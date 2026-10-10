@@ -98,7 +98,11 @@ export class NoteSync {
     if (!doc) return;
     if (!this.unacknowledged) {
       const text = doc.toString();
-      if (text === this.savedText) return;
+      if (text === this.savedText) {
+        unsaved.delete(this);
+        this.onState("saved");
+        return;
+      }
       this.unacknowledged = { text, baseRevision: this.revision, writeId: crypto.randomUUID() };
       this.typedSinceWrite = ChangeSet.empty(text.length);
     }

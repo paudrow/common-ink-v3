@@ -154,6 +154,24 @@ test("a long note in a script that takes several bytes a character saves", async
   expect(await history(page, noteIdIn(page))).toHaveLength(1);
 });
 
+test("typing undone before the pause leaves the note saved", async ({ page }) => {
+  await signInAsNewPerson(page, "Grace Hopper");
+  await page.getByRole("button", { name: "New note" }).click();
+  await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
+  await page.keyboard.type("# Undone");
+  await expect(page).toHaveURL(/\/note\/undone-[a-z0-9]{12}$/);
+
+  await page.keyboard.type("!");
+  await page.keyboard.press("Backspace");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  const asked = page.waitForEvent("dialog", { timeout: 1000 }).then(
+    async (dialog) => (await dialog.dismiss(), true),
+    () => false,
+  );
+  await page.reload();
+  expect(await asked).toBe(false);
+});
+
 test("an old link with an outdated slug still opens the note", async ({ page }) => {
   await signInAsNewPerson(page, "Sofia Kovalevskaya");
   await page.getByRole("button", { name: "New note" }).click();
