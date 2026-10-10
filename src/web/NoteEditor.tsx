@@ -1,11 +1,11 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
+import { noteHighlighting } from "./highlight.ts";
 import { NoteSync, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…" };
@@ -44,7 +44,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved }: Props) {
               history(),
               keymap.of([...defaultKeymap, ...historyKeymap]),
               markdown(),
-              syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+              noteHighlighting,
               EditorView.lineWrapping,
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
