@@ -39,7 +39,10 @@ export interface Note extends NoteSummary {
   text: string;
 }
 
-export type Author = { kind: "member"; personId: string; name: string };
+export type Author =
+  | { kind: "member"; personId: string; name: string }
+  /** A connected agent, named as its member named it; `onBehalfOf` is that member. */
+  | { kind: "agent"; agentId: string; name: string; onBehalfOf: string };
 
 export interface ChangeEntry {
   revision: number;

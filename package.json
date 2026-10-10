@@ -13,6 +13,7 @@
     "test:browser": "playwright test",
     "check": "npm run typecheck && npm test && npm run build",
     "preview": "node scripts/preview.ts",
+    "ink": "node scripts/ink.ts",
     "deploy": "npm run build && wrangler d1 migrations apply DB --remote && wrangler deploy"
   },
   "dependencies": {

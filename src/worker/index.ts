@@ -2,6 +2,8 @@ import { whoAmI } from "../core/accounts.ts";
 import { perform } from "../core/operations.ts";
 import { OpError, type OpErrorCode } from "../core/protocol.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
+import { handleAgentsApi } from "./mcp/agents-api.ts";
+import { handleMcp } from "./mcp/mcp.ts";
 import { redirectFor } from "./hosts.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 
@@ -44,6 +46,8 @@ export default {
     if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
     if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
     if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
+    if (url.pathname === "/mcp") return handleMcp(req, env);
+    if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return handleAgentsApi(req, env, url);
     if (url.pathname.startsWith("/api/")) return handleApi(req, env, url);
     return env.ASSETS.fetch(req);
   },
