@@ -23,4 +23,14 @@ describe("signing in", () => {
     expect(after.workspaces).toEqual(before.workspaces);
     expect(after.workspaces).toHaveLength(1);
   });
+
+  it("creates one workspace when first sign-ins race", async () => {
+    const [a, b] = await Promise.all([
+      signIn(env.DB, { email: "mary@example.com", name: "Mary Jackson" }),
+      signIn(env.DB, { email: "mary@example.com", name: "Mary Jackson" }),
+    ]);
+
+    expect(b.personId).toBe(a.personId);
+    expect((await whoAmI(env.DB, a.personId)).workspaces).toHaveLength(1);
+  });
 });

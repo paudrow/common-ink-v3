@@ -80,12 +80,12 @@ async function replay(ctx: Context, id: string, revision: number): Promise<{ tex
 }
 
 const MAX_WRITE_ATTEMPTS = 5;
-const isRevisionTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: changes\.note_id, changes\.revision/.test(err.message);
+const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: changes\./.test(err.message);
 
-const insertChange = (ctx: Context, noteId: string, revision: number, baseRevision: number, changes: ChangeSet) =>
+const insertChange = (ctx: Context, noteId: string, revision: number, baseRevision: number, changes: ChangeSet, writeId: string | null = null) =>
   ctx.db
-    .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(noteId, revision, baseRevision, ctx.actor.kind, ctx.actor.personId, JSON.stringify(changes.toJSON()), ctx.now);
+    .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, write_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(noteId, revision, baseRevision, ctx.actor.kind, ctx.actor.personId, JSON.stringify(changes.toJSON()), ctx.now, writeId);
 
 const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.list": {
@@ -133,6 +133,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       for (let attempt = 1; ; attempt++) {
         const row = await loadNote(ctx, op.id);
+        if (op.writeId) {
+          const recorded = await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(row.id, op.writeId).first();
+          if (recorded) return toNote(row);
+        }
         if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
         let changes: ChangeSet;
         if (op.baseRevision === row.revision) {
@@ -149,11 +153,11 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         const title = noteTitle(text);
         try {
           await ctx.db.batch([
-            insertChange(ctx, row.id, revision, op.baseRevision, changes),
+            insertChange(ctx, row.id, revision, op.baseRevision, changes, op.writeId),
             ctx.db.prepare("UPDATE notes SET revision = ?, text = ?, title = ?, updated_at = ? WHERE id = ? AND revision = ?").bind(revision, text, title, ctx.now, row.id, row.revision),
           ]);
         } catch (err) {
-          if (attempt < MAX_WRITE_ATTEMPTS && isRevisionTaken(err)) continue;
+          if (attempt < MAX_WRITE_ATTEMPTS && isChangeTaken(err)) continue;
           throw err;
         }
         return toNote({ ...row, revision, text, title, updated_at: ctx.now });

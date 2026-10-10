@@ -18,19 +18,21 @@ export async function signIn(db: D1Database, identity: SignInIdentity, now = Dat
   if (!person) throw new Error(`no person for ${email} after sign-in`);
 
   const member = await db.prepare("SELECT 1 FROM members WHERE person_id = ? LIMIT 1").bind(person.id).first();
-  if (!member) await createWorkspace(db, person.id, `${person.name.split(/\s+/)[0]}'s workspace`, now);
+  if (!member) await createFirstWorkspace(db, person.id, `${person.name.split(/\s+/)[0]}'s workspace`, now);
   return { personId: person.id };
 }
 
-async function createWorkspace(db: D1Database, adminId: string, name: string, now: number): Promise<string> {
+/** A batch runs as one transaction, so of two racing first sign-ins only one finds no membership. */
+async function createFirstWorkspace(db: D1Database, adminId: string, name: string, now: number): Promise<void> {
   const workspaceId = newId();
   const unsortedId = newId();
   await db.batch([
-    db.prepare("INSERT INTO workspaces (id, name, unsorted_folder_id, created_at) VALUES (?, ?, ?, ?)").bind(workspaceId, name, unsortedId, now),
-    db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) VALUES (?, ?, NULL, 'Unsorted')").bind(unsortedId, workspaceId),
-    db.prepare("INSERT INTO members (workspace_id, person_id, role) VALUES (?, ?, 'admin')").bind(workspaceId, adminId),
+    db
+      .prepare("INSERT INTO workspaces (id, name, unsorted_folder_id, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM members WHERE person_id = ?)")
+      .bind(workspaceId, name, unsortedId, now, adminId),
+    db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) SELECT ?, id, NULL, 'Unsorted' FROM workspaces WHERE id = ?").bind(unsortedId, workspaceId),
+    db.prepare("INSERT INTO members (workspace_id, person_id, role) SELECT id, ?, 'admin' FROM workspaces WHERE id = ?").bind(adminId, workspaceId),
   ]);
-  return workspaceId;
 }
 
 export async function whoAmI(db: D1Database, personId: string): Promise<Me> {

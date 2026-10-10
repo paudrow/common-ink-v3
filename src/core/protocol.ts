@@ -10,7 +10,14 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note.list") }),
   z.object({ type: z.literal("note.create"), text: NoteText.default("") }),
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
-  z.object({ type: z.literal("note.write"), id: Id, baseRevision: Revision, text: NoteText }),
+  z.object({
+    type: z.literal("note.write"),
+    id: Id,
+    baseRevision: Revision,
+    text: NoteText,
+    /** Chosen by the writer; a write sent again with the same id is recorded once. */
+    writeId: z.string().min(1).max(64).optional(),
+  }),
   z.object({ type: z.literal("note.history"), id: Id }),
 ]);
 export type Op = z.output<typeof Op>;

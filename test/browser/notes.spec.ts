@@ -90,6 +90,58 @@ test("a save based on an old revision keeps the other writer's change, and the e
   expect((await history(page, noteIdIn(page))).map((c) => c.baseRevision)).toEqual([0, 1, 1]);
 });
 
+const isWrite = (body: string | null) => (body ? JSON.parse(body).type === "note.write" : false);
+
+test("a save whose answer is lost is sent again without doubling the text", async ({ page }) => {
+  await signInAsNewPerson(page, "Hedy Lamarr");
+  let dropped = false;
+  await page.route("**/ops", async (route) => {
+    if (dropped || !isWrite(route.request().postData())) return route.continue();
+    dropped = true;
+    await route.fetch();
+    await route.abort();
+  });
+  await page.getByRole("button", { name: "New note" }).click();
+  await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
+  await page.keyboard.type("# Lost answer");
+
+  await expect(page.getByRole("status")).toHaveText("Couldn't save. Retrying…");
+  await expect(page.getByRole("status")).toHaveText("Saved", { timeout: 10_000 });
+
+  await expect(page.locator(".cm-line")).toHaveText(["# Lost answer"]);
+  expect(await history(page, noteIdIn(page))).toHaveLength(1);
+});
+
+test("leaving a note while its save is on the way keeps the other writer's change", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.getByRole("button", { name: "New note" }).click();
+  await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
+  await page.keyboard.type("# Shared\n\nmine");
+  await expect(page).toHaveURL(/\/note\/shared-[a-z0-9]{12}$/);
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  const id = noteIdIn(page);
+
+  let held = false;
+  await page.route("**/ops", async (route) => {
+    if (held || !isWrite(route.request().postData())) return route.continue();
+    held = true;
+    await writeElsewhere(page, { id, baseRevision: 1, text: "# Shared\n\nmine\n\ntheirs" });
+    const response = await route.fetch();
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await route.fulfill({ response });
+  });
+  await page.keyboard.type(" too");
+  await page.getByText("Ada's workspace").click();
+  await page.getByRole("button", { name: "New note" }).click();
+  await expect(page).not.toHaveURL(new RegExp(id));
+
+  await expect.poll(async () => (await history(page, id)).length, { timeout: 10_000 }).toBe(3);
+  await page.goto(`/note/${id}`);
+  await expect(page.locator(".cm-line")).toHaveText(["# Shared", "", "mine too", "", "theirs"]);
+  await page.waitForTimeout(1500);
+  expect(await history(page, id)).toHaveLength(3);
+});
+
 test("an old link with an outdated slug still opens the note", async ({ page }) => {
   await signInAsNewPerson(page, "Sofia Kovalevskaya");
   await page.getByRole("button", { name: "New note" }).click();

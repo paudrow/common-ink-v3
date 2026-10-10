@@ -81,6 +81,19 @@ describe("notes", () => {
     expect(merged.text).toBe("mine too\n\ntheirs");
   });
 
+  it("records a retried write once, even after newer changes", async () => {
+    const ada = await newMember();
+    const note = await perform(env.DB, ada, { type: "note.create", text: "hello" });
+    const write = { type: "note.write", id: note.id, baseRevision: 1, text: "hello!", writeId: "w1" } as const;
+    await perform(env.DB, ada, write);
+    await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 2, text: "# hello!" });
+
+    const retried = await perform(env.DB, ada, write);
+
+    expect(retried.text).toBe("# hello!");
+    expect(await perform(env.DB, ada, { type: "note.history", id: note.id })).toHaveLength(3);
+  });
+
   it("keeps both writes when two saves from the same revision race", async () => {
     const ada = await newMember();
     const note = await perform(env.DB, ada, { type: "note.create", text: "middle" });

@@ -69,6 +69,8 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
 
   if (url.pathname === "/auth/dev") {
     if (!devSignIn(env, url)) return new Response("Not found", { status: 404 });
+    const site = req.headers.get("Sec-Fetch-Site");
+    if (site && site !== "same-origin" && site !== "none") return new Response("Switch people from Common Ink itself", { status: 403 });
     const identity = { email: url.searchParams.get("email") || DEV_USER.email, name: url.searchParams.get("name") || DEV_USER.name };
     return startSession(env, identity, url.searchParams.get("next") ?? "/");
   }
