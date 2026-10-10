@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "common-ink-v3",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": true,
+  // The web app, built by Vite into dist. Pages are the single-page app; only the API and sign-in reach the Worker.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "common-ink-v3",
+      "database_id": "833000a5-43fb-497f-8080-a312d5fe078c",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "observability": { "enabled": true },
+  // The optional settings are typed in src/worker/env.d.ts.
+  "secrets": { "required": ["SESSION_SECRET"] },
+  // Each pull request's Preview gets its own D1 database, which scripts/preview.ts creates and binds here.
+  "previews": {
+    "vars": { "DEV_SIGN_IN": "1" }
+  }
+}
