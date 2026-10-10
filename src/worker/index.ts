@@ -1,15 +1,15 @@
 import { whoAmI } from "../core/accounts.ts";
 import { perform } from "../core/operations.ts";
 import { OpError, type OpErrorCode } from "../core/protocol.ts";
-import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
+import { handleAuth, sessionPersonId } from "./auth.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404 };
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
-  const personId = await sessionPersonId(req, env);
-  if (!personId) return json({ error: "signed_out", devSignIn: devSignIn(env, url) }, 401);
+  const personId = await sessionPersonId(req, env, url);
+  if (!personId) return json({ error: "signed_out" }, 401);
 
   if (url.pathname === "/api/me" && req.method === "GET") return json(await whoAmI(env.DB, personId));
 

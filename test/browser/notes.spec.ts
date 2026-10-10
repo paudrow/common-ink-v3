@@ -3,9 +3,6 @@ import type { ChangeEntry, Me } from "../../src/core/protocol.ts";
 
 async function signInAsNewPerson(page: Page, name: string) {
   const email = `browser-${crypto.randomUUID()}@example.com`;
-  await page.goto("/");
-  await expect(page.getByRole("link", { name: "Sign in with Google" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Sign in as a dev user" })).toBeVisible();
   await page.goto(`/auth/dev?${new URLSearchParams({ email, name })}`);
 }
 
@@ -33,6 +30,13 @@ function writeElsewhere(page: Page, op: { id: string; baseRevision: number; text
 }
 
 const noteIdIn = (page: Page) => /([a-z0-9]{12})$/.exec(new URL(page.url()).pathname)![1]!;
+
+test("opens signed in as the dev user, with no login", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByText("Dev's workspace")).toBeVisible();
+  await expect(page.getByRole("button", { name: "New note" })).toBeVisible();
+});
 
 test("a new person signs in, writes a note, and finds it intact after reloading", async ({ page }) => {
   await signInAsNewPerson(page, "Mary Somerville");

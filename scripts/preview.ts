@@ -3,7 +3,8 @@
 //   npm run preview -- --name pr-12 [--message <sha>]   create or update it, and print its URL
 //   npm run preview -- --name pr-12 --delete            delete the Preview and its database
 //
-// With GITHUB_OUTPUT set, the URL is also written there as `url`.
+// With GITHUB_OUTPUT set, the URLs are also written there: `url` always serves the Preview's latest
+// deployment, and `deployment_url` serves only this one, so tests can't reach an older build.
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -47,10 +48,12 @@ try {
   wrangler(["d1", "migrations", "apply", database, "--remote", "-c", GENERATED]);
   execFileSync("npx", ["vite", "build"], { stdio: "inherit" });
   const out = wrangler(["preview", "-c", GENERATED, "--name", name, "--secrets-file", secrets, "--json", ...(values.message ? ["--message", values.message] : [])]);
-  const url = /https:\/\/[a-z0-9.-]+\.workers\.dev/.exec(out)?.[0];
-  if (!url) throw new Error(`no Preview URL in wrangler's output:\n${out}`);
-  console.log(url);
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `url=${url}\n`);
+  const result = JSON.parse(out.slice(out.indexOf("{"))) as { preview: { urls: Record<string, string> }; deployment: { urls: Record<string, string> } };
+  const url = Object.values(result.preview.urls)[0];
+  const deploymentUrl = Object.values(result.deployment.urls)[0];
+  if (!url || !deploymentUrl) throw new Error(`no Preview URLs in wrangler's output:\n${out}`);
+  console.log(`${url}\nThis deployment only: ${deploymentUrl}`);
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `url=${url}\ndeployment_url=${deploymentUrl}\n`);
 } finally {
   rmSync(secrets, { force: true });
   rmSync(GENERATED, { force: true });

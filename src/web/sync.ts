@@ -96,7 +96,7 @@ export class NoteSync {
     await this.inFlight;
   }
 
-  /** Commit what's typed and stop. The text is read now, so the view can be destroyed right after. */
+  /** Commit what's typed and stop. A destroyed view keeps its last state, so it can be destroyed right after. */
   close(): Promise<void> {
     const done = this.commit();
     this.closed = true;

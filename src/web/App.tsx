@@ -5,7 +5,7 @@ import { ApiError, getMe, perform, signOut } from "./api.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { useRoute } from "./router.ts";
 
-type Session = { kind: "loading" } | { kind: "signed-out"; devSignIn: boolean } | { kind: "signed-in"; me: Me } | { kind: "error"; message: string };
+type Session = { kind: "loading" } | { kind: "signed-out" } | { kind: "signed-in"; me: Me } | { kind: "error"; message: string };
 
 export function App() {
   const [session, setSession] = useState<Session>({ kind: "loading" });
@@ -13,7 +13,7 @@ export function App() {
     getMe().then(
       (me) => setSession({ kind: "signed-in", me }),
       (err) =>
-        setSession(err instanceof ApiError && err.status === 401 ? { kind: "signed-out", devSignIn: err.devSignIn } : { kind: "error", message: String(err.message ?? err) }),
+        setSession(err instanceof ApiError && err.status === 401 ? { kind: "signed-out" } : { kind: "error", message: String(err.message ?? err) }),
     );
   }, []);
 
@@ -23,7 +23,7 @@ export function App() {
     case "error":
       return <p className="notice">Common Ink couldn't load: {session.message}</p>;
     case "signed-out":
-      return <SignIn devSignIn={session.devSignIn} />;
+      return <SignIn />;
     case "signed-in": {
       const workspace = session.me.workspaces[0];
       return workspace ? <Workspace me={session.me} workspace={workspace} /> : <p className="notice">You aren't in a workspace.</p>;
@@ -31,7 +31,7 @@ export function App() {
   }
 }
 
-function SignIn({ devSignIn }: { devSignIn: boolean }) {
+function SignIn() {
   const next = encodeURIComponent(location.pathname);
   return (
     <main className="sign-in">
@@ -41,11 +41,6 @@ function SignIn({ devSignIn }: { devSignIn: boolean }) {
       <a className="button primary" href={`/auth/google?next=${next}`}>
         Sign in with Google
       </a>
-      {devSignIn && (
-        <a className="button" href={`/auth/dev?next=${next}`}>
-          Sign in as a dev user
-        </a>
-      )}
     </main>
   );
 }

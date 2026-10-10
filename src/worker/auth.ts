@@ -7,13 +7,18 @@ const STATE_COOKIE = "__Host-ink_google";
 const SESSION_SECONDS = 30 * 86_400;
 const STATE_SECONDS = 600;
 
-/** Dev sign-in never works on production's hosts, even if DEV_SIGN_IN leaks into its settings. */
-export const devSignIn = (env: Env, url: URL) => env.DEV_SIGN_IN === "1" && !/(^|\.)commonink\.app$/.test(url.hostname);
+const DEV_HOSTS = /^(localhost|127\.0\.0\.1|\[::1\]|[a-z0-9-]+-common-ink-v3\.draftox\.workers\.dev)$/;
 
-export async function sessionPersonId(req: Request, env: Env): Promise<string | null> {
-  if (!env.SESSION_SECRET) return null;
-  const data = await verify<{ personId?: string }>(cookie(req, SESSION_COOKIE), env.SESSION_SECRET);
-  return typeof data?.personId === "string" ? data.personId : null;
+/** Dev sign-in works only on this machine and on Previews, even if DEV_SIGN_IN leaks into production. */
+export const devSignIn = (env: Env, url: URL) => env.DEV_SIGN_IN === "1" && DEV_HOSTS.test(url.hostname);
+
+const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
+
+/** Who a request is from. On this machine and on Previews, nobody signed in is the dev user. */
+export async function sessionPersonId(req: Request, env: Env, url: URL): Promise<string | null> {
+  const data = env.SESSION_SECRET ? await verify<{ personId?: string }>(cookie(req, SESSION_COOKIE), env.SESSION_SECRET) : null;
+  if (typeof data?.personId === "string") return data.personId;
+  return devSignIn(env, url) ? (await signIn(env.DB, DEV_USER)).personId : null;
 }
 
 const allowedEmails = (value: string | undefined) => new Set((value ?? "").split(/[\s,]+/).map((e) => e.trim().toLowerCase()).filter(Boolean));
@@ -64,8 +69,8 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
 
   if (url.pathname === "/auth/dev") {
     if (!devSignIn(env, url)) return new Response("Not found", { status: 404 });
-    const email = url.searchParams.get("email") || "dev@common.ink";
-    return startSession(env, { email, name: url.searchParams.get("name") || "Dev User" }, url.searchParams.get("next") ?? "/");
+    const identity = { email: url.searchParams.get("email") || DEV_USER.email, name: url.searchParams.get("name") || DEV_USER.name };
+    return startSession(env, identity, url.searchParams.get("next") ?? "/");
   }
 
   const google: GoogleConfig | null = env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } : null;

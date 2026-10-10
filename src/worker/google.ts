@@ -22,9 +22,8 @@ export function authorizeUrl(config: GoogleConfig, redirectUri: string, state: s
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
-    access_type: "offline",
-    prompt: "consent",
     include_granted_scopes: "true",
+    prompt: "select_account",
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
