@@ -89,6 +89,6 @@ describe("/sw.js retires the service worker v2 left behind", () => {
 
   it("is only /sw.js", async () => {
     const res = await get("https://commonink.app/sw.js/other");
-    expect(res.headers.get("Content-Type")).not.toMatch(/javascript/);
+    expect(res.headers.get("Content-Type") ?? "").not.toMatch(/javascript/);
   });
 });
