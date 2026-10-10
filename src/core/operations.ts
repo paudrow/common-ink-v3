@@ -9,7 +9,13 @@ import { applyChanges, changesBetween } from "./text.ts";
 export type Actor =
   | { kind: "member"; personId: string; workspaceId: string }
   /** An agent acts as `personId`: their role in the workspace, so their access, and no more. */
-  | { kind: "agent"; agentId: string; personId: string; workspaceId: string };
+  | { kind: "agent"; agentId: string; personId: string; workspaceId: string; scope?: AgentScope };
+
+/** What narrows an agent's token below its member: one workspace, and no changes. */
+export interface AgentScope {
+  pinnedWorkspaceId?: string | null;
+  readOnly?: boolean;
+}
 
 const authorId = (actor: Actor) => (actor.kind === "agent" ? actor.agentId : actor.personId);
 
@@ -38,11 +44,13 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor, i
   const op = parsed.data;
   const handler = HANDLERS[op.type] as Handler<OpType>;
 
+  if (actor.kind === "agent" && actor.scope?.pinnedWorkspaceId && actor.scope.pinnedWorkspaceId !== actor.workspaceId) throw new OpError("not_found", "No such workspace");
   const member = await db
     .prepare("SELECT role FROM members WHERE workspace_id = ? AND person_id = ?")
     .bind(actor.workspaceId, actor.personId)
     .first<{ role: Role }>();
   if (!member) throw new OpError("not_found", "No such workspace");
+  if (actor.kind === "agent" && actor.scope?.readOnly && handler.needs === "edit") throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if (!ALLOWS[member.role].has(handler.needs)) throw new OpError("forbidden", `A ${member.role} can't ${op.type}`);
 
   return handler.run({ db, actor, now }, op as never) as Promise<Results[T["type"]]>;

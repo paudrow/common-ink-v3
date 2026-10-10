@@ -1,7 +1,7 @@
 // The MCP endpoint, https://<host>/mcp: Streamable HTTP in its stateless form, one JSON-RPC message (or a
 // batch) per POST, answered as JSON. An agent signs in with the bearer token its member made for it; it
 // never has a session cookie, so a web page can't make it act. See docs/mcp.md.
-import { authenticateAgent } from "../../core/agents.ts";
+import { authenticateAgent, type ConnectedAgent } from "../../core/agents.ts";
 import { callTool, toolList } from "./tools.ts";
 
 const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -60,7 +60,7 @@ export async function handleMcp(req: Request, env: Env): Promise<Response> {
   return json(batch ? out : out[0]);
 }
 
-async function handleMessage(env: Env, agent: { agentId: string; personId: string; name: string }, message: unknown): Promise<unknown | null> {
+async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown): Promise<unknown | null> {
   const m = (typeof message === "object" && message !== null ? message : {}) as Request_;
   const hasId = m.id !== undefined;
   const id: Id = hasId && (typeof m.id === "string" || typeof m.id === "number" || m.id === null) ? m.id : null;

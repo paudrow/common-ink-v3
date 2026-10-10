@@ -97,7 +97,9 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
   if (!tool) return null;
   try {
     const me = await whoAmI(db, agent.personId);
-    if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces });
+    // A token pinned to one workspace sees only that one, as if the member belonged to no other.
+    if (agent.workspaceId) me.workspaces = me.workspaces.filter((w) => w.id === agent.workspaceId);
+    if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces, readOnly: agent.readOnly });
 
     const { workspace, ...rest } = args;
     let workspaceId: string;
@@ -108,7 +110,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", "No such workspace");
       workspaceId = workspace;
     }
-    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId };
+    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly } };
     return text(await perform(db, actor, tool.op!(rest)));
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${err.message}`, true);
