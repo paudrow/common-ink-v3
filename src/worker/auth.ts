@@ -9,7 +9,10 @@ const STATE_SECONDS = 600;
 
 const DEV_HOSTS = /^(localhost|127\.0\.0\.1|\[::1\]|[a-z0-9-]+-common-ink-v3\.draftox\.workers\.dev)$/;
 
-/** Dev sign-in works only on this machine and on Previews, even if DEV_SIGN_IN leaks into production. */
+/**
+ * Dev sign-in is set only by the dev server and scripts/preview.ts. The host check keeps it off the
+ * production domain, but production versions share the workers.dev hosts with Previews.
+ */
 export const devSignIn = (env: Env, url: URL) => env.DEV_SIGN_IN === "1" && DEV_HOSTS.test(url.hostname);
 
 const DEV_USER = { email: "dev@common.ink", name: "Dev User" };

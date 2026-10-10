@@ -2,12 +2,24 @@ import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { Note } from "../core/protocol.ts";
 import { changesBetween } from "../core/text.ts";
-import { perform } from "./api.ts";
+import { ApiError, perform } from "./api.ts";
 
 export const PAUSE_MS = 1000;
 const RETRY_MS = 3000;
 
-export type SaveState = "saved" | "unsaved" | "saving" | "failed";
+export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "rejected";
+
+/** Sending the same write again can succeed only after a network failure, a server fault, or signing back in. */
+const worthRetrying = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || err.status === 401 || err.status === 429;
+
+/** Every sync with typing the server may not have, including those whose editor has closed. */
+const unsaved = new Set<NoteSync>();
+addEventListener("pagehide", () => {
+  for (const sync of unsaved) void sync.commit();
+});
+addEventListener("beforeunload", (e) => {
+  if (unsaved.size) e.preventDefault();
+});
 
 const fromServer = Annotation.define<boolean>();
 
@@ -68,6 +80,7 @@ export class NoteSync {
   private onUpdate(update: ViewUpdate) {
     if (!update.docChanged || update.transactions.some((tr) => tr.annotation(fromServer))) return;
     if (this.typedSinceWrite) this.typedSinceWrite = this.typedSinceWrite.compose(update.changes);
+    unsaved.add(this);
     this.onState("unsaved");
     this.schedule(PAUSE_MS);
   }
@@ -105,10 +118,17 @@ export class NoteSync {
         this.savedText = saved.text;
         this.onSaved(saved);
         if (this.dirty) this.schedule(PAUSE_MS);
+        else unsaved.delete(this);
         this.onState(this.dirty ? "unsaved" : "saved");
-      } catch {
-        this.onState("failed");
-        this.schedule(RETRY_MS);
+      } catch (err) {
+        if (worthRetrying(err)) {
+          this.onState("failed");
+          this.schedule(RETRY_MS);
+        } else {
+          this.unacknowledged = null;
+          this.typedSinceWrite = null;
+          this.onState("rejected");
+        }
       } finally {
         this.inFlight = null;
       }

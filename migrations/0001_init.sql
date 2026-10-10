@@ -45,9 +45,12 @@ CREATE TABLE changes (
   note_id TEXT NOT NULL REFERENCES notes (id),
   revision INTEGER NOT NULL,
   base_revision INTEGER NOT NULL,
-  author_kind TEXT NOT NULL CHECK (author_kind IN ('member')),
+  author_kind TEXT NOT NULL CHECK (author_kind IN ('member', 'agent', 'plugin')),
   author_id TEXT NOT NULL,
   diff TEXT NOT NULL,
   created_at INTEGER NOT NULL,
+  write_id TEXT,
   PRIMARY KEY (note_id, revision)
 );
+
+CREATE UNIQUE INDEX changes_by_write ON changes (note_id, write_id) WHERE write_id IS NOT NULL;

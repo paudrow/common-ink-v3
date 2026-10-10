@@ -142,6 +142,18 @@ test("leaving a note while its save is on the way keeps the other writer's chang
   expect(await history(page, id)).toHaveLength(3);
 });
 
+test("a long note in a script that takes several bytes a character saves", async ({ page }) => {
+  await signInAsNewPerson(page, "Lu Xun");
+  await page.getByRole("button", { name: "New note" }).click();
+  await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
+  await page.keyboard.insertText(`# 狂人日记\n\n${"今天晚上，很好的月光。".repeat(2500)}`);
+
+  await expect(page.getByRole("status")).toHaveText("Saved", { timeout: 10_000 });
+  await page.reload();
+  await expect(page.locator(".cm-line").first()).toHaveText("# 狂人日记");
+  expect(await history(page, noteIdIn(page))).toHaveLength(1);
+});
+
 test("an old link with an outdated slug still opens the note", async ({ page }) => {
   await signInAsNewPerson(page, "Sofia Kovalevskaya");
   await page.getByRole("button", { name: "New note" }).click();

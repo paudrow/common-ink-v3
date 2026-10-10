@@ -10,7 +10,8 @@ export class ApiError extends Error {
   }
 }
 
-const KEEPALIVE_LIMIT = 60_000;
+/** Browsers cap a keepalive request body at 64 KiB, counted in bytes. */
+const KEEPALIVE_BYTES = 60_000;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, credentials: "same-origin" });
@@ -27,7 +28,7 @@ export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
-    keepalive: body.length < KEEPALIVE_LIMIT,
+    keepalive: new TextEncoder().encode(body).byteLength < KEEPALIVE_BYTES,
   });
 }
 

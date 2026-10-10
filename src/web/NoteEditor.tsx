@@ -8,7 +8,9 @@ import { ApiError, perform } from "./api.ts";
 import { noteHighlighting } from "./highlight.ts";
 import { NoteSync, type SaveState } from "./sync.ts";
 
-const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…" };
+const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
+  rejected: "Couldn't save this version. Edit the note to try again.",
+};
 
 interface Props {
   workspaceId: string;
@@ -26,10 +28,6 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved }: Props) {
     let view: EditorView | null = null;
     let sync: NoteSync | null = null;
     let cancelled = false;
-    const onPageHide = () => void sync?.commit();
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (sync?.dirty) e.preventDefault();
-    };
 
     perform(workspaceId, { type: "note.read", id: noteId }).then(
       (note) => {
@@ -54,8 +52,6 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved }: Props) {
         });
         sync.attach(view);
         if (!note.text) view.focus();
-        addEventListener("pagehide", onPageHide);
-        addEventListener("beforeunload", onBeforeUnload);
       },
       (err) => {
         if (!cancelled && err instanceof ApiError && err.code === "not_found") setMissing(true);
@@ -64,8 +60,6 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved }: Props) {
 
     return () => {
       cancelled = true;
-      removeEventListener("pagehide", onPageHide);
-      removeEventListener("beforeunload", onBeforeUnload);
       void sync?.close();
       view?.destroy();
     };

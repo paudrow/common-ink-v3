@@ -22,9 +22,7 @@
   ],
   "observability": { "enabled": true },
   // The optional settings are typed in src/worker/env.d.ts.
-  "secrets": { "required": ["SESSION_SECRET"] },
-  // Each pull request's Preview gets its own D1 database, which scripts/preview.ts creates and binds here.
-  "previews": {
-    "vars": { "DEV_SIGN_IN": "1" }
-  }
+  "secrets": { "required": ["SESSION_SECRET"] }
+  // scripts/preview.ts adds the Previews' settings: their own D1 database, and dev sign-in. Production
+  // versions are served on the same workers.dev hosts as Previews, so dev sign-in must never be set here.
 }

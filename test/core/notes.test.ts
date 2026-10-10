@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { signIn, whoAmI } from "../../src/core/accounts.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
+import { MAX_NOTE_LENGTH } from "../../src/core/protocol.ts";
 
 async function newMember(name = "Ada Lovelace"): Promise<Actor> {
   const email = `${crypto.randomUUID()}@example.com`;
@@ -21,6 +22,18 @@ describe("notes", () => {
     expect(reopened.text).toBe("# Groceries\n\n- eggs\n- flour");
     expect(reopened.title).toBe("Groceries");
     expect(reopened.slug).toBe("groceries");
+  });
+
+  it("refuses a merge that would make the note longer than any one write may be", async () => {
+    const ada = await newMember();
+    const note = await perform(env.DB, ada, { type: "note.create", text: "start" });
+    const half = "x".repeat(MAX_NOTE_LENGTH / 2);
+    await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `start${half}` });
+
+    const stale = perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `${half}start` });
+
+    await expect(stale).rejects.toMatchObject({ code: "invalid" });
+    expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).revision).toBe(2);
   });
 
   it("records each save as a change with its author and the revision it was based on", async () => {

@@ -1,7 +1,7 @@
 import { ChangeSet } from "@codemirror/state";
 import { z } from "zod";
 import { newId } from "./ids.ts";
-import { Op, OpError, type ChangeEntry, type Note, type OpInput, type OpType, type Results, type Role } from "./protocol.ts";
+import { MAX_NOTE_LENGTH, Op, OpError, type ChangeEntry, type Note, type OpInput, type OpType, type Results, type Role } from "./protocol.ts";
 import { noteSlug, noteTitle } from "./slug.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 
@@ -66,9 +66,12 @@ async function loadNote(ctx: Context, id: string): Promise<NoteRow> {
   return row;
 }
 
-/** The note's text at `revision`, and the changes after it composed into one. */
-async function replay(ctx: Context, id: string, revision: number): Promise<{ text: string; since: ChangeSet }> {
-  const { results } = await ctx.db.prepare("SELECT revision, diff FROM changes WHERE note_id = ? ORDER BY revision").bind(id).all<{ revision: number; diff: string }>();
+/** The note's text at `revision`, and the changes after it up to `current` composed into one. */
+async function replay(ctx: Context, id: string, revision: number, current: number): Promise<{ text: string; since: ChangeSet }> {
+  const { results } = await ctx.db
+    .prepare("SELECT revision, diff FROM changes WHERE note_id = ? AND revision <= ? ORDER BY revision")
+    .bind(id, current)
+    .all<{ revision: number; diff: string }>();
   let text = "";
   let since: ChangeSet | null = null;
   for (const row of results) {
@@ -124,7 +127,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row = await loadNote(ctx, op.id);
       if (op.revision === undefined || op.revision === row.revision) return toNote(row);
       if (op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
-      return toNote(row, (await replay(ctx, op.id, op.revision)).text, op.revision);
+      return toNote(row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
     },
   },
 
@@ -142,7 +145,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         if (op.baseRevision === row.revision) {
           changes = changesBetween(row.text, op.text);
         } else {
-          const base = await replay(ctx, row.id, op.baseRevision);
+          const base = await replay(ctx, row.id, op.baseRevision, row.revision);
           // At a tie, the stale write's insertion goes first: it stays next to the text it was typed after.
           changes = changesBetween(base.text, op.text).map(base.since, true);
         }
@@ -150,6 +153,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
 
         const revision = row.revision + 1;
         const text = applyChanges(changes, row.text);
+        if (text.length > MAX_NOTE_LENGTH) throw new OpError("invalid", `With the other changes merged in, the note would be over ${MAX_NOTE_LENGTH} characters`);
         const title = noteTitle(text);
         try {
           await ctx.db.batch([

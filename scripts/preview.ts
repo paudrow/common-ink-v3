@@ -41,7 +41,8 @@ if (!db) {
 }
 const binding = { ...config.d1_databases[0], database_name: database, database_id: db.uuid };
 
-writeFileSync(GENERATED, JSON.stringify({ ...config, d1_databases: [binding], previews: { ...config.previews, d1_databases: [binding] } }, null, 2));
+const previews = { d1_databases: [binding], vars: { DEV_SIGN_IN: "1" } };
+writeFileSync(GENERATED, JSON.stringify({ ...config, d1_databases: [binding], previews }, null, 2));
 const secrets = path.join(tmpdir(), `ink-preview-${process.pid}.json`);
 writeFileSync(secrets, JSON.stringify({ SESSION_SECRET: randomBytes(32).toString("hex") }), { mode: 0o600 });
 try {
