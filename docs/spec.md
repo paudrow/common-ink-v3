@@ -7,7 +7,7 @@ Here are some details:
 - Settings should have a gui and adjust a json file like vscode, only non default options should be populated in the settings json, errors in the settings json should be flagged
 - Called common ink, use branding from earlier versions, host at commonink.app
 - PRs should have live previews using cloudflare workers, fine to use draftox
-- use cloudflare D1 for databases and D2 for storing files
+- use cloudflare D1 for databases and R2 for storing files
 - use codemirror6 to give great vim text editing experience
 - workspaces
   - A space should be made in a workspace. Workspace admins can invite users as admins, editors, or just viewers. People can also be added on a note specific level too
@@ -108,3 +108,10 @@ Here are some details:
 - Entry 3
 :::
 ```
+
+For agents file
+
+- I prefer larger PRs with chances for me to give feedback over lots of little PRs. PRs should be centered around one larger feature or common
+- Don't go nuts implementing a multi step plan for features, get feedback at each step. Multistep bug fixes or refactors are fine.
+- Use Poteto Mode skill in implementation. Create levers. Prioritize verification.
+- Try to have a different model review code, or at least a new worker
