@@ -2,6 +2,8 @@ import { whoAmI } from "../core/accounts.ts";
 import { perform } from "../core/operations.ts";
 import { OpError, type OpErrorCode } from "../core/protocol.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
+import { handleAgentsApi } from "./mcp/agents-api.ts";
+import { handleMcp } from "./mcp/mcp.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404 };
 
@@ -39,6 +41,8 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
+    if (url.pathname === "/mcp") return handleMcp(req, env);
+    if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return handleAgentsApi(req, env, url);
     if (url.pathname.startsWith("/api/")) return handleApi(req, env, url);
     return env.ASSETS.fetch(req);
   },

@@ -6,7 +6,12 @@ import { noteSlug, noteTitle } from "./slug.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 
 /** Who is performing an operation, in which workspace. */
-export type Actor = { kind: "member"; personId: string; workspaceId: string };
+export type Actor =
+  | { kind: "member"; personId: string; workspaceId: string }
+  /** An agent acts as `personId`: their role in the workspace, so their access, and no more. */
+  | { kind: "agent"; agentId: string; personId: string; workspaceId: string };
+
+const authorId = (actor: Actor) => (actor.kind === "agent" ? actor.agentId : actor.personId);
 
 interface Context {
   db: D1Database;
@@ -88,7 +93,7 @@ const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constrai
 const insertChange = (ctx: Context, noteId: string, revision: number, baseRevision: number, changes: ChangeSet, writeId: string | null = null) =>
   ctx.db
     .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, write_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(noteId, revision, baseRevision, ctx.actor.kind, ctx.actor.personId, JSON.stringify(changes.toJSON()), ctx.now, writeId);
+    .bind(noteId, revision, baseRevision, ctx.actor.kind, authorId(ctx.actor), JSON.stringify(changes.toJSON()), ctx.now, writeId);
 
 const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.list": {
@@ -175,17 +180,22 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       await loadNote(ctx, op.id);
       const { results } = await ctx.db
         .prepare(
-          `SELECT c.revision, c.base_revision, c.author_id, p.name, c.created_at
-           FROM changes c LEFT JOIN people p ON p.id = c.author_id
+          `SELECT c.revision, c.base_revision, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner, c.created_at
+           FROM changes c
+           LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
+           LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
            WHERE c.note_id = ? ORDER BY c.revision`,
         )
         .bind(op.id)
-        .all<{ revision: number; base_revision: number; author_id: string; name: string | null; created_at: number }>();
+        .all<{ revision: number; base_revision: number; author_kind: string; author_id: string; name: string | null; agent_owner: string | null; created_at: number }>();
       return results.map(
         (r): ChangeEntry => ({
           revision: r.revision,
           baseRevision: r.base_revision,
-          author: { kind: "member", personId: r.author_id, name: r.name ?? "Someone" },
+          author:
+            r.author_kind === "agent"
+              ? { kind: "agent", agentId: r.author_id, name: r.name ?? "An agent", onBehalfOf: r.agent_owner ?? "" }
+              : { kind: "member", personId: r.author_id, name: r.name ?? "Someone" },
           createdAt: r.created_at,
         }),
       );
