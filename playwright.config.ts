@@ -1,0 +1,14 @@
+import { defineConfig, devices } from "@playwright/test";
+
+const baseURL = process.env.BASE_URL ?? "http://localhost:5198";
+
+export default defineConfig({
+  testDir: "test/browser",
+  fullyParallel: true,
+  retries: process.env.CI ? 1 : 0,
+  expect: { timeout: process.env.BASE_URL ? 15_000 : 5_000 },
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
+  use: { baseURL, trace: "retain-on-failure", screenshot: "only-on-failure" },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  webServer: process.env.BASE_URL ? undefined : { command: "npm run dev -- --port 5198 --strictPort", url: baseURL, reuseExistingServer: true },
+});

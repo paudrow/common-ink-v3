@@ -1,0 +1,230 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf8;
+  --bg-elev: #ffffff;
+  --ink: #1f1e1c;
+  --muted: #6f6b66;
+  --line: #e7e4df;
+  --hover: rgb(31 30 28 / 0.06);
+  --accent: #5b5bd6;
+  --accent-soft: rgb(91 91 214 / 0.12);
+  --on-accent: #ffffff;
+  --selection: #dcdcf7;
+  --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--prose);
+  background: var(--bg);
+  color: var(--ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171716;
+    --bg-elev: #22211f;
+    --ink: #e8e6e3;
+    --muted: #9a958f;
+    --line: #2c2b29;
+    --hover: rgb(232 230 227 / 0.08);
+    --accent: #8f8ff0;
+    --accent-soft: rgb(143 143 240 / 0.16);
+    --on-accent: #10101a;
+    --selection: #34345c;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--hover);
+}
+
+.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.button.primary:hover {
+  filter: brightness(1.08);
+}
+
+button.link {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.link:hover {
+  color: var(--ink);
+}
+
+.notice {
+  margin: 20vh auto 0;
+  max-width: 28rem;
+  padding: 0 1.5rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.sign-in {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 22rem;
+  margin: 18vh auto 0;
+  padding: 0 1.5rem;
+  text-align: center;
+}
+
+.sign-in h1 {
+  margin: 0.5rem 0 0;
+  font-size: 1.6rem;
+}
+
+.sign-in p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.sign-in .button {
+  width: 100%;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 15rem 1fr;
+  height: 100%;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+  padding: 0.9rem 0.75rem;
+  border-right: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.workspace-name {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.sidebar nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sidebar nav a {
+  display: block;
+  overflow: hidden;
+  padding: 0.35rem 0.5rem;
+  border-radius: 5px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar nav a:hover {
+  background: var(--hover);
+}
+
+.sidebar nav a[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.person {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.main {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.note {
+  position: relative;
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2.5rem 2rem 30vh;
+}
+
+.save-state {
+  position: absolute;
+  top: 0.9rem;
+  right: 2rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.note[data-save-state="failed"] .save-state {
+  color: #c2410c;
+}
+
+.editor .cm-editor {
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.editor .cm-content {
+  font-family: var(--prose);
+  caret-color: var(--accent);
+}
+
+.editor .cm-selectionBackground,
+.editor .cm-focused .cm-selectionBackground {
+  background: var(--selection) !important;
+}
+
+.editor .cm-placeholder {
+  color: var(--muted);
+}
