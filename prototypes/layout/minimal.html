@@ -1,0 +1,806 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Not production code.
+  Question: starting from layout D (folders · note list · editor · inspector), how should a member
+  strip the UI down to focus on writing one note?
+  Four approaches on the D layout, switchable via ?variant=1|2|3|4 and the floating bar (or ← / → outside the editor).
+  The note body is editable so you can feel writing in each; edits are lost on re-render.
+  Open this file directly in a browser. No build, no persistence; all state is in memory.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Common Ink — layout prototype</title>
+<style>
+  :root {
+    --ui: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --bg: #fbfaf8; --bg-side: #f4f2ee; --bg-elev: #fff;
+    --hover: rgba(40,32,20,.05); --active: rgba(40,32,20,.08);
+    --line: #e7e3db; --line-strong: #d9d4ca;
+    --ink: #26241f; --heading: #16150f; --muted: #65615a; --faint: #b8b2a7;
+    --accent: #5b5bd6; --accent-ink: #4545b8; --accent-soft: rgba(91,91,214,.11);
+    --ok: #2f9e62; --ok-soft: rgba(47,158,98,.12); --bad: #d4513d; --bad-soft: rgba(212,81,61,.1);
+    --warn: #c7811b; --agent: #b0561f; --agent-soft: rgba(176,86,31,.12);
+    --shadow-lg: 0 24px 60px -12px rgba(30,24,12,.28), 0 0 0 1px rgba(30,24,12,.06);
+    --shadow-sm: 0 1px 2px rgba(30,24,12,.05), 0 4px 14px -6px rgba(30,24,12,.1);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 13.5px/1.5 var(--ui); color: var(--ink); background: var(--bg); overflow: hidden; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  input { font: inherit; color: inherit; }
+  #app { height: 100%; }
+
+  /* shared bits */
+  .drop { width: 18px; height: 24px; flex: none; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; color: var(--heading); letter-spacing: -.01em; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+  .kbd { font: 11px var(--mono); color: var(--muted); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  .item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 10px; border-radius: 6px; text-align: left; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item:hover { background: var(--hover); }
+  .item.on { background: var(--active); color: var(--heading); font-weight: 550; }
+  .item .ic { width: 16px; text-align: center; color: var(--muted); flex: none; }
+  .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding: 12px 12px 4px; font-weight: 600; }
+  .icon-btn { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: var(--muted); }
+  .icon-btn:hover, .icon-btn.on { background: var(--hover); color: var(--heading); }
+  .icon-btn.on { background: var(--active); }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg-elev); color: var(--muted); }
+  .pill.on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+
+  /* tabs + groups */
+  .groups { display: flex; flex: 1; min-width: 0; min-height: 0; }
+  .group { flex: 1; display: flex; flex-direction: column; min-width: 0; border-left: 1px solid var(--line); }
+  .group:first-child { border-left: 0; }
+  .group.focused .tab.on { box-shadow: inset 0 2px 0 var(--accent); }
+  .tabbar { display: flex; align-items: stretch; height: 36px; background: var(--bg-side); border-bottom: 1px solid var(--line); flex: none; }
+  .tabs { display: flex; flex: 1; min-width: 0; overflow: hidden; }
+  .tab { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px; border-right: 1px solid var(--line); color: var(--muted); max-width: 200px; min-width: 72px; flex: 0 1 auto; white-space: nowrap; cursor: pointer; user-select: none; }
+  .tab span.t { overflow: hidden; text-overflow: ellipsis; }
+  .tab.on { background: var(--bg); color: var(--heading); }
+  .tab.preview span.t { font-style: italic; }
+  .tab .x { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; opacity: 0; font-size: 14px; }
+  .tab:hover .x, .tab.on .x { opacity: .7; }
+  .tab .x:hover { background: var(--active); opacity: 1; }
+  .tabbar .acts { display: flex; align-items: center; padding: 0 4px; gap: 2px; }
+  .pane { flex: 1; overflow: auto; min-height: 0; }
+
+  /* note rendering */
+  .doc { max-width: 720px; margin: 0 auto; padding: 36px 48px 120px; }
+  .doc h1 { font-size: 28px; line-height: 1.2; margin: 0 0 6px; color: var(--heading); letter-spacing: -.02em; }
+  .doc h2 { font-size: 17px; margin: 26px 0 6px; color: var(--heading); }
+  .doc p { margin: 8px 0; font-size: 15px; line-height: 1.65; }
+  .doc .meta { font-size: 12px; color: var(--faint); margin-bottom: 18px; display: flex; gap: 10px; align-items: center; }
+  .blk { position: relative; }
+  .wl { color: var(--accent-ink); text-decoration: none; border-bottom: 1px solid var(--accent-line, rgba(91,91,214,.35)); cursor: pointer; }
+  .tag { color: var(--accent-ink); background: var(--accent-soft); border-radius: 4px; padding: 0 4px; font-size: .92em; }
+  .person { display: inline-flex; align-items: center; gap: 3px; border-radius: 99px; padding: 0 7px 0 3px; font-size: .9em; font-weight: 550; }
+  .person::before { content: ""; width: 13px; height: 13px; border-radius: 50%; background: currentColor; opacity: .9; -webkit-mask: radial-gradient(circle at 50% 35%, #000 28%, transparent 30%), radial-gradient(ellipse at 50% 100%, #000 45%, transparent 47%); mask: radial-gradient(circle at 50% 35%, #000 28%, transparent 30%), radial-gradient(ellipse at 50% 100%, #000 45%, transparent 47%); }
+  .person.member { color: var(--accent-ink); background: var(--accent-soft); }
+  .person.contact { color: #8a857c; background: #efece6; }
+  .todo { display: flex; align-items: flex-start; gap: 10px; padding: 5px 0; font-size: 15px; }
+  .todo .box { width: 17px; height: 17px; border: 1.5px solid var(--line-strong); border-radius: 5px; margin-top: 4px; flex: none; display: grid; place-items: center; color: #fff; font-size: 11px; }
+  .todo.done .box { background: var(--ok); border-color: var(--ok); }
+  .todo.done .txt { color: var(--faint); text-decoration: line-through; }
+  .todo.imp3 .box { border-color: var(--bad); }
+  .todo.imp2 .box { border-color: var(--warn); }
+  .todo.imp1 .box { border-color: var(--accent); }
+  .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; vertical-align: 1px; }
+  .chip { font-size: 11.5px; line-height: 18px; padding: 0 7px; border-radius: 5px; background: #f0ede7; color: var(--muted); border: 1px solid transparent; cursor: pointer; white-space: nowrap; }
+  .chip:hover { border-color: var(--line-strong); }
+  .chip.due.over { background: var(--bad-soft); color: var(--bad); }
+  .chip.due.today { background: rgba(199,129,27,.13); color: #895913; }
+  .chip.imp { color: var(--bad); background: var(--bad-soft); font-weight: 700; }
+  .chip.proj { color: var(--accent-ink); background: var(--accent-soft); }
+  .embed { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 14px 0; background: var(--bg-elev); }
+  .kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .kanban .col h4 { margin: 0 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .kanban .card { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
+  .changed { position: absolute; left: -22px; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; }
+  .changed.agent { background: var(--agent); }
+  .changed.member { background: var(--accent); }
+
+  /* history */
+  .hist { font-size: 12.5px; }
+  .hist .filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .change { border-bottom: 1px solid var(--line); padding: 10px 12px; }
+  .change .who { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+  .avatar { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; flex: none; }
+  .badge { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 0 5px; border-radius: 4px; font-weight: 650; }
+  .badge.agent { background: var(--agent-soft); color: var(--agent); }
+  .badge.label { background: var(--accent-soft); color: var(--accent-ink); }
+  .dl { font: 12px/1.55 var(--mono); padding: 0 6px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+  .dl.add { background: var(--ok-soft); color: #1d6b41; }
+  .dl.del { background: var(--bad-soft); color: #a33a2a; text-decoration: line-through; text-decoration-color: rgba(163,58,42,.4); }
+  .change .acts { display: flex; gap: 10px; margin-top: 6px; font-size: 12px; }
+  .change .acts button { color: var(--accent-ink); padding: 0; }
+
+  /* mode views */
+  .view { padding: 28px 36px 120px; max-width: 1100px; margin: 0 auto; }
+  .view h1 { font-size: 22px; margin: 0 0 4px; color: var(--heading); letter-spacing: -.01em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 18px; }
+  .card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; box-shadow: var(--shadow-sm); }
+  .card h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .ev { display: flex; gap: 10px; padding: 5px 0; }
+  .ev .time { font: 12px var(--mono); color: var(--muted); width: 64px; flex: none; padding-top: 2px; }
+  .ev .bar { width: 3px; border-radius: 2px; background: var(--accent); flex: none; }
+  .linky { color: var(--ink); cursor: pointer; display: block; padding: 3px 0; }
+  .linky:hover { color: var(--accent-ink); }
+
+  /* palette */
+  .scrim { position: fixed; inset: 0; background: rgba(20,16,10,.18); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: 50; }
+  .palette { width: 560px; background: var(--bg-elev); border-radius: 12px; box-shadow: var(--shadow-lg); overflow: hidden; }
+  .palette input { width: 100%; border: 0; outline: 0; padding: 14px 16px; font-size: 15px; border-bottom: 1px solid var(--line); background: transparent; }
+  .palette .res { max-height: 340px; overflow: auto; padding: 6px; }
+  .palette .res .item { padding: 7px 10px; }
+  .palette .res .item.sel { background: var(--accent-soft); color: var(--accent-ink); }
+  .ctx { position: fixed; z-index: 60; background: var(--bg-elev); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 4px; min-width: 180px; }
+  .ctx .item { padding: 5px 10px; }
+
+  /* ===== Variant A: spec layout ===== */
+  .A { display: flex; height: 100%; }
+  .A .left { width: 252px; background: var(--bg-side); border-right: 1px solid var(--line); display: flex; flex-direction: column; flex: none; }
+  .A .left .top { padding: 14px 14px 8px; display: flex; justify-content: space-between; align-items: center; }
+  .A .left nav { padding: 0 6px; }
+  .A .left .tree { flex: 1; overflow: auto; padding: 0 6px 12px; }
+  .A .main { flex: 1; display: flex; min-width: 0; }
+  .A .right { width: 320px; border-left: 1px solid var(--line); background: var(--bg-side); display: flex; flex-direction: column; flex: none; }
+  .A .right .hd { height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); flex: none; }
+  .A .right .bd { overflow: auto; flex: 1; }
+
+  /* ===== Variant B: rail + bottom panel ===== */
+  .B { display: grid; height: 100%; grid-template-columns: 48px auto 1fr; grid-template-rows: 1fr auto 24px; }
+  .B .rail { grid-row: 1 / 3; background: #1f1e2b; display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+  .B .rail .icon-btn { color: #a9a7c2; width: 34px; height: 34px; font-size: 16px; position: relative; }
+  .B .rail .icon-btn:hover { background: rgba(255,255,255,.07); color: #fff; }
+  .B .rail .icon-btn.on { background: rgba(91,91,214,.35); color: #fff; }
+  .B .rail .sep { width: 22px; height: 1px; background: rgba(255,255,255,.12); margin: 6px 0; }
+  .B .rail .tip { position: absolute; left: 42px; top: 50%; transform: translateY(-50%); background: #111; color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 4px; white-space: nowrap; opacity: 0; pointer-events: none; z-index: 5; }
+  .B .rail .icon-btn:hover .tip { opacity: 1; }
+  .B .explorer { grid-row: 1 / 3; width: 240px; background: var(--bg-side); border-right: 1px solid var(--line); overflow: auto; }
+  .B .explorer .hd { display: flex; justify-content: space-between; align-items: center; padding: 10px 10px 4px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 650; }
+  .B .center { display: flex; min-width: 0; min-height: 0; }
+  .B .panel { height: 230px; border-top: 1px solid var(--line); background: var(--bg-side); display: flex; flex-direction: column; min-width: 0; }
+  .B .panel .hd { display: flex; align-items: center; gap: 14px; padding: 0 10px; height: 32px; border-bottom: 1px solid var(--line); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 650; color: var(--muted); flex: none; }
+  .B .panel .hd .on { color: var(--heading); box-shadow: inset 0 -2px 0 var(--accent); height: 100%; display: flex; align-items: center; }
+  .B .panel .bd { display: grid; grid-template-columns: 340px 1fr; flex: 1; min-height: 0; }
+  .B .panel .list { border-right: 1px solid var(--line); overflow: auto; }
+  .B .panel .list .change { cursor: pointer; padding: 7px 12px; }
+  .B .panel .list .change.sel { background: var(--accent-soft); }
+  .B .panel .diff { overflow: auto; padding: 10px 14px; }
+  .B .status { grid-column: 1 / 4; background: var(--accent); color: #fff; font-size: 11.5px; display: flex; align-items: center; gap: 16px; padding: 0 10px; }
+  .B .status .vim { background: rgba(0,0,0,.18); padding: 0 8px; height: 100%; display: flex; align-items: center; font-weight: 700; font-family: var(--mono); }
+
+  /* ===== Variant C: writer-first ===== */
+  .C { display: flex; flex-direction: column; height: 100%; }
+  .C .bar { height: 48px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--bg); flex: none; }
+  .C .crumbs { display: flex; align-items: center; gap: 6px; color: var(--muted); min-width: 0; }
+  .C .crumbs b { color: var(--heading); font-weight: 600; }
+  .C .seg { display: flex; background: var(--bg-side); border-radius: 8px; padding: 3px; gap: 2px; }
+  .C .seg button { padding: 4px 12px; border-radius: 6px; color: var(--muted); font-size: 12.5px; }
+  .C .seg button.on { background: var(--bg-elev); color: var(--heading); box-shadow: var(--shadow-sm); font-weight: 550; }
+  .C .bar .end { display: flex; justify-content: flex-end; gap: 4px; align-items: center; }
+  .C .strip { display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--line); flex: none; overflow: hidden; }
+  .C .strip .t { font-size: 12px; padding: 2px 6px 2px 10px; border-radius: 6px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+  .C .strip .t.on { background: var(--active); color: var(--heading); }
+  .C .strip .t.preview { font-style: italic; }
+  .C .body { flex: 1; display: flex; min-height: 0; position: relative; }
+  .C .body .pane { flex: 1; }
+  .C .doc { max-width: 680px; padding-top: 56px; }
+  .C .margin-note { position: absolute; right: -210px; width: 190px; font-size: 11.5px; color: var(--muted); top: 4px; line-height: 1.35; }
+  .C .margin-note b { color: var(--agent); font-weight: 600; }
+  .C .margin-note.member b { color: var(--accent-ink); }
+  .C .drawer { position: absolute; left: 0; top: 0; bottom: 0; width: 290px; background: var(--bg-elev); box-shadow: var(--shadow-lg); z-index: 10; overflow: auto; padding: 8px; }
+  .C .slide { width: 360px; border-left: 1px solid var(--line); background: var(--bg-side); overflow: auto; }
+  .C .peek { position: absolute; left: 0; top: 0; bottom: 0; width: 14px; z-index: 5; }
+
+  /* ===== Variant D: three-column browse ===== */
+  .D { display: flex; height: 100%; }
+  .D .c1 { width: 216px; background: #f0eee9; border-right: 1px solid var(--line); display: flex; flex-direction: column; flex: none; }
+  .D .ws { margin: 10px; padding: 7px 10px; border-radius: 8px; background: var(--bg-elev); box-shadow: var(--shadow-sm); display: flex; align-items: center; gap: 8px; }
+  .D .c2 { width: 310px; border-right: 1px solid var(--line); display: flex; flex-direction: column; background: var(--bg); flex: none; }
+  .D .c2 .hd { padding: 14px 16px 8px; }
+  .D .c2 .hd h2 { margin: 0; font-size: 17px; color: var(--heading); }
+  .D .c2 .search { margin: 0 12px 8px; display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; background: var(--bg-elev); color: var(--faint); }
+  .D .c2 .search input { border: 0; outline: 0; flex: 1; background: transparent; }
+  .D .list { overflow: auto; flex: 1; }
+  .nrow { padding: 10px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .nrow:hover { background: var(--hover); }
+  .nrow.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .nrow .tt { font-weight: 600; color: var(--heading); }
+  .nrow .sn { color: var(--muted); font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .nrow .ft { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--faint); margin-top: 4px; }
+  .D .c3 { flex: 1; display: flex; min-width: 0; }
+  .D .insp { width: 300px; border-left: 1px solid var(--line); background: var(--bg-side); display: flex; flex-direction: column; flex: none; }
+  .D .insp .tabsx { display: flex; gap: 14px; padding: 0 12px; height: 36px; align-items: center; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); flex: none; }
+  .D .insp .tabsx .on { color: var(--heading); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); height: 100%; display: flex; align-items: center; }
+  .D .insp .bd { overflow: auto; flex: 1; }
+
+  /* focus mode */
+  .focus .left, .focus .right, .focus .explorer, .focus .panel, .focus .c1, .focus .c2, .focus .insp, .focus .slide, .focus .rail { display: none !important; }
+  .B.focus { grid-template-columns: 0 0 1fr; }
+  .focus .tabbar, .focus .strip { opacity: .0; transition: opacity .15s; }
+  .focus .tabbar:hover, .focus .strip:hover { opacity: 1; }
+
+  /* ===== D, stripped down ===== */
+  .Dm { position: relative; }
+  .Dm .doc[contenteditable] { outline: none; caret-color: var(--accent); }
+  .Dm .c1, .Dm .c2, .Dm .insp { transition: width .22s ease, opacity .22s ease, border-color .22s; overflow: hidden; }
+  .Dm .c1.collapsed, .Dm .c2.collapsed, .Dm .insp.collapsed { width: 0; opacity: 0; border-width: 0; }
+  .Dm.step3 .doc { max-width: 700px; padding-top: 64px; }
+  .Dm.step3 .tabbar { background: var(--bg); border-bottom-color: transparent; }
+  .stepper { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 2px; margin-right: 4px; }
+  .stepper button { width: 30px; height: 22px; border-radius: 5px; display: grid; place-items: center; color: var(--muted); }
+  .stepper button:hover { background: var(--hover); }
+  .stepper button.on { background: var(--accent-soft); color: var(--accent-ink); }
+  .writebtn { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; color: var(--accent-ink); border-color: var(--accent-line, rgba(91,91,214,.35)); }
+
+  /* variant 2: zen */
+  .zen { position: fixed; inset: 0; background: var(--bg); }
+  .zen-doc { height: 100%; overflow: auto; }
+  .zen-doc .doc { max-width: 680px; padding-top: 12vh; }
+  .zen-doc .doc p, .zen-doc .todo { font-size: 17px; }
+  .zen-doc .doc h1 { font-size: 34px; }
+  .zen-top { position: fixed; top: 0; left: 0; right: 0; height: 18px; z-index: 5; }
+  .zen-top:hover { height: auto; }
+  .zen-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: rgba(251,250,248,.94); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); transform: translateY(-100%); opacity: 0; transition: transform .18s, opacity .18s; }
+  .zen-top:hover .zen-bar { transform: none; opacity: 1; }
+  .zen-agent { color: var(--agent); font-size: 12px; }
+  .zen-left { position: fixed; left: 0; top: 0; bottom: 0; width: 18px; z-index: 6; }
+  .zen-left:hover { width: 320px; }
+  .zen-list { position: absolute; inset: 0; width: 320px; background: var(--bg-elev); transform: translateX(-100%); transition: transform .18s; overflow: auto; }
+  .zen-left:hover .zen-list { transform: none; box-shadow: var(--shadow-lg); }
+
+  /* variant 3: fade while typing */
+  .m3 .c1, .m3 .c2, .m3 .insp, .m3 .tabbar { transition: opacity .2s ease; }
+  .m3.typing .c1, .m3.typing .c2, .m3.typing .insp, .m3.typing .tabbar { opacity: .06; transition: opacity 1.2s ease; }
+  .m3.typing .changed { opacity: .2; }
+
+  /* variant 4: rails + popovers */
+  .drail, .irail { width: 46px; background: #f0eee9; display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; flex: none; }
+  .drail { border-right: 1px solid var(--line); }
+  .irail { border-left: 1px solid var(--line); width: 42px; }
+  .drail .sep { width: 20px; height: 1px; background: var(--line-strong); margin: 6px 0; }
+  .irail .icon-btn, .drail .icon-btn { position: relative; font-size: 15px; }
+  .irail .dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--agent); }
+  .popover { position: absolute; top: 8px; bottom: 8px; background: var(--bg-elev); border-radius: 10px; box-shadow: var(--shadow-lg); overflow: auto; z-index: 20; }
+  .popover.left { left: 52px; width: 560px; }
+  .popover.right { right: 48px; width: 340px; }
+  .pop-cols { display: grid; grid-template-columns: 200px 1fr; height: 100%; }
+  .pop-tree { border-right: 1px solid var(--line); padding: 8px 6px; background: #f6f4f0; }
+  .pop-list { overflow: auto; }
+
+  /* prototype switcher (not part of the design) */
+  .proto-bar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 4px; background: #111; color: #fff; border-radius: 99px; padding: 5px; box-shadow: 0 10px 30px rgba(0,0,0,.35); font: 12.5px var(--ui); }
+  .proto-bar button { color: #fff; width: 30px; height: 30px; border-radius: 99px; font-size: 15px; }
+  .proto-bar button:hover { background: rgba(255,255,255,.14); }
+  .proto-bar .lbl { padding: 0 10px; min-width: 250px; text-align: center; }
+  .proto-bar .lbl b { color: #b9b9ff; }
+  .proto-bar .tag2 { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #888; padding-right: 8px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="overlay"></div>
+<script>
+// ---------- fake data ----------
+const TODAY = "2026-10-10";
+const PEOPLE = {
+  Audrow: { name: "Audrow", member: true, color: "#5b5bd6" },
+  Ben: { name: "Ben Ortiz", member: true, color: "#2f9e62" },
+  Maya: { name: "Maya Chen", member: true, color: "#c7811b" },
+  Joe: { name: "Joe Rivera", member: false },
+  Dana: { name: "Dana (accountant)", member: false },
+};
+const AGENT = { name: "Claude", color: "#b0561f" };
+const FOLDERS = [
+  { id: "unsorted", name: "Unsorted", parent: null },
+  { id: "daily", name: "Daily", parent: null },
+  { id: "projects", name: "Projects", parent: null },
+  { id: "ink", name: "Common Ink", parent: "projects" },
+  { id: "house", name: "House", parent: "projects" },
+  { id: "reading", name: "Reading", parent: null },
+];
+const NOTES = [
+  { id: "n1", folder: "ink", title: "Common Ink roadmap", edited: "2m ago", by: "Claude", pinned: true, blocks: [
+    { p: "Plan for v3. Vocabulary lives in [[Glossary]]; layout ideas in [[Layout ideas]]. #roadmap" },
+    { h2: "Now" },
+    { todo: { text: "Foundation: sign in and write a note", due: "2026-10-09", imp: 3, proj: "Ink", who: "Audrow" } },
+    { todo: { text: "Folders and the sidebar", due: TODAY, imp: 2, proj: "Ink" }, changed: "agent" },
+    { todo: { text: "Tabs, splits, command palette, quick open", due: "2026-10-14", proj: "Ink", who: "Ben" }, changed: "agent" },
+    { h2: "Board" },
+    { kanban: [["Next", ["History", "Agents: CLI + MCP"]], ["Doing", ["Layout prototype"]], ["Done", ["Spec", "Tickets"]]] },
+    { p: "Ask @Maya whether history should be the right sidebar or a bottom panel." , changed: "member" },
+  ]},
+  { id: "n2", folder: "house", title: "Plumbing repair", edited: "1h ago", by: "Audrow", blocks: [
+    { p: "Kitchen sink leaking under the cabinet. #house" },
+    { p: "Called @Joe — he said he'd come by Tuesday with the replacement trap." },
+    { todo: { text: "Confirm Tuesday visit", due: "2026-10-13", who: "Joe" } },
+    { todo: { text: "Change furnace filter", due: "2026-11-01", rec: "every 3 months", last: "Aug 1 · 6×", proj: "Home" } },
+    { todo: { text: "Buy replacement trap", done: true } },
+  ]},
+  { id: "n3", folder: "daily", title: "2026-10-10", edited: "just now", by: "Audrow", blocks: [
+    { p: "Morning: worked through the spec with grilling. Published 22 tickets." },
+    { todo: { text: "Water plants", done: true, rec: "every 3 days" } },
+    { todo: { text: "Review layout prototype", due: TODAY, imp: 1, proj: "Ink" } },
+  ]},
+  { id: "n4", folder: "unsorted", title: "Meeting with Ben", edited: "yesterday", by: "Ben", blocks: [
+    { p: "@Ben thinks the dashboard should lead with today's events. Agreed on pins being personal. #meetings" },
+    { todo: { text: "Send Ben the ticket list", done: true, who: "Ben" } },
+  ]},
+  { id: "n5", folder: "reading", title: "Reading list", edited: "3d ago", by: "Audrow", blocks: [
+    { p: "Things to read on local-first and CRDTs. #reading" },
+    { todo: { text: "Ink & Switch: Local-first software", proj: "Reading" } },
+  ]},
+  { id: "n6", folder: "ink", title: "Layout ideas", edited: "5m ago", by: "Audrow", blocks: [
+    { p: "VS Code inspiration: tabs, splits, preview tabs in italics, cmd+p and cmd+shift+p. See [[Common Ink roadmap]]." },
+    { p: "Open question: where does history live so it's always one glance away?" },
+  ]},
+  { id: "n7", folder: "ink", title: "Glossary", edited: "2h ago", by: "Audrow", blocks: [
+    { p: "Workspace, Note, Folder, Grant, Change, Plugin… #domain" },
+  ]},
+  { id: "n8", folder: "unsorted", title: "Taxes 2026", edited: "1w ago", by: "Audrow", private: true, blocks: [
+    { p: "Docs for @Dana. Private note. #taxes" },
+    { todo: { text: "Send W-2 to Dana", due: "2026-10-08", imp: 2, who: "Dana" } },
+  ]},
+];
+const HISTORY = {
+  n1: [
+    { who: "Claude", agent: true, when: "2m ago", lines: [["-", "- [ ] Folders and the sidebar"], ["+", "- [ ] !! Folders and the sidebar due:2026-10-10 +Ink"], ["+", "- [ ] Tabs, splits, command palette, quick open due:2026-10-14 +Ink @Ben"]] },
+    { who: "Audrow", when: "20m ago", label: "tickets published", lines: [["+", "Ask @Maya whether history should be the right sidebar or a bottom panel."]] },
+    { who: "Maya", when: "1h ago", lines: [["-", "## Later"], ["+", "## Board"]] },
+    { who: "Audrow", when: "yesterday", lines: [["+", "# Common Ink roadmap"], ["+", "Plan for v3."]] },
+  ],
+};
+function histFor(id) {
+  return HISTORY[id] || [{ who: (NOTES.find(n => n.id === id) || {}).by || "Audrow", when: "earlier", lines: [["+", "(initial version)"]] }];
+}
+const ALL_HISTORY = [
+  { note: "n1", ...HISTORY.n1[0] }, { note: "n3", who: "Audrow", when: "4m ago", lines: [["+", "- [ ] ! Review layout prototype due:2026-10-10 +Ink"]] },
+  { note: "n6", who: "Audrow", when: "5m ago", lines: [["+", "Open question: where does history live…"]] },
+  { note: "n1", ...HISTORY.n1[1] }, { note: "n2", who: "Claude", agent: true, when: "1h ago", lines: [["+", "- [ ] Confirm Tuesday visit due:2026-10-13 @Joe"]] },
+  { note: "n1", ...HISTORY.n1[2] }, { note: "n4", who: "Ben", when: "yesterday", lines: [["+", "Agreed on pins being personal."]] },
+];
+const EVENTS = [
+  { time: "All day", title: "Mom's birthday" },
+  { time: "13:00", title: "Design review with Ben" },
+  { time: "15:30", title: "Plumber window (Joe)" },
+  { time: "18:00", title: "Climbing" },
+];
+const PRIMARY_MODES = [["dashboard", "Dashboard", "◎"], ["search", "Search", "⌕"], ["todos", "Todos", "☑"], ["calendar", "Calendar", "▦"]];
+const MORE_MODES = [["contacts", "Contacts", "☺"], ["uploads", "Uploads", "⇪"], ["history", "History", "↺"]];
+const MODE_NAME = Object.fromEntries([...PRIMARY_MODES, ...MORE_MODES].map(m => [m[0], m[1]]));
+const MODE_ICON = Object.fromEntries([...PRIMARY_MODES, ...MORE_MODES].map(m => [m[0], m[2]]));
+
+// ---------- state ----------
+const VARIANTS = [
+  ["1", "Steps: peel off one column at a time (⌘\\ / ⇧⌘\\)"],
+  ["2", "Zen: one key hides everything; edges peek (⌘.)"],
+  ["3", "Fade while typing; move the mouse to bring it back"],
+  ["4", "Collapse to slim rails; panels open as popovers (⌘.)"],
+];
+const S = {
+  variant: (new URLSearchParams(location.search).get("variant") || "1").toUpperCase(),
+  step: 0,
+  zen: false,
+  rails: false,
+  pop: null,
+  groups: [{ tabs: [{ kind: "note", id: "n1", preview: false }, { kind: "mode", id: "dashboard", preview: false }], active: 0 }],
+  ag: 0,
+  expanded: new Set(["projects", "ink", "unsorted", "daily", "house"]),
+  folder: "ink",
+  moreOpen: false,
+  focus: false,
+  rightOpen: true,
+  explorerOpen: true,
+  panelOpen: true,
+  panelSel: 0,
+  drawer: false,
+  slide: false,
+  inspTab: "history",
+  palette: null,
+  ctx: null,
+};
+if (!VARIANTS.some(v => v[0] === S.variant)) S.variant = "1";
+
+// ---------- helpers ----------
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const note = id => NOTES.find(n => n.id === id);
+const folderPath = fid => { const out = []; let f = FOLDERS.find(x => x.id === fid); while (f) { out.unshift(f.name); f = FOLDERS.find(x => x.id === f.parent); } return out; };
+const DROP = `<svg class="drop" viewBox="21 11 58 80"><path d="M50 14.5C50 14.5 25 43.5 25 60.5a25 25 0 0 0 50 0C75 43.5 50 14.5 50 14.5Z" fill="#5b5bd6"/><path d="M37 60.5a13 13 0 0 0 9 12" stroke="#fff" stroke-width="5" stroke-linecap="round" fill="none"/></svg>`;
+function personChip(key) {
+  const p = PEOPLE[key]; if (!p) return "@" + esc(key);
+  return `<span class="person ${p.member ? "member" : "contact"}" title="${p.member ? "Workspace member" : "Contact (no access)"}">${esc(p.name)}</span>`;
+}
+function inline(t) {
+  let s = esc(t);
+  s = s.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, title, disp) => { const n = NOTES.find(x => x.title === title); return `<a class="wl" data-act="open" data-id="${n ? n.id : ""}">${disp || title}</a>`; });
+  s = s.replace(/(^|\s)#([\w-]+)/g, (_, pre, tag) => `${pre}<span class="tag">#${tag}</span>`);
+  s = s.replace(/@(\w+)/g, (_, k) => personChip(k));
+  return s;
+}
+function fmtDate(d) { const dt = new Date(d + "T12:00"); return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
+function todoHTML(t) {
+  const chips = [];
+  if (t.imp) chips.push(`<span class="chip imp" title="Importance">${"!".repeat(t.imp)}</span>`);
+  if (t.due) { const cls = t.due < TODAY ? "over" : t.due === TODAY ? "today" : ""; chips.push(`<span class="chip due ${cls}">${t.due === TODAY ? "Today" : fmtDate(t.due)}</span>`); }
+  if (t.rec) chips.push(`<span class="chip">↻ ${esc(t.rec)}</span>`);
+  if (t.last) chips.push(`<span class="chip" title="Completion history">✓ ${esc(t.last)}</span>`);
+  if (t.proj) chips.push(`<span class="chip proj">+${esc(t.proj)}</span>`);
+  if (t.who) chips.push(personChip(t.who));
+  return `<div class="todo ${t.done ? "done" : ""} ${t.imp ? "imp" + t.imp : ""}"><span class="box">${t.done ? "✓" : ""}</span><span class="txt">${inline(t.text)}<span class="chips">${chips.join("")}</span></span></div>`;
+}
+function blockHTML(b, opts = {}) {
+  let inner;
+  if (b.h2) inner = `<h2>${esc(b.h2)}</h2>`;
+  else if (b.todo) inner = todoHTML(b.todo);
+  else if (b.kanban) inner = `<div class="embed"><div class="muted" style="font-size:11px;margin-bottom:8px">:::kanban</div><div class="kanban">${b.kanban.map(([c, cards]) => `<div class="col"><h4>${esc(c)}</h4>${cards.map(x => `<div class="card">${esc(x)}</div>`).join("")}</div>`).join("")}</div></div>`;
+  else inner = `<p>${inline(b.p)}</p>`;
+  let mark = "";
+  if (b.changed && opts.marks) mark = `<span class="changed ${b.changed}"></span>`;
+  if (b.changed && opts.margin) mark += `<div class="margin-note ${b.changed}"><b>${b.changed === "agent" ? "Claude" : "Maya"}</b> ${b.changed === "agent" ? "edited 2m ago" : "added 1h ago"} · <a class="wl" data-act="slide">view</a></div>`;
+  return `<div class="blk">${mark}${inner}</div>`;
+}
+function noteHTML(n, opts = {}) {
+  const path = folderPath(n.folder).join(" / ");
+  return `<div class="doc"${opts.editable ? ' contenteditable="true" spellcheck="false"' : ""}><h1>${esc(n.title)}</h1><div class="meta"><span>${esc(path)}</span><span>·</span><span>edited ${esc(n.edited)} by ${esc(n.by)}</span>${n.private ? `<span class="badge label">private</span>` : ""}</div>${n.blocks.map(b => blockHTML(b, opts)).join("")}</div>`;
+}
+function avatar(who, agent) {
+  const color = agent ? AGENT.color : (PEOPLE[who] && PEOPLE[who].color) || "#888";
+  return `<span class="avatar" style="background:${color}">${agent ? "✦" : who[0]}</span>`;
+}
+function changeHTML(c, opts = {}) {
+  const n = c.note ? note(c.note) : null;
+  return `<div class="change"><div class="who">${avatar(c.who, c.agent)}<b>${esc(c.who)}</b>${c.agent ? `<span class="badge agent">agent</span>` : ""}<span class="faint">${esc(c.when)}</span>${c.label ? `<span class="badge label">${esc(c.label)}</span>` : ""}</div>${n && opts.showNote ? `<div class="muted" style="margin-bottom:4px">${esc(n.title)}</div>` : ""}${c.lines.map(([k, s]) => `<div class="dl ${k === "+" ? "add" : "del"}">${k} ${esc(s)}</div>`).join("")}${opts.actions !== false ? `<div class="acts"><button>Revert</button><button>Apply selection…</button><button>Label</button></div>` : ""}</div>`;
+}
+function filtersHTML() {
+  return `<div class="filters"><span class="pill on">All authors</span><span class="pill">Agents</span><span class="pill">Ben</span><span class="pill">Last 7 days</span><span class="pill">This note ▾</span></div>`;
+}
+function historyHTML(noteId) {
+  return `<div class="hist">${filtersHTML()}${histFor(noteId).map(c => changeHTML(c)).join("")}</div>`;
+}
+function allTodos() { const out = []; NOTES.forEach(n => n.blocks.forEach(b => b.todo && out.push({ ...b.todo, note: n }))); return out; }
+function modeHTML(mode) {
+  if (mode === "dashboard") {
+    const due = allTodos().filter(t => !t.done && t.due && t.due <= TODAY);
+    return `<div class="view"><h1>Saturday, October 10</h1><div class="muted">Good morning, Audrow · 3 changes since your last visit</div><div class="grid">
+      <div class="card"><h3>Today</h3>${EVENTS.map(e => `<div class="ev"><span class="time">${e.time}</span><span class="bar"></span><span>${esc(e.title)}</span></div>`).join("")}</div>
+      <div class="card"><h3>Due</h3>${due.map(t => `<div style="font-size:14px">${todoHTML(t)}</div><div class="faint" style="font-size:11.5px;margin:-4px 0 4px 27px">${esc(t.note.title)}</div>`).join("")}</div>
+      <div class="card"><h3>Today's notes</h3>${NOTES.filter(n => /just now|ago/.test(n.edited) && !/d ago|w ago/.test(n.edited)).map(n => `<a class="linky" data-act="open" data-id="${n.id}">${esc(n.title)} <span class="faint">· ${esc(n.edited)}</span></a>`).join("")}</div>
+      <div class="card"><h3>Pinned</h3>${NOTES.filter(n => n.pinned || n.id === "n7").map(n => `<a class="linky" data-act="open" data-id="${n.id}">📌 ${esc(n.title)}</a>`).join("")}</div>
+      <div class="card" style="grid-column:1/-1"><h3>Since your last visit</h3>${ALL_HISTORY.slice(0, 3).map(c => changeHTML(c, { showNote: true, actions: false })).join("")}</div>
+    </div></div>`;
+  }
+  if (mode === "todos") {
+    const ts = allTodos().filter(t => !t.done);
+    const byProj = {}; ts.forEach(t => (byProj[t.proj || "No project"] ||= []).push(t));
+    return `<div class="view"><h1>Todos</h1><div class="row" style="margin:12px 0 4px;flex-wrap:wrap"><span class="pill on">Open</span><span class="pill">Due ≤ today</span><span class="pill">+Ink</span><span class="pill">#house</span><span class="pill">Assigned to me</span><span class="pill">Include completed</span></div>
+      ${Object.entries(byProj).map(([p, list]) => `<h3 class="section-label" style="padding-left:0">${p === "No project" ? p : "+" + esc(p)}</h3>${list.map(t => `<div>${todoHTML(t)}<div class="faint" style="font-size:11.5px;margin:-4px 0 4px 27px">${esc(t.note.title)}</div></div>`).join("")}`).join("")}</div>`;
+  }
+  if (mode === "history") return `<div class="view"><h1>History</h1><div class="muted">Every change in the workspace</div><div class="card" style="padding:0;margin-top:16px">${filtersHTML()}${ALL_HISTORY.map(c => changeHTML(c, { showNote: true })).join("")}</div></div>`;
+  if (mode === "calendar") return `<div class="view"><h1>Calendar</h1><div class="muted">Google Calendar · only you can see this</div><div class="card" style="margin-top:16px">${EVENTS.map(e => `<div class="ev"><span class="time">${e.time}</span><span class="bar"></span><span>${esc(e.title)}</span></div>`).join("")}</div></div>`;
+  if (mode === "search") return `<div class="view"><h1>Search</h1><div class="palette" style="width:100%;box-shadow:var(--shadow-sm);margin-top:14px"><input placeholder="Search note text, todos, #tags, +projects…" /></div><div class="muted" style="margin-top:14px">Archived and trashed notes excluded · <a class="wl">include</a></div></div>`;
+  if (mode === "contacts") return `<div class="view"><h1>Contacts</h1><div class="muted">Google Contacts · only you can see this</div><div class="card" style="margin-top:16px">${Object.values(PEOPLE).map(p => `<div style="padding:4px 0">${p.member ? `<span class="person member">${esc(p.name)}</span> <span class="faint">member</span>` : `<span class="person contact">${esc(p.name)}</span> <span class="faint">contact</span>`}</div>`).join("")}</div></div>`;
+  if (mode === "uploads") return `<div class="view"><h1>Uploads</h1><div class="grid">${["sink-photo.jpg", "w2-2026.pdf", "logo.svg"].map(f => `<div class="card"><div style="height:80px;background:var(--bg-side);border-radius:6px;margin-bottom:8px"></div>${f}</div>`).join("")}</div></div>`;
+  return "";
+}
+function itemTitle(t) { return t.kind === "note" ? note(t.id).title : MODE_NAME[t.id]; }
+function activeItem() { const g = S.groups[S.ag]; return g && g.tabs[g.active]; }
+function activeNoteId() { const t = activeItem(); return t && t.kind === "note" ? t.id : null; }
+function contentHTML(t, opts) { if (!t) return `<div class="view muted">No open tabs. <span class="kbd">⌘P</span> to open a note.</div>`; return t.kind === "note" ? noteHTML(note(t.id), opts) : modeHTML(t.id); }
+
+// ---------- tab model ----------
+function openItem(kind, id, pin) {
+  const g = S.groups[S.ag];
+  const i = g.tabs.findIndex(t => t.kind === kind && t.id === id);
+  if (i >= 0) { g.active = i; if (pin) g.tabs[i].preview = false; }
+  else if (!pin) { const p = g.tabs.findIndex(t => t.preview); const tab = { kind, id, preview: true }; if (p >= 0) { g.tabs[p] = tab; g.active = p; } else { g.tabs.push(tab); g.active = g.tabs.length - 1; } }
+  else { g.tabs.push({ kind, id, preview: false }); g.active = g.tabs.length - 1; }
+  if (kind === "note") S.folder = note(id).folder;
+  S.drawer = false; S.pop = null; render();
+}
+function closeTabs(gi, pred) {
+  const g = S.groups[gi]; const cur = g.tabs[g.active];
+  g.tabs = g.tabs.filter((t, i) => !pred(t, i));
+  g.active = Math.max(0, g.tabs.indexOf(cur) >= 0 ? g.tabs.indexOf(cur) : Math.min(g.active, g.tabs.length - 1));
+  if (!g.tabs.length && S.groups.length > 1) { S.groups.splice(gi, 1); S.ag = Math.min(S.ag, S.groups.length - 1); }
+  render();
+}
+function split() { const t = activeItem(); if (!t || S.groups.length >= 3) return; S.groups.splice(S.ag + 1, 0, { tabs: [{ ...t, preview: false }], active: 0 }); S.ag++; render(); }
+function groupsHTML(opts = {}) {
+  return `<div class="groups">${S.groups.map((g, gi) => `<div class="group ${gi === S.ag ? "focused" : ""}" data-act="focusgroup" data-g="${gi}">
+    <div class="tabbar"><div class="tabs">${g.tabs.map((t, ti) => `<div class="tab ${ti === g.active ? "on" : ""} ${t.preview ? "preview" : ""}" data-act="tab" data-g="${gi}" data-t="${ti}" draggable="true">${t.kind === "mode" ? `<span class="faint">${MODE_ICON[t.id]}</span>` : ""}<span class="t">${esc(itemTitle(t))}</span><span class="x" data-act="close" data-g="${gi}" data-t="${ti}">×</span></div>`).join("")}</div>
+    <div class="acts"><button class="icon-btn" title="Split right" data-act="split">◫</button>${gi === S.groups.length - 1 ? opts.extraActs || "" : ""}</div></div>
+    <div class="pane">${contentHTML(g.tabs[g.active], opts)}</div></div>`).join("")}</div>`;
+}
+
+// ---------- tree ----------
+function treeHTML(opts = {}) {
+  const kids = pid => FOLDERS.filter(f => f.parent === pid);
+  const rec = (pid, depth) => kids(pid).map(f => {
+    const open = S.expanded.has(f.id);
+    const notes = opts.foldersOnly ? [] : NOTES.filter(n => n.folder === f.id);
+    const count = NOTES.filter(n => n.folder === f.id).length;
+    return `<button class="item ${opts.foldersOnly && S.folder === f.id ? "on" : ""}" style="padding-left:${10 + depth * 14}px" data-act="folder" data-id="${f.id}"><span class="ic">${open ? "▾" : "▸"}</span>${esc(f.name)}${opts.foldersOnly ? `<span class="faint" style="margin-left:auto">${count}</span>` : ""}</button>
+      ${open ? rec(f.id, depth + 1) + notes.map(n => `<button class="item ${activeNoteId() === n.id ? "on" : ""}" style="padding-left:${24 + depth * 14}px" data-act="opennote" data-id="${n.id}"><span class="ic">${n.private ? "🔒" : "▤"}</span>${esc(n.title)}</button>`).join("") : ""}`;
+  }).join("");
+  return rec(null, 0);
+}
+function modesNav(opts = {}) {
+  const t = activeItem();
+  const btn = ([id, name, ic]) => `<button class="item ${t && t.kind === "mode" && t.id === id ? "on" : ""}" data-act="mode" data-id="${id}"><span class="ic">${ic}</span>${name}${id === "search" ? `<span class="kbd" style="margin-left:auto">⌘P</span>` : ""}</button>`;
+  return `${PRIMARY_MODES.map(btn).join("")}<button class="item" data-act="more"><span class="ic">${S.moreOpen ? "▾" : "⋯"}</span>More</button>${S.moreOpen ? `<div style="padding-left:8px">${MORE_MODES.map(btn).join("")}</div>` : ""}`;
+}
+
+// ---------- variants ----------
+function VariantA() {
+  const nid = activeNoteId();
+  return `<div class="A ${S.focus ? "focus" : ""}">
+    <aside class="left"><div class="top"><span class="brand">${DROP} Common Ink</span><button class="icon-btn" title="New note" data-act="new">＋</button></div>
+      <nav>${modesNav()}</nav><div class="section-label">Folders</div><div class="tree">${treeHTML()}</div>
+      <div style="padding:8px 10px;border-top:1px solid var(--line)" class="row"><span class="avatar" style="background:#5b5bd6">A</span><span>Audrow</span><span class="faint" style="margin-left:auto">Home ▾</span></div></aside>
+    <div class="main">${groupsHTML({ marks: true, extraActs: `<button class="icon-btn ${S.rightOpen ? "on" : ""}" title="Toggle history" data-act="right">↺</button><button class="icon-btn" title="Focus mode" data-act="focus">⤢</button>` })}</div>
+    ${S.rightOpen ? `<aside class="right"><div class="hd"><span>History${nid ? " · " + esc(note(nid).title) : ""}</span><button class="icon-btn" data-act="right">×</button></div><div class="bd">${nid ? historyHTML(nid) : `<div class="hist">${filtersHTML()}${ALL_HISTORY.map(c => changeHTML(c, { showNote: true })).join("")}</div>`}</div></aside>` : ""}
+  </div>`;
+}
+function VariantB() {
+  const t = activeItem();
+  const railBtn = ([id, name, ic]) => `<button class="icon-btn ${t && t.kind === "mode" && t.id === id ? "on" : ""}" data-act="mode" data-id="${id}">${ic}<span class="tip">${name}</span></button>`;
+  const sel = ALL_HISTORY[S.panelSel] || ALL_HISTORY[0];
+  return `<div class="B ${S.focus ? "focus" : ""}">
+    <div class="rail"><div style="margin-bottom:8px">${DROP}</div>
+      <button class="icon-btn ${S.explorerOpen ? "on" : ""}" data-act="explorer">▤<span class="tip">Folders</span></button><div class="sep"></div>
+      ${PRIMARY_MODES.map(railBtn).join("")}<div class="sep"></div>${MORE_MODES.map(railBtn).join("")}
+      <div style="flex:1"></div><button class="icon-btn" data-act="palette-cmd">⌘<span class="tip">Commands ⇧⌘P</span></button><button class="icon-btn" data-act="focus">⤢<span class="tip">Focus mode</span></button><span class="avatar" style="background:#5b5bd6;margin-top:6px">A</span></div>
+    ${S.explorerOpen ? `<aside class="explorer"><div class="hd"><span>Home workspace</span><button class="icon-btn" data-act="new">＋</button></div>${treeHTML()}</aside>` : `<div></div>`}
+    <div class="center">${groupsHTML({ marks: true, extraActs: `<button class="icon-btn ${S.panelOpen ? "on" : ""}" title="Toggle history panel" data-act="panel">⊟</button>` })}</div>
+    ${S.panelOpen ? `<section class="panel" style="grid-column:3"><div class="hd"><span class="on">History</span><span>Backlinks</span><span>Problems</span><span style="margin-left:auto" class="row"><span class="pill on" style="text-transform:none;letter-spacing:0">All authors</span><span class="pill" style="text-transform:none;letter-spacing:0">Agents</span><span class="pill" style="text-transform:none;letter-spacing:0">7 days</span><button class="icon-btn" data-act="panel">×</button></span></div>
+      <div class="bd"><div class="list">${ALL_HISTORY.map((c, i) => `<div class="change ${i === S.panelSel ? "sel" : ""}" data-act="psel" data-i="${i}"><div class="who" style="margin:0">${avatar(c.who, c.agent)}<b>${esc(c.who)}</b>${c.agent ? `<span class="badge agent">agent</span>` : ""}<span class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(note(c.note).title)}</span><span class="faint" style="margin-left:auto;white-space:nowrap">${esc(c.when)}</span></div></div>`).join("")}</div>
+      <div class="diff">${changeHTML(sel, { showNote: true })}</div></div></section>` : ""}
+    <div class="status"><span class="vim">NORMAL</span><span>${activeNoteId() ? esc(folderPath(note(activeNoteId()).folder).join(" › ")) : ""}</span><span>✓ Saved · change by you</span><span style="margin-left:auto">✦ Claude connected</span><span>Ln 4, Col 12</span></div>
+  </div>`;
+}
+function VariantC() {
+  const t = activeItem();
+  const nid = activeNoteId();
+  const g = S.groups[S.ag];
+  const segBtn = ([id, name]) => `<button class="${t && t.kind === "mode" && t.id === id ? "on" : ""}" data-act="mode" data-id="${id}">${name}</button>`;
+  return `<div class="C ${S.focus ? "focus" : ""}">
+    <header class="bar"><div class="crumbs"><button class="icon-btn" data-act="drawer" title="Notes">☰</button>${DROP}${nid ? folderPath(note(nid).folder).map(p => `<span>${esc(p)}</span><span class="faint">/</span>`).join("") + `<b>${esc(note(nid).title)}</b>` : `<b>${esc(itemTitle(t || { kind: "mode", id: "dashboard" }))}</b>`}</div>
+      <div class="seg">${PRIMARY_MODES.map(segBtn).join("")}<button data-act="more">More ▾</button></div>
+      <div class="end"><button class="pill" data-act="palette">⌘P  Search</button><button class="icon-btn ${S.slide ? "on" : ""}" data-act="slide" title="History">↺</button><button class="pill">Share</button><button class="icon-btn" data-act="focus" title="Focus">⤢</button><span class="avatar" style="background:#5b5bd6">A</span></div></header>
+    ${S.moreOpen ? `<div class="strip" style="justify-content:center">${MORE_MODES.map(([id, name, ic]) => `<button class="pill" data-act="mode" data-id="${id}">${ic} ${name}</button>`).join("")}</div>` : ""}
+    <div class="strip">${g.tabs.map((x, ti) => `<span class="t ${ti === g.active ? "on" : ""} ${x.preview ? "preview" : ""}" data-act="tab" data-g="${S.ag}" data-t="${ti}">${esc(itemTitle(x))}<span class="x faint" data-act="close" data-g="${S.ag}" data-t="${ti}">×</span></span>`).join("")}</div>
+    <div class="body"><div class="peek" data-act="drawer"></div>
+      ${S.drawer ? `<div class="drawer"><div class="row" style="padding:6px 8px 10px"><input placeholder="Filter notes…" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:var(--bg)" /></div>${treeHTML()}</div>` : ""}
+      <div class="pane">${contentHTML(t, { margin: true })}</div>
+      ${S.slide ? `<aside class="slide">${nid ? historyHTML(nid) : ALL_HISTORY.map(c => changeHTML(c, { showNote: true })).join("")}</aside>` : ""}</div>
+  </div>`;
+}
+function VariantD_original() {
+  const nid = activeNoteId();
+  const list = NOTES.filter(n => n.folder === S.folder);
+  return `<div class="D ${S.focus ? "focus" : ""}">
+    <aside class="c1"><div class="ws">${DROP}<div><div style="font-weight:650;color:var(--heading)">Common Ink</div><div class="faint" style="font-size:11px">Home workspace ▾</div></div></div>
+      <nav style="padding:0 6px">${modesNav()}</nav><div class="section-label">Folders</div><div style="padding:0 6px;overflow:auto;flex:1">${treeHTML({ foldersOnly: true })}</div></aside>
+    <section class="c2"><div class="hd row" style="justify-content:space-between"><h2>${esc(folderPath(S.folder).slice(-1)[0])}</h2><button class="icon-btn" data-act="new">＋</button></div>
+      <div class="search">⌕ <input placeholder="Filter ${list.length} notes" /></div>
+      <div class="row" style="padding:0 12px 8px;gap:4px"><span class="pill on">Recent</span><span class="pill">Title</span><span class="pill">Has todos</span></div>
+      <div class="list">${list.map(n => { const snip = n.blocks.filter(b => b.p).map(b => b.p).join(" ").replace(/\[\[|\]\]/g, ""); const open = n.blocks.filter(b => b.todo && !b.todo.done).length; return `<div class="nrow ${nid === n.id ? "on" : ""}" data-act="opennote" data-id="${n.id}"><div class="tt">${n.private ? "🔒 " : ""}${esc(n.title)}</div><div class="sn">${esc(snip)}</div><div class="ft"><span>${esc(n.edited)} · ${esc(n.by)}</span><span>${open ? open + " open ☐" : ""}</span></div></div>`; }).join("") || `<div class="muted" style="padding:16px">Empty folder</div>`}</div></section>
+    <div class="c3">${groupsHTML({ marks: true, extraActs: `<button class="icon-btn ${S.rightOpen ? "on" : ""}" title="Inspector" data-act="right">ⓘ</button><button class="icon-btn" data-act="focus" title="Focus">⤢</button>` })}</div>
+    ${S.rightOpen ? `<aside class="insp"><div class="tabsx">${["history", "backlinks", "info"].map(k => `<span class="${S.inspTab === k ? "on" : ""}" data-act="insp" data-id="${k}" style="cursor:pointer">${k[0].toUpperCase() + k.slice(1)}</span>`).join("")}</div><div class="bd">${
+      S.inspTab === "history" ? (nid ? historyHTML(nid) : `<div class="hist">${filtersHTML()}${ALL_HISTORY.map(c => changeHTML(c, { showNote: true })).join("")}</div>`) :
+      S.inspTab === "backlinks" ? `<div style="padding:12px">${NOTES.filter(n => nid && n.blocks.some(b => b.p && b.p.includes("[[" + note(nid).title))).map(n => `<a class="linky" data-act="open" data-id="${n.id}">← ${esc(n.title)}</a>`).join("") || `<span class="muted">No backlinks</span>`}</div>` :
+      nid ? `<div style="padding:12px;line-height:2"><div><span class="muted">Folder</span> ${esc(folderPath(note(nid).folder).join(" / "))}</div><div><span class="muted">Shared with</span> ${personChip("Ben")} ${personChip("Maya")}</div><div><span class="muted">Tags</span> <span class="tag">#roadmap</span></div><div><span class="muted">URL</span> <span style="font-family:var(--mono);font-size:11.5px">/note/${note(nid).title.toLowerCase().replace(/\W+/g, "-")}-${nid}</span></div><button class="pill">Archive</button></div>` : ""
+    }</div></aside>` : ""}
+  </div>`;
+}
+
+// ---------- D, with four ways to strip it down ----------
+function noteRowsHTML(nid) {
+  const list = NOTES.filter(n => n.folder === S.folder);
+  return list.map(n => { const snip = n.blocks.filter(b => b.p).map(b => b.p).join(" ").replace(/\[\[|\]\]/g, ""); const open = n.blocks.filter(b => b.todo && !b.todo.done).length; return `<div class="nrow ${nid === n.id ? "on" : ""}" data-act="opennote" data-id="${n.id}"><div class="tt">${n.private ? "🔒 " : ""}${esc(n.title)}</div><div class="sn">${esc(snip)}</div><div class="ft"><span>${esc(n.edited)} · ${esc(n.by)}</span><span>${open ? open + " open ☐" : ""}</span></div></div>`; }).join("") || `<div class="muted" style="padding:16px">Empty folder</div>`;
+}
+function inspContent(tab, nid) {
+  if (tab === "history") return nid ? historyHTML(nid) : `<div class="hist">${filtersHTML()}${ALL_HISTORY.map(c => changeHTML(c, { showNote: true })).join("")}</div>`;
+  if (tab === "backlinks") return `<div style="padding:12px">${NOTES.filter(n => nid && n.blocks.some(b => b.p && b.p.includes("[[" + note(nid).title))).map(n => `<a class="linky" data-act="open" data-id="${n.id}">← ${esc(n.title)}</a>`).join("") || `<span class="muted">No backlinks</span>`}</div>`;
+  return nid ? `<div style="padding:12px;line-height:2"><div><span class="muted">Folder</span> ${esc(folderPath(note(nid).folder).join(" / "))}</div><div><span class="muted">Shared with</span> ${personChip("Ben")} ${personChip("Maya")}</div><div><span class="muted">Tags</span> <span class="tag">#roadmap</span></div><div><span class="muted">URL</span> <span style="font-family:var(--mono);font-size:11.5px">/note/${note(nid).title.toLowerCase().replace(/\W+/g, "-")}-${nid}</span></div><button class="pill">Archive</button></div>` : "";
+}
+const STEP_NAMES = ["Everything", "Hide folders", "Hide folders + note list", "Just the note"];
+function stepIcon(i) {
+  const cols = [[1, 3, i < 1], [5, 4, i < 2], [10, 7, true], [18, 3, i < 3]];
+  return `<svg width="22" height="14" viewBox="0 0 22 14">${cols.map(([x, w, on]) => `<rect x="${x}" y="1" width="${w}" height="12" rx="1" fill="currentColor" opacity="${on ? 0.85 : 0.18}"/>`).join("")}</svg>`;
+}
+function wordCount(n) { return n.blocks.map(b => b.p || (b.todo && b.todo.text) || b.h2 || "").join(" ").split(/\s+/).filter(Boolean).length; }
+function VariantDMin(mode) {
+  const nid = activeNoteId();
+  const step = mode === 1 ? S.step : 0;
+  if (mode === 2 && S.zen) return zenHTML(nid);
+  const rails = mode === 4 && S.rails;
+  const list = NOTES.filter(n => n.folder === S.folder);
+  const extra = {
+    1: `<div class="stepper">${[0, 1, 2, 3].map(i => `<button class="${S.step === i ? "on" : ""}" data-act="setstep" data-i="${i}" title="${STEP_NAMES[i]}">${stepIcon(i)}</button>`).join("")}</div>`,
+    2: `<button class="pill writebtn" data-act="zen">✎ Write <span class="kbd">⌘.</span></button>`,
+    3: `<span class="faint" style="font-size:11px;padding:0 6px">Click into the note and type</span>`,
+    4: `<button class="icon-btn ${rails ? "on" : ""}" data-act="rails" title="Collapse panels (⌘.)">${rails ? "⇥" : "⇤"}</button>`,
+  }[mode];
+  const c1 = rails
+    ? `<aside class="drail"><div style="margin:4px 0 10px">${DROP}</div>${PRIMARY_MODES.map(([id, name, ic]) => `<button class="icon-btn" data-act="mode" data-id="${id}" title="${name}">${ic}</button>`).join("")}<div class="sep"></div><button class="icon-btn ${S.pop === "folders" ? "on" : ""}" data-act="pop" data-id="folders" title="Folders and notes">▤</button><div style="flex:1"></div><button class="icon-btn" data-act="rails" title="Expand panels">⇥</button></aside>`
+    : `<aside class="c1 ${step >= 1 ? "collapsed" : ""}"><div class="ws">${DROP}<div><div style="font-weight:650;color:var(--heading)">Common Ink</div><div class="faint" style="font-size:11px">Home workspace ▾</div></div></div>
+      <nav style="padding:0 6px">${modesNav()}</nav><div class="section-label">Folders</div><div style="padding:0 6px;overflow:auto;flex:1">${treeHTML({ foldersOnly: true })}</div></aside>`;
+  const c2 = rails ? "" : `<section class="c2 ${step >= 2 ? "collapsed" : ""}"><div class="hd row" style="justify-content:space-between"><h2>${esc(folderPath(S.folder).slice(-1)[0])}</h2><button class="icon-btn" data-act="new">＋</button></div>
+      <div class="search">⌕ <input placeholder="Filter ${list.length} notes" /></div>
+      <div class="row" style="padding:0 12px 8px;gap:4px"><span class="pill on">Recent</span><span class="pill">Title</span><span class="pill">Has todos</span></div>
+      <div class="list">${noteRowsHTML(nid)}</div></section>`;
+  const insp = rails
+    ? `<aside class="irail">${[["history", "↺", "History"], ["backlinks", "⇠", "Backlinks"], ["info", "ⓘ", "Info"]].map(([k, ic, name]) => `<button class="icon-btn ${S.pop === k ? "on" : ""}" data-act="pop" data-id="${k}" title="${name}">${ic}${k === "history" && nid === "n1" ? `<span class="dot"></span>` : ""}</button>`).join("")}</aside>`
+    : S.rightOpen ? `<aside class="insp ${step >= 3 ? "collapsed" : ""}"><div class="tabsx">${["history", "backlinks", "info"].map(k => `<span class="${S.inspTab === k ? "on" : ""}" data-act="insp" data-id="${k}" style="cursor:pointer">${k[0].toUpperCase() + k.slice(1)}</span>`).join("")}</div><div class="bd">${inspContent(S.inspTab, nid)}</div></aside>` : "";
+  let pop = "";
+  if (rails && S.pop) {
+    const left = S.pop === "folders";
+    pop = `<div class="popover ${left ? "left" : "right"}">${left
+      ? `<div class="pop-cols"><div class="pop-tree">${treeHTML({ foldersOnly: true })}</div><div class="pop-list">${noteRowsHTML(nid)}</div></div>`
+      : `<div class="tabsx" style="display:flex;gap:14px;padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600">${S.pop[0].toUpperCase() + S.pop.slice(1)}</div>${inspContent(S.pop, nid)}`}</div>`;
+  }
+  const inspBtn = rails ? "" : `<button class="icon-btn ${S.rightOpen ? "on" : ""}" title="Inspector" data-act="right">ⓘ</button>`;
+  return `<div class="D Dm m${mode} step${step} ${rails ? "rails" : ""}">
+    ${c1}${c2}
+    <div class="c3">${groupsHTML({ marks: true, editable: true, extraActs: extra + inspBtn })}</div>
+    ${insp}${pop}
+  </div>`;
+}
+function zenHTML(nid) {
+  const n = nid && note(nid);
+  return `<div class="zen">
+    <div class="zen-top"><div class="zen-bar"><button class="pill" data-act="zen">← Back to layout</button><b>${n ? esc(n.title) : ""}</b><span class="faint">${n ? wordCount(n) + " words" : ""}</span>${nid === "n1" ? `<span class="zen-agent">● Claude edited 2m ago</span>` : ""}<span style="margin-left:auto" class="faint">Esc to exit · hover left edge for notes</span></div></div>
+    <div class="zen-left"><div class="zen-list"><div class="section-label">${esc(folderPath(S.folder).join(" / "))}</div>${noteRowsHTML(nid)}</div></div>
+    <div class="zen-doc">${n ? noteHTML(n, { editable: true }) : `<div class="doc muted">Open a note to write.</div>`}</div>
+  </div>`;
+}
+
+// ---------- overlays ----------
+function overlayHTML() {
+  let out = "";
+  if (S.palette) {
+    const q = S.palette.q.toLowerCase();
+    const items = S.palette.cmd
+      ? ["Split editor right", "Toggle focus mode", "Toggle history", "New note", "Archive note", "Close all tabs", "Toggle vim mode"].filter(x => x.toLowerCase().includes(q)).map(x => ({ label: x, act: "cmd" }))
+      : NOTES.filter(n => n.title.toLowerCase().includes(q)).map(n => ({ label: n.title, sub: folderPath(n.folder).join(" / "), id: n.id }));
+    S.palette.sel = Math.min(S.palette.sel, Math.max(0, items.length - 1));
+    S.palette.items = items;
+    out += `<div class="scrim" data-act="scrim"><div class="palette"><input id="pq" placeholder="${S.palette.cmd ? "> Run a command" : "Go to note…"}" value="${esc(S.palette.q)}" /><div class="res">${items.map((it, i) => `<div class="item ${i === S.palette.sel ? "sel" : ""}" data-act="pick" data-i="${i}">${S.palette.cmd ? "›" : "▤"} ${esc(it.label)}${it.sub ? `<span class="faint" style="margin-left:auto">${esc(it.sub)}</span>` : ""}</div>`).join("") || `<div class="muted" style="padding:10px">No matches</div>`}</div></div></div>`;
+  }
+  if (S.ctx) {
+    out += `<div class="ctx" style="left:${S.ctx.x}px;top:${S.ctx.y}px">${[["Close", "c"], ["Close others", "o"], ["Close all", "a"], ["Close to the left", "l"], ["Close to the right", "r"], ["Keep open", "k"], ["Split right", "s"]].map(([l, k]) => `<button class="item" data-act="ctx" data-k="${k}">${l}</button>`).join("")}</div>`;
+  }
+  out += `<div class="proto-bar"><span class="tag2">Prototype</span><button data-act="prev">←</button><span class="lbl"><b>${S.variant}</b> · ${esc(VARIANTS.find(v => v[0] === S.variant)[1])}</span><button data-act="next">→</button></div>`;
+  return out;
+}
+
+// ---------- render + events ----------
+function render() {
+  document.getElementById("app").innerHTML = VariantDMin(+S.variant);
+  document.getElementById("overlay").innerHTML = overlayHTML();
+  const pq = document.getElementById("pq");
+  if (pq) { pq.focus(); pq.setSelectionRange(pq.value.length, pq.value.length); }
+}
+function setVariant(dir) {
+  const i = VARIANTS.findIndex(v => v[0] === S.variant);
+  S.variant = VARIANTS[(i + dir + VARIANTS.length) % VARIANTS.length][0];
+  const u = new URL(location.href); u.searchParams.set("variant", S.variant); history.replaceState(null, "", u);
+  render();
+}
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]"); if (!el) { if (e.target.closest(".drawer, input, .popover, [contenteditable]")) return; if (S.ctx || S.drawer || S.pop) { S.ctx = null; S.drawer = false; S.pop = null; render(); } return; }
+  const a = el.dataset.act, id = el.dataset.id;
+  if (a === "setstep") { S.step = +el.dataset.i; return applyStep(); }
+  if (a === "zen") { S.zen = !S.zen; return render(); }
+  if (a === "rails") { S.rails = !S.rails; S.pop = null; return render(); }
+  if (a === "pop") { e.stopPropagation(); S.pop = S.pop === id ? null : id; return render(); }
+  if (a !== "ctx" && S.ctx) S.ctx = null;
+  if (a === "close") { e.stopPropagation(); const gi = +el.dataset.g, ti = +el.dataset.t; return closeTabs(gi, (t, i) => i === ti); }
+  if (a === "tab") { const gi = +el.dataset.g, ti = +el.dataset.t; S.ag = gi; S.groups[gi].active = ti; if (e.detail === 2) S.groups[gi].tabs[ti].preview = false; const t = S.groups[gi].tabs[ti]; if (t.kind === "note") S.folder = note(t.id).folder; return render(); }
+  if (a === "focusgroup") { const gi = +el.dataset.g; if (S.ag !== gi) { S.ag = gi; render(); } return; }
+  if (a === "opennote") return openItem("note", id, e.detail === 2);
+  if (a === "open") { if (id) openItem("note", id, false); return; }
+  if (a === "mode") return openItem("mode", id, true);
+  if (a === "folder") { if (document.querySelector(".D")) { if (S.folder === id) S.expanded.has(id) ? S.expanded.delete(id) : S.expanded.add(id); S.folder = id; S.expanded.add(id); } else { S.expanded.has(id) ? S.expanded.delete(id) : S.expanded.add(id); } return render(); }
+  if (a === "more") { S.moreOpen = !S.moreOpen; return render(); }
+  if (a === "split") { e.stopPropagation(); return split(); }
+  if (a === "right") { S.rightOpen = !S.rightOpen; return render(); }
+  if (a === "panel") { S.panelOpen = !S.panelOpen; return render(); }
+  if (a === "explorer") { S.explorerOpen = !S.explorerOpen; return render(); }
+  if (a === "psel") { S.panelSel = +el.dataset.i; return render(); }
+  if (a === "focus") { S.focus = !S.focus; return render(); }
+  if (a === "drawer") { e.stopPropagation(); S.drawer = !S.drawer; return render(); }
+  if (a === "slide") { S.slide = !S.slide; return render(); }
+  if (a === "insp") { S.inspTab = id; return render(); }
+  if (a === "palette") { S.palette = { q: "", sel: 0, cmd: false }; return render(); }
+  if (a === "palette-cmd") { S.palette = { q: "", sel: 0, cmd: true }; return render(); }
+  if (a === "scrim") { if (e.target === el) { S.palette = null; render(); } return; }
+  if (a === "pick") return pick(+el.dataset.i);
+  if (a === "prev") return setVariant(-1);
+  if (a === "next") return setVariant(1);
+  if (a === "new") { const n = { id: "n" + (NOTES.length + 1), folder: S.folder, title: "Untitled", edited: "just now", by: "Audrow", blocks: [{ p: "Start writing…" }] }; NOTES.push(n); return openItem("note", n.id, true); }
+  if (a === "ctx") {
+    const { g, t } = S.ctx; S.ctx = null; const k = el.dataset.k;
+    if (k === "c") return closeTabs(g, (x, i) => i === t);
+    if (k === "o") return closeTabs(g, (x, i) => i !== t);
+    if (k === "a") return closeTabs(g, () => true);
+    if (k === "l") return closeTabs(g, (x, i) => i < t);
+    if (k === "r") return closeTabs(g, (x, i) => i > t);
+    if (k === "k") { S.groups[g].tabs[t].preview = false; return render(); }
+    if (k === "s") { S.ag = g; S.groups[g].active = t; return split(); }
+  }
+});
+document.addEventListener("contextmenu", e => {
+  const el = e.target.closest('[data-act="tab"]'); if (!el) return;
+  e.preventDefault(); S.ctx = { x: e.clientX, y: e.clientY, g: +el.dataset.g, t: +el.dataset.t }; render();
+});
+function pick(i) {
+  const it = S.palette.items[i]; const cmd = S.palette.cmd; S.palette = null;
+  if (!it) return render();
+  if (!cmd) return openItem("note", it.id, false);
+  if (it.label.startsWith("Split")) return split();
+  if (it.label.includes("focus")) S.focus = !S.focus;
+  if (it.label.includes("history")) { S.rightOpen = !S.rightOpen; S.panelOpen = !S.panelOpen; S.slide = !S.slide; }
+  if (it.label.startsWith("Close all")) return closeTabs(S.ag, () => true);
+  render();
+}
+document.addEventListener("input", e => { if (e.target.id === "pq") { S.palette.q = e.target.value; S.palette.sel = 0; render(); } });
+document.addEventListener("keydown", e => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key.toLowerCase() === "p") { e.preventDefault(); S.palette = { q: "", sel: 0, cmd: e.shiftKey }; return render(); }
+  if (mod && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); S.focus = !S.focus; return render(); }
+  if (S.palette) {
+    if (e.key === "Escape") { S.palette = null; return render(); }
+    if (e.key === "ArrowDown") { e.preventDefault(); S.palette.sel++; return render(); }
+    if (e.key === "ArrowUp") { e.preventDefault(); S.palette.sel = Math.max(0, S.palette.sel - 1); return render(); }
+    if (e.key === "Enter") { e.preventDefault(); return pick(S.palette.sel); }
+    return;
+  }
+  if (mod && e.key === ".") { e.preventDefault(); if (S.variant === "2") S.zen = !S.zen; else if (S.variant === "4") { S.rails = !S.rails; S.pop = null; } else if (S.variant === "1") { S.step = S.step === 3 ? 0 : 3; return applyStep(); } return render(); }
+  if (mod && e.key === "\\" && S.variant === "1") { e.preventDefault(); S.step = Math.max(0, Math.min(3, S.step + (e.shiftKey ? -1 : 1))); return applyStep(); }
+  if (e.key === "Escape") { S.ctx = null; S.drawer = false; S.pop = null; S.zen = false; if (S.focus) S.focus = false; return render(); }
+  const tgt = e.target; if (tgt.closest && tgt.closest("input, textarea, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") setVariant(-1);
+  if (e.key === "ArrowRight") setVariant(1);
+});
+// drag a note or tab onto a pane to split, or onto a tab bar to add a tab
+let dragging = null;
+document.addEventListener("dragstart", e => { const t = e.target.closest('[data-act="tab"]'); if (t) dragging = S.groups[+t.dataset.g].tabs[+t.dataset.t]; });
+document.addEventListener("dragover", e => { if (dragging && e.target.closest(".pane, .tabbar")) e.preventDefault(); });
+document.addEventListener("drop", e => {
+  if (!dragging) return; e.preventDefault();
+  const grp = e.target.closest(".group"); const gi = grp ? +grp.dataset.g : S.ag;
+  if (e.target.closest(".pane") && S.groups.length < 3) { S.groups.splice(gi + 1, 0, { tabs: [{ ...dragging, preview: false }], active: 0 }); S.ag = gi + 1; }
+  else if (e.target.closest(".tabbar")) { const g = S.groups[gi]; if (!g.tabs.some(t => t.kind === dragging.kind && t.id === dragging.id)) g.tabs.push({ ...dragging, preview: false }); g.active = g.tabs.length - 1; S.ag = gi; }
+  dragging = null; render();
+});
+function applyStep() {
+  const d = document.querySelector(".Dm"); if (!d) return render();
+  d.classList.remove("step0", "step1", "step2", "step3"); d.classList.add("step" + S.step);
+  const set = (sel, on) => { const x = d.querySelector(sel); if (x) x.classList.toggle("collapsed", on); };
+  set(".c1", S.step >= 1); set(".c2", S.step >= 2); set(".insp", S.step >= 3);
+  d.querySelectorAll(".stepper button").forEach((b, i) => b.classList.toggle("on", i === S.step));
+}
+// variant 3: typing in the note fades the chrome; moving the mouse a bit brings it back
+let moved = 0, lastXY = null;
+document.addEventListener("keydown", e => {
+  if (S.variant !== "3" || !e.target.closest || !e.target.closest("[contenteditable]") || e.metaKey || e.ctrlKey) return;
+  const d = document.querySelector(".Dm"); if (d) d.classList.add("typing"); moved = 0;
+});
+document.addEventListener("mousemove", e => {
+  const d = document.querySelector(".Dm.typing"); if (!d) { lastXY = null; return; }
+  if (lastXY) moved += Math.abs(e.clientX - lastXY[0]) + Math.abs(e.clientY - lastXY[1]);
+  lastXY = [e.clientX, e.clientY];
+  if (moved > 60) { d.classList.remove("typing"); moved = 0; lastXY = null; }
+});
+document.addEventListener("mousedown", e => { const n = e.target.closest('[data-act="opennote"]'); if (n) { n.setAttribute("draggable", "true"); n.ondragstart = () => { dragging = { kind: "note", id: n.dataset.id }; }; } });
+render();
+</script>
+</body>
+</html>
