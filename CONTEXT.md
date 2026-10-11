@@ -59,11 +59,22 @@ A list item inside a kanban block in a note. Moving it on the board moves its li
 _Avoid_: Todo
 
 **Data source**:
-External structured data a member connects, such as their calendar events or contacts. Other members cannot see its records. Records are not notes. A read-write data source writes edits back to the external system. A read-only data source refuses edits.
+External structured data a person connects, such as their calendar events or contacts. It is that person's and in no workspace: no other member sees that it exists or any of its records, whatever their role, and their own agents read it as them. Records are not notes and are not kept in Common Ink: each is read where it lives when it is shown. A read-write data source writes edits back to the external system. A read-only data source refuses edits. It is connected, not connected, or needs reconnecting, which is when it was connected and the external system stopped answering for the person. See `docs/adr/0006-data-sources-are-one-persons.md`.
 _Avoid_: Integration, connector
 
+**Connect**:
+What a person does to let Common Ink into a data source: agreeing to it at the external system, in their own browser. They can take it back by disconnecting, and agree again at any time. Signing in with Google asks for the calendar and contacts at the same time.
+_Avoid_: Link, sync, authorize
+
+**Record**:
+One thing in a data source: an event or a contact.
+
 **Event**:
-A calendar entry from a member's data source. It may recur.
+A calendar entry from a member's data source. It may recur, and each occurrence is then an event of its own. It is either between two instants, shown in the viewing member's timezone, or all-day: on calendar dates, with no time and no zone, the same dates wherever it is read. An event can be changed when its data source is read-write and its calendar lets the member change it.
+
+**Record reference**:
+What a note writes to point at an event or a contact without copying it: an embed, `::event{ref label}` or `::contact{ref label}`. The ref says nothing of the record and leads to it only for the member who made the reference, who is shown the record as it is now. The label is plain text in the note that every reader sees, in gray. Anyone else sees the label and nothing more.
+_Avoid_: Link (that is to a note), mention (that is `@`)
 
 **Dashboard**:
 A view for one member, not a stored object. It shows that member's events still ahead today, including all-day events; open todos they can see that are due today or earlier; their daily note for today and other notes they can see that were created or edited today; their pinned notes; and a summary of changes they can see since their last visit.
@@ -76,7 +87,7 @@ The previous time a member opened a workspace.
 A note a member has chosen to show on their own dashboard. It is not written into the note.
 
 **Contact**:
-A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list.
+A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. Contacts are read-only.
 _Avoid_: Member, user
 
 **Tag**:

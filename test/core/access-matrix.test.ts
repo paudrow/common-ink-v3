@@ -237,6 +237,16 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.setPrivate": { on: "note", needs: "V", trashed: "opens", members: true, args: (id, _, note) => ({ id, private: note === "secret" }) },
   "shared.open": { on: "link", args: () => ({}) },
   "shared.read": { on: "link", args: (w) => ({ id: w.notes.open }) },
+  // A data source is the asker's own, so each of these is let through for anyone in the workspace, and with nothing connected here finds nothing.
+  // Whose records each answers is asked in test/core/sources.test.ts, where there are records to keep apart.
+  "source.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  "source.connect": { on: "workspace", who: EVERYONE, args: () => ({ id: "google-calendar" }) },
+  "source.disconnect": { on: "workspace", who: EVERYONE, args: () => ({ id: "google-calendar" }) },
+  "event.list": { on: "workspace", who: EVERYONE, args: () => ({ from: 0, to: 1, timeZone: "UTC" }) },
+  "event.update": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none", etag: "none", title: "No" }) },
+  "contact.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
+  "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
   "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
 };
@@ -268,7 +278,7 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && folderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "record.refer"];
 const AGENTS = ["their agent", "their read-only agent", "their agent pinned to this workspace"] as const;
 
 /** `not_found` for a note that was never there, which is what one the actor can't see must be answered with. */

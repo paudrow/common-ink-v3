@@ -17,6 +17,8 @@ A member connects an agent in the web app, on the Agents page (`/agents`, from t
 
 - An agent can archive a note, move it to Trash and restore it, with edit on the note, since each can be taken back. It can't remove a note from Trash for good: that takes the note's history with it and nothing brings it back, so it is for the member, signed in, on the Trash page.
 
+- An agent reads its member's data sources and no other member's: `list_events`, `list_contacts` and `read_record` answer for the member who connected the agent, whatever their role, and there is no argument that names anyone else. `update_event` changes the member's real calendar, as the member, and a read-only token is refused it and `refer_record`. A change to an event is not in Common Ink's history and can't be reverted from here. An agent can't connect or disconnect a data source: agreeing is the member's, in their browser. What an agent reads from a data source is the member's private data, and an agent that writes it into a shared note has shared it (`docs/adr/0006-data-sources-are-one-persons.md`).
+
 ## Connect and disconnect (signed in, from Common Ink's own origin)
 
     POST   /api/agents        {"name": "Claude"}   ->  201 {"agent": {...}, "token": "cink_..."}
@@ -31,7 +33,7 @@ Optional fields on the POST: `label` (up to 60 characters), `expiresInDays` (def
 
 `POST /mcp` with `Authorization: Bearer cink_...` and `Content-Type: application/json`. Streamable HTTP, stateless: one JSON-RPC message (or a batch) per POST, answered as JSON. No server-sent events, no sessions. Without a valid token the answer is 401.
 
-Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `backlinks`, `rebuild_links`, `list_todos`, `todo_filters`, `set_todo`, `todo_history`, `daily_note`, `rebuild_todos`, `move_note`, `note_history`, `search`, `list_tags`, for a note's state `archive_note`, `trash_note`, `restore_note`, `list_trash`, for folders `list_folders`, `create_folder`, `rename_folder`, `delete_folder`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `revert_author`, `undo`, `redo`, and `list_members` for who is in the workspace. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace. An argument a tool doesn't take is refused by name, not left out.
+Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `backlinks`, `rebuild_links`, `list_todos`, `todo_filters`, `set_todo`, `todo_history`, `daily_note`, `rebuild_todos`, `move_note`, `note_history`, `search`, `list_tags`, for a note's state `archive_note`, `trash_note`, `restore_note`, `list_trash`, for the member's data sources `list_sources`, `list_events`, `update_event`, `list_contacts`, `refer_record`, `read_record`, for folders `list_folders`, `create_folder`, `rename_folder`, `delete_folder`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `revert_author`, `undo`, `redo`, and `list_members` for who is in the workspace. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace. An argument a tool doesn't take is refused by name, not left out.
 
 Every operation the web app performs has a tool with the same fields, and every tool has an `ink` command. `test/core/agent-parity.test.ts` reads the operation schema and fails when one is missing; an operation kept from agents on purpose is listed with its reason in `NOT_FOR_AGENTS` (`src/worker/mcp/tools.ts`). Two kinds are kept from agents: reading and writing the member's settings, which shape the member's own app and are checked against a schema only the app has, and every change to a workspace's members and invites (see Rules). The core refuses them to an agent, not only the tools. Connecting and disconnecting agents is not an operation: it needs a member's session, so an agent can't make another token.
 
@@ -46,6 +48,8 @@ A todo with `every:` recurs: `every:2w`, `every:mon,thu`, `every:3d-after-done`,
 A note is live, archived, or in Trash, and every listing of it says which as `state` (`docs/adr/0005-a-note-has-a-state-beside-its-access.md`). `archive_note` archives and unarchives. An archived note is left out of `list_notes`, `list_todos`, `todo_filters`, `list_tags` and `search` unless `includeArchived` is true, and is read and written as any note. `trash_note` moves a note to Trash, where `list_trash` lists it with `purgesAt`, the time it is removed for good, 30 days on. Until then `read_note` reads it, every change to it is refused as a conflict, and `restore_note` brings it back as it was. `revert_author` with `trashEmptied` moves the notes it left empty to Trash. `list_notes` with `updatedSince` also reports a note whose state changed since, and each note has `stateAt`. A removed note reads as no such note, and a link to it has a null title, exactly as for a note that never existed.
 
 `search` finds notes by their text: every word must be in the note, each matching the start of a word, ignoring case and accents. `"a phrase"` matches in order, `#tag` narrows to notes with that tag, `+project` to notes with a todo in that project. Each result has the note and the first lines that matched, with `marks` saying where in each line. `list_tags` lists the tags of the notes the agent can see with how many notes have each, and `list_notes` with `tag` lists the notes under one.
+
+A member's calendar and contacts are data sources (`docs/adr/0006-data-sources-are-one-persons.md`). `list_sources` says which the member has and each one's `state` (`connected`, `needs_reconnect`, `not_connected`) and `writable`. `list_events` takes a span as two times and the `timeZone` whose days all-day events are matched by; an event's `when` is `{ allDay: false, from, to }` in milliseconds or `{ allDay: true, from, to }` with its first and last day. `update_event` takes the event's `sourceId`, `id` and `etag` as read and only the fields to change, and is refused with `conflict` when the event changed since, and with `forbidden` for an event whose `editable` is false. `list_contacts` lists contacts, narrowed by `query`. A note references a record with an embed that holds no copy of it: `refer_record` answers the `::event{<ref> <label>}` or `::contact{<ref> <label>}` to write, and `read_record` reads what a `ref` stands for now. The label is plain text in the note, which every reader sees. The ref leads to the record only for the member who made it.
 
 Most clients take a URL and a header:
 
@@ -90,6 +94,12 @@ Most clients take a URL and a header:
     npm run ink -- reapply <id> --changes <n>
     npm run ink -- undo <id>
     npm run ink -- redo <id>
+    npm run ink -- sources
+    npm run ink -- events --from 2026-10-11 --to 2026-10-18 [--timezone America/Chicago]
+    npm run ink -- event-update <source id> "<event id>" --etag '<etag>' [--title "Lunch"] [--location "Cafe"] [--description "..."] [--days 2026-10-14,2026-10-15 | --start 2026-10-14T17:00:00Z --end 2026-10-14T18:00:00Z]
+    npm run ink -- contacts [sam]
+    npm run ink -- refer <source id> "<record id>"
+    npm run ink -- record <ref>
     npm run ink -- workspaces                 # role is admin, editor, viewer, or guest
     npm run ink -- members
 

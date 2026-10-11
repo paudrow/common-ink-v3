@@ -8,9 +8,10 @@ import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
 import { embedResponse, framing } from "./frames.ts";
 import { redirectFor } from "./hosts.ts";
+import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 
-const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409 };
+const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
@@ -76,7 +77,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
       return json({ error: "invalid", message: "The body isn't JSON" }, 400);
     }
     try {
-      return json(await perform(env.DB, { kind: "member", personId, workspaceId: opsRoute[1]! }, op as never));
+      return json(await perform(env.DB, { kind: "member", personId, workspaceId: opsRoute[1]! }, op as never, Date.now(), sourcesFor(env, url)));
     } catch (err) {
       if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
       throw err;
@@ -95,7 +96,7 @@ export default {
     if (embed) return embed;
     if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
     if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
-    if (url.pathname === "/mcp") return handleMcp(req, env);
+    if (url.pathname === "/mcp") return handleMcp(req, env, sourcesFor(env, url));
     if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return handleAgentsApi(req, env, url);
     if (url.pathname.startsWith("/api/")) return handleApi(req, env, url);
     const page = framing(await env.ASSETS.fetch(req), url, env);

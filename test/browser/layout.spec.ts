@@ -139,8 +139,8 @@ test("More expands and collapses Contacts, Uploads, and History, and a mode not 
 
   await modes.getByRole("button", { name: "More" }).click();
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
-  await modes.getByRole("link", { name: "Calendar" }).click();
-  await expect(editorPane(page)).toHaveText("CalendarCalendar arrives with #17.");
+  await modes.getByRole("link", { name: "Dashboard" }).click();
+  await expect(editorPane(page)).toHaveText("DashboardDashboard arrives with #23.");
 });
 
 test("the note list filters on title and snippet, sorts, and narrows to notes with open todos", async ({ page }) => {

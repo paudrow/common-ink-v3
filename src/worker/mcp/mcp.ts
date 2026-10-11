@@ -2,6 +2,7 @@
 // batch) per POST, answered as JSON. An agent signs in with the bearer token its member made for it; it
 // never has a session cookie, so a web page can't make it act. See docs/mcp.md.
 import { authenticateAgent, type ConnectedAgent } from "../../core/agents.ts";
+import type { Sources } from "../../core/sources.ts";
 import { callTool, toolList } from "./tools.ts";
 
 const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -29,7 +30,7 @@ const unauthorized = () => json({ error: "unauthorized", message: "Send a Common
 
 export const bearerToken = (req: Request): string | null => /^Bearer\s+(\S+)$/i.exec(req.headers.get("Authorization") ?? "")?.[1] ?? null;
 
-export async function handleMcp(req: Request, env: Env): Promise<Response> {
+export async function handleMcp(req: Request, env: Env, sources?: Sources): Promise<Response> {
   const token = bearerToken(req);
   const agent = token ? await authenticateAgent(env.DB, token) : null;
   if (!agent) return unauthorized();
@@ -53,14 +54,14 @@ export async function handleMcp(req: Request, env: Env): Promise<Response> {
   if (batch && messages.length === 0) return json(fail(null, -32600, "An empty batch"), 400);
   const out: unknown[] = [];
   for (const message of messages) {
-    const answer = await handleMessage(env, agent, message);
+    const answer = await handleMessage(env, agent, message, sources);
     if (answer) out.push(answer);
   }
   if (out.length === 0) return new Response(null, { status: 202, headers: { "Cache-Control": "no-store" } });
   return json(batch ? out : out[0]);
 }
 
-async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown): Promise<unknown | null> {
+async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown, sources?: Sources): Promise<unknown | null> {
   const m = (typeof message === "object" && message !== null ? message : {}) as Request_;
   const hasId = m.id !== undefined;
   const id: Id = hasId && (typeof m.id === "string" || typeof m.id === "number" || m.id === null) ? m.id : null;
@@ -87,7 +88,7 @@ async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown):
       if (typeof params.name !== "string") return fail(id, -32602, "Name the tool to call");
       const args = params.arguments ?? {};
       if (typeof args !== "object" || args === null || Array.isArray(args)) return fail(id, -32602, "arguments must be an object");
-      const result = await callTool(env.DB, agent, params.name, args as Record<string, unknown>);
+      const result = await callTool(env.DB, agent, params.name, args as Record<string, unknown>, sources);
       return result ? reply(id, result) : fail(id, -32602, `No such tool: ${params.name}`);
     }
     default:

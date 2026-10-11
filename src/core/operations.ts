@@ -37,6 +37,7 @@ import { removing } from "./purge.ts";
 import { isEmpty, matchOf, matchesIn, parseQuery, titleMatchOf } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
+import { NO_SOURCES, listContacts, listEvents, listSources, readRecord, refer, updateEvent, type Sources } from "./sources.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, todoIndex, todosIn, type Completed } from "./todos.ts";
@@ -75,6 +76,8 @@ export interface Context {
   /** What they can see and do. Every read of a note or a folder is checked against it. */
   sight: Sight;
   now: number;
+  /** Where the asker's data sources come from. */
+  sources: Sources;
 }
 
 type Access = "view" | "edit" | "manage";
@@ -98,11 +101,13 @@ type Handler<K extends OpType> = {
   by?: "member" | "visitor";
   /** Set when a guest may not ask, only a member of the workspace. */
   members?: true;
+  /** Set when it changes something though it needs no more than `view` of the workspace, so a read-only token is refused it. */
+  changes?: true;
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
 
 /** Every operation on a workspace. The web app, CLI, and MCP server all come through here. */
-export async function perform<T extends OpInput>(db: D1Database, actor: Actor | Visitor, input: T, now = Date.now()): Promise<Results[T["type"]]> {
+export async function perform<T extends OpInput>(db: D1Database, actor: Actor | Visitor, input: T, now = Date.now(), sources: Sources = NO_SOURCES): Promise<Results[T["type"]]> {
   const parsed = Op.safeParse(input);
   if (!parsed.success) throw new OpError("invalid", z.prettifyError(parsed.error));
   const op = parsed.data;
@@ -114,7 +119,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   // Whoever holds a link is let into the operations made for them and no other, whatever is added later.
   if ((actor.kind === "visitor") !== (handler.by === "visitor")) throw new OpError("forbidden", actor.kind === "visitor" ? `A link can't ${op.type}` : `Only a link can ${op.type}`);
   if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
-  if (actor.kind === "agent" && actor.scope?.readOnly && handler.needs !== "view") throw new OpError("forbidden", `A read-only token can't ${op.type}`);
+  if (actor.kind === "agent" && actor.scope?.readOnly && (handler.needs !== "view" || handler.changes)) throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
 
   let author: Author = { kind: "member", personId: standing.personId ?? "", name: standing.name };
@@ -122,7 +127,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
     const agent = await db.prepare("SELECT name FROM agents WHERE id = ?").bind(actor.agentId).first<{ name: string }>();
     author = { kind: "agent", agentId: actor.agentId, name: agent?.name ?? "An agent", onBehalfOf: actor.personId };
   }
-  const ctx: Context = { db, actor, author, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now };
+  const ctx: Context = { db, actor, author, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources };
   return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
 }
 
@@ -923,6 +928,9 @@ async function trashing(ctx: Context, id: string, only = "state <> 'trashed'"): 
 }
 
 /** Only for an operation that is `by: "member"`, which is always asked by a person. */
+/** Whose data sources an operation reads: the person asking, or the person an agent asks for. Never anyone an operation names. */
+const asker = (ctx: Context) => ({ db: ctx.db, sources: ctx.sources, personId: ctx.personId!, now: ctx.now });
+
 const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now });
 
 const HANDLERS: { [K in OpType]: Handler<K> } = {
@@ -1687,4 +1695,31 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       return { ...toShared(ctx, row, (folderId) => folderId), text: row.text, revision: row.revision, links: await linksOf(ctx, row.text, "kept") };
     },
   },
+
+  // A data source is the asker's own, so each of these needs no more than being in the workspace it is asked in, and answers nothing of anyone else.
+  "source.list": { needs: "view", run: async (ctx) => ({ sources: await listSources(asker(ctx)) }) },
+  // Agreeing to a data source happens in the member's own browser, and ending it is theirs too: see NOT_FOR_AGENTS.
+  "source.connect": {
+    needs: "view",
+    by: "member",
+    async run(ctx, op) {
+      if (!(await listSources(asker(ctx))).some((s) => s.id === op.id)) throw new OpError("not_found", "No such data source");
+      const { redirect } = await ctx.sources.connect(ctx.personId!, op.id, op.back);
+      return { redirect, sources: await listSources(asker(ctx)) };
+    },
+  },
+  "source.disconnect": {
+    needs: "view",
+    by: "member",
+    async run(ctx, op) {
+      if (!(await listSources(asker(ctx))).some((s) => s.id === op.id)) throw new OpError("not_found", "No such data source");
+      await ctx.sources.disconnect(ctx.personId!, op.id);
+      return { sources: await listSources(asker(ctx)) };
+    },
+  },
+  "event.list": { needs: "view", run: (ctx, op) => listEvents(asker(ctx), op) },
+  "event.update": { needs: "view", changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateEvent(asker(ctx), sourceId, id, etag, change) },
+  "contact.list": { needs: "view", run: (ctx, op) => listContacts(asker(ctx), op.query) },
+  "record.refer": { needs: "view", changes: true, run: (ctx, op) => refer(asker(ctx), op.sourceId, op.id) },
+  "record.read": { needs: "view", run: (ctx, op) => readRecord(asker(ctx), op.ref) },
 };

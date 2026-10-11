@@ -10,6 +10,7 @@ import { noteHighlighting } from "./highlight.ts";
 import type { App, Plugin } from "./plugin-api.ts";
 import { createPluginHost } from "./pluginHost.ts";
 import { bullets } from "./plugins/bullets/index.ts";
+import { labelledReferences } from "./plugins/lib/references.tsx";
 import { codeBlocks } from "./plugins/code/index.ts";
 import { gfm } from "./plugins/gfm/index.ts";
 import { html } from "./plugins/html/index.ts";
@@ -33,7 +34,7 @@ export const sharedToken = (pathname: string) => ADDRESS.exec(pathname)?.[1] ?? 
  * to it: the one thing any asks for, the projects a todo's chip offers, is refused, and nobody here
  * can change a todo anyway.
  */
-const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, tables, math, codeBlocks, bullets];
+const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, tables, math, codeBlocks, bullets, labelledReferences];
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const NOT_HERE = () => Promise.reject(new Error("A link's page asks nothing of a workspace"));

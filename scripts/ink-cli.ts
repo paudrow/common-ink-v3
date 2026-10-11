@@ -60,6 +60,15 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   reapply ID --changes N,N            put back changes that were taken out
   undo ID                             take back your latest change to a note
   redo ID                             put back what your latest undo took out
+  sources                             your member's data sources: their calendar and contacts, and whether each is connected
+  events --from TIME --to TIME [--timezone ZONE]
+                                      your member's calendar events in a span of time
+  event-update SOURCE EVENT --etag ETAG [--title TEXT] [--location TEXT] [--description TEXT]
+               [--days DAY,DAY | --start TIME --end TIME]
+                                      change an event where it is kept; --days makes it all-day, first and last day
+  contacts [QUERY]                    your member's contacts, or those matching every word
+  refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
+  record REF                          the event or contact a reference stands for, as it is now
 
 TIME is anything a date parses, such as 2026-10-09 or 2026-10-09T14:00:00Z. KIND:ID is an author
 from authors, such as agent:abc123def456. NEXT is the next of the page before, as JSON.
@@ -73,6 +82,10 @@ DAY is a calendar date, YYYY-MM-DD. Importance is 0 for normal and 1 to 3 for !,
 RULE is how a todo recurs, written every:RULE on its line: 2w (d, w, m or y), mon,thu, 3d-after-done,
 3rd-day, last-day, 2nd-tue, last-fri. Checking off a todo that recurs leaves it open with
 its next due date and files the checked line on your daily note for --on, or for today when left out.
+
+SOURCE is a data source's id from sources, such as google-calendar. EVENT and RECORD are ids from
+events and contacts, quoted when they have a space. A reference is your member's alone: nobody else
+who reads the note can follow it.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
 
@@ -283,6 +296,36 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "authors":
         tool = "history_authors";
+        break;
+      case "sources":
+        tool = "list_sources";
+        break;
+      case "events":
+        tool = "list_events";
+        args = { from: time("--from", needFlag("from")), to: time("--to", needFlag("to")), timeZone: flags.get("timezone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone };
+        break;
+      case "event-update": {
+        if (positional.length < 2) throw new UsageError("event-update needs a data source and an event id");
+        if (flags.has("days") && (flags.has("start") || flags.has("end"))) throw new UsageError("event-update takes --days, or --start and --end, not both");
+        if (flags.has("start") !== flags.has("end")) throw new UsageError("event-update needs --start and --end together");
+        const [from, to = from] = (flags.get("days") ?? "").split(",");
+        const when = flags.has("days") ? { allDay: true, from, to } : flags.has("start") ? { allDay: false, from: time("--start", flags.get("start")!), to: time("--end", flags.get("end")!) } : undefined;
+        tool = "update_event";
+        args = { sourceId: positional[0], id: positional[1], etag: needFlag("etag"), ...given({ title: ["title"], location: ["location"], description: ["description"] }), ...(when ? { when } : {}) };
+        break;
+      }
+      case "contacts":
+        tool = "list_contacts";
+        args = id === undefined ? {} : { query: id };
+        break;
+      case "refer":
+        if (positional.length < 2) throw new UsageError("refer needs a data source and a record id");
+        tool = "refer_record";
+        args = { sourceId: positional[0], id: positional[1] };
+        break;
+      case "record":
+        tool = "read_record";
+        args = { ref: need("a reference") };
         break;
       case "activity":
         tool = "activity";

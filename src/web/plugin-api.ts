@@ -123,7 +123,7 @@ export interface PluginHost {
   };
   readonly embeds: {
     register(embed: Embed): Dispose;
-    /** Every embed from every plugin that is on, as a menu would offer them. */
+    /** Every embed from every plugin that is on, as a menu would offer them, so without those that say `menu: false`. */
     list(): EmbedInfo[];
   };
   readonly completions: {
@@ -309,6 +309,8 @@ export interface Embed {
   block?: boolean;
   /** What a new one is written with when it is picked from the embed menu. With none, an empty config and an empty body. */
   starts?: { config?: string; body?: string };
+  /** False for one no menu can write, because what it holds is picked somewhere else, as a reference to an event is copied from the Calendar page. `host.embeds.list()` leaves it out. */
+  menu?: boolean;
   /**
    * Draws into `el`, once, all of it before returning, so the embed is never seen half drawn. May
    * return a function that stops whatever it started, or a {@link Drawn}. An embed is registered
