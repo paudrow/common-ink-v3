@@ -8,6 +8,6 @@ export const timer: Plugin = {
   description: "A countdown in a note, written ::timer{5m}, that runs the same for everyone reading.",
   icon: "clock",
   activate(host) {
-    host.embeds.register({ name: "timer", title: "Timer", starts: { config: "5m" }, render: clockEmbed("timer"), options: clockOptions("timer") });
+    host.embeds.register({ name: "timer", title: "Timer", live: true, starts: { config: "5m" }, render: clockEmbed("timer"), options: clockOptions("timer") });
   },
 };

@@ -95,22 +95,6 @@ export const serializeBoard = (board: Board): string => [...board.before, ...boa
 
 export const cardsOf = (column: Column): Card[] => column.parts.filter((p): p is Card => p.card);
 
-/** How far into the board as written the end of a card's own line is, which is where its text is changed. Null for a place with no card. */
-export function cardEnd(board: Board, at: Place): number | null {
-  const card = board.columns[at.column] && cardsOf(board.columns[at.column]!)[at.card];
-  if (!card) return null;
-  const lengthOf = (lines: readonly string[]) => lines.reduce((sum, line) => sum + line.length + 1, 0);
-  let offset = lengthOf(board.before);
-  for (const column of board.columns) {
-    offset += column.heading.length + 1;
-    for (const part of column.parts) {
-      if (part === card) return offset + card.lines[0]!.length;
-      offset += lengthOf(part.lines);
-    }
-  }
-  return null;
-}
-
 const isBlank = (part: Part) => !part.card && part.lines.every((l) => l.trim() === "");
 
 /** Where in a column's parts its `at`th card goes: before the card there now, or after the last one, ahead of the blank lines that end the column. */

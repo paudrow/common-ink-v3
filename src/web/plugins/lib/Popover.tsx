@@ -7,21 +7,14 @@ const EDGE = 8;
 
 let shown: { anchor: HTMLElement; close: () => void } | null = null;
 
-/** Closes the popover that is open, if one is. */
-export const closePopover = () => shown?.close();
-
-/** Whether the popover that is open hangs from `anchor`. */
-export const openFrom = (anchor: HTMLElement) => shown?.anchor === anchor;
-
 /**
  * Opens a small panel under `anchor`, such as the form a chip is set with. It is laid over the app,
  * in an element of its own at the end of the page, so it takes no room in the note and moves nothing
  * there. It follows its anchor as the page scrolls, and closes on Escape, on a press outside it, when
  * `close` is called, and when its anchor is gone, as a chip is once its token is written another way.
- * One is open at a time, and opening it again from the same anchor closes it. `onClosed` is told when it
- * has closed, however that came about, and whether the keyboard was in it.
+ * One is open at a time, and opening it again from the same anchor closes it.
  */
-export function openPopover(anchor: HTMLElement, label: string, content: (close: () => void) => ReactNode, onClosed?: (hadFocus: boolean) => void): void {
+export function openPopover(anchor: HTMLElement, label: string, content: (close: () => void) => ReactNode): void {
   const again = shown?.anchor === anchor;
   shown?.close();
   if (again) return;
@@ -35,7 +28,6 @@ export function openPopover(anchor: HTMLElement, label: string, content: (close:
     root.unmount();
     holder.remove();
     if (within && anchor.isConnected) anchor.focus();
-    onClosed?.(within);
   };
   shown = { anchor, close };
   root.render(
@@ -57,14 +49,13 @@ function Panel({ anchor, label, close, children }: { anchor: HTMLElement; label:
       const at = anchor.getBoundingClientRect();
       const { width, height } = el.getBoundingClientRect();
       const below = at.bottom + GAP;
-      // Above its anchor where there is no room below and there is above; where there is room on neither side, as low as it fits.
-      const roomBelow = below + height <= innerHeight - EDGE;
-      const top = roomBelow ? below : at.top - GAP - height >= EDGE ? at.top - GAP - height : Math.min(below, innerHeight - EDGE - height);
+      // Above its anchor where there is no room below and there is above.
+      const top = below + height > innerHeight - EDGE && at.top - GAP - height >= EDGE ? at.top - GAP - height : below;
       el.style.left = `${Math.max(EDGE, Math.min(at.left, innerWidth - EDGE - width))}px`;
       el.style.top = `${Math.max(EDGE, top)}px`;
     };
     place();
-    (el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>("button:enabled, input:enabled, select:enabled"))?.focus();
+    el.querySelector<HTMLElement>("[data-autofocus], button:enabled, input:enabled, select:enabled")?.focus();
     // Its own size changes as it loads or a part of it is opened, and it may then fit another way.
     const sized = new ResizeObserver(place);
     sized.observe(el);

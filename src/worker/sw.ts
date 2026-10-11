@@ -22,5 +22,6 @@ export const swResponse = () =>
     headers: {
       "Content-Type": "text/javascript; charset=utf-8",
       "Cache-Control": "no-cache",
+      "X-Content-Type-Options": "nosniff",
     },
   });

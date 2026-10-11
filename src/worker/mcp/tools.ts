@@ -66,36 +66,11 @@ const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
 const TODOS =
-  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, and due:YYYY-MM-DD for the day it is due. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.";
+  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, due:YYYY-MM-DD for the day it is due, and +Name for a project. every:RULE makes it recur: 2w (every 2 weeks, in d, w, m or y), mon,thu, 3d-after-done, 3rd-day or last-day of the month, 2nd-tue or last-fri of the month. done:YYYY-MM-DDxN is when a recurring todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note.";
 const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
 const revisions = { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, description: "The revisions of the changes, from note_history or history" };
-const choice = {
-  anyOf: [
-    { type: "string", enum: ["keep", "back"] },
-    { type: "object", properties: { text: { type: "string", description: "The lines to have there, typed out; an empty string for no lines" } }, required: ["text"], additionalProperties: false },
-  ],
-};
-const choices = { anyOf: [{ type: "string", enum: ["keep", "back"] }, { type: "array", items: choice }] };
-const resolve = {
-  type: "object",
-  description:
-    'How to settle the conflicts preview_revert lists: places where later changes edited lines this revert changes. "keep" keeps the later edits (what a revert does when this is left out), "back" returns the lines to how they were before the reverted changes and drops the later edits to them, and { text } puts the lines given there. Pass one choice for all of them, or a list with one for each conflict in the order preview_revert lists them.',
-  properties: {
-    at: { type: "integer", minimum: 0, description: "The revision preview_revert answered with. The revert is refused when the note has changed since: preview again" },
-    choices,
-  },
-  required: ["at", "choices"],
-  additionalProperties: false,
-};
-const resolveByNote = {
-  type: "object",
-  description:
-    "How to settle the conflicts of the notes named here, by note id: for each, what preview_revert with author listed, settled as resolve settles them there. A note left out keeps every later edit. A note that has changed since its preview is left as it was and named in failed.",
-  additionalProperties: resolve,
-  maxProperties: 200,
-};
 const author = {
   type: "object",
   properties: { kind: { type: "string", enum: ["member", "agent", "plugin"] }, id: { type: "string" } },
@@ -103,25 +78,6 @@ const author = {
   additionalProperties: false,
 };
 const noteIds = (description: string) => ({ type: "array", items: { type: "string" }, minItems: 1, description });
-const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
-const selected = (item: Record<string, unknown>, required: string[], description: string) => ({
-  type: "array",
-  minItems: 1,
-  maxItems: 40,
-  description,
-  items: { type: "object", properties: { noteId, ...item }, required: ["noteId", ...required], additionalProperties: false },
-});
-const reverted = selected(
-  {
-    revisions,
-    to: { type: "integer", minimum: 0, description: "Instead of revisions: the revision to return the note to" },
-    author: { ...author, description: "Instead of revisions: the member or agent whose changes to this note that still stand are reverted, as revert_author picks them" },
-    at: { type: "integer", minimum: 0, description: "The note's revision that preview_reverts answered with. The note is skipped when it has changed since" },
-    choices: { ...choices, description: "How to settle this note's conflicts, as resolve.choices of revert_changes does. Needs at" },
-  },
-  [],
-  "The notes to revert, each named once: up to 40, each with revisions (its changes to revert), to (the revision to return to) or author (whose changes to revert)",
-);
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
 
 export const TOOLS: Tool[] = [
@@ -153,7 +109,7 @@ export const TOOLS: Tool[] = [
   {
     name: "write_note",
     description:
-      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} Checking the box of a recurring todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         id: noteId,
@@ -161,6 +117,7 @@ export const TOOLS: Tool[] = [
         text: { type: "string", description: "The note's full new markdown" },
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
+        on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "baseRevision", "text"],
     ),
@@ -180,10 +137,10 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the most important. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance, due, the note's tags, and access. Narrow it by folder, by a tag of the note, by a range of due days, both included, or to those with no due date, and by importance. Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
+    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the most important. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance, due, projects, the note's tags, and access. Narrow it by project, by a tag of the note, by a range of due days, both included, or to those with no due date, and by importance. Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
     inputSchema: object({
-      folderId: { type: "string", description: "Only todos in notes in this folder or in a folder under it, from list_folders" },
-      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case: a tag on the todo's own line, or anywhere else in its note" },
+      project: { type: "string", description: "Only todos in this project, without the +, ignoring case" },
+      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case" },
       dueFrom: day("Only todos due on or after this day"),
       dueTo: day("Only todos due on or before this day"),
       noDue: { type: "boolean", description: "True for only todos with no due date" },
@@ -197,14 +154,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_filters",
-    description: "The tags list_todos can be narrowed by: those of the notes that have todos, among the notes you can see. The folders it can be narrowed by are list_folders'.",
+    description: "What list_todos can be narrowed by: the projects of the todos, and the tags of the notes that have todos, in the notes you can see.",
     inputSchema: object({}),
     op: "todo.filters",
   },
   {
     name: "set_todo",
     description:
-      "Check a todo off, or change its importance, its due date or its words, by rewriting its line in its note. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Check a todo off, or change its importance, due date, project or how it recurs, by rewriting its line in its note. Checking off a todo that recurs leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         id: noteId,
@@ -214,11 +171,26 @@ export const TOOLS: Tool[] = [
         done: { type: "boolean", description: "True checks it off, false opens it again" },
         importance: { type: "integer", minimum: 0, maximum: 3, description: "0 for normal, 1 to 3 for !, !! and !!!" },
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
-        words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, importance and due date, tags included, on one line. Its due date is written after them" },
+        addProject: { type: "string", description: "A project to put it in, without the +. With removeProject, it takes that one's place on the line." },
+        removeProject: { type: "string", description: "A project to take it out of, without the +" },
+        every: { type: ["string", "null"], description: "How it recurs, as written after every:, such as 2w, mon,thu, 3d-after-done or last-fri, or null to stop it recurring" },
+        on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "revision", "line", "text"],
     ),
     op: "todo.set",
+  },
+  {
+    name: "todo_history",
+    description: "Each time a recurring todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. Pass id, revision, line and text as list_todos gave them.",
+    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision of the note, from list_todos" }, line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" }, text: { type: "string", description: "The todo's line as written, from list_todos" } }, ["id", "revision", "line", "text"]),
+    op: "todo.history",
+  },
+  {
+    name: "daily_note",
+    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings name. A member has one for each day, and it is where a recurring todo they or you check off is filed. Needs the editor or admin role.",
+    inputSchema: object({ on: day("The day. Left out, it is today in the time zone your member's settings name, or in UTC") }),
+    op: "daily.open",
   },
   {
     name: "rebuild_todos",
@@ -276,7 +248,6 @@ export const TOOLS: Tool[] = [
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
-      by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),
       before: { type: "object", description: "The next of the page before" },
@@ -291,7 +262,6 @@ export const TOOLS: Tool[] = [
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
-      by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),
       before: { type: "object", description: "The next of the page before" },
@@ -307,27 +277,6 @@ export const TOOLS: Tool[] = [
     op: "history.authors",
   },
   {
-    name: "history_diff",
-    description:
-      "What a selection of changes did, note by note, across up to 40 notes. A note's selected changes that follow one another are one run with one line diff, from the note before the first of them to the note after the last, so a line written and taken out again within a run shows in neither. A change left out in between starts a new run, which says how many were skipped. Each run has its revisions (from, to), how many changes it is (saves), who made them, when, and the lines it added and removed. An answer holds about 2000 diff lines: a run past them has diff null, and asking for its note alone returns it. A run's diff shows at most 200 lines and counts the rest in omitted.",
-    inputSchema: object({ changes: selected({ revisions }, ["revisions"], "The selection: each note once, with the revisions of its changes") }, ["changes"]),
-    op: "history.diff",
-  },
-  {
-    name: "preview_reverts",
-    description:
-      "What revert_many would do to each note, with nothing written: for each, the note's revision it was worked out at (pass it back as at), the changes that would be reverted (revisions), the ones left out because something already reverted them (already), the diff from the note as it is to the note after, and its conflicts as preview_revert lists them. A change selected together with the change that reverted it stays reverted and that revert goes too. An empty diff means the note would not change.",
-    inputSchema: object({ changes: reverted }, ["changes"]),
-    op: "history.previewRevert",
-  },
-  {
-    name: "revert_many",
-    description:
-      "Revert changes of up to 40 notes at once, each note as one new change under your agent's name. Each note is reverted or skipped whole, by itself: the answer lists reverted (each with the revision the revert made and the changes it reverted) and skipped (each with why: changed, when the note is no longer at the revision passed as at; nothing, when the revert would change nothing; refused, with the reason). Call preview_reverts first and pass each note's revision back as at. To undo a revert, revert the revision it made, with at set to that revision: the note is skipped if it has been changed since. Needs the editor or admin role.",
-    inputSchema: object({ changes: reverted }, ["changes"]),
-    op: "history.revert",
-  },
-  {
     name: "label_revision",
     description: "Name one revision of a note, so it can be found and reverted to. A null name takes the label away. Needs the editor or admin role.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 1 }, name: { type: ["string", "null"], maxLength: 60 } }, ["id", "revision", "name"]),
@@ -335,31 +284,23 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "revert_note",
-    description:
-      "Put a note back to how it was at a revision. This is recorded as a new change under your agent's name; nothing is erased. Call preview_revert first; if it lists conflicts, pass resolve to settle them. Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision to return to" }, resolve }, ["id", "revision"]),
+    description: "Put a note back to how it was at a revision. This is recorded as a new change under your agent's name; nothing is erased. Needs the editor or admin role.",
+    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision to return to" } }, ["id", "revision"]),
     op: "note.revert",
   },
   {
     name: "revert_changes",
     description:
-      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Call preview_revert first; if it lists conflicts, pass resolve to settle them, or the later edits are kept. Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revisions, resolve }, ["id", "revisions"]),
+      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Needs the editor or admin role.",
+    inputSchema: object({ id: noteId, revisions }, ["id", "revisions"]),
     op: "note.revertChanges",
   },
   {
     name: "revert_author",
     description:
-      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. To settle a note's conflicts, preview_revert it with author first and pass resolve; without it the later edits are kept. A note left with no text, such as one the author created, is named in emptied: it stays, since a note can't be deleted yet. Needs the editor or admin role.",
-    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" }, resolve: resolveByNote }, ["author"]),
+      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. A note left with no text, such as one the author created, is named in emptied: it stays, since a note can't be deleted yet. Needs the editor or admin role.",
+    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" } }, ["author"]),
     op: "history.revertAuthor",
-  },
-  {
-    name: "preview_revert",
-    description:
-      "What a revert would do to a note, with nothing written. Pass one of: revisions to preview revert_changes of those changes, to to preview revert_note to that revision, or author to preview what revert_author would do to this note. Returns the note's revision it was worked out at, the changes that would be reverted (revisions), the diff from the note as it is to the note after (diff), overlaps: later changes that still stand and edited the same lines, and conflicts: each place they did, top of the note first, with the lines as they were before the reverted changes (before), as they are now (now), as the revert leaves them with the later edits kept (kept), the line of the result kept starts at (line), and the later changes that edited them with their authors (later). Settle each conflict with resolve on the revert; pass the same resolve here to see the diff of the revert settled that way. A read-only token can use it.",
-    inputSchema: object({ id: noteId, revisions, to: { type: "integer", minimum: 0, description: "The revision to return to" }, author: { ...author, description: "Whose changes, from history_authors" }, resolve }, ["id"]),
-    op: "note.previewRevert",
   },
   {
     name: "undo",
@@ -395,7 +336,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
     const me = await whoAmI(db, agent.personId);
     // A token pinned to one workspace sees only that one, as if the member belonged to no other.
     if (agent.workspaceId) me.workspaces = me.workspaces.filter((w) => w.id === agent.workspaceId);
-    if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces, readOnly: agent.readOnly, folderIds: agent.folderIds });
+    if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces, readOnly: agent.readOnly });
 
     const { workspace, ...rest } = args;
     let workspaceId: string;
@@ -406,7 +347,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
-    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly, folderIds: agent.folderIds } };
+    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly } };
     return text(await perform(db, actor, { ...rest, type: tool.op! } as OpInput));
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${err.message}`, true);

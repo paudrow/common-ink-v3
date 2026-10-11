@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { advance, bind, chordFor, chordLabel, chordOf, onPlatform, overlap, pressing, typed } from "../../src/web/keybindings.ts";
-import { matching, starting } from "../../src/web/plugins/lib/match.ts";
+import { advance, bind, chordFor, chordLabel, chordOf, onPlatform, overlap, typed } from "../../src/web/keybindings.ts";
+import { matching } from "../../src/web/plugins/lib/match.ts";
 
 describe("keybindings", () => {
   const press = (key: string, held: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}, mac = false) =>
@@ -24,12 +24,6 @@ describe("keybindings", () => {
   it("knows the keys that would otherwise type, by the chord they begin with", () => {
     for (const keys of ["j", "shift+g", "g g", "enter", "space", "/", "backspace", "j mod+k"]) expect(typed(keys), keys).toBe(true);
     for (const keys of ["mod+j", "ctrl+w h", "alt+shift+g", "escape", "shift+escape", "f2", "f12 j", "mod+k l"]) expect(typed(keys), keys).toBe(false);
-  });
-
-  it("knows the keys a button, a link or a checkbox acts on itself: Enter and Space, alone or with Shift", () => {
-    for (const keys of ["enter", "shift+enter", "enter j"]) expect(pressing(keys), keys).toBe("enter");
-    for (const keys of ["space", "shift+space"]) expect(pressing(keys), keys).toBe("space");
-    for (const keys of ["j", "mod+enter", "alt+space", "g enter", "escape"]) expect(pressing(keys), keys).toBe(null);
   });
 
   it("says how two commands' keys stand to each other: the same, or one the first keys of the other", () => {
@@ -138,23 +132,5 @@ describe("matching what was typed", () => {
     expect(match("  PLAN ")).toEqual(["Plan", "Trip planning", "People and plans"]);
     expect(match("")).toEqual(titles);
     expect(match("xyz")).toEqual([]);
-  });
-});
-
-describe("items that start with what was typed", () => {
-  const embeds = ["Timer timer", "Stopwatch stopwatch", "Kanban board kanban", "Standup notes standup"];
-  const start = (typed: string) => starting(embeds, typed, (t) => t);
-
-  it("offers those whose text starts with it, then those with a word that does", () => {
-    expect(start("st")).toEqual(["Stopwatch stopwatch", "Standup notes standup"]);
-    expect(start("B")).toEqual(["Kanban board kanban"]);
-    expect(start("no")).toEqual(["Standup notes standup"]);
-    expect(start("")).toEqual(embeds);
-    expect(starting(["To-do list to-do"], "to-d", (t) => t)).toEqual(["To-do list to-do"]);
-    expect(starting(["To-do list to-do"], "do", (t) => t)).toEqual(["To-do list to-do"]);
-  });
-
-  it("offers nothing for letters that are only inside a word or scattered through it", () => {
-    for (const typed of ["or", "h", "a", "an", "watch", "tmr", "kb"]) expect([typed, start(typed)]).toEqual([typed, []]);
   });
 });

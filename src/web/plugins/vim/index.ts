@@ -1,10 +1,25 @@
 import { dismissing, type Plugin } from "../../plugin-api.ts";
 import { EMPTY, jump, visit } from "./jumplist.ts";
 import { KEYS } from "./keys.ts";
-import { surfaces } from "./surfaces.ts";
+import { DRAWN, surfaces } from "./surfaces.ts";
 
 const isField = (el: Element | null): el is HTMLElement =>
   el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable);
+
+const ARROWS: Record<string, string> = { h: "ArrowLeft", j: "ArrowDown", k: "ArrowUp", l: "ArrowRight" };
+
+/**
+ * In what an embed draws in a note, h, j, k and l are the arrow keys, with Shift as with them: a
+ * drawing the cursor has gone into, such as a kanban board, is moved through and left as a note is.
+ */
+function arrowsInEmbeds(e: KeyboardEvent) {
+  const arrow = ARROWS[e.key.toLowerCase()];
+  const on = e.target instanceof HTMLElement && e.target.closest(DRAWN) ? e.target : null;
+  if (!arrow || e.ctrlKey || e.metaKey || e.altKey || !on || isField(e.target as Element)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  on.dispatchEvent(new KeyboardEvent("keydown", { key: arrow, shiftKey: e.shiftKey, bubbles: true, cancelable: true }));
+}
 
 /**
  * Vim keys in every note's editor, ctrl+o and ctrl+i to go back and forward through the notes
@@ -90,6 +105,8 @@ export const vim: Plugin = {
             },
           });
         }
+        // On the document, so the app's keybindings, which the window hears first, have had the key: Ctrl-w and then h leaves a board.
+        document.addEventListener("keydown", arrowsInEmbeds, true);
       },
       () => !stopped && host.report(new Error("Vim's editing couldn't be loaded, so notes are edited without it. Reload the page to try again.")),
     );
@@ -98,6 +115,7 @@ export const vim: Plugin = {
       ui?.dispose();
       document.removeEventListener("focusin", landed);
       delete document.documentElement.dataset.vimKeys;
+      document.removeEventListener("keydown", arrowsInEmbeds, true);
     };
   },
 };

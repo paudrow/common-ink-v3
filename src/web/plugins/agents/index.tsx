@@ -1,7 +1,7 @@
 import type { Plugin } from "../../plugin-api.ts";
 import { Agents } from "./Agents.tsx";
 
-/** Where the History plugin's page is, when it is on. An author handed to it as the page's state, under the name the page shows for it, is the one it narrows to. */
+/** Where the History plugin's page is, when it is on. An author handed to it as the page's state is the one it shows. */
 const HISTORY = "/history";
 
 export const agents: Plugin = {
@@ -20,10 +20,8 @@ export const agents: Plugin = {
           host={host}
           workspace={app.workspace}
           workspaces={app.workspaces}
-          folders={app.folders}
           version={(app.notes ?? []).reduce((sum, n) => sum + n.revision, 0)}
-          canChange={(noteId) => app.notes?.find((n) => n.id === noteId)?.access === "edit"}
-          onShowChanges={app.pages.some((p) => p.path === HISTORY) ? (agent) => app.go(HISTORY, { state: { label: `By ${agent.name}`, author: { kind: "agent", id: agent.id } } }) : undefined}
+          onShowChanges={app.pages.some((p) => p.path === HISTORY) ? (agentId) => app.go(HISTORY, { state: `agent:${agentId}` }) : undefined}
           onReverted={app.refresh}
         />
       ),

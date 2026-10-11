@@ -1,6 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, folderRow, join, listedNote, listedNotes, me, openAllNotes, perform, pinPanel, showPanel, signInAsNewPerson, visitor } from "./helpers.ts";
-import { standIns } from "./media-helpers.ts";
+import { anotherPerson, folderRow, join, listedNote, listedNotes, me, openAllNotes, perform, signInAsNewPerson, visitor } from "./helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
@@ -15,8 +14,7 @@ const emailOf = async (page: Page) => (await me(page)).person.email;
 const firstWorkspace = async (page: Page) => (await me(page)).workspaces[0]!.id;
 
 async function openShare(page: Page) {
-  // Pinned, so the panel stays once the dialog is closed.
-  await pinPanel(page, "Info");
+  await inspector(page).getByRole("tab", { name: "Info" }).click();
   await inspector(page).getByRole("button", { name: "Share" }).click();
   await expect(shareDialog(page)).toBeVisible();
 }
@@ -45,9 +43,8 @@ test("a guest given one note to view sees that note and nothing else, and can't 
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
   await expect(tree(grace).getByRole("treeitem")).toHaveText([/^All notes\s*1$/, /^Shared with me\s*1$/]);
   await expect(grace.getByRole("button", { name: "New folder" })).toHaveCount(0);
-  await expect.poll(() => quickOpenTitles(grace)).toEqual(["Shared plan"]);
-  await showPanel(grace, "Info");
-  await expect(inspector(grace)).toContainText("You can view this note");
+  expect(await quickOpenTitles(grace)).toEqual(["Shared plan"]);
+  await expect(inspector(grace).getByRole("tabpanel")).toContainText("You can view this note");
   await expect(inspector(grace).getByRole("button", { name: "Share" })).toHaveCount(0);
 
   await folderRow(grace, "Shared with me").click();
@@ -68,7 +65,7 @@ test("a guest given one note to view sees that note and nothing else, and can't 
   await expect(grace.getByText(NOTHING)).toBeVisible();
   await expect(grace.getByText("Not for Grace.")).toHaveCount(0);
   await expect(perform(grace, { type: "note.read", id: secret.id }, workspaceId)).rejects.toThrow();
-  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title)).toEqual(["Shared plan"]);
+  expect((await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title)).toEqual(["Shared plan"]);
 });
 
 test("a guest given a folder to edit sees what is in it, edits a note, sees its history, and makes a note there, and a note shared to view inside it stays read-only", async ({ page }) => {
@@ -96,8 +93,8 @@ test("a guest given a folder to edit sees what is in it, edits a note, sees its 
   await grace.keyboard.type("\nGrace adds a line.");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: kickoff.id })).text).toContain("Grace adds a line.");
 
-  await showPanel(grace, "History");
-  await expect(inspector(grace).getByRole("listbox", { name: "Changes" }).getByRole("option").first()).toContainText("You edited");
+  await inspector(grace).getByRole("tab", { name: "History" }).click();
+  await expect(inspector(grace).getByRole("list", { name: "Changes" }).getByRole("listitem").first()).toContainText("Grace Hopper");
 
   await folderRow(grace, "Projects").click();
   await expect(listedNotes(grace)).toHaveText(["Kickoff"]);
@@ -111,7 +108,7 @@ test("a guest given a folder to edit sees what is in it, edits a note, sees its 
   await expect(editor(grace)).toContainText("Fixed by Ada.");
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
   await expect(perform(grace, { type: "note.write", id: q3.id, baseRevision: 1, text: "# Q3\n\nGrace's." }, workspaceId)).rejects.toThrow();
-  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title).sort()).toEqual(["From Grace", "Kickoff", "Q3"]);
+  expect((await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title).sort()).toEqual(["From Grace", "Kickoff", "Q3"]);
 });
 
 test("a note its maker makes private is hidden from an admin everywhere, and sharing it with one member lets that member in", async ({ page }) => {
@@ -134,7 +131,7 @@ test("a note its maker makes private is hidden from an admin everywhere, and sha
   await expect(shareDialog(bob)).toContainText("This note is private to you.");
   await shareDialog(bob).getByRole("button", { name: "Close" }).click();
   await expect(bob.getByRole("tab", { name: "Diary" }).locator(".private-mark")).toBeVisible();
-  await expect(inspector(bob)).toContainText("Private · Link off");
+  await expect(inspector(bob).getByRole("tabpanel")).toContainText("Private · Link off");
   // Kept, so its tab is still there once a list is opened: a list from the tree takes a preview's place.
   await bob.getByRole("tab", { name: "Diary" }).dblclick();
   await openAllNotes(bob);
@@ -145,12 +142,12 @@ test("a note its maker makes private is hidden from an admin everywhere, and sha
   await expect(editor(page)).toContainText("See");
   await expect(editor(page).getByRole("link", { name: "Unavailable note" })).toBeVisible();
   await expect(editor(page)).not.toContainText("Diary");
-  await expect.poll(() => quickOpenTitles(page)).toEqual(["Index", "Target"]);
+  expect(await quickOpenTitles(page)).toEqual(["Index", "Target"]);
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Index", "Target"]);
   await listedNote(page, "Target").click();
-  await showPanel(page, "Backlinks");
-  await expect(inspector(page)).toContainText("No notes link here yet.");
+  await inspector(page).getByRole("tab", { name: "Backlinks" }).click();
+  await expect(inspector(page).getByRole("tabpanel")).toContainText("No notes link here yet.");
   await page.goto(`/note/${diary.id}`);
   await expect(page.getByText(NOTHING)).toBeVisible();
   await expect(page.getByText("Bob's own words")).toHaveCount(0);
@@ -180,7 +177,7 @@ test("a public link made in the Share dialog shows the note read-only to someone
   await shareDialog(page).getByRole("combobox", { name: "Link" }).selectOption({ label: "Anyone with the link" });
   const address = await shareDialog(page).getByRole("textbox", { name: "Link address" }).inputValue();
   expect(new URL(address).pathname).toMatch(/^\/s\/[A-Za-z0-9_-]{20,64}$/);
-  await expect(inspector(page)).toContainText("Link on: anyone with the link");
+  await expect(inspector(page).getByRole("tabpanel")).toContainText("Link on: anyone with the link");
 
   const anyone = await visitor(page);
   const asked: string[] = [];
@@ -207,22 +204,19 @@ test("a public link made in the Share dialog shows the note read-only to someone
   const revoked = await anyone.locator("main").innerText();
   await anyone.goto(`/s/${"x".repeat(43)}`);
   await expect(anyone.getByRole("heading", { name: NO_LINK })).toBeVisible();
-  await expect.poll(() => anyone.locator("main").innerText()).toBe(revoked);
+  expect(await anyone.locator("main").innerText()).toBe(revoked);
 });
 
 test("a link's page draws the note as the app does, and runs nothing in it until the visitor asks", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  // The member has HTML run by itself, which is not the default on a server without an embed site (#40).
-  await perform(page, { type: "settings.write", text: JSON.stringify({ "html.run": "automatically" }), baseRevision: 0 });
-  const text = "# Demo\n\nSome **bold** words.\n\n:::html{}\n<p>Hello from HTML.</p>\n:::\n\nWatch this.\n\nhttps://youtu.be/dQw4w9WgXcQ\n";
+  const text = "# Demo\n\nSome **bold** words.\n\n:::html{}\n<p>Hello from HTML.</p>\n:::\n\nWatch ::youtube{https://youtu.be/dQw4w9WgXcQ} here.\n";
   const note = await perform(page, { type: "note.create", text });
   const link = await perform(page, { type: "grant.link", noteId: note.id, link: "public" });
   if (link?.to.kind !== "link") throw new Error("no link was made");
   const anyone = await visitor(page);
-  const played = await standIns(anyone);
-  const elsewhere = new Set<string>();
+  const elsewhere: string[] = [];
   anyone.on("request", (request) => {
-    if (new URL(request.url()).origin !== new URL(page.url()).origin) elsewhere.add(new URL(request.url()).host);
+    if (new URL(request.url()).origin !== new URL(page.url()).origin) elsewhere.push(request.url());
   });
 
   await anyone.goto(`/s/${link.to.token}`);
@@ -231,18 +225,12 @@ test("a link's page draws the note as the app does, and runs nothing in it until
   await expect(anyone.getByRole("button", { name: /^Run HTML/ })).toBeVisible();
   await expect(anyone.getByRole("button", { name: /^Play video/ })).toBeVisible();
   await expect(anyone.locator("iframe")).toHaveCount(0);
-  // The video's picture and what it is called are asked of YouTube as the app asks them, with no player: nothing of another site runs.
-  await expect.poll(() => [...elsewhere].sort(), "a picture and a title, and no more, until asked").toEqual(["i.ytimg.com", "www.youtube.com"]);
-  expect(played, "no player until play is pressed").toEqual([]);
+  expect(elsewhere, "nothing is loaded from anywhere else until asked").toEqual([]);
 
   await anyone.getByRole("button", { name: /^Run HTML/ }).click();
-  await expect(anyone.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
+  await expect(anyone.locator('.embed-below[data-embed="html"] iframe')).toHaveAttribute("sandbox", /.*/);
   await expect(editor(anyone)).toHaveAttribute("contenteditable", "false");
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(text);
-  // In the workspace the same HTML runs by itself for its member, who chose that: a link's page always asks.
-  await page.goto(`/note/${note.id}`);
-  await expect(page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Run HTML/ })).toHaveCount(0);
+  expect((await perform(page, { type: "note.read", id: note.id })).text).toBe(text);
 });
 
 test("a folder's link lists and opens its notes, and not a private note inside it", async ({ page }) => {
@@ -290,7 +278,7 @@ test("a link for people signed in opens for someone signed in who isn't a member
 
   await expect(editor(grace)).toContainText("For anyone with an account.");
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
-  await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name), "opening a link makes nobody a guest").toEqual(["Grace's workspace"]);
+  expect((await me(grace)).workspaces.map((w) => w.name), "opening a link makes nobody a guest").toEqual(["Grace's workspace"]);
 });
 
 test("an editor an admin narrows to view on a folder finds its notes read-only, and is offered no new note there", async ({ page }) => {
@@ -356,7 +344,7 @@ test("an admin's Sharing page lists every grant and revokes one, after which the
   await grace.reload();
   await expect(grace.getByText(NOTHING)).toBeVisible();
   await expect(grace.getByText("For Grace.")).toHaveCount(0);
-  await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
+  expect((await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
 });
 
 test("a grant taken back while the guest has the note open takes the note off their screen without a reload", async ({ page }) => {
@@ -382,9 +370,7 @@ test("a grant taken back while the guest has the note open takes the note off th
   await expect(grace.getByText(HIDDEN)).toBeVisible({ timeout: 30_000 });
   await expect(grace.getByText("Grace may change this for now.")).toHaveCount(0);
   await expect(editor(grace)).toHaveCount(0);
-  // The inspector has nothing of the note's: with no listed note in front its panel is empty.
-  await showPanel(grace, "Info");
-  await expect(inspector(grace).locator(".inspector-body")).toHaveText("");
+  await expect(inspector(grace)).toHaveCount(0);
   await expect(grace.getByRole("tab", { name: "Untitled" })).toBeVisible();
   await openAllNotes(grace);
   await expect(listedNotes(grace)).toHaveText(["Kept"]);
@@ -406,8 +392,8 @@ test("typing in a note whose grant was narrowed to view is refused, and the edit
   await grace.keyboard.type(" Grace's late words.");
 
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false", { timeout: 30_000 });
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: draft.id })).text).toBe("# Draft\n\nAs Ada left it.");
-  await expect.poll(async () => (await perform(grace, { type: "note.read", id: draft.id }, workspaceId)).access).toBe("view");
+  expect((await perform(page, { type: "note.read", id: draft.id })).text).toBe("# Draft\n\nAs Ada left it.");
+  expect((await perform(grace, { type: "note.read", id: draft.id }, workspaceId)).access).toBe("view");
 });
 
 test("removing a member says what happens to their private notes, and a member with private notes is told why they can't leave", async ({ page }) => {
@@ -423,8 +409,8 @@ test("removing a member says what happens to their private notes, and a member w
   await bob.getByRole("menuitem", { name: "Members" }).click();
   await members(bob).getByRole("button", { name: "Leave" }).click();
   await members(bob).getByRole("button", { name: "Leave Ada's workspace" }).click();
-  await expect(members(bob).getByRole("alert")).toContainText("You have private notes here");
-  await expect.poll(async () => (await me(bob)).workspaces.map((w) => w.name)).toContain("Ada's workspace");
+  await expect(members(bob).getByRole("alert")).toContainText("You have a private note here besides your daily notes");
+  expect((await me(bob)).workspaces.map((w) => w.name)).toContain("Ada's workspace");
 
   await page.goto("/members");
   await members(page).getByRole("button", { name: "Remove Bob Editor" }).click();
@@ -503,57 +489,7 @@ test("a plugin that isn't Common Ink's own can't share, change members, or conne
     "Greedy fixture isn't given host.members.invite: only Common Ink's own plugins are",
     "Greedy fixture isn't given host.agents.connect: only Common Ink's own plugins are",
   ]);
-  await expect.poll(() => perform(page, { type: "grant.list", noteId: note.id })).toMatchObject({ grants: [] });
-  await expect.poll(() => perform(page, { type: "invite.list" })).toEqual([]);
+  expect(await perform(page, { type: "grant.list", noteId: note.id })).toMatchObject({ grants: [] });
+  expect(await perform(page, { type: "invite.list" })).toEqual([]);
   expect(await page.evaluate(async () => ((await (await fetch("/api/agents")).json()) as { agents: unknown[] }).agents)).toEqual([]);
-});
-
-test("reverting an agent's changes from the Agents page takes the notes the member may change, and says which are left out", async ({ page }) => {
-  await signInAsNewPerson(page, "Ed Editor");
-  const admin = await anotherPerson(page, "Ada Lovelace");
-  const { workspaceId } = await join(page, admin, "editor");
-  const claude = await connectAgent(page, "Claude");
-  const [mine, shown] = [await perform(admin, { type: "note.create", text: "# Mine to change" }), await perform(admin, { type: "note.create", text: "# Shown to me" })];
-  for (const n of [mine, shown]) await claude.tool("write_note", { workspace: workspaceId, id: n.id, baseRevision: 1, text: `# ${n.title}\n\nClaude's line.` });
-  await perform(admin, { type: "grant.set", noteId: shown.id, email: (await me(page)).person.email, access: "view" });
-
-  // Opening a note of Ada's workspace shows that workspace, whose notes the agent changed.
-  await page.goto(`/note/${mine.id}`);
-  await expect(editor(page)).toContainText("Claude's line.");
-  await page.goto("/agents");
-  await page.getByRole("button", { name: "Revert Claude's changes…" }).click();
-  const dialog = page.getByRole("dialog", { name: /^Revert/ });
-  await expect(dialog).toContainText("1 note you can read and not change is left out.");
-  await expect(dialog).toContainText("Mine to change");
-  await expect(dialog).not.toContainText("Shown to me");
-  await dialog.getByRole("button", { name: /^Revert/ }).click();
-  await expect.poll(async () => (await perform(admin, { type: "note.read", id: mine.id })).revision).toBe(3);
-  await expect.poll(async () => (await perform(admin, { type: "note.read", id: shown.id })).revision).toBe(2);
-});
-
-test("a dropdown's arrow is the app's own, as far from the right edge as its words are from the left, in the Share dialog and beside it", async ({ page }) => {
-  await signInAsNewPerson(page, "Ada Lovelace");
-  const note = await perform(page, { type: "note.create", text: "# Plan" });
-  await page.goto(`/note/${note.id}`);
-  await expect(editor(page)).toContainText("Plan");
-  await openShare(page);
-  await expect(shareDialog(page).getByRole("combobox", { name: "Access" })).toBeVisible();
-
-  const insets = () =>
-    page.locator("select:visible").evaluateAll((all) =>
-      all.map((el) => {
-        const s = getComputedStyle(el);
-        const fromRight = /^calc\(100% - (\d+)px\)/.exec(s.backgroundPositionX)?.[1];
-        return { name: el.getAttribute("aria-label") ?? el.getAttribute("aria-labelledby") ?? "", native: s.appearance !== "none", drawn: s.backgroundImage.startsWith("url("), words: parseFloat(s.paddingLeft), arrow: Number(fromRight), room: parseFloat(s.paddingRight) };
-      }),
-    );
-  const found = await insets();
-  expect(found.map((s) => s.name)).toContain("Access");
-  expect(found.length).toBeGreaterThanOrEqual(3);
-  for (const s of found) {
-    expect(s, `${s.name}: the app draws the arrow`).toMatchObject({ native: false, drawn: true });
-    expect(s.arrow, `${s.name}: the arrow's inset is the words'`).toBe(s.words);
-    expect(s.words).toBe(8);
-    expect(s.room, `${s.name}: the words stop short of the arrow`).toBeGreaterThanOrEqual(s.arrow + 10 + 4);
-  }
 });

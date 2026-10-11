@@ -23,6 +23,13 @@ const PATHS = {
       <path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" />
     </>
   ),
+  today: (
+    <>
+      <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
+      <path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" />
+      <circle cx="8" cy="10" r="1.25" fill="currentColor" stroke="none" />
+    </>
+  ),
   contacts: (
     <>
       <circle cx="8" cy="5.75" r="2.5" />
@@ -44,32 +51,18 @@ const PATHS = {
     </>
   ),
   more: <path d="M4 8h.01M8 8h.01M12 8h.01" strokeWidth="2.25" />,
-  agent: (
-    <>
-      <rect x="3" y="5.5" width="10" height="7.5" rx="2" />
-      <path d="M8 5.5V3M6 9h.01M10 9h.01" />
-    </>
-  ),
-  back: <path d="M9.5 3.5 5 8l4.5 4.5" />,
   folders: <path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />,
   plus: <path d="M8 3.5v9M3.5 8h9" />,
   edit: <path d="M9.75 3.75 12.25 6.25M3 13l.6-2.85 7.4-7.4a1.2 1.2 0 0 1 1.7 0l.55.55a1.2 1.2 0 0 1 0 1.7l-7.4 7.4z" />,
   close: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,
-  pin: <path d="M6 2.5h4l-.5 4 2 2.25h-7l2-2.25zM8 8.75v4.75" />,
   chevron: <path d="m6 4.5 3.5 3.5L6 11.5" />,
-  sidebar: (
-    <>
-      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-      <path d="M6 3v10" />
-    </>
-  ),
   inspector: (
     <>
       <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
       <path d="M10 3v10" />
     </>
   ),
-  focus: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
+  writing: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
   lock: (
     <>
       <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
@@ -144,6 +137,18 @@ const PATHS = {
     </>
   ),
   command: <path d="m3.5 5.5 3 2.5-3 2.5M8.5 11h4" />,
+  sidebar: (
+    <>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+      <path d="M6 3v10" />
+    </>
+  ),
+  agent: (
+    <>
+      <rect x="3" y="5.5" width="10" height="7.5" rx="2" />
+      <path d="M8 5.5V3M6.25 9v.01M9.75 9v.01M1.5 8.5v2M14.5 8.5v2" />
+    </>
+  ),
   members: (
     <>
       <circle cx="6" cy="6" r="2.25" />
@@ -171,22 +176,6 @@ const PATHS = {
       <path d="M4 10V6l1.75 2L7.5 6v4M11 6v4M9.5 8.5 11 10l1.5-1.5" />
     </>
   ),
-  flag: <path d="M4 14V2.75h8l-1.5 3 1.5 3H4" />,
-  sliders: (
-    <>
-      <path d="M13.5 4.75h-6M9.5 11.25h-6" />
-      <circle cx="11.5" cy="11.25" r="2" />
-      <circle cx="4.5" cy="4.75" r="2" />
-    </>
-  ),
-  open: <path d="M10 2.5h3.5V6M7 9l6.5-6.5M12 9v3.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 2 12.5v-7A1.5 1.5 0 0 1 3.5 4H7" />,
-  split: (
-    <>
-      <rect x="1.5" y="2.75" width="5.75" height="10.5" rx="1.25" />
-      <rect x="8.75" y="2.75" width="5.75" height="10.5" rx="1.25" />
-    </>
-  ),
-  check: <path d="m3.75 8.25 2.75 2.75 5.75-6" />,
 } as const;
 
 export type IconName = keyof typeof PATHS;

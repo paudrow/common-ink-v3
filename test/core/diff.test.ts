@@ -48,6 +48,6 @@ describe("a line diff", () => {
   });
 
   it("is empty for a change that changes nothing", () => {
-    expect(diff("same", "same")).toEqual({ hunks: [], added: 0, removed: 0, omitted: 0, lines: 1 });
+    expect(diff("same", "same")).toEqual({ hunks: [], added: 0, removed: 0, omitted: 0 });
   });
 });

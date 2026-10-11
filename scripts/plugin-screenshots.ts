@@ -40,7 +40,7 @@ const SHOTS: readonly Shot[] = [
     id: "todos",
     at: "/todos",
     height: 430,
-    note: "# This week\n\n- [ ] !! Send the invoice due:2026-10-12 #work\n- [ ] Water the plants every:1w #home\n- [ ] ! Call the landlord due:2026-10-14 #home\n- [x] Renew the domain\n",
+    note: "# This week\n\n- [ ] !! Send the invoice due:2026-10-12 +Work\n- [ ] Water the plants every:1w +Home\n- [ ] ! Call the landlord due:2026-10-14 +Home\n- [x] Renew the domain\n",
   },
 ];
 

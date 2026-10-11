@@ -1,5 +1,5 @@
 import type { CompletionItem, EmbedInfo, Plugin } from "../plugin-api.ts";
-import { starting } from "./lib/match.ts";
+import { matching } from "./lib/match.ts";
 
 /** How a new embed is written, with its config left selected when there is one to type over. */
 function itemFor({ name, title, block, starts }: EmbedInfo): CompletionItem {
@@ -21,8 +21,7 @@ export const embedMenu: Plugin = {
     host.completions.register({
       id: "embeds",
       trigger: "/",
-      prose: true,
-      items: (typed) => starting(host.embeds.list(), typed, (e) => `${e.title} ${e.name}`).map(itemFor),
+      items: (typed) => matching(host.embeds.list(), typed, (e) => `${e.title} ${e.name}`).map(itemFor),
     });
   },
 };

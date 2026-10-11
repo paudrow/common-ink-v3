@@ -1,6 +1,5 @@
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { Icon, carry, useDismiss, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
-import { ContextMenu } from "./lib/Menu.tsx";
+import { useCallback, useRef, useState } from "react";
+import { Icon, useDismiss, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
@@ -15,107 +14,21 @@ function Sidebar({ app }: ViewProps) {
     setWas(on);
     if (on !== null) setMore(true);
   }
-  const open = app.sidebarOpen;
-  const [picking, setPicking] = useState(false);
-  const foldersButton = useRef<HTMLButtonElement>(null);
-  const closePicker = useCallback(() => setPicking(false), []);
-  if ((open || app.focus) && picking) setPicking(false);
-  const links = (nav: PageInfo["nav"]) => under(nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled={open} />);
-  const pages = (
-    <>
-      {links("primary")}
-      <button type="button" className="mode more-toggle" aria-expanded={more} aria-label={open ? undefined : more ? "Less" : "More"} title={open ? undefined : more ? "Less" : "More"} onClick={() => setMore(!more)}>
-        <Icon name="chevron" />
-        {open && <span>{more ? "Less" : "More"}</span>}
-      </button>
-      {more && links("more")}
-    </>
-  );
-  // Closed, it is a narrow bar with an icon for each thing the open sidebar lists, in the same order.
-  if (!open)
-    return (
-      <nav className="rail" aria-label="Sidebar bar">
-        <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />
-        <NewNote app={app} />
-        {pages}
-        {app.sections != null && (
-          <button ref={foldersButton} type="button" className="icon-button" aria-label="Folders" title="Folders" aria-haspopup="dialog" aria-expanded={picking} onClick={() => setPicking(!picking)}>
-            <Icon name="folders" />
-          </button>
-        )}
-        {picking && <Picker app={app} anchor={foldersButton} onClose={closePicker} />}
-      </nav>
-    );
+  const links = (nav: PageInfo["nav"]) => under(nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled />);
   return (
     <aside className="sidebar" aria-label="Sidebar">
       <WorkspaceMenu app={app} />
       <NewNote app={app} />
       <nav aria-label="Modes" className="modes">
-        {pages}
+        {links("primary")}
+        <button type="button" className="mode more-toggle" aria-expanded={more} onClick={() => setMore(!more)}>
+          <Icon name="chevron" />
+          <span>{more ? "Less" : "More"}</span>
+        </button>
+        {more && links("more")}
       </nav>
       {app.sections}
     </aside>
-  );
-}
-
-/** How long the picker stays once something is opened from it, so the second click of a double click still lands on its row. */
-const LINGER_MS = 300;
-const EDGE = 8;
-
-/**
- * The sidebar's sections over the page beside its bar, for picking a folder while the sidebar is
- * closed. It takes no room: nothing under it moves. It goes once something is opened from it, on
- * Escape, and on a press outside it, and the cursor goes back to the button that opened it.
- */
-function Picker({ app, anchor, onClose }: ViewProps & { anchor: RefObject<HTMLButtonElement | null>; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [leaving, setLeaving] = useState(false);
-  /** A row being dragged out of it to the editor area, which it then lets the pointer through to. */
-  const [dragging, setDragging] = useState(false);
-  useDismiss(onClose, ref, anchor);
-  const opened = useCallback(() => setLeaving(true), []);
-  useLayoutEffect(() => {
-    if (!leaving) return;
-    const timer = setTimeout(onClose, LINGER_MS);
-    return () => clearTimeout(timer);
-  }, [leaving, onClose]);
-
-  useLayoutEffect(() => {
-    const el = ref.current!;
-    const button = anchor.current;
-    const place = () => {
-      const top = button?.getBoundingClientRect().top ?? EDGE;
-      el.style.top = `${Math.max(EDGE, Math.min(top, innerHeight - EDGE - el.offsetHeight))}px`;
-    };
-    place();
-    (el.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]') ?? el.querySelector<HTMLElement>("[tabindex], button, a[href]"))?.focus();
-    // It is taller once a folder in it is opened out, and may then need to start higher to fit.
-    const sized = new ResizeObserver(place);
-    sized.observe(el);
-    addEventListener("resize", place);
-    return () => {
-      sized.disconnect();
-      removeEventListener("resize", place);
-      if (button?.isConnected && (el.contains(document.activeElement) || document.activeElement === document.body)) button.focus();
-    };
-  }, [anchor]);
-
-  return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Folders"
-      className="sidebar-picker"
-      data-leaving={leaving || undefined}
-      data-dragging={dragging || undefined}
-      // Not as the drag starts: what is dragged is drawn from the row as it is then.
-      onDragStart={() => setTimeout(() => setDragging(true))}
-      onDragEnd={onClose}
-      // The cursor taken out of it, as by Tab, leaves nothing floating over the page behind it.
-      onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && e.relatedTarget !== anchor.current && onClose()}
-    >
-      {app.sectionsOpening(opened)}
-    </div>
   );
 }
 
@@ -129,69 +42,39 @@ function NewNote({ app }: ViewProps) {
   const folder = app.folderId && app.folders?.byId.get(app.folderId);
   const where = folder ? folder.name : "Unsorted";
   const refused = app.canCreateNote ? null : folder ? `You can read ${folder.name}, and not add notes to it` : "Open a folder you can change to add a note to it";
-  const title = refused ?? `New note in ${where}`;
-  const create = () => {
-    if (!refused) app.createNote().catch(() => {});
-  };
-  if (!app.sidebarOpen)
-    return (
-      <button type="button" className="icon-button new-note" aria-label="New note" aria-disabled={!!refused} title={title} onClick={create}>
-        <Icon name="plus" />
-      </button>
-    );
   return (
-    <button type="button" className="button new-note" aria-disabled={!!refused} title={title} onClick={create}>
+    <button
+      type="button"
+      className="button new-note"
+      aria-disabled={!!refused}
+      title={refused ?? `New note in ${where}`}
+      onClick={() => {
+        if (!refused) app.createNote().catch(() => {});
+      }}
+    >
       <Icon name="plus" />
       New note
     </button>
   );
 }
 
-/**
- * A page's link. Clicked, it goes there; dragged to the editor area, the page is dropped in a group
- * as a tab is; and where the editor area has splits its menu opens the page in one.
- */
 function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelled?: boolean }) {
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const tab: Opened = { kind: "page", id: page.id, path: page.path };
-  const { openBeside } = app;
   return (
-    <>
-      <a
-        href={page.path}
-        className="mode"
-        aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) ? "page" : undefined}
-        aria-label={labelled ? undefined : page.label}
-        title={labelled ? undefined : page.label}
-        draggable
-        onDragStart={(e) => carry(e.dataTransfer, tab)}
-        onContextMenu={(e) => {
-          if (!openBeside) return;
-          e.preventDefault();
-          setMenu({ x: e.clientX, y: e.clientY });
-        }}
-        onClick={(e) => {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-          e.preventDefault();
-          app.go(page.path);
-        }}
-      >
-        {page.icon && <Icon name={page.icon} />}
-        {labelled && <span>{page.label}</span>}
-      </a>
-      {menu && openBeside && (
-        <ContextMenu
-          label={`${page.label} actions`}
-          x={menu.x}
-          y={menu.y}
-          onClose={() => setMenu(null)}
-          items={[
-            { label: "Open in a split right", action: () => openBeside(tab, "right") },
-            { label: "Open in a split down", action: () => openBeside(tab, "down") },
-          ]}
-        />
-      )}
-    </>
+    <a
+      href={page.path}
+      className="mode"
+      aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) ? "page" : undefined}
+      aria-label={labelled ? undefined : page.label}
+      title={labelled ? undefined : page.label}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        app.go(page.path);
+      }}
+    >
+      {page.icon && <Icon name={page.icon} />}
+      {labelled && <span>{page.label}</span>}
+    </a>
   );
 }
 
@@ -270,5 +153,17 @@ export const sidebar: Plugin = {
   icon: "sidebar",
   activate(host) {
     host.views.register("column", { id: "sidebar", component: Sidebar });
+    host.views.register("rail", {
+      id: "pages",
+      component: ({ app }) => (
+        <>
+          {app.pages
+            .filter((p) => p.nav === "primary")
+            .map((page) => (
+              <PageLink key={page.id} app={app} page={page} />
+            ))}
+        </>
+      ),
+    });
   },
 };

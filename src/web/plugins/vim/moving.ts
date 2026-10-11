@@ -25,18 +25,13 @@ export interface Box {
 
 /**
  * Which box is next to `boxes[from]` on a side, or -1: the nearest of those that lie wholly beyond
- * that side, and of two as near, the one that shares more of the edge. A box that lies over another,
- * as a panel over the page does, has that one next to it on each side the other reaches past it.
+ * that side, and of two as near, the one that shares more of the edge.
  */
 export function toward(boxes: readonly Box[], from: number, side: Side): number {
   const here = boxes[from]!;
   const across = side === "left" || side === "right";
-  const beyond = (b: Box) => ({ left: here.left - b.right, right: b.left - here.right, up: here.top - b.bottom, down: b.top - here.bottom })[side];
+  const gap = (b: Box) => ({ left: here.left - b.right, right: b.left - here.right, up: here.top - b.bottom, down: b.top - here.bottom })[side];
   const shared = (b: Box) => (across ? Math.min(b.bottom, here.bottom) - Math.max(b.top, here.top) : Math.min(b.right, here.right) - Math.max(b.left, here.left));
-  const under = (b: Box) =>
-    (across ? b.left <= here.left && b.right >= here.right : b.top <= here.top && b.bottom >= here.bottom) &&
-    ({ left: b.left < here.left - 1, right: b.right > here.right + 1, up: b.top < here.top - 1, down: b.bottom > here.bottom + 1 })[side];
-  const gap = (b: Box) => (under(b) ? 0 : beyond(b));
   let best = -1;
   boxes.forEach((box, i) => {
     if (i === from || gap(box) < -1) return;

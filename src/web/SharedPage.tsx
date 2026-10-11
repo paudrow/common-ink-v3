@@ -30,7 +30,8 @@ export const sharedToken = (pathname: string) => ADDRESS.exec(pathname)?.[1] ?? 
 
 /**
  * The plugins that draw a note's text. None of them needs the server, and the page gives them no way
- * to it.
+ * to it: the one thing any asks for, the projects a todo's chip offers, is refused, and nobody here
+ * can change a todo anyway.
  */
 const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, tables, math, codeBlocks, bullets];
 
@@ -70,15 +71,14 @@ function useDrawing(open: (noteId: string) => void) {
     const kept = new Map<string, unknown>();
     return createPluginHost({
       plugins: DRAWING,
-      // Whoever holds a link isn't a member and has no settings: HTML in a note it opens runs only when they press Run.
-      settings: { "html.run": "ask first" },
+      settings: {},
       write: () => {},
       mac: MAC,
       provide: (plugin) => ({
         workspace: { id: "", name: "", role: "guest" },
         app: () => app.current as App,
         perform: NOT_HERE,
-        agents: { list: NOT_HERE, connect: NOT_HERE, edit: NOT_HERE, disconnect: NOT_HERE },
+        agents: { list: NOT_HERE, connect: NOT_HERE, disconnect: NOT_HERE },
         members: { invite: NOT_HERE, setRole: NOT_HERE, remove: NOT_HERE, leave: NOT_HERE, invites: NOT_HERE, revoke: NOT_HERE },
         sharing: { of: NOT_HERE, grant: NOT_HERE, link: NOT_HERE, revoke: NOT_HERE, setPrivate: NOT_HERE, all: NOT_HERE },
         storage: { get: (key) => kept.get(`${plugin.id}.${key}`), set: (key, value) => void kept.set(`${plugin.id}.${key}`, value) },
