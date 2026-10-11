@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { noteIdFromPath } from "../core/slug.ts";
 import { MODES, modePath, type ModeId } from "./modes.ts";
 
-export type Route = { kind: "home" } | { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "mode"; mode: ModeId } | { kind: "missing" };
+export type Route = { kind: "home" } | { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "mode"; mode: ModeId } | { kind: "agents" } | { kind: "missing" };
 
 /** Where a folder's list of notes lives: `/folder/<id>`, with `all` for every note. */
 export const folderPath = (folderId: string) => `/folder/${folderId}`;
 const FOLDER = /^\/folder\/([a-z0-9-]+)$/;
+
+/** Where a member connects and disconnects their agents. */
+export const AGENTS_PATH = "/agents";
 
 /**
  * `replace` writes over the entry the browser is at. `move` is a step between things already open:
@@ -22,6 +25,7 @@ export function routeOf(pathname: string): Route {
   if (pathname === "/") return { kind: "home" };
   const folderId = FOLDER.exec(pathname)?.[1];
   if (folderId) return { kind: "folder", id: folderId };
+  if (pathname === AGENTS_PATH) return { kind: "agents" };
   const mode = MODES.find((m) => modePath(m.id) === pathname);
   if (mode) return { kind: "mode", mode: mode.id };
   const id = noteIdFromPath(pathname);

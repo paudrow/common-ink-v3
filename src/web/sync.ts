@@ -1,7 +1,7 @@
 import { redo, undo } from "@codemirror/commands";
 import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
-import type { Note, OpInput, RevertedNotes } from "../core/protocol.ts";
+import type { AuthorRef, Note, OpInput } from "../core/protocol.ts";
 import { changesBetween } from "../core/text.ts";
 import { ApiError, perform } from "./api.ts";
 
@@ -39,19 +39,6 @@ export async function moveThroughHistory(workspaceId: string, op: HistoryOp): Pr
   return note;
 }
 
-/** Sends what is typed in these notes and not yet saved, so that what is read of them next is all of it. */
-export const commitTyping = (noteIds: readonly string[]) => Promise.all(noteIds.flatMap((id) => [open.get(id)?.commit(), committed(id)]));
-
-type RevertMany = Extract<OpInput, { type: "history.revert" }>;
-
-/** Reverts changes of several notes. What's typed in them is saved first, and each reverted note's editor takes the result if it's open. */
-export async function revertMany(workspaceId: string, changes: RevertMany["changes"]): Promise<RevertedNotes> {
-  await commitTyping(changes.map((c) => c.noteId));
-  const done = await perform(workspaceId, { type: "history.revert", changes });
-  await Promise.all(done.reverted.map((r) => open.get(r.noteId)?.pull(r.revision)));
-  return done;
-}
-
 type Step = Extract<HistoryOp, { type: "note.undo" | "note.redo" }>;
 
 /**
@@ -62,6 +49,36 @@ type Step = Extract<HistoryOp, { type: "note.undo" | "note.redo" }>;
 export async function undoOrRedo(workspaceId: string, op: Step): Promise<Note | null> {
   if (open.get(op.id)?.stepHere(op.type)) return null;
   return moveThroughHistory(workspaceId, op);
+}
+
+export interface AuthorReverting {
+  notes: number;
+  changes: number;
+  /** The titles the notes left with no text had. */
+  emptied: string[];
+  /** The titles of notes that refused the change, each with why. */
+  failed: { title: string; message: string }[];
+}
+
+/**
+ * Takes back out every change by `author` that still stands, a few notes a request until every note
+ * is covered. What's typed is saved first, and each open editor takes its note's result.
+ */
+export async function revertAuthor(workspaceId: string, author: AuthorRef, noteIds?: string[]): Promise<AuthorReverting> {
+  await Promise.all([...open.values()].map((sync) => sync.commit()));
+  const done: AuthorReverting = { notes: 0, changes: 0, emptied: [], failed: [] };
+  for (let after: string | undefined; ; ) {
+    const { reverted, emptied, failed, next } = await perform(workspaceId, { type: "history.revertAuthor", author, noteIds, after });
+    for (const { note, revisions } of reverted) {
+      done.notes++;
+      done.changes += revisions.length;
+      await open.get(note.id)?.pull(note.revision);
+    }
+    done.emptied.push(...emptied.map((e) => e.title));
+    done.failed.push(...failed);
+    if (!next) return done;
+    after = next;
+  }
 }
 
 const fromServer = Annotation.define<boolean>();

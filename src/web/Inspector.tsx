@@ -1,8 +1,8 @@
 import { useId, useRef, useState, type ReactNode } from "react";
-import type { NoteSummary } from "../core/protocol.ts";
+import type { Note, NoteSummary } from "../core/protocol.ts";
 import { notePath } from "../core/slug.ts";
 import { pathName, type FolderTree } from "./folders.ts";
-import { FolderHistory, NoteHistory, type Scope } from "./History.tsx";
+import { FolderHistory, NoteHistory } from "./History.tsx";
 import type { IconName } from "./icons.tsx";
 import { pickView } from "./inspectorPick.ts";
 import { Soon } from "./Soon.tsx";
@@ -13,8 +13,6 @@ export type Subject =
   | {
       kind: "note";
       workspaceId: string;
-      /** The member, by their person id. */
-      me: string;
       note: NoteSummary;
       tree: FolderTree;
       canEdit: boolean;
@@ -22,24 +20,19 @@ export type Subject =
       /** Whether the note has changes by someone else that the member hasn't been shown. */
       unseen: boolean;
       onSeen: (noteId: string, revision: number) => void;
-      /** History reverted the note. */
-      onReverted: () => void;
-      onOpenNote: (noteId: string) => void;
-      /** Opens the History page on some notes, or on all of them. */
-      onOpenHistory: (scope: Scope | null) => void;
+      /** The note after History reverted it or applied a selection of its changes. */
+      onChanged: (note: Note) => void;
     }
   | {
       kind: "folder";
       workspaceId: string;
-      me: string;
       name: string;
       notes: readonly NoteSummary[];
       /** Whether its notes are every note of the workspace: All notes. */
       whole: boolean;
       canEdit: boolean;
       onOpenNote: (noteId: string) => void;
-      onReverted: () => void;
-      onOpenHistory: (scope: Scope | null) => void;
+      onChanged: (note: Note) => void;
     }
   | { kind: "page" };
 
@@ -67,7 +60,7 @@ const INSPECTOR_VIEWS: readonly InspectorView[] = [
     label: "History",
     icon: "history",
     for: "note",
-    render: (s) => <NoteHistory workspaceId={s.workspaceId} me={s.me} note={s.note} canEdit={s.canEdit} onChanged={s.onReverted} onOpenNote={s.onOpenNote} onOpenHistory={s.onOpenHistory} onSeen={s.onSeen} />,
+    render: (s) => <NoteHistory workspaceId={s.workspaceId} noteId={s.note.id} revision={s.note.revision} canEdit={s.canEdit} onChanged={s.onChanged} onSeen={s.onSeen} />,
     mark: (s) => (s.unseen ? UNSEEN : undefined),
   }),
   view({ id: "backlinks", label: "Backlinks", icon: "backlinks", for: "note", render: () => <Soon issue={13}>Notes that link here arrive with</Soon> }),
@@ -77,7 +70,7 @@ const INSPECTOR_VIEWS: readonly InspectorView[] = [
     label: "History",
     icon: "history",
     for: "folder",
-    render: (s) => <FolderHistory workspaceId={s.workspaceId} me={s.me} name={s.name} notes={s.notes} whole={s.whole} canEdit={s.canEdit} onOpenNote={s.onOpenNote} onOpenHistory={s.onOpenHistory} onChanged={s.onReverted} />,
+    render: (s) => <FolderHistory workspaceId={s.workspaceId} notes={s.notes} whole={s.whole} canEdit={s.canEdit} onOpenNote={s.onOpenNote} onChanged={s.onChanged} />,
   }),
   view({ id: "folder-info", label: "Info", icon: "info", for: "folder", render: (subject) => <FolderInfo {...subject} /> }),
 ];

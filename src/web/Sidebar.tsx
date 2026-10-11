@@ -7,6 +7,7 @@ import type { Opened } from "./editorLayout.ts";
 import { Icon } from "./icons.tsx";
 import { ContextMenu } from "./Menu.tsx";
 import { MODES, modePath, type ModeId } from "./modes.ts";
+import { AGENTS_PATH } from "./router.ts";
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
 
@@ -81,7 +82,7 @@ export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onSplit, on
     );
   return (
     <aside className="sidebar" aria-label="Sidebar">
-      <WorkspaceMenu me={me} workspace={workspace} onSwitch={onSwitch} />
+      <WorkspaceMenu me={me} workspace={workspace} onSwitch={onSwitch} onGo={onGo} />
       {onNewNote && (
         <button type="button" className="button new-note" title={`New note in ${newNoteIn}`} onClick={onNewNote}>
           <Icon name="plus" />
@@ -124,7 +125,7 @@ function ModeLink({ mode, active, onGo, labelled, onMenu }: { mode: Mode; active
   );
 }
 
-function WorkspaceMenu({ me, workspace, onSwitch }: { me: Me; workspace: WorkspaceSummary; onSwitch: (workspaceId: string) => void }) {
+function WorkspaceMenu({ me, workspace, onSwitch, onGo }: { me: Me; workspace: WorkspaceSummary; onSwitch: (workspaceId: string) => void; onGo: (path: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -157,6 +158,16 @@ function WorkspaceMenu({ me, workspace, onSwitch }: { me: Me; workspace: Workspa
             </button>
           ))}
           <hr />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              close();
+              onGo(AGENTS_PATH);
+            }}
+          >
+            Agents
+          </button>
           <button type="button" role="menuitem" onClick={() => signOut().then(() => location.assign("/"))}>
             Sign out
           </button>

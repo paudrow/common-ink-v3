@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
+import { Agents } from "./Agents.tsx";
 import { ApiError, perform } from "./api.ts";
 import { createCommands, type Command } from "./commands.ts";
 import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction, type EditorLayout, type Group, type Opened } from "./editorLayout.ts";
 import { ALL_NOTES, folderTitle, folderTree, pathName, type FolderTree as Tree } from "./folders.ts";
 import { FolderTree } from "./FolderTree.tsx";
-import { HistoryMode, type Scope } from "./History.tsx";
+import { HistoryMode } from "./History.tsx";
 import { Icon, type IconName } from "./icons.tsx";
 import { Inspector, markOf, viewsFor, type Subject } from "./Inspector.tsx";
 import { FIELD_COMMANDS, KEYBINDINGS, advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
@@ -18,14 +19,14 @@ import { INITIAL_VIEW, notesIn } from "./noteListView.ts";
 import { NoteReader } from "./NoteReader.tsx";
 import { Palette } from "./Palette.tsx";
 import { ResizeHandle } from "./resize.tsx";
-import { folderPath, type Navigate, type Route } from "./router.ts";
+import { AGENTS_PATH, folderPath, type Navigate, type Route } from "./router.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { Soon } from "./Soon.tsx";
 import { isBoolean, useStored } from "./stored.ts";
 import { undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
-const FOCUS_KEY = "ink.focus";
+const WRITING_KEY = "ink.writing";
 const SIDEBAR_KEY = "ink.sidebar";
 const INSPECTOR_KEY = "ink.inspector";
 /** How wide the sidebar and the inspector start, and how far a member can drag each. */
@@ -47,8 +48,11 @@ const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el
 const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 const isAnything = (_: unknown): _ is unknown => true;
 
-/** What a tab can hold besides a note and a folder's list: each mode. */
-const PAGES: readonly { id: string; label: string; icon: IconName; path: string }[] = MODES.map((mode) => ({ id: mode.id, label: mode.label, icon: mode.icon, path: modePath(mode.id) }));
+/** What a tab can hold besides a note and a folder's list: each mode, and Agents. */
+const PAGES: readonly { id: string; label: string; icon: IconName; path: string }[] = [
+  ...MODES.map((mode) => ({ id: mode.id, label: mode.label, icon: mode.icon, path: modePath(mode.id) })),
+  { id: "agents", label: "Agents", icon: "agent", path: AGENTS_PATH },
+];
 
 
 const summaryOf = ({ text: _, ...summary }: Note): NoteSummary => summary;
@@ -104,8 +108,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   /** Every note in the workspace, for a folder's list, tab titles, and quick open. */
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
   const [listVersion, setListVersion] = useState(0);
-  /** In focus the tab in front of the focused group fills the window, over everything else, which stays as it is underneath. Which group that is, the layout already says. */
-  const [focusMode, setFocusMode] = useStored(FOCUS_KEY, isBoolean, false);
+  /** Writing mode shows the editor area and neither side, whichever of them is open. */
+  const [writing, setWriting] = useStored(WRITING_KEY, isBoolean, false);
   const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
   /** The inspector's tab the member last picked, kept in this browser as the widths are. Only a pick changes it: what is in front shows it when it has it. */
@@ -122,12 +126,15 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const [palette, setPalette] = useState<"commands" | "notes" | null>(null);
   /** An undo or redo that didn't happen, and why, shown on its note until the member's next step. */
   const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
+  /** An author History mode is asked to show the changes of, until it has. */
+  const [historyAuthor, showHistoryOf] = useState<string | null>(null);
 
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
+  const notesVersion = useMemo(() => (notes ?? []).reduce((sum, n) => sum + n.revision, 0), [notes]);
   const routeNoteId = route.kind === "note" ? route.id : null;
   const current = (routeNoteId && byId.get(routeNoteId)) || null;
   const routeFolderId = route.kind === "folder" ? route.id : null;
-  const routePage = route.kind === "mode" ? PAGES.find((p) => p.id === route.mode) : undefined;
+  const routePage = route.kind === "mode" ? PAGES.find((p) => p.id === route.mode) : route.kind === "agents" ? PAGES.find((p) => p.id === "agents") : undefined;
   /** What the address names in the editor area: the note, the folder's list or the page in front. */
   const opened = useMemo<Opened | null>(
     () => (routeNoteId ? { kind: "note", id: routeNoteId } : routeFolderId ? { kind: "folder", id: routeFolderId } : routePage ? { kind: "page", id: routePage.id, path: routePage.path } : null),
@@ -197,20 +204,16 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     },
     [setEditor, navigate],
   );
-  /**
-   * Back retraces every open and close. Moving between tabs already open is one step however many moves it took, and never takes the place of an open.
-   * A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
-   */
+  /** Back retraces every open and close. Moving between tabs already open is one step however many moves it took, and never takes the place of an open. */
   const dispatch = useCallback(
     (action: EditorAction) => {
       const next = editorReducer(shown.current.editor, action);
-      if ((action.type === "split" || action.type === "send") && next !== shown.current.editor) setFocusMode(false);
       if (action.type !== "resize") return showEditor(next, action.type === "focus" || action.type === "activate");
       // Dragging the edge of a split goes nowhere.
       shown.current.editor = next;
       setEditor(next);
     },
-    [showEditor, setEditor, setFocusMode],
+    [showEditor, setEditor],
   );
 
   useEffect(() => {
@@ -248,25 +251,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   }, [workspaceId, currentId, currentRevision, me.person.id]);
   const unseen = !!current && others?.noteId === current.id && others.revision > (seen[current.id] ?? 0);
 
-  /** Asked for on a group, focus turns to that group first, so what fills the window is its tab in front. */
-  const toggleFocus = useCallback(
-    (groupId?: string) => {
-      if (groupId && groupId !== shown.current.editor.focusedGroupId) dispatch({ type: "focus", groupId });
-      setFocusMode((on) => !on);
-    },
-    [dispatch, setFocusMode],
-  );
+  const toggleWriting = useCallback(() => setWriting((w) => !w), [setWriting]);
   const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), [setSidebarOpen]);
   const toggleInspector = useCallback(() => setInspectorOpen((open) => !open), [setInspectorOpen]);
   const closePalette = useCallback(() => setPalette(null), []);
 
   const go = navigate;
-  /** The notes the History page is narrowed to, when it was opened from a note's or a folder's History tab. */
-  const [historyScope, setHistoryScope] = useState<Scope | null>(null);
-  const openHistory = (scope: Scope | null) => {
-    setHistoryScope(scope);
-    go(modePath("history"));
-  };
 
   /** The note whose editor is to take the cursor once it is there. */
   const [toFocus, setToFocus] = useState<string | null>(null);
@@ -336,7 +326,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       { id: "notes.quickOpen", title: "Go to note…", run: show("notes") },
       { id: "notes.all", title: "Open All notes", run: () => latest.current.openFolder(ALL_NOTES) },
       { id: "commands.show", title: "Show all commands", run: show("commands") },
-      { id: "view.toggleFocus", title: "Toggle focus", run: () => toggleFocus() },
+      { id: "view.toggleWritingMode", title: "Toggle writing mode", run: toggleWriting },
       { id: "view.toggleSidebar", title: "Toggle sidebar", run: toggleSidebar },
       { id: "view.toggleInspector", title: "Toggle inspector", run: toggleInspector },
       { id: "tab.keep", title: "Keep tab open", run: onTab((tab) => ({ type: "pin", ...tab })) },
@@ -347,10 +337,11 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       { id: "tab.moveToPreviousGroup", title: "Move tab to previous group", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) },
       { id: "tab.menu", title: "Show tab menu", run: showTabMenu },
       ...MODES.map((mode) => ({ id: `go.${mode.id}`, title: `Go to ${mode.label}`, run: () => latest.current.go(modePath(mode.id)) })),
+      { id: "go.agents", title: "Go to Agents", run: () => latest.current.go(AGENTS_PATH) },
     ];
     const unregister = all.map((command) => commands.register(command));
     return () => unregister.forEach((off) => off());
-  }, [commands, canEdit, dispatch, toggleFocus, toggleSidebar, toggleInspector, workspaceId, remember]);
+  }, [commands, canEdit, dispatch, toggleWriting, toggleSidebar, toggleInspector, workspaceId, remember]);
 
   useEffect(() => {
     let pending = "";
@@ -413,13 +404,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   );
   /** What is in front, for the inspector to be about: the tab in front of the focused group. Null while it loads. */
   const subject = ((): Subject | null => {
-    if (routeNoteId)
-      return current && tree ? { kind: "note", workspaceId, me: me.person.id, note: current, tree, canEdit, onMove: moveNote, unseen, onSeen: markSeen, onReverted: refresh, onOpenNote: (id) => openNote(id), onOpenHistory: openHistory } : null;
+    if (routeNoteId) return current && tree ? { kind: "note", workspaceId, note: current, tree, canEdit, onMove: moveNote, unseen, onSeen: markSeen, onChanged: remember } : null;
     if (!routeFolderId) return { kind: "page" };
     if (!tree || !notes) return null;
     const name = folderTitle(tree, routeFolderId);
     if (name === null) return { kind: "page" };
-    return { kind: "folder", workspaceId, me: me.person.id, name, notes: notesIn(notes, routeFolderId), whole: routeFolderId === ALL_NOTES, canEdit, onOpenNote: (id) => openNote(id), onReverted: refresh, onOpenHistory: openHistory };
+    return { kind: "folder", workspaceId, name, notes: notesIn(notes, routeFolderId), whole: routeFolderId === ALL_NOTES, canEdit, onOpenNote: (id) => openNote(id), onChanged: remember };
   })();
   const pick = setPicked;
   const activeMode = route.kind === "mode" ? route.mode : null;
@@ -459,8 +449,28 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     const mode = MODES.find((m) => m.id === pageId);
     return (
       <div className="page-pane" key={pageId}>
-        {pageId === "history" ? (
-          <HistoryMode workspaceId={workspaceId} me={me.person.id} notes={notes ?? []} canEdit={canEdit} scope={historyScope} onScope={setHistoryScope} onOpenNote={(id) => openNote(id)} onChanged={refresh} />
+        {pageId === "agents" ? (
+          <Agents
+            workspace={workspace}
+            workspaces={me.workspaces}
+            version={notesVersion}
+            onShowChanges={(agentId) => {
+              showHistoryOf(`agent:${agentId}`);
+              go(modePath("history"));
+            }}
+            onReverted={refresh}
+          />
+        ) : pageId === "history" ? (
+          <HistoryMode
+            workspaceId={workspaceId}
+            notes={notes ?? []}
+            canEdit={canEdit}
+            showAuthor={historyAuthor}
+            onShownAuthor={() => showHistoryOf(null)}
+            onOpenNote={(id) => openNote(id)}
+            onChanged={remember}
+            onReverted={refresh}
+          />
         ) : mode ? (
           <ModeView mode={mode.id} />
         ) : (
@@ -470,44 +480,59 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     );
   };
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
-  /** The buttons that act on the window and on no one note, together where the sidebar meets the editor area: before the first tab of the top left group. */
-  const controls = (
-    <div className="window-controls" role="group" aria-label="Window">
-      <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
-        <Icon name="sidebar" />
-      </button>
-      <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
-        <Icon name="inspector" />
-      </button>
-    </div>
-  );
+  /** The buttons that act on the window and on no one note. The editor area puts them at the ends of its tab rows: the sidebar's before the first tab at the top left, the rest after the last at the top right. */
+  const controls = {
+    start: !writing && (
+      <div className="window-controls" role="group" aria-label="Window">
+        <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
+          <Icon name="sidebar" />
+        </button>
+      </div>
+    ),
+    end: (
+      <div className="window-controls end" role="group" aria-label="Window">
+        {!writing && (
+          <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
+            <Icon name="inspector" />
+          </button>
+        )}
+        <button type="button" className="icon-button" aria-label="Writing mode" title={`Writing mode (${shortcut("view.toggleWritingMode")})`} aria-pressed={writing} onClick={toggleWriting}>
+          <Icon name="writing" />
+        </button>
+      </div>
+    ),
+  };
 
   return (
-    <div className="app" data-focus-mode={focusMode || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
-      <Sidebar
-        me={me}
-        workspace={workspace}
-        activeMode={activeMode}
-        onSwitch={onSwitch}
-        onGo={go}
-        onSplit={openBeside}
-        onNewNote={canEdit ? () => void createNote() : undefined}
-        newNoteIn={(frontFolderId && tree?.byId.get(frontFolderId)?.name) || "Unsorted"}
-        open={sidebarOpen}
-        onOpen={() => setSidebarOpen(true)}
-      >
-        {folders}
-      </Sidebar>
-      {sidebarOpen && (
-        <ResizeHandle
-          label="Resize sidebar"
-          orientation="vertical"
-          value={sidebarWidth}
-          {...SIDEBAR}
-          step={WIDTH_STEP}
-          onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
-          onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
-        />
+    <div className="app" data-writing={writing || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+      {!writing && (
+        <>
+          <Sidebar
+            me={me}
+            workspace={workspace}
+            activeMode={activeMode}
+            onSwitch={onSwitch}
+            onGo={go}
+            onSplit={openBeside}
+            onNewNote={canEdit ? () => void createNote() : undefined}
+            newNoteIn={(frontFolderId && tree?.byId.get(frontFolderId)?.name) || "Unsorted"}
+            open={sidebarOpen}
+            onOpen={() => setSidebarOpen(true)}
+          >
+            {folders}
+          </Sidebar>
+          {sidebarOpen && (
+            <ResizeHandle
+              label="Resize sidebar"
+              orientation="vertical"
+              value={sidebarWidth}
+              {...SIDEBAR}
+              step={WIDTH_STEP}
+              onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
+              onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
+            />
+          )}
+        </>
       )}
 
       <main className="main" aria-label="Editor">
@@ -521,46 +546,46 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
             render={(group, tab) => (tab.kind === "folder" ? renderFolder(tab.id) : tab.kind === "page" ? renderPage(tab.id) : renderNote(group, tab.id))}
             empty={empty}
             controls={controls}
-            focusMode={{ on: focusMode, keys: shortcut("view.toggleFocus"), toggle: toggleFocus }}
           />
         )}
       </main>
 
-      {inspectorOpen ? (
-        <>
-          <ResizeHandle
-            label="Resize inspector"
-            orientation="vertical"
-            value={inspectorWidth}
-            {...INSPECTOR}
-            step={WIDTH_STEP}
-            perPixel={() => -1}
-            onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
-            onReset={() => setWidths(({ inspector: _, ...w }) => w)}
-          />
-          <Inspector subject={subject} picked={picked} onPick={pick} />
-        </>
-      ) : (
-        <nav className="rail" aria-label="Inspector bar">
-          {viewsFor(subject).map((v) => (
-            <button
-              key={v.id}
-              type="button"
-              className="icon-button"
-              aria-label={v.label}
-              title={v.label}
-              aria-description={markOf(v, subject)}
-              onClick={() => {
-                pick(v.id);
-                setInspectorOpen(true);
-              }}
-            >
-              <Icon name={v.icon} />
-              {markOf(v, subject) && <span className="unseen-dot" />}
-            </button>
-          ))}
-        </nav>
-      )}
+      {!writing &&
+        (inspectorOpen ? (
+          <>
+            <ResizeHandle
+              label="Resize inspector"
+              orientation="vertical"
+              value={inspectorWidth}
+              {...INSPECTOR}
+              step={WIDTH_STEP}
+              perPixel={() => -1}
+              onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
+              onReset={() => setWidths(({ inspector: _, ...w }) => w)}
+            />
+            <Inspector subject={subject} picked={picked} onPick={pick} />
+          </>
+        ) : (
+          <nav className="rail" aria-label="Inspector bar">
+            {viewsFor(subject).map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className="icon-button"
+                aria-label={v.label}
+                title={v.label}
+                aria-description={markOf(v, subject)}
+                onClick={() => {
+                  pick(v.id);
+                  setInspectorOpen(true);
+                }}
+              >
+                <Icon name={v.icon} />
+                {markOf(v, subject) && <span className="unseen-dot" />}
+              </button>
+            ))}
+          </nav>
+        ))}
       {palette === "commands" && (
         <Palette
           key="commands"

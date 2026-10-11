@@ -1,6 +1,6 @@
 # Connecting an agent
 
-A member connects an agent and gets a token for it. The agent sends the token to `/mcp` (the MCP server) or uses the `ink` command, which calls `/mcp`. Both go through the same operations as the web app (`src/core/operations.ts`), as the member who connected the agent.
+A member connects an agent in the web app, on the Agents page (`/agents`, from the workspace menu or the "Go to Agents" command), and gets a token for it. The page shows the token once with the command to paste, lists the member's agents, and disconnects them. The agent sends the token to `/mcp` (the MCP server) or uses the `ink` command, which calls `/mcp`. Both go through the same operations as the web app (`src/core/operations.ts`), as the member who connected the agent.
 
 ## Rules
 
@@ -27,15 +27,11 @@ Optional fields on the POST: `label` (up to 60 characters), `expiresInDays` (def
 
 `POST /mcp` with `Authorization: Bearer cink_...` and `Content-Type: application/json`. Streamable HTTP, stateless: one JSON-RPC message (or a batch) per POST, answered as JSON. No server-sent events, no sessions. Without a valid token the answer is 401.
 
-Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `note_history`, and for history `history_summary`, `history`, `change_diff`, `history_authors`, `history_diff`, `preview_reverts`, `revert_many`, `label_revision`, `revert_note`, `revert_changes`, `preview_revert`, `undo`, `redo`. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace.
+Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `move_note`, `note_history`, for folders `list_folders`, `create_folder`, `rename_folder`, `delete_folder`, and for history `history_summary`, `history`, `change_diff`, `history_authors`, `label_revision`, `revert_note`, `revert_changes`, `revert_author`, `undo`, `redo`. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace. An argument a tool doesn't take is refused by name, not left out.
 
-History only goes forward. A revert, an undo, or a redo is a new change under the agent's name that names the changes it reverted (`reverts`), and each change it reverted names it (`revertedBy`). There is no putting a change back: to have a reverted change again, revert the change that reverted it, which `revert_changes` does like any other, however many reverts deep. `revert_changes` refuses a change that is already reverted and names the change to revert instead. Read history from the top down: `history_summary` lists the notes that changed, latest first, each with its count of changes and the lines they added and removed; `history` lists changes, each with the lines it added and removed (`added`, `removed`) and, unless `diffs` is false, its diff; `change_diff` reads one change's diff. All three take the same `noteIds`, `authors` and time range, and a summary counts only the changes that match. `history` filters by `authors`, so an agent's changes can be listed on their own and passed to `revert_changes`. `preview_revert` says what a revert would do and writes nothing: pass `revisions` for what `revert_changes` would do or `to` for what `revert_note` to that revision would do, and it answers with the note's `revision` it was worked out at, the `revisions` that would be reverted, the `diff` from the note as it is to the note after, `overlaps`, the later changes that still stand and edited the same lines, and `conflicts`, each place they did, top of the note first: the lines as they were before the reverted changes (`before`), as they are now (`now`), as the revert leaves them with the later edits kept (`kept`, starting at `line` of the result), and the later changes that edited them with their authors (`later`). What a later change did to other lines is no conflict and always stays. A revert settles each conflict with a choice, passed as `resolve: { at, choices }` to `revert_changes` or `revert_note`: `"keep"` keeps the later edits on a line the revert otherwise returns to how it was (what a revert does when `resolve` is left out), `"back"` returns the lines to `before` and drops the later edits to them, and `{ "text": "..." }` puts the lines given there (an empty string for none). `choices` is one of the first two for every conflict, or a list with a choice for each in the order the preview lists them; `at` is the `revision` the preview answered with, and the revert is refused when the note has changed since, so preview again. Pass the same `resolve` to `preview_revert` to read the diff of the revert settled that way. The revert is one change whichever way its conflicts are settled, and reverting it takes what was chosen out with it. It refuses what the revert itself would refuse, in the same words. A read-only token can list history and preview a revert, and is refused the rest.
+Every operation the web app performs has a tool with the same fields, and every tool has an `ink` command. `test/core/agent-parity.test.ts` reads the operation schema and fails when one is missing; an operation kept from agents on purpose is listed with its reason in `NOT_FOR_AGENTS` (`src/worker/mcp/tools.ts`). Connecting and disconnecting agents is not an operation: it needs a member's session, so an agent can't make another token.
 
-A selection of changes across notes is read and reverted in one call each. `history_diff` takes `changes`, up to 40 notes each as `{ noteId, revisions }`, and answers note by note: a note's selected changes that follow one another are one run with one diff, from the note before the first to the note after the last, and a run after changes that were left out says how many it `skipped`. One answer holds about 2000 diff lines; a run past them has `diff: null` and its note asked for alone returns it. `preview_reverts` says what `revert_many` would do to each note and writes nothing. `revert_many` reverts each note as one new change and answers with `reverted` and `skipped`: a note is skipped, never half-reverted, when it is no longer at the revision passed as `at` (`changed`), when the revert would change nothing (`nothing`), or when it can't be made (`refused`, with the reason). A selected change that was already reverted is left as it is and listed in the preview's `already`. To undo a revert, revert the revision it made with `at` set to that revision: the note is skipped if it has been edited since. `history_summary` and `history` also take `by`, `"people"` or `"agents"`.
-
-    npm run ink -- diffs <id>:<n>,<n> <id>:<n>
-    npm run ink -- revert-many <id>:<n>,<n> <id>:<n> --preview
-    npm run ink -- revert-many <id>:<n>,<n>@<revision of the preview> <id>:<n>@<revision of the preview>
+History only goes forward. A revert, an undo, or a redo is a new change under the agent's name that names the changes it reverted (`reverts`), and each change it reverted names it (`revertedBy`). There is no putting a change back: to have a reverted change again, revert the change that reverted it, which `revert_changes` does like any other, however many reverts deep. `revert_changes` refuses a change that is already reverted and names the change to revert instead. Read history from the top down: `history_summary` lists the notes that changed, latest first, each with its count of changes and the lines they added and removed; `history` lists changes, each with the lines it added and removed (`added`, `removed`) and, unless `diffs` is false, its diff; `change_diff` reads one change's diff. All three take the same `noteIds`, `authors` and time range, and a summary counts only the changes that match. `history` filters by `authors`, so an agent's changes can be listed on their own and passed to `revert_changes`. `revert_author` reverts every change one author made that still stands, across the workspace or in `noteIds`, as one new change in each note by whoever asks. It leaves alone what somebody else already reverted and what the author undid themselves, and has stand again what the author reverted of others'. It covers ten notes a call and reads only those notes: while the answer's `next` isn't null, call again with it as `after`. A note that refuses the change, such as one it would make too long, is left as it was and named in `failed`, and the notes after it are still covered. A note the revert leaves with no text, such as one the author created, is named in `emptied` with the title it had: it stays, since there is no deleting a note yet. `ink revert-author` makes those calls itself until every note is covered. The web app does the same from an agent's entry on the Agents page and from History mode when it is filtered to one agent. A read-only token can list history and is refused the rest.
 
 Most clients take a URL and a header:
 
@@ -43,10 +39,15 @@ Most clients take a URL and a header:
 
 ## The `ink` command
 
-    INK_TOKEN=cink_... INK_URL=https://commonink.app npm run ink -- notes
+    INK_TOKEN=cink_... INK_URL=https://commonink.app npm run ink -- notes [--folder <id>] [--since 2026-10-01]
     npm run ink -- read <id> [--revision N]
-    echo "# Title" | npm run ink -- create
+    echo "# Title" | npm run ink -- create [--folder <id>]
     echo "# Title\n\nmore" | npm run ink -- write <id> --base <revision>
+    npm run ink -- move <id> --folder <folder id>
+    npm run ink -- folders
+    npm run ink -- folder-create "Plans" [--parent <folder id>]
+    npm run ink -- folder-rename <folder id> --name "Plans"
+    npm run ink -- folder-delete <folder id>
     npm run ink -- changed [--note <id>,<id>] [--author agent:<id>] [--from 2026-10-01] [--to 2026-10-08]
     npm run ink -- history <id>
     npm run ink -- diff <id> --change <n>
@@ -55,10 +56,7 @@ Most clients take a URL and a header:
     npm run ink -- label <id> --revision <n> --name "Draft"
     npm run ink -- revert <id> --revision <n>
     npm run ink -- revert <id> --changes <n>,<n>
-    npm run ink -- revert <id> --changes <n>,<n> --preview
-    npm run ink -- revert <id> --revision <n> --preview
-    npm run ink -- revert <id> --changes <n> --resolve back --at <revision of the preview>
-    npm run ink -- revert <id> --changes <n> --resolve '["keep", {"text": "the line, typed out"}]' --at <revision of the preview>
+    npm run ink -- revert-author agent:<id> [--note <id>,<id>]
     npm run ink -- undo <id>
     npm run ink -- redo <id>
     npm run ink -- workspaces

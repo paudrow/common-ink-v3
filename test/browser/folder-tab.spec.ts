@@ -107,7 +107,7 @@ test("a folder's tab has an address that Back, Forward, a reload and a link all 
   await page.reload();
   // The note's preview gave way to All notes when Back came to it.
   await expect(tabs(page)).toHaveText(["Projects", "All notes"]);
-  await expect.poll(() => italic(page)).toEqual([false, true]);
+  expect(await italic(page)).toEqual([false, true]);
   await expect(tab(page, "Projects")).toHaveAttribute("aria-selected", "true");
   await expect(heading(page)).toHaveText("Projects");
 
@@ -194,7 +194,7 @@ test("a card expands to its note drawn to be read, which nothing in it changes, 
   await card.getByRole("button", { name: "Expand Plan" }).click();
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(tabs(page)).toHaveText(["Projects", "Plan"]);
-  await expect.poll(() => italic(page)).toEqual([true, false]);
+  expect(await italic(page)).toEqual([true, false]);
   await expect(editor(page)).toBeFocused();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("- [ ] and paper");
@@ -212,14 +212,14 @@ test("a card's title and its pencil open the note with the cursor in it, the tit
 
   await listedNote(page, "Plan").click();
   await expect(tabs(page)).toHaveText(["Plan"]);
-  await expect.poll(() => italic(page)).toEqual([true]);
+  expect(await italic(page)).toEqual([true]);
   await expect(editor(page)).toBeFocused();
 
   await openAllNotes(page);
   await noteCard(page, "Monday").hover();
   await noteCard(page, "Monday").getByRole("button", { name: "Edit Monday" }).click();
   await expect(tabs(page)).toHaveText(["All notes", "Monday"]);
-  await expect.poll(() => italic(page)).toEqual([true, false]);
+  expect(await italic(page)).toEqual([true, false]);
   await expect(editor(page)).toBeFocused();
   await expect(page.locator(".cm-line").first()).toHaveText("# Monday");
 });
@@ -230,7 +230,7 @@ test("⌘-click or a middle click on a title or a collapsed card opens the note 
 
   await listedNote(page, "Plan").click({ modifiers: ["ControlOrMeta"] });
   await expect(tabs(page)).toHaveText(["All notes", "Plan"]);
-  await expect.poll(() => italic(page)).toEqual([true, false]);
+  expect(await italic(page)).toEqual([true, false]);
   await expect(tab(page, "All notes")).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveURL(/\/folder\/all$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All notes");
@@ -310,16 +310,16 @@ test("a card's title and details stay where they are when it expands, shows the 
       await card.getByRole("button", { name: "Expand B long note" }).click();
       await expect(card.locator(".cm-line").first()).toHaveText("# B long note");
       await expect(card.getByRole("button", { name: "Show whole note" })).toBeVisible();
-      await expect.poll(() => placed(page, long.id), `expanded at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
+      expect(await placed(page, long.id), `expanded at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
 
       await card.getByRole("button", { name: "Show whole note" }).click();
       await expect(card.getByRole("button", { name: "Show less" })).toBeVisible();
       expect((await card.boundingBox())!.height).toBeGreaterThan(1500);
-      await expect.poll(() => placed(page, long.id), `whole note at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
+      expect(await placed(page, long.id), `whole note at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
 
       await card.getByRole("button", { name: "Collapse B long note" }).click();
       await expect(card.locator(".cm-line")).toHaveCount(0);
-      await expect.poll(() => placed(page, long.id), `collapsed at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
+      expect(await placed(page, long.id), `collapsed at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
     }
   }
 });

@@ -1,42 +1,12 @@
 import { z } from "zod";
 import { newId } from "./ids.ts";
-import { OpError } from "./protocol.ts";
+import { ConnectOptions, MAX_AGENT_NAME, OpError, type Agent } from "./protocol.ts";
 
 export const TOKEN_PREFIX = "cink_";
 export const MAX_ACTIVE_AGENTS = 20;
-export const MAX_AGENT_NAME = 60;
-export const DEFAULT_EXPIRY_DAYS = 90;
-export const MAX_EXPIRY_DAYS = 365;
 const DAY = 86_400_000;
 /** How often an agent's "last used" time is rewritten, so a busy agent doesn't write on every call. */
 const LAST_USED_EVERY = 10 * 60_000;
-
-export interface Agent {
-  id: string;
-  name: string;
-  /** Tells this token from the member's other tokens under the same name, e.g. "laptop". */
-  label: string | null;
-  /** The first characters of its token, to tell tokens apart. Not enough to use it. */
-  tokenPrefix: string;
-  createdAt: number;
-  /** After this the token stops working. */
-  expiresAt: number;
-  lastUsedAt: number | null;
-  revokedAt: number | null;
-  /** The one workspace this token can reach, or null for every workspace its member can reach. */
-  workspaceId: string | null;
-  /** A read-only token can't change anything, whatever its member's role. */
-  readOnly: boolean;
-}
-
-/** What a member may ask for when connecting an agent. */
-export const ConnectOptions = z.object({
-  label: z.string().trim().max(MAX_AGENT_NAME).optional(),
-  expiresInDays: z.number().int().min(1).max(MAX_EXPIRY_DAYS).default(DEFAULT_EXPIRY_DAYS),
-  workspaceId: z.string().regex(/^[a-z0-9]{12}$/, "not an id").optional(),
-  readOnly: z.boolean().default(false),
-});
-export type ConnectOptions = z.input<typeof ConnectOptions>;
 
 /** An agent as a request names it: whose it is, so what it may reach. */
 export interface ConnectedAgent {
