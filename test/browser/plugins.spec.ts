@@ -210,6 +210,10 @@ test("a stopwatch written in a note is drawn in it and runs, and is plain text a
   await expect(watch).toHaveAttribute("aria-pressed", "true");
   await watch.click();
   await expect(watch).toHaveAttribute("aria-pressed", "false");
+  // Its time is kept in the note, so it is set back before the note is compared with what was written.
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toMatch(/Time me ::stopwatch\{at=\ds\} here/);
+  await text(page).getByRole("button", { name: "Reset stopwatch" }).click();
+  await expect(watch).toHaveText(["0:00"]);
 
   await run(page, "Disable plugin: Stopwatch");
   await expect(watch).toHaveCount(0);

@@ -36,8 +36,11 @@ _Avoid_: Folder, tag
 **Daily note**:
 A note for one calendar date, belonging to one member. Its heading is that date in that member's timezone. Which member it belongs to is stored outside the note. The folder comes from that member's settings, and the default is Daily. Changing that setting leaves daily notes already created where they are. An agent files a completion on the connecting member's daily note.
 
+**Kanban board**:
+A block embed whose body is markdown: each heading is a column and each list item under it is a card. Anything else in the body is kept and not shown.
+
 **Kanban card**:
-A list item inside a kanban block in a note.
+A list item inside a kanban block in a note. Moving it on the board moves its lines in the note, as a change by the member who moved it.
 _Avoid_: Todo
 
 **Data source**:
@@ -156,7 +159,7 @@ A name attached to one revision in history. A revision has at most one, and a no
 ## Configuration
 
 **Plugin**:
-A unit of functionality that adds commands, views, embeds, editor extensions, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves in settings, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
+A unit of functionality that adds commands, views, embeds, completions, editor extensions, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves in settings, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
 _Avoid_: Extension, add-on
 
 **Built-in plugin**:
@@ -166,18 +169,38 @@ A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs 
 The part of the core that turns plugins on and off, hands each one its reach into the workspace, and keeps what each has contributed.
 
 **Contribution**:
-One thing a plugin adds: a command, a view, an embed, or an editor extension. It is there while its plugin is on.
+One thing a plugin adds: a command, a view, an embed, a completion, or an editor extension. It is there while its plugin is on.
 
 **View**:
-Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, an inspector tab, a page, an overlay, or an icon in a rail.
-_Avoid_: Panel, widget
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, an inspector tab, a page, the bottom bar, an overlay, or an icon in a rail.
+_Avoid_: Panel
 
 **Page**:
 A view with its own address, shown in place of the editor, such as History or Agents.
 _Avoid_: Mode, screen
 
 **Embed**:
-Content a plugin draws inside a note where the note says `::name{config}`, such as a stopwatch or HTML. It is handed its config and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written.
+Content a plugin draws inside a note where the note says `::name{config}`, such as a timer or HTML. It is handed what the note says of it and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Everything it knows is in the note, so it can rewrite its own config and body, which is a change by the member who was using it. A timer or stopwatch keeps when it started there, so it runs the same for everyone reading the note. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written. An inline embed is shown as written while the cursor is on it. A block embed stays drawn, and its markdown is shown under it only when the member asks to edit it.
+
+**Block embed**:
+An embed written on lines of its own: `:::name{config}`, then its body as markdown, then `:::`. A kanban board is one.
+
+**Widget**:
+A small live thing a plugin adds, to glance at or press: a timer, a board, a count. It lives in one of three places. In a note it is an embed, inline or block, and what it knows is in the note. In the bottom bar it shows something about the open note or the app. Started from the command palette, it has no place in any note, shows in the bottom bar, and keeps what it knows in this browser. A widget never flashes: it is drawn whole at its size when it first appears, and changed where it stands after.
+_Avoid_: Gadget, applet
+
+**Bottom bar**:
+The line along the bottom of the app where plugins put widgets, such as the open note's running timers, a quick timer, and the word count. It is there in writing mode too, and is the same height whatever is in it.
+_Avoid_: Status bar, footer
+
+**Quick timer**:
+A timer started from the command palette that belongs to no note. It shows in the bottom bar and is kept in the member's browser for that workspace: it runs on through a reload there, and nobody else sees it.
+
+**Embed menu**:
+The list of embeds that opens at the cursor when a member types `/` at the start of a line or after a space. Typing filters it, and picking one writes that embed into the note.
+
+**Completion**:
+A list a plugin offers at the cursor while the member types after a trigger. The embed menu is one.
 
 **Editor extension**:
 Something a plugin adds to the editor of every note, such as keys or a status line. It applies to notes already open, and not to the settings JSON.

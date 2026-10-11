@@ -17,6 +17,7 @@
     "deploy": "npm run build && wrangler d1 migrations apply DB --remote && wrangler deploy"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-markdown": "^6.5.2",

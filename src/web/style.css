@@ -894,20 +894,295 @@ button.link:hover {
   display: inline-block;
 }
 
-.stopwatch {
-  padding: 0 8px;
+.embed-block {
+  display: block;
+  padding: 6px 0;
+}
+
+.clock,
+.clock-reset {
+  /* The border is taken back out of the line's height, so a line with a clock in it is as tall as one without. */
+  margin-block: -1px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg-side);
   color: inherit;
   font: inherit;
-  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
-.stopwatch[aria-pressed="true"] {
+.clock {
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock:disabled {
+  cursor: default;
+}
+
+.clock[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.clock.done {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.clock-reset {
+  margin-left: 3px;
+  padding: 0 6px;
+  color: var(--muted);
+}
+
+/* Drawn here and not written in the button, so the time is the only text a stopwatch adds to its line. */
+/* Kept in its place and out of sight, so the line is as wide before the clock starts as after. Not hidden outright, which the caret is lost beside. */
+.clock-reset:disabled {
+  opacity: 0;
+  cursor: default;
+}
+
+.clock-reset::before {
+  content: "↺";
+}
+
+.clock-unread {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.kanban {
+  font-family: var(--prose);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.kanban-columns {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.kanban-column {
+  flex: 1 0 8rem;
+  max-width: 18rem;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-side);
+}
+
+.kanban-column.drop {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.kanban-column h3 {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 2px 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.kanban-count {
+  color: var(--faint);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.kanban-cards {
+  display: grid;
+  gap: 6px;
+  min-height: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kanban-card {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  cursor: grab;
+  overflow-wrap: anywhere;
+}
+
+.kanban-card:focus-visible,
+.kanban-add:focus-visible,
+.kanban-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.kanban-card.dragging {
+  opacity: 0.4;
+}
+
+.kanban-card-more {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.kanban-add,
+.kanban-edit {
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kanban-add {
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.kanban-add::before {
+  content: "+ ";
+}
+
+.kanban-add:hover,
+.kanban-edit:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.kanban-add-text {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.kanban-edit {
+  margin-top: 2px;
+  padding: 2px 6px;
+}
+
+.kanban-empty p {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
+.app[data-bar] {
+  box-sizing: border-box;
+  padding-bottom: 26px;
+}
+
+.bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-side);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.bar-item {
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-end {
+  margin-left: auto;
+}
+
+button.bar-item {
+  cursor: pointer;
+}
+
+button.bar-item:hover,
+button.bar-item:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
+}
+
+.bar-clock {
+  color: var(--accent);
+}
+
+.bar-clock[data-done] {
+  color: var(--danger);
+}
+
+.quick-timer-how {
+  margin: 0;
+  padding: 8px 14px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quick-timer input[aria-invalid="true"] {
+  color: var(--danger);
+}
+
+/* The list a completion offers at the cursor, such as the embed menu. */
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete {
+  border: 0;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  font-family: var(--prose);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul {
+  max-height: 16rem;
+  padding: 4px;
+  font-family: inherit;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li {
+  padding: 4px 8px;
+  border-radius: 5px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.cm-editor .cm-tooltip-autocomplete .cm-completionDetail {
+  margin-left: 1em;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-style: normal;
 }
 
 .plugins {

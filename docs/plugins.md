@@ -56,8 +56,9 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 ## What a plugin is handed
 
 - `host.commands` registers commands, lists every command, and runs one by id. A command's `keys` are its default chords.
-- `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `rail`, `editor`, `inspector`, `page`, and `overlay`. A page gets a `go.<id>` command.
-- `host.embeds` registers an embed, drawn wherever a note says `::name{config}`.
+- `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `rail`, `editor`, `inspector`, `page`, `bar`, and `overlay`. A page gets a `go.<id>` command.
+- `host.embeds` registers an embed, drawn wherever a note says `::name{config}`, or `:::name{config}` … `:::` for a block embed. `host.embeds.list()` is every embed that is on, as a menu would offer them.
+- `host.completions` registers a completion: a list offered at the cursor while the member types after a trigger, such as the embed menu on `/`.
 - `host.editorExtensions` registers an editor extension, added to the editor of every note. It is a value, or a function of the editor that is told its note.
 - `host.onNavigate(listener)` calls the listener each time the app arrives at an address.
 - `host.report(error)` says on the Plugins page that the plugin is on and something it is for didn't work.
@@ -82,6 +83,81 @@ A plugin cannot change settings. The host has no call for it, and `host.perform`
 Some names are the app's. A command whose id starts with `go.`, `plugins.`, or `settings.` is refused, and so is a page at an address another page has, and the plugin that asked doesn't start. A page still gets its `go.<id>` command, which the host adds. The core and the Settings and Plugins pages start before every other plugin, so none can take an id they need.
 
 The name `enabled` is taken. Every plugin that can be turned off has the setting `<id>.enabled`, and a plugin that declares its own doesn't start.
+
+## Widgets and where they live
+
+A widget is a small live thing to glance at or press. There are three places one lives, and each has a built-in plugin or two that can be turned off like any other.
+
+| Where | How a plugin adds one | Where its state is | Built in |
+| --- | --- | --- | --- |
+| In a note, inline | `host.embeds.register({ name, render })`, written `::name{config}` | The note: its config | Timer (`timer`), Stopwatch (`stopwatch`) |
+| In a note, as a block | `host.embeds.register({ name, block: true, render })`, written `:::name{config}` … `:::` | The note: its config and body | Kanban board (`kanban`) |
+| The bottom bar | `host.views.register("bar", { id, component })` | Whatever it shows: the open note, the app | Note clocks (`note-clocks`), Word count (`word-count`) |
+| From the command palette only | A command that opens an `overlay` to ask what it needs, and a `bar` view that shows it | This browser, for this workspace: `host.storage` | Quick timer (`quick-timer`) |
+
+Every embed is in the `/` menu, and every command-started widget is a command in the palette.
+
+The other slots are not places for widgets. `column`, `section`, `editor`, and `page` are the structure of the app: where notes are found and read. A `section` is in a popover in writing mode, so a widget there would be out of sight just when a timer matters. `rail` holds icons that open something, not things that are live themselves. The `inspector` holds tabs about the open note, and which tabs it has is part of the product (History, Backlinks, Info), so a count or a clock is in the bar and not a fourth tab. An `overlay` is where a command-started widget asks its question, not where it stays.
+
+**The bottom bar** is one line along the bottom of the app, drawn only while some plugin has a view in it. It is 26px tall whatever is in it, in writing mode too, so a widget that appears or goes moves nothing above it. A bar view that has nothing to show draws nothing. `plugins/lib/openNotes.ts` gives a bar widget the open note's text as the editor has it, typing not yet saved included, through an editor extension of the plugin's own.
+
+**A widget with no note** says where its state is. The quick timer keeps `{ length, since }` under `host.storage`: it runs on through a reload in this browser, another browser doesn't have it, nobody else sees it, there is one at a time, and nothing is written to any note or to History. A viewer can run one.
+
+**Widgets don't flash.** A widget appears whole, at its size, in the first frame it is in, and is changed where it stands after that. `test/browser/widgets-steady.spec.ts` watches every frame from the start of the page, through a reload, typing elsewhere, someone else's change, the embed's own rewrite, the cursor passing, a plugin turned off, and a tab or split opening: no frame shows an embed as written or empty, none is taken out of the page, and each stays the same element at the same place and size. What that asks of a plugin:
+
+- Register an embed in `activate`, not after something has loaded, and draw all of it before `render` returns. An embed whose drawing needs code that isn't loaded yet still registers at once and draws a holder of its final size, which it fills in place. Otherwise the note shows `::name{}` first.
+- Give `render` a `Drawn` with `update` when the embed can change what it drew, as the clocks do: the same button shows the new time. Without it the embed's element is emptied and drawn again in one step, which keeps the element and its place and loses anything inside it that the embed didn't keep itself, as kanban keeps a half-typed card.
+- Keep its size when its state changes. The clock's reset button is there, unseen, before there is anything to reset, so starting it doesn't push the rest of the line along.
+- A tab that comes back makes its editor again, so those are new elements, drawn whole in their first frame.
+
+## Embeds
+
+An embed is drawn where a note writes its name. An inline embed is written `::name{config}` on one line. A block embed, one registered with `block: true`, is written on lines of its own:
+
+```
+:::kanban{}
+## To do
+- write the announcement
+## Done
+:::
+```
+
+The lines between the opening and the closing `:::` are its body. An embed is written one way: `::kanban{}` and `:::timer{5m}` … `:::` both stay as text. So does a block with no closing line, one inside a code fence, and any name nobody registered.
+
+With the cursor on an inline embed it is shown as written, so it can be changed as text, the way the markup around it is. The line is as tall either way. A block is different: it stays drawn, with its lines hidden under the drawing, and the cursor steps over them, by arrow key or vim's `j` and `k`, so passing a board changes nothing. `embed.edit()`, which is kanban's "Edit as markdown", puts the cursor in the lines and shows them under the board, which stays where it is and follows what is typed. They are hidden again when the cursor leaves them.
+
+`render(el, embed)` draws into `el` and is handed `embed.config`, `embed.body` (a block's lines, each with its line break), `embed.readOnly`, and two functions:
+
+- `embed.update({ config, body })` rewrites the embed in the note. It is an ordinary edit in that editor by the member: it is saved with their typing, synced, recorded in History as their change, and undone the way typing is. Give only what changes. The edit covers only the characters that differ, so typing elsewhere and other people's changes merge around it.
+- `embed.edit()` puts the cursor in the embed as written, and for a block shows its lines.
+
+`embed.readOnly` is true when the member can't change the note, as a viewer can't. The note's editor is then read-only as a whole: no typing, no keys, and `update` does nothing, whatever calls it. An embed draws what it shows and leaves out the controls that would call `update`: the timer is a time that can't be pressed, and the board has no "Add a card" and nothing to drag.
+
+`update` called from inside `render` is carried out right after the drawing, since the editor can't be changed while it draws. An embed that tidies its own config that way is drawn twice.
+
+Two members can act on one embed before either sees the other's change, and the server merges their writes as text. An embed's reading of its config should stand that: two presses of one timer leave two `since=` words, and the timer reads the last and writes one back on the next press. Two moves of one kanban card to different columns leave the card in both, which a merge of text can't tell from two cards, so one of them is deleted by hand.
+
+An embed keeps what it knows in the note. The timer keeps its length and how it is running in its config (`::timer{5m since=2026-10-10T12:00:00.000Z}`), so a reload and another member see the same time, and nothing ticks into the note: the time shown is worked out from the instant it started. Kanban keeps nothing but the markdown: `parseBoard` and `serializeBoard` in `plugins/kanban/board.ts` read the body into columns and cards and write it back line for line, so what a board doesn't understand stays where it was.
+
+Each time the note says something else of an embed, whoever changed it, the embed's `update` is called if `render` gave one back, and otherwise `render` is called again on the same element, emptied. Focus then goes to the element whose `data-focus` equals that of the element that had it, so a control that rewrites the note keeps the keyboard. To send focus somewhere else, set `data-focus` on the focused element before calling `update`, as a kanban card does with the place it is moving to.
+
+`update` is checked against the note as it is when called. A drawing that has left the editor, or one of an embed that the note no longer writes that way, does nothing, so a rewrite computed from a stale body can't land on someone else's newer text. A config holding `{`, `}`, or a line break throws, and so does a body with a line that is only `:::`: an embed can't write its way out of its own range. `test/core/plugin-embed-syntax.test.ts` covers the syntax and the edits, and `test/browser/widgets.spec.ts` the rest.
+
+`starts` is what the embed menu writes for a new one: `{ config: "5m" }` for the timer, and a body of three empty columns for kanban.
+
+## Completions
+
+`host.completions.register({ id, trigger, items })` offers a list at the cursor. It opens when the member types the trigger at the start of a line or after a space, and not inside code, so the `/` of a URL, a path, or a date opens nothing. `items(typed)` is asked on each keystroke for what to offer for the text typed after the trigger, best first, and may answer with a promise. One that answers at once is in the list by the member's next key, so a name typed after `/` and Enter with no pause picks it. Completions whose triggers both fit share the list, each one's items together, in the order of their plugins. With nothing from any of them the list closes. Each item has a `label`, an optional `detail`, and `insert`, the text that takes the place of the trigger and what was typed. `select` leaves part of it selected, `block` puts it on lines of its own, and `spaces: true` on the completion lets what is typed hold spaces, as a note's title does.
+
+```ts
+host.completions.register({
+  id: "people",
+  trigger: "@",
+  items: (typed) => people.filter((p) => p.name.toLowerCase().startsWith(typed.toLowerCase())).map((p) => ({ label: p.name, insert: `@${p.handle}` })),
+});
+```
+
+The embed menu is one of these, in `plugins/embedMenu.ts`: it lists `host.embeds.list()`, so an embed is in the menu as soon as its plugin registers it. The list itself is CodeMirror's autocompletion, which one place in the core configures (`src/web/completing.ts`), so completions from several plugins share one list, one set of keys, and vim's insert mode. A plugin that added its own `autocompletion()` as an editor extension would fight it. A completion that throws offers nothing, and the Plugins page says so.
 
 ## Editor extensions
 
@@ -127,7 +203,7 @@ A member turns a plugin off from the palette (`Disable plugin: Tabs and splits`)
 
 With every plugin off, the core still opens the note its address names, takes typing, and saves.
 
-A plugin whose `activate` throws is left out whole. A view that throws while being drawn is left out alone, and an embed that throws is shown as it is written. Either way the Plugins page says what failed.
+A plugin whose `activate` throws is left out whole. A view that throws while being drawn is left out alone, an embed that throws is shown as it is written, and a completion that throws offers nothing. Each way the Plugins page says what failed.
 
 ## What third-party plugins must not get as it is
 
@@ -137,6 +213,8 @@ The built-in plugins are trusted, and the host gives them more than an untrusted
 - `host.agents.connect` mints a token that acts as the member.
 - `host.commands.run` runs any command, including `plugins.disable.<another plugin>`. That command writes the member's settings, so it is a way around the refusal in `host.perform`. The palette needs it to run what the member picks.
 - `Embed.render` is handed a real element inside the note, so it can reach the rest of the page from there.
+- `Embedded.update` changes the note as the member, recorded as the member's change. It can only rewrite the embed's own config and body, but an untrusted embed could do that without the member touching it.
+- A completion's `items` is told what the member types after its trigger, and what an item inserts is written into the note as the member.
 - An editor extension runs inside the editor with the note's text, every key typed, and the page. It must also be built from the app's own copy of `@codemirror/state`, which a plugin loaded from elsewhere doesn't have.
 - `host.storage` is the browser's localStorage under a prefix, which any script on the page can read.
 - A view is handed `app`, which carries the member's email, every note's title and first lines, `signOut`, and `switchWorkspace`. Each view is drawn with the `app` its own plugin is given (`provide` in `Workspace.tsx`), so that is the one place to narrow it.

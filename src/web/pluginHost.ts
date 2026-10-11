@@ -1,5 +1,5 @@
 import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
-import type { App, Command, CommandInfo, Dispose, EditorExtension, Embed, OpInput, Plugin, PluginHost, SettingValue, Slots } from "./plugin-api.ts";
+import type { App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, OpInput, Plugin, PluginHost, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
 export interface PluginState {
@@ -20,6 +20,7 @@ export interface Contributions {
   settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
   embeds: readonly Embed[];
+  completions: readonly Completion[];
   editorExtensions: readonly EditorExtension[];
   plugins: readonly PluginState[];
 }
@@ -62,7 +63,7 @@ export interface Host {
   setEnabled(pluginId: string, enabled: boolean): void;
   /** The app as the plugin that registered a view is given it. */
   appFor(view: object): App;
-  /** Records against its plugin that a view or embed threw while being drawn, or that an editor extension couldn't be used. */
+  /** Records against its plugin that a view or embed threw while being drawn, that a completion threw, or that an editor extension couldn't be used. */
   fail(contribution: object, error: unknown): void;
   /** Turns every plugin off without forgetting which are on. They start again the next time contributions are read. */
   dispose(): void;
@@ -83,7 +84,7 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "rail", "editor", "inspector", "page", "overlay"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "rail", "editor", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
 const RESERVED = ["plugins.", "go.", "settings."];
@@ -93,6 +94,7 @@ const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.pl
 export function createPluginHost({ plugins, required = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed>>();
+  const completions = new Map<string, Owned<Completion>>();
   const editorExtensions = new Map<string, Owned<EditorExtension>>();
   const views = new Map<keyof Slots, Map<string, Owned<Slots[keyof Slots]>>>(SLOTS.map((slot) => [slot, new Map()]));
   /** What each running plugin registered, to take back out when it is turned off. */
@@ -194,6 +196,14 @@ export function createPluginHost({ plugins, required = [], settings, write, mac,
         register(embed) {
           const dispose = keep(add(embeds, embed.name, embed, index, "an embed named"));
           owners.set(embed, owner);
+          return dispose;
+        },
+        list: () => contributions().embeds.map(({ name, title, block, starts }) => ({ name, title, block, starts })),
+      },
+      completions: {
+        register(completion) {
+          const dispose = keep(add(completions, completion.id, completion, index, "a completion with the id"));
+          owners.set(completion, owner);
           return dispose;
         },
       },
@@ -337,6 +347,7 @@ export function createPluginHost({ plugins, required = [], settings, write, mac,
       settings: { declared, values, problems: [...problems, ...conflicts.map(({ commandId, reason }): Problem => ({ key: KEYBINDING + commandId, kind: "conflict", reason }))], document },
       views: Object.fromEntries(SLOTS.map((slot) => [slot, inOrder(views.get(slot)!.values())])) as unknown as Contributions["views"],
       embeds: inOrder(embeds.values()),
+      completions: inOrder(completions.values()),
       editorExtensions: inOrder(editorExtensions.values()),
       plugins: plugins.map((p) => ({ id: p.id, name: p.name, enabled: !off.has(p.id), required: required.includes(p.id), error: errors.get(p.id) ?? null })),
     });

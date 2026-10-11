@@ -442,7 +442,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         notice={stuck?.noteId === noteId ? stuck.message : null}
         focus={toFocus === noteId}
         onFocused={() => setToFocus(null)}
+        canEdit={canEdit}
         embeds={embeds}
+        completions={contributed.completions}
+        onContributionFailed={host.fail}
         extensions={extensions}
         onExtensionRefused={host.fail}
         meta={
@@ -497,7 +500,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   useDismiss(popover ? closePopover : null, popoverRef, leftRail, rightRail);
 
   return (
-    <div className="app" data-writing={layout.writing || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100 } as CSSProperties}>
+    <div className="app" data-writing={layout.writing || undefined} data-bar={contributed.views.bar.length > 0 || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100 } as CSSProperties}>
       {layout.writing ? (
         <nav ref={leftRail} className="rail" aria-label="Left rail">
           <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />
@@ -543,7 +546,13 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
           })}
         </nav>
       ) : (
-        inspected && inspectorOpen && <Inspector host={host} tabs={inspectorTabs} app={app} note={inspected} />
+        inspectorOpen &&
+        (inspected ? (
+          <Inspector host={host} tabs={inspectorTabs} app={app} note={inspected} />
+        ) : (
+          // A note can be read before the notes and folders are listed. The inspector's place is held until they are, so the note doesn't open wide and then narrow.
+          routeNoteId && !(notes && tree) && inspectorTabs.length > 0 && <aside className="inspector" aria-hidden />
+        ))
       )}
 
       {popover?.side === "left" && (
@@ -558,6 +567,13 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         <div ref={popoverRef} className="popover right" role="dialog" aria-label={popoverTab.label}>
           <h2>{popoverTab.label}</h2>
           <Drawn key={popoverTab.id} host={host} view={popoverTab} note={inspected} />
+        </div>
+      )}
+      {contributed.views.bar.length > 0 && (
+        <div className="bar" role="group" aria-label="Bottom bar">
+          {contributed.views.bar.map((item) => (
+            <Drawn key={item.id} host={host} view={item} />
+          ))}
         </div>
       )}
       {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} />}
