@@ -94,36 +94,3 @@ export const addColumn = (table: Table, column: number): Table => ({
 /** Without `column`. The last column stays: a table has one. */
 export const removeColumn = (table: Table, column: number): Table =>
   table.aligns.length === 1 ? table : { aligns: table.aligns.filter((_, c) => c !== column), rows: table.rows.map((cells) => cells.filter((_, c) => c !== column)) };
-
-/** What can be done to a table from one of its cells, in the order a menu lists it. */
-export const CELL_ACTIONS = [
-  { id: "rowAbove", label: "Insert row above" },
-  { id: "rowBelow", label: "Insert row below" },
-  { id: "columnLeft", label: "Insert column left" },
-  { id: "columnRight", label: "Insert column right" },
-  { id: "deleteRow", label: "Delete row" },
-  { id: "deleteColumn", label: "Delete column" },
-] as const;
-
-export type CellAction = (typeof CELL_ACTIONS)[number]["id"];
-
-/**
- * The table after `action` is done from the cell `at`, and the cell to be in after it. Null where
- * there is nothing to do: no row goes above the header, and the header and the last column stay.
- */
-export function actOnCell(table: Table, [row, column]: At, action: CellAction): { table: Table; at: At } | null {
-  switch (action) {
-    case "rowAbove":
-      return row === 0 ? null : { table: addRow(table, row - 1), at: [row, column] };
-    case "rowBelow":
-      return { table: addRow(table, row), at: [row + 1, column] };
-    case "columnLeft":
-      return { table: addColumn(table, column - 1), at: [row, column] };
-    case "columnRight":
-      return { table: addColumn(table, column), at: [row, column + 1] };
-    case "deleteRow":
-      return row === 0 ? null : { table: removeRow(table, row), at: [Math.min(row, table.rows.length - 2), column] };
-    case "deleteColumn":
-      return table.aligns.length === 1 ? null : { table: removeColumn(table, column), at: [row, Math.min(column, table.aligns.length - 2)] };
-  }
-}

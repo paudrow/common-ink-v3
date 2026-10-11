@@ -8,7 +8,7 @@ import { sample } from "./sample.ts";
 export interface Provider {
   owns(sourceId: string): boolean;
   of(personId: string): Promise<DataSource[]>;
-  connect(personId: string, sourceId: string, back: string, edit?: boolean): Promise<{ redirect: string | null }>;
+  connect(personId: string, sourceId: string, back: string): Promise<{ redirect: string | null }>;
   disconnect(personId: string): Promise<void>;
 }
 
@@ -26,7 +26,7 @@ export function sourcesFor(env: Env, url: URL, outbound: typeof fetch = (input, 
   const owner = (sourceId: string) => providers.find((p) => p.owns(sourceId));
   return {
     of: async (personId) => (await Promise.all(providers.map((p) => p.of(personId)))).flat(),
-    connect: async (personId, sourceId, back, edit) => (await owner(sourceId)?.connect(personId, sourceId, back, edit)) ?? { redirect: null },
+    connect: async (personId, sourceId, back) => (await owner(sourceId)?.connect(personId, sourceId, back)) ?? { redirect: null },
     disconnect: async (personId, sourceId) => owner(sourceId)?.disconnect(personId),
   };
 }

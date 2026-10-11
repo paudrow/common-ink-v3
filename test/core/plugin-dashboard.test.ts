@@ -8,7 +8,7 @@ const NOW = Date.UTC(2026, 9, 11, 11, 30);
 /** 03:30 UTC on October 12: still the evening of the 11th in Los Angeles. */
 const LATE = Date.UTC(2026, 9, 12, 3, 30);
 
-const event = (title: string, when: CalendarEvent["when"]): CalendarEvent => ({ sourceId: "cal", id: title, calendarId: "work", calendar: "Work", color: null, title, when, timeZone: null, location: null, description: null, recurring: false, editable: true, etag: "0", url: null });
+const event = (title: string, when: CalendarEvent["when"]): CalendarEvent => ({ sourceId: "cal", id: title, calendar: "Work", color: null, title, when, timeZone: null, location: null, description: null, recurring: false, editable: true, etag: "0", url: null });
 const note = (id: string, createdAt: number, updatedAt: number, state: NoteSummary["state"] = "live"): NoteSummary => ({
   id,
   title: id,
@@ -93,7 +93,7 @@ describe("notes made or edited today", () => {
 });
 
 describe("the summary of changes", () => {
-  const change = (noteId: string, revision: number, createdAt: number, author: HistoryEntry["author"]): HistoryEntry => ({ noteId, noteTitle: `Title of ${noteId}`, revision, baseRevision: revision - 1, author, createdAt, label: null, reverts: null, revertedBy: null, restores: 0, added: 0, removed: 0, diff: null });
+  const change = (noteId: string, revision: number, createdAt: number, author: HistoryEntry["author"]): HistoryEntry => ({ noteId, noteTitle: `Title of ${noteId}`, revision, baseRevision: revision - 1, author, createdAt, label: null, reverts: null, revertedBy: null, added: 0, removed: 0, diff: null });
   const grace = { kind: "member" as const, personId: "g", name: "Grace" };
   const claude = { kind: "agent" as const, agentId: "c", name: "Claude", onBehalfOf: "g" };
 

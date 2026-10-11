@@ -14,8 +14,14 @@ const MEASURE_MS = 4000;
 
 const whenever = <T>(promise: Promise<T>, otherwise: T) => Promise.race([promise.catch(() => otherwise), new Promise<T>((done) => setTimeout(() => done(otherwise), MEASURE_MS))]);
 
-/** How large the picture or video at `address` is, as this browser draws it. Null for one it can't read in time. */
-export function measuredAt(address: string, picture: boolean): Promise<Size | null> {
+/**
+ * How large a picture or a video is, read in this browser before the file is sent, so its embed is
+ * written with its room and nothing moves when it loads. Null for any other file, and for one the browser can't read.
+ */
+export function measured(file: File): Promise<Size | null> {
+  const [picture, video] = [file.type.startsWith("image/"), file.type.startsWith("video/")];
+  if (!picture && !video) return Promise.resolve(null);
+  const address = URL.createObjectURL(file);
   const reading = new Promise<Size | null>((done) => {
     if (picture) {
       const img = new Image();
@@ -31,28 +37,7 @@ export function measuredAt(address: string, picture: boolean): Promise<Size | nu
       player.src = address;
     }
   });
-  return whenever(reading, null);
-}
-
-/**
- * How large a picture or a video is, read in this browser before the file is sent, so its embed is
- * written with its room and nothing moves when it loads. Null for any other file, and for one the browser can't read.
- */
-export function measured(file: File): Promise<Size | null> {
-  const [picture, video] = [file.type.startsWith("image/"), file.type.startsWith("video/")];
-  if (!picture && !video) return Promise.resolve(null);
-  const address = URL.createObjectURL(file);
-  return measuredAt(address, picture).finally(() => URL.revokeObjectURL(address));
-}
-
-/**
- * How an upload already sent is written, with its room: the size the server read, or else the one
- * this browser reads from its address now (a video's always, and a picture whose size the server couldn't read).
- */
-export async function writtenNow(host: PluginHost, upload: Pick<Upload, "id" | "kind" | "width" | "height">): Promise<string> {
-  const known = upload.kind === "image" && upload.width && upload.height;
-  const seen = upload.kind === "image" || upload.kind === "video" ? (known ? null : await measuredAt(host.uploads.address(upload.id), upload.kind === "image")) : null;
-  return writtenFor(upload, seen);
+  return whenever(reading, null).finally(() => URL.revokeObjectURL(address));
 }
 
 /** One file on its way. */
@@ -118,11 +103,11 @@ export function sender(host: PluginHost) {
     }
   }
 
-  /** Sends files for the Uploads page, each private to the member in no folder until it is put in a note. The ones the server took. */
-  async function sendAll(files: readonly File[]): Promise<Upload[]> {
+  /** Sends files for the Uploads page, to a folder. The ones the server took. */
+  async function sendAll(files: readonly File[], to: { folderId?: string }): Promise<Upload[]> {
     const taken: Upload[] = [];
     for (const file of files) {
-      const sent = await send(file, { private: true });
+      const sent = await send(file, to);
       if (sent) taken.push(sent.upload);
     }
     return taken;

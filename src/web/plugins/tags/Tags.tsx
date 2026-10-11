@@ -61,8 +61,8 @@ export function TagSection({ app, store }: { app: App; store: TagStore }) {
       <div className="section-head">
         <span id={`${ids}-label`}>Tags</span>
       </div>
-      {tags && (tags.length ? <TagLinks app={app} tags={tags.slice(0, MOST_IN_SECTION)} labelledBy={`${ids}-label`} /> : <p className="tags-hint">Write #tag in a note to tag it.</p>)}
-      {tags && tags.length > MOST_IN_SECTION && (
+      {tags.length ? <TagLinks app={app} tags={tags.slice(0, MOST_IN_SECTION)} labelledBy={`${ids}-label`} /> : <p className="tags-hint">Write #tag in a note to tag it.</p>}
+      {tags.length > MOST_IN_SECTION && (
         <a className="tag-row tags-all" {...going(app, TAGS_PATH)}>
           All {tags.length} tags
         </a>

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { CalendarEvent, Me, OpInput } from "../../src/core/protocol.ts";
-import { anotherPerson, join, perform, runCommand, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, join, perform, signInAsNewPerson, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -20,11 +20,6 @@ const cell = (page: Page, day: string) => grid(page).locator(`[data-day="${day}"
 const eventIn = (within: Locator, title: string) => within.getByRole("button", { name: new RegExp(`${title}$`) });
 const details = (page: Page) => page.getByRole("dialog", { name: /^Event:/ });
 const form = (page: Page) => details(page).getByRole("form", { name: "Change event" });
-/** An all-day bar in Week's all-day row, by the first and last day it covers on screen. */
-const barOf = (page: Page, title: string, first: string) => grid(page).getByRole("row", { name: "All day" }).locator(`.cal-bar[data-first="${first}"]`).filter({ hasText: title });
-/** The days in view in Week, as the grid has them. */
-const daysInView = (page: Page) => grid(page).getByRole("gridcell").evaluateAll((cells) => cells.map((c) => (c as HTMLElement).dataset.day));
-const openSources = (page: Page) => calendar(page).getByRole("button", { name: "Calendars", exact: true }).click();
 const contact = (page: Page, name: string) => contacts(page).getByRole("list", { name: "Contacts" }).getByRole("listitem", { name });
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const chips = (page: Page) => editor(page).locator(".ref-chip");
@@ -45,11 +40,11 @@ const dayIn = (time: number, timeZone: string) => new Intl.DateTimeFormat("en-CA
 const timeIn = (time: number, timeZone: string) => new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(time).replace(/ /g, " ");
 const shift = (day: string, by: number) => new Date(Date.parse(`${day}T00:00:00Z`) + by * DAY_MS).toISOString().slice(0, 10);
 
-/** The dates of the week it is where the browser is, Monday first, which is the week the Calendar opens on unless the member chose another first day. */
+/** The dates of the week it is where the browser is, Sunday first, which is the week the Calendar opens on. */
 async function weekOn(page: Page) {
   const today = dayIn(Date.now(), await zoneOf(page));
-  const monday = shift(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
-  return Array.from({ length: 7 }, (_, i) => shift(monday, i));
+  const sunday = shift(today, -new Date(`${today}T00:00:00Z`).getUTCDay());
+  return Array.from({ length: 7 }, (_, i) => shift(sunday, i));
 }
 
 /** This week's events as the server lists them for the signed-in person. */
@@ -98,8 +93,6 @@ const isMuted = (chip: Locator) =>
 test("a calendar that isn't connected says so, and connecting it shows the week's events", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.goto("/calendar");
-  await expect(calendar(page)).toContainText("Connect a calendar to see your events here.");
-  await openSources(page);
 
   await expect(source(page, "Sample calendar")).toContainText("Not connected. Connect it to see your events here.");
   await expect(grid(page)).toHaveCount(0);
@@ -111,23 +104,22 @@ test("a calendar that isn't connected says so, and connecting it shows the week'
   await source(page, "Sample calendar").getByRole("button", { name: "Connect Sample calendar" }).click();
 
   await expect(source(page, "Sample calendar")).toContainText("Connected to Sample data");
-  await page.getByRole("dialog", { name: "Calendars" }).getByRole("button", { name: "Close" }).click();
   const week = await weekOn(page);
   await expect(calendar(page).getByRole("heading", { level: 2 }).first()).toHaveText(/ – /);
   await expect(grid(page).getByRole("gridcell")).toHaveCount(7);
   for (const title of ["Standup", "Planning", "Lunch with Sam", "Offsite", "Call with Tokyo", "Company holiday"]) await expect(eventIn(grid(page), title).first(), title).toBeVisible();
-  await expect(barOf(page, "Offsite", week[2]!)).toHaveAttribute("data-last", week[3]!);
-  await expect(eventIn(cell(page, week[0]!), "Planning")).toHaveCount(1);
+  await expect(eventIn(cell(page, week[3]!).getByRole("list", { name: "All day" }), "Offsite")).toHaveCount(1);
+  await expect(eventIn(cell(page, week[1]!), "Planning")).toHaveCount(1);
 
   await calendar(page).getByRole("button", { name: "Next" }).click();
-  await expect.poll(() => daysInView(page)).toEqual(week.map((day) => shift(day, 7)));
-  await expect(eventIn(cell(page, shift(week[0]!, 7)), "Planning")).toHaveCount(1);
+  await expect(cell(page, shift(week[0]!, 7))).toBeVisible();
+  await expect(eventIn(cell(page, shift(week[1]!, 7)), "Planning")).toHaveCount(1);
   await calendar(page).getByRole("button", { name: "Today" }).click();
-  await expect.poll(() => daysInView(page)).toEqual(week);
+  await expect(cell(page, week[0]!)).toBeVisible();
 
   await calendar(page).getByRole("button", { name: "Month", exact: true }).click();
-  await expect(grid(page).getByRole("columnheader")).toHaveText(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
-  await expect(eventIn(cell(page, week[0]!), "Planning")).toHaveCount(1);
+  await expect(grid(page).getByRole("columnheader")).toHaveText(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
+  await expect(eventIn(cell(page, week[1]!), "Planning")).toHaveCount(1);
   await expect.poll(() => grid(page).getByRole("gridcell").count()).toBeGreaterThanOrEqual(28);
 
   await calendar(page).getByRole("button", { name: "Agenda", exact: true }).click();
@@ -150,9 +142,7 @@ test("contacts connect the same way, are searched as typed, and disconnecting ta
   await expect(rows).toHaveText([/^Ada Lovelace/, /^Grace Hopper/, /^Lin Wei/, /^Sam Okafor/, /^Zoë Álvarez/]);
   await expect(contacts(page).getByRole("status").first()).toHaveText("5 contacts");
   await expect(contact(page, "Grace Hopper")).toContainText("Navy");
-  // A card is one link, to the person's page: an address is written on it, and followed from that page.
-  await expect(contact(page, "Grace Hopper")).toContainText("hopper@navy.example");
-  await expect(contact(page, "Grace Hopper").getByRole("link")).toHaveAttribute("href", "/person/Grace%20Hopper");
+  await expect(contact(page, "Grace Hopper").getByRole("link", { name: "hopper@navy.example" })).toHaveAttribute("href", "mailto:hopper@navy.example");
   await expect(contact(page, "Sam Okafor")).toContainText("+1 555 0142");
   await expect(contacts(page).getByRole("button", { name: /Edit|Save/ }), "contacts are read here and not changed").toHaveCount(0);
 
@@ -164,7 +154,6 @@ test("contacts connect the same way, are searched as typed, and disconnecting ta
 
   // One account stands behind both, so the calendar is connected too.
   await openCalendar(page);
-  await openSources(page);
   await source(page, "Sample calendar").getByRole("button", { name: "Disconnect Sample data…" }).click();
   const asking = sources(page).getByRole("group", { name: "Disconnect Sample data" });
   await expect(asking).toContainText("Disconnecting Sample data disconnects Sample calendar and Sample contacts together");
@@ -176,7 +165,7 @@ test("contacts connect the same way, are searched as typed, and disconnecting ta
   await page.goto("/contacts");
   await expect(source(page, "Sample contacts")).toContainText("Not connected");
   await expect(contacts(page)).not.toContainText("Grace Hopper");
-  await expect.poll(async () => (await perform(page, { type: "source.list" })).sources.filter((s) => s.provider === "Sample data").map((s) => s.state)).toEqual(["not_connected", "not_connected"]);
+  expect((await perform(page, { type: "source.list" })).sources.filter((s) => s.provider === "Sample data").map((s) => s.state)).toEqual(["not_connected", "not_connected"]);
 });
 
 test("a member's events and contacts are shown to them and to no other member of the workspace", async ({ page }) => {
@@ -188,7 +177,6 @@ test("a member's events and contacts are shown to them and to no other member of
 
   await grace.goto("/calendar");
   await grace.getByRole("button", { name: /workspace/ }).first().waitFor();
-  await openSources(grace);
   await expect(source(grace, "Sample calendar")).toContainText("Not connected");
   await expect(grid(grace)).toHaveCount(0);
   for (const title of ["Standup", "Offsite", "Call with Tokyo"]) await expect(grace.locator("body")).not.toContainText(title);
@@ -197,12 +185,12 @@ test("a member's events and contacts are shown to them and to no other member of
   await expect(grace.locator("body")).not.toContainText("Okafor");
 
   // Asked in Ada's workspace, where Grace is an admin, the server still answers for Grace alone.
-  await expect.poll(async () => (await listed(grace, workspaceId)).length).toBe(0);
-  await expect.poll(async () => (await perform(grace, { type: "contact.list" }, workspaceId)).contacts).toEqual([]);
-  await expect.poll(async () => (await perform(grace, { type: "source.list" }, workspaceId)).sources.every((s) => s.state === "not_connected" && s.account === null)).toBe(true);
+  expect((await listed(grace, workspaceId)).length).toBe(0);
+  expect((await perform(grace, { type: "contact.list" }, workspaceId)).contacts).toEqual([]);
+  expect((await perform(grace, { type: "source.list" }, workspaceId)).sources.every((s) => s.state === "not_connected" && s.account === null)).toBe(true);
   const lunch = await eventNamed(page, "Lunch with Sam");
-  await expect.poll(async () => (await answer(grace, { type: "event.update", sourceId: lunch.sourceId, id: lunch.id, etag: lunch.etag, title: "Grace was here" }, workspaceId)).status).toBe(409);
-  await expect.poll(async () => (await eventNamed(page, "Lunch with Sam")).etag).toBe(lunch.etag);
+  expect((await answer(grace, { type: "event.update", sourceId: lunch.sourceId, id: lunch.id, etag: lunch.etag, title: "Grace was here" }, workspaceId)).status).toBe(409);
+  expect((await eventNamed(page, "Lunch with Sam")).etag).toBe(lunch.etag);
 });
 
 for (const timezoneId of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
@@ -213,33 +201,25 @@ for (const timezoneId of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
       await signInAsNewPerson(page, "Ada Lovelace");
       await connectSample(page);
       await openCalendar(page);
-      await expect.poll(() => zoneOf(page)).toBe(timezoneId);
+      expect(await zoneOf(page)).toBe(timezoneId);
       await expect(calendar(page)).toContainText(`Times are in your time zone, ${timezoneId.replace(/_/g, " ")}.`);
       const week = await weekOn(page);
       // The sample call is at 23:30 UTC on the Thursday, so the day it is on depends on where it is read.
-      const call = Date.parse(`${week[3]}T23:30:00Z`);
+      const call = Date.parse(`${week[4]}T23:30:00Z`);
       const [callDay, callTime] = [dayIn(call, timezoneId), timeIn(call, timezoneId)];
-      expect(callDay, "this zone reads the call on another day than Kiritimati or Los Angeles would").toBe(timezoneId === "Pacific/Kiritimati" ? week[4] : week[3]);
-      const standup = timeIn(Date.parse(`${week[0]}T14:00:00Z`), timezoneId);
+      expect(callDay, "this zone reads the call on another day than Kiritimati or Los Angeles would").toBe(timezoneId === "Pacific/Kiritimati" ? week[5] : week[4]);
+      const standup = timeIn(Date.parse(`${week[1]}T14:00:00Z`), timezoneId);
 
       for (const view of ["Week", "Month"]) {
         await calendar(page).getByRole("button", { name: view, exact: true }).click();
         await expect(calendar(page).getByRole("button", { name: view, exact: true })).toHaveAttribute("aria-pressed", "true");
-        if (view === "Week") {
-          // In Week a card says its title, then when it is: the whole span, or where the card is narrow, when it starts.
-          await expect(eventIn(cell(page, callDay), "Call with Tokyo"), `${view}: the call's day`).toHaveAccessibleName(`${new Intl.DateTimeFormat("en-US", { timeZone: timezoneId, hour: "numeric", minute: "2-digit" }).formatRange(call, call + 3_600_000).replace(/[  ]/g, " ")} Call with Tokyo`);
-          await expect(eventIn(cell(page, callDay), "Call with Tokyo").locator(".cal-ev-start")).toHaveText(callTime);
-          await expect(barOf(page, "Offsite", week[2]!), `${view}: Offsite on its two days`).toHaveAttribute("data-last", week[3]!);
-          await expect(barOf(page, "Company holiday", week[4]!), `${view}: the holiday is on Friday`).toHaveAttribute("data-last", week[4]!);
-          await expect(eventIn(cell(page, dayIn(Date.parse(`${week[0]}T14:00:00Z`), timezoneId)), "Standup").first().locator(".cal-ev-start")).toHaveText(standup);
-        } else {
-          await expect(eventIn(cell(page, callDay), "Call with Tokyo"), `${view}: the call's day`).toHaveText(`${callTime}Call with Tokyo`);
-          for (const day of [week[2]!, week[3]!]) await expect(eventIn(cell(page, day).getByRole("list", { name: "All day" }), "Offsite"), `${view}: Offsite on ${day}`).toHaveCount(1);
-          for (const day of [week[1]!, week[4]!]) await expect(eventIn(cell(page, day), "Offsite"), `${view}: no Offsite on ${day}`).toHaveCount(0);
-          await expect(eventIn(cell(page, week[4]!).getByRole("list", { name: "All day" }), "Company holiday"), `${view}: the holiday is on Friday`).toHaveCount(1);
-          await expect(eventIn(cell(page, dayIn(Date.parse(`${week[0]}T14:00:00Z`), timezoneId)), "Standup").first()).toHaveText(`${standup}Standup`);
-        }
+        await expect(eventIn(cell(page, callDay), "Call with Tokyo"), `${view}: the call's day`).toHaveText(`${callTime}Call with Tokyo`);
         for (const day of week.filter((d) => d !== callDay)) await expect(eventIn(cell(page, day), "Call with Tokyo"), `${view}: ${day}`).toHaveCount(0);
+
+        for (const day of [week[3]!, week[4]!]) await expect(eventIn(cell(page, day).getByRole("list", { name: "All day" }), "Offsite"), `${view}: Offsite on ${day}`).toHaveCount(1);
+        for (const day of [week[2]!, week[5]!]) await expect(eventIn(cell(page, day), "Offsite"), `${view}: no Offsite on ${day}`).toHaveCount(0);
+        await expect(eventIn(cell(page, week[5]!).getByRole("list", { name: "All day" }), "Company holiday"), `${view}: the holiday is on Friday`).toHaveCount(1);
+        await expect(eventIn(cell(page, dayIn(Date.parse(`${week[1]}T14:00:00Z`), timezoneId)), "Standup").first()).toHaveText(`${standup}Standup`);
       }
 
       await eventIn(cell(page, callDay), "Call with Tokyo").click();
@@ -287,7 +267,7 @@ test("an event the member may change is changed where it is kept, and a read-onl
   const holiday = await eventNamed(page, "Company holiday");
   const refused = await answer(page, { type: "event.update", sourceId: holiday.sourceId, id: holiday.id, etag: holiday.etag, title: "Work day" });
   expect([refused.status, refused.body.error]).toEqual([403, "forbidden"]);
-  await expect.poll(async () => (await eventNamed(page, "Company holiday")).etag).toBe(holiday.etag);
+  expect((await eventNamed(page, "Company holiday")).etag).toBe(holiday.etag);
 });
 
 test("a change made from a stale reading is refused, says so, and overwrites nothing", async ({ page }) => {
@@ -328,10 +308,8 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await openCalendar(page);
 
   await eventIn(grid(page), "Lunch with Sam").click();
-  // Copy reference is the palette's, for the event open: the panel's one action is a new note about it.
-  await expect(details(page).getByRole("button", { name: "Copy reference" })).toHaveCount(0);
-  await runCommand(page, "Copy event reference");
-  await expect(page.locator(".toast-card").last()).toContainText(/^Copied the reference to Lunch with Sam, \w{3} \d{1,2}\. Paste it into a note\.$/);
+  await details(page).getByRole("button", { name: "Copy reference" }).click();
+  await expect(details(page).getByRole("status")).toContainText("Paste it into a note.");
   const written = await page.evaluate(() => navigator.clipboard.readText());
   expect(written).toMatch(/^::event\{[a-z0-9]{12} Lunch with Sam\}$/);
 
@@ -361,8 +339,8 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await expect(chips(grace)).toHaveText(["Lunch with Sam"]);
   await expect(chips(grace)).toHaveAttribute("data-state", "private");
   await expect(chips(grace)).toHaveAttribute("title", "Only the member who referenced this event sees its details");
-  await expect.poll(() => isMuted(chips(grace))).toBe(true);
-  await expect.poll(() => isMuted(chips(page))).toBe(false);
+  expect(await isMuted(chips(grace))).toBe(true);
+  expect(await isMuted(chips(page))).toBe(false);
   await expect(grace.locator("body")).not.toContainText("Samira");
   await expect(grace.locator("body")).not.toContainText("Cafe Lula");
   const ref = /\{([a-z0-9]{12}) /.exec(written)![1]!;
@@ -376,7 +354,8 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await expect(chips(page)).toHaveAttribute("title", "Reconnect Sample calendar first to see this event as it is now");
 });
 
-test("a reference to a contact shows its owner the contact, and every other member the name alone", async ({ page }) => {
+test("a reference to a contact shows its owner the contact, and every other member the name alone", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAsNewPerson(page, "Ada Lovelace");
   const grace = await anotherPerson(page, "Grace Hopper");
   const { workspaceId } = await join(grace, page, "editor");
@@ -384,10 +363,9 @@ test("a reference to a contact shows its owner the contact, and every other memb
   const note = await perform(page, { type: "note.create", text: "# Plumbing\n\nCall " });
   await page.goto("/contacts");
 
-  // Contacts lists people and copies nothing: a reference to one is written by an agent, or by `record.refer` as here.
-  await expect(contact(page, "Sam Okafor")).toContainText("+1 555 0142");
-  await expect(page.getByRole("button", { name: "Copy reference" })).toHaveCount(0);
-  const { text: written } = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
+  await contact(page, "Sam Okafor").getByRole("button", { name: "Copy reference" }).click();
+  await expect(contact(page, "Sam Okafor").getByRole("status")).toContainText("Paste it into a note.");
+  const written = await page.evaluate(() => navigator.clipboard.readText());
   expect(written).toMatch(/^::contact\{[a-z0-9]{12} Sam Okafor\}$/);
 
   await openNote(page, note.id, "Call");
@@ -404,11 +382,11 @@ test("a reference to a contact shows its owner the contact, and every other memb
   await expect(chips(grace)).toHaveText(["Sam Okafor"]);
   await expect(chips(grace)).toHaveAttribute("data-state", "private");
   await expect(chips(grace)).toHaveAttribute("title", "Only the member who referenced this contact sees its details");
-  await expect.poll(() => isMuted(chips(grace))).toBe(true);
+  expect(await isMuted(chips(grace))).toBe(true);
   await expect(grace.locator("body")).not.toContainText("555 0142");
   await expect(grace.locator("body")).not.toContainText("Okafor Plumbing");
   const ref = /\{([a-z0-9]{12}) /.exec(written)![1]!;
-  await expect.poll(async () => (await answer(grace, { type: "record.read", ref }, workspaceId)).status).toBe(404);
+  expect((await answer(grace, { type: "record.read", ref }, workspaceId)).status).toBe(404);
 });
 
 interface Place {
@@ -438,7 +416,7 @@ test("whoever opens a link to a note sees a reference as its label, in gray, and
   await expect(editor(anyone)).not.toContainText(lunch.ref);
   for (const chip of await chips(anyone).all()) {
     await expect(chip).toHaveAttribute("data-state", "private");
-    await expect.poll(() => isMuted(chip)).toBe(true);
+    expect(await isMuted(chip)).toBe(true);
     await expect(chip).not.toHaveAttribute("role", "button");
   }
   expect(asked.filter((path) => !path.startsWith("/api/shared/"))).toEqual([]);
@@ -472,7 +450,7 @@ function expectUnmoved(now: Record<string, Place>, before: Record<string, Place>
   }
 }
 
-test("nothing moves when a reference's details arrive or the cursor comes to its line, and with the cursor in it it stays drawn, with what the note says above it", async ({ page }) => {
+test("a reference's line is as tall drawn as written, and nothing around it moves when its details arrive or the cursor comes and goes", async ({ page }) => {
   // Wide enough that a line still fits on one row with its reference shown as written, which is longer than the chip.
   await page.setViewportSize({ width: 1700, height: 900 });
   await signInAsNewPerson(page, "Ada Lovelace");
@@ -498,6 +476,7 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   await expect(chips(page).first()).toHaveAttribute("data-state", "reading");
   const fixed = ["plain line above", "Before", "Second", "next line", "last line"];
   const reading = await places(page, fixed);
+  expect(reading["Before"]!.height, "a line with references in it is as tall as one without").toBe(reading["plain line above"]!.height);
 
   release();
   await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
@@ -511,26 +490,23 @@ test("nothing moves when a reference's details arrive or the cursor comes to its
   await expect(chips(page)).toHaveCount(3);
   expectUnmoved(await places(page, [...fixed, "trailing"]), drawn, "with the cursor on the line");
 
-  // The cursor in the first reference: it stays drawn, what the note says of it is shown above the line, and nothing before it moves or shifts sideways.
+  // The cursor on the first reference: it is shown as written, and the line keeps its place and height.
   await page.keyboard.press("Home");
-  for (let i = 0; i < "Before ::".length; i++) await page.keyboard.press("ArrowRight");
-  await expect(editor(page).locator(".embed-source")).toHaveText(lunch.text);
-  await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
-  const written = await places(page, [...fixed, "trailing"]);
-  expectUnmoved({ "plain line above": written["plain line above"]! }, { "plain line above": drawn["plain line above"]! }, "with the first reference shown as written above its line");
-  for (const word of [...fixed, "trailing"]) expect(Math.abs(written[word]!.x - drawn[word]!.x), `x of "${word}" with the first reference shown as written above its line`).toBeLessThanOrEqual(0.5);
+  for (let i = 0; i < "Before ".length; i++) await page.keyboard.press("ArrowRight");
+  await expect(editor(page).locator(".cm-line").filter({ hasText: "Before" })).toContainText(lunch.text);
+  await expect(chips(page)).toHaveCount(2);
+  expectUnmoved(await places(page, fixed), reading, "with the first reference shown as written");
 
   await page.keyboard.press("ControlOrMeta+End");
   await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
   expectUnmoved(await places(page, [...fixed, "trailing"]), drawn, "with the cursor gone again");
   expect(reads, "drawing a reference again asks nothing").toBe(2);
 
-  // Narrow enough that the line of two references wraps: each card goes to a row of its own whole, and none is wider than the note.
-  await page.setViewportSize({ width: 560, height: 900 });
-  await expect.poll(async () => (await places(page, ["Second"]))["Second"]!.height).toBeGreaterThan(drawn["Second"]!.height * 1.5);
-  const edges = await page.evaluate(() => {
-    const text = document.querySelector<HTMLElement>(".cm-content")!.getBoundingClientRect();
-    return [...document.querySelectorAll<HTMLElement>(".cm-content .embed-card")].map((card) => ({ left: card.getBoundingClientRect().left - text.left, over: card.getBoundingClientRect().right - text.right }));
-  });
-  for (const edge of edges) expect(edge.left >= 0 && edge.over <= 0.5, `a card ${edge.left}px in from the note's left edge and ${edge.over}px past its right`).toBe(true);
+  // Narrow enough that the references wrap: they break as words do, and the line is whole rows of the height of any other.
+  await page.setViewportSize({ width: 720, height: 900 });
+  const row = reading["plain line above"]!.height;
+  await expect.poll(async () => (await places(page, ["plain line above", "Before"]))["Before"]!.height / row).toBeGreaterThan(1.5);
+  const narrow = await places(page, ["plain line above", "Before"]);
+  const rows = narrow["Before"]!.height / row;
+  expect(Math.abs(rows - Math.round(rows)), `a wrapped line of ${narrow["Before"]!.height}px is whole rows of ${row}px`).toBeLessThan(0.02);
 });

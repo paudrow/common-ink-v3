@@ -174,10 +174,6 @@ describe("the last visit", () => {
     const agent = await agentOf(ada);
     expect((await visit(agent, T0 + HOUR)).readUntil).toBe(T0);
     expect(await refusal(mark(agent, T0 + HOUR, T0 + HOUR))).toBe("forbidden: An agent can't visit.mark");
-    // No moment is before the first: marked at nothing, someone who never marked would read as having marked in 1970.
-    const fresh = await newMember("Lin Fresh");
-    expect(await refusal(mark(fresh, 0, T0))).toMatch(/^invalid: /);
-    expect((await perform(env.DB, fresh, { type: "visit.read" }, T0)).readUntil).toBeNull();
   });
 
   it("bounds the changes since: those by others and by agents, made at or after it, that the member can see, a page at a time", async () => {
@@ -203,9 +199,6 @@ describe("the last visit", () => {
     ]);
     expect(JSON.stringify(since)).not.toMatch(/Hers|Secret/);
 
-    // Leaving authors out and asking for one kind of author are two questions, and each is answered beside the other.
-    const kinds = async (by: "people" | "agents") => [...new Set((await perform(env.DB, ada, { type: "history.list", from: readUntil!, to: now, notAuthors: me, by, diffs: false })).changes.map((c) => c.author.kind))];
-    expect([await kinds("people"), await kinds("agents")]).toEqual([["member"], ["agent"]]);
     const first = await perform(env.DB, ada, { type: "history.list", from: readUntil!, to: now, notAuthors: me, diffs: false, limit: 1 });
     expect(first.changes.map((c) => c.author.name)).toEqual(["Claude"]);
     const rest = await perform(env.DB, ada, { type: "history.list", from: readUntil!, to: now, notAuthors: me, diffs: false, limit: 1, before: first.next! });

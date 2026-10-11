@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { App, PluginHost, Source, SourceKind } from "../../plugin-api.ts";
 import { forgetReferences } from "./references.tsx";
 
@@ -38,17 +38,13 @@ interface Props {
   sources: readonly Source[] | null;
   /** Handed the data sources as they are after one was connected or disconnected. */
   onChange: (sources: readonly Source[]) => void;
-  /** Drawn under a connected data source, such as the calendars in it. */
-  below?: (source: Source) => ReactNode;
-  /** Whether to say what the list is with a heading of its own, where nothing around it says so. */
-  heading?: boolean;
 }
 
 /**
  * The data sources of one kind: which are connected and to what account, with the way to connect,
  * reconnect and disconnect each. Everything said here is drawn from what `source.list` answers.
  */
-export function Sources({ host, app, kind, sources, onChange, below, heading = true }: Props) {
+export function Sources({ host, app, kind, sources, onChange }: Props) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
@@ -74,7 +70,7 @@ export function Sources({ host, app, kind, sources, onChange, below, heading = t
 
   return (
     <section className="sources" aria-label="Data sources">
-      {heading && <h2>Data sources</h2>}
+      <h2>Data sources</h2>
       {!sources.length && <p className="sources-none">Data sources are not set up on this Common Ink, so there is no {NOUN[kind]} to connect.</p>}
       {sources.length > 0 && !sources.some((s) => s.provider === "Google") && (
         <p className="sources-none">
@@ -112,7 +108,6 @@ export function Sources({ host, app, kind, sources, onChange, below, heading = t
                       Disconnect {source.provider}…
                     </button>
                   )}
-                  {below?.(source)}
                 </>
               )}
               {source.state === "not_connected" && (

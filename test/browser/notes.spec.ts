@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, me, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 const history = (page: Page, id: string) => perform(page, { type: "note.history", id });
 
@@ -9,11 +9,11 @@ const writeElsewhere = (page: Page, op: { id: string; baseRevision: number; text
 const leaveEditor = (page: Page) => page.getByRole("complementary", { name: "Sidebar" }).getByText("Folders", { exact: true }).click();
 
 test("opens signed in as the dev user, with no login", async ({ page }) => {
-  // A Preview's database outlives each run, and whoever tries the Preview is this same dev user, so nothing here rests on its settings or notes.
   await page.goto("/");
 
-  await expect(page.getByRole("main", { name: "Editor" })).toBeVisible();
-  expect((await me(page)).person).toMatchObject({ email: "dev@common.ink", name: "Dev User" });
+  await expect(page.getByText("Dev's workspace")).toBeVisible();
+  await openAllNotes(page);
+  await expect(page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" })).toBeVisible();
 });
 
 test("a new person signs in, writes a note, and finds it intact after reloading", async ({ page }) => {
@@ -50,10 +50,9 @@ test("typing is committed as soon as the note loses focus", async ({ page }) => 
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Draft");
 
-  // The save leaves well inside the second a pause in typing waits; how long the server takes to answer is not the point.
-  const sent = page.waitForRequest((req) => req.url().endsWith("/ops") && req.postDataJSON()?.type === "note.write", { timeout: 600 });
+  const saved = page.waitForResponse((res) => res.url().endsWith("/ops") && res.request().postDataJSON()?.type === "note.write", { timeout: 600 });
   await leaveEditor(page);
-  expect((await (await sent).response())?.ok()).toBe(true);
+  await saved;
 
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(await history(page, noteIdIn(page))).toHaveLength(1);
@@ -111,29 +110,20 @@ test("leaving a note while its save is on the way keeps the other writer's chang
   const id = noteIdIn(page);
 
   let held = false;
-  let reached = () => {};
-  let opened = () => {};
-  const saveReached = new Promise<void>((done) => (reached = done));
-  const nextOpened = new Promise<void>((done) => (opened = done));
   await page.route("**/ops", async (route) => {
     if (held || !isWrite(route.request().postData())) return route.continue();
     held = true;
     await writeElsewhere(page, { id, baseRevision: 1, text: "# Shared\n\nmine\n\ntheirs" });
     const response = await route.fetch();
-    reached();
-    await Promise.all([nextOpened, new Promise((resolve) => setTimeout(resolve, 1000))]);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     await route.fulfill({ response });
   });
   await page.keyboard.type(" too");
   await leaveEditor(page);
   await openAllNotes(page);
-  // The next note is made once the save has reached the server and its answer comes back once that note is open, however slow each request is.
-  await saveReached;
   await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page).toHaveURL(/\/note\/untitled-[a-z0-9]{12}$/);
   await expect(page).not.toHaveURL(new RegExp(id));
-  opened();
-  await showPanel(page, "Info");
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" })).toHaveValue(new RegExp(`${noteIdIn(page)}$`));
 
   await openAllNotes(page);

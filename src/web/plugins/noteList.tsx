@@ -1,10 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, ago, dayOf, folderTitle, parseQuery, queryNames, useInspected, useNow, type App, type Showing, type FolderProps, type NoteSummary, type Plugin, type PluginHost, type SearchMatch } from "../plugin-api.ts";
+import { ALL_NOTES, Icon, MAX_SEARCH_LENGTH, NOTE_DRAG, SHARED_WITH_ME, ago, folderTitle, useNow, type App, type FolderProps, type NoteSummary, type Plugin, type PluginHost, type SearchMatch } from "../plugin-api.ts";
 import { reasonOf } from "./lib/FoundNote.tsx";
 import { lifecycle } from "./lib/lifecycle.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
-import { QueryBar } from "./lib/QueryBar.tsx";
-import { INITIAL_VIEW, ORDERS, SHOWS, SORTS, fits, includeArchivedOf, listReducer, listed, notesIn, titleOf, type ListAction, type ListView, type Sort } from "./noteListView.ts";
+import { INITIAL_VIEW, SHOWS, SORTS, fits, includeArchivedOf, listReducer, listed, notesIn, titleOf, type ListAction, type ListView, type Sort } from "./noteListView.ts";
 import { pieces } from "./search/marks.ts";
 import { IDLE, againLimit, queryOf, reduce, type Ask } from "./search/request.ts";
 
@@ -13,7 +12,7 @@ const PAUSE_MS = 200;
 /** How long the list waits before asking again a search the server answered while still indexing. Each ask indexes more. */
 const INDEXING_PAUSE_MS = 1500;
 const STILL_INDEXING = "Still indexing notes. Results may be missing some.";
-const SYNTAX = 'words, "a phrase", #tag, is:archived';
+const SYNTAX = 'words, "a phrase", #tag, +project';
 
 /** How far below the top of the list a card's head is put when its note is collapsed from further down. */
 const HEAD_GAP = 10;
@@ -31,12 +30,8 @@ export interface FinderProps extends FolderProps {
   kept: { scrollTop: number };
   /** What the list is called in place of its folder's name, as the Search page's is. */
   heading?: string;
-  /** Whether the query is the list's one control, with no Open/Archived/All, Has todos or Sort beside it, as on the Search page. */
-  queryOnly?: boolean;
   /** Whether the search field takes the keyboard when the list is drawn. */
   autoFocus?: boolean;
-  /** Whether the inspector is about the notes listed, called by the heading and the query, as on the Search page. */
-  inspected?: boolean;
   /** Takes the search out of this folder to every note, for a list that is of one folder. */
   onWiden?: () => void;
 }
@@ -95,7 +90,7 @@ function folderForNew(app: App, folderId: string) {
  * nothing typed it is the notes the app already holds, and nothing is asked of the server. With
  * something typed it is what the server's search finds in the folder, each card with the lines that matched.
  */
-export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, queryOnly, autoFocus, inspected, onWiden }: FinderProps) {
+export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, autoFocus, onWiden }: FinderProps) {
   const ids = useId();
   const now = useNow();
   const { setArchived, items: menuFor } = useMemo(() => lifecycle(host), [host]);
@@ -114,6 +109,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
 
   const title = app.folders && folderTitle(app.folders, folderId);
   const inFolder = app.notes && notesIn(app.notes, folderId);
+  const count = inFolder ? listed(inFolder, { ...INITIAL_VIEW, show: view.show }).length : 0;
   const ready = !!inFolder && !!title;
   /** A list of one folder says so in its search field. Every note, and what was shared with a guest, are of no one folder. */
   const scoped = folderId !== ALL_NOTES && folderId !== SHARED_WITH_ME;
@@ -138,24 +134,14 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
   }, [wanted, view.query]);
 
   const sort = view.sort ?? (view.query ? "match" : "recent");
-  // A query that can't be read yet is not asked, and one that names no word and no filter, such as a sort: alone, is the folder's own notes.
-  const read = useMemo(() => parseQuery(view.query, "notes"), [view.query]);
-  const asked = read.ok && read.query.where ? view.query : "";
-  const order = read.ok && !read.query.where ? read.query.sort : null;
-  /** The states the query itself asks for, which are then listed whatever Open, Archived or All is set to. */
-  const namesArchived = read.ok && queryNames(read.query.where, "archived");
-  const namesTrashed = read.ok && queryNames(read.query.where, "trashed");
-  /** The notes a search is of, which a query naming archived notes widens to them. */
-  const count = inFolder ? listed(inFolder, { ...INITIAL_VIEW, show: namesArchived && view.show === "open" ? "all" : view.show }).length : 0;
-  const days = { today: dayOf(new Date(now)), zone: Intl.DateTimeFormat().resolvedOptions().timeZone };
   const ask = useMemo<Ask>(
-    () => ({ query: ready ? asked : "", ...(scoped && { folderId }), includeArchived: includeArchivedOf(view.show), hasTodos: view.hasTodos, sort: view.sort ?? "match" }),
-    [ready, asked, scoped, folderId, view.show, view.hasTodos, view.sort],
+    () => ({ query: ready ? view.query : "", ...(scoped && { folderId }), includeArchived: includeArchivedOf(view.show), hasTodos: view.hasTodos, sort: view.sort ?? "match" }),
+    [ready, view.query, scoped, folderId, view.show, view.hasTodos, view.sort],
   );
   const find = (asked: Ask, offset = 0) => {
     dispatch(offset ? { type: "moreAsked" } : { type: "asked", ask: asked });
     if (!asked.query) return;
-    host.perform({ type: "search", ...asked, ...days, offset }).then(
+    host.perform({ type: "search", ...asked, offset }).then(
       ({ results, next, indexing }) => dispatch({ type: "answered", ask: asked, offset, results, next, indexing }),
       (err: unknown) => dispatch({ type: "refused", ask: asked, offset, message: reasonOf(err) }),
     );
@@ -172,7 +158,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     let timer: ReturnType<typeof setTimeout>;
     const again = () => {
       timer = setTimeout(() => {
-        host.perform({ type: "search", ...partialAsk, ...days, offset: 0, limit: againLimit(partialResults.length) }).then(
+        host.perform({ type: "search", ...partialAsk, offset: 0, limit: againLimit(partialResults.length) }).then(
           ({ results, next, indexing }) => !left && dispatch({ type: "reanswered", ask: partialAsk, results, next, indexing }),
           // The results on show stay, and the server is asked once more after the same pause.
           () => !left && again(),
@@ -195,29 +181,16 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     if (!inFolder) return [];
     if (search.status === "failed") return [];
     const results = search.status === "listed" ? search.results : search.status === "searching" ? search.before : null;
-    if (!results) {
-      const own = listed(inFolder, view);
-      return (order && ORDERS[order] ? own.sort(ORDERS[order]) : own).map((note) => ({ note, matches: [] }));
-    }
+    if (!results) return listed(inFolder, view).map((note) => ({ note, matches: [] }));
     const held = new Map(app.notes!.map((n) => [n.id, n]));
     const gone = new Set(app.trashed.map((n) => n.id));
     return results.flatMap(({ note, matches }) => {
-      const current = held.get(note.id) ?? (gone.has(note.id) && !namesTrashed ? null : note);
-      if (!current) return [];
-      const stated = (namesArchived && current.state === "archived") || (namesTrashed && current.state === "trashed");
-      const fitting = fits(view, current) || (stated && (!view.hasTodos || current.openTodos > 0));
+      const current = held.get(note.id) ?? (gone.has(note.id) ? null : note);
       // What was shared with a guest is of no folder the server can be asked for, so it is picked out of every note found.
-      return fitting && (folderId !== SHARED_WITH_ME || current.folderId === null) ? [{ note: current, matches }] : [];
+      return current && fits(view, current) && (folderId !== SHARED_WITH_ME || current.folderId === null) ? [{ note: current, matches }] : [];
     });
-  }, [inFolder, search, view.show, view.hasTodos, view.sort, order, namesArchived, namesTrashed, app.notes, app.trashed, folderId]);
+  }, [inFolder, search, view.show, view.hasTodos, view.sort, app.notes, app.trashed, folderId]);
   const notes = items.map((item) => item.note);
-  // History is then the history of the notes found, and Info counts them, each following the query.
-  // Told only once the list answers its query: while a search is on its way it says what it said before.
-  const told = useRef<Showing | null>(null);
-  if (inFolder && (!asked || (search.status === "listed" && search.ask.query === asked))) {
-    told.current = { kind: "notes", label: [heading ?? "Notes", view.query.trim()].filter(Boolean).join(": "), noteIds: notes.map((n) => n.id).sort() };
-  }
-  useInspected(app, inspected ? told.current : null);
 
   /**
    * Where the list was scrolled to when it was last drawn. It goes back there as its expanded
@@ -298,10 +271,8 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
       : found
         ? `${notes.length}${found.next === null ? "" : "+"} of ${count} ${count === 1 ? "note" : "notes"}`
         : `${count} ${count === 1 ? "note" : "notes"}`;
-  /** How a search that left archived notes out has them: by its query on the Search page, by All on a folder's list. */
-  const leftOut = view.show !== "open" || namesArchived || namesTrashed ? "" : queryOnly ? " Archived notes are left out: add is:archived to search them." : " Archived notes are left out: choose All to search them too.";
   const nothing = found
-    ? `No notes match “${found.ask.query}”${scoped ? ` in ${title}` : ""}.${leftOut}`
+    ? `No notes match “${found.ask.query}”${scoped ? ` in ${title}` : ""}.${view.show === "open" ? " Archived notes are left out: choose All to search them too." : ""}`
     : count
       ? "No notes match."
       : view.show === "archived"
@@ -357,77 +328,76 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
             </button>
           )}
         </header>
-        <QueryBar
-          host={host}
-          app={app}
-          scope="notes"
-          value={typed}
-          fieldRef={field}
-          label="Search notes"
-          placeholder={`${scoped ? "Search this folder" : "Search all notes"}: ${SYNTAX}`}
-          lead={
-            scoped && (
-              <span className="finder-scope" title={`Searching the notes in ${title}, not those of the folders inside it`}>
-                <span>{title}</span>
-                {onWiden && (
-                  <button type="button" aria-label={`Search all notes, not only ${title}`} title="Search all notes" onClick={onWiden}>
-                    <Icon name="close" />
-                  </button>
-                )}
-              </span>
-            )
-          }
-          onChange={(text, how) => {
-            setTyped(text);
-            // A field emptied is the folder's notes again at once: they are here, and there is nothing to wait for. So is a query put there whole.
-            if (!queryOf(text) || how === "set") setQuery(queryOf(text));
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowDown" && notes[0]) {
-              e.preventDefault();
-              card(notes[0].id)?.focus();
-            } else if (e.key === "Enter") {
-              e.preventDefault();
-              // Enter before the pause is over asks for what is typed. It never opens a result of the search before.
-              if (wanted !== view.query) setQuery(wanted);
-              else if (found && notes[0]) open(notes[0], "keep");
-            }
-          }}
-        />
-        {!queryOnly && (
-          <div className="finder-tools">
-            <div role="radiogroup" aria-label="Show" className="segmented">
-              {SHOWS.map((s) => (
-                <label key={s.id}>
-                  <input type="radio" name={`${ids}-show`} checked={view.show === s.id} onChange={() => act({ type: "show", show: s.id })} />
-                  <span>{s.label}</span>
-                </label>
-              ))}
-            </div>
-            <button type="button" className="chip" aria-pressed={view.hasTodos} onClick={() => act({ type: "hasTodos" })}>
-              Has todos
-            </button>
-            <label className="finder-sort">
-              Sort
-              <select
-                aria-label="Sort by"
-                value={sort}
-                onChange={(e) => {
-                  const picked = e.target.value as Sort | "match";
-                  // The order a list has until one is picked is left unpicked, so a search made later is by its best match.
-                  act({ type: "sort", sort: picked === "match" || (picked === "recent" && !view.query) ? null : picked });
-                }}
-              >
-                {view.query && <option value="match">Best match</option>}
-                {SORTS.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <div className="finder-field">
+          <Icon name="search" />
+          {scoped && (
+            <span className="finder-scope" title={`Searching the notes in ${title}, not those of the folders inside it`}>
+              <span>{title}</span>
+              {onWiden && (
+                <button type="button" aria-label={`Search all notes, not only ${title}`} title="Search all notes" onClick={onWiden}>
+                  <Icon name="close" />
+                </button>
+              )}
+            </span>
+          )}
+          <input
+            ref={field}
+            type="search"
+            aria-label="Search notes"
+            placeholder={`${scoped ? "Search this folder" : "Search all notes"}: ${SYNTAX}`}
+            maxLength={MAX_SEARCH_LENGTH}
+            value={typed}
+            onChange={(e) => {
+              setTyped(e.target.value);
+              // A field emptied is the folder's notes again at once: they are here, and there is nothing to wait for.
+              if (!queryOf(e.target.value)) setQuery("");
+            }}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === "ArrowDown" && notes[0]) {
+                e.preventDefault();
+                card(notes[0].id)?.focus();
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                // Enter before the pause is over asks for what is typed. It never opens a result of the search before.
+                if (wanted !== view.query) setQuery(wanted);
+                else if (found && notes[0]) open(notes[0], "keep");
+              }
+            }}
+          />
+        </div>
+        <div className="finder-tools">
+          <div role="radiogroup" aria-label="Show" className="segmented">
+            {SHOWS.map((s) => (
+              <label key={s.id}>
+                <input type="radio" name={`${ids}-show`} checked={view.show === s.id} onChange={() => act({ type: "show", show: s.id })} />
+                <span>{s.label}</span>
+              </label>
+            ))}
           </div>
-        )}
+          <button type="button" className="chip" aria-pressed={view.hasTodos} onClick={() => act({ type: "hasTodos" })}>
+            Has todos
+          </button>
+          <label className="finder-sort">
+            Sort
+            <select
+              aria-label="Sort by"
+              value={sort}
+              onChange={(e) => {
+                const picked = e.target.value as Sort | "match";
+                // The order a list has until one is picked is left unpicked, so a search made later is by its best match.
+                act({ type: "sort", sort: picked === "match" || (picked === "recent" && !view.query) ? null : picked });
+              }}
+            >
+              {view.query && <option value="match">Best match</option>}
+              {SORTS.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         {error && (
           <p role="alert" className="error">
             {error}
@@ -444,7 +414,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
         {found?.indexing && <p className="search-status">{STILL_INDEXING}</p>}
         <nav aria-label="Notes">
           {!notes.length && search.status !== "failed" && search.status !== "searching" && <p className="empty">{nothing}</p>}
-          <ul className="cards" data-list aria-busy={search.status === "searching"}>
+          <ul className="cards" aria-busy={search.status === "searching"}>
             {items.map(({ note, matches }, at) => {
               const expanded = view.expanded[note.id];
               const name = titleOf(note);
@@ -635,8 +605,6 @@ function keeping() {
 export const noteList: Plugin = {
   id: "note-list",
   name: "Note list",
-  description: "A folder's notes as cards, each with its details and its first lines, to sort and to filter.",
-  icon: "list",
   settings: {
     snippets: { type: "boolean", default: true, title: "Show snippets", description: "Show the first lines of each note under its title." },
   },

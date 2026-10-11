@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, and marking changes read are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts and test/core/dashboard.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
-type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, and everything of plugins but reading the record are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts and test/core/third-party.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
+type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "plugin.read" | "plugin.install" | "plugin.uninstall" | "plugin.permit" | "plugin.request" | "plugin.frame">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -63,22 +63,16 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "note.label": { id: noteId, revision: 1, name: "Start" },
   "note.revert": { id: noteId, revision: 1 },
   "note.revertChanges": { id: noteId, revisions: [2] },
-  "note.previewRevert": { id: noteId, revisions: [2] },
   "note.diff": { id: noteId, revision: 1 },
-  "note.blame": { id: noteId },
   "history.summary": {},
   "note.undo": { id: noteId },
   "note.redo": { id: noteId },
   "history.list": {},
   "history.authors": {},
   "history.revertAuthor": { author: { kind: "agent", id: "aaaaaaaaaaaa" } },
-  "history.diff": { changes: [{ noteId, revisions: [2] }] },
-  "history.previewRevert": { changes: [{ noteId, revisions: [2] }] },
-  "history.revert": { changes: [{ noteId, revisions: [2] }] },
   "folder.list": {},
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
-  "folder.move": { id: folderId, parentId: null },
   "folder.delete": { id: "aaaaaaaaaaaa" },
   "member.list": {},
   "tag.list": {},
@@ -90,20 +84,17 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "source.list": {},
   "event.list": { from: 0, to: 1, timeZone: "UTC" },
   "event.update": { sourceId: "google-calendar", id: "none", etag: "none", title: "No" },
-  "event.create": { sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } },
   "contact.list": {},
-  "person.read": { who: "Sam Okafor" },
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },
   "upload.list": {},
   "upload.read": { id: "aaaaaaaaaaaa" },
   "upload.move": { id: "aaaaaaaaaaaa", folderId },
-  "upload.place": { id: "aaaaaaaaaaaa", noteId },
   "upload.archive": { id: "aaaaaaaaaaaa", archived: false },
   "upload.trash": { id: "aaaaaaaaaaaa" },
   "upload.restore": { id: "aaaaaaaaaaaa" },
   "upload.trashed": {},
-  "record.notes": { sourceId: "google-calendar", id: "none" },
+  "plugin.list": {},
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {
@@ -131,7 +122,6 @@ describe("an agent's access is its member's", () => {
       "note.trash",
       "note.restore",
       "upload.move",
-      "upload.place",
       "upload.archive",
       "upload.trash",
       "upload.restore",
@@ -141,10 +131,8 @@ describe("an agent's access is its member's", () => {
       "note.undo",
       "note.redo",
       "history.revertAuthor",
-      "history.revert",
       "folder.create",
       "folder.rename",
-      "folder.move",
       "folder.delete",
     ],
   };
@@ -242,6 +230,29 @@ describe("an agent's access is its member's", () => {
 
     await perform(env.DB, ada, { type: "member.remove", memberId: member.personId });
     expect(await tool(reader.token, "list_members", { workspace })).toMatchObject({ isError: true, text: "not_found: No such workspace" });
+  });
+
+  it("reads the workspace's plugins, decides nothing of them, and has no tool that changes them", async () => {
+    const { ada, member, token, workspace } = await team("admin");
+    const manifest = JSON.stringify({ name: "Word Tally", capabilities: [{ name: "notes.read", reason: "Counts the words in your notes." }] });
+    const made = await perform(env.DB, ada, { type: "plugin.install", manifest, code: "ink.notify('counted')" });
+    const { id } = made;
+    await perform(env.DB, ada, { type: "plugin.permit", id, capability: "notes.read", allowed: true, codeHash: made.plugins.find((p) => p.id === id)!.codeHash! });
+
+    const record = JSON.parse((await tool(token, "list_plugins", { workspace })).text) as { canManage: boolean; plugins: { id: string; manifest: { name: string }; permissions: { capability: string; reason: string; state: string; decidedBy: string | null }[] }[] };
+    // Its member is an admin, and it is still told it decides nothing.
+    expect(record.canManage).toBe(false);
+    expect(record.plugins.map((p) => [p.id, p.manifest.name])).toEqual([[id, "Word Tally"], ["html", "HTML embeds"]]);
+    expect(record.plugins[0]!.permissions).toMatchObject([{ capability: "notes.read", reason: "Counts the words in your notes.", state: "allowed", decidedBy: "Ada Lovelace" }]);
+    // The record says nothing of the code, which only the app reads.
+    expect(JSON.stringify(record)).not.toContain("ink.notify");
+    expect(TOOLS.filter((t) => /plugin|permit|install|frame/.test(t.name)).map((t) => t.name)).toEqual(["list_plugins"]);
+
+    const agent: Actor = { kind: "agent", agentId: (await connectAgent(env.DB, member.personId, "Second")).agent.id, personId: member.personId, workspaceId: workspace };
+    for (const op of [{ type: "plugin.uninstall", id }, { type: "plugin.permit", id, capability: "notes.read", allowed: false }, { type: "plugin.read", id }, { type: "plugin.frame", id }] satisfies OpInput[]) {
+      await expect(perform(env.DB, agent, op), op.type).rejects.toMatchObject({ code: "forbidden", message: `An agent can't ${op.type}` });
+    }
+    expect((await perform(env.DB, ada, { type: "plugin.list" })).plugins[0]!.permissions[0]!.state).toBe("allowed");
   });
 
   it("is only at /mcp: a token is no session, so it can't perform operations as a member or connect another agent", async () => {

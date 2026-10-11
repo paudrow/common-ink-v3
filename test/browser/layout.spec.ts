@@ -1,13 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });
 const editorPane = (page: Page) => page.getByRole("main", { name: "Editor" });
 const width = async (page: Page) => (await editorPane(page).boundingBox())!.width;
-/** In focus, the box of what is in front. */
-const filled = (page: Page) => page.locator(".group-body").filter({ visible: true }).boundingBox();
-const WINDOW = { x: 0, y: 0, width: 1280, height: 720 };
 const listHeading = (page: Page) => editorPane(page).getByRole("heading", { level: 1 });
 
 async function newFolder(page: Page, name: string, parent?: string) {
@@ -117,7 +114,7 @@ test("a folder with notes in it can't be deleted, and an empty one can", async (
 
   await folder(page, "Empty").hover();
   await page.getByRole("button", { name: "Actions for Empty" }).click();
-  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in a split right", "Open in a split down", "New folder inside", "Move to…", "Share", "Rename", "Delete"]);
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["New folder inside", "Rename", "Delete"]);
   await page.getByRole("menuitem", { name: "Delete" }).click();
 
   await expect(tree(page).getByRole("treeitem")).toHaveText([/^All notes/, /^Unsorted/, /^Full/]);
@@ -142,45 +139,18 @@ test("More expands and collapses Contacts, Uploads, and History, and each mode i
   const modes = page.getByRole("navigation", { name: "Modes" });
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
 
-  const more = modes.getByRole("button", { name: "More" });
-  await expect(more).toHaveAttribute("aria-expanded", "false");
-  await more.click();
-  const less = modes.getByRole("button", { name: "Less" });
-  await expect(less).toHaveAttribute("aria-expanded", "true");
-  await expect(more).toHaveCount(0);
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Plugins"]);
+  await modes.getByRole("button", { name: "More" }).click();
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");
   await expect(editorPane(page)).toContainText("Nothing has been written in this workspace yet.");
 
-  await less.click();
-  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await modes.getByRole("button", { name: "More" }).click();
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
   await modes.getByRole("link", { name: "Dashboard" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("Dashboard");
-});
-
-test("More opens by itself when a mode under it is reached another way, and stays closed once closed by hand until the next time", async ({ page }) => {
-  await signInAsNewPerson(page, "Ada Lovelace");
-  const modes = page.getByRole("navigation", { name: "Modes" });
-  await modes.getByRole("button", { name: "More" }).click();
-  await modes.getByRole("link", { name: "History" }).click();
-  await expect(page).toHaveURL(/\/history$/);
-
-  // Closed by hand it stays closed, on this mode and on the ones that aren't under More.
-  await modes.getByRole("button", { name: "Less" }).click();
-  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
-  await modes.getByRole("link", { name: "Todos" }).click();
-  await expect(page).toHaveURL(/\/todos$/);
-  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
-
-  // Back is another way to a mode under More.
-  await page.goBack();
-  await expect(page).toHaveURL(/\/history$/);
-  await expect(modes.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
-  await expect(modes.getByRole("link", { name: "History" })).toHaveAttribute("aria-current", "page");
 });
 
 test("a folder's list filters on title and snippet, sorts, and narrows to notes with open todos", async ({ page }) => {
@@ -241,9 +211,9 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(folder(page, "Common Ink")).toHaveAttribute("aria-selected", "true");
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  await pinPanel(page, "Info");
-  const panel = inspector.locator(".inspector-body");
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
+  const panel = inspector.getByRole("tabpanel");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive", "Trash"]);
   await expect(panel.getByRole("definition").first().locator("span")).toHaveText("Projects / Common Ink");
   await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveValue(ink.id);
@@ -254,124 +224,82 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(panel.getByRole("button", { name: "Copied" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Archive" })).toBeEnabled();
 
-  await showPanel(page, "History");
-  await expect(panel.getByRole("listbox", { name: "Changes" }).getByRole("option")).toContainText("You wrote");
-  await showPanel(page, "Backlinks");
+  await inspector.getByRole("tab", { name: "History" }).click();
+  await expect(panel.getByRole("list", { name: "Changes" }).getByRole("listitem")).toHaveAccessibleName("Change 1 by Ada Lovelace");
+  await inspector.getByRole("tab", { name: "Backlinks" }).click();
   await expect(panel).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
 
-  await showPanel(page, "Info");
+  await inspector.getByRole("tab", { name: "Info" }).click();
   await panel.getByRole("combobox", { name: "Move to" }).selectOption({ label: "Projects" });
   await expect(panel.getByRole("definition").first().locator("span")).toHaveText("Projects");
   await expect(folder(page, "Projects")).toHaveAccessibleDescription("1");
   await expect(folder(page, "Common Ink")).toHaveAccessibleDescription("0");
 
-  await toggleInspector(page);
+  await page.getByRole("button", { name: "Inspector" }).click();
   await expect(inspector).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inspector" })).toHaveAttribute("aria-pressed", "false");
   await expect(inspector).toHaveCount(0);
 });
 
-test("⌘. toggles focus, which shows the note with neither side nor a bar of icons, and gives the editor the whole window", async ({ page }) => {
+test("⌘. toggles writing mode, collapsing both sides to rails and giving the editor their width", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
   await page.goto(`/note/draft-${note.id}`);
-  await pinPanel(page, "Info");
   await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
   expect(await width(page)).toBe(764);
 
   await page.getByRole("textbox", { name: "Note text" }).click();
   await page.keyboard.press("ControlOrMeta+.");
 
-  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
+  for (const name of ["History", "Backlinks", "Info"]) await expect(page.getByRole("navigation", { name: "Right rail" }).getByRole("button", { name })).toBeVisible();
   await expect(tree(page)).toHaveCount(0);
-  await expect(page.getByRole("complementary")).toHaveCount(0);
-  await expect(page.getByRole("navigation")).toHaveCount(0);
-  await expect(page.getByRole("group", { name: "Window" })).toHaveCount(0);
-  await expect(page.getByRole("tab")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Focus" })).toHaveCount(1);
-  expect(await filled(page)).toEqual(WINDOW);
+  await expect(page.getByRole("complementary", { name: "Inspector" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
+  expect(await width(page)).toBe(1192);
 
   await page.reload();
-  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("navigation")).toHaveCount(0);
-  await page.getByRole("button", { name: "Focus" }).click();
+  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
+  await page.getByRole("button", { name: "Writing mode" }).click();
   await expect(tree(page)).toBeVisible();
   expect(await width(page)).toBe(764);
 });
 
-test("focus shows neither bar when the sidebar and the inspector were closed, on a note and on a mode, and leaving it brings the bars back", async ({ page }) => {
+test("a rail opens its panel over the note without moving it, and opening a note from it closes it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
-  await page.goto(`/note/draft-${note.id}`);
-  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("Draft");
-  await toggleSidebar(page);
-  await toggleInspector(page);
-  await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
-  expect(await width(page)).toBe(1280 - 44 - 44);
-
+  const first = await perform(page, { type: "note.create", text: "# First\n\nOne." });
+  const second = await perform(page, { type: "note.create", text: "# Second\n\nTwo." });
+  await page.goto(`/note/first-${first.id}`);
+  const text = page.getByRole("textbox", { name: "Note text" });
+  await expect(text).toHaveText("# FirstOne.");
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.getByRole("navigation")).toHaveCount(0);
-  expect(await filled(page)).toEqual(WINDOW);
+  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
+  const before = await text.boundingBox();
 
-  await page.goto("/calendar");
-  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
-  await expect(page.getByRole("navigation")).toHaveCount(0);
-  await expect(page.getByRole("complementary")).toHaveCount(0);
-  expect(await filled(page)).toEqual(WINDOW);
+  await page.getByRole("button", { name: "Info", exact: true }).click();
+  const info = page.getByRole("dialog", { name: "Info" });
+  await expect(info.getByRole("combobox", { name: "Move to" })).toHaveValue(first.folderId!);
+  expect(await text.boundingBox()).toEqual(before);
+  await text.click();
+  await expect(info).toHaveCount(0);
 
-  await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
-});
+  await page.getByRole("button", { name: "Folders", exact: true }).click();
+  const folders = page.getByRole("dialog", { name: "Folders" });
+  await expect(folders.getByRole("treeitem", { name: "Unsorted" })).toHaveAttribute("aria-selected", "true");
+  expect(await text.boundingBox()).toEqual(before);
+  await page.keyboard.press("Escape");
+  await expect(folders).toHaveCount(0);
 
-test("the inspector stays open whatever is in front, with the same icons in its bar, and shows what belongs to it: a note's Info, a folder's Info, and one quiet line on a mode", async ({ page }) => {
-  await signInAsNewPerson(page, "Ada Lovelace");
-  const projects = await perform(page, { type: "folder.create", name: "Projects" });
-  const plan = await perform(page, { type: "note.create", folderId: projects.id, text: "# Plan" });
-  await perform(page, { type: "note.create", folderId: projects.id, text: "# Budget" });
-  await perform(page, { type: "note.create", text: "# Loose" });
-  await page.goto(`/note/plan-${plan.id}`);
-
-  const inspector = page.getByRole("complementary", { name: "Inspector" });
-  const panel = inspector.locator(".inspector-body");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  await pinPanel(page, "Info");
-  await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
-  const place = await inspector.boundingBox();
-
-  await folder(page, "Projects").click();
-  await expect(listHeading(page)).toHaveText("Projects");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  await expect(panel.getByRole("term")).toHaveText(["Folder", "Notes", "Last changed"]);
-  await expect(panel.getByRole("definition")).toHaveText(["Projects", "2 notes", "just now by Ada Lovelace"]);
-  await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
-  await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveCount(0);
-  expect(await inspector.boundingBox()).toEqual(place);
-
-  // The panel picked on a note is the one a folder showed, and the one a note comes back to.
-  await page.goBack();
-  await expect(shownPanel(page)).toHaveText("Info");
-  await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
-  expect(await inspector.boundingBox()).toEqual(place);
-
-  await openAllNotes(page);
-  await expect(panel.getByRole("definition")).toHaveText(["All notes", "3 notes", "just now by Ada Lovelace"]);
-  await newFolder(page, "Empty");
-  await folder(page, "Empty").click();
-  await expect(panel.getByRole("definition")).toHaveText(["Empty", "0 notes", "Nothing in it yet"]);
-
-  await page.getByRole("link", { name: "Calendar" }).click();
-  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
-  await expect(panel).toHaveText("Nothing to show for this view");
-  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  expect(await inspector.boundingBox()).toEqual(place);
-
-  await page.goto("/folder/nosuchfolder");
-  await expect(page.getByText("This folder doesn't exist, or you can't see it.")).toBeVisible();
-  await expect(panel).toHaveText("Nothing to show for this view");
-
+  await page.getByRole("button", { name: "Folders", exact: true }).click();
+  await expect(folders.getByRole("navigation", { name: "Notes" })).toHaveCount(0);
+  await folders.getByRole("treeitem", { name: "All notes" }).click();
+  await expect(folders).toHaveCount(0);
+  await expect(page).toHaveURL(/\/folder\/all$/);
+  await listedNote(page, "Second").click();
+  await expect(page).toHaveURL(new RegExp(`/note/second-${second.id}$`));
+  await expect(page.locator(".cm-line")).toHaveText(["# Second", "", "Two."]);
+  expect(noteIdIn(page)).toBe(second.id);
 });
 
 test("the workspace menu names the workspace and your role, and signs out", async ({ page }) => {
@@ -384,36 +312,4 @@ test("the workspace menu names the workspace and your role, and signs out", asyn
   await menu.getByRole("menuitem", { name: "Sign out" }).click();
 
   await expect(page.getByRole("button", { name: "Dev's workspace Admin" })).toBeVisible();
-});
-
-test("More opens by itself when a page under it is reached another way, and stays closed once closed by hand until the next time", async ({ page }) => {
-  await signInAsNewPerson(page, "Ada Lovelace");
-  const modes = page.getByRole("navigation", { name: "Modes" });
-  const run = async (command: string) => {
-    await page.keyboard.press("ControlOrMeta+Shift+P");
-    await page.keyboard.type(command);
-    await expect(page.getByRole("dialog", { name: "Commands" }).getByRole("option").first()).toHaveText(command);
-    await page.keyboard.press("Enter");
-  };
-  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
-
-  await run("Go to Plugins");
-  await expect(page).toHaveURL(/\/plugins$/);
-  await expect(modes.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
-  await expect(modes.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
-
-  // Closed by hand it stays closed, on this page and under it, and on the pages that aren't under More.
-  await modes.getByRole("button", { name: "Less" }).click();
-  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "Plugins" }).dblclick();
-  await page.getByRole("list", { name: "Plugins" }).getByRole("link", { name: "History", exact: true }).click();
-  await expect(page).toHaveURL(/\/plugins\/history$/);
-  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
-  await modes.getByRole("link", { name: "Dashboard" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
-
-  // A tab is another way to a page under More.
-  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "Plugins" }).click();
-  await expect(modes.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
-  await expect(modes.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
 });

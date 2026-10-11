@@ -1,6 +1,7 @@
-import { bind, chordLabel, onPlatform } from "./keybindings.ts";
-import type { AddressEmbed, App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, Setting, SettingValue, Slots } from "./plugin-api.ts";
+import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
+import type { App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, OpInput, Plugin, PluginHost, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
+import { OWN_NAMES, takenName } from "../core/plugins.ts";
 
 export interface PluginState {
   id: string;
@@ -8,25 +9,17 @@ export interface PluginState {
   enabled: boolean;
   /** A required plugin can't be turned off. */
   required: boolean;
-  /** Whether it came with the app, and wasn't added to it. */
-  builtIn: boolean;
   /** Why the plugin isn't running though it is turned on, or what of it failed while being drawn. */
   error: string | null;
-  description: string | null;
-  icon: IconName | null;
-  screenshots: readonly Screenshot[];
-  /** What it has registered: as it stands while the plugin is on, and as it last stood once it is off. Null for one that hasn't been on since the app loaded. */
-  adds: Added | null;
+  /** Whether it is one a workspace's admin installed, and not one that comes with Common Ink. */
+  installed: boolean;
 }
 
-/** What one plugin has registered, read from the host's own tables and never from what the plugin says of itself. */
-export interface Added {
-  commands: readonly { id: string; title: string }[];
-  views: readonly { slot: keyof Slots; id: string; label: string | null }[];
-  /** `address` is on one a note writes as a web address alone on a line, and not as `::name{}`. */
-  embeds: readonly { name: string; title: string; block: boolean; address?: true }[];
-  completions: readonly { id: string; trigger: string }[];
-  editorExtensions: readonly string[];
+/** A third-party plugin a workspace has installed, as the app's own code made a plugin of it. */
+export interface Installed {
+  plugin: Plugin;
+  /** Changes when the plugin is to start again: other code, another manifest, other permissions. */
+  version: string;
 }
 
 /** Everything the plugins that are on have added, in the order of the plugins and then of their registering. */
@@ -36,7 +29,7 @@ export interface Contributions {
   keybindings: Readonly<Record<string, string>>;
   settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
-  embeds: readonly (Embed | AddressEmbed)[];
+  embeds: readonly Embed[];
   completions: readonly Completion[];
   editorExtensions: readonly EditorExtension[];
   plugins: readonly PluginState[];
@@ -56,11 +49,7 @@ export interface MemberSettings {
 export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "sharing" | "uploads" | "storage">;
 
 export interface HostOptions {
-  /**
-   * Every installed plugin, in the order their contributions are shown. One whose id an earlier one
-   * has is left out: the id is what a plugin's settings and switch are kept under, so a second one
-   * would read and change the first one's.
-   */
+  /** Every plugin that comes with the app, in the order their contributions are shown. The ones a workspace installed come after, through `setInstalled`. */
   plugins: readonly Plugin[];
   required?: readonly string[];
   /**
@@ -69,19 +58,15 @@ export interface HostOptions {
    * `host.sharing` and `host.uploads`. Any other plugin is handed ones whose every method refuses.
    */
   trusted?: readonly Plugin[];
-  /** The ids of the plugins that came with the app. */
-  builtIn?: readonly string[];
   /** The member's settings as they are at the start. */
   settings: SettingsDocument;
   /**
    * Asked to set one key of the member's settings, or to take it out when `value` is undefined. Only
    * `setSetting` asks, on behalf of the member. Answer with `settingsChanged` once the document has changed.
    */
-  write(key: string, value: SettingValue | undefined): boolean;
+  write(key: string, value: SettingValue | undefined): void;
   /** Whether chords are labelled for a Mac. */
   mac: boolean;
-  /** Whether HTML embeds have a host of their own on this server, as the server says. A setting's `defaultWithoutEmbedSite` is its default where they don't. */
-  embedSite?: boolean;
   provide(plugin: PluginHost["plugin"]): Provided;
 }
 
@@ -98,14 +83,20 @@ export interface Host {
   fail(contribution: object, error: unknown): void;
   /** Turns every plugin off without forgetting which are on. They start again the next time contributions are read. */
   dispose(): void;
-  /** Sets one of the member's settings. A value that is the default is taken out of the document, as is `undefined`. False when it wasn't changed. */
-  setSetting(key: string, value: SettingValue | undefined): boolean;
+  /** Sets one of the member's settings. A value that is the default is taken out of the document, as is `undefined`. */
+  setSetting(key: string, value: SettingValue | undefined): void;
   /** Tells the host the member's document is now this one. Plugins it turns on or off start and stop. */
   settingsChanged(document: SettingsDocument): void;
   /** Tells the host the app has arrived at an address. */
   navigated(): void;
   /** Tells the host the notes the member can see have changed. */
   notesChanged(): void;
+  /**
+   * Tells the host which third-party plugins the workspace has installed now. One that is new starts
+   * if the member has it on, one that is gone stops and takes what it added with it, and one whose
+   * version changed stops and starts again. They are never among Common Ink's own.
+   */
+  setInstalled(installed: readonly Installed[]): void;
 }
 
 /** The setting that turns a plugin on and off. */
@@ -117,13 +108,15 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
-
-/** The most a plugin may keep in one remembered setting, in characters of JSON: the member's settings are small, and theirs. */
-const MAX_REMEMBERED = 10_000;
+const SLOTS = ["column", "section", "rail", "editor", "folder", "inspector", "page", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
-const RESERVED = ["plugins.", "go.", "settings.", "inspector."];
+const RESERVED = ["plugins.", "go.", "settings."];
+
+/** How the name of an installed plugin's embed starts, and no other's: so it can never be the name of one that comes with the app, on or off. */
+export const INSTALLED_EMBED = "x-";
+
+/** Names that are the app's own beside its plugins', which an installed plugin can't go by. */
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
@@ -139,14 +132,12 @@ function withheld(plugin: Plugin, given: Provided): Pick<Provided, (typeof OWN_O
   return Object.fromEntries(OWN_ONLY.map((capability) => [capability, refusing(capability)])) as never;
 }
 
-/** `host.uploads` for a plugin that isn't Common Ink's own: no upload is known, none has an address, nothing is read, and nothing is sent. */
+/** `host.uploads` for a plugin that isn't Common Ink's own: no upload is known, none has an address, and nothing is sent. */
 const noUploads = (plugin: Plugin): Provided["uploads"] => ({
   referred: () => null,
   onReferred: () => () => {},
   learn: () => {},
   address: () => "about:blank",
-  tabAddress: () => null,
-  bytes: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.bytes: only Common Ink's own plugins are`)),
   send: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.send: only Common Ink's own plugins are`)),
 });
 
@@ -158,6 +149,7 @@ function keptFromPerform(type: string): string | null {
   if (type === "upload.setPrivate") return "who an upload is shared with is read and changed through host.sharing, by a plugin that is given it";
   if (type === "upload.create" || type === "upload.open") return "an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it";
   if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
+  if (/^plugin\.(install|uninstall|permit|request|read)$/.test(type)) return "which plugins a workspace has, and what they are permitted, is decided on the Plugins page";
   return null;
 }
 
@@ -169,20 +161,29 @@ const ownOnly = (type: string): string | null =>
       ? "a workspace's uploads are read and changed only by Common Ink's own plugins"
       : /^(pin|visit)\./.test(type)
         ? "a member's pins and how far they have read the changes are theirs, and are read and changed only by Common Ink's own plugins"
-        : null;
+        : type.startsWith("plugin.")
+          ? "a workspace's record of its plugins is read only by Common Ink's own plugins"
+          : null;
 
-export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
-  const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
+export function createPluginHost({ plugins: builtIn, required = [], trusted = [], settings, write, mac, provide }: HostOptions): Host {
+  /** The third-party plugins the workspace has installed, after the ones that come with the app. */
+  let installed: readonly Installed[] = [];
+  let plugins: readonly Plugin[] = builtIn;
+  /** Where each plugin's contributions go among the others'. An installed plugin keeps its place while it is installed. */
+  const places = new Map<string, number>(builtIn.map((p, index) => [p.id, index]));
+  let nextPlace = builtIn.length;
+  const ownNames = [...builtIn.map((p) => p.name), ...OWN_NAMES];
+  /** Why an installed plugin can't start under the name it gives itself, or null when it can. Names are compared by how they read, so a look-alike letter is no way around it. */
+  const misnamed = (plugin: Plugin) => (builtIn.includes(plugin) ? null : takenName(plugin.name, ownNames));
+  const placeOf = (plugin: Plugin) => places.get(plugin.id)!;
   const commands = new Map<string, Owned<Command>>();
-  const embeds = new Map<string, Owned<Embed | AddressEmbed>>();
+  const embeds = new Map<string, Owned<Embed>>();
   const completions = new Map<string, Owned<Completion>>();
   const editorExtensions = new Map<string, Owned<EditorExtension>>();
   const views = new Map<keyof Slots, Map<string, Owned<Slots[keyof Slots]>>>(SLOTS.map((slot) => [slot, new Map()]));
   /** What each running plugin registered, to take back out when it is turned off. */
   const running = new Map<string, Set<Dispose>>();
   const errors = new Map<string, string>();
-  /** What each plugin had registered when contributions were last read with it on. */
-  const added = new Map<string, Added>();
   let document = settings;
   /** A switch that isn't true or false reads as its default, as any setting does. */
   const isOff = (p: Plugin) => {
@@ -242,36 +243,18 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       plugin: { id: plugin.id, name: plugin.name },
       ...provided,
       // This is the one way a plugin performs an operation of its own choosing, so it is where a plugin is refused.
-      // What is sent is a copy taken once, so the type that was looked at is the type that goes.
       perform(op) {
-        const sent = { ...(op as OpInput) };
-        const type: unknown = sent.type;
-        const why = typeof type === "string" ? (keptFromPerform(type) ?? (trusted.includes(plugin) ? null : ownOnly(type))) : "a plugin can't read or change the member's settings";
-        return why ? Promise.reject(new Error(`${plugin.name} can't ${String(type)}: ${why}`)) : provided.perform(sent as typeof op);
+        const { type } = op as OpInput;
+        const why = keptFromPerform(type) ?? (trusted.includes(plugin) ? null : ownOnly(type));
+        return why ? Promise.reject(new Error(`${plugin.name} can't ${type}: ${why}`)) : provided.perform(op);
       },
       settings: {
         get<T extends SettingValue>(name: string) {
           if (!plugin.settings || !Object.hasOwn(plugin.settings, name)) throw new Error(`${plugin.name} declares no setting named ${name}`);
           return contributions().settings.values[`${plugin.id}.${name}`] as T;
         },
-        set(name, value) {
-          const key = `${plugin.id}.${name}`;
-          // The key must be this plugin's own declaration and nothing else's: a dotted name, or an id such as `keybindings`, would make another's key.
-          const own = contributions().settings.declared.some((d) => d.key === key && d.group.id === plugin.id);
-          if (!plugin.settings?.[name]?.remembered || !Object.hasOwn(plugin.settings, name) || name.includes(".") || key.startsWith(KEYBINDING) || !own)
-            throw new Error(`${plugin.name} can't change ${name}: a plugin changes only a setting it declares remembered`);
-          const read = readSetting(plugin.settings[name]!, value);
-          return "value" in read && JSON.stringify(read.value).length <= MAX_REMEMBERED && setSetting(key, read.value);
-        },
         subscribe(listener) {
-          // A listener that throws is its plugin's failure, and not the end of telling the others or of the change it was told of.
-          const heard = () => {
-            try {
-              listener();
-            } catch (err) {
-              record(plugin.id, err);
-            }
-          };
+          const heard = () => listener();
           watching.add(heard);
           return keep(() => void watching.delete(heard));
         },
@@ -288,32 +271,31 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       views: {
         register(slot, view) {
           const table = views.get(slot) as Map<string, Owned<typeof view>>;
+          if (slot === "page" && (view as Slots["page"]).home && !trusted.includes(plugin)) throw new Error(`Only Common Ink's own plugins add the page shown at /, and ${plugin.name} asked to with ${(view as Slots["page"]).path}`);
           if (slot === "page" && /^\/folder(\/|$)/.test((view as Slots["page"]).path)) throw new Error(`${(view as Slots["page"]).path} is where a folder's notes are listed, so no page can be there`);
           if (slot === "page" && [...table.values()].some((o) => (o.value as Slots["page"]).path === (view as Slots["page"]).path)) throw new Error(`There's already a page at ${(view as Slots["page"]).path}`);
           const dispose = keep(add(table, view.id, view, index, `a ${slot} view with the id`));
           owners.set(view, owner);
-          if (slot !== "page" && slot !== "inspector") return dispose;
-          const own =
-            slot === "page"
-              ? keep(command({ id: `go.${view.id}`, title: `Go to ${(view as Slots["page"]).label}`, run: () => provided.app().go((view as Slots["page"]).path) }))
-              : keep(command({ id: `inspector.${view.id}`, title: `Toggle ${(view as Slots["inspector"]).label} panel`, run: () => provided.app().togglePanel(view.id) }));
+          if (slot !== "page") return dispose;
+          const page = view as Slots["page"];
+          const go = keep(command({ id: `go.${page.id}`, title: `Go to ${page.label}`, run: () => provided.app().go(page.path) }));
           return () => {
             dispose();
-            own();
+            go();
           };
         },
       },
       embeds: {
         register(embed) {
-          const address = "claims" in embed;
-          // An address embed is in no note by its name, so it is no clash with an embed a note writes by the same one: a video by its address, and `::video{}`.
-          const dispose = keep(add(embeds, address ? `address ${embed.name}` : embed.name, embed, index, address ? "an address embed named" : "an embed named"));
+          const theirs = !builtIn.includes(plugin);
+          if (embed.name.startsWith(INSTALLED_EMBED) !== theirs) throw new Error(`${theirs ? "An" : "Only an"} installed plugin's embed has a name that starts with ${INSTALLED_EMBED}, and this one is ${embed.name}`);
+          const dispose = keep(add(embeds, embed.name, embed, index, "an embed named"));
           owners.set(embed, owner);
           return dispose;
         },
         list: () =>
           contributions()
-            .embeds.filter((e): e is Embed => !("claims" in e) && e.menu !== false)
+            .embeds.filter((e) => e.menu !== false)
             .map(({ name, title, block, starts, pick }) => ({ name, title, block, starts, ...(pick && { pick }) })),
       },
       completions: {
@@ -352,45 +334,29 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     const mine = new Set<Dispose>();
     errors.delete(plugin.id);
     try {
+      const named = misnamed(plugin);
+      if (named) throw new Error(named);
       if (plugin.settings && Object.hasOwn(plugin.settings, "enabled")) throw new Error("A plugin can't declare a setting named enabled, which turns it on and off");
       const stopping = plugin.activate(hostFor(plugin, index, mine));
       if (stopping) mine.add(stopping);
       running.set(plugin.id, mine);
     } catch (err) {
       // A plugin that can't start is left out whole, and the rest of the app carries on.
-      undo(mine);
+      for (const dispose of mine) dispose();
       errors.set(plugin.id, err instanceof Error ? err.message : String(err));
     }
   }
 
   function stop(plugin: Plugin) {
-    const mine = running.get(plugin.id) ?? [];
-    // It stops running before its contributions go one by one, so what it added is remembered whole and not as it stood halfway out.
+    for (const dispose of running.get(plugin.id) ?? []) dispose();
     running.delete(plugin.id);
-    const failed = undo(mine);
     errors.delete(plugin.id);
-    if (failed.length) errors.set(plugin.id, failed.join("; "));
-  }
-
-  /** Takes back everything a plugin added. One part that throws as it goes doesn't keep the rest in, or stop whatever turned the plugin off: what it said is returned. */
-  function undo(disposes: Iterable<Dispose>): string[] {
-    const failed: string[] = [];
-    for (const dispose of disposes) {
-      try {
-        dispose();
-      } catch (err) {
-        failed.push(err instanceof Error ? err.message : String(err));
-      }
-    }
-    return failed;
   }
 
   /** The hint is the chord that runs the command now, which another command may have claimed first. */
   const infoOf = (c: Command): CommandInfo => {
-    const { keybindings } = contributions();
-    // Two chords can read the same, as / and Shift with / do.
-    const keys = [...new Set(Object.keys(keybindings).filter((chord) => keybindings[chord] === c.id).map((chord) => chordLabel(chord, mac)))];
-    return { id: c.id, title: c.title, shortcut: keys[0], keys, group: c.group };
+    const chord = chordFor(c.id, contributions().keybindings);
+    return { id: c.id, title: c.title, shortcut: chord === undefined ? undefined : chordLabel(chord, mac) };
   };
 
   function startAll() {
@@ -398,9 +364,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     started = starting = true;
     // A required plugin starts first, so no other can take an id it needs. Where its contributions are shown is still its place in the list.
     for (const first of [true, false]) {
-      plugins.forEach((plugin, index) => {
-        if (required.includes(plugin.id) === first && !off.has(plugin.id)) start(plugin, index);
-      });
+      for (const plugin of plugins) if (required.includes(plugin.id) === first && !off.has(plugin.id)) start(plugin, placeOf(plugin));
     }
     starting = false;
   }
@@ -433,71 +397,72 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
   function setSetting(key: string, value: SettingValue | undefined) {
     const setting = contributions().settings.declared.find((d) => d.key === key)?.setting;
     const read = setting && value !== undefined ? readSetting(setting, value) : undefined;
-    // A value the same as a default that depends on the server is kept: it is the member's choice wherever the app is.
-    const followsServer = setting?.type === "string" && setting.defaultWithoutEmbedSite !== undefined;
-    const isDefault = !followsServer && read && "value" in read && sameValue(read.value, setting!.default);
-    return write(key, isDefault ? undefined : value);
+    const isDefault = read && "value" in read && sameValue(read.value, setting!.default);
+    write(key, isDefault ? undefined : value);
   }
 
   function settingsChanged(next: SettingsDocument) {
     document = next;
-    plugins.forEach((plugin, index) => {
-      if (isOff(plugin) === off.has(plugin.id)) return;
+    for (const plugin of plugins) {
+      if (isOff(plugin) === off.has(plugin.id)) continue;
       if (off.delete(plugin.id)) {
-        if (started) start(plugin, index);
+        if (started) start(plugin, placeOf(plugin));
       } else {
         off.add(plugin.id);
         stop(plugin);
       }
-    });
+    }
     changed();
     for (const heard of [...watching]) heard();
   }
 
-  /** The schema: each plugin's switch and options, then a keybinding for each command that is on. */
-  /** A setting as it is on this server: with no host of HTML embeds' own, its default is the one it gives for that. */
-  function onThisServer(setting: Setting): Setting {
-    return setting.type === "string" && !embedSite && setting.defaultWithoutEmbedSite !== undefined ? { ...setting, default: setting.defaultWithoutEmbedSite } : setting;
+  function setInstalled(next: readonly Installed[]) {
+    // An id that is one of the app's own plugins' is never taken by an installed one.
+    const usable = next.filter((now, index) => !builtIn.some((p) => p.id === now.plugin.id) && next.findIndex((other) => other.plugin.id === now.plugin.id) === index);
+    const kept = (now: Installed) => installed.find((was) => was.plugin.id === now.plugin.id && was.version === now.version);
+    if (usable.length === installed.length && usable.every((now, index) => installed[index] === kept(now))) return;
+    for (const was of installed) {
+      if (usable.some((now) => kept(now) === was)) continue;
+      stop(was.plugin);
+      off.delete(was.plugin.id);
+      if (!usable.some((now) => now.plugin.id === was.plugin.id)) places.delete(was.plugin.id);
+    }
+    const before = installed;
+    installed = usable.map((now) => kept(now) ?? now);
+    plugins = [...builtIn, ...installed.map((i) => i.plugin)];
+    for (const now of installed) {
+      if (before.includes(now)) continue;
+      if (!places.has(now.plugin.id)) places.set(now.plugin.id, nextPlace++);
+      if (isOff(now.plugin)) off.add(now.plugin.id);
+      else if (started) start(now.plugin, placeOf(now.plugin));
+    }
+    changed();
   }
 
+  /** The schema: each plugin's switch and options, then a keybinding for each command that is on. */
   function declare(all: readonly Command[]): Declared[] {
     const options = plugins.flatMap((p) => {
       const group = { id: p.id, name: p.name };
       const active = running.has(p.id);
-      const own = Object.entries(p.settings ?? {}).map(([name, setting]): Declared => ({ key: `${p.id}.${name}`, setting: onThisServer(setting), group, active }));
+      const own = Object.entries(p.settings ?? {}).map(([name, setting]): Declared => ({ key: `${p.id}.${name}`, setting, group, active }));
       if (required.includes(p.id)) return own;
       const on = p.enabledByDefault ?? true;
-      const enabled: Declared = { switch: true, key: enabledKey(p.id), setting: { type: "boolean", default: on, title: "On", description: on ? `Turn ${p.name} off and what it adds goes away.` : `${p.name} is off until you turn it on here.` }, group, active: true };
+      const enabled: Declared = { key: enabledKey(p.id), setting: { type: "boolean", default: on, title: "On", description: on ? `Turn ${p.name} off and what it adds goes away.` : `${p.name} is off until you turn it on here.` }, group, active: true };
       return [enabled, ...own];
     });
     const group = { id: "keybindings", name: "Keybindings" };
     return [...options, ...all.map((c): Declared => ({ key: KEYBINDING + c.id, setting: { type: "chords", default: c.keys ?? [], title: c.title }, group, active: true }))];
   }
 
-  /** What the plugin at one place has in the tables now. */
-  function addedBy(place: number): Added {
-    const mine = <T>(owned: Iterable<Owned<T>>) => inOrder([...owned].filter((o) => o.plugin === place));
-    return {
-      commands: mine(commands.values()).map(({ id, title }) => ({ id, title })),
-      views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: ("label" in view ? view.label : null) ?? null }))),
-      embeds: mine(embeds.values()).map((e) => ("claims" in e ? { name: e.name, title: e.title, block: false, address: true as const } : { name: e.name, title: e.title, block: e.block ?? false })),
-      completions: mine(completions.values()).map(({ id, trigger }) => ({ id, trigger })),
-      editorExtensions: mine(editorExtensions.values()).map((extension) => extension.id),
-    };
-  }
-
   function contributions(): Contributions {
     startAll();
     if (snapshot) return snapshot;
-    plugins.forEach((p, place) => {
-      if (running.has(p.id)) added.set(p.id, addedBy(place));
-    });
     const toggles = plugins
-      .filter((p) => !required.includes(p.id))
+      // One that can't start under its name gets no command either, which would read as turning one of the app's own on or off.
+      .filter((p) => !required.includes(p.id) && !misnamed(p))
       .map((p): Command => {
         const enable = off.has(p.id);
-        // One id whichever way it goes, so a key given to it turns the plugin off and then on again. Only its title says which.
-        return { id: `plugins.toggle.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
+        return { id: `plugins.${enable ? "enable" : "disable"}.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
       });
     const all = [...inOrder(commands.values()), ...toggles];
     const declared = declare(all);
@@ -511,18 +476,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       embeds: inOrder(embeds.values()),
       completions: inOrder(completions.values()),
       editorExtensions: inOrder(editorExtensions.values()),
-      plugins: plugins.map((p) => ({
-        id: p.id,
-        name: p.name,
-        enabled: !off.has(p.id),
-        required: required.includes(p.id),
-        builtIn: builtIn.includes(p.id),
-        error: errors.get(p.id) ?? null,
-        description: p.description ?? null,
-        icon: p.icon ?? null,
-        screenshots: p.screenshots ?? [],
-        adds: added.get(p.id) ?? null,
-      })),
+      plugins: plugins.map((p) => ({ id: p.id, name: p.name, enabled: !off.has(p.id), required: required.includes(p.id), error: errors.get(p.id) ?? misnamed(p), installed: !builtIn.includes(p) })),
     });
   }
 
@@ -546,5 +500,6 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     notesChanged() {
       for (const heard of [...listing]) heard();
     },
+    setInstalled,
   };
 }

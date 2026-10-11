@@ -49,13 +49,14 @@ async function edit(page: Page, noteId: string) {
   await keys(page, "g", "g");
 }
 
-test("vim mode is off until it is turned on on the Plugins page, and turning it on or off reaches every open editor at once", async ({ page }) => {
+test("vim mode is off until it is turned on in settings, and turning it on or off reaches every open editor at once", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const alpha = await perform(page, { type: "note.create", text: "# Alpha" });
   const beta = await perform(page, { type: "note.create", text: "# Beta" });
-  await page.goto("/plugins");
-  const vim = page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Vim mode", exact: true });
-  await expect(vim).not.toBeChecked();
+  await page.goto("/settings");
+  const vim = page.getByRole("tabpanel").getByRole("region", { name: "Vim mode", exact: true });
+  await expect(vim.getByRole("checkbox", { name: "On" }).first()).not.toBeChecked();
+  await expect(vim).toContainText("Vim mode is off until you turn it on here.");
 
   await page.goto(`/note/${alpha.id}`);
   await editor(page).click();
@@ -74,21 +75,14 @@ test("vim mode is off until it is turned on on the Plugins page, and turning it 
   await run(page, "Split editor right");
   await expect(editors(page)).toHaveCount(2);
 
-  await run(page, "Go to Plugins");
-  await vim.check();
-  await expect.poll(() => stored(page)).toEqual({ "vim.enabled": true });
   await run(page, "Go to Settings");
-  await page.getByRole("button", { name: "Open settings (JSON)" }).click();
+  await vim.getByRole("checkbox", { name: "On" }).first().check();
+  await expect.poll(() => stored(page)).toEqual({ "vim.enabled": true });
+  await page.getByRole("tab", { name: "JSON", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Settings JSON" })).toContainText('"vim.enabled": true');
-  // Settings is a tab in one group, and the editor still showing in the other has vim at once.
-  await expect(editors(page)).toHaveCount(1);
-  await expect(statusLine(page)).toHaveText(["--NORMAL--"]);
+  await expect(statusLine(page)).toHaveCount(0);
 
-  // Back from the JSON, from Settings, and from the Plugins page, to the notes.
-  for (const address of [/\/settings$/, /\/plugins$/, /\/note\//]) {
-    await page.goBack();
-    await expect(page).toHaveURL(address);
-  }
+  await page.goBack();
   await expect(editors(page)).toHaveCount(2);
   await expect(statusLine(page, 0)).toHaveText("--NORMAL--");
   await expect(statusLine(page, 1)).toHaveText("--NORMAL--");
@@ -176,7 +170,7 @@ test("visual mode selects by character and by line, and a search moves to each m
   await keys(page, "k", "Shift+V", "d");
 
   await expect(lines(page)).toHaveText(["# Pick", "green blue", "cyan magenta yellow", "cyan agenta yellow"]);
-  await expect.poll(() => page.evaluate(() => document.querySelectorAll(".cm-line")[1]!.textContent)).toBe(" green blue");
+  expect(await page.evaluate(() => document.querySelectorAll(".cm-line")[1]!.textContent)).toBe(" green blue");
 });
 
 test("u and ctrl+r are the app's undo and redo: local for typing not yet saved, and a recorded change for typing that was", async ({ page }) => {
@@ -237,8 +231,7 @@ test(":w saves what is typed now, ⌘S does too, and :q closes the tab", async (
   await page.keyboard.press(":");
   await page.keyboard.type("q");
   await page.keyboard.press("Enter");
-  // The note's tab is gone, and with none left the app is at `/` with the Dashboard.
-  await expect(tabs(page)).toHaveText(["Dashboard"]);
+  await expect(tabs(page)).toHaveCount(0);
   await expect(page).toHaveURL(/\/$/);
 });
 
@@ -271,7 +264,7 @@ test("ctrl+o and ctrl+i go back and forward through the notes visited, into a cl
   await expect(page).toHaveURL(/\/note\/gamma-/);
 
   await run(page, "Close all tabs");
-  await expect(tabs(page)).toHaveText(["Dashboard"]);
+  await expect(tabs(page)).toHaveCount(0);
   await page.keyboard.press("Control+o");
   await expect(page).toHaveURL(/\/note\/gamma-/);
   await expect(tabs(page)).toHaveText(["Gamma"]);
@@ -306,7 +299,7 @@ test("in insert mode ctrl+o runs one normal command and ctrl+i types a tab, and 
   await page.keyboard.press("Control+i");
   await page.keyboard.type("Y");
   await expect(page).toHaveURL(/\/note\/beta-/);
-  await expect.poll(() => page.evaluate(() => document.querySelector(".cm-line")!.textContent)).toBe("Z\tY# Beta");
+  expect(await page.evaluate(() => document.querySelector(".cm-line")!.textContent)).toBe("Z\tY# Beta");
 
   await keys(page, "Escape", "Control+o");
   await expect(page).toHaveURL(/\/note\/alpha-/);
@@ -322,38 +315,27 @@ test("moving through a note in a preview tab leaves it a preview, and an edit ke
   await page.keyboard.type("second");
   await page.keyboard.press("Enter");
   await expect(statusLine(page)).toHaveText("--NORMAL--");
-  await expect.poll(() => italic(page)).toEqual([true]);
+  expect(await italic(page)).toEqual([false, true]);
 
   await page.keyboard.press("x");
   await expect(lines(page).nth(1)).toHaveText("econd line");
-  await expect.poll(() => italic(page)).toEqual([false]);
+  await expect.poll(() => italic(page)).toEqual([false, false]);
 });
 
-test("the cursor moves across an embed, which stays drawn and is shown as written above its line while the cursor is on it", async ({ page }) => {
+test("the cursor moves across an embed, which is shown as written while the cursor is on it and drawn again after", async ({ page }) => {
   const [note] = await withVim(page, "# Laps\nTime ::stopwatch{} here\nend");
-  await page.goto(`/note/${note!.id}`);
-  await expect(statusLine(page)).toHaveText("--NORMAL--");
-  // Not a click, which could land on the embed's own buttons.
-  await editor(page).focus();
-  await keys(page, "g", "g");
+  await edit(page, note!.id);
   const watch = page.getByRole("button", { name: /^Stopwatch/ });
-  const written = page.locator(".embed-source");
 
   await page.keyboard.press("j");
   await expect(watch).toBeVisible();
-  await expect(lines(page).nth(1)).toHaveText("Time 0:00 here");
   await expect(page.locator(".cm-fat-cursor")).toHaveText("T");
-  const drawn = await watch.elementHandle();
   await page.keyboard.press("w");
-  await expect(written).toHaveText("::stopwatch{}");
+  await expect(watch).toHaveCount(0);
+  await expect(lines(page).nth(1)).toHaveText("Time ::stopwatch{} here");
   await expect(page.locator(".cm-fat-cursor")).toHaveText(":");
-  // The cursor is drawn where the text is: in the row above the stopwatch.
-  expect((await page.locator(".cm-fat-cursor").boundingBox())!.y).toBeLessThan((await watch.boundingBox())!.y);
-  expect(await watch.evaluate((el, was) => el === was, drawn)).toBe(true);
   await page.keyboard.press("$");
-  await expect(written).toHaveCount(0);
-  await expect(lines(page).nth(1)).toHaveText("Time 0:00 here");
-  expect(await watch.evaluate((el, was) => el === was, drawn)).toBe(true);
+  await expect(watch).toBeVisible();
   await expect(page.locator(".cm-fat-cursor")).toHaveText("e");
   await keys(page, "j", "k", "0");
   await expect(watch).toBeVisible();
@@ -370,6 +352,7 @@ test("the cursor moves across an embed, which stays drawn and is shown as writte
 
 test("Escape closes what is open before it leaves insert mode, and the app's keys still run from normal mode", async ({ page }) => {
   const [note] = await withVim(page, "# Keys\nsecond");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true, "keybindings.view.toggleInspector": ["mod+shift+u"] }), baseRevision: 1 });
   await edit(page, note!.id);
 
   await page.keyboard.press("j");
@@ -386,11 +369,17 @@ test("Escape closes what is open before it leaves insert mode, and the app's key
   await expect(lines(page)).toHaveText(["# Keys", "econd"]);
 
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
   await expect(statusLine(page)).toHaveText("--NORMAL--");
   await page.keyboard.press("i");
   await page.keyboard.type("S");
-  // Focus has no popovers to close, so Escape here has only insert mode to leave.
+  await page.keyboard.press("ControlOrMeta+Shift+U");
+  const popover = page.getByRole("dialog");
+  await expect(popover).toBeVisible();
+  await expect(editor(page)).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(popover).toHaveCount(0);
   await expect(statusLine(page)).toHaveText("--INSERT--");
   await page.keyboard.type("s");
   await page.keyboard.press("Escape");
@@ -436,8 +425,6 @@ test("ctrl+o and ctrl+i are left to a field that has focus, vim's own prompt inc
   await openNote(page, "Beta");
   await expect(page).toHaveURL(/\/note\/beta-/);
   await expect(statusLine(page)).toHaveText("--NORMAL--");
-  // A preview gives way to the list opened next, so Beta's tab is kept first.
-  await tabs(page).filter({ hasText: "Beta" }).dblclick();
 
   await openAllNotes(page);
   await page.getByRole("searchbox", { name: "Search notes" }).click();
@@ -486,7 +473,6 @@ test("when vim's editing can't be loaded the Plugins page says so, notes are edi
   await expect(vim.getByRole("checkbox")).toBeChecked();
   await expect(vim.getByRole("alert")).toHaveText("Failed: Vim's editing couldn't be loaded, so notes are edited without it. Reload the page to try again.");
   await run(page, "Go to Settings");
-  await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Keyboard shortcuts" }).click();
-  await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByText("note.save", { exact: true })).toBeVisible();
-  await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByText("vim.back", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("keybindings.note.save")).toBeVisible();
+  await expect(page.getByText("keybindings.vim.back")).toHaveCount(0);
 });

@@ -122,22 +122,17 @@ test("a file uploaded on the Uploads page is listed with its picture, and its de
   await uploadsPage(page).getByRole("button", { name: "Upload files" }).click();
   await (await chooser).setFiles({ name: "harbour.png", mimeType: "image/png", buffer: png(320, 200) });
 
-  await expect(rows(page)).toHaveText([/^harbour\.pngImage.*You, just now.*Only you/]);
+  await expect(rows(page)).toHaveText([/^harbour\.pngImage.*Unsorted.*Ada Lovelace/]);
   await expect.poll(() => rows(page).locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(320);
   const [upload] = await perform(page, { type: "upload.list", includeArchived: false });
   await expect(page).toHaveURL(new RegExp(`/uploads/${upload!.id}$`));
   const detail = page.getByRole("complementary", { name: "harbour.png" });
   await expect(detail).toContainText("320 × 200");
-  await detail.getByRole("button", { name: "More for harbour.png" }).click();
-  await page.getByRole("menu", { name: "More for harbour.png" }).getByRole("menuitem", { name: "Copy embed" }).click();
-  await expect(toast(page).filter({ hasText: upload!.id })).toContainText(`::image{${upload!.id} 320x200}`);
+  await expect(detail.getByRole("textbox", { name: "Embed" })).toHaveValue(`::image{${upload!.id} 320x200}`);
   await expect(detail.getByRole("region", { name: "Used in" })).toContainText("No note you can see uses this file.");
-  const download = page.waitForEvent("download");
-  await detail.getByRole("button", { name: "More for harbour.png" }).click();
-  await page.getByRole("menu", { name: "More for harbour.png" }).getByRole("menuitem", { name: "Download" }).click();
-  expect((await download).suggestedFilename()).toBe("harbour.png");
+  await expect(detail.getByRole("link", { name: "Download" })).toHaveAttribute("download", "harbour.png");
 
-  await detail.getByRole("button", { name: "Preview harbour.png" }).click();
+  await detail.getByRole("button", { name: "Open", exact: true }).click();
   await expect.poll(() => page.getByRole("dialog", { name: "Preview of harbour.png" }).locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(320);
   await page.keyboard.press("Escape");
 
@@ -158,36 +153,31 @@ test("the Uploads page narrows by name, kind, folder and archived, moves a file,
   await page.goto("/uploads");
   await expect(rows(page)).toHaveCount(3);
 
-  const query = uploadsPage(page).getByRole("searchbox", { name: "Find uploads" });
-  await query.fill("LOG");
+  await uploadsPage(page).getByRole("searchbox", { name: "Filter uploads by name" }).fill("LOG");
   await expect(rows(page)).toHaveText([/^logo\.png/]);
-  await query.fill("type:video");
+  await uploadsPage(page).getByRole("searchbox", { name: "Filter uploads by name" }).fill("");
+  await uploadsPage(page).getByRole("combobox", { name: "Kind" }).selectOption({ label: "Videos" });
   await expect(rows(page)).toHaveText([/^clip\.mp4Video/]);
-  await query.fill("folder:Press");
+  await uploadsPage(page).getByRole("combobox", { name: "Kind" }).selectOption({ label: "All kinds" });
+  await uploadsPage(page).getByRole("combobox", { name: "Folder", exact: true }).selectOption({ label: "Press" });
   await expect(rows(page)).toHaveText([/^logo\.png/]);
-  await query.fill("");
+  await uploadsPage(page).getByRole("combobox", { name: "Folder", exact: true }).selectOption({ label: "All folders" });
 
   await rows(page).filter({ hasText: "logo.png" }).click();
   const detail = page.getByRole("complementary", { name: "logo.png" });
-  const more = detail.getByRole("button", { name: "More for logo.png" });
-  const menu = page.getByRole("menu", { name: "More for logo.png" });
-  await more.click();
-  await menu.getByRole("menuitem", { name: "Move to folder…" }).click();
-  await page.getByRole("menu", { name: "Move logo.png to" }).getByRole("menuitem", { name: "Unsorted" }).click();
+  await detail.getByRole("combobox", { name: "Move to folder" }).selectOption({ label: "Unsorted" });
   await expect.poll(async () => (await perform(page, { type: "upload.read", id: picture.id })).folderId).not.toBe(folder.id);
 
-  await more.click();
-  await menu.getByRole("menuitem", { name: "Make private" }).click();
-  await expect(rows(page).filter({ hasText: "logo.png" })).toContainText("Only you");
-  await expect.poll(async () => (await perform(page, { type: "upload.read", id: picture.id })).private).toBe(true);
+  await detail.getByRole("checkbox", { name: "Private" }).click();
+  await expect(detail.getByRole("checkbox", { name: "Private" })).toBeChecked();
+  await expect(rows(page).filter({ hasText: "logo.png" })).toContainText("Private");
+  expect((await perform(page, { type: "upload.read", id: picture.id })).private).toBe(true);
 
-  await more.click();
-  await menu.getByRole("menuitem", { name: "Archive" }).click();
+  await detail.getByRole("button", { name: "Archive" }).click();
   await expect(rows(page)).toHaveText([/^clip\.mp4/, /^notes\.txt/]);
-  await query.fill("is:archived");
+  await uploadsPage(page).getByRole("checkbox", { name: "Include archived" }).check();
   await expect(rows(page).filter({ hasText: "logo.png" })).toContainText("Archived");
-  await more.click();
-  await menu.getByRole("menuitem", { name: "Unarchive" }).click();
+  await detail.getByRole("button", { name: "Unarchive" }).click();
   await expect.poll(async () => (await perform(page, { type: "upload.read", id: picture.id })).state).toBe("live");
 });
 
@@ -201,7 +191,7 @@ test("a picture pasted into a note is sent to the note's folder and written with
 
   await give(page, "paste", [], { "text/plain": " Plain words." });
   await expect(editor(page)).toContainText("The harbour at dusk. Plain words.");
-  await expect.poll(() => perform(page, { type: "upload.list", includeArchived: true })).toEqual([]);
+  expect(await perform(page, { type: "upload.list", includeArchived: true })).toEqual([]);
 
   await give(page, "paste", [{ name: "dusk.png", type: "image/png", bytes: png(320, 200) }]);
   await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).map((u) => [u.name, u.folderId, u.private])).toEqual([["dusk.png", folder.id, false]]);
@@ -210,8 +200,8 @@ test("a picture pasted into a note is sent to the note's folder and written with
   await expect.poll(() => drawnWidth(page)).toBe(320);
   const box = await below(page, "image").boundingBox();
   expect([Math.round(box!.width), Math.round(box!.height)]).toEqual([320, 200]);
-  // The cursor is on the line under the picture, so the line that writes it shows nothing of it.
-  await expect(page.locator(".cm-line").nth(3)).toHaveText("");
+  // The cursor is on the line under the picture, so the line that writes it reads as its name.
+  await expect(line(page, "dusk.png")).toHaveText("dusk.png");
   await page.keyboard.type("and after");
   await expect.poll(() => noteText(page, note.id)).toBe(`# Trip\n\nThe harbour at dusk. Plain words.\n::image{${upload!.id} 320x200}\nand after`);
   // One change by the member, as typing is.
@@ -219,7 +209,7 @@ test("a picture pasted into a note is sent to the note's folder and written with
   expect(changes.every((c) => c.author.kind === "member")).toBe(true);
 });
 
-test("a file dropped on a private note is uploaded private, a file that is no picture, video, recording, PDF or text is a card on its own line whose name downloads it, and a file over 50 MB is refused before it is sent", async ({ page }) => {
+test("a file dropped on a private note is uploaded private, any file is a chip that downloads, and a file over 50 MB is refused before it is sent", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Diary\n\nWords.\n" });
   await perform(page, { type: "note.setPrivate", id: note.id, private: true });
@@ -231,17 +221,15 @@ test("a file dropped on a private note is uploaded private, a file that is no pi
   await expect(toast(page)).toContainText("huge.bin is 50 MB. A file can be at most 50 MB.");
   expect(sent).toEqual([]);
 
-  await give(page, "drop", [{ name: "minutes.bin", type: "application/octet-stream", bytes: Buffer.from("What was said.") }]);
-  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).map((u) => [u.name, u.private, u.kind])).toEqual([["minutes.bin", true, "file"]]);
+  await give(page, "drop", [{ name: "minutes.txt", type: "text/plain", bytes: Buffer.from("What was said.") }]);
+  await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).map((u) => [u.name, u.private, u.kind])).toEqual([["minutes.txt", true, "file"]]);
   const [upload] = await perform(page, { type: "upload.list", includeArchived: false });
   await expect.poll(() => noteText(page, note.id)).toBe(`# Diary\n\nWords.\n::file{${upload!.id}}\n`);
-  const card = below(page, "file");
-  await expect(card.locator(".upload-card-head")).toContainText("14 bytes");
-  const chip = card.getByRole("link", { name: "minutes.bin", exact: true });
-  await expect(chip).toHaveAttribute("download", "minutes.bin");
+  const chip = editor(page).getByRole("link", { name: "minutes.txt" });
+  await expect(chip).toContainText("14 bytes");
   const download = page.waitForEvent("download");
   await chip.click();
-  await expect.poll(async () => (await download).suggestedFilename()).toBe("minutes.bin");
+  expect((await download).suggestedFilename()).toBe("minutes.txt");
 });
 
 test("Upload a file in the / menu asks for a file and writes it where the menu was opened", async ({ page }) => {
@@ -251,7 +239,7 @@ test("Upload a file in the / menu asks for a file and writes it where the menu w
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/upl", { delay: 20 });
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Upload a file/, /^Insert an upload/]);
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Upload a file/]);
   await settled(page);
   const chooser = page.waitForEvent("filechooser");
   await page.keyboard.press("Enter");
@@ -262,49 +250,34 @@ test("Upload a file in the / menu asks for a file and writes it where the menu w
   await expect.poll(() => drawnWidth(page)).toBe(200);
 });
 
-test("with the cursor on a picture's line its text is shown above the picture, which is lower by that line and nothing else moves, and typing elsewhere neither draws the picture again nor asks for it again", async ({ page }) => {
+test("nothing in the note moves when the cursor comes to a picture's line, and typing elsewhere neither draws the picture again nor asks for it again", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const wide = await send(page, "wide.png", png(320, 200));
   const tall = await send(page, "tall.png", png(300, 900));
   const workspaceId = await workspaceOf(page);
   const asked: string[] = [];
   page.on("request", (request) => request.url().includes(`/api/workspaces/${workspaceId}/uploads/`) && asked.push(new URL(request.url()).pathname.slice(-12)));
-  await page.setViewportSize({ width: 1600, height: 1900 });
+  await page.setViewportSize({ width: 1600, height: 1400 });
   const note = await perform(page, { type: "note.create", text: `# Pictures\n\nbefore it\n\n::image{${wide.id} 320x200}\n\nbetween them\n\n::image{${tall.id} 300x900}\n\nafter them\n` });
   await open(page, note.id, "after them");
   await expect(picture(page)).toHaveCount(2);
   await expect.poll(() => picture(page).evaluateAll((imgs: HTMLImageElement[]) => imgs.map((img) => img.naturalWidth))).toEqual([320, 300]);
   await expect.poll(async () => (await measured(page)).shown).toEqual((await measured(page)).rooms);
   const before = await measured(page);
-  expect(before.rooms.map(([, , width, height]) => [width, height]), "each as large as the note says, narrower than the column").toEqual([
+  expect(before.rooms.map(([, , width, height]) => [width, height]), "each as large as the note says, and no taller than 480").toEqual([
     [320, 200],
-    [300, 900],
+    [160, 480],
   ]);
 
   await picture(page).evaluateAll((imgs) => imgs.forEach((img) => ((img as HTMLImageElement & { marked?: boolean }).marked = true)));
-  for (const [lineNumber, written] of [
-    [5, `::image{${wide.id} 320x200}`],
-    [9, `::image{${tall.id} 300x900}`],
-  ] as const) {
-    for (const elsewhere of [3, 11, 7]) {
-      await goTo(page, elsewhere);
-      await settled(page);
-      await expect.poll(() => measured(page), `with the cursor on line ${elsewhere}`).toEqual(before);
-    }
+  for (const lineNumber of [5, 9, 3, 11, 7]) {
     await goTo(page, lineNumber);
     await settled(page);
-    const shown = page.locator(".cm-line", { hasText: written });
-    await expect(shown).toHaveText(written);
-    const line = (await shown.boundingBox())!;
-    const on = await measured(page);
-    const at = on.lines.findIndex(([, top]) => Math.abs(top! - line.y) < 0.5);
-    const lower = (boxes: number[][]) => boxes.map(([left, top, width, height]) => [left!, top! >= line.y - 0.5 ? top! + line.height : top!, width!, height!]);
-    const near = (a: number[][], b: number[][]) => a.length === b.length && a.every((box, i) => box.every((n, j) => Math.abs(n - b[i]![j]!) <= 0.25));
-    expect(near(on.lines.filter((_, i) => i !== at), lower(before.lines)), `with the cursor on line ${lineNumber}, the lines under it are lower by it`).toBe(true);
-    expect(near(on.rooms, lower(before.rooms)) && near(on.shown, lower(before.shown)), `with the cursor on line ${lineNumber}, the pictures under it are lower by it`).toBe(true);
-    expect(on.shown.find(([, top]) => top! >= line.y)![1], "the picture is under its line").toBeGreaterThanOrEqual(line.y + line.height - 0.25);
-    await expect(picture(page)).toHaveCount(2);
+    expect(await measured(page), `with the cursor on line ${lineNumber}`).toEqual(before);
   }
+  await goTo(page, 5);
+  await expect(page.locator(".cm-line").nth(4)).toHaveText(`::image{${wide.id} 320x200}`);
+  await expect(picture(page)).toHaveCount(2);
 
   await goTo(page, 11);
   await page.keyboard.type(" and more words");
@@ -312,9 +285,9 @@ test("with the cursor on a picture's line its text is shown above the picture, w
   await page.keyboard.type(" here");
   await expect(page.getByRole("status")).toHaveText("Saved");
   await settled(page);
-  await expect.poll(() => picture(page).evaluateAll((imgs) => imgs.map((img) => (img as HTMLImageElement & { marked?: boolean }).marked === true))).toEqual([true, true]);
+  expect(await picture(page).evaluateAll((imgs) => imgs.map((img) => (img as HTMLImageElement & { marked?: boolean }).marked === true))).toEqual([true, true]);
   expect(asked.sort(), "each picture's bytes were asked for once").toEqual([wide.id, tall.id].sort());
-  await expect.poll(() => measured(page)).toEqual(before);
+  expect(await measured(page)).toEqual(before);
 });
 
 test("a picture's room is its full size before a byte of it has arrived, and a video and a recording wait to be played", async ({ page }) => {
@@ -334,7 +307,7 @@ test("a picture's room is its full size before a byte of it has arrived, and a v
   await open(page, note.id, "after");
   await expect(picture(page)).toHaveCount(1);
   await settled(page);
-  await expect.poll(() => picture(page).evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(false);
+  expect(await picture(page).evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(false);
   const waiting = await measured(page);
   expect(waiting.rooms.map(([, , width, height]) => [width, height])).toEqual([
     [320, 200],
@@ -344,7 +317,7 @@ test("a picture's room is its full size before a byte of it has arrived, and a v
   release();
   await expect.poll(() => drawnWidth(page)).toBe(320);
   await settled(page);
-  await expect.poll(() => measured(page)).toEqual(waiting);
+  expect(await measured(page)).toEqual(waiting);
 
   const video = below(page, "video").locator("video");
   await expect(video).toHaveAttribute("preload", "metadata");
@@ -353,7 +326,7 @@ test("a picture's room is its full size before a byte of it has arrived, and a v
   const audio = below(page, "audio").locator("audio");
   await expect(audio).toHaveAttribute("preload", "none");
   await expect(audio).toHaveJSProperty("autoplay", false);
-  await expect.poll(() => page.locator(".editor object, .editor embed, .editor iframe").count()).toBe(0);
+  expect(await page.locator(".editor object, .editor embed, .editor iframe").count()).toBe(0);
 });
 
 test("quick open finds an upload by its file name and opens the Uploads page on it, and ranks notes as it did", async ({ page }) => {
@@ -390,8 +363,7 @@ test("a file moved to Trash says so in the notes that use it, comes back when re
 
   await page.goto(`/uploads/${upload.id}`);
   const detail = page.getByRole("complementary", { name: "chart.png" });
-  await detail.getByRole("button", { name: "More for chart.png" }).click();
-  await page.getByRole("menu", { name: "More for chart.png" }).getByRole("menuitem", { name: "Move to Trash" }).click();
+  await detail.getByRole("button", { name: "Move to Trash" }).click();
   const confirm = detail.getByRole("group", { name: "Move chart.png to Trash" });
   await expect(confirm).toContainText("1 note still uses this file. It will say it is in Trash until it is restored.");
   await confirm.getByRole("button", { name: "Move to Trash" }).click();
@@ -401,13 +373,13 @@ test("a file moved to Trash says so in the notes that use it, comes back when re
   await open(page, note.id, "after");
   await expect(drawn(page, "image")).toHaveText(`${IN_TRASH}chart.png`);
   await expect(picture(page)).toHaveCount(0);
-  await expect.poll(async () => (await measured(page)).rooms, "the same room").toEqual(room);
+  expect((await measured(page)).rooms, "the same room").toEqual(room);
 
   await page.goto("/trash");
   const files = page.getByRole("list", { name: "Files in Trash" });
   await expect(files.getByRole("listitem")).toHaveText([/^chart\.png.*Trashed by Ada Lovelace.*30 days left/]);
   await files.getByRole("button", { name: "Restore" }).click();
-  await expect(page.locator(".toast-card").filter({ hasText: "chart.png" })).toContainText("Restored from Trash.");
+  await expect(page.getByRole("status").filter({ hasText: "chart.png" })).toContainText("Restored from Trash.");
   await open(page, note.id, "after");
   await expect.poll(() => drawnWidth(page)).toBe(320);
 
@@ -419,7 +391,7 @@ test("a file moved to Trash says so in the notes that use it, comes back when re
   await open(page, note.id, "after");
   await expect(drawn(page, "image")).toHaveText(UNAVAILABLE);
   await expect(page.locator("body")).not.toContainText("chart.png");
-  await expect.poll(async () => (await measured(page)).rooms).toEqual(room);
+  expect((await measured(page)).rooms).toEqual(room);
 });
 
 test("a member who can't see a file is shown a placeholder of the same size that says nothing of it, and is never sent its bytes", async ({ page }) => {
@@ -451,8 +423,7 @@ test("a member who can't see a file is shown a placeholder of the same size that
 
   // Shared with Bob, it is his to see, and his notes show it.
   await page.goto(`/uploads/${secret.id}`);
-  await page.getByRole("complementary", { name: "salaries-2026.png" }).getByRole("button", { name: "More for salaries-2026.png" }).click();
-  await page.getByRole("menu", { name: "More for salaries-2026.png" }).getByRole("menuitem", { name: "Share…" }).click();
+  await page.getByRole("complementary", { name: "salaries-2026.png" }).getByRole("button", { name: "Share" }).click();
   const dialog = page.getByRole("dialog", { name: "Share salaries-2026.png" });
   await expect(dialog).toContainText("A file has no link of its own.");
   await expect(dialog.getByRole("combobox", { name: "Link" })).toHaveCount(0);
@@ -493,8 +464,7 @@ test("a folder's link shows the pictures in the folder by the link's own address
   const html = await anyone.content();
   for (const word of ["office-map", "floor-plan"]) expect(html).not.toContain(word);
   expect(asked).toEqual([]);
-  const { token } = onNote.to;
-  await expect.poll(async () => (await anyone.request.get(`/api/shared/${token}/uploads/${inside.id}`)).status()).toBe(404);
+  expect((await anyone.request.get(`/api/shared/${onNote.to.token}/uploads/${inside.id}`)).status()).toBe(404);
 });
 
 test("an SVG draws as a picture in a note, and opened by its address it is a download that can run nothing", async ({ page }) => {
@@ -505,7 +475,7 @@ test("an SVG draws as a picture in a note, and opened by its address it is a dow
   const note = await perform(page, { type: "note.create", text: `# Diagram\n\n::image{${upload.id} 120x80}\n\nafter\n` });
   await open(page, note.id, "after");
   await expect.poll(() => drawnWidth(page)).toBe(120);
-  await expect.poll(() => page.evaluate(() => (window as { hacked?: boolean }).hacked)).toBeUndefined();
+  expect(await page.evaluate(() => (window as { hacked?: boolean }).hacked)).toBeUndefined();
 
   const response = await page.request.get(`/api/workspaces/${workspaceId}/uploads/${upload.id}`);
   expect(response.status()).toBe(200);
@@ -523,26 +493,5 @@ test("deleting a folder that holds a file is refused, with the reason said in th
   await tree.getByRole("treeitem", { name: "Assets" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.getByRole("complementary", { name: "Sidebar" }).getByRole("alert")).toHaveText("\"Assets\" isn't empty. Move or delete what's in it first. It holds uploads, which the Uploads view lists.");
-  await expect.poll(async () => (await perform(page, { type: "folder.list" })).folders.map((f) => f.name)).toContain("Assets");
-});
-
-test("with vim on, j and k move through the Uploads list and Enter opens the selected file's details", async ({ page }) => {
-  await signInAsNewPerson(page, "Ada Lovelace");
-  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
-  for (const name of ["one.png", "two.png", "three.png"]) await send(page, name, png(8, 8));
-  await page.goto("/uploads");
-  await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
-  await expect(rows(page)).toHaveCount(3);
-  const names = await rows(page).locator(".upload-name").allInnerTexts();
-  const selected = (n: number) => expect.poll(() => rows(page).nth(n).evaluate((row) => row.contains(document.activeElement) || row.closest("li")!.contains(document.activeElement))).toBe(true);
-  await page.keyboard.press((await page.evaluate(() => document.activeElement instanceof HTMLInputElement)) ? "Escape" : "j");
-  await selected(0);
-  await page.keyboard.press("j");
-  await selected(1);
-  await page.keyboard.press("Shift+G");
-  await selected(2);
-  await page.keyboard.press("k");
-  await selected(1);
-  await page.keyboard.press("Enter");
-  await expect(uploadsPage(page).getByRole("heading", { name: names[1]! })).toBeVisible();
+  expect((await perform(page, { type: "folder.list" })).folders.map((f) => f.name)).toContain("Assets");
 });

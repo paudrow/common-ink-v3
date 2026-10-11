@@ -93,9 +93,9 @@ describe("the dashboard's events, at every hour of a week on both sides of UTC",
     expect(wrong).toEqual([]);
     expect(few, "three editable occurrences to move, whatever the day and hour").toEqual([]);
     expect(asked).toBe(7 * 24 * ZONES.length);
-    // The listing the browser test used to make is short exactly here, in either zone, to the end of that date in UTC: on a Monday from
-    // 14:15 UTC, when the standup three days before has ended, and on a Sunday from 19:00, when Thursday's Focus time has.
-    const hoursFrom = (date: number, weekday: string, first: number) => Array.from({ length: 24 - first }, (_, i) => `2026-10-${String(date).padStart(2, "0")}T${first + i}:20Z ${weekday}`);
-    expect([...new Set(cut.map((at) => at.slice(0, 21)))]).toEqual([...hoursFrom(5, "Mon", 14), ...hoursFrom(11, "Sun", 19)]);
+    // The listing the browser test used to make is short exactly here, in either zone: on a Sunday and a Monday, from 14:15 UTC, when the
+    // standup three days before has ended, to the end of that date in UTC.
+    const fromStandupsEnd = (date: number, weekday: string) => Array.from({ length: 10 }, (_, i) => `2026-10-${String(date).padStart(2, "0")}T${14 + i}:20Z ${weekday}`);
+    expect([...new Set(cut.map((at) => at.slice(0, 21)))]).toEqual([...fromStandupsEnd(5, "Mon"), ...fromStandupsEnd(11, "Sun")]);
   }, 120_000);
 });

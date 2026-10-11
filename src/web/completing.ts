@@ -1,8 +1,7 @@
-import { acceptCompletion, autocompletion, currentCompletions, selectedCompletionIndex, setSelectedCompletion, type Completion as Option, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { autocompletion, type Completion as Option, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
-import { Prec, type EditorState, type Extension } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
-import { placed, startsLine, typedAfter } from "./completionSyntax.ts";
+import type { Extension } from "@codemirror/state";
+import { placed, typedAfter } from "./completionSyntax.ts";
 import type { Completion, CompletionItem } from "./plugin-api.ts";
 
 type Items = readonly CompletionItem[];
@@ -12,12 +11,11 @@ type Items = readonly CompletionItem[];
  * completion whose trigger fits is asked, and their items share the one list, in the order of the
  * completions. One that throws offers nothing, and `onFail` is told.
  */
-export function completing(given: readonly Completion[], onFail: (completion: Completion, error: unknown) => void): Extension {
-  if (!given.length) return [];
-  const completions = [...given].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+export function completing(completions: readonly Completion[], onFail: (completion: Completion, error: unknown) => void): Extension {
+  if (!completions.length) return [];
 
   /** Where a completion's trigger starts and what it offers for what was typed after it, or null when the cursor isn't after its trigger. */
-  const ask = (completion: Completion, context: CompletionContext): { completion: Completion; from: number; items: Items | Promise<Items> } | null => {
+  const ask = (completion: Completion, context: CompletionContext): { from: number; items: Items | Promise<Items> } | null => {
     const line = context.state.doc.lineAt(context.pos);
     const typed = typedAfter(line.text.slice(0, context.pos - line.from), completion.trigger, completion);
     if (typed === null) return null;
@@ -26,9 +24,9 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
     const failed = (err: unknown): Items => (onFail(completion, err), []);
     try {
       const items = completion.items(typed);
-      return { completion, from, items: items instanceof Promise ? items.catch(failed) : items };
+      return { from, items: items instanceof Promise ? items.catch(failed) : items };
     } catch (err) {
-      return { completion, from, items: failed(err) };
+      return { from, items: failed(err) };
     }
   };
 
@@ -43,7 +41,7 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
     const from = Math.min(...asked.map((a) => a.from));
     const offer = (answers: Items[]): CompletionResult | null => {
       // The completion has already chosen and ordered what fits, and unfiltered items keep the order they are given in, one completion after another.
-      const options = answers.flatMap((items, i) => items.map((item) => optionFor(asked[i]!.completion, item, asked[i]!.from - from)));
+      const options = answers.flatMap((items, i) => items.map((item) => optionFor(item, asked[i]!.from - from)));
       return options.length ? { from, to: context.pos, filter: false, update, options } : null;
     };
     const answers = asked.map((a) => a.items);
@@ -58,59 +56,19 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
   };
 
   /** `after` is how far the item's own trigger is past where the list starts, which is the earliest trigger of those that fit. */
-  const optionFor = (completion: Completion, item: CompletionItem, after: number): Option => ({
+  const optionFor = (item: CompletionItem, after: number): Option => ({
     ...(item.tone && { type: item.tone }),
     label: item.label,
     detail: item.detail,
     apply(view, _picked, listFrom, end) {
       const start = listFrom + after;
-      const write = (insert: string, from = start, to = end) => {
-        const at = view.state.doc.lineAt(from);
-        const { anchor, head, ...changes } = placed({ ...item, insert }, { from, to, before: at.text.slice(0, from - at.from), after: at.text.slice(to - at.from), last: at.number === view.state.doc.lines });
-        // Typing carried on after it while it was made: the cursor stays where that left it.
-        const still = view.state.selection.main.empty && view.state.selection.main.head === to;
-        view.dispatch({ changes, ...(still && { selection: { anchor, head } }), scrollIntoView: true, userEvent: "input.complete" });
-        item.run?.();
-      };
-      if (typeof item.insert === "string") return write(item.insert);
-      const typed = view.state.doc.sliceString(start, end);
-      item.insert().then(
-        (insert) => {
-          if (insert === null || !view.dom.isConnected) return;
-          // Typing before it while it was made moved it: it is written where the trigger and what was typed now are, the nearest, or not at all.
-          const text = view.state.doc.toString();
-          const found: number[] = [];
-          for (let at = text.indexOf(typed); at >= 0; at = text.indexOf(typed, at + 1)) found.push(at);
-          const at = found.sort((a, b) => Math.abs(a - start) - Math.abs(b - start))[0];
-          if (at !== undefined) write(insert, at, at + typed.length);
-        },
-        (err: unknown) => onFail(completion, err),
-      );
+      const at = view.state.doc.lineAt(start);
+      const { anchor, head, ...changes } = placed(item, { from: start, to: end, before: at.text.slice(0, start - at.from), after: at.text.slice(end - at.from), last: at.number === view.state.doc.lines });
+      view.dispatch({ changes, selection: { anchor, head }, scrollIntoView: true, userEvent: "input.complete" });
+      item.run?.();
     },
   });
 
-  const entersAt = (state: EditorState) => {
-    const head = state.selection.main.head;
-    const line = state.doc.lineAt(head);
-    const before = line.text.slice(0, head - line.from);
-    return completions.every((completion) => {
-      const typed = completion.prose ? typedAfter(before, completion.trigger, completion) : null;
-      return typed === null || startsLine(before, typed, completion.trigger);
-    });
-  };
-  // Tab picks what is highlighted, or the first item when nothing is.
-  const pick = (view: EditorView) => {
-    if (currentCompletions(view.state).length && selectedCompletionIndex(view.state) === null) view.dispatch({ effects: setSelectedCompletion(0) });
-    return acceptCompletion(view);
-  };
   // No delays: a member who types `/timer` and Enter without a pause means the timer.
-  return [
-    // A list opens with nothing highlighted, and its first item is highlighted in the same turn unless a prose trigger follows other words on its line, where Enter stays a new line.
-    autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0, selectOnOpen: false, optionClass: (option) => (option.type ? `cm-completion-${option.type}` : "") }),
-    EditorView.updateListener.of(({ view, state }) => {
-      if (currentCompletions(state).length && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
-    }),
-    // With no list open Tab is whatever it is elsewhere in a note.
-    Prec.highest(keymap.of([{ key: "Tab", run: pick }])),
-  ];
+  return autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0, optionClass: (option) => (option.type ? `cm-completion-${option.type}` : "") });
 }
