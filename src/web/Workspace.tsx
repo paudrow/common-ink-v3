@@ -31,6 +31,8 @@ const WRITING: Layout = { writing: true, popover: null };
 const WRITING_KEY = "ink.writing";
 const INSPECTOR_KEY = "ink.inspector";
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+/** Where a page that gives no order is placed: after every page that gives one. */
+const UNPLACED = Number.MAX_SAFE_INTEGER;
 /** How often the notes changed since the last look are listed, so an agent's or another member's change shows up. */
 const REFRESH_MS = 5000;
 /**
@@ -482,7 +484,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     folders: tree,
     folderId: selectedFolderId,
     writing: layout.writing,
-    pages: contributed.views.page,
+    pages: contributed.views.page.toSorted((a, b) => (a.order ?? UNPLACED) - (b.order ?? UNPLACED)),
     sections: null,
     overlay: overlay?.id ?? null,
     ...actions,

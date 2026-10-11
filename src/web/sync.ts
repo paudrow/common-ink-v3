@@ -31,9 +31,10 @@ const open = new Map<string, NoteSync>();
 /** Sends what's typed in a note now, without waiting for a pause. */
 export const saveNow = (noteId: string) => open.get(noteId)?.commit();
 
-type HistoryOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.reapplyChanges" | "note.undo" | "note.redo" }>;
+/** An operation that changes one note's text from outside its editor, and answers with the note. */
+type HistoryOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.reapplyChanges" | "note.undo" | "note.redo" | "todo.set" }>;
 
-/** Moves a note through its history. What's typed is saved first, and the note's editor takes the result if it's open. */
+/** Moves a note through its history, or rewrites a todo in it. What's typed is saved first, and the note's editor takes the result if it's open. */
 export async function moveThroughHistory(workspaceId: string, op: HistoryOp): Promise<Note> {
   const sync = open.get(op.id);
   await sync?.commit();
@@ -42,11 +43,11 @@ export async function moveThroughHistory(workspaceId: string, op: HistoryOp): Pr
   return note;
 }
 
-const MOVES: ReadonlySet<string> = new Set<HistoryOp["type"]>(["note.revert", "note.revertChanges", "note.reapplyChanges", "note.undo", "note.redo"]);
+const MOVES: ReadonlySet<string> = new Set<HistoryOp["type"]>(["note.revert", "note.revertChanges", "note.reapplyChanges", "note.undo", "note.redo", "todo.set"]);
 
 /**
  * Performs an operation and keeps the open editors true to it. Before one that moves notes through
- * history, what's typed is saved, and each open editor takes its note's result.
+ * history or rewrites a todo, what's typed is saved, and each open editor takes its note's result.
  */
 export async function performInSync<T extends OpInput>(workspaceId: string, op: T): Promise<Results[T["type"]]> {
   if (MOVES.has(op.type)) return moveThroughHistory(workspaceId, op as HistoryOp) as Promise<Results[T["type"]]>;

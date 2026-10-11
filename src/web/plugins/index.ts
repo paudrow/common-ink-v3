@@ -26,8 +26,9 @@ import { stopwatch } from "./stopwatch.ts";
 import { tables } from "./tables/index.ts";
 import { tabs } from "./tabs/index.tsx";
 import { timer } from "./timer.ts";
+import { todos } from "./todos/index.tsx";
 import { vim } from "./vim/index.ts";
 import { wordCount } from "./wordCount.tsx";
 
 /** The plugins that come with the app, in the order their contributions are shown. Each is on until a member turns it off, except one that says it starts off. */
-export const BUILT_INS: readonly Plugin[] = [sidebar, folders, noteList, tabs, quickOpen, commandPalette, comingSoon, history, agents, members, sharing, backlinks, noteInfo, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, wordCount, media, html, gfm, links, tables, math, codeBlocks, bullets, vim];
+export const BUILT_INS: readonly Plugin[] = [sidebar, folders, noteList, tabs, quickOpen, commandPalette, comingSoon, history, agents, members, sharing, backlinks, noteInfo, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, wordCount, media, html, gfm, todos, links, tables, math, codeBlocks, bullets, vim];

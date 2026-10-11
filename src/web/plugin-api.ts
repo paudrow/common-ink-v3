@@ -20,6 +20,9 @@ export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS } from "../core/pr
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
+/** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
+export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, todosIn, type Importance, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+
 export { dismissing, useDismiss } from "./dismiss.ts";
 export { sandboxed } from "./htmlFrame.ts";
 export { Icon, type IconName } from "./icons.tsx";
@@ -243,9 +246,10 @@ export interface Slots {
   /**
    * A page with its own address, shown in place of the editor. `nav` says where its link goes:
    * with the main links of the sidebar, under More, or in the workspace menu. Each page gets a
-   * `go.<id>` command.
+   * `go.<id>` command. `order` places its link among the others: lower first, and those with none
+   * after them, in the order of their plugins.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; component: View };
+  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; component: View };
   /**
    * A widget in the bar along the bottom of the app, such as a running timer. The bar is one line of
    * small things to glance at. It is there in writing mode too, and keeps its height when a widget

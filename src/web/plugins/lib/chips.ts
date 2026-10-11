@@ -19,6 +19,12 @@ export interface Source {
    * writes the way it was drawn from does nothing.
    */
   rewrite(text: string): void;
+  /**
+   * Writes the token's line another way: `next` is handed the line as it reads and answers how it
+   * should. For a change that reaches past the token, as taking a token away takes the space before
+   * it. In every other way it is `rewrite`.
+   */
+  rewriteLine(next: (line: string) => string): void;
   /** Puts the cursor in the token, which shows it as written: after it, or `offset` characters into it. */
   edit(offset?: number): void;
 }
@@ -105,6 +111,13 @@ export class ChipWidget<T extends Token> extends WidgetType {
         rewrite(text) {
           const token = writable(view.state) ? now() : undefined;
           const changes = token && replacing(written, text, token.from);
+          if (changes) view.dispatch({ changes, userEvent: `input.${chip.id}` });
+        },
+        rewriteLine(next) {
+          const token = writable(view.state) ? now() : undefined;
+          if (!token) return;
+          const line = view.state.doc.lineAt(token.from);
+          const changes = replacing(line.text, next(line.text), line.from);
           if (changes) view.dispatch({ changes, userEvent: `input.${chip.id}` });
         },
         edit(offset) {

@@ -49,6 +49,12 @@ describe("a note's snippet", () => {
   });
 });
 
+describe("a note's snippet of a todo", () => {
+  it("is the todo's words, without its importance, due date and projects", () => {
+    expect(summarize("# Plan\n\n- [ ] !! Call the **bank** due:2026-10-14 +Home #money\n- [x] done +Trip").snippet).toBe("Call the bank #money done");
+  });
+});
+
 describe("a note's open todos", () => {
   it("count unchecked list checkboxes", () => {
     expect(summarize("- [ ] a\n  * [ ] nested\n3. [ ] numbered\n4) [ ]\n- [x] done\n- [ ]no space\n[ ] not in a list").openTodos).toBe(4);

@@ -344,7 +344,7 @@ describe("a private note", () => {
       expect((await perform(env.DB, other, { type: "note.list", folderId: team.id }))).toEqual([]);
       expect(await perform(env.DB, other, { type: "history.revertAuthor", author: { kind: "agent", id: zed.agent.id } })).toEqual({ reverted: [], emptied: [], failed: [], next: null });
     }
-    expect(await perform(env.DB, ada, { type: "links.rebuild" })).toEqual({ notes: 2, next: null });
+    expect(await perform(env.DB, ada, { type: "links.rebuild" })).toEqual({ done: true });
     expect((await perform(env.DB, ada, { type: "grant.list" })).grants).toEqual([]);
 
     expect(await titles(eve)).toEqual(["Diary", "Linking", "Open"]);

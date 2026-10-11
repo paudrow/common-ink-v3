@@ -2624,3 +2624,187 @@ del.diff-line::before {
     border-bottom: 1px solid var(--line);
   }
 }
+
+.todos-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 54rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.todos-page h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.todo-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.todo-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.todo-filters select {
+  max-width: 12rem;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+}
+
+.todo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.todo-row > input[type="checkbox"] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.todo-words {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.45;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.todo-words:hover > :first-child {
+  text-decoration: underline;
+}
+
+.todo-row[data-done] .todo-words > :first-child {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.todo-note {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.todo-chips {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 50%;
+}
+
+.todo-chip {
+  position: relative;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.todo-chip > input,
+.todo-chip > select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.todo-chip > :disabled {
+  cursor: default;
+}
+
+.todo-chip:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.todo-importance {
+  min-width: 2.4em;
+  margin-top: 1px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.todo-importance[data-level="0"],
+.todo-due[data-due="none"],
+.todo-add {
+  background: none;
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.todo-due[data-due="overdue"],
+.todo-importance[data-level="3"] {
+  background: var(--removed-soft);
+  color: var(--danger);
+}
+
+.todo-due[data-due="today"],
+.todo-importance[data-level="2"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.todo-none {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.todo-more {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}

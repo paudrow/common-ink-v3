@@ -1,4 +1,4 @@
-import { ChangeSet } from "@codemirror/state";
+import { ChangeSet, MapMode } from "@codemirror/state";
 import { z } from "zod";
 import { SEEN, SEEN_FOLDER, allows, folderLevel, noteLevel, type GrantLevel, type Sight } from "./access.ts";
 import { lineDiff } from "./diff.ts";
@@ -18,6 +18,7 @@ import {
   type ChangeEntry,
   type Folder,
   type HistoryEntry,
+  type ListedTodo,
   type Note,
   type NoteSummary,
   type OpInput,
@@ -31,6 +32,7 @@ import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing
 import { noteSlug } from "./slug.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
+import { changeTodo, nameKey, parseTodo, todoIndex, todosIn } from "./todos.ts";
 
 /** Who is performing an operation, and where. */
 export type Actor =
@@ -137,7 +139,12 @@ export interface NoteRow extends SummaryRow {
   text: string;
   /** The person who made it, or whose agent did. Null for a note made before that was kept. */
   created_by: string | null;
+  /** Below {@link MADE} for a note whose links and todos haven't been made from its text since there were tables for them. */
+  indexed: number;
 }
+
+/** What a note's `indexed` is once its links, todos, projects and tags have been made from its text. */
+const MADE = 1;
 
 const SUMMARY_COLUMNS = `n.id, n.folder_id, n.revision, n.title, n.snippet, n.open_todos, n.created_at, n.updated_at, n.updated_by, n.updated_by_kind, n.private_owner,
     COALESCE(p.name, a.name) AS updated_by_name, a.person_id AS updated_by_owner
@@ -208,7 +215,7 @@ const NO_SUCH_FOLDER = "No such folder";
  */
 export async function loadNote(ctx: Context, id: string, need: GrantLevel): Promise<NoteRow> {
   const row = await ctx.db
-    .prepare(`SELECT n.text, n.created_by, ${SUMMARY_COLUMNS} WHERE n.id = ? AND n.workspace_id = ?`)
+    .prepare(`SELECT n.text, n.created_by, n.indexed, ${SUMMARY_COLUMNS} WHERE n.id = ? AND n.workspace_id = ?`)
     .bind(id, ctx.workspaceId)
     .first<NoteRow>();
   const level = row ? noteLevel(ctx.sight, row) : "none";
@@ -321,6 +328,90 @@ function linking(ctx: Context, noteId: string, text: string, { was, atRevision }
   ];
 }
 
+/** A bound value has a largest size, which the index of a long note of nothing but todos would pass, so its rows go in a few at a time. */
+const INDEX_ROWS_LENGTH = 250_000;
+
+function inParts(rows: readonly unknown[]): string[] {
+  const parts: string[][] = [[]];
+  let length = 0;
+  for (const row of rows.map((r) => JSON.stringify(r))) {
+    if (length + row.length > INDEX_ROWS_LENGTH && parts.at(-1)!.length) {
+      parts.push([]);
+      length = 0;
+    }
+    parts.at(-1)!.push(row);
+    length += row.length + 1;
+  }
+  return parts.filter((part) => part.length).map((part) => `[${part.join(",")}]`);
+}
+
+const INDEXED = {
+  todos: "INSERT INTO todos (note_id, line, done, importance, due, text) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]')",
+  projects: "INSERT INTO todo_projects (note_id, line, project, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
+  tags: "INSERT INTO note_tags (note_id, tag, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]')",
+} as const;
+const INDEX_TABLE = { todos: "todos", projects: "todo_projects", tags: "note_tags" } as const;
+
+/**
+ * The statements that make the index of a note's todos, their projects, and its tags what `text`
+ * says, or none for a part that `was` says the same of. Like `linking`, they go in the batch that
+ * changes the text, and with `atRevision` do nothing unless the note is still at that revision.
+ */
+function indexing(ctx: Context, noteId: string, text: string, { was, atRevision }: { was?: string; atRevision?: number } = {}): D1PreparedStatement[] {
+  const now = todoIndex(text);
+  const before = was === undefined ? null : todoIndex(was);
+  const current = "(?2 IS NULL OR EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND revision = ?2))";
+  const at = atRevision ?? null;
+  return (Object.keys(INDEXED) as (keyof typeof INDEXED)[]).flatMap((part) => {
+    if (before && JSON.stringify(before[part]) === JSON.stringify(now[part])) return [];
+    return [
+      ctx.db.prepare(`DELETE FROM ${INDEX_TABLE[part]} WHERE note_id = ?1 AND ${current}`).bind(noteId, at),
+      ...inParts(now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows)),
+    ];
+  });
+}
+
+/**
+ * Makes the links, todos, projects and tags of the notes that have never had them made, from their
+ * text: notes written before there were tables for them, and every note after a rebuild asks. It
+ * covers every note in the workspace, whoever asks, since it tells the asker nothing: what it writes
+ * is only ever read back through `SEEN`. It does so many a call. False when there are more.
+ */
+async function mend(ctx: Context): Promise<boolean> {
+  for (let batch = 0; batch < MEND_BATCHES; batch++) {
+    const { results } = await ctx.db
+      .prepare(`SELECT id, revision, text FROM notes WHERE workspace_id = ? AND indexed < ${MADE} LIMIT ?`)
+      .bind(ctx.workspaceId, MEND_NOTES + 1)
+      .all<{ id: string; revision: number; text: string }>();
+    const notes = results.slice(0, MEND_NOTES);
+    // A note written since it was read here is left to that write, which made all of it.
+    if (notes.length) {
+      await ctx.db.batch(
+        notes.flatMap((n) => [
+          ...linking(ctx, n.id, n.text, { atRevision: n.revision }),
+          ...indexing(ctx, n.id, n.text, { atRevision: n.revision }),
+          ctx.db.prepare("UPDATE notes SET indexed = ? WHERE id = ? AND revision = ?").bind(MADE, n.id, n.revision),
+        ]),
+      );
+    }
+    if (results.length <= MEND_NOTES) return true;
+  }
+  return false;
+}
+
+/**
+ * Has every note's links and index made again. A call that finds notes still waiting from the call
+ * before carries on with them, and one that finds none starts over.
+ */
+const rebuild = {
+  needs: "manage",
+  async run(ctx: Context) {
+    const waiting = await ctx.db.prepare(`SELECT 1 FROM notes WHERE workspace_id = ? AND indexed < ${MADE} LIMIT 1`).bind(ctx.workspaceId).first();
+    if (!waiting) await ctx.db.prepare("UPDATE notes SET indexed = 0 WHERE workspace_id = ?").bind(ctx.workspaceId).run();
+    return { done: await mend(ctx) };
+  },
+} as const;
+
 /** The note's text at `revision`, and the changes after it up to `current` composed into one. */
 async function replay(ctx: Context, id: string, revision: number, current: number): Promise<{ text: string; since: ChangeSet }> {
   const { results } = await ctx.db
@@ -340,8 +431,10 @@ async function replay(ctx: Context, id: string, revision: number, current: numbe
 const MAX_WRITE_ATTEMPTS = 5;
 /** Reverting an author reads each note's whole record and costs a few queries a note, and a request is allowed only so many. */
 const REVERT_AUTHOR_NOTES = 10;
-/** Two statements a note, in one batch. */
-const REBUILD_NOTES = 40;
+/** A handful of statements a note, in one batch. */
+const MEND_NOTES = 20;
+/** As many batches as one request makes, so a workspace of any size is mended over a few. */
+const MEND_BATCHES = 20;
 const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: changes\./.test(err.message);
 
 /** What a change records beyond its diff. */
@@ -360,14 +453,17 @@ async function record(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevisi
   const revision = row.revision + 1;
   const text = applyChanges(changes, row.text);
   if (text.length > MAX_NOTE_LENGTH) throw new OpError("invalid", `With the other changes merged in, the note would be over ${MAX_NOTE_LENGTH} characters`);
-  const next: NoteRow = { ...row, revision, ...written(ctx, text) };
+  const next: NoteRow = { ...row, revision, indexed: MADE, ...written(ctx, text) };
+  // A note never indexed has all of it made now, whatever this change touched.
+  const was = row.indexed < MADE ? {} : { was: row.text };
   try {
     await ctx.db.batch([
       insertChange(ctx, row.id, revision, baseRevision, changes, recording),
       ctx.db
-        .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ? WHERE id = ? AND revision = ?")
-        .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, row.id, row.revision),
-      ...linking(ctx, row.id, text, { was: row.text }),
+        .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, indexed = ? WHERE id = ? AND revision = ?")
+        .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, MADE, row.id, row.revision),
+      ...linking(ctx, row.id, text, was),
+      ...indexing(ctx, row.id, text, was),
     ]);
   } catch (err) {
     if (isChangeTaken(err)) return null;
@@ -499,14 +595,14 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const id = newId();
       const revision = op.text ? 1 : 0;
       const text = await linkedById(ctx, op.text, "", op.linkTitles);
-      const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, ...written(ctx, text) };
+      const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, indexed)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by);
-      await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, changesBetween("", text)), ...linking(ctx, id, text, { was: "" })] : [insertNote]));
+        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, row.indexed);
+      await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, changesBetween("", text)), ...linking(ctx, id, text, { was: "" }), ...indexing(ctx, id, text, { was: "" })] : [insertNote]));
       return toNote(ctx, row);
     },
   },
@@ -531,19 +627,116 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     },
   },
 
-  "links.rebuild": {
-    needs: "manage",
+  "links.rebuild": rebuild,
+
+  "todo.list": {
+    needs: "view",
     async run(ctx, op) {
+      await mend(ctx);
       const { results } = await ctx.db
-        .prepare(`SELECT n.id, n.revision, n.text FROM notes n WHERE n.workspace_id = ?1 AND (?2 IS NULL OR n.id > ?2) AND ${SEEN("n", "?4")} ORDER BY n.id LIMIT ?3`)
-        .bind(ctx.workspaceId, op.after ?? null, REBUILD_NOTES + 1, ctx.sight.bind)
-        .all<{ id: string; revision: number; text: string }>();
-      const page = results.slice(0, REBUILD_NOTES);
-      // A note written since it was read here is left to that write, which kept its record.
-      if (page.length) await ctx.db.batch(page.flatMap((n) => linking(ctx, n.id, n.text, { atRevision: n.revision })));
-      return { notes: page.length, next: results.length > page.length ? page.at(-1)!.id : null };
+        .prepare(
+          `SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
+             (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
+           FROM todos t JOIN notes n ON n.id = t.note_id
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")}
+             AND (?3 = 1 OR t.done = 0)
+             AND (?4 IS NULL OR EXISTS (SELECT 1 FROM todo_projects p WHERE p.note_id = t.note_id AND p.line = t.line AND p.project = ?4))
+             AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = t.note_id AND g.tag = ?5))
+             AND (?6 IS NULL OR t.due >= ?6)
+             AND (?7 IS NULL OR t.due <= ?7)
+             AND (?8 = 0 OR t.due IS NULL)
+             AND (?9 IS NULL OR t.importance IN (SELECT value FROM json_each(?9)))
+             AND (?10 IS NULL OR t.note_id = ?10)
+           ORDER BY t.done, t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE, t.note_id, t.line
+           LIMIT ?11 OFFSET ?12`,
+        )
+        .bind(
+          ctx.workspaceId,
+          ctx.sight.bind,
+          op.includeCompleted ? 1 : 0,
+          op.project === undefined ? null : nameKey(op.project),
+          op.tag === undefined ? null : nameKey(op.tag),
+          op.dueFrom ?? null,
+          op.dueTo ?? null,
+          op.noDue ? 1 : 0,
+          op.importance ? JSON.stringify(op.importance) : null,
+          op.noteId ?? null,
+          op.limit + 1,
+          op.offset,
+        )
+        .all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
+      const page = results.slice(0, op.limit);
+      return {
+        todos: page.map((r) => {
+          const todo = parseTodo(r.text);
+          return {
+            noteId: r.note_id,
+            noteTitle: r.title,
+            revision: r.revision,
+            line: r.line,
+            text: r.text,
+            done: r.done === 1,
+            importance: r.importance,
+            due: r.due,
+            projects: todo?.projects.map((p) => p.name) ?? [],
+            tags: JSON.parse(r.tags) as string[],
+            words: todo?.words ?? r.text,
+            access: noteLevel(ctx.sight, { id: r.note_id, folder_id: r.folder_id, private_owner: r.private_owner }) === "edit" ? "edit" : "view",
+          };
+        }),
+        next: results.length > op.limit ? op.offset + op.limit : null,
+      };
     },
   },
+
+  "todo.filters": {
+    needs: "view",
+    async run(ctx) {
+      await mend(ctx);
+      const [projects, tags] = await ctx.db.batch<{ name: string }>([
+        ctx.db
+          .prepare(`SELECT MIN(p.name) AS name FROM todo_projects p JOIN notes n ON n.id = p.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} GROUP BY p.project ORDER BY p.project`)
+          .bind(ctx.workspaceId, ctx.sight.bind),
+        ctx.db
+          .prepare(
+            `SELECT MIN(g.name) AS name FROM note_tags g JOIN notes n ON n.id = g.note_id
+             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} AND EXISTS (SELECT 1 FROM todos t WHERE t.note_id = g.note_id) GROUP BY g.tag ORDER BY g.tag`,
+          )
+          .bind(ctx.workspaceId, ctx.sight.bind),
+      ]);
+      return { projects: projects!.results.map((r) => r.name), tags: tags!.results.map((r) => r.name) };
+    },
+  },
+
+  "todo.set": {
+    needs: "edit",
+    run: (ctx, op) =>
+      settle(async () => {
+        const row = await loadNote(ctx, op.id, "edit");
+        if (op.revision > row.revision) throw new OpError("invalid", `The note has no revision ${op.revision}`);
+        const { id: _, type: __, revision, line, text: listedAs, ...change } = op;
+        let wanted: string;
+        try {
+          wanted = changeTodo(listedAs, change);
+        } catch (err) {
+          throw err instanceof RangeError ? new OpError("invalid", err.message) : err;
+        }
+        // The todo is the line the caller was shown, followed through each change recorded since. What a
+        // line says never decides which line it is: another todo may say the same.
+        const then = revision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, revision, row.revision);
+        const listed = todosIn(then.text).find((todo) => todo.line === line && todo.text === listedAs);
+        const at = !listed ? null : then.since ? then.since.mapPos(listed.from, 1, MapMode.TrackAfter) : listed.from;
+        const todo = at === null ? undefined : todosIn(row.text).find((t) => t.from <= at && at <= t.from + t.text.length);
+        // Asked again after it was done, as a call that failed on its way back is: the line already says so.
+        if (todo && todo.text !== listedAs && todo.text === wanted) return toNote(ctx, row);
+        if (!todo || todo.text !== listedAs) throw new OpError("conflict", "This todo was changed since it was listed. List the todos again.");
+        if (wanted === listedAs) return toNote(ctx, row);
+        const next = await record(ctx, row, changesBetween(row.text, row.text.slice(0, todo.from) + wanted + row.text.slice(todo.from + todo.text.length)), row.revision);
+        return next && toNote(ctx, next);
+      }),
+  },
+
+  "todos.rebuild": rebuild,
 
   "note.write": {
     needs: "edit",

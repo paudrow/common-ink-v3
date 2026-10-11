@@ -57,6 +57,10 @@ interface World {
 
 const address = () => `${crypto.randomUUID()}@example.com`;
 
+/** Each note has a todo with a project of its own, and a tag of its own, which give the note away as its title does. */
+const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name}`;
+const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
+
 async function world(): Promise<World> {
   const ada = await newMember("Ada Lovelace");
   const here = (personId: string): Actor => ({ kind: "member", personId, workspaceId: ada.workspaceId });
@@ -77,14 +81,14 @@ async function world(): Promise<World> {
   const team = await folder("Team");
   const folders = { Open: open, Team: team, Deep: await folder("Deep", team) };
 
-  const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: `# Title-${name}\n\nbody-${name} ${text}` })).id;
+  const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: textOf(name, text) })).id;
   const notes = { open: await note(ada, "open"), team: await note(ada, "team"), deep: await note(ada, "deep"), lone: await note(ada, "lone"), secret: "", vpriv: await note(vera, "vpriv") };
   await perform(env.DB, vera, { type: "note.setPrivate", id: notes.vpriv, private: true });
   await perform(env.DB, ada, { type: "member.setRole", memberId: vera.personId, as: "viewer" });
   notes.secret = await note(eve, "secret", `[[${notes.open}]]`);
   const zed = await connectAgent(env.DB, eve.personId, "Zed-agent");
   const asZed: Actor = { kind: "agent", agentId: zed.agent.id, personId: eve.personId, workspaceId: ada.workspaceId };
-  await perform(env.DB, asZed, { type: "note.write", id: notes.secret, baseRevision: 1, text: `# Title-secret\n\nbody-secret [[${notes.open}]] more` });
+  await perform(env.DB, asZed, { type: "note.write", id: notes.secret, baseRevision: 1, text: textOf("secret", `[[${notes.open}]] more`) });
   // What an admin put on the note before it was private: a link, and a guest. Neither outlasts it becoming private.
   const linked = await perform(env.DB, ada, { type: "grant.link", noteId: notes.secret, link: "public" });
   await perform(env.DB, ada, { type: "grant.set", noteId: notes.secret, email: vic!.email, access: "view" });
@@ -101,7 +105,7 @@ async function world(): Promise<World> {
   for (const name of NOTES) spare[name] = (await perform(env.DB, name === "secret" ? eve : name === "vpriv" ? vera : ada, { type: "grant.set", noteId: notes[name], email: `spare-${name}-${address()}`, access: "view" })).id;
 
   const marks = {} as World["marks"];
-  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`];
+  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`];
   for (const name of FOLDERS) marks[name] = [folders[name], `${name}-folder`];
   marks.secret.push(zed.agent.id, "Zed-agent");
 
@@ -152,7 +156,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.list": { on: "everything", args: () => ({}) },
   "note.create": { on: "folder", needs: "E", args: (folderId) => ({ folderId, text: "# Made" }) },
   "note.read": { on: "note", needs: "V", args: (id) => ({ id }) },
-  "note.write": { on: "note", needs: "E", args: (id, w, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, text: note === "secret" ? `# Title-secret\n\nbody-secret [[${w.notes.open}]] more` : `# Title-${note}\n\nbody-${note} ` }) },
+  "note.write": { on: "note", needs: "E", args: (id, w, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, text: note === "secret" ? textOf("secret", `[[${w.notes.open}]] more`) : textOf(note) }) },
   "note.backlinks": { on: "note", needs: "V", args: (id) => ({ id }) },
   "note.history": { on: "note", needs: "V", args: (id) => ({ id }) },
   "note.move": { on: "note", needs: "E", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
@@ -167,6 +171,10 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "history.revertAuthor": { on: "workspace", who: ["admin", "editor", "guest"], args: () => ({ author: { kind: "agent", id: "aaaaaaaaaaaa" } }) },
   "history.activity": { on: "everything", args: (w) => ({ timeZone: "UTC", author: { kind: "agent", id: w.secretAgent.id } }) },
   "links.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
+  "todo.list": { on: "everything", args: () => ({ includeCompleted: true }) },
+  "todo.filters": { on: "everything", args: () => ({}) },
+  "todo.set": { on: "note", needs: "E", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note), importance: 0 }) },
+  "todos.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
   "folder.list": { on: "everything", args: () => ({}) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
@@ -212,7 +220,7 @@ const enough = (level: Level, needs: "V" | "E") => level === "E" || (level === "
 const sharesNote = (name: ActorName, note: NoteName) => OWNER[note] === name || (ACTORS[name].shares && levelOf(name, note) === "E");
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && folderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "links.rebuild", "folder.delete"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "links.rebuild", "todos.rebuild", "folder.delete"];
 const AGENTS = ["their agent", "their read-only agent", "their agent pinned to this workspace"] as const;
 
 /** `not_found` for a note that was never there, which is what one the actor can't see must be answered with. */

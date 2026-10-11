@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isDay, isProjectName } from "./todos.ts";
 
 export const MAX_NOTE_LENGTH = 500_000;
 export const MAX_SETTINGS_LENGTH = 100_000;
@@ -46,6 +47,11 @@ const FolderName = z
  * writer can see has it or several do. `keep` leaves the text as written, where it links nothing.
  */
 const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
+
+/** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
+const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
+const ProjectName = z.string().max(100).refine(isProjectName, "not a project's name: a letter, then letters, digits, _ and -");
+const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 
 export const Op = z.discriminatedUnion("type", [
   /** `updatedSince` leaves out notes whose text hasn't changed since that time. */
@@ -109,11 +115,56 @@ export const Op = z.discriminatedUnion("type", [
     to: Time.optional(),
   }),
   /**
-   * Makes the record of which notes link to which again from the notes' text. Nothing needs it while
-   * every write keeps the record, so it is for a record that was changed some other way. It covers
-   * some notes a call; pass the answer's `next` as `after` for the rest.
+   * Makes what is derived from the notes' text again, for every note in the workspace: which notes
+   * link to which, and the index of todos, projects and tags. Nothing needs it while every write
+   * keeps them, so it is for a record that was changed some other way. It covers so many notes a
+   * call: while the answer's `done` is false, ask again. It is the same operation as todos.rebuild.
    */
-  z.object({ type: z.literal("links.rebuild"), after: Id.optional() }),
+  z.object({ type: z.literal("links.rebuild") }),
+  /**
+   * The todos in the notes the asker can see: open ones, or done ones too with `includeCompleted`.
+   * Open ones come first, then by due date with those that have none last, then the most important.
+   * `dueFrom` and `dueTo` are days, both included, and leave out todos with no due date; `noDue`
+   * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `project` and `tag`
+   * match ignoring case, and a tag is the note's. Pass the answer's `next` as `offset` for the page after.
+   */
+  z.object({
+    type: z.literal("todo.list"),
+    project: z.string().min(1).max(100).optional(),
+    tag: z.string().min(1).max(100).optional(),
+    dueFrom: Day.optional(),
+    dueTo: Day.optional(),
+    noDue: z.boolean().optional(),
+    importance: z.array(ImportanceLevel).min(1).max(4).optional(),
+    includeCompleted: z.boolean().default(false),
+    noteId: Id.optional(),
+    limit: z.number().int().min(1).max(200).default(100),
+    offset: z.number().int().min(0).default(0),
+  }),
+  /** What todo.list can be narrowed by: the projects of the todos, and the tags of the notes that have todos, in notes the asker can see. */
+  z.object({ type: z.literal("todo.filters") }),
+  /**
+   * Changes one todo by rewriting its line, as a change to its note by whoever asks. `revision`,
+   * `line` and `text` are the todo as todo.list gave it: the line it was on at that revision of its
+   * note, and what the line said. The line is followed through every change recorded since, so it is
+   * found wherever it has moved to, and no other line is ever taken for it, however alike. Refused as
+   * a conflict when the line itself was changed or deleted since. The same call made again changes
+   * nothing more. What is left out stays as written.
+   */
+  z.object({
+    type: z.literal("todo.set"),
+    id: Id,
+    revision: Revision,
+    line: z.number().int().min(0),
+    text: z.string().max(MAX_NOTE_LENGTH),
+    done: z.boolean().optional(),
+    importance: ImportanceLevel.optional(),
+    due: Day.nullable().optional(),
+    addProject: ProjectName.optional(),
+    removeProject: z.string().min(1).max(100).optional(),
+  }),
+  /** The same operation as links.rebuild, under the name of the other record it makes again. */
+  z.object({ type: z.literal("todos.rebuild") }),
   z.object({ type: z.literal("folder.list") }),
   z.object({ type: z.literal("folder.create"), name: FolderName, parentId: Id.optional() }),
   z.object({ type: z.literal("folder.rename"), id: Id, name: FolderName }),
@@ -246,6 +297,30 @@ export interface LinkedNote {
 export interface ReadNote extends Note {
   /** Each note the text links to by id, once, in the order they first appear. */
   links: LinkedNote[];
+}
+
+/** A todo as a listing gives it. `revision`, `line` and `text` are what todo.set finds it by. */
+export interface ListedTodo {
+  noteId: string;
+  noteTitle: string;
+  /** The revision its note was at when it was listed. */
+  revision: number;
+  /** Which line of the note it is, counted from 0. */
+  line: number;
+  /** The line as the note writes it. */
+  text: string;
+  done: boolean;
+  /** 0 for normal, and 1 to 3 for `!`, `!!` and `!!!`. */
+  importance: 0 | 1 | 2 | 3;
+  /** A calendar date, YYYY-MM-DD, or null. */
+  due: string | null;
+  projects: string[];
+  /** The tags of the note it is in. */
+  tags: string[];
+  /** The line without its list mark, checkbox, importance, due date and projects. */
+  words: string;
+  /** What the one asking may do with its note. With edit, todo.set changes it. */
+  access: GrantAccess;
 }
 
 export interface Folder {
@@ -407,13 +482,27 @@ export interface StoredSettings {
   updatedAt: number | null;
 }
 
+/**
+ * How far a rebuild got. It covers notes the one asking can't see too, so it says nothing of how
+ * many notes there were or which: only whether to ask again.
+ */
+export interface Rebuilt {
+  done: boolean;
+}
+
 export interface Results {
   "note.list": NoteSummary[];
   "note.create": Note;
   "note.read": ReadNote;
   "note.write": Note;
   "note.backlinks": NoteSummary[];
-  "links.rebuild": { notes: number; next: string | null };
+  "links.rebuild": Rebuilt;
+  /** `next` is the `offset` of the page after, or null on the last. */
+  "todo.list": { todos: ListedTodo[]; next: number | null };
+  /** Each name once, ignoring case, as a note writes it. */
+  "todo.filters": { projects: string[]; tags: string[] };
+  "todo.set": Note;
+  "todos.rebuild": Rebuilt;
   "note.history": ChangeEntry[];
   "note.move": Note;
   "note.label": { id: string; revision: number; label: string | null };

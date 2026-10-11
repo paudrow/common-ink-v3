@@ -56,7 +56,7 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 ## What a plugin is handed
 
 - `host.commands` registers commands, lists every command, and runs one by id. A command's `keys` are its default chords.
-- `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `rail`, `editor`, `inspector`, `page`, `bar`, and `overlay`. A page gets a `go.<id>` command.
+- `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `rail`, `editor`, `inspector`, `page`, `bar`, and `overlay`. A page gets a `go.<id>` command, and its `order` places its link among the others in its nav: lower first, and pages with none after them.
 - `host.embeds` registers an embed, drawn wherever a note says `::name{config}`, or `:::name{config}` … `:::` for a block embed. `host.embeds.list()` is every embed that is on, as a menu would offer them.
 - `host.completions` registers a completion: a list offered at the cursor while the member types after a trigger, such as the embed menu on `/`.
 - `host.editorExtensions` registers an editor extension, added to the editor of every note. It is a value, or a function of the editor that is told its note.
@@ -248,7 +248,7 @@ Don't add a `keymap.of(...)` for a key or two. CodeMirror runs all keymaps from 
 
 ## Drawing markdown in a note
 
-A note has one surface, its editor. Markdown is drawn there, in place of its source, and a line is shown as written while the cursor is on it. Five built-in plugins do it, each of which can be turned off alone: `gfm` (emphasis, headings, links, quotes, rules, inline code, task checkboxes), `tables`, `math`, `code-blocks`, and `bullets`. The editor parses GitHub-flavored markdown whether or not they are on, so each reads the same parse.
+A note has one surface, its editor. Markdown is drawn there, in place of its source, and a line is shown as written while the cursor is on it. Six built-in plugins do it, each of which can be turned off alone: `gfm` (emphasis, headings, links, quotes, rules, inline code), `todos` (a todo's checkbox and its options), `tables`, `math`, `code-blocks`, and `bullets`. The editor parses GitHub-flavored markdown whether or not they are on, so each reads the same parse.
 
 Three rules hold for all of them, and for anything drawn later:
 
@@ -263,7 +263,8 @@ How each kind of mark keeps the third rule:
 | A heading's `#`s | hang in the left margin, not painted | painted, in the same place |
 | `>`, `---`, a code fence | kept in the line, not painted (`ghost`) | painted |
 | A bullet's `-` | kept in the line, a dot painted over it | painted |
-| `[ ]` of a task | a checkbox exactly as wide as the three characters (`keepsWidth`) | the characters |
+| `[ ]` of a todo | a checkbox exactly as wide as the three characters (`keepsWidth`) | the characters |
+| A todo's `!!`, `due:2026-10-14`, `+Project` | a chip exactly as wide as the token (`keepsWidth`) | the token, kept in one piece so the line wraps where it did |
 | `**`, `` ` ``, `~~`, a link's address, a formula in a line | taken out of the line | put back: the rest of that line moves along by their width |
 | A block of math | the formula, in the room its lines take when written, wrapped rows and blank lines counted | its lines, the last padded to the formula's height |
 | A table | a table, always | still a table: a cell is typed in where it is drawn, held at the size it was drawn while it shows its source |
@@ -279,7 +280,7 @@ A fold never hides an edit. It opens when the cursor lands in it, when a selecti
 
 ### Chips
 
-A token that is drawn as something else and edits its own source is a chip (`plugins/lib/chips.ts`). The checkbox, the formula, and a link to a note are chips, and a mention and a todo's options will be:
+A token that is drawn as something else and edits its own source is a chip (`plugins/lib/chips.ts`). The checkbox, the formula, a link to a note, and a todo's options are chips, and a mention will be:
 
 ```ts
 const checkbox: Chip<Checkbox> = {
@@ -294,12 +295,12 @@ const checkbox: Chip<Checkbox> = {
     box.addEventListener("change", () => source.rewrite(box.checked ? "[x]" : "[ ]"));
   },
 };
-host.editorExtensions.register({ id: "gfm.tasks", extension: chips(checkbox) });
+host.editorExtensions.register({ id: "todos", extension: chips(checkbox) });
 ```
 
 A chip is drawn again when the note writes its token another way. One that also shows something from outside the note, such as a linked note's title or today's date, gives `key(token)`, a string of what it read: the chip is drawn again when that changes. To have it asked when nothing in the note changed, dispatch `redraw` (from `plugins/lib/live.ts`) to the editor.
 
-`chips` draws the tokens on screen, leaves the ones in code and on the cursor's line as written, and hands `draw` a `source`: `rewrite(text)` writes the token another way, as the member's edit, and does nothing when the note no longer writes the token as it was drawn; `edit()` puts the cursor after it, or `edit(offset)` that far into it.
+`chips` draws the tokens on screen, leaves the ones in code and on the cursor's line as written, and hands `draw` a `source`: `rewrite(text)` writes the token another way, as the member's edit, and does nothing when the note no longer writes the token as it was drawn; `rewriteLine(next)` does the same for a change that reaches past the token, handing `next` the token's line and writing what it answers, which is how taking a todo's due date away takes the space before it; `edit()` puts the cursor after it, or `edit(offset)` that far into it.
 
 A chip with `written: "within"` is shown as written only while the member is working inside the token itself: a cursor past its first character and before its last, or a selection of part of it. A selection that covers all of it, as selecting a paragraph does, leaves it drawn. The rest of its line stays drawn while the member types on it. It is for a token nobody reads as written, which a link is (`[[k3j5h8d9f0a1]]`) and a mention will be. On a line with several links, the one the cursor is in is shown as written and the others stay drawn, so the only thing that moves is what follows that one link on its line, by the difference in width between the id and the title. Coming to the line, typing on it, and leaving it move nothing. `test/browser/links.spec.ts` measures both.
 
@@ -307,7 +308,11 @@ Such a chip is one thing to the keyboard while it is drawn. The cursor passes it
 
 A chip is not drawn in what the editor's parse calls code. `inCode: true` leaves that to the chip's own `skip`, for one that has a better reading of code than the parse. Draw with elements and `textContent` only. Nothing from a note is ever set as HTML: HTML in a note stays text, and KaTeX is run with `trust` off (`plugins/math/options.ts`), so a formula can't make a link or load an image.
 
-The task checkbox in `plugins/gfm/tasks.ts` is all the todos plugin (#18) needs to take over: it registers a chip with the same `find` and takes `gfm.tasks` out.
+### Todos
+
+The todos plugin (`plugins/todos/`) is the pattern for options written as tokens on a line. `parseTodo` and `rewriteTodo` from the plugin API read and rewrite a line, the same functions the core indexes todos with (`docs/todos.md`). `plugins/lib/todoLines.ts` keeps where `todosIn` finds a todo in the whole text in a state field, and each chip is `inCode: true` with a `skip` that asks it, so a todo is drawn on exactly the lines the server lists. Each chip is `keepsWidth` and shown as written with its line, so its line never changes width. A chip's control is the browser's own, a select or a date field, laid over what the chip says and not painted. It needs no menu of its own, and it is disabled for a member who can only read. On the cursor's line each token is marked `md-todo-token`, which keeps it from wrapping in the middle as its chip can't.
+
+The Todos page changes a todo through `host.perform({ type: "todo.set", … })`. The host saves what is typed in that note's editor first and hands the editor the result, as it does for a move through history. A click on a todo opens its note and puts the cursor on its line: the plugin keeps the todo it is going to, and the editor extension it registers for that note places the cursor when the editor is there.
 
 ### Links to notes
 
