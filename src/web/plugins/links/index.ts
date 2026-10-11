@@ -10,8 +10,9 @@ const MOST_OFFERED = 50;
 
 /**
  * Links between notes. `[[` lists the notes and picking one writes a link by its id, drawn as the
- * note's title as it is now or as the link's own display text. ⌘-click, or the command vim's `gd`
- * runs, follows a link to its note, and the command follows a web address too.
+ * note's title as it is now or as the link's own display text. A click on a drawn link, or the
+ * command vim's `gd` runs, follows it to its note, ⌘-click opens the note in a tab behind, and the
+ * command follows a web address too.
  */
 export const links: Plugin = {
   id: "links",
@@ -23,7 +24,7 @@ export const links: Plugin = {
       const all = notes();
       return all ? (all.find((n) => n.id === noteId)?.title ?? null) : undefined;
     };
-    const open = (noteId: string) => host.app().openNote(noteId, { preview: true, focus: true });
+    const open = (noteId: string, how?: { background: boolean }) => host.app().openNote(noteId, how?.background ? { background: true } : { preview: true, focus: true });
 
     host.completions.register({
       id: "links",
@@ -77,7 +78,7 @@ export const links: Plugin = {
       },
     });
 
-    // The cursor passes a drawn link whole, so going into one to change it is asked for: by a click, or by this.
+    // An arrow key goes into a drawn link from either end. This goes straight to its words from beside it.
     host.commands.register({
       id: "links.edit",
       title: "Edit the link at the cursor",

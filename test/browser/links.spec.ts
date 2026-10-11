@@ -153,14 +153,15 @@ test("the Backlinks tab lists the notes that link to the open note, follows link
   await expect(page.getByRole("tabpanel")).toContainText("No notes link here yet.");
 });
 
-test("⌘-click opens a link's note as any note is opened, drawn or as written, and a plain click puts the cursor in it", async ({ page }) => {
+test("a click on a drawn link opens its note as any note is opened, ⌘-click opens it in a tab behind, and as written a plain click is for the cursor", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const plan = await create(page, "# Plan");
   const diary = await create(page, `# Diary\n\nRead [[${plan.id}]] today.`);
   await open(page, diary.id, "Read Plan today.");
 
-  // From a preview tab the linked note takes the tab, and Back returns.
-  await drawnLinks(page).click({ modifiers: ["ControlOrMeta"] });
+  // A plain click follows it, and says so. From a preview tab the linked note takes the tab, and Back returns.
+  await expect(drawnLinks(page)).toHaveAttribute("title", /^Plan\nClick to open · (⌘|Ctrl)-click to open in a new tab$/);
+  await drawnLinks(page).click();
   await expect(page).toHaveURL(/\/note\/plan-/);
   await expect(tabs(page)).toHaveText(["Plan"]);
   await expect(editor(page)).toBeFocused();
@@ -168,13 +169,27 @@ test("⌘-click opens a link's note as any note is opened, drawn or as written, 
   await expect(page).toHaveURL(/\/note\/diary-/);
   await expect(editor(page)).toContainText("Read Plan today.");
 
-  await drawnLinks(page).click();
-  await expect(lines(page).last()).toHaveText(`Read [[${plan.id}]] today.`);
+  // ⌘-click opens it in a tab of its own behind this one, which stays in front with the link still drawn.
+  await drawnLinks(page).click({ modifiers: ["ControlOrMeta"] });
+  await expect(tabs(page)).toHaveText(["Diary", "Plan"]);
+  await expect(tabs(page).first()).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveURL(/\/note\/diary-/);
+  await expect(drawnLinks(page)).toHaveText(["Plan"]);
+
+  // The arrow keys go into it, which shows it as written to be changed, and there a plain click is for the cursor.
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+End");
+  for (let i = 0; i < " today.".length + 1; i++) await page.keyboard.press("ArrowLeft");
+  await expect(lines(page).last()).toHaveText(`Read [[${plan.id}]] today.`);
+  await editor(page).getByText(plan.id).click();
+  await expect(page).toHaveURL(/\/note\/diary-/);
+  await expect(lines(page).last()).toHaveText(`Read [[${plan.id}]] today.`);
+  await page.keyboard.press("End");
+  for (let i = 0; i < "]] today.".length; i++) await page.keyboard.press("ArrowLeft");
   await page.keyboard.type("|the plan");
   await expect.poll(() => text(page, diary.id)).toBe(`# Diary\n\nRead [[${plan.id}|the plan]] today.`);
 
-  // From a tab that was edited, which is kept, the linked note opens beside it as a preview.
+  // As written, ⌘-click opens it. From a tab that was edited, which is kept, the linked note is opened in its own tab.
   await editor(page).getByText(plan.id).click({ modifiers: ["ControlOrMeta"] });
   await expect(page).toHaveURL(/\/note\/plan-/);
   await expect(tabs(page)).toHaveText(["Diary", "Plan"]);
@@ -255,7 +270,7 @@ test("in vim, gd on a link opens its note and ctrl+o comes back, and gd on an ad
 
 const undo = (page: Page) => page.keyboard.press("ControlOrMeta+z");
 
-test("a drawn link is one thing to the keys: the cursor passes it in a step, a deletion takes all of it, and undo brings all of it back", async ({ page }) => {
+test("a drawn link is one thing to a deletion, which takes all of it and undo brings all of it back, and the arrow keys go into it to change it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const plan = await create(page, "# Plan");
   const whole = `# Diary\n\nRead [[${plan.id}]] now`;
@@ -273,7 +288,8 @@ test("a drawn link is one thing to the keys: the cursor passes it in a step, a d
   };
 
   // Backspace from its right edge.
-  await right("Read ".length + 1);
+  await page.keyboard.press("End");
+  for (let i = 0; i < " now".length; i++) await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("Backspace");
   await expect(line).toHaveText("Read  now");
   await expect.poll(() => text(page, diary.id)).toBe("# Diary\n\nRead  now");
@@ -291,15 +307,30 @@ test("a drawn link is one thing to the keys: the cursor passes it in a step, a d
   await expect(line).toHaveText("Rea now");
   await restored();
 
-  // One step passes it, in both directions, and typing lands beside it.
-  await right("Read ".length + 1);
-  await page.keyboard.type("!");
-  await keys(page, "ArrowLeft", "ArrowLeft");
+  // Typing beside it, at either edge, leaves it drawn.
+  await right("Read ".length);
   await page.keyboard.type("?");
+  await page.keyboard.press("End");
+  for (let i = 0; i < " now".length; i++) await page.keyboard.press("ArrowLeft");
+  await page.keyboard.type("!");
   await expect(line).toHaveText("Read ?Plan! now");
   await expect.poll(() => text(page, diary.id)).toBe(`# Diary\n\nRead ?[[${plan.id}]]! now`);
 
-  // Going inside is asked for, and then it is text to edit like any other.
+  // An arrow key goes into it from the right, which shows it as written, and on out of its left, which draws it again.
+  await keys(page, "ArrowLeft", "ArrowLeft");
+  await expect(line).toHaveText(`Read ?[[${plan.id}]]! now`);
+  for (let i = 0; i < `[[${plan.id}]`.length; i++) await page.keyboard.press("ArrowLeft");
+  await expect(line).toHaveText("Read ?Plan! now");
+  // And from the left, and out of its right.
+  await page.keyboard.press("ArrowRight");
+  await expect(line).toHaveText(`Read ?[[${plan.id}]]! now`);
+  for (let i = 0; i < `[${plan.id}]]`.length; i++) await page.keyboard.press("ArrowRight");
+  await expect(line).toHaveText("Read ?Plan! now");
+
+  // Inside, it is text to edit like any other. Alt+Enter from beside it goes straight to its words.
+  await page.keyboard.press("End");
+  for (let i = 0; i < "! now".length; i++) await page.keyboard.press("ArrowLeft");
+  await expect(line).toHaveText("Read ?Plan! now");
   await page.keyboard.press("Alt+Enter");
   await expect(line).toHaveText(`Read ?[[${plan.id}]]! now`);
   await keys(page, "Backspace", "Backspace");
@@ -307,7 +338,7 @@ test("a drawn link is one thing to the keys: the cursor passes it in a step, a d
   await expect.poll(() => text(page, diary.id)).toBe(`# Diary\n\nRead ?[[${plan.id.slice(0, -2)}z|the plan]]! now`);
 });
 
-test("in vim a drawn link is one thing too: x, dw, cw and a visual d take all of it, and u brings it back", async ({ page }) => {
+test("in vim a drawn link is one thing to x, dw, cw and a visual d, which take all of it, u brings it back, and l and h go into it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
   const plan = await create(page, "# Plan");
@@ -323,7 +354,7 @@ test("in vim a drawn link is one thing too: x, dw, cw and a visual d take all of
     ["dw", ["d", "w"], "Read  now"],
     ["cw", ["c", "w", "Escape"], "Read  now"],
     ["visual d", ["v", "l", "d"], "Read  now"],
-    ["X from after it", ["l", "Shift+X"], "Read  now"],
+    ["X from after it", ["f", " ", "Shift+X"], "Read  now"],
   ] as const) {
     await keys(page, "g", "g", "2", "j", "w");
     await keys(page, ...presses);
@@ -334,14 +365,18 @@ test("in vim a drawn link is one thing too: x, dw, cw and a visual d take all of
     await expect.poll(() => text(page, diary.id), `u after ${name}`).toBe(whole);
   }
 
-  // l and h pass it in one step each.
-  await keys(page, "g", "g", "2", "j", "w", "l", "i");
-  await page.keyboard.type("!");
-  // Escape leaves the cursor on the "!", so one h is on the link, and i types before it.
-  await keys(page, "Escape", "h", "i");
-  await page.keyboard.type("?");
-  await page.keyboard.press("Escape");
-  await expect(line).toHaveText("Read ?Plan! now");
+  // l goes into it, which shows it as written, and h comes back out, which draws it again.
+  await keys(page, "g", "g", "2", "j", "w");
+  await expect(line).toHaveText("Read Plan now");
+  await page.keyboard.press("l");
+  await expect(line).toHaveText(`Read [[${plan.id}]] now`);
+  await page.keyboard.press("h");
+  await expect(line).toHaveText("Read Plan now");
+  // From the space after it, h goes onto its last bracket.
+  await keys(page, "f", " ", "h");
+  await expect(line).toHaveText(`Read [[${plan.id}]] now`);
+  await keys(page, "0");
+  await expect(line).toHaveText("Read Plan now");
 });
 
 test("what is drawn as a link is what the server records as one: in a nested bullet and an indented line, and not in a fence or inline code", async ({ page }) => {

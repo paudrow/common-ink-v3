@@ -51,9 +51,10 @@ export interface Chip<T extends Token> {
    * When the token is shown as written: with the cursor anywhere on its line, or `within`, only with
    * the cursor inside the token itself or a selection of part of it. For a token nobody reads as written, such as
    * a link's id: the rest of its line stays drawn while the member types on it, and nothing on the
-   * line moves until the cursor goes into the token. Such a token is one thing to the keyboard: the
-   * cursor passes it in one step, and a deletion that reaches into it takes all of it. The cursor
-   * goes inside only when sent there, by `source.edit(offset)` or `editWithin`.
+   * line moves until the cursor goes into the token. A drawn token is one thing to a deletion and to
+   * a selection: a deletion that reaches into it takes all of it, and a selection that would end
+   * inside it takes it whole. A cursor alone goes into it as into any text, by an arrow key or a
+   * motion of vim's, which shows it as written, and out again the same way.
    */
   written?: "line" | "within";
   /** Whether tokens in what the editor reads as code are drawn too, for a chip whose `skip` leaves code out by its own reading. */
@@ -181,9 +182,10 @@ export function editWithin<T extends Token>(chip: Chip<T>, view: EditorView, fro
 }
 
 /**
- * Keeps a token whole. A deletion of part of it, by any key in any mode, takes the rest of it too,
- * and a cursor or the end of a selection that a key would leave inside it goes on to its far side.
- * Vim works out its own ranges, so this is done to the transaction and not left to the keys.
+ * Keeps a drawn token whole. A deletion of part of it, by any key in any mode, takes the rest of it
+ * too, and the end of a selection that a key would leave inside it goes on to its far side. A cursor
+ * with nothing selected is let in. Vim works out its own ranges, so this is done to the transaction
+ * and not left to the keys.
  */
 function oneUnit<T extends Token>(chip: Chip<T>): Extension {
   return EditorState.transactionFilter.of((tr) => {
@@ -205,16 +207,12 @@ function oneUnit<T extends Token>(chip: Chip<T>): Extension {
     let moved = false;
     /** The token an end of a selection would be left inside, if any. */
     const cut = (pos: number) => units(chip, was, pos, pos).find((t) => pos > t.from && pos < t.to);
-    const ranges = tr.selection.ranges.map((r, i) => {
+    const ranges = tr.selection.ranges.map((r) => {
       const [low, high] = [cut(r.from), cut(r.to)];
-      if (!low && !high) return r;
+      if (r.empty || (!low && !high)) return r;
       moved = true;
-      if (!r.empty) {
-        const [from, to] = [low ? low.from : r.from, high ? high.to : r.to];
-        return r.head < r.anchor ? EditorSelection.range(to, from) : EditorSelection.range(from, to);
-      }
-      const before = (was.selection.ranges[i] ?? was.selection.main).head;
-      return EditorSelection.cursor(r.head > before ? low!.to : low!.from);
+      const [from, to] = [low ? low.from : r.from, high ? high.to : r.to];
+      return r.head < r.anchor ? EditorSelection.range(to, from) : EditorSelection.range(from, to);
     });
     return moved ? [tr, { selection: EditorSelection.create(ranges, tr.selection.mainIndex) }] : tr;
   });

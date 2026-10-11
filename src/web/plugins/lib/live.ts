@@ -17,7 +17,7 @@ export const touched = (state: EditorState, from: number, to: number) => !isRead
  * as selecting a paragraph does, is not.
  */
 export const within = (state: EditorState, from: number, to: number) =>
-  state.selection.ranges.some((r) => (r.empty ? r.from > from && r.to < to : r.from >= from && r.to <= to && r.to - r.from < to - from));
+  !isReading(state) && state.selection.ranges.some((r) => (r.empty ? r.from > from && r.to < to : r.from >= from && r.to <= to && r.to - r.from < to - from));
 
 /** Whether the cursor or a selection is on the line `pos` is in. */
 export function lineTouched(state: EditorState, pos: number) {
