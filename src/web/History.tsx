@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import type { Author, AuthorRef, Diff, HistoryEntry, HistoryPage, Note, NoteSummary, OpInput } from "../core/protocol.ts";
 import { perform } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
+import { RevertAuthor } from "./RevertAuthor.tsx";
 import { moveThroughHistory } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
@@ -9,6 +10,7 @@ type Query = Omit<Extract<OpInput, { type: "history.list" }>, "type" | "before">
 
 const refOf = (author: Author): AuthorRef => (author.kind === "agent" ? { kind: "agent", id: author.agentId } : { kind: "member", id: author.personId });
 const authorKey = (author: Author) => `${author.kind}:${refOf(author).id}`;
+const refOfKey = (key: string): AuthorRef => ({ kind: key.split(":")[0] as AuthorRef["kind"], id: key.split(":")[1]! });
 const changeKey = (change: HistoryEntry) => `${change.noteId}/${change.revision}`;
 const titleOf = (title: string) => title || "Untitled";
 const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
@@ -397,14 +399,22 @@ interface HistoryModeProps {
   /** Every note in the workspace, for scoping history to some of them. */
   notes: NoteSummary[];
   canEdit: boolean;
+  /** An author, as `kind:id`, to show the changes of. Answered with `onShownAuthor` once the filter is set. */
+  showAuthor: string | null;
+  onShownAuthor: () => void;
   onOpenNote: (noteId: string) => void;
   onChanged: (note: Note) => void;
+  /** Called once an author's changes were reverted across notes, so the notes are read again. */
+  onReverted: () => void;
 }
 
 /** The workspace's history: every change, filtered by author, date, and notes, with the member's activity above it. */
-export function HistoryMode({ workspaceId, personId, notes, canEdit, onOpenNote, onChanged }: HistoryModeProps) {
+export function HistoryMode({ workspaceId, personId, notes, canEdit, showAuthor, onShownAuthor, onOpenNote, onChanged, onReverted }: HistoryModeProps) {
   const [authors, setAuthors] = useState<Author[]>([]);
-  const [byAuthors, setByAuthors] = useState<string[]>([]);
+  const [byAuthors, setByAuthors] = useState<string[]>(showAuthor ? [showAuthor] : []);
+  useEffect(() => {
+    if (showAuthor) onShownAuthor();
+  }, [showAuthor]);
   const [noteIds, setNoteIds] = useState<string[]>([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -423,16 +433,16 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, onOpenNote,
   const query = useMemo<Query>(
     () => ({
       ...(noteIds.length ? { noteIds } : {}),
-      ...(chosen.length ? { authors: chosen.map(refOf) } : {}),
+      ...(byAuthors.length ? { authors: byAuthors.map(refOfKey) } : {}),
       ...(from ? { from: dayStart(from).getTime() } : {}),
       ...(to ? { to: dayStart(to).getTime() + DAY_MS } : {}),
     }),
-    [noteIds, byAuthors, authors, from, to],
+    [noteIds, byAuthors, from, to],
   );
   const me: AuthorRef = { kind: "member", id: personId };
   const one = chosen.length === 1 ? chosen[0]! : null;
   const pickedDay = from && from === to ? from : null;
-  const filtered = noteIds.length > 0 || chosen.length > 0 || from !== "" || to !== "";
+  const filtered = noteIds.length > 0 || byAuthors.length > 0 || from !== "" || to !== "";
 
   return (
     <section className="history-mode" aria-label="History">
@@ -482,6 +492,19 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, onOpenNote,
           </button>
         )}
       </div>
+      {canEdit && one?.kind === "agent" && !from && !to && (
+        <div className="revert-author">
+          <RevertAuthor
+            key={authorKey(one)}
+            workspaceId={workspaceId}
+            author={refOf(one)}
+            name={one.name}
+            where={noteIds.length ? `in the ${count(noteIds.length, "note")} chosen` : "in this workspace"}
+            noteIds={noteIds.length ? noteIds : undefined}
+            onReverted={onReverted}
+          />
+        </div>
+      )}
       <Changes
         workspaceId={workspaceId}
         query={query}

@@ -118,7 +118,7 @@ _Avoid_: Commit, event, op
 Who made a change: a member, a named agent, or a plugin.
 
 **Agent**:
-An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's.
+An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. An agent's changes can be reverted on their own, which keeps everyone else's.
 _Avoid_: Bot
 
 **History**:

@@ -4,6 +4,7 @@ import { signOut } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
 import { Icon } from "./icons.tsx";
 import { MODES, modePath, type ModeId } from "./modes.ts";
+import { AGENTS_PATH } from "./router.ts";
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
 
@@ -21,7 +22,7 @@ export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, children }:
   const link = (mode: (typeof MODES)[number]) => <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={onGo} labelled />;
   return (
     <aside className="sidebar" aria-label="Sidebar">
-      <WorkspaceMenu me={me} workspace={workspace} onSwitch={onSwitch} />
+      <WorkspaceMenu me={me} workspace={workspace} onSwitch={onSwitch} onGo={onGo} />
       <nav aria-label="Modes" className="modes">
         {MODES.filter((m) => m.primary).map(link)}
         <button type="button" className="mode" aria-expanded={more} onClick={() => setMore(!more)}>
@@ -56,7 +57,7 @@ export function ModeLink({ mode, active, onGo, labelled }: { mode: (typeof MODES
   );
 }
 
-function WorkspaceMenu({ me, workspace, onSwitch }: { me: Me; workspace: WorkspaceSummary; onSwitch: (workspaceId: string) => void }) {
+function WorkspaceMenu({ me, workspace, onSwitch, onGo }: { me: Me; workspace: WorkspaceSummary; onSwitch: (workspaceId: string) => void; onGo: (path: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -89,6 +90,16 @@ function WorkspaceMenu({ me, workspace, onSwitch }: { me: Me; workspace: Workspa
             </button>
           ))}
           <hr />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              close();
+              onGo(AGENTS_PATH);
+            }}
+          >
+            Agents
+          </button>
           <button type="button" role="menuitem" onClick={() => signOut().then(() => location.assign("/"))}>
             Sign out
           </button>

@@ -2,7 +2,8 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { signIn, whoAmI } from "../../src/core/accounts.ts";
-import { authenticateAgent, connectAgent, DEFAULT_EXPIRY_DAYS, listAgents, MAX_EXPIRY_DAYS } from "../../src/core/agents.ts";
+import { authenticateAgent, connectAgent, listAgents } from "../../src/core/agents.ts";
+import { DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS } from "../../src/core/protocol.ts";
 import { perform } from "../../src/core/operations.ts";
 import { sign } from "../../src/worker/session.ts";
 

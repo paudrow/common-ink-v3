@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
+import { Agents } from "./Agents.tsx";
 import { ApiError, perform } from "./api.ts";
 import { createCommands, type Command } from "./commands.ts";
 import { useDismiss } from "./dismiss.ts";
@@ -16,7 +17,7 @@ import { MODES, modePath, type ModeId } from "./modes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { NoteList } from "./NoteList.tsx";
 import { Palette } from "./Palette.tsx";
-import type { Navigate, Route } from "./router.ts";
+import { AGENTS_PATH, type Navigate, type Route } from "./router.ts";
 import { ModeLink, Sidebar } from "./Sidebar.tsx";
 import { Soon } from "./Soon.tsx";
 import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
@@ -98,9 +99,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const [palette, setPalette] = useState<"commands" | "notes" | null>(null);
   /** An undo or redo that didn't happen, and why, shown on its note until the member's next step. */
   const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
+  /** An author History mode is asked to show the changes of, until it has. */
+  const [historyAuthor, showHistoryOf] = useState<string | null>(null);
 
   const selectedFolderId = tree && chosenFolderId && !tree.byId.has(chosenFolderId) ? null : chosenFolderId;
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
+  const notesVersion = useMemo(() => (notes ?? []).reduce((sum, n) => sum + n.revision, 0), [notes]);
   const routeNoteId = route.kind === "note" ? route.id : null;
   const current = (routeNoteId && byId.get(routeNoteId)) || null;
 
@@ -286,6 +290,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       ...CLOSES.map(({ scope, id, title }) => ({ id, title, run: onTab((tab) => ({ type: "close", scope, ...tab })) })),
       { id: "editor.splitRight", title: "Split editor right", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) },
       ...MODES.map((mode) => ({ id: `go.${mode.id}`, title: `Go to ${mode.label}`, run: () => latest.current.go(modePath(mode.id)) })),
+      { id: "go.agents", title: "Go to Agents", run: () => latest.current.go(AGENTS_PATH) },
     ];
     const unregister = all.map((command) => commands.register(command));
     return () => unregister.forEach((off) => off());
@@ -419,10 +424,32 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       <main className="main" aria-label="Editor">
         {route.kind === "mode" &&
           (route.mode === "history" ? (
-            <HistoryMode workspaceId={workspaceId} personId={me.person.id} notes={notes ?? []} canEdit={canEdit} onOpenNote={(id) => openNote(id, false)} onChanged={remember} />
+            <HistoryMode
+              workspaceId={workspaceId}
+              personId={me.person.id}
+              notes={notes ?? []}
+              canEdit={canEdit}
+              showAuthor={historyAuthor}
+              onShownAuthor={() => showHistoryOf(null)}
+              onOpenNote={(id) => openNote(id, false)}
+              onChanged={remember}
+              onReverted={refresh}
+            />
           ) : (
             <ModeView mode={route.mode} />
           ))}
+        {route.kind === "agents" && (
+          <Agents
+            workspace={workspace}
+            workspaces={me.workspaces}
+            version={notesVersion}
+            onShowChanges={(agentId) => {
+              showHistoryOf(`agent:${agentId}`);
+              go(modePath("history"));
+            }}
+            onReverted={refresh}
+          />
+        )}
         {route.kind === "missing" && <p className="notice">There's nothing at this address.</p>}
         {(route.kind === "note" || route.kind === "home") && <EditorGroups layout={editor} titleOf={titleOf} dispatch={dispatch} renderNote={renderNote} />}
       </main>

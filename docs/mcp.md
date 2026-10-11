@@ -1,6 +1,6 @@
 # Connecting an agent
 
-A member connects an agent and gets a token for it. The agent sends the token to `/mcp` (the MCP server) or uses the `ink` command, which calls `/mcp`. Both go through the same operations as the web app (`src/core/operations.ts`), as the member who connected the agent.
+A member connects an agent in the web app, on the Agents page (`/agents`, from the workspace menu or the "Go to Agents" command), and gets a token for it. The page shows the token once with the command to paste, lists the member's agents, and disconnects them. The agent sends the token to `/mcp` (the MCP server) or uses the `ink` command, which calls `/mcp`. Both go through the same operations as the web app (`src/core/operations.ts`), as the member who connected the agent.
 
 ## Rules
 
@@ -27,9 +27,11 @@ Optional fields on the POST: `label` (up to 60 characters), `expiresInDays` (def
 
 `POST /mcp` with `Authorization: Bearer cink_...` and `Content-Type: application/json`. Streamable HTTP, stateless: one JSON-RPC message (or a batch) per POST, answered as JSON. No server-sent events, no sessions. Without a valid token the answer is 401.
 
-Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `note_history`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `undo`, `redo`. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace.
+Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `move_note`, `note_history`, for folders `list_folders`, `create_folder`, `rename_folder`, `delete_folder`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `revert_author`, `undo`, `redo`. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace. An argument a tool doesn't take is refused by name, not left out.
 
-History tools never rewrite the record. A revert, an undo, or a redo is a new change under the agent's name that names the changes it took back out (`reverts`), and each change it took out names it (`revertedBy`). `history` filters by `authors`, so an agent's changes can be listed on their own and passed to `revert_changes`. A read-only token can list history and is refused the rest.
+Every operation the web app performs has a tool with the same fields, and every tool has an `ink` command. `test/core/agent-parity.test.ts` reads the operation schema and fails when one is missing; an operation kept from agents on purpose is listed with its reason in `NOT_FOR_AGENTS` (`src/worker/mcp/tools.ts`). Connecting and disconnecting agents is not an operation: it needs a member's session, so an agent can't make another token.
+
+History tools never rewrite the record. A revert, an undo, or a redo is a new change under the agent's name that names the changes it took back out (`reverts`), and each change it took out names it (`revertedBy`). `history` filters by `authors`, so an agent's changes can be listed on their own and passed to `revert_changes`. `revert_author` takes back out every change one author made that still stands, across the workspace or in `noteIds`, as one new change in each note by whoever asks. It leaves alone what somebody else already took out and what the author undid themselves, and puts back what the author took out of others'. It covers ten notes a call and reads only those notes: while the answer's `next` isn't null, call again with it as `after`. A note that refuses the change, such as one it would make too long, is left as it was and named in `failed`, and the notes after it are still covered. A note the revert leaves with no text, such as one the author created, is named in `emptied` with the title it had: it stays, since there is no deleting a note yet. `ink revert-author` makes those calls itself until every note is covered. The web app does the same from an agent's entry on the Agents page and from History mode when it is filtered to one agent. A read-only token can list history and is refused the rest.
 
 Most clients take a URL and a header:
 
@@ -37,10 +39,15 @@ Most clients take a URL and a header:
 
 ## The `ink` command
 
-    INK_TOKEN=cink_... INK_URL=https://commonink.app npm run ink -- notes
+    INK_TOKEN=cink_... INK_URL=https://commonink.app npm run ink -- notes [--folder <id>] [--since 2026-10-01]
     npm run ink -- read <id> [--revision N]
-    echo "# Title" | npm run ink -- create
+    echo "# Title" | npm run ink -- create [--folder <id>]
     echo "# Title\n\nmore" | npm run ink -- write <id> --base <revision>
+    npm run ink -- move <id> --folder <folder id>
+    npm run ink -- folders
+    npm run ink -- folder-create "Plans" [--parent <folder id>]
+    npm run ink -- folder-rename <folder id> --name "Plans"
+    npm run ink -- folder-delete <folder id>
     npm run ink -- history <id>
     npm run ink -- changes [--note <id>,<id>] [--author agent:<id>] [--from 2026-10-01] [--to 2026-10-08]
     npm run ink -- authors
@@ -48,6 +55,7 @@ Most clients take a URL and a header:
     npm run ink -- label <id> --revision <n> --name "Draft"
     npm run ink -- revert <id> --revision <n>
     npm run ink -- revert <id> --changes <n>,<n>
+    npm run ink -- revert-author agent:<id> [--note <id>,<id>]
     npm run ink -- reapply <id> --changes <n>
     npm run ink -- undo <id>
     npm run ink -- redo <id>

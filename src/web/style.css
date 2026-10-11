@@ -1444,3 +1444,181 @@ del.diff-line::before {
   outline: 2px solid var(--ink);
   outline-offset: 1px;
 }
+
+/* Agents */
+
+.agents {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 46rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.agents h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.agents h2 {
+  margin: 10px 0 0;
+  font-size: 14px;
+}
+
+.agents .lead,
+.agents .empty,
+.agents .error {
+  margin: 0;
+  text-align: left;
+}
+
+.agents .lead,
+.agents .hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.connect {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+}
+
+.connect h2,
+.connect .check {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.connect label:not(.check),
+.copyable {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.connect input:not([type="checkbox"]),
+.connect select,
+.copyable textarea {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.connect .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.connect .button {
+  justify-self: start;
+}
+
+.new-token {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+
+.new-token p {
+  margin: 0;
+}
+
+.new-token .button {
+  align-self: flex-start;
+}
+
+.copyable-row {
+  display: flex;
+  gap: 6px;
+}
+
+.copyable textarea {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: none;
+}
+
+.copyable-row .button {
+  align-self: flex-start;
+}
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.agent-head,
+.agent-actions,
+.revert-author,
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-name {
+  font-weight: 600;
+}
+
+.agent-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.confirm,
+.said {
+  font-size: 12px;
+}
+
+.confirm {
+  flex-basis: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+
+.said {
+  color: var(--muted);
+}
+
+.said.failed {
+  color: var(--danger);
+}

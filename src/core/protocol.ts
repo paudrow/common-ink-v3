@@ -12,6 +12,8 @@ const LabelName = z
   .max(60)
   .regex(/^\P{Cc}*$/u, "can't contain control characters");
 const Time = z.number().int().min(0);
+/** As many revisions as putting back can name at once. It is far past where a note's record is too long to replay. */
+const MAX_NOTE_CHANGES_NAMED = 100_000;
 /** Revisions of one note that a change made, so never 0. */
 const Revisions = z.array(Revision.min(1)).min(1).max(500);
 const AuthorRef = z.object({ kind: z.enum(["member", "agent", "plugin"]), id: Id });
@@ -45,8 +47,11 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note.revert"), id: Id, revision: Revision }),
   /** Takes the chosen changes back out and keeps the rest, as one new change. */
   z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions }),
-  /** Puts back chosen changes that were taken out, as one new change. */
-  z.object({ type: z.literal("note.reapplyChanges"), id: Id, revisions: Revisions }),
+  /**
+   * Puts back chosen changes that were taken out, as one new change. Changes taken out together go
+   * back together, so this takes as many as one revert can name, which is every change of a note.
+   */
+  z.object({ type: z.literal("note.reapplyChanges"), id: Id, revisions: z.array(Revision.min(1)).min(1).max(MAX_NOTE_CHANGES_NAMED) }),
   /** Takes back the author's own latest change that still stands. */
   z.object({ type: z.literal("note.undo"), id: Id }),
   z.object({ type: z.literal("note.redo"), id: Id }),
@@ -64,6 +69,11 @@ export const Op = z.discriminatedUnion("type", [
     diffs: z.boolean().default(true),
   }),
   z.object({ type: z.literal("history.authors") }),
+  /**
+   * Takes back out every change by one author that still stands, as one new change in each note
+   * by whoever asks. It covers a few notes at a time; pass the answer's `next` as `after` for the rest.
+   */
+  z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional() }),
   z.object({
     type: z.literal("history.activity"),
     /** The IANA zone whose days the changes are counted in, such as "America/Chicago". */
@@ -178,6 +188,17 @@ export interface Activity {
   days: { date: string; count: number }[];
 }
 
+export interface AuthorReverted {
+  /** Each note that got a new change, and the author's changes it took back out. */
+  reverted: { note: NoteSummary; revisions: number[] }[];
+  /** The reverted notes left with no text, each under the title it had. There is no deleting a note yet, so they stay. */
+  emptied: { noteId: string; title: string }[];
+  /** Notes that refused the change, such as one it would make too long. They are left as they were. */
+  failed: { noteId: string; title: string; message: string }[];
+  /** Pass as `after` to cover the notes not reached yet; null when every note was. */
+  next: string | null;
+}
+
 export interface Results {
   "note.list": NoteSummary[];
   "note.create": Note;
@@ -193,12 +214,44 @@ export interface Results {
   "note.redo": Note;
   "history.list": HistoryPage;
   "history.authors": Author[];
+  "history.revertAuthor": AuthorReverted;
   "history.activity": Activity;
   "folder.list": { unsortedId: string; folders: ListedFolder[] };
   "folder.create": Folder;
   "folder.rename": Folder;
   "folder.delete": { id: string };
 }
+
+export const MAX_AGENT_NAME = 60;
+export const DEFAULT_EXPIRY_DAYS = 90;
+export const MAX_EXPIRY_DAYS = 365;
+
+export interface Agent {
+  id: string;
+  name: string;
+  /** Tells this token from the member's other tokens under the same name, e.g. "laptop". */
+  label: string | null;
+  /** The first characters of its token, to tell tokens apart. Not enough to use it. */
+  tokenPrefix: string;
+  createdAt: number;
+  /** After this the token stops working. */
+  expiresAt: number;
+  lastUsedAt: number | null;
+  revokedAt: number | null;
+  /** The one workspace this token can reach, or null for every workspace its member can reach. */
+  workspaceId: string | null;
+  /** A read-only token can't change anything, whatever its member's role. */
+  readOnly: boolean;
+}
+
+/** What a member may ask for when connecting an agent. */
+export const ConnectOptions = z.object({
+  label: z.string().trim().max(MAX_AGENT_NAME).optional(),
+  expiresInDays: z.number().int().min(1).max(MAX_EXPIRY_DAYS).default(DEFAULT_EXPIRY_DAYS),
+  workspaceId: Id.optional(),
+  readOnly: z.boolean().default(false),
+});
+export type ConnectOptions = z.input<typeof ConnectOptions>;
 
 export interface WorkspaceSummary {
   id: string;

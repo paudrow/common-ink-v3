@@ -1,7 +1,7 @@
 import { ChangeSet } from "@codemirror/state";
 import { z } from "zod";
 import { lineDiff } from "./diff.ts";
-import { dayIn, redoTarget, revertedBy, takeBackOut, undoTarget } from "./history.ts";
+import { dayIn, redoTarget, revertOfAuthor, revertedBy, takeBackOut, undoTarget } from "./history.ts";
 import { newId } from "./ids.ts";
 import { summarize } from "./markdown.ts";
 import {
@@ -147,7 +147,8 @@ function written(ctx: Context, text: string) {
   };
 }
 
-const isBy = (ctx: Context, author: AuthorRef) => author.kind === ctx.actor.kind && author.id === authorId(ctx.actor);
+const sameAuthor = (a: AuthorRef, b: AuthorRef) => a.kind === b.kind && a.id === b.id;
+const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx.actor.kind, id: authorId(ctx.actor) });
 
 async function loadNote(ctx: Context, id: string): Promise<NoteRow> {
   const row = await ctx.db
@@ -208,6 +209,8 @@ async function replay(ctx: Context, id: string, revision: number, current: numbe
 }
 
 const MAX_WRITE_ATTEMPTS = 5;
+/** Reverting an author reads each note's whole record and costs a few queries a note, and a request is allowed only so many. */
+const REVERT_AUTHOR_NOTES = 10;
 const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: changes\./.test(err.message);
 
 /** What a change records beyond its diff. */
@@ -561,6 +564,41 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .bind(ctx.actor.workspaceId)
         .all<Pick<ChangeRow, "author_kind" | "author_id" | "name" | "agent_owner">>();
       return results.map((r) => authorOf(r.author_kind, r.author_id, r.name, r.agent_owner));
+    },
+  },
+
+  "history.revertAuthor": {
+    needs: "edit",
+    async run(ctx, op) {
+      const theirs = (c: { author: AuthorRef }) => sameAuthor(c.author, op.author);
+      // Only this page's notes are named here and read below, however many more the author changed.
+      const { results } = await ctx.db
+        .prepare(
+          `SELECT n.id, n.title FROM notes n
+           WHERE n.workspace_id = ?1
+             AND (?2 IS NULL OR n.id IN (SELECT value FROM json_each(?2)))
+             AND (?3 IS NULL OR n.id > ?3)
+             AND EXISTS (SELECT 1 FROM changes c WHERE c.note_id = n.id AND c.author_kind = ?4 AND c.author_id = ?5)
+           ORDER BY n.id LIMIT ?6`,
+        )
+        .bind(ctx.actor.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.after ?? null, op.author.kind, op.author.id, REVERT_AUTHOR_NOTES + 1)
+        .all<{ id: string; title: string }>();
+      const page = results.slice(0, REVERT_AUTHOR_NOTES);
+
+      const answer: Results["history.revertAuthor"] = { reverted: [], emptied: [], failed: [], next: results.length > page.length ? page.at(-1)!.id : null };
+      for (const { id, title } of page) {
+        let reverts: Reverts | null = null;
+        try {
+          const { text, ...note } = await takeBack(ctx, id, (history) => (reverts = revertOfAuthor(history, theirs)));
+          if (!reverts) continue;
+          answer.reverted.push({ note, revisions: (reverts as Reverts).revisions });
+          if (!text.trim()) answer.emptied.push({ noteId: id, title });
+        } catch (err) {
+          // One note that can't take the change doesn't keep it from the notes after, or lose the answer for the notes before.
+          answer.failed.push({ noteId: id, title, message: err instanceof OpError ? err.message : "Common Ink couldn't change this note just now. Try again." });
+        }
+      }
+      return answer;
     },
   },
 
