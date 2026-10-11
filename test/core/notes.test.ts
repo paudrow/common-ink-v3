@@ -1,15 +1,8 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { signIn, whoAmI } from "../../src/core/accounts.ts";
-import { perform, type Actor } from "../../src/core/operations.ts";
+import { perform } from "../../src/core/operations.ts";
 import { MAX_NOTE_LENGTH } from "../../src/core/protocol.ts";
-
-async function newMember(name = "Ada Lovelace"): Promise<Actor> {
-  const email = `${crypto.randomUUID()}@example.com`;
-  const { personId } = await signIn(env.DB, { email, name });
-  const [workspace] = (await whoAmI(env.DB, personId)).workspaces;
-  return { kind: "member", personId, workspaceId: workspace!.id };
-}
+import { addMember, newMember } from "./members.ts";
 
 describe("notes", () => {
   it("can be created, edited, and reopened with their text intact", async () => {
@@ -117,6 +110,41 @@ describe("notes", () => {
     ]);
 
     expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe("start middle end");
+  });
+
+  it("are listed with their title, snippet, open todos, and who changed them last", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const grace = await addMember(ada, "editor", "Grace Hopper");
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# Plan\n\n- [ ] book a room" }, 1000);
+
+    const [created] = await perform(env.DB, ada, { type: "note.list" });
+    await perform(env.DB, grace, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\n- [x] book a room\n- [ ] send [[invites]]" }, 2000);
+    const [written] = await perform(env.DB, ada, { type: "note.list" });
+
+    expect(created).toEqual({
+      id: note.id,
+      title: "Plan",
+      slug: "plan",
+      folderId: note.folderId,
+      revision: 1,
+      createdAt: 1000,
+      updatedAt: 1000,
+      updatedBy: { kind: "member", personId: ada.personId, name: "Ada Lovelace" },
+      snippet: "book a room",
+      openTodos: 1,
+    });
+    expect(written).toEqual({
+      ...created,
+      revision: 2,
+      updatedAt: 2000,
+      updatedBy: { kind: "member", personId: grace.personId, name: "Grace Hopper" },
+      snippet: "book a room send invites",
+      openTodos: 1,
+    });
+    expect(await perform(env.DB, ada, { type: "note.read", id: note.id })).toEqual({
+      ...written,
+      text: "# Plan\n\n- [x] book a room\n- [ ] send [[invites]]",
+    });
   });
 
   it("is invisible to people outside the workspace", async () => {

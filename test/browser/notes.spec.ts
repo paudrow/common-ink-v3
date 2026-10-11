@@ -1,35 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { ChangeEntry, Me } from "../../src/core/protocol.ts";
+import { noteIdIn, perform, signInAsNewPerson } from "./helpers.ts";
 
-async function signInAsNewPerson(page: Page, name: string) {
-  const email = `browser-${crypto.randomUUID()}@example.com`;
-  await page.goto(`/auth/dev?${new URLSearchParams({ email, name })}`);
-}
+const history = (page: Page, id: string) => perform(page, { type: "note.history", id });
 
-function history(page: Page, noteId: string): Promise<ChangeEntry[]> {
-  return page.evaluate(async (id) => {
-    const me = (await (await fetch("/api/me")).json()) as Me;
-    const res = await fetch(`/api/workspaces/${me.workspaces[0]!.id}/ops`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "note.history", id }),
-    });
-    return res.json();
-  }, noteId);
-}
+const writeElsewhere = (page: Page, op: { id: string; baseRevision: number; text: string }) => perform(page, { type: "note.write", ...op });
 
-function writeElsewhere(page: Page, op: { id: string; baseRevision: number; text: string }) {
-  return page.evaluate(async (write) => {
-    const me = (await (await fetch("/api/me")).json()) as Me;
-    await fetch(`/api/workspaces/${me.workspaces[0]!.id}/ops`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "note.write", ...write }),
-    });
-  }, op);
-}
-
-const noteIdIn = (page: Page) => /([a-z0-9]{12})$/.exec(new URL(page.url()).pathname)![1]!;
+/** Clicking outside the editor takes focus from it. */
+const leaveEditor = (page: Page) => page.getByRole("heading", { level: 2 }).click();
 
 test("opens signed in as the dev user, with no login", async ({ page }) => {
   await page.goto("/");
@@ -49,7 +26,7 @@ test("a new person signs in, writes a note, and finds it intact after reloading"
 
   await expect(page).toHaveURL(/\/note\/field-notes-[a-z0-9]{12}$/);
   await expect(page.getByRole("status")).toHaveText("Saved");
-  await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("link")).toHaveText(["Field notes"]);
+  await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("link")).toHaveText(["Field notesTyped in one go.just now · Mary Somerville"]);
   const changes = await history(page, noteIdIn(page));
   expect(changes.map((c) => ({ revision: c.revision, baseRevision: c.baseRevision, author: c.author.name }))).toEqual([
     { revision: 1, baseRevision: 0, author: "Mary Somerville" },
@@ -66,7 +43,7 @@ test("typing is committed as soon as the note loses focus", async ({ page }) => 
   await page.keyboard.type("# Draft");
 
   const saved = page.waitForResponse((res) => res.url().endsWith("/ops") && res.request().postDataJSON()?.type === "note.write", { timeout: 600 });
-  await page.getByText("Emmy's workspace").click();
+  await leaveEditor(page);
   await saved;
 
   await expect(page.getByRole("status")).toHaveText("Saved");
@@ -83,7 +60,7 @@ test("a save based on an old revision keeps the other writer's change, and the e
 
   await writeElsewhere(page, { id: noteIdIn(page), baseRevision: 1, text: "# Shared\n\nmine\n\ntheirs" });
   await page.keyboard.type(" too");
-  await page.getByText("Ada's workspace").click();
+  await leaveEditor(page);
 
   await expect(page.locator(".cm-line")).toHaveText(["# Shared", "", "mine too", "", "theirs"]);
   await expect(page.getByRole("status")).toHaveText("Saved");
@@ -131,9 +108,14 @@ test("leaving a note while its save is on the way keeps the other writer's chang
     await route.fulfill({ response });
   });
   await page.keyboard.type(" too");
-  await page.getByText("Ada's workspace").click();
+  await leaveEditor(page);
   await page.getByRole("button", { name: "New note" }).click();
   await expect(page).not.toHaveURL(new RegExp(id));
+
+  const notes = page.getByRole("navigation", { name: "Notes" });
+  await expect(notes.getByRole("link", { name: "Shared" })).toContainText("theirs");
+  await expect(notes.getByRole("link", { name: "Untitled" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" })).toHaveValue(new RegExp(`${noteIdIn(page)}$`));
 
   await expect.poll(async () => (await history(page, id)).length, { timeout: 10_000 }).toBe(3);
   await page.goto(`/note/${id}`);
