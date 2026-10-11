@@ -13,7 +13,8 @@ export interface WrittenLink {
   display: string | null;
 }
 
-const LINK = /\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/g;
+// `@[[` is a mention of a person, which mentions.ts reads, where the `@` starts one: after anything but a letter, a digit, `_` or `@`.
+const LINK = /(?<!(?<![\p{L}\p{N}_@])@)\[\[([^[\]|\n]+)(?:\|([^[\]\n]*))?\]\]/gu;
 const INLINE_CODE = /(`+)(?!`)[^]*?(?<!`)\1(?!`)/g;
 const ID = /^[a-z0-9]{12}$/;
 

@@ -18,6 +18,7 @@ export const REMOVALS = [
   `DELETE FROM todo_projects WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM todos WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM note_tags WHERE note_id = ?1 AND ${DUE}`,
+  `DELETE FROM mentions WHERE note_id = ?1 AND ${DUE}`,
   // What the note links to. What links to it stays: that is what another note's text says.
   `DELETE FROM links WHERE source_id = ?1 AND ${DUE}`,
   `DELETE FROM labels WHERE note_id = ?1 AND ${DUE}`,

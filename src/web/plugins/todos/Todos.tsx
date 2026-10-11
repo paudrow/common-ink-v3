@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { changeTodo, parseTodo, useNow, type App, type Importance, type ListedTodo, type OpInput, type PluginHost, type Results, type TodoChange, type TodoCompletion } from "../../plugin-api.ts";
+import { changeTodo, isPersonId, mentionKey, mentionName, parseTodo, useNow, type App, type Importance, type ListedTodo, type Mentioned, type OpInput, type PluginHost, type Results, type TodoChange, type TodoCompletion } from "../../plugin-api.ts";
 import { openPopover } from "../lib/Popover.tsx";
 import { IMPORTANCE } from "./chips.ts";
 import { Completions } from "./Completions.tsx";
@@ -14,12 +14,17 @@ interface Filters {
   due: DueFilter;
   /** A level, or "" for any. */
   importance: string;
+  /** Who it is assigned to: a member's id, anyone else's name, {@link ME}, or "" for anyone. */
+  assignee: string;
   completed: boolean;
   /** Whether todos in archived notes are listed too. */
   archived: boolean;
 }
 
-const EVERYTHING: Filters = { project: "", tag: "", due: "any", importance: "", completed: false, archived: false };
+/** The filter for the todos assigned to the member themself. No name starts with a line break, so no name is taken for it. */
+const ME = "\nme";
+
+const EVERYTHING: Filters = { project: "", tag: "", due: "any", importance: "", assignee: "", completed: false, archived: false };
 
 const stored = (value: unknown): Filters => {
   const kept = typeof value === "object" && value !== null ? (value as Partial<Record<keyof Filters, unknown>>) : {};
@@ -28,6 +33,7 @@ const stored = (value: unknown): Filters => {
     tag: typeof kept.tag === "string" ? kept.tag : "",
     due: typeof kept.due === "string" && kept.due in DUE_FILTERS ? (kept.due as DueFilter) : "any",
     importance: typeof kept.importance === "string" && /^[0-3]?$/.test(kept.importance) ? kept.importance : "",
+    assignee: typeof kept.assignee === "string" ? kept.assignee : "",
     completed: kept.completed === true,
     archived: kept.archived === true,
   };
@@ -39,6 +45,7 @@ const queryOf = (filters: Filters, now: string): Query => ({
   ...(filters.project && { project: filters.project }),
   ...(filters.tag && { tag: filters.tag }),
   ...(filters.importance && { importance: [Number(filters.importance) as Importance] }),
+  ...(filters.assignee === ME ? { assignedToMe: true } : filters.assignee && { assignee: filters.assignee }),
   ...dueRange(filters.due, now),
   includeCompleted: filters.completed,
   includeArchived: filters.archived,
@@ -46,13 +53,25 @@ const queryOf = (filters: Filters, now: string): Query => ({
 
 const keyOf = (todo: ListedTodo) => `${todo.noteId}/${todo.line}`;
 
+/** What a row changes about its todo: as the todo's line is changed, with whoever is assigned or taken off named as the listing names them. */
+type RowChange = Omit<TodoChange, "assign" | "unassign"> & { assign?: Mentioned; unassign?: Mentioned };
+
+/** What someone is named by where a filter or a change names them: a member's id, or anyone else's name. */
+const whoOf = (person: Mentioned) => person.id ?? person.name;
+const sameWho = (person: Mentioned, key: string) => mentionKey({ target: whoOf(person) }) === key;
+
+const lineChange = ({ assign, unassign, ...rest }: RowChange): TodoChange => ({ ...rest, ...(assign && { assign: { id: assign.id, name: assign.name } }), ...(unassign && { unassign: whoOf(unassign) }) });
+const opChange = ({ assign, unassign, ...rest }: RowChange) => ({ ...rest, ...(assign && { assign: whoOf(assign) }), ...(unassign && { unassign: whoOf(unassign) }) });
+
 /** The todo as it reads once `change` is made on the day `on`, by the function the server makes it with: a recurring todo checked off stays open, due next. */
-function changed(todo: ListedTodo, change: TodoChange, on: string): ListedTodo {
-  const text = changeTodo(todo.text, change, on).line;
+function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
+  const text = changeTodo(todo.text, lineChange(change), on).line;
   const read = parseTodo(text);
   if (!read) return todo;
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
-  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, lastDone, projects: read.projects.map((p) => p.name), words: read.words };
+  const known = [...todo.assignees, ...(change.assign ? [change.assign] : [])];
+  const assignees = new Map(read.assignees.map((a) => [mentionKey(a), known.find((person) => sameWho(person, mentionKey(a))) ?? { id: isPersonId(a.target) ? a.target : null, name: mentionName(a), member: false }]));
+  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, lastDone, projects: read.projects.map((p) => p.name), assignees: [...assignees.values()], words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
@@ -62,16 +81,18 @@ interface RowProps {
   todo: ListedTodo;
   now: string;
   projects: readonly string[];
+  /** Everyone a todo the member can see is assigned to, who a todo can be assigned to from here. Anyone else is mentioned in its note. */
+  people: readonly Mentioned[];
   /** Whether its completion is on its way to the server. */
   completing: boolean;
-  onChange: (todo: ListedTodo, change: TodoChange) => void;
+  onChange: (todo: ListedTodo, change: RowChange) => void;
   onOpen: (todo: ListedTodo) => void;
   /** Reads each time it was checked off. */
   completions: (todo: ListedTodo) => Promise<TodoCompletion[]>;
   onOpenNote: (noteId: string) => void;
 }
 
-function Row({ todo, now, projects, completing, onChange, onOpen, completions, onOpenNote }: RowProps) {
+function Row({ todo, now, projects, people, completing, onChange, onOpen, completions, onOpenNote }: RowProps) {
   const readOnly = todo.access !== "edit";
   // A panel stays open while the list is read again, and what it does is done to the row as it reads by then.
   const row = useRef(todo);
@@ -101,6 +122,7 @@ function Row({ todo, now, projects, completing, onChange, onOpen, completions, o
     ));
   };
   const others = projects.filter((name) => !todo.projects.some((mine) => mine.toLowerCase() === name.toLowerCase()));
+  const assignable = people.filter((person) => !todo.assignees.some((mine) => sameWho(mine, mentionKey({ target: whoOf(person) }))));
   return (
     <li className="todo-row" data-done={todo.done || undefined}>
       <input type="checkbox" checked={todo.done} disabled={readOnly || completing} aria-label={todo.done ? "Done" : "Not done"} onChange={(e) => onChange(todo, { done: e.target.checked })} />
@@ -119,6 +141,30 @@ function Row({ todo, now, projects, completing, onChange, onOpen, completions, o
         <span className="todo-note">{todo.noteTitle || "Untitled"}</span>
       </button>
       <span className="todo-chips">
+        {todo.assignees.map((person) => (
+          <span key={whoOf(person)} className="todo-chip todo-assignee" data-member={person.member || undefined} title={person.member ? `Assigned to ${person.name}, a member of this workspace` : `Assigned to ${person.name}, mentioned by name`}>
+            @{person.name}
+            {!readOnly && (
+              <select aria-label={`Assigned to ${person.name}`} value="" onChange={(e) => e.target.value && onChange(todo, { unassign: person })}>
+                <option value="">{person.name}</option>
+                <option value="unassign">Unassign</option>
+              </select>
+            )}
+          </span>
+        ))}
+        {!readOnly && assignable.length > 0 && (
+          <span className="todo-chip todo-add">
+            @ Assign
+            <select aria-label="Assign to someone" value="" onChange={(e) => e.target.value && onChange(todo, { assign: assignable.find((person) => whoOf(person) === e.target.value)! })}>
+              <option value="">Assign to someone</option>
+              {assignable.map((person) => (
+                <option key={whoOf(person)} value={whoOf(person)}>
+                  {person.name}
+                </option>
+              ))}
+            </select>
+          </span>
+        )}
         {todo.projects.map((name) => (
           <span key={name} className="todo-chip todo-project">
             +{name}
@@ -197,7 +243,7 @@ interface Props {
 export function TodosPage({ host, app, onOpen }: Props) {
   const [filters, setFilters] = useState(() => stored(host.storage.get("filters")));
   const [page, setPage] = useState<Results["todo.list"] | null>(null);
-  const [options, setOptions] = useState<Results["todo.filters"]>({ projects: [], tags: [] });
+  const [options, setOptions] = useState<Results["todo.filters"]>({ projects: [], tags: [], assignees: [] });
   const [problem, setProblem] = useState<string | null>(null);
   const [asked, setAsked] = useState(0);
   /** The recurring todos whose completion is on its way. Checked again before it lands, one would be completed twice. */
@@ -235,7 +281,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
   };
 
   const change = useCallback(
-    (todo: ListedTodo, to: TodoChange) => {
+    (todo: ListedTodo, to: RowChange) => {
       setProblem(null);
       const rolls = to.done === true && comesAround(todo, now);
       if (rolls) setCompleting((keys) => new Set(keys).add(keyOf(todo)));
@@ -245,7 +291,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
       queue.count++;
       // One at a time: each change names the line as the one before it left it, at the revision that one made.
       queue.last = queue.last
-        .then(() => host.perform({ type: "todo.set", id: todo.noteId, revision: queue.revisions.get(keyOf(todo)) ?? todo.revision, line: todo.line, text: todo.text, ...to, on: now }))
+        .then(() => host.perform({ type: "todo.set", id: todo.noteId, revision: queue.revisions.get(keyOf(todo)) ?? todo.revision, line: todo.line, text: todo.text, ...opChange(to), on: now }))
         .then(
           (note) => {
             queue.revisions.set(keyOf(todo), note.revision);
@@ -275,6 +321,8 @@ export function TodosPage({ host, app, onOpen }: Props) {
 
   // A filter the member left on names something that may be gone since; it stays choosable so it can be seen and taken off.
   const offered = (names: readonly string[], chosen: string) => (chosen && !names.some((n) => n.toLowerCase() === chosen.toLowerCase()) ? [...names, chosen] : names);
+  const chosen = filters.assignee && filters.assignee !== ME && !options.assignees.some((person) => sameWho(person, mentionKey({ target: filters.assignee })));
+  const offeredPeople = chosen ? [...options.assignees, { id: isPersonId(filters.assignee) ? filters.assignee : null, name: isPersonId(filters.assignee) ? "Someone no longer assigned" : filters.assignee, member: false }] : options.assignees;
   const narrowed = JSON.stringify(filters) !== JSON.stringify(EVERYTHING);
 
   return (
@@ -299,6 +347,18 @@ export function TodosPage({ host, app, onOpen }: Props) {
             {offered(options.tags, filters.tag).map((name) => (
               <option key={name} value={name}>
                 #{name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Assignee
+          <select value={filters.assignee} onChange={(e) => narrow({ assignee: e.target.value })}>
+            <option value="">Anyone</option>
+            <option value={ME}>Assigned to me</option>
+            {offeredPeople.map((person) => (
+              <option key={whoOf(person)} value={whoOf(person)}>
+                {person.name}
               </option>
             ))}
           </select>
@@ -342,7 +402,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
       {page && page.todos.length > 0 && (
         <ul className="todo-list" aria-label="Todos">
           {page.todos.map((todo) => (
-            <Row key={keyOf(todo)} todo={todo} now={now} projects={options.projects} completing={completing.has(keyOf(todo))} onChange={change} onOpen={onOpen} completions={completions} onOpenNote={openNote} />
+            <Row key={keyOf(todo)} todo={todo} now={now} projects={options.projects} people={options.assignees} completing={completing.has(keyOf(todo))} onChange={change} onOpen={onOpen} completions={completions} onOpenNote={openNote} />
           ))}
         </ul>
       )}

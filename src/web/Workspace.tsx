@@ -73,7 +73,7 @@ function Toast({ notice, onClose }: { notice: Notice; onClose: () => void }) {
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
-    if (held) return;
+    if (held || notice.stays) return;
     const timer = setTimeout(() => close.current(), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [notice, held]);
@@ -210,7 +210,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         },
         sharing: {
           of: (on) => perform(workspaceId, { type: "grant.list", ...on }),
-          grant: (on, email, access) => perform(workspaceId, { type: "grant.set", ...on, email, access }),
+          grant: (on, to, access) => perform(workspaceId, { type: "grant.set", ...on, ...(typeof to === "string" ? { email: to } : to), access }),
           link: (on, link) => perform(workspaceId, { type: "grant.link", ...on, link }),
           revoke: (grantId) => perform(workspaceId, { type: "grant.revoke", id: grantId }).then(() => {}),
           setPrivate: (noteId, isPrivate) => perform(workspaceId, { type: "note.setPrivate", id: noteId, private: isPrivate }),

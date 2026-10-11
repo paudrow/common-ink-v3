@@ -1,5 +1,6 @@
 import type { ChangeSet } from "@codemirror/state";
 import { linesOutsideCode } from "./lines.ts";
+import { mentionKey, mentionsOn, personKey, writtenMention, type WrittenMention } from "./mentions.ts";
 import { RULE_PATTERN, nextDue, parseRule, type Rule } from "./recurrence.ts";
 import { applyChanges } from "./text.ts";
 
@@ -15,6 +16,7 @@ import { applyChanges } from "./text.ts";
  * - `done:2026-10-10x12` is the day a recurring todo was last checked off, and how many times it has been.
  * - `+Name` puts it in a project. A name starts with a letter and goes on in letters, digits, `_` and `-`.
  * - `#tag` tags the whole note, on this line as on any other.
+ * - `@[[id|Name]]` or `@[[Name]]` assigns it to a person. `mentions.ts` has how a mention is written.
  *
  * A token stands alone: after a space, and before a space, the end of the line, or `.,;:!?)`. Text
  * in inline code, in a link to a note, and in a link's address is never a token. Projects and tags
@@ -35,7 +37,9 @@ export interface Todo {
   lastDone: (Span & LastDone) | null;
   projects: (Span & { name: string })[];
   tags: (Span & { name: string })[];
-  /** The line without its list mark, checkbox, importance, due date, recurrence, last-done mark and projects. */
+  /** The people mentioned on the line, who are who it is assigned to. */
+  assignees: WrittenMention[];
+  /** The line without its list mark, checkbox, importance, due date, recurrence, last-done mark, projects and assignees. */
   words: string;
 }
 
@@ -110,10 +114,11 @@ export function parseTodo(line: string, offset = 0): Todo | null {
   const did = [...body.matchAll(LAST_DONE)].find((m) => isDay(m[1]!));
   const lastDone = did ? { ...span(did.index, did[0].length), on: did[1]!, times: Number(did[2] ?? 1) } : null;
   const projects = [...body.matchAll(PROJECT)].map((m) => ({ ...span(m.index, m[0].length), name: m[1]! }));
+  const assignees = mentionsOn(line, offset).filter((m) => m.from >= offset + start);
 
   let words = "";
   let at = start;
-  for (const taken of [importanceAt, due, every, lastDone, ...projects].filter((s) => s !== null).sort((a, b) => a.from - b.from)) {
+  for (const taken of [importanceAt, due, every, lastDone, ...projects, ...assignees].filter((s) => s !== null).sort((a, b) => a.from - b.from)) {
     words += line.slice(at, taken.from - offset);
     at = taken.to - offset;
   }
@@ -129,6 +134,7 @@ export function parseTodo(line: string, offset = 0): Todo | null {
     lastDone,
     projects,
     tags: tagsOn(line, offset),
+    assignees,
     words,
   };
 }
@@ -147,6 +153,10 @@ export interface TodoChange {
   addProject?: string;
   /** Takes it out of a project, ignoring case. */
   removeProject?: string;
+  /** Assigns it to a person, unless it is theirs already: a member by their id and name, anyone else by name. */
+  assign?: { id?: string | null; name: string };
+  /** Takes it from a person, named by their id or by a name ignoring case, or from each of several such. */
+  unassign?: string | readonly string[];
 }
 
 export interface Edit extends Span {
@@ -205,6 +215,13 @@ export function todoEdits(line: string, change: TodoChange): Edit[] {
     leaving.forEach((p, i) => edits.push(i === 0 && adding ? { from: p.from, to: p.to, insert: `+${adding}` } : { from: p.from - 1, to: p.to, insert: "" }));
     if (adding && !leaving.length) tail += ` +${adding}`;
   }
+
+  const mention = change.assign === undefined ? undefined : writtenMention(change.assign);
+  if (mention === "") throw new RangeError("A todo is assigned to a member's id or to a name, and that is neither");
+  const taking = new Set((change.unassign === undefined ? [] : typeof change.unassign === "string" ? [change.unassign] : change.unassign).map(personKey));
+  for (const assignee of todo.assignees) if (taking.has(mentionKey(assignee))) edits.push({ from: assignee.from - (line[assignee.from - 1] === " " ? 1 : 0), to: assignee.to, insert: "" });
+  const theirs = change.assign && personKey(change.assign.id || change.assign.name);
+  if (mention && !taking.has(theirs!) && !todo.assignees.some((a) => mentionKey(a) === theirs)) tail += ` ${mention}`;
 
   if (tail) {
     const end = Math.max(line.trimEnd().length, todo.box.to);

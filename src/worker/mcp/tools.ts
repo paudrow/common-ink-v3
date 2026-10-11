@@ -68,10 +68,13 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
 
 const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
+const mentionNames = { type: "string", enum: ["resolve", "keep"], description: 'What to do with mentions you add, @[[Name]] or @[[id]]. "resolve", the default, stores a mention of the one member with that name by their id, as @[[id|Name]], and refuses the write when several members have the name. A name no member has stays a name. "keep" leaves every mention as you wrote it.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
 const TODOS =
-  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, due:YYYY-MM-DD for the day it is due, and +Name for a project. every:RULE makes it recur: 2w (every 2 weeks, in d, w, m or y), mon,thu, 3d-after-done, 3rd-day or last-day of the month, 2nd-tue or last-fri of the month. done:YYYY-MM-DDxN is when a recurring todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note.";
+  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, due:YYYY-MM-DD for the day it is due, +Name for a project, and @[[Name]] for someone it is assigned to. every:RULE makes it recur: 2w (every 2 weeks, in d, w, m or y), mon,thu, 3d-after-done, 3rd-day or last-day of the month, 2nd-tue or last-fri of the month. done:YYYY-MM-DDxN is when a recurring todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note.";
 const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
+const MENTIONS =
+  "A mention of a person is @[[id|Name]] for a member of the workspace, with their id from list_members, or @[[Name]] for anyone else, such as one of your member's contacts. You can write @[[Name]] for a member too and it is stored by their id. A mention on a todo's line assigns the todo. A mention gives nobody access and tells nobody. Every reader of the note sees the name, so write only the name of a contact: never their email or anything else list_contacts told you.";
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
 const revisions = { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, description: "The revisions of the changes, from note_history or history" };
@@ -108,20 +111,20 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. A note in Trash is read as any other, and its state says trashed.",
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are @[[id|Name]] or @[[Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. A note in Trash is read as any other, and its state says trashed.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "An earlier revision; default is the latest" } }, ["id"]),
     op: "note.read",
   },
   {
     name: "create_note",
-    description: `Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} ${TODOS} Needs the editor or admin role.`,
-    inputSchema: object({ text: { type: "string", description: "The note's markdown" }, folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"), linkTitles }),
+    description: `Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} ${MENTIONS} ${TODOS} Needs the editor or admin role.`,
+    inputSchema: object({ text: { type: "string", description: "The note's markdown" }, folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"), linkTitles, mentionNames }),
     op: "note.create",
   },
   {
     name: "write_note",
     description:
-      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} Checking the box of a recurring todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a recurring todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         id: noteId,
@@ -129,6 +132,7 @@ export const TOOLS: Tool[] = [
         text: { type: "string", description: "The note's full new markdown" },
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
+        mentionNames,
         on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "baseRevision", "text"],
@@ -149,7 +153,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the most important. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance, due, projects, the note's tags, and access. Narrow it by project, by a tag of the note, by a range of due days, both included, or to those with no due date, and by importance. Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
+    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the most important. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance, due, projects, assignees, the note's tags, and access. Narrow it by project, by who it is assigned to, by a tag of the note, by a range of due days, both included, or to those with no due date, and by importance. Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
     inputSchema: object({
       project: { type: "string", description: "Only todos in this project, without the +, ignoring case" },
       tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case" },
@@ -157,6 +161,8 @@ export const TOOLS: Tool[] = [
       dueTo: day("Only todos due on or before this day"),
       noDue: { type: "boolean", description: "True for only todos with no due date" },
       importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these levels: 0 is normal, 1 to 3 are !, !! and !!!" },
+      assignee: { type: "string", description: "Only todos assigned to this person: a member's id from list_members, or anyone else's name as the todo writes it, ignoring case" },
+      assignedToMe: { type: "boolean", description: "True for only todos assigned to your member" },
       includeCompleted: { type: "boolean", description: "True to list done todos too" },
       includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
@@ -167,14 +173,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_filters",
-    description: "What list_todos can be narrowed by: the projects of the todos, and the tags of the notes that have todos, in the notes you can see.",
+    description: "What list_todos can be narrowed by: the projects of the todos, who they are assigned to, and the tags of the notes that have todos, in the notes you can see.",
     inputSchema: object({ includeArchived }),
     op: "todo.filters",
   },
   {
     name: "set_todo",
     description:
-      "Check a todo off, or change its importance, due date, project or how it recurs, by rewriting its line in its note. Checking off a todo that recurs leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Check a todo off, or change its importance, due date, project, who it is assigned to or how it recurs, by rewriting its line in its note. Checking off a todo that recurs leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         id: noteId,
@@ -187,6 +193,8 @@ export const TOOLS: Tool[] = [
         addProject: { type: "string", description: "A project to put it in, without the +. With removeProject, it takes that one's place on the line." },
         removeProject: { type: "string", description: "A project to take it out of, without the +" },
         every: { type: ["string", "null"], description: "How it recurs, as written after every:, such as 2w, mon,thu, 3d-after-done or last-fri, or null to stop it recurring" },
+        assign: { type: "string", description: "Someone to assign it to, by writing a mention of them on the line: a member's id or name, or anyone else's name. Assigning gives nobody access and tells nobody." },
+        unassign: { type: "string", description: "Someone to take it from: a member's id or name, or anyone else's name as the line writes it. Refused when the todo isn't assigned to them." },
         on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "revision", "line", "text"],

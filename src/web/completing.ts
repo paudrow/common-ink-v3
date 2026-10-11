@@ -57,6 +57,7 @@ export function completing(completions: readonly Completion[], onFail: (completi
 
   /** `after` is how far the item's own trigger is past where the list starts, which is the earliest trigger of those that fit. */
   const optionFor = (item: CompletionItem, after: number): Option => ({
+    ...(item.tone && { type: item.tone }),
     label: item.label,
     detail: item.detail,
     apply(view, _picked, listFrom, end) {
@@ -68,5 +69,5 @@ export function completing(completions: readonly Completion[], onFail: (completi
   });
 
   // No delays: a member who types `/timer` and Enter without a pause means the timer.
-  return autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0 });
+  return autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0, optionClass: (option) => (option.type ? `cm-completion-${option.type}` : "") });
 }

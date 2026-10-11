@@ -65,8 +65,8 @@ interface World {
 
 const address = () => `${crypto.randomUUID()}@example.com`;
 
-/** Each note has a todo with a project of its own, and a tag of its own, which give the note away as its title does. */
-const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name}`;
+/** Each note has a todo with a project of its own, a tag of its own, and someone of its own it is assigned to, which give the note away as its title does. */
+const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name} @[[who-${name}]]`;
 const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
 
 async function world(): Promise<World> {
@@ -115,7 +115,7 @@ async function world(): Promise<World> {
   for (const name of NOTES) spare[name] = (await perform(env.DB, name === "secret" ? eve : name === "vpriv" ? vera : ada, { type: "grant.set", noteId: notes[name], email: `spare-${name}-${address()}`, access: "view" })).id;
 
   const marks = {} as World["marks"];
-  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`];
+  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`, `who-${name}`];
   for (const name of FOLDERS) marks[name] = [folders[name], `${name}-folder`];
   marks.secret.push(zed.agent.id, "Zed-agent");
 

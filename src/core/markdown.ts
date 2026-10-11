@@ -10,6 +10,8 @@ const plainText = (line: string) =>
     .replace(/^\s*(?:>\s*)*/, "")
     .replace(/^#{1,6}(?:\s+|$)/, "")
     .replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\](?:\s+|$))?/, "")
+    // A mention reads as the name it was written with.
+    .replace(/@\[\[(?:[^\]|]*\|)?([^\]|]+)\]\]/g, "@$1")
     .replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1")
     // A link with no words of its own shows its note's title, which isn't this note's to keep.
     .replace(/\s*\[\[[a-z0-9]{12}\]\]/g, "")

@@ -12,6 +12,8 @@ interface Props {
   label: string;
   placeholder: string;
   items: PaletteItem[];
+  /** How many are shown at most, for a list that can be long, as a workspace's notes can. Without it every item is: the commands are a few hundred at most, and the palette is where a member reads what there is. */
+  most?: number;
   /** Shown when nothing matches what was typed. */
   empty: string;
   /** A switch under the box that widens what is listed, such as to archived notes. The box keeps the keyboard when it is clicked. */
@@ -20,16 +22,14 @@ interface Props {
   onClose: () => void;
 }
 
-const MOST_SHOWN = 50;
-
 /** A box to type in over a list that narrows to what matches; the command palette and quick open are both one. */
-export function Palette({ label, placeholder, items, empty, toggle, onPick, onClose }: Props) {
+export function Palette({ label, placeholder, items, most, empty, toggle, onPick, onClose }: Props) {
   const ids = useId();
   const ref = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState("");
   const [at, setAt] = useState(0);
-  const shown = matching(items, typed, (item) => item.label).slice(0, MOST_SHOWN);
+  const shown = matching(items, typed, (item) => item.label).slice(0, most);
   const optionId = (i: number) => `${ids}-option-${i}`;
 
   useDismiss(onClose, ref);

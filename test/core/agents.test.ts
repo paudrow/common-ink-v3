@@ -247,7 +247,7 @@ describe("MCP tools", () => {
     const { token } = await connectAgent(env.DB, ada.personId, "Claude");
     const folder = await perform(env.DB, { kind: "member", ...ada }, { type: "folder.create", name: "Plans" });
 
-    expect(await tool(token, "create_note", { text: "# Hi", folder_id: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder_id". It takes workspace, text, folderId, linkTitles.' });
+    expect(await tool(token, "create_note", { text: "# Hi", folder_id: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder_id". It takes workspace, text, folderId, linkTitles, mentionNames.' });
     expect(await tool(token, "list_workspaces", { all: true })).toMatchObject({ isError: true, text: 'invalid: list_workspaces takes no "all". It takes no arguments.' });
     expect((await tool(token, "list_notes")).json()).toEqual([]);
   });

@@ -11,6 +11,7 @@ function QuickOpen({ app, close }: ViewProps & { close: () => void }) {
     <Palette
       label="Go to note"
       placeholder="Find a note by its title"
+      most={50}
       empty={notes?.length ? "No notes match." : notes ? "There are no notes yet." : "Loading notes…"}
       items={(notes ?? []).map((n) => ({ id: n.id, label: n.title || "Untitled", hint: [n.state === "archived" && "Archived", app.folders?.pathName(n.folderId)].filter(Boolean).join(" · ") }))}
       toggle={{ label: "Include archived", on: archived, set: setArchived }}

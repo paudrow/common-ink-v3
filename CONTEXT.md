@@ -23,6 +23,13 @@ _Avoid_: Document, page
 A reference from one note to another by the target note's id, written `[[id]]` or `[[id|display text]]`. The visible text follows the target's title unless the link sets its own display text. The note's text holds the id and never the title, so renaming a note changes no other note. It is shown as written only while the cursor is inside it, and is otherwise one thing: the cursor passes it in a step and a deletion takes all of it. A link to a note that doesn't exist, or that the reader can't see, reads as unavailable either way. A link written by title, `[[Title]]`, links nothing until the write that introduces it resolves it to an id. See `docs/adr/0001-links-stored-by-id.md`.
 _Avoid_: Wikilink, reference
 
+**Mention**:
+A reference to a person in a note's text, written `@[[id|name]]` for a member of the workspace and `@[[name]]` for anyone else, such as one of the member's contacts. A member's is shown as their name is now, in the theme color, to readers who can list the members; anyone else's is the name as written, in gray, and that is how every mention reads to a guest or on a share link's page. A mention gives nobody access and tells nobody. Like a link it is one thing to the cursor. A mention written by name, `@[[Name]]`, is stored by the member's id when the write that introduces it finds one member with that name. See `docs/adr/0007-mentions-are-ids-for-members-and-names-for-everyone-else.md`.
+_Avoid_: Tag, ping
+
+**Assignee**:
+A person mentioned on a todo's line. A todo can have several. The todos view narrows by assignee and to the todos assigned to the viewing member.
+
 **Backlink**:
 A note whose text links to the open note. The inspector's Backlinks tab lists the ones the member can see.
 

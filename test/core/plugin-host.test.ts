@@ -361,6 +361,25 @@ describe("plugin host", () => {
     expect(performed).toEqual([["greedy", "member.list"]]);
   });
 
+  it("refuses a plugin that isn't Common Ink's own the member's data sources, their contacts among them, and lets one that is read them", async () => {
+    let greedy: PluginHost | null = null;
+    let own: PluginHost | null = null;
+    const contacts: Plugin = { id: "contacts", name: "Contacts", activate: (h) => void (own = h) };
+    const { performed } = hostWith([contacts, { id: "greedy", name: "Greedy", activate: (h) => void (greedy = h) }], { trusted: [contacts] });
+    const kept: OpInput[] = [
+      { type: "contact.list" },
+      { type: "event.list", from: 0, to: 1, timeZone: "UTC" },
+      { type: "source.list" },
+      { type: "record.read", ref: "aaaaaaaaaaaa" },
+      { type: "record.refer", sourceId: "sample-contacts", id: "sam" },
+    ];
+
+    for (const op of kept) await expect((greedy!.perform as (op: OpInput) => Promise<unknown>)(op), op.type).rejects.toThrow(`Greedy can't ${op.type}: a member's data sources are theirs, and are read only by Common Ink's own plugins`);
+    expect(performed).toEqual([]);
+    await own!.perform({ type: "contact.list" });
+    expect(performed).toEqual([["contacts", "contact.list"]]);
+  });
+
   it("refuses a plugin that asks, as an operation, who something is shared with, to change that, or what a link opens", async () => {
     let asked: PluginHost | null = null;
     const { performed } = hostWith([{ id: "greedy", name: "Greedy", activate: (h) => void (asked = h) }]);

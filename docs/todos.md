@@ -14,9 +14,10 @@ A todo is a checkbox line in a note. There is no other record of it: the note's 
 | Recurrence | `every:2w` | One of the rules below. The first one that can be read counts. |
 | Last done | `done:2026-10-10x12` | The day a recurring todo was last checked off, and how many times it has been. With no `x12` it was once. Checking the todo off writes it. |
 | Project | `+Home` | A letter, then letters, digits, `_` and `-`. A todo can be in several. Matched ignoring case. |
+| Assignee | `@[[k3j5h8d9f0a1\|Ada Lovelace]]`, `@[[Sam Okafor]]` | A mention of a person on the line: a member by their id and name, anyone else by name. A todo can have several. `docs/adr/0007-mentions-are-ids-for-members-and-names-for-everyone-else.md` has how a mention is written. |
 | Tag | `#money` | Letters, digits, `_`, `-` and `/`, with something besides digits, so `#12` is not a tag. It tags the whole note, on a todo's line as on any other. Matched ignoring case. |
 
-A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `C++`, `a+b`, `1 + 2` and `+1` are not projects, and `a#b` is not a tag. Text in inline code, in a link to a note (`[[…]]`), and in a link's address (`](…)`) is never a token.
+A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `C++`, `a+b`, `1 + 2` and `+1` are not projects, and `a#b` is not a tag. Text in inline code, in a link to a note (`[[…]]`), in a mention (`@[[…]]`), and in a link's address (`](…)`) is never a token. A mention stands alone the same way at its start: its `@` doesn't follow a letter, a digit, `_` or `@`.
 
 Where issue 1 was silent, the choices were made for text that is plain to read and to type, that parses one way, and that an agent can write without asking:
 
@@ -77,11 +78,12 @@ The one place the server does work out a day is a completion with no day given. 
 
 ## The index
 
-Three tables hold what the Todos page lists, so that no note's text is read to list todos:
+Four tables hold what the Todos page lists, so that no note's text is read to list todos:
 
 - `todos`: one row for each todo, with its note, its line counted from 0, whether it is done, its importance, its due date, and the line as written.
 - `todo_projects`: one row for each project of each todo, as a key in lower case and the name as written.
 - `note_tags`: one row for each tag of each note, the same way. #21 lists notes by tag from here.
+- `mentions`: one row for each person each line mentions, as the person's id, or the name in lower case for a mention by name, and the name as written. A row on a todo's line is an assignee of that todo.
 
 They are written in the same batch as every change to a note's text (`indexing` in `src/core/operations.ts`, beside `linking`): creating a note, a write, a revert, an undo, a redo, and reverting an author all go through `record`. So the index never says anything the text doesn't. A part that a change leaves the same is not rewritten.
 
@@ -100,12 +102,12 @@ The index mends itself. Each note carries `indexed`, which is 0 until its links 
 | `daily.open` | `daily_note` | `daily` | a member who can make notes |
 | `todos.rebuild` | `rebuild_todos` | `todos-rebuild` | admin |
 
-`todo.list` lists open todos, or done ones too with `includeCompleted`, from the notes the asker can see: open first, then the soonest due with undated ones last, then the most important. It narrows by `project`, by `tag` (the note's), by `dueFrom` and `dueTo` (both included), by `noDue`, by `importance` (the levels wanted), and by `noteId`. `todo.filters` gives the projects and tags there are to narrow by. Both carry `SEEN`: a todo in a note the asker can't see is not listed, not counted, and its project and tag names are not offered.
+`todo.list` lists open todos, or done ones too with `includeCompleted`, from the notes the asker can see: open first, then the soonest due with undated ones last, then the most important. It narrows by `project`, by `tag` (the note's), by `dueFrom` and `dueTo` (both included), by `noDue`, by `importance` (the levels wanted), by `assignee` (a member's id, or anyone else's name ignoring case), by `assignedToMe`, and by `noteId`. Each todo has its `assignees`: for each, the person's id or null, a name, and whether they are a member now. A member's name is their name now. Anyone else's, and everyone's for an asker who isn't a member, is the name as the line writes it. `todo.filters` gives the projects, assignees and tags there are to narrow by. Both carry `SEEN`: a todo in a note the asker can't see is not listed, not counted, and its project, assignee and tag names are not offered.
 
 `todo.set` rewrites one todo's line as a change to its note by whoever asks. It takes the todo as `todo.list` gave it: `id`, the note's `revision`, `line` and `text`. The line the caller was shown is followed through every change recorded since that revision, by mapping its place through each change, so it is found wherever it has moved to. What a line says never decides which line it is, so another todo that reads the same is never taken for it. When the line itself was changed or deleted since, the call is refused as a conflict and nothing is written. The same call made twice is done once: the second finds the line already reading as asked.
 
 One case is not decided by the caller. When one of two identical todos is deleted, the text can't say which, and the record of the change names one of them. The one that is left is then whichever the record kept, for either listing. Nothing else is ever changed in place of a todo the caller pointed at.
-Checking a todo off through `todo.set` goes through `completeTodo`, and `every` sets or clears how it recurs. The editor's checkbox writes `[x]`, and the server completes a recurring todo when that write lands, by the same function.
+Checking a todo off through `todo.set` goes through `completeTodo`, and `every` sets or clears how it recurs. `assign` writes a mention of a person at the end of the line, and `unassign` takes one away: each names a member by id or by name, or anyone else by name. Taking it from a name takes it from the member so named too, and an `unassign` that names nobody the listed line is assigned to is refused. An assignee rides onto the checked line a recurring todo files, and is withheld with the rest of the line's words where the daily note is seen by people the todo's note isn't. The editor's checkbox writes `[x]`, and the server completes a recurring todo when that write lands, by the same function.
 
 `todo.history` lists each time a recurring todo was checked off: the day, who did it, and the daily note it was filed on when the asker can see that note. The `completions` table holds one row a completion, written in the batch that made it, with where the todo's line started then. A todo has no id, so its completions are found the way `todo.set` finds a todo: each of those places is followed through every change to the note since, to the line it is now. That keeps a todo's history through being reworded, reordered among its neighbours, and having lines added above it. It loses the history of a line cut out and pasted elsewhere, whose `done:` mark still carries the count. A completion that was undone is left out.
 

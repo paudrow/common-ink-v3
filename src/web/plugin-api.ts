@@ -20,6 +20,9 @@ export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_SEARCH_LENGTH
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
+/** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
+export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, writtenMention, type WrittenMention } from "../core/mentions.ts";
+
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
 export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
 
@@ -94,6 +97,13 @@ export type KeptFromPerform =
   | "note.setPrivate"
   | `shared.${string}`;
 
+/**
+ * The operations `host.perform` takes only from Common Ink's own plugins: everything of the
+ * member's data sources, which are theirs and nobody else's. A plugin that isn't Common Ink's own
+ * is refused them, and so can't copy a member's contacts or calendar into a note or a frame.
+ */
+export type OwnOnly = `source.${string}` | `event.${string}` | `contact.${string}` | `record.${string}`;
+
 /** What a grant is on: one note or one folder. */
 export type SharedItem = { noteId: string } | { folderId: string };
 
@@ -147,7 +157,8 @@ export interface PluginHost {
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
    * is saved before an operation that moves a note through its history, and the editors take the result.
    * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites,
-   * and one that reads or changes who a note or folder is shared with.
+   * and one that reads or changes who a note or folder is shared with. A plugin that isn't Common
+   * Ink's own is also refused each {@link OwnOnly} operation.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
   /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
@@ -184,8 +195,8 @@ export interface PluginHost {
   readonly sharing: {
     /** How one note or folder is shared: its grants, those on the folders above it, and for a note whether it is private. */
     of(on: SharedItem): Promise<Sharing>;
-    /** Gives whoever signs in with `email` view or edit, or changes what they have. */
-    grant(on: SharedItem, email: string, access: GrantAccess): Promise<Grant>;
+    /** Gives whoever signs in with an email view or edit, or changes what they have. A member can be named by their id instead, since only an admin is told a member's email. */
+    grant(on: SharedItem, to: string | { memberId: string }, access: GrantAccess): Promise<Grant>;
     /** Sets who the item's link opens for, or takes the link away with null. The address is `/s/<token>`. */
     link(on: SharedItem, kind: LinkKind | null): Promise<Grant | null>;
     revoke(grantId: string): Promise<void>;
@@ -417,6 +428,8 @@ export interface CompletionItem {
   select?: readonly [from: number, to: number];
   /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after. */
   block?: boolean;
+  /** How the label is coloured: `accent` is the theme colour and `muted` is gray. Without it, as the list's text is. */
+  tone?: "accent" | "muted";
 }
 
 /**
@@ -456,6 +469,8 @@ export interface Notice {
   message: string;
   /** A button beside the message, such as Undo. The notice goes when it is pressed. */
   action?: { label: string; run: () => void };
+  /** Whether it waits to be answered or dismissed, in place of going after a few seconds. For a question, such as an offer to share. */
+  stays?: boolean;
 }
 
 export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav">;

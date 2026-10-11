@@ -18,6 +18,7 @@ import { kanban } from "./plugins/kanban/index.ts";
 import { links } from "./plugins/links/index.ts";
 import { math } from "./plugins/math/index.ts";
 import { media } from "./plugins/media/index.ts";
+import { mentions } from "./plugins/mentions/index.ts";
 import { stopwatch } from "./plugins/stopwatch.ts";
 import { tables } from "./plugins/tables/index.ts";
 import { timer } from "./plugins/timer.ts";
@@ -31,10 +32,10 @@ export const sharedToken = (pathname: string) => ADDRESS.exec(pathname)?.[1] ?? 
 
 /**
  * The plugins that draw a note's text. None of them needs the server, and the page gives them no way
- * to it: the one thing any asks for, the projects a todo's chip offers, is refused, and nobody here
- * can change a todo anyway.
+ * to it: what any asks for, the projects a todo's chip offers and who is in the workspace, is refused.
+ * So nobody here can change a todo, and a mention is the name the note writes and nothing more.
  */
-const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, tables, math, codeBlocks, bullets, labelledReferences];
+const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, mentions, tables, math, codeBlocks, bullets, labelledReferences];
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const NOT_HERE = () => Promise.reject(new Error("A link's page asks nothing of a workspace"));

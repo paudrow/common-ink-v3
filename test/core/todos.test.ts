@@ -93,7 +93,7 @@ describe("the index of todos", () => {
 
     // Whoever lists first mends every note, their own or not, and is told only of what they can see.
     expect((await list(ada)).length).toBe(45);
-    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ projects: ["P0", "P1"], tags: ["t"] });
+    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ projects: ["P0", "P1"], tags: ["t"], assignees: [] });
     for (const note of [...notes, diary]) expect(await indexed(note.id)).toEqual(todoIndex(note.text));
     expect(await words(eve, { project: "secret" })).toEqual(["hers alone"]);
   });
@@ -105,7 +105,7 @@ describe("the index of todos", () => {
 
     const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "# Old, renamed\n\n- [ ] from before +P #t" });
     expect(await indexed(note.id)).toEqual(todoIndex(written.text));
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 3 });
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 4 });
   });
 
   it("is made again from every note's text by an admin, another member's private note included, and the answer says nothing of how many", async () => {
@@ -161,6 +161,7 @@ describe("listing todos", () => {
       every: null,
       lastDone: null,
       tags: ["work", "garden"],
+      assignees: [],
       words: "Water plants #garden",
       access: "edit",
     });
@@ -217,9 +218,9 @@ describe("listing todos", () => {
     });
     const hidden = { bySecret: [], byTag: [], byNote: [] };
 
-    expect(await seenBy(eve)).toEqual({ todos: ["for the guest", "hidden", "hidden and done", "seen by all"], bySecret: ["hidden", "hidden and done"], byTag: ["hidden", "hidden and done"], byNote: ["hidden", "hidden and done"], filters: { projects: ["Common", "Lent", "Secret"], tags: ["lent", "open", "private"] } });
-    for (const admin of [ada, adasAgent]) expect(await seenBy(admin)).toEqual({ ...hidden, todos: ["for the guest", "seen by all"], filters: { projects: ["Common", "Lent"], tags: ["lent", "open"] } });
-    expect(await seenBy(guest)).toEqual({ ...hidden, todos: ["for the guest"], filters: { projects: ["Lent"], tags: ["lent"] } });
+    expect(await seenBy(eve)).toEqual({ todos: ["for the guest", "hidden", "hidden and done", "seen by all"], bySecret: ["hidden", "hidden and done"], byTag: ["hidden", "hidden and done"], byNote: ["hidden", "hidden and done"], filters: { projects: ["Common", "Lent", "Secret"], tags: ["lent", "open", "private"], assignees: [] } });
+    for (const admin of [ada, adasAgent]) expect(await seenBy(admin)).toEqual({ ...hidden, todos: ["for the guest", "seen by all"], filters: { projects: ["Common", "Lent"], tags: ["lent", "open"], assignees: [] } });
+    expect(await seenBy(guest)).toEqual({ ...hidden, todos: ["for the guest"], filters: { projects: ["Lent"], tags: ["lent"], assignees: [] } });
     expect((await list(guest))[0]!.access).toBe("view");
     expect(await codeOf(perform(env.DB, ada, { type: "todo.set", id: secret.id, revision: 1, line: 2, text: "- [ ] hidden +Secret due:2026-01-01", done: true }))).toBe("not_found: No such note");
   });
@@ -256,7 +257,7 @@ describe("changing a todo from a listing", () => {
     const cleared = await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 2, line: 2, text: "- [ ] !!! Call the bank due:2026-11-01 +Bank", importance: 0, due: null, removeProject: "Bank", done: false });
     expect(cleared.text).toBe(PLAN.replace("- [ ] !! Call the bank due:2026-10-14 +Home", "- [ ] Call the bank"));
     expect(cleared.revision).toBe(3);
-    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ projects: ["home", "Trip"], tags: ["garden", "work"] });
+    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ projects: ["home", "Trip"], tags: ["garden", "work"], assignees: [] });
   });
 
   it("follows the todo through the changes made since it was listed, and refuses when the todo itself was changed", async () => {

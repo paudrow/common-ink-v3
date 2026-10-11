@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { NoteState } from "./lifecycle.ts";
+import { readableName } from "./mentions.ts";
 import { parseRule } from "./recurrence.ts";
 import { isDay, isProjectName, type LastDone } from "./todos.ts";
 
@@ -50,6 +51,23 @@ const FolderName = z
  */
 const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 
+/**
+ * What a write does with a mention it introduces, `@[[Name]]` or `@[[id]]`, outside code. `resolve`
+ * stores a mention of the one member with that name, ignoring case, by their id, as
+ * `@[[id|Name]]`, and refuses the write when several members have the name. A name no member has is
+ * left as written: a mention of someone by name, who is told nothing and given nothing. `keep`
+ * leaves every mention as written. A writer who isn't a member is never told who is one, so theirs
+ * are kept.
+ */
+const MentionNames = z.enum(["resolve", "keep"]).default("resolve");
+/** A member's id, or the name of anyone else as a mention writes it. */
+const Person = z
+  .string()
+  .max(200)
+  .regex(/^[^[\]|\n]*$/, "can't contain brackets, | or a line break")
+  .transform(readableName)
+  .refine((name) => name.length > 0, "is no name: nothing in it shows");
+
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
 const ProjectName = z.string().max(100).refine(isProjectName, "not a project's name: a letter, then letters, digits, _ and -");
@@ -83,7 +101,7 @@ export const Op = z.discriminatedUnion("type", [
    * `tag` lists only the notes with that tag, ignoring case.
    */
   z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: IncludeArchived }),
-  z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles }),
+  z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles, mentionNames: MentionNames }),
   /** The note, and for each note its text links to by id, that note's title now. A note in Trash is read as any other, and its `state` says where it is. */
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
   z.object({
@@ -94,6 +112,7 @@ export const Op = z.discriminatedUnion("type", [
     /** Chosen by the writer; a write sent again with the same id is recorded once. */
     writeId: z.string().min(1).max(64).optional(),
     linkTitles: LinkTitles,
+    mentionNames: MentionNames,
     /**
      * The day it is for the writer, which counts when the write checks off a recurring todo: the todo
      * is completed on that day, as todo.set does it. Left out, it is today in the time zone the
@@ -202,7 +221,10 @@ export const Op = z.discriminatedUnion("type", [
    * Open ones come first, then by due date with those that have none last, then the most important.
    * `dueFrom` and `dueTo` are days, both included, and leave out todos with no due date; `noDue`
    * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `project` and `tag`
-   * match ignoring case, and a tag is the note's. Pass the answer's `next` as `offset` for the page after.
+   * match ignoring case, and a tag is the note's. `assignee` lists only the todos assigned to one
+   * person: a member's id, or anyone else's name, ignoring case. `assignedToMe` lists only those
+   * assigned to the asker, or to the member an agent acts for. Pass the answer's `next` as `offset`
+   * for the page after.
    */
   z.object({
     type: z.literal("todo.list"),
@@ -212,13 +234,15 @@ export const Op = z.discriminatedUnion("type", [
     dueTo: Day.optional(),
     noDue: z.boolean().optional(),
     importance: z.array(ImportanceLevel).min(1).max(4).optional(),
+    assignee: Person.optional(),
+    assignedToMe: z.boolean().optional(),
     includeCompleted: z.boolean().default(false),
     includeArchived: IncludeArchived,
     noteId: Id.optional(),
     limit: z.number().int().min(1).max(200).default(100),
     offset: z.number().int().min(0).default(0),
   }),
-  /** What todo.list can be narrowed by: the projects of the todos, and the tags of the notes that have todos, in notes the asker can see. */
+  /** What todo.list can be narrowed by: the projects of the todos, who they are assigned to, and the tags of the notes that have todos, in notes the asker can see. */
   z.object({ type: z.literal("todo.filters"), includeArchived: IncludeArchived }),
   /**
    * Changes one todo by rewriting its line, as a change to its note by whoever asks. `revision`,
@@ -232,6 +256,11 @@ export const Op = z.discriminatedUnion("type", [
    * leaves it open with its next due date and a mark of when it was last done and how many times,
    * and files the checked line on the daily note of whoever asks, or of the member an agent acts
    * for. `on` is the day that happens on, as it is for note.write.
+   *
+   * `assign` assigns it to a person by writing a mention of them on the line: a member's id, or a
+   * name. A name one member has is theirs, as it is for a mention note.write introduces, and a name
+   * no member has is written as a name. `unassign` takes it from a member's id or name, or from
+   * anyone else's name, and is refused when the listed line isn't assigned to them.
    */
   z.object({
     type: z.literal("todo.set"),
@@ -245,6 +274,8 @@ export const Op = z.discriminatedUnion("type", [
     addProject: ProjectName.optional(),
     removeProject: z.string().min(1).max(100).optional(),
     every: Recurrence.nullable().optional(),
+    assign: Person.optional(),
+    unassign: Person.optional(),
     on: Day.optional(),
   }),
   /**
@@ -311,9 +342,10 @@ export const Op = z.discriminatedUnion("type", [
    * Gives whoever signs in with `email` view or edit on a note or a folder, or changes what they
    * have. Someone who isn't a member becomes a guest, who sees that and nothing else. Naming a
    * member only narrows what their role allows there, which an admin does; on a private note of
-   * one's own it lets that member in.
+   * one's own it lets that member in. A member can be named by `memberId` in place of `email`,
+   * since only an admin is told a member's email. The grant then keeps the email from whoever made it.
    */
-  z.object({ type: z.literal("grant.set"), ...On, email: Email, access: GrantAccess }),
+  z.object({ type: z.literal("grant.set"), ...On, email: Email.optional(), memberId: Id.optional(), access: GrantAccess }),
   /**
    * Sets the link on a note or a folder: `public` opens for anyone who has it, `signed_in` for
    * anyone signed in to Common Ink who has it, and null takes the link away, which stops it at once.
@@ -471,9 +503,23 @@ export interface LinkedNote {
   state: NoteState | null;
 }
 
+/**
+ * Someone a note mentions, or a todo is assigned to. `id` is the person's id when the mention names
+ * one, and null for a name alone. `member` says they are a member of the workspace now, and `name`
+ * is then their name now. Otherwise, and always for an asker who isn't a member themself, `name` is
+ * the name as the note writes it, and nothing else is told of them.
+ */
+export interface Mentioned {
+  id: string | null;
+  name: string;
+  member: boolean;
+}
+
 export interface ReadNote extends Note {
   /** Each note the text links to by id, once, in the order they first appear. */
   links: LinkedNote[];
+  /** Each person the text mentions, once, in the order they first appear. */
+  mentions: Mentioned[];
 }
 
 /** A todo as a listing gives it. `revision`, `line` and `text` are what todo.set finds it by. */
@@ -498,7 +544,9 @@ export interface ListedTodo {
   lastDone: LastDone | null;
   /** The tags of the note it is in. */
   tags: string[];
-  /** The line without its list mark, checkbox, importance, due date and projects. */
+  /** Who it is assigned to: each person mentioned on its line. */
+  assignees: Mentioned[];
+  /** The line without its list mark, checkbox, importance, due date, projects and assignees. */
   words: string;
   /** What the one asking may do with its note. With edit, todo.set changes it. */
   access: GrantAccess;
@@ -548,7 +596,7 @@ export interface Grant {
   to:
     | {
         kind: "person";
-        /** Kept from anyone but an admin and whoever made the grant, once a person has taken the grant up. */
+        /** Kept from anyone but an admin and whoever made the grant by typing it, once a person has taken the grant up. */
         email: string | null;
         /** Null until someone signs in with the email. */
         personId: string | null;
@@ -711,7 +759,7 @@ export interface Results {
   /** `next` is the `offset` of the page after, or null on the last. */
   "todo.list": { todos: ListedTodo[]; next: number | null };
   /** Each name once, ignoring case, as a note writes it. */
-  "todo.filters": { projects: string[]; tags: string[] };
+  "todo.filters": { projects: string[]; tags: string[]; assignees: Mentioned[] };
   "todo.set": Written;
   "todo.history": { completions: Completion[] };
   "daily.open": Note;

@@ -46,8 +46,8 @@ describe("archive", () => {
     expect((await perform(env.DB, ada, { type: "folder.list" })).folders.find((f) => f.id === folder.id)!.noteCount).toBe(1);
     expect((await perform(env.DB, ada, { type: "todo.list" })).todos.map((t) => t.noteTitle)).toEqual(["Current"]);
     expect((await perform(env.DB, ada, { type: "todo.list", includeArchived: true })).todos.map((t) => t.noteTitle).sort()).toEqual(["Current", "Old plan"]);
-    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ projects: ["Work"], tags: ["now"] });
-    expect(await perform(env.DB, ada, { type: "todo.filters", includeArchived: true })).toEqual({ projects: ["Someday", "Work"], tags: ["later", "now"] });
+    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ projects: ["Work"], tags: ["now"], assignees: [] });
+    expect(await perform(env.DB, ada, { type: "todo.filters", includeArchived: true })).toEqual({ projects: ["Someday", "Work"], tags: ["later", "now"], assignees: [] });
     expect((await perform(env.DB, ada, { type: "tag.list" })).tags).toEqual([{ name: "now", notes: 1 }]);
     expect((await perform(env.DB, ada, { type: "tag.list", includeArchived: true })).tags).toEqual([{ name: "later", notes: 1 }, { name: "now", notes: 1 }]);
     expect((await perform(env.DB, ada, { type: "search", query: "ponder" })).results).toEqual([]);
@@ -124,7 +124,7 @@ describe("Trash", () => {
     for (const includeArchived of [false, true]) {
       expect(await titles(ada, { type: "note.list", includeArchived })).toEqual(["Kept"]);
       expect((await perform(env.DB, ada, { type: "todo.list", includeArchived })).todos.map((t) => t.noteTitle)).toEqual(["Kept"]);
-      expect(await perform(env.DB, ada, { type: "todo.filters", includeArchived })).toEqual({ projects: ["Work"], tags: ["now"] });
+      expect(await perform(env.DB, ada, { type: "todo.filters", includeArchived })).toEqual({ projects: ["Work"], tags: ["now"], assignees: [] });
       expect((await perform(env.DB, ada, { type: "tag.list", includeArchived })).tags).toEqual([{ name: "now", notes: 1 }]);
       expect((await perform(env.DB, ada, { type: "search", query: "regret", includeArchived })).results).toEqual([]);
     }

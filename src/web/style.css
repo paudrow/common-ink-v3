@@ -1359,6 +1359,14 @@ button.bar-item:focus-visible {
   color: var(--ink);
 }
 
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-accent .cm-completionLabel {
+  color: var(--accent);
+}
+
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-muted .cm-completionLabel {
+  color: var(--muted);
+}
+
 .cm-editor .cm-tooltip-autocomplete .cm-completionDetail {
   margin-left: 1em;
   color: var(--muted);
@@ -2765,6 +2773,15 @@ del.diff-line::before {
 .todo-chip:focus-within {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.todo-assignee {
+  unicode-bidi: isolate;
+}
+
+.todo-assignee[data-member] {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .todo-importance {

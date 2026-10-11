@@ -8,6 +8,7 @@ import { dayIn, redoTarget, revertOfAuthor, revertedBy, takeBackOut, undoTarget 
 import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
+import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
 import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, type Asking } from "./membership.ts";
 import {
   NO_SUCH_WORKSPACE,
@@ -22,6 +23,7 @@ import {
   type HistoryEntry,
   type LinkedNote,
   type ListedTodo,
+  type Mentioned,
   type Note,
   type NoteSummary,
   type OpInput,
@@ -161,8 +163,8 @@ export interface NoteRow extends SummaryRow {
   restores_to?: string | null;
 }
 
-/** What a note's `indexed` is once its links, todos, projects, tags and search text have been made from its text. */
-const MADE = 3;
+/** What a note's `indexed` is once its links, todos, projects, tags, mentions and search text have been made from its text. */
+const MADE = 4;
 
 /** A note as it is made: live. */
 const NEW = { state: "live", state_at: null } as const;
@@ -351,6 +353,82 @@ async function linkedById(ctx: Context, text: string, base: string, how: "resolv
   return stored;
 }
 
+type Member = { id: string; name: string };
+
+/**
+ * The members of the workspace among `targets`, each a person's id or a name, ignoring case. None
+ * for an asker who isn't a member themself: who is in a workspace is not a guest's to be told, by a
+ * name that came back as an id any more than by a list.
+ */
+async function membersMeant(ctx: Context, targets: readonly string[]): Promise<{ byId: Map<string, Member>; byName: Map<string, Member[]> }> {
+  const asked = [...new Set(targets)];
+  if (!ctx.role || !asked.length) return { byId: new Map(), byName: new Map() };
+  // Each name as written and in lower case: the database folds case for unaccented letters only.
+  const { results } = await ctx.db
+    .prepare(
+      `SELECT p.id, p.name FROM members m JOIN people p ON p.id = m.person_id
+       WHERE m.workspace_id = ?1 AND (p.id IN (SELECT value FROM json_each(?2)) OR p.name COLLATE NOCASE IN (SELECT value FROM json_each(?3))) ORDER BY p.id`,
+    )
+    .bind(ctx.workspaceId, JSON.stringify(asked.filter(isPersonId)), JSON.stringify(asked.flatMap((target) => [target, target.toLowerCase()])))
+    .all<Member>();
+  return { byId: new Map(results.map((m) => [m.id, m])), byName: Map.groupBy(results, (m) => m.name.toLowerCase()) };
+}
+
+/** The one member a name or an id means, or undefined when it is nobody's. Refused when the name is several members'. */
+function memberMeant(found: Awaited<ReturnType<typeof membersMeant>>, target: string): Member | undefined {
+  const byId = found.byId.get(target);
+  if (byId) return byId;
+  const members = found.byName.get(target.toLowerCase()) ?? [];
+  if (members.length > 1) throw new OpError("invalid", `${members.length} members are named ${quoted(target)}: ${members.map((m) => m.id).join(", ")}. Mention the one you mean as @[[id]], with ids from member.list.`);
+  return members[0];
+}
+
+/** Who a mention is of, as the asker may be told: a member by their name now, and anyone else by the name as written. */
+const mentioned = (members: ReadonlyMap<string, Member>, who: string, name: string): Mentioned => {
+  const member = members.get(who);
+  return { id: isPersonId(who) ? who : null, name: member?.name ?? name, member: member !== undefined };
+};
+
+/** Each person `mentions` are of, once, in the order they first appear. */
+function mentionedIn(members: ReadonlyMap<string, Member>, mentions: readonly WrittenMention[]): Mentioned[] {
+  const first = new Map<string, WrittenMention>();
+  for (const mention of mentions) if (!first.has(mentionKey(mention))) first.set(mentionKey(mention), mention);
+  return [...first].map(([who, mention]) => mentioned(members, who, mentionName(mention)));
+}
+
+/** Each person `text` mentions. */
+async function mentionsOf(ctx: Context, text: string): Promise<Mentioned[]> {
+  const mentions = mentionsIn(text);
+  return mentionedIn((await membersMeant(ctx, mentions.map((m) => m.target).filter(isPersonId))).byId, mentions);
+}
+
+/**
+ * The text with each mention the write introduces that is of a member stored by that member's id,
+ * with their name: `@[[Ada Lovelace]]` and `@[[id]]` both become `@[[id|Ada Lovelace]]`. As with a
+ * link, a write introduces a mention when no mention in `base` has the same target as written, so
+ * one the note already had is left exactly as it is. A name no member has is left too: it is a
+ * mention of someone by name. Only a name several members have is refused.
+ */
+async function mentionedById(ctx: Context, text: string, base: string, how: "resolve" | "keep"): Promise<string> {
+  if (how === "keep") return text;
+  const had = new Set(mentionsIn(base).map((m) => m.target));
+  const introduced = mentionsIn(text).filter((m) => !had.has(m.target));
+  if (!introduced.length) return text;
+  const found = await membersMeant(ctx, introduced.map((m) => m.target));
+  const stored = rementioned(text, (mention) => {
+    if (had.has(mention.target)) return undefined;
+    const member = memberMeant(found, mention.target);
+    if (!member || (member.id === mention.target && mention.label)) return undefined;
+    return writtenMention({ id: member.id, name: mention.label ?? member.name });
+  });
+  if (stored.length > MAX_NOTE_LENGTH) throw new OpError("invalid", `With its mentions stored by id, the note would be over ${MAX_NOTE_LENGTH} characters`);
+  return stored;
+}
+
+/** The text a write stores: what was written, with the links and mentions it introduces stored by id. */
+const storedAs = async (ctx: Context, text: string, base: string, op: { linkTitles: "resolve" | "keep"; mentionNames: "resolve" | "keep" }) =>
+  mentionedById(ctx, await linkedById(ctx, text, base, op.linkTitles), base, op.mentionNames);
+
 /**
  * The statements that make the record of a note's links what `text` says, or none when `was` says
  * the same. They go in the batch that changes the text, so the record can't differ from it. With
@@ -388,17 +466,19 @@ const INDEXED = {
   todos: "INSERT INTO todos (note_id, line, done, importance, due, text) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]')",
   projects: "INSERT INTO todo_projects (note_id, line, project, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
   tags: "INSERT INTO note_tags (note_id, tag, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]')",
+  mentions: "INSERT INTO mentions (note_id, line, who, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
 } as const;
-const INDEX_TABLE = { todos: "todos", projects: "todo_projects", tags: "note_tags" } as const;
+const INDEX_TABLE = { todos: "todos", projects: "todo_projects", tags: "note_tags", mentions: "mentions" } as const;
+const indexOf = (text: string) => ({ ...todoIndex(text), mentions: mentionIndex(text) });
 
 /**
- * The statements that make the index of a note's todos, their projects, and its tags what `text`
+ * The statements that make the index of a note's todos, their projects, its tags, and its mentions what `text`
  * says, or none for a part that `was` says the same of. Like `linking`, they go in the batch that
  * changes the text, and with `atRevision` do nothing unless the note is still at that revision.
  */
 function indexing(ctx: Context, noteId: string, text: string, { was, atRevision }: { was?: string; atRevision?: number } = {}): D1PreparedStatement[] {
-  const now = todoIndex(text);
-  const before = was === undefined ? null : todoIndex(was);
+  const now = indexOf(text);
+  const before = was === undefined ? null : indexOf(was);
   const current = "(?2 IS NULL OR EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND revision = ?2))";
   const at = atRevision ?? null;
   return (Object.keys(INDEXED) as (keyof typeof INDEXED)[]).flatMap((part) => {
@@ -956,7 +1036,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const folder = await loadFolder(ctx, op.folderId, "edit");
       const id = newId();
       const revision = op.text ? 1 : 0;
-      const text = await linkedById(ctx, op.text, "", op.linkTitles);
+      const text = await storedAs(ctx, op.text, "", op);
       const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
@@ -975,7 +1055,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row = await loadNote(ctx, op.id, "view", "opens");
       if (op.revision !== undefined && op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
       const note = op.revision === undefined || op.revision === row.revision ? toNote(ctx, row) : toNote(ctx, row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
-      return { ...note, links: await linksOf(ctx, note.text, "any") };
+      return { ...note, links: await linksOf(ctx, note.text, "any"), mentions: await mentionsOf(ctx, note.text) };
     },
   },
 
@@ -1008,6 +1088,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
              AND (?8 = 0 OR t.due IS NULL)
              AND (?9 IS NULL OR t.importance IN (SELECT value FROM json_each(?9)))
              AND (?10 IS NULL OR t.note_id = ?10)
+             AND (?13 IS NULL OR EXISTS (SELECT 1 FROM mentions a WHERE a.note_id = t.note_id AND a.line = t.line AND a.who = ?13))
+             AND (?14 IS NULL OR EXISTS (SELECT 1 FROM mentions a WHERE a.note_id = t.note_id AND a.line = t.line AND a.who = ?14))
            ORDER BY t.done, t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE, t.note_id, t.line
            LIMIT ?11 OFFSET ?12`,
         )
@@ -1024,12 +1106,14 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           op.noteId ?? null,
           op.limit + 1,
           op.offset,
+          op.assignee === undefined ? null : personKey(op.assignee),
+          op.assignedToMe ? ctx.personId : null,
         )
         .all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
-      const page = results.slice(0, op.limit);
+      const page = results.slice(0, op.limit).map((r) => ({ r, todo: parseTodo(r.text) }));
+      const members = (await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []))).byId;
       return {
-        todos: page.map((r) => {
-          const todo = parseTodo(r.text);
+        todos: page.map(({ r, todo }) => {
           return {
             noteId: r.note_id,
             noteTitle: r.title,
@@ -1043,6 +1127,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             every: todo?.every?.written ?? null,
             lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
             tags: JSON.parse(r.tags) as string[],
+            assignees: mentionedIn(members, todo?.assignees ?? []),
             words: todo?.words ?? r.text,
             access: noteLevel(ctx.sight, { id: r.note_id, folder_id: r.folder_id, private_owner: r.private_owner }) === "edit" ? "edit" : "view",
           };
@@ -1057,7 +1142,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       await mend(ctx);
       const covering = listing(op.includeArchived);
-      const [projects, tags] = await ctx.db.batch<{ name: string }>([
+      const [projects, tags, assigned] = await ctx.db.batch<{ name: string; who?: string }>([
         ctx.db
           .prepare(`SELECT MIN(p.name) AS name FROM todo_projects p JOIN notes n ON n.id = p.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} GROUP BY p.project ORDER BY p.project`)
           .bind(ctx.workspaceId, ctx.sight.bind),
@@ -1067,8 +1152,18 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
              WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND EXISTS (SELECT 1 FROM todos t WHERE t.note_id = g.note_id) GROUP BY g.tag ORDER BY g.tag`,
           )
           .bind(ctx.workspaceId, ctx.sight.bind),
+        ctx.db
+          .prepare(
+            `SELECT a.who, MIN(a.name) AS name FROM mentions a JOIN notes n ON n.id = a.note_id
+             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND EXISTS (SELECT 1 FROM todos t WHERE t.note_id = a.note_id AND t.line = a.line) GROUP BY a.who`,
+          )
+          .bind(ctx.workspaceId, ctx.sight.bind),
       ]);
-      return { projects: projects!.results.map((r) => r.name), tags: tags!.results.map((r) => r.name) };
+      const members = (await membersMeant(ctx, assigned!.results.map((r) => r.who!).filter(isPersonId))).byId;
+      const assignees = assigned!.results.map((r) => mentioned(members, r.who!, r.name));
+      // Members first, then everyone else, each by name.
+      assignees.sort((a, b) => Number(b.member) - Number(a.member) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || (a.id ?? "").localeCompare(b.id ?? ""));
+      return { projects: projects!.results.map((r) => r.name), tags: tags!.results.map((r) => r.name), assignees };
     },
   },
 
@@ -1077,11 +1172,19 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     run: (ctx, op) =>
       settle(async (): Promise<Written | null> => {
         const row = await loadNote(ctx, op.id, "edit", "refused");
-        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, ...change } = op;
+        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, assign, unassign, ...rest } = op;
+        // A member is assigned by their id with their name, whichever they were named by, as a mention a write introduces is stored.
+        // Taking a todo from a name takes it from the member so named too, whom the line holds by their id.
+        const meant = await membersMeant(ctx, [assign, unassign].filter((who) => who !== undefined));
+        const theirs = assign === undefined ? undefined : memberMeant(meant, assign);
+        const taken = unassign === undefined ? undefined : memberMeant(meant, unassign);
+        const from = unassign === undefined ? undefined : [unassign, ...(taken ? [taken.id] : [])];
+        if (from && !parseTodo(listedAs)?.assignees.some((a) => from.map(personKey).includes(mentionKey(a)))) throw new OpError("invalid", `This todo isn't assigned to ${quoted(unassign!)}`);
+        const change = { ...rest, ...(from && { unassign: from }) };
         const mine = change.done ? await completing(ctx, on) : null;
         let wanted: Completed;
         try {
-          wanted = changeTodo(listedAs, change, mine?.day ?? "");
+          wanted = changeTodo(listedAs, assign === undefined ? change : { ...change, assign: theirs ?? { name: assign } }, mine?.day ?? "");
         } catch (err) {
           throw err instanceof RangeError ? new OpError("invalid", err.message) : err;
         }
@@ -1145,7 +1248,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         }
         if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
         const base = op.baseRevision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, op.baseRevision, row.revision);
-        const changed = changesBetween(base.text, await linkedById(ctx, op.text, base.text, op.linkTitles));
+        const changed = changesBetween(base.text, await storedAs(ctx, op.text, base.text, op));
         // At a tie, the stale write's insertion goes first: it stays next to the text it was typed after.
         const changes = base.since ? changed.map(base.since, true) : changed;
         if (changes.empty) return toNote(ctx, row);
@@ -1657,7 +1760,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   // Who a note is shared with is not in history either, and a link can put a note before the whole internet. Only the member decides it: see NOT_FOR_AGENTS.
   "grant.list": { needs: "view", by: "member", run: (ctx, op) => listGrants(ctx, op) },
   // What each needs of its item is `canShare`'s to say: a viewer who owns a private note shares it, and can change nothing else.
-  "grant.set": { needs: "view", by: "member", members: true, run: (ctx, op) => setGrant(ctx, op, op.email, op.access) },
+  "grant.set": { needs: "view", by: "member", members: true, run: (ctx, op) => setGrant(ctx, op, op, op.access) },
   "grant.link": { needs: "view", by: "member", members: true, run: (ctx, op) => linkTo(ctx, op, op.link) },
   "grant.revoke": { needs: "view", by: "member", members: true, run: (ctx, op) => revokeGrant(ctx, op.id) },
   // A viewer who made a note while they were an editor is still the one who made it.

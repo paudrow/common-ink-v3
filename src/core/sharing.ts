@@ -50,12 +50,14 @@ interface GrantRow {
   person_role: Role | null;
   token: string | null;
   access: GrantAccess;
+  /** Whether whoever made it named a member, and so was never told the email it is kept by. */
+  named: number;
   granted_by: string;
   granted_by_name: string;
   created_at: number;
 }
 
-const GRANT_COLUMNS = `g.id, g.note_id, g.folder_id, COALESCE(n.title, f.name) AS on_name, g.kind, g.email, g.person_id, p.name AS person_name, m.role AS person_role, g.token, g.access,
+const GRANT_COLUMNS = `g.id, g.note_id, g.folder_id, COALESCE(n.title, f.name) AS on_name, g.kind, g.email, g.person_id, p.name AS person_name, m.role AS person_role, g.token, g.access, g.named,
     g.granted_by, b.name AS granted_by_name, g.created_at
   FROM grants g
   JOIN people b ON b.id = g.granted_by
@@ -73,7 +75,7 @@ const toGrant = (ctx: Context, r: GrantRow): Grant => ({
   access: r.access,
   to:
     r.kind === "person"
-      ? { kind: "person", email: r.person_id === null || ctx.role === "admin" || r.granted_by === ctx.personId ? r.email : null, personId: r.person_id, name: r.person_name, role: r.person_role }
+      ? { kind: "person", email: r.person_id === null || ctx.role === "admin" || (r.granted_by === ctx.personId && !r.named) ? r.email : null, personId: r.person_id, name: r.person_name, role: r.person_role }
       : { kind: "link", link: r.kind, token: r.token! },
   grantedBy: { personId: r.granted_by, name: r.granted_by_name },
   createdAt: r.created_at,
@@ -140,24 +142,35 @@ async function noteSharing(ctx: Context, note: NoteRow): Promise<NonNullable<Sha
   };
 }
 
-export async function setGrant(ctx: Context, on: On, email: string, access: GrantAccess): Promise<Grant> {
+/**
+ * `to` names who the grant is for one way: by the email they sign in with, or as a member of the
+ * workspace by their id. A member named by id is granted by the email the workspace already holds,
+ * which whoever named them is not told.
+ */
+export async function setGrant(ctx: Context, on: On, to: { email?: string; memberId?: string }, access: GrantAccess): Promise<Grant> {
+  if ((to.email === undefined) === (to.memberId === undefined)) throw new OpError("invalid", "Name who the grant is for one way: as email, or as memberId for a member");
   const item = await itemOf(ctx, on);
   sharing(ctx, item);
   const them = await ctx.db
-    .prepare("SELECT p.id, m.role FROM people p LEFT JOIN members m ON m.person_id = p.id AND m.workspace_id = ?2 WHERE p.email = ?1")
-    .bind(email, ctx.workspaceId)
-    .first<{ id: string; role: Role | null }>();
+    .prepare(
+      `SELECT p.id, p.email, m.role FROM people p LEFT JOIN members m ON m.person_id = p.id AND m.workspace_id = ?2
+       WHERE ${to.memberId === undefined ? "p.email = ?1" : "p.id = ?1 AND m.role IS NOT NULL"}`,
+    )
+    .bind(to.email ?? to.memberId, ctx.workspaceId)
+    .first<{ id: string; email: string; role: Role | null }>();
+  if (to.memberId !== undefined && !them) throw new OpError("not_found", "No such member");
+  const email = to.email ?? them!.email;
   if (them?.id === ctx.personId) throw new OpError("invalid", "That's you. A grant is for someone else.");
   if (them?.role) narrowing(ctx, item);
   const column = item.kind === "note" ? "note_id" : "folder_id";
   const row = await ctx.db
     .prepare(
-      `INSERT INTO grants (id, workspace_id, ${column}, kind, email, person_id, access, granted_by, created_at)
-       VALUES (?1, ?2, ?3, 'person', ?4, (SELECT id FROM people WHERE email = ?4), ?5, ?6, ?7)
-       ON CONFLICT (${column}, email) WHERE kind = 'person' AND ${column} IS NOT NULL DO UPDATE SET access = excluded.access, granted_by = excluded.granted_by
+      `INSERT INTO grants (id, workspace_id, ${column}, kind, email, person_id, access, granted_by, created_at, named)
+       VALUES (?1, ?2, ?3, 'person', ?4, (SELECT id FROM people WHERE email = ?4), ?5, ?6, ?7, ?8)
+       ON CONFLICT (${column}, email) WHERE kind = 'person' AND ${column} IS NOT NULL DO UPDATE SET access = excluded.access, granted_by = excluded.granted_by, named = excluded.named
        RETURNING id`,
     )
-    .bind(newId(), ctx.workspaceId, item.id, email, access, ctx.personId, ctx.now)
+    .bind(newId(), ctx.workspaceId, item.id, email, access, ctx.personId, ctx.now, to.memberId === undefined ? 0 : 1)
     .first<{ id: string }>();
   return grantById(ctx, row!.id);
 }

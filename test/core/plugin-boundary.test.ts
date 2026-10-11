@@ -28,9 +28,9 @@ describe("the plugin boundary", () => {
     expect(reaching).toEqual([]);
   });
 
-  it("builds the plugin API from the operations protocol, how a link, a todo, a tag and a recurrence are written and which lines are code, the daily note settings, and four small helpers, so widening it is a choice", () => {
+  it("builds the plugin API from the operations protocol, how a link, a mention, a todo, a tag and a recurrence are written and which lines are code, the daily note settings, and four small helpers, so widening it is a choice", () => {
     const api = files.find((f) => f.path === API)!;
 
-    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/daily.ts", "../core/lines.ts", "../core/links.ts", "../core/protocol.ts", "../core/recurrence.ts", "../core/todos.ts", "./dismiss.ts", "./htmlFrame.ts", "./icons.tsx", "./time.ts", "react"]);
+    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/daily.ts", "../core/lines.ts", "../core/links.ts", "../core/mentions.ts", "../core/protocol.ts", "../core/recurrence.ts", "../core/todos.ts", "./dismiss.ts", "./htmlFrame.ts", "./icons.tsx", "./time.ts", "react"]);
   });
 });
