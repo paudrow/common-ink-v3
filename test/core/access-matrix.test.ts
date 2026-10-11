@@ -5,8 +5,10 @@ import { connectAgent } from "../../src/core/agents.ts";
 import { IN_TRASH, type Covering, type NoteState, type Trashed } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
 import { Op, OpError, type OpInput, type OpType } from "../../src/core/protocol.ts";
+import { UPLOAD_IN_TRASH } from "../../src/core/uploads.ts";
 import { NOT_FOR_AGENTS } from "../../src/worker/mcp/tools.ts";
 import { addMember, newMember } from "./members.ts";
+import { PNG, upload } from "./uploading.ts";
 
 /*
  * Every operation, asked by every kind of actor, of every kind of note and folder. What each actor
@@ -18,6 +20,10 @@ import { addMember, newMember } from "./members.ts";
  * Where a note is in its life is written out the same way, beside who may see it: one note is
  * archived and one is in Trash. Each operation on a note says what it does with a note in Trash,
  * and each listing says which states it covers, so none can leave either unsaid.
+ *
+ * Beside every note is an upload of the same name: in the same folder, in the same state, private to
+ * the same owner, under the same grants. An upload is decided as a note is, so the one table says
+ * what each actor may do with both, and an operation on an upload is held to the row its note has.
  */
 
 type Level = "-" | "V" | "E";
@@ -52,9 +58,13 @@ type ActorName = keyof typeof ACTORS;
 interface World {
   actors: Record<ActorName, Actor>;
   notes: Record<NoteName, string>;
+  /** The upload beside each note. */
+  uploads: Record<NoteName, string>;
   folders: Record<FolderName, string>;
   /** A grant on each note, there to be revoked. */
   spare: Record<NoteName, string>;
+  /** And one on each upload. */
+  spareUpload: Record<NoteName, string>;
   /** An agent of Eve's that has only ever written the private note. */
   secretAgent: { id: string; name: string };
   /** A link an admin put on `secret` before its owner made it private, and how many grants went when she did. */
@@ -91,6 +101,13 @@ async function world(): Promise<World> {
 
   const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: textOf(name, text) })).id;
   const notes = { open: await note(ada, "open"), team: await note(ada, "team"), deep: await note(ada, "deep"), lone: await note(ada, "lone"), secret: "", vpriv: await note(vera, "vpriv"), arch: await note(ada, "arch"), bin: await note(ada, "bin") };
+  const file = async (by: Actor, name: NoteName, more: { private?: boolean } = {}) => (await upload(by, `File-${name}.png`, PNG, { folderId: folders[FOLDER_OF[name]], ...more })).id;
+  const uploads = { open: await file(ada, "open"), team: await file(ada, "team"), deep: await file(ada, "deep"), lone: await file(ada, "lone"), secret: await file(eve, "secret"), vpriv: await file(vera, "vpriv", { private: true }), arch: await file(ada, "arch"), bin: await file(ada, "bin") };
+  await perform(env.DB, ada, { type: "upload.archive", id: uploads.arch, archived: true });
+  await perform(env.DB, ada, { type: "upload.trash", id: uploads.bin });
+  // As with the note: what an admin put on the upload before it was private goes when its owner makes it so.
+  await perform(env.DB, ada, { type: "grant.set", uploadId: uploads.secret, email: `gone-${address()}`, access: "view" });
+  expect(await perform(env.DB, eve, { type: "upload.setPrivate", id: uploads.secret, private: true })).toEqual({ id: uploads.secret, private: true, removed: 1 });
   await perform(env.DB, ada, { type: "note.archive", id: notes.arch, archived: true });
   await perform(env.DB, ada, { type: "note.trash", id: notes.bin });
   await perform(env.DB, vera, { type: "note.setPrivate", id: notes.vpriv, private: true });
@@ -110,12 +127,17 @@ async function world(): Promise<World> {
   await perform(env.DB, ada, { type: "grant.set", folderId: team, email: vic!.email, access: "view" });
   await perform(env.DB, ada, { type: "grant.set", noteId: notes.lone, email: nia!.email, access: "edit" });
   await perform(env.DB, ada, { type: "grant.set", noteId: notes.lone, email: val!.email, access: "view" });
+  await perform(env.DB, ada, { type: "grant.set", uploadId: uploads.lone, email: nia!.email, access: "edit" });
+  await perform(env.DB, ada, { type: "grant.set", uploadId: uploads.lone, email: val!.email, access: "view" });
 
   const spare = {} as World["spare"];
   for (const name of NOTES) spare[name] = (await perform(env.DB, name === "secret" ? eve : name === "vpriv" ? vera : ada, { type: "grant.set", noteId: notes[name], email: `spare-${name}-${address()}`, access: "view" })).id;
 
+  const spareUpload = {} as World["spareUpload"];
+  for (const name of NOTES) spareUpload[name] = (await perform(env.DB, name === "secret" ? eve : name === "vpriv" ? vera : ada, { type: "grant.set", uploadId: uploads[name], email: `spare-up-${name}-${address()}`, access: "view" })).id;
+
   const marks = {} as World["marks"];
-  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`, `who-${name}`];
+  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`, `who-${name}`, uploads[name], `File-${name}`, `spare-up-${name}-`];
   for (const name of FOLDERS) marks[name] = [folders[name], `${name}-folder`];
   marks.secret.push(zed.agent.id, "Zed-agent");
 
@@ -132,8 +154,10 @@ async function world(): Promise<World> {
       "Val, a guest with view on the note lone": val!.actor,
     },
     notes,
+    uploads,
     folders,
     spare,
+    spareUpload,
     secretAgent: { id: zed.agent.id, name: "Zed-agent" },
     before,
     marks,
@@ -143,10 +167,10 @@ async function world(): Promise<World> {
 type Args<K extends OpType> = Omit<Extract<OpInput, { type: K }>, "type">;
 
 /** Puts a note back in the state the table gives it, after an operation that moved it. */
-const settle = (w: World, note: NoteName) =>
-  env.DB.prepare("UPDATE notes SET state = ?2, state_at = ?3, state_by = ?4, state_by_kind = ?5, restores_as = ?6, restores_to = ?7, folder_id = ?8 WHERE id = ?1")
+const settle = (w: World, note: NoteName, table: "notes" | "uploads" = "notes") =>
+  env.DB.prepare(`UPDATE ${table} SET state = ?2, state_at = ?3, state_by = ?4, state_by_kind = ?5, restores_as = ?6, restores_to = ?7, folder_id = ?8 WHERE id = ?1`)
     .bind(
-      w.notes[note],
+      (table === "notes" ? w.notes : w.uploads)[note],
       STATE_OF[note],
       STATE_OF[note] === "live" ? null : Date.now(),
       STATE_OF[note] === "live" ? null : w.actors["Ada, an admin"].personId,
@@ -157,7 +181,7 @@ const settle = (w: World, note: NoteName) =>
     )
     .run();
 /** The operations that move a note through its life, each followed by `settle`. */
-const MOVES: readonly OpType[] = ["note.trash", "note.restore"];
+const MOVES: readonly OpType[] = ["note.trash", "note.restore", "upload.trash", "upload.restore"];
 
 /**
  * What an operation is asked about, and what it needs of that. Each is given arguments that change
@@ -170,6 +194,8 @@ type Plan<K extends OpType> =
    * `maker` when it takes an admin or the member who made the note. `trashed` is what it does with a note in Trash, for someone it would otherwise let through.
    */
   | { on: "note"; needs: "V" | "E"; trashed: Exclude<Trashed, "hidden">; share?: true; members?: true; maker?: true; args: (noteId: string, w: World, note: NoteName) => Args<K>; also?: "folder" }
+  /** The same of the upload beside each note. */
+  | { on: "upload"; needs: "V" | "E"; trashed: Exclude<Trashed, "hidden">; share?: true; members?: true; maker?: true; args: (uploadId: string, w: World, note: NoteName) => Args<K>; also?: "folder" }
   | { on: "folder"; needs: "V" | "E"; share?: true; args: (folderId: string, w: World) => Args<K> }
   /**
    * Lists across the workspace: asked by everyone, and checked for anything of what they can't see. `covers` is the states of the notes
@@ -237,6 +263,17 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.setPrivate": { on: "note", needs: "V", trashed: "opens", members: true, args: (id, _, note) => ({ id, private: note === "secret" }) },
   "shared.open": { on: "link", args: () => ({}) },
   "shared.read": { on: "link", args: (w) => ({ id: w.notes.open }) },
+  "shared.upload": { on: "link", args: (w) => ({ id: w.uploads.open }) },
+  "upload.create": { on: "folder", needs: "E", args: (folderId) => ({ folderId, name: "made.png", size: PNG.byteLength }) },
+  "upload.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
+  "upload.read": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
+  "upload.open": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
+  "upload.move": { on: "upload", needs: "E", trashed: "refused", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
+  "upload.archive": { on: "upload", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, archived: STATE_OF[note] === "archived" }) },
+  "upload.trash": { on: "upload", needs: "E", trashed: "opens", args: (id) => ({ id }) },
+  "upload.restore": { on: "upload", needs: "E", trashed: "opens", args: (id) => ({ id }) },
+  "upload.trashed": { on: "everything", covers: "trashed", args: () => ({}) },
+  "upload.setPrivate": { on: "upload", needs: "V", trashed: "opens", members: true, args: (id, _, note) => ({ id, private: OWNER[note] !== undefined }) },
   // A data source is the asker's own, so each of these is let through for anyone in the workspace, and with nothing connected here finds nothing.
   // Whose records each answers is asked in test/core/sources.test.ts, where there are records to keep apart.
   "source.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
@@ -249,17 +286,28 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
   "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
+  "upload.purge": { on: "upload", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
 };
+
+/** The operations on how a note is shared, asked again of the upload beside it. */
+const SHARING_AN_UPLOAD: { type: OpType; plan: Extract<Plan<OpType>, { on: "upload" }> }[] = [
+  { type: "grant.list", plan: { on: "upload", needs: "V", trashed: "opens", args: (uploadId) => ({ uploadId }) } },
+  { type: "grant.set", plan: { on: "upload", needs: "V", trashed: "opens", share: true, args: (uploadId) => ({ uploadId, email: address(), access: "view" }) } },
+  { type: "grant.revoke", plan: { on: "upload", needs: "V", trashed: "opens", share: true, args: (_, w, note) => ({ id: w.spareUpload[note] }) } },
+];
 
 /** How an operation ended: done, or refused and how. */
 type Outcome = "done" | "forbidden" | "in trash" | `not_found: ${string}` | `other: ${string}`;
 
 async function ask(actor: Actor | Visitor, op: OpInput): Promise<{ outcome: Outcome; answer?: unknown }> {
   try {
-    return { outcome: "done", answer: await perform(env.DB, actor, op) };
+    const answer: unknown = await perform(env.DB, actor, op, Date.now(), undefined, { bucket: env.FILES, body: op.type === "upload.create" ? new Response(PNG).body : null });
+    // An upload's bytes are let go of here. What was told of the upload is kept, to be read for what it gives away.
+    if (answer && typeof answer === "object" && "body" in answer) await (answer as { body?: ReadableStream }).body?.cancel();
+    return { outcome: "done", answer: answer && typeof answer === "object" && "body" in answer ? { ...answer, body: undefined } : answer };
   } catch (err) {
     if (!(err instanceof OpError)) throw err;
-    if (err.code === "conflict" && err.message === IN_TRASH) return { outcome: "in trash" };
+    if (err.code === "conflict" && (err.message === IN_TRASH || err.message === UPLOAD_IN_TRASH)) return { outcome: "in trash" };
     // Refused for something other than who is asking, so they were let through to it.
     if (err.code === "invalid" || err.code === "conflict") return { outcome: "done" };
     if (err.code === "forbidden") return { outcome: "forbidden" };
@@ -283,6 +331,7 @@ const AGENTS = ["their agent", "their read-only agent", "their agent pinned to t
 
 /** `not_found` for a note that was never there, which is what one the actor can't see must be answered with. */
 const NO_NOTE: Outcome = "not_found: No such note";
+const NO_UPLOAD: Outcome = "not_found: No such upload";
 const NO_FOLDER: Outcome = "not_found: No such folder";
 const NO_CHANGE: Outcome = "not_found: The note has no change 99";
 const NO_GRANT: Outcome = "not_found: No such grant";
@@ -305,6 +354,7 @@ describe("every operation, by every actor", () => {
         // What is told as a number gives a note away as surely as its title: a folder's count, and an author's changes by day.
         const { folders: listed } = await perform(env.DB, actor, { type: "folder.list" });
         const counted = (folder: FolderName) => NOTES.filter((note) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-" && STATE_OF[note] === "live").length;
+        expect(listed.map((f) => f.uploadCount)).toEqual(listed.map((f) => f.noteCount));
         expect(Object.fromEntries(listed.map((f) => [f.name, f.noteCount]))).toEqual(Object.fromEntries(FOLDERS.filter((f) => folderLevelOf(name, f) !== "-").map((f) => [`${f}-folder`, counted(f)]).concat(role === "guest" ? [] : [["Unsorted", 0]])));
         const { days } = await perform(env.DB, actor, { type: "history.activity", timeZone: "UTC", author: { kind: "agent", id: w.secretAgent.id } });
         expect(days.map((day) => day.count)).toEqual(levelOf(name, "secret") === "-" ? [] : [1]);
@@ -319,34 +369,44 @@ describe("every operation, by every actor", () => {
           const { outcome, answer } = await ask(actor, { type, ...args } as OpInput);
           // An operation on the workspace is asked about a member, an invite or a folder that isn't there: finding none, it had let the actor through.
           got[key] = letThrough && outcome.startsWith("not_found") ? "done" : outcome;
-          const changes = readOnly && (CHANGES.includes(type) || ((PLANS[type] as Plan<OpType>).on === "note" || (PLANS[type] as Plan<OpType>).on === "folder" ? (PLANS[type] as { needs: string }).needs === "E" : false));
+          const changes = readOnly && (CHANGES.includes(type) || ("needs" in PLANS[type] ? PLANS[type].needs === "E" : false));
           expected[key] = kept || changes ? "forbidden" : expectation;
           if (answer !== undefined) answers.push(answer);
         };
 
+        /** One operation asked of every note, or of the upload beside every note, and then of one that was never there. */
+        const ofEach = async (type: OpType, plan: Extract<Plan<OpType>, { on: "note" | "upload" }>) => {
+          const ids = plan.on === "note" ? w.notes : w.uploads;
+          const NONE = plan.on === "note" ? NO_NOTE : NO_UPLOAD;
+          const key = (note: NoteName) => `${type} ${plan.on === "note" ? "" : "upload "}${note}`;
+          for (const note of NOTES) {
+            const level = levelOf(name, note);
+            let expectation: Outcome = level === "-" ? NONE : !enough(level, plan.needs) || (plan.share && !sharesNote(name, note)) ? "forbidden" : "done";
+            // Whoever can't even change anything in the workspace is refused before the note is looked for, and told nothing of it.
+            if (plan.needs === "E" && (role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")))) expectation = "forbidden";
+            if ((plan.share || plan.members) && role === "guest") expectation = "forbidden";
+            if (plan.maker && expectation === "done" && role !== "admin" && !madeBy(name, note)) expectation = "forbidden";
+            if (expectation === "done" && STATE_OF[note] === "trashed" && plan.trashed === "refused") expectation = "in trash";
+            if (expectation === "done" && plan.also === "folder" && folderLevelOf(name, FOLDER_OF[note]) === "-") expectation = NO_FOLDER;
+            if (expectation === "done" && type === "note.revertChanges") expectation = NO_CHANGE;
+            if (type === "grant.revoke" && expectation === NONE) expectation = NO_GRANT;
+            await run(key(note), type, plan.args(ids[note], w, note), expectation);
+            if (MOVES.includes(type)) await settle(w, note, plan.on === "note" ? "notes" : "uploads");
+          }
+          // The same operation on one that was never there: what a hidden one has to look like.
+          if (type !== "grant.revoke") {
+            const missing = await ask(actor, { type, ...plan.args(MISSING, w, "open"), ...(plan.on === "upload" ? {} : type === "grant.list" || type === "grant.set" ? { noteId: MISSING } : { id: MISSING }) } as OpInput);
+            const hidden = NOTES.filter((note) => levelOf(name, note) === "-" && got[key(note)] !== "forbidden").map((note) => got[key(note)]);
+            expect(hidden.every((outcome) => outcome === missing.outcome), `${type}: a hidden ${plan.on} and a missing one`).toBe(true);
+          }
+        };
+
         for (const type of Object.keys(PLANS) as OpType[]) {
           const plan = PLANS[type] as Plan<OpType>;
-          if (plan.on === "note") {
-            for (const note of NOTES) {
-              const level = levelOf(name, note);
-              let expectation: Outcome = level === "-" ? NO_NOTE : !enough(level, plan.needs) || (plan.share && !sharesNote(name, note)) ? "forbidden" : "done";
-              // Whoever can't even change anything in the workspace is refused before the note is looked for, and told nothing of it.
-              if (plan.needs === "E" && (role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")))) expectation = "forbidden";
-              if ((plan.share || plan.members) && role === "guest") expectation = "forbidden";
-              if (plan.maker && expectation === "done" && role !== "admin" && !madeBy(name, note)) expectation = "forbidden";
-              if (expectation === "done" && STATE_OF[note] === "trashed" && plan.trashed === "refused") expectation = "in trash";
-              if (expectation === "done" && plan.also === "folder" && folderLevelOf(name, FOLDER_OF[note]) === "-") expectation = NO_FOLDER;
-              if (expectation === "done" && type === "note.revertChanges") expectation = NO_CHANGE;
-              if (type === "grant.revoke" && expectation === NO_NOTE) expectation = NO_GRANT;
-              await run(`${type} ${note}`, type, plan.args(w.notes[note], w, note), expectation);
-              if (MOVES.includes(type)) await settle(w, note);
-            }
-            // The same operation on a note that was never there: what a hidden note has to look like.
-            if (type !== "grant.revoke") {
-              const missing = await ask(actor, { type, ...plan.args(MISSING, w, "open"), ...(type === "grant.list" || type === "grant.set" ? { noteId: MISSING } : { id: MISSING }) } as OpInput);
-              const hidden = NOTES.filter((note) => levelOf(name, note) === "-" && got[`${type} ${note}`] !== "forbidden").map((note) => got[`${type} ${note}`]);
-              expect(hidden.every((outcome) => outcome === missing.outcome), `${type}: a hidden note and a missing one`).toBe(true);
-            }
+          if (plan.on === "note" || plan.on === "upload") {
+            // How an upload is shared is asked before the one operation that removes it.
+            if (type === "upload.purge") for (const sharing of SHARING_AN_UPLOAD) await ofEach(sharing.type, sharing.plan);
+            await ofEach(type, plan);
           } else if (plan.on === "folder") {
             for (const folder of FOLDERS) {
               const level = folderLevelOf(name, folder);
@@ -390,17 +450,20 @@ describe("every operation, by every actor", () => {
         expect(hidden.flatMap((item) => w.marks[item].filter((mark) => said.includes(mark)).map((mark) => `${item}: ${mark}`))).toEqual([]);
         // And what they can see is there, so the check above isn't passing on an empty answer.
         const seen = NOTES.filter((note) => levelOf(name, note) !== "-");
-        expect(seen.filter((note) => !said.includes(`Title-${note}`))).toEqual([]);
+        expect(seen.filter((note) => !said.includes(`Title-${note}`) || !said.includes(`File-${note}`))).toEqual([]);
 
         // No listing says anything of a note in a state it doesn't cover, though the actor can see the note: not its title, a tag, a todo, or its id.
         const beyond = listings.flatMap(({ key, covers, said }) => seen.filter((note) => !COVERED[covers].includes(STATE_OF[note])).flatMap((note) => w.marks[note].filter((mark) => said.includes(mark)).map((mark) => `${key}: ${note}: ${mark}`)));
         expect(beyond).toEqual([]);
         // And each one that names notes names every note it covers, so an include that did nothing would fail here.
-        const NAMES: readonly string[] = ["note.list", "todo.list", "todo.filters", "tag.list", "search", "trash.list", "history.list"];
+        const NAMES: readonly string[] = ["note.list", "todo.list", "todo.filters", "tag.list", "search", "trash.list", "history.list", "upload.list", "upload.trashed"];
         const lacking = listings
           .filter(({ key }) => NAMES.includes(key.replace(" with archived", "")))
           .flatMap(({ key, covers, said }) => seen.filter((note) => COVERED[covers].includes(STATE_OF[note]) && !w.marks[note].some((mark) => said.includes(mark))).map((note) => `${key}: ${note}`));
         expect(lacking).toEqual([]);
+        // A listing of notes says nothing of an upload, and a listing of uploads names each upload it covers by its own id.
+        const uploadsListed = listings.filter(({ key }) => key.startsWith("upload."));
+        expect(uploadsListed.flatMap(({ key, covers, said }) => seen.filter((note) => COVERED[covers].includes(STATE_OF[note]) && !said.includes(w.uploads[note])).map((note) => `${key}: ${note}`))).toEqual([]);
       });
     }
   }
@@ -411,7 +474,7 @@ describe("every operation, by every actor", () => {
     const expected: Record<string, boolean> = {};
     for (const name of Object.keys(ACTORS) as ActorName[]) {
       const maker = w.actors[name];
-      const items = [...NOTES.map((note) => ({ key: note as string, column: "note_id", id: w.notes[note], level: levelOf(name, note) })), ...FOLDERS.map((folder) => ({ key: folder as string, column: "folder_id", id: w.folders[folder], level: folderLevelOf(name, folder) }))];
+      const items = [...NOTES.map((note) => ({ key: note as string, column: "note_id", id: w.notes[note], level: levelOf(name, note) })), ...NOTES.map((note) => ({ key: `upload ${note}`, column: "upload_id", id: w.uploads[note], level: levelOf(name, note) })), ...FOLDERS.map((folder) => ({ key: folder as string, column: "folder_id", id: w.folders[folder], level: folderLevelOf(name, folder) }))];
       for (const item of items) {
         const email = address();
         // Written straight into the record, as a grant made while its maker still could and left waiting since.
@@ -419,7 +482,7 @@ describe("every operation, by every actor", () => {
           .bind(crypto.randomUUID().replace(/-/g, "").slice(0, 12), maker.workspaceId, item.id, email, maker.personId)
           .run();
         waiting[`${name} / ${item.key}`] = email;
-        expected[`${name} / ${item.key}`] = item.column === "note_id" ? sharesNote(name, item.key as NoteName) : sharesFolder(name, item.key as FolderName);
+        expected[`${name} / ${item.key}`] = item.column === "folder_id" ? sharesFolder(name, item.key as FolderName) : sharesNote(name, item.key.replace("upload ", "") as NoteName);
       }
     }
     const took: Record<string, boolean> = {};
@@ -452,6 +515,11 @@ describe("every operation, by every actor", () => {
       if (answer !== undefined) answers.push(answer);
     }
     expect(read).toEqual({ open: NO_NOTE, team: "done", deep: "done", lone: NO_NOTE, secret: NO_NOTE, vpriv: NO_NOTE, arch: NO_NOTE, bin: NO_NOTE });
+    // And the bytes of the uploads in that folder, by the same rule.
+    const bytes: Record<string, Outcome> = {};
+    for (const note of NOTES) bytes[note] = (await ask(visitor, { type: "shared.upload", id: w.uploads[note] })).outcome;
+    expect(bytes).toEqual({ open: NO_UPLOAD, team: "done", deep: "done", lone: NO_UPLOAD, secret: NO_UPLOAD, vpriv: NO_UPLOAD, arch: NO_UPLOAD, bin: NO_UPLOAD });
+    expect((await ask(visitor, { type: "shared.upload", id: MISSING })).outcome).toBe(NO_UPLOAD);
     expect((await ask(visitor, { type: "shared.read", id: MISSING })).outcome).toBe(NO_NOTE);
     const said = JSON.stringify(answers);
     expect((["open", "lone", "secret", "vpriv", "arch", "bin", "Open"] as const).flatMap((item) => w.marks[item].filter((mark) => said.includes(mark)))).toEqual([]);
@@ -466,10 +534,11 @@ describe("every operation, by every actor", () => {
     const outcomes: Record<string, Outcome> = {};
     for (const type of Object.keys(PLANS) as OpType[]) {
       const plan = PLANS[type] as Plan<OpType>;
-      const args = plan.on === "note" ? plan.args(w.notes.open, w, "open") : plan.on === "folder" ? plan.args(w.folders.Open, w) : plan.args(w);
+      const args = plan.on === "note" ? plan.args(w.notes.open, w, "open") : plan.on === "upload" ? plan.args(w.uploads.open, w, "open") : plan.on === "folder" ? plan.args(w.folders.Open, w) : plan.args(w);
       outcomes[type] = (await ask(visitor, { type, ...args } as OpInput)).outcome;
     }
-    expect(outcomes).toEqual(Object.fromEntries((Object.keys(PLANS) as OpType[]).map((type) => [type, type.startsWith("shared.") ? "done" : "forbidden"])));
+    // A link on a note opens that note. The upload beside it, in the same folder, is no upload to whoever holds it.
+    expect(outcomes).toEqual(Object.fromEntries((Object.keys(PLANS) as OpType[]).map((type) => [type, type === "shared.upload" ? NO_UPLOAD : type.startsWith("shared.") ? "done" : "forbidden"])));
   });
 
   it("answers someone who is in the workspace in no way as if there were no workspace, whatever they ask", async () => {
@@ -486,7 +555,7 @@ describe("every operation, by every actor", () => {
       for (const type of Object.keys(PLANS) as OpType[]) {
         const plan = PLANS[type] as Plan<OpType>;
         if (plan.on === "link") continue;
-        const args = plan.on === "note" ? plan.args(w.notes.open, w, "open") : plan.on === "folder" ? plan.args(w.folders.Open, w) : plan.args(w);
+        const args = plan.on === "note" ? plan.args(w.notes.open, w, "open") : plan.on === "upload" ? plan.args(w.uploads.open, w, "open") : plan.on === "folder" ? plan.args(w.folders.Open, w) : plan.args(w);
         outcomes.add((await ask(actor, { type, ...args } as OpInput)).outcome);
       }
       expect([...outcomes], who).toEqual(["not_found: No such workspace"]);

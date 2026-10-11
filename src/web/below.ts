@@ -25,7 +25,7 @@ let ids = 0;
 /** Above and below each box, in pixels. */
 const GAP = 6;
 
-const sameBox = (a: BelowBox, b: BelowBox) => ("ratio" in a ? "ratio" in b && a.ratio === b.ratio : "height" in b && a.height === b.height);
+const sameBox = (a: BelowBox, b: BelowBox) => ("ratio" in a ? "ratio" in b && a.ratio === b.ratio && a.width === b.width : "height" in b && a.height === b.height);
 
 /** How tall each box was when last measured, for the ones sized by their width. */
 const heights = new Map<number, number>();
@@ -57,8 +57,10 @@ class BoxWidget extends WidgetType {
     el.style.paddingBlock = `${GAP}px`;
     const box = el.appendChild(document.createElement("div"));
     box.dataset.below = String(this.id);
-    if ("ratio" in this.box) box.style.aspectRatio = String(this.box.ratio);
-    else box.style.height = `${this.box.height}px`;
+    if ("ratio" in this.box) {
+      box.style.aspectRatio = String(this.box.ratio);
+      if (this.box.width) box.style.maxWidth = `min(40rem, ${this.box.width}px)`;
+    } else box.style.height = `${this.box.height}px`;
     return el;
   }
 
@@ -77,7 +79,8 @@ function boxOf(embed: Embed & { below: Below }, written: Written): BelowBox | nu
     const box = embed.below.box({ config: written.config, body: written.body });
     if (!box) return null;
     const size = "ratio" in box ? box.ratio : box.height;
-    return Number.isFinite(size) && size > 0 ? box : null;
+    const width = "ratio" in box ? (box.width ?? 1) : 1;
+    return Number.isFinite(size) && size > 0 && Number.isFinite(width) && width > 0 ? box : null;
   } catch {
     return null;
   }

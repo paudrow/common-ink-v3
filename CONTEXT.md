@@ -9,7 +9,7 @@ The only container a person signs into. It holds notes, folders, and uploads. A 
 _Avoid_: Space, vault, project
 
 **Folder**:
-A named location in a workspace. A note or upload has exactly one parent folder. An editor can create and rename a folder they can edit. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty.
+A named location in a workspace. A note or upload has exactly one parent folder. An editor can create and rename a folder they can edit. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty: no notes, uploads or folders in it.
 _Avoid_: Directory, space
 
 **Unsorted**:
@@ -304,5 +304,5 @@ _Avoid_: Option (except for a plugin's own), preference
 Every setting there is for a member in a workspace: the core's, those of each installed plugin whether it is on or off, and a keybinding for each command that is on. Settings are checked against it, and the options are drawn from it.
 
 **Upload**:
-A binary file in a workspace with one parent folder. The default folder is Unsorted. Grants apply as they do for notes. A note references an upload by its id. An upload can be archived the same way a note can. Deleting an upload uses Trash.
+A file in a workspace with one parent folder. The default folder is Unsorted. It is seen as a note is: by its folder, by a grant on it, and private to the member who uploaded it when they make it so. It has no link of its own, and is reached by a link only through the folder it is in. A note refers to an upload by its id, in an embed: `::image{id 640x480}`, `::video{id 640x360}`, `::audio{id}`, or `::file{id}`. The file's name is kept for showing and is in no note and no address. A reader who can't see the upload is shown a placeholder that says nothing of it. An upload is archived and trashed as a note is, and a note that refers to one in Trash says so. Deleting a note leaves the uploads it refers to. A file can be at most 50 MB, and a workspace's uploads 1 GB together. See `docs/adr/0008-uploads-are-items-and-their-bytes-go-through-the-resolver.md`.
 _Avoid_: Asset, attachment

@@ -65,6 +65,7 @@ export function completing(completions: readonly Completion[], onFail: (completi
       const at = view.state.doc.lineAt(start);
       const { anchor, head, ...changes } = placed(item, { from: start, to: end, before: at.text.slice(0, start - at.from), after: at.text.slice(end - at.from), last: at.number === view.state.doc.lines });
       view.dispatch({ changes, selection: { anchor, head }, scrollIntoView: true, userEvent: "input.complete" });
+      item.run?.();
     },
   });
 

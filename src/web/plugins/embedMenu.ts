@@ -2,7 +2,8 @@ import type { CompletionItem, EmbedInfo, Plugin } from "../plugin-api.ts";
 import { matching } from "./lib/match.ts";
 
 /** How a new embed is written, with its config left selected when there is one to type over. */
-function itemFor({ name, title, block, starts }: EmbedInfo): CompletionItem {
+function itemFor({ name, title, block, starts, pick }: EmbedInfo): CompletionItem {
+  if (pick) return { label: pick.title, detail: pick.detail, insert: "", run: pick.run };
   const config = starts?.config ?? "";
   const opening = `${block ? ":::" : "::"}${name}{`;
   const written = `${opening}${config}}`;
@@ -19,7 +20,13 @@ export const embedMenu: Plugin = {
     host.completions.register({
       id: "embeds",
       trigger: "/",
-      items: (typed) => matching(host.embeds.list(), typed, (e) => `${e.title} ${e.name}`).map(itemFor),
+      // The embeds the menu writes come first, then what it can only ask for, such as a file to upload.
+      items: (typed) =>
+        matching(
+          host.embeds.list().toSorted((a, b) => Number(!!a.pick) - Number(!!b.pick)),
+          typed,
+          (e) => `${e.pick?.title ?? e.title} ${e.name}`,
+        ).map(itemFor),
     });
   },
 };

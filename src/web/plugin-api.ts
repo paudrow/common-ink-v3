@@ -10,18 +10,22 @@
  * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, ReferredUpload, Results, Role, Sharing, Upload, WorkspaceSummary } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_SEARCH_LENGTH } from "../core/protocol.ts";
+export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, WORKSPACE_UPLOAD_BYTES } from "../core/protocol.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
 export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, writtenMention, type WrittenMention } from "../core/mentions.ts";
+
+/** How a note refers to an upload, which is the same for a plugin as for an agent, and what kind of file an upload is. */
+export { UPLOAD_EMBEDS, sizeIn, uploadIn, writtenUpload, type UploadEmbed } from "../core/uploadRefs.ts";
+export type { UploadKind } from "../core/filetypes.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
 export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
@@ -83,8 +87,9 @@ export type SettingValue = boolean | string | number | readonly string[];
 
 /**
  * The operations `host.perform` won't take: the member's settings, every change to who is in the
- * workspace, which goes through `host.members`, who a note or folder is shared with, which goes
- * through `host.sharing`, and what a link's holder asks, which nobody signed in does.
+ * workspace, which goes through `host.members`, who a note, folder or upload is shared with, which
+ * goes through `host.sharing`, an upload's bytes, which go through `host.uploads`, and what a link's
+ * holder asks, which nobody signed in does.
  */
 export type KeptFromPerform =
   | `settings.${string}`
@@ -95,17 +100,24 @@ export type KeptFromPerform =
   | "member.leave"
   | `grant.${string}`
   | "note.setPrivate"
+  | "upload.setPrivate"
+  | "upload.create"
+  | "upload.open"
   | `shared.${string}`;
 
 /**
  * The operations `host.perform` takes only from Common Ink's own plugins: everything of the
- * member's data sources, which are theirs and nobody else's. A plugin that isn't Common Ink's own
- * is refused them, and so can't copy a member's contacts or calendar into a note or a frame.
+ * member's data sources, which are theirs and nobody else's, and everything of the workspace's
+ * uploads. A plugin that isn't Common Ink's own is refused them, and so can't copy a member's
+ * contacts or calendar into a note or a frame, or list, move or remove a file.
  */
-export type OwnOnly = `source.${string}` | `event.${string}` | `contact.${string}` | `record.${string}`;
+export type OwnOnly = `source.${string}` | `event.${string}` | `contact.${string}` | `record.${string}` | `upload.${string}`;
 
-/** What a grant is on: one note or one folder. */
-export type SharedItem = { noteId: string } | { folderId: string };
+/** What a grant is on: one note, one folder or one upload. An upload has no link of its own. */
+export type SharedItem = { noteId: string } | { folderId: string } | { uploadId: string };
+
+/** What is told of an upload a note refers to. Null for one that isn't there or that the reader can't see: nothing tells the two apart. */
+export type ReferredTo = ReferredUpload["upload"];
 
 /** What the note list is showing in place of a folder when it shows the notes shared with a guest whose folders they can't see. */
 export const SHARED_WITH_ME = "shared-with-me";
@@ -150,15 +162,15 @@ export interface PluginHost {
   /** Calls `listener` each time the app arrives at an address, and once for the address it is at when the plugin starts later than the app. */
   onNavigate(listener: () => void): Dispose;
   /** Calls `listener` each time the notes the member can see change: one made, renamed, moved, or changed by anyone. `app().notes` then holds them as they are. */
-  onNotes(listener: () => void): Dispose;
+  onItems(listener: () => void): Dispose;
   /** The app as it is now. A view is handed this as `app`; a command reads it when it runs. It isn't there yet during `activate`. */
   app(): App;
   /**
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
    * is saved before an operation that moves a note through its history, and the editors take the result.
    * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites,
-   * and one that reads or changes who a note or folder is shared with. A plugin that isn't Common
-   * Ink's own is also refused each {@link OwnOnly} operation.
+   * one that reads or changes who a note, folder or upload is shared with, and one that sends or opens
+   * an upload's bytes. A plugin that isn't Common Ink's own is also refused each {@link OwnOnly} operation.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
   /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
@@ -200,10 +212,31 @@ export interface PluginHost {
     /** Sets who the item's link opens for, or takes the link away with null. The address is `/s/<token>`. */
     link(on: SharedItem, kind: LinkKind | null): Promise<Grant | null>;
     revoke(grantId: string): Promise<void>;
-    /** `removed` is how many grants and links other people had put on the note, which go as it becomes private. */
-    setPrivate(noteId: string, isPrivate: boolean): Promise<{ removed: number }>;
+    /** Makes a note private, by its id, or an upload. `removed` is how many grants and links other people had put on it, which go as it becomes private. */
+    setPrivate(on: string | { uploadId: string }, isPrivate: boolean): Promise<{ removed: number }>;
     /** Every grant in the workspace, for an admin. */
     all(): Promise<Grant[]>;
+  };
+  /**
+   * The workspace's uploads as the notes on screen refer to them, and their bytes. Only Common Ink's
+   * own plugins are given it: for any other, nothing is known of any upload, there is no address,
+   * and nothing is sent. Listing, moving and removing uploads are `perform`'s `upload.*` operations.
+   */
+  readonly uploads: {
+    /**
+     * What the app was last told of an upload: by the read of a note that refers to it, or by
+     * `learn`. Null for one that isn't there or that the member can't see, and undefined for one
+     * nothing has been said of yet.
+     */
+    referred(id: string): ReferredTo | undefined;
+    /** Calls `listener` when what `referred` answers has changed for any upload. */
+    onReferred(listener: () => void): Dispose;
+    /** Tells the app what an upload is now, after an operation that made, changed or removed it, so every note that shows it follows. */
+    learn(uploads: readonly ReferredUpload[]): void;
+    /** Where an upload's bytes are asked for, as the source of a picture, a video or a download. It is good only for whoever is looking: the member's session, or on a link's page the link. */
+    address(id: string): string;
+    /** Sends a file to the workspace as the member. `folderId` left out puts it in Unsorted. `onProgress` is told how many bytes have gone. The server's refusal, such as that the workspace is full, is what it throws. */
+    send(file: Blob, as: { name: string; folderId?: string; private?: boolean }, onProgress?: (sent: number) => void): Promise<Upload>;
   };
   /** JSON this plugin keeps in this browser for this workspace and this member. Other plugins can't see it. */
   readonly storage: {
@@ -320,6 +353,12 @@ export interface Embed {
   block?: boolean;
   /** What a new one is written with when it is picked from the embed menu. With none, an empty config and an empty body. */
   starts?: { config?: string; body?: string };
+  /**
+   * For an embed a menu can't write, because what it holds is made by doing something: an upload's
+   * is made by sending a file. A menu offers it under this title, after the embeds it writes, and
+   * picking it calls `run` and writes nothing. The editor it was picked in still has the keyboard.
+   */
+  pick?: { title: string; detail?: string; run: () => void };
   /** False for one no menu can write, because what it holds is picked somewhere else, as a reference to an event is copied from the Calendar page. `host.embeds.list()` leaves it out. */
   menu?: boolean;
   /**
@@ -360,8 +399,9 @@ export interface Drawn {
 export interface Below {
   /**
    * The room to keep, from what the note says of the embed alone: as wide as the note's column up to
-   * a limit and `ratio` times as wide as tall, or `height` pixels tall. Null for one with nothing to
-   * show, such as a config that can't be read.
+   * a limit and `ratio` times as wide as tall, or `height` pixels tall. With `width`, it is no wider
+   * than that many pixels, as a small picture isn't drawn larger than it is. Null for one with nothing
+   * to show, such as a config that can't be read.
    */
   box(written: { config: string; body: string }): BelowBox | null;
   /**
@@ -373,7 +413,7 @@ export interface Below {
   render(el: HTMLElement, embed: Pick<Embedded, "config" | "body" | "readOnly" | "update">): void | (() => void);
 }
 
-export type BelowBox = { ratio: number } | { height: number };
+export type BelowBox = { ratio: number; width?: number } | { height: number };
 
 /** What an embed is handed about one place a note writes it. */
 export interface Embedded {
@@ -398,7 +438,7 @@ export interface Embedded {
   edit(): void;
 }
 
-export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts">;
+export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts" | "pick">;
 
 /**
  * A list offered at the cursor while the member types after a trigger, such as the embed menu on
@@ -430,6 +470,8 @@ export interface CompletionItem {
   block?: boolean;
   /** How the label is coloured: `accent` is the theme colour and `muted` is gray. Without it, as the list's text is. */
   tone?: "accent" | "muted";
+  /** Called once `insert` is in the note, for an item that does something more than write, such as opening a file picker. The editor still has the keyboard. */
+  run?: () => void;
 }
 
 /**

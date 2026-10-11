@@ -89,7 +89,7 @@ export const todos: Plugin = {
     };
     let summary = "";
     let settling: ReturnType<typeof setTimeout> | undefined;
-    const offNotes = host.onNotes(() => {
+    const offNotes = host.onItems(() => {
       const now = (host.app().notes ?? []).map((n) => `${n.id}:${n.revision}`).join(",");
       if (now === summary) return;
       const first = summary === "";

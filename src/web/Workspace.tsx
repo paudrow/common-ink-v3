@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
+import type { Me, Note, NoteSummary, Results, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
-import { ApiError, connectAgent, disconnectAgent, listAgents, perform, signOut } from "./api.ts";
+import { ApiError, connectAgent, disconnectAgent, listAgents, perform, sendUpload, signOut, uploadAddress } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
 import { Drawn } from "./Drawn.tsx";
 import { usable } from "./editorExtensions.ts";
@@ -15,6 +15,7 @@ import { SHARED_WITH_ME, type App, type Embed, type Folders, type Notice, type P
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
+import { referredUploads } from "./referredUploads.ts";
 import type { Navigate, Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
 import { Settings } from "./Settings.tsx";
@@ -151,6 +152,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const current = (routeNoteId && byId.get(routeNoteId)) || null;
 
   const appNow = useRef<App>(null!);
+  /** What each read of a note said of the uploads it refers to, which is what an embed of one is drawn from. */
+  const [referred] = useState(referredUploads);
   /** What the app's own commands do, as of the latest render. */
   const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleWriting: () => void; toggleInspector: () => void }>(null!);
   const [host] = useState(() => {
@@ -213,8 +216,15 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           grant: (on, to, access) => perform(workspaceId, { type: "grant.set", ...on, ...(typeof to === "string" ? { email: to } : to), access }),
           link: (on, link) => perform(workspaceId, { type: "grant.link", ...on, link }),
           revoke: (grantId) => perform(workspaceId, { type: "grant.revoke", id: grantId }).then(() => {}),
-          setPrivate: (noteId, isPrivate) => perform(workspaceId, { type: "note.setPrivate", id: noteId, private: isPrivate }),
+          setPrivate: (on, isPrivate) => perform(workspaceId, typeof on === "string" ? { type: "note.setPrivate", id: on, private: isPrivate } : { type: "upload.setPrivate", id: on.uploadId, private: isPrivate }),
           all: () => perform(workspaceId, { type: "grant.list" }).then((all) => all.grants),
+        },
+        uploads: {
+          referred: referred.get,
+          onReferred: referred.subscribe,
+          learn: referred.learn,
+          address: (id) => uploadAddress(workspaceId, id),
+          send: (file, as, onProgress) => sendUpload(workspaceId, file, as, onProgress),
         },
         storage: {
           // By member too: two people who share a browser and a workspace don't share what a plugin keeps, such as which notes are open.
@@ -342,6 +352,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
 
   const remember = useCallback(
     (note: Note) => {
+      // A read says what the note's uploads are, before the editor that draws them is made.
+      if ("uploads" in note) referred.learn((note as Results["note.read"]).uploads);
       const summary = summaryOf(note);
       // Before the app goes to a note it has just made, so it doesn't stop to ask where the note is.
       noteIsHere(note.id, workspaceId);
@@ -350,7 +362,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       setGone((was) => (was.has(note.id) ? new Set([...was].filter((id) => id !== note.id)) : was));
       if (location.pathname.startsWith("/note/") && location.pathname.endsWith(note.id)) navigate(notePath(note), { replace: true });
     },
-    [navigate, noteIsHere, workspaceId],
+    [navigate, noteIsHere, workspaceId, referred],
   );
 
   /** A save was refused because its note is in Trash, which the app hadn't heard. It reads the note, and sends the typing after all if the note is back by then. */

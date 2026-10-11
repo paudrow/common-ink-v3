@@ -5,18 +5,21 @@ import { perform, type Actor } from "../../src/core/operations.ts";
 import { KEPT, REMOVALS, purgeTrash, removing } from "../../src/core/purge.ts";
 import worker from "../../src/worker/index.ts";
 import { newMember } from "./members.ts";
+import { upload } from "./uploading.ts";
 
 const T0 = Date.UTC(2026, 9, 11);
 
 /**
  * A note with something in every table that keeps anything by a note's id: changes, a label, links
  * out and in, todos, a project, a tag, a mention, search text, a grant and a link, a completion, and a daily
- * note that a completion elsewhere was filed on. `word` is in its text and nowhere else.
+ * note that a completion elsewhere was filed on. `word` is in its text and nowhere else. It refers to
+ * an upload too, which is no part of it.
  */
 async function doomed(ada: Actor, word: string) {
   const other = await perform(env.DB, ada, { type: "note.create", text: "# Other\n\n- [ ] elsewhere every:1d" });
   const daily = await perform(env.DB, ada, { type: "daily.open", on: "2026-10-11" });
-  await perform(env.DB, ada, { type: "note.write", id: daily.id, baseRevision: daily.revision, text: `${daily.text}\n${word} [[${other.id}]]\n- [ ] ${word}-todo every:1d +${word}proj #${word}tag @[[${word} Person]]\n` });
+  const file = await upload(ada, "kept.png");
+  await perform(env.DB, ada, { type: "note.write", id: daily.id, baseRevision: daily.revision, text: `${daily.text}\n${word} [[${other.id}]] ::image{${file.id} 1x1}\n- [ ] ${word}-todo every:1d +${word}proj #${word}tag @[[${word} Person]]\n` });
   await perform(env.DB, ada, { type: "note.label", id: daily.id, revision: 1, name: `${word}-label` });
   await perform(env.DB, ada, { type: "todo.set", id: other.id, revision: 1, line: 2, text: "- [ ] elsewhere every:1d", done: true, on: "2026-10-11" });
   const now = await perform(env.DB, ada, { type: "note.read", id: daily.id });
@@ -25,7 +28,7 @@ async function doomed(ada: Actor, word: string) {
   await perform(env.DB, ada, { type: "grant.set", noteId: daily.id, email: `${word}@example.com`, access: "view" });
   await perform(env.DB, ada, { type: "grant.link", noteId: daily.id, link: "public" });
   const linker = await perform(env.DB, ada, { type: "note.create", text: `# Linker\n\n[[${daily.id}]]` });
-  return { id: daily.id, other: other.id, linker: linker.id };
+  return { id: daily.id, other: other.id, linker: linker.id, upload: file.id };
 }
 
 /** Every table and its columns, the full-text index's own tables among them, since they hold the text. */
@@ -56,7 +59,7 @@ describe("removing notes from Trash", () => {
     const note = await doomed(ada, "xyzzyplugh");
     const before = await remains(note.id, "xyzzyplugh");
     // The check below means something only if the note was in every one of these to begin with.
-    expect(before).toEqual(expect.arrayContaining(["notes.id", "notes.text", "changes.note_id", "changes.diff", "labels.note_id", "links.source_id", "todos.note_id", "todo_projects.note_id", "note_tags.note_id", "mentions.note_id", "note_search_rows.note_id", "note_search_content.c2", "grants.note_id", "completions.note_id", "completions.daily_note_id", "daily_notes.note_id"]));
+    expect(before).toEqual(expect.arrayContaining(["notes.id", "notes.text", "changes.note_id", "changes.diff", "labels.note_id", "links.source_id", "todos.note_id", "todo_projects.note_id", "note_tags.note_id", "mentions.note_id", "upload_refs.note_id", "note_search_rows.note_id", "note_search_content.c2", "grants.note_id", "completions.note_id", "completions.daily_note_id", "daily_notes.note_id"]));
     await perform(env.DB, ada, { type: "note.trash", id: note.id }, T0);
 
     expect(await purgeTrash(env.DB, T0 + TRASH_MS - 1)).toEqual({ removed: 0, failed: [], more: false });
@@ -73,6 +76,9 @@ describe("removing notes from Trash", () => {
     expect((await perform(env.DB, ada, { type: "todo.history", id: note.other, revision: todo!.revision, line: todo!.line, text: todo!.text })).completions).toMatchObject([{ on: "2026-10-11", dailyNoteId: null }]);
     expect((await perform(env.DB, ada, { type: "search", query: "xyzzyplugh" })).results).toEqual([]);
     expect((await perform(env.DB, ada, { type: "daily.open", on: "2026-10-11" })).id).not.toBe(note.id);
+    // The upload the note referred to is no part of the note. It is there as it was, and used in nothing.
+    expect(await perform(env.DB, ada, { type: "upload.read", id: note.upload })).toMatchObject({ name: "kept.png", state: "live", usedIn: [] });
+    expect(await env.FILES.head(note.upload)).not.toBeNull();
   });
 
   it("shows a link to a removed note exactly as a link to a note that never was, to someone who could see it and to someone who couldn't", async () => {

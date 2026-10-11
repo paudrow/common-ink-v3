@@ -1,0 +1,220 @@
+import { env } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
+import { whoAmI } from "../../src/core/accounts.ts";
+import { connectAgent } from "../../src/core/agents.ts";
+import { perform, type Actor } from "../../src/core/operations.ts";
+import type { Upload } from "../../src/core/protocol.ts";
+import worker from "../../src/worker/index.ts";
+import { sign } from "../../src/worker/session.ts";
+import { addMember, newMember } from "./members.ts";
+import { PNG, bytesOf } from "./uploading.ts";
+
+const SECRET = "test-secret";
+const HTML = bytesOf("<!doctype html><script>alert(document.cookie)</script>");
+const SVG = bytesOf('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+
+const send = (path: string, init: RequestInit = {}) => worker.fetch(new Request(`https://ink.test${path}`, init) as never, { ...env, SESSION_SECRET: SECRET });
+const bearer = (token?: string): Record<string, string> => (token ? { Authorization: `Bearer ${token}` } : {});
+
+/** A file sent the way an agent sends one. `declared` is the length the request says, when that isn't the body's. */
+const post = (workspace: string, token: string | undefined, name: string, bytes: Uint8Array, more: { declared?: number; headers?: Record<string, string> } = {}) =>
+  send(`/api/workspaces/${workspace}/uploads`, {
+    method: "POST",
+    headers: { ...bearer(token), "Content-Type": "application/octet-stream", "Content-Length": String(more.declared ?? bytes.byteLength), "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name })), ...more.headers },
+    body: bytes,
+  });
+
+const get = (workspace: string, token: string | undefined, id: string, headers: Record<string, string> = {}) => send(`/api/workspaces/${workspace}/uploads/${id}`, { headers: { ...bearer(token), ...headers } });
+
+const bytesIn = async (res: Response) => [...new Uint8Array(await res.arrayBuffer())];
+const errorIn = async (res: Response) => ((await res.json()) as { error: string }).error;
+
+/** The headers that keep an upload's bytes from acting as a page of the app. */
+const sealOf = (res: Response) => Object.fromEntries(["X-Content-Type-Options", "Cross-Origin-Resource-Policy", "Referrer-Policy", "Cache-Control"].map((name) => [name, res.headers.get(name)]));
+const SEAL = { "X-Content-Type-Options": "nosniff", "Cross-Origin-Resource-Policy": "same-origin", "Referrer-Policy": "no-referrer", "Cache-Control": "private, no-cache" };
+const expectSealed = (res: Response, what: string) => {
+  expect(sealOf(res), what).toEqual(SEAL);
+  const policy = (res.headers.get("Content-Security-Policy") ?? "").split(";").map((part) => part.trim());
+  expect(policy, what).toContain("sandbox");
+  expect(policy, what).toContain("default-src 'none'");
+};
+
+/** Ada, admin of her workspace, with an agent of hers. */
+async function connected(options: Parameters<typeof connectAgent>[3] = {}) {
+  const ada = await newMember("Ada Lovelace");
+  const { token } = await connectAgent(env.DB, ada.personId, "Claude", options);
+  return { ada, token, workspace: ada.workspaceId };
+}
+
+const sent = async (workspace: string, token: string, name: string, bytes: Uint8Array): Promise<Upload> => {
+  const res = await post(workspace, token, name, bytes);
+  expect(res.status, name).toBe(201);
+  return res.json();
+};
+
+/** The workspace a person got when they first signed in, which is not the one they were invited to. */
+const ownWorkspace = async (member: Actor) => (await whoAmI(env.DB, member.personId)).workspaces.find((w) => w.id !== member.workspaceId)!.id;
+
+const listed = (actor: Actor) => perform(env.DB, actor, { type: "upload.list" });
+
+describe("an upload's bytes over HTTP, with an agent's token", () => {
+  it("come back as they went in: a picture is answered as a picture, shown in place", async () => {
+    const { token, workspace } = await connected();
+
+    const upload = await sent(workspace, token, "dot.png", PNG);
+    expect(upload).toMatchObject({ name: "dot.png", type: "image/png", kind: "image", size: 70, width: 1, height: 1, state: "live", private: false });
+    expect(upload.id).toMatch(/^[a-z0-9]{12}$/);
+
+    const res = await get(workspace, token, upload.id);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/png");
+    expect(res.headers.get("Content-Disposition")).toMatch(/^inline; filename="dot\.png"/);
+    expect(res.headers.get("Content-Length")).toBe("70");
+    expectSealed(res, "a picture");
+    expect(await bytesIn(res)).toEqual([...PNG]);
+
+    const head = await send(`/api/workspaces/${workspace}/uploads/${upload.id}`, { method: "HEAD", headers: bearer(token) });
+    expect([head.status, head.headers.get("Content-Type"), await bytesIn(head)]).toEqual([200, "image/png", []]);
+    expectSealed(head, "a picture's headers alone");
+  });
+
+  it("answers anything a browser could run as a download, whatever its name says", async () => {
+    const { token, workspace } = await connected();
+    const answers: Record<string, [bytes: Uint8Array, type: string]> = {
+      "x.html": [HTML, "application/octet-stream"],
+      "x.svg": [SVG, "image/svg+xml"],
+      "evil.png": [HTML, "application/octet-stream"],
+    };
+
+    for (const [name, [bytes, type]] of Object.entries(answers)) {
+      const upload = await sent(workspace, token, name, bytes);
+      expect(upload.type, name).toBe(type);
+      const res = await get(workspace, token, upload.id);
+      expect([res.status, res.headers.get("Content-Type")], name).toEqual([200, type]);
+      expect(res.headers.get("Content-Disposition"), name).toMatch(new RegExp(`^attachment; filename="${name.replace(".", "\\.")}"`));
+      expectSealed(res, name);
+      expect(await bytesIn(res), name).toEqual([...bytes]);
+    }
+  });
+
+  it("is not typed by what the request says it is", async () => {
+    const { token, workspace } = await connected();
+
+    const claimed = await post(workspace, token, "page.png", HTML, { headers: { "Content-Type": "application/octet-stream; type=text/html" } });
+    expect(claimed.status).toBe(201);
+    expect(((await claimed.json()) as Upload).type).toBe("application/octet-stream");
+    expect((await post(workspace, token, "page.html", HTML, { headers: { "Content-Type": "text/html" } })).status).toBe(415);
+  });
+
+  it("answers a part that is asked for, and nothing to someone who has the bytes already", async () => {
+    const { token, workspace } = await connected();
+    const upload = await sent(workspace, token, "dot.png", PNG);
+
+    const part = await get(workspace, token, upload.id, { Range: "bytes=0-3" });
+    expect([part.status, part.headers.get("Content-Range"), part.headers.get("Content-Length")]).toEqual([206, "bytes 0-3/70", "4"]);
+    expectSealed(part, "a part");
+    expect(await bytesIn(part)).toEqual([0x89, 0x50, 0x4e, 0x47]);
+
+    const etag = (await get(workspace, token, upload.id)).headers.get("ETag")!;
+    expect(etag).toMatch(/^"[0-9a-f]+"$/);
+    const again = await get(workspace, token, upload.id, { "If-None-Match": etag });
+    expect([again.status, await bytesIn(again)]).toEqual([304, []]);
+    expectSealed(again, "an answer with no bytes");
+  });
+
+  it("refuses a read-only token the upload, and lets it read", async () => {
+    const { ada, token, workspace } = await connected();
+    const upload = await sent(workspace, token, "dot.png", PNG);
+    const reader = await connectAgent(env.DB, ada.personId, "Reader", { readOnly: true });
+
+    const refused = await post(workspace, reader.token, "more.png", PNG);
+    expect([refused.status, await errorIn(refused)]).toEqual([403, "forbidden"]);
+    expect((await listed(ada)).map((u) => u.name)).toEqual(["dot.png"]);
+    const read = await get(workspace, reader.token, upload.id);
+    expect([read.status, await bytesIn(read)]).toEqual([200, [...PNG]]);
+  });
+
+  it("refuses a viewer's agent the upload, and lets it read", async () => {
+    const { ada, token, workspace } = await connected();
+    const upload = await sent(workspace, token, "dot.png", PNG);
+    const viewer = await addMember(ada, "viewer");
+    const theirs = await connectAgent(env.DB, viewer.personId, "Claude");
+
+    const refused = await post(workspace, theirs.token, "more.png", PNG);
+    expect([refused.status, await errorIn(refused)]).toEqual([403, "forbidden"]);
+    expect((await get(workspace, theirs.token, upload.id)).status).toBe(200);
+  });
+
+  it("has no workspace but its own for a token pinned to one", async () => {
+    const { ada, token, workspace } = await connected();
+    const upload = await sent(workspace, token, "dot.png", PNG);
+    const grace = await addMember(ada, "editor");
+    const own = await ownWorkspace(grace);
+    const pinned = await connectAgent(env.DB, grace.personId, "Pinned", { workspaceId: own });
+    const free = await connectAgent(env.DB, grace.personId, "Free");
+
+    expect((await get(workspace, free.token, upload.id)).status, "her unpinned agent reads it").toBe(200);
+    const read = await get(workspace, pinned.token, upload.id);
+    expect([read.status, await errorIn(read)]).toEqual([404, "not_found"]);
+    const write = await post(workspace, pinned.token, "more.png", PNG);
+    expect([write.status, await errorIn(write)]).toEqual([404, "not_found"]);
+    expect((await post(own, pinned.token, "mine.png", PNG)).status).toBe(201);
+    expect((await listed(ada)).map((u) => u.name)).toEqual(["dot.png"]);
+  });
+
+  it("is not found by an agent whose member isn't in the workspace", async () => {
+    const { token, workspace } = await connected();
+    const upload = await sent(workspace, token, "dot.png", PNG);
+    const mallory = await connected();
+
+    expect((await get(workspace, mallory.token, upload.id)).status).toBe(404);
+    expect((await get(mallory.workspace, mallory.token, upload.id)).status).toBe(404);
+    expect((await post(workspace, mallory.token, "planted.png", PNG)).status).toBe(404);
+  });
+
+  it("answers 401 with no token and no session, and for a token it doesn't know", async () => {
+    const { ada, token, workspace } = await connected();
+    const upload = await sent(workspace, token, "dot.png", PNG);
+
+    expect((await get(workspace, undefined, upload.id)).status).toBe(401);
+    expect((await post(workspace, undefined, "more.png", PNG)).status).toBe(401);
+    expect((await post(workspace, undefined, "more.png", PNG, { headers: { Origin: "https://ink.test" } })).status).toBe(401);
+    expect((await get(workspace, "cink_nobody", upload.id)).status).toBe(401);
+    expect((await post(workspace, "cink_nobody", "more.png", PNG)).status).toBe(401);
+    expect((await listed(ada)).map((u) => u.name)).toEqual(["dot.png"]);
+  });
+
+  it("refuses a file said to be over 50 MB before reading it, and one that doesn't say how long it is", async () => {
+    const { ada, token, workspace } = await connected();
+
+    const tooBig = await post(workspace, token, "huge.png", PNG, { declared: 50 * 1024 * 1024 + 1 });
+    expect([tooBig.status, await errorIn(tooBig)]).toEqual([413, "invalid"]);
+    const unsaid = await post(workspace, token, "unsaid.png", PNG, { headers: { "Content-Length": "" } });
+    expect([unsaid.status, await errorIn(unsaid)]).toEqual([411, "invalid"]);
+    expect(await listed(ada)).toEqual([]);
+  });
+
+  it("refuses a file that isn't the length it said, and keeps nothing of it", async () => {
+    const { ada, token, workspace } = await connected();
+
+    for (const declared of [69, 71, 50 * 1024 * 1024]) {
+      const res = await post(workspace, token, "dot.png", PNG, { declared });
+      expect([res.status, await errorIn(res)], `${declared} bytes said, 70 sent`).toEqual([400, "invalid"]);
+    }
+    expect(await listed(ada)).toEqual([]);
+  });
+
+  it("goes nowhere as an operation in JSON, where a member's other operations go", async () => {
+    const { ada, token, workspace } = await connected();
+    const upload = await sent(workspace, token, "dot.png", PNG);
+    const cookie = `__Host-ink_session=${encodeURIComponent(await sign({ personId: ada.personId }, SECRET, 3600))}`;
+    const op = (body: unknown) => send(`/api/workspaces/${workspace}/ops`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://ink.test", Cookie: cookie }, body: JSON.stringify(body) });
+
+    const listing = await op({ type: "upload.list" });
+    expect([listing.status, ((await listing.json()) as Upload[]).map((u) => u.name)]).toEqual([200, ["dot.png"]]);
+    for (const body of [{ type: "upload.create", name: "more.png", size: 70 }, { type: "upload.open", id: upload.id }]) {
+      const res = await op(body);
+      expect([res.status, await errorIn(res)], body.type).toEqual([400, "invalid"]);
+    }
+  });
+});

@@ -52,7 +52,7 @@ export const tags: Plugin = {
     // A note's tags are in its text, so they can have changed whenever a note has: written, archived, trashed, or put back.
     let summary: string | null = null;
     let settling: ReturnType<typeof setTimeout> | undefined;
-    const offNotes = host.onNotes(() => {
+    const offNotes = host.onItems(() => {
       const notes = host.app().notes;
       if (!notes) return;
       const now = notes.map((n) => `${n.id}:${n.revision}:${n.state}`).join(",");

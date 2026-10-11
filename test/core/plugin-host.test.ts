@@ -25,6 +25,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
       members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
       sharing: { of: async () => ({}) as never, grant: async () => ({}) as never, link: async () => null, revoke: async () => {}, setPrivate: async () => ({ removed: 0 }), all: async () => [] },
+      uploads: { referred: () => undefined, onReferred: () => () => {}, learn: () => {}, address: (id: string) => `/files/${id}`, send: async () => ({ id: "sent" }) as never },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,
@@ -380,6 +381,44 @@ describe("plugin host", () => {
     expect(performed).toEqual([["contacts", "contact.list"]]);
   });
 
+  it("gives a plugin that isn't Common Ink's own no upload: no operation on one, nothing known of one, no address for its bytes, and no way to send a file", async () => {
+    let greedy: PluginHost | null = null;
+    let own: PluginHost | null = null;
+    const uploads: Plugin = { id: "uploads", name: "Uploads", activate: (h) => void (own = h) };
+    const { performed } = hostWith([uploads, { id: "greedy", name: "Greedy", activate: (h) => void (greedy = h) }], { trusted: [uploads] });
+    const kept: OpInput[] = [
+      { type: "upload.list", includeArchived: true },
+      { type: "upload.read", id: "aaaaaaaaaaaa" },
+      { type: "upload.move", id: "aaaaaaaaaaaa", folderId: "bbbbbbbbbbbb" },
+      { type: "upload.trash", id: "aaaaaaaaaaaa" },
+      { type: "upload.purge", id: "aaaaaaaaaaaa" },
+      { type: "upload.trashed" },
+    ];
+
+    for (const op of kept) await expect((greedy!.perform as (op: OpInput) => Promise<unknown>)(op), op.type).rejects.toThrow(`Greedy can't ${op.type}: a workspace's uploads are read and changed only by Common Ink's own plugins`);
+    expect(performed).toEqual([]);
+    expect(greedy!.uploads.referred("aaaaaaaaaaaa")).toBeNull();
+    expect(greedy!.uploads.address("aaaaaaaaaaaa")).toBe("about:blank");
+    await expect(greedy!.uploads.send(new Blob(["x"]), { name: "x.txt" })).rejects.toThrow("Greedy isn't given host.uploads.send: only Common Ink's own plugins are");
+
+    await own!.perform({ type: "upload.list", includeArchived: true });
+    expect(performed).toEqual([["uploads", "upload.list"]]);
+    expect(own!.uploads.address("aaaaaaaaaaaa")).toBe("/files/aaaaaaaaaaaa");
+    expect(await own!.uploads.send(new Blob(["x"]), { name: "x.txt" })).toEqual({ id: "sent" });
+  });
+
+  it("refuses every plugin an upload's bytes and its privacy as operations, which go through host.uploads and host.sharing", async () => {
+    let own: PluginHost | null = null;
+    const uploads: Plugin = { id: "uploads", name: "Uploads", activate: (h) => void (own = h) };
+    const { performed } = hostWith([uploads], { trusted: [uploads] });
+    const perform = own!.perform as (op: OpInput) => Promise<unknown>;
+
+    await expect(perform({ type: "upload.create", name: "a.png", size: 1, private: false })).rejects.toThrow("Uploads can't upload.create: an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it");
+    await expect(perform({ type: "upload.open", id: "aaaaaaaaaaaa" })).rejects.toThrow("Uploads can't upload.open: an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it");
+    await expect(perform({ type: "upload.setPrivate", id: "aaaaaaaaaaaa", private: true })).rejects.toThrow("Uploads can't upload.setPrivate: who an upload is shared with is read and changed through host.sharing, by a plugin that is given it");
+    expect(performed).toEqual([]);
+  });
+
   it("refuses a plugin that asks, as an operation, who something is shared with, to change that, or what a link opens", async () => {
     let asked: PluginHost | null = null;
     const { performed } = hostWith([{ id: "greedy", name: "Greedy", activate: (h) => void (asked = h) }]);
@@ -724,7 +763,7 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
 
   it("tells a plugin each time the notes change, until it is turned off", () => {
     const heard: string[] = [];
-    const listening = (id: string): Plugin => ({ id, name: id, activate: (host) => void host.onNotes(() => heard.push(id)) });
+    const listening = (id: string): Plugin => ({ id, name: id, activate: (host) => void host.onItems(() => heard.push(id)) });
     const { host } = hostWith([listening("links"), listening("other")]);
 
     host.notesChanged();

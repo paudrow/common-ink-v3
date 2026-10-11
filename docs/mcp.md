@@ -5,7 +5,7 @@ A member connects an agent in the web app, on the Agents page (`/agents`, from t
 ## Rules
 
 - An agent acts with its person's access in each workspace, and no further: their role where they are a member, narrowed by any grant that names them, and where they are a guest only what was granted. A viewer's agent can read and cannot write. A note its person can't see, such as another member's private note, is no note to the agent: it is in no listing, count, backlink, link title or history, and asking for it by id answers `not_found: No such note`, the same as for an id that was never a note's. Every listing of a note carries `access`, `edit` or `view`: what the agent may do with it.
-- An agent can't share. Granting a note or a folder to someone, making or removing a link, making a note private, and reading who a note is shared with are for the member, signed in, in the Share dialog. A link can put a note before the whole internet, and none of this is a change in history that could be reverted.
+- An agent can't share. Granting a note, a folder or an upload to someone, making or removing a link, making a note private, and reading who a note is shared with are for the member, signed in, in the Share dialog. A link can put a note before the whole internet, and none of this is a change in history that could be reverted.
 - Its changes are recorded with the agent as author (`author_kind = 'agent'`, `author_id` = the agent's id), under the name the member gave it, so they can be told apart from the member's own.
 - A member who loses access to a workspace takes their agents' access with them: every call checks the member's membership at the time. Removing a member, or their leaving, ends it on the agent's next call, and a change of role changes what the agent can do on its next call.
 - An agent can see who is in a workspace (`list_members`: each member's person id, name, and role, and never an email, whatever its member's role) and can't change it. Inviting, changing a role, removing a member, leaving, and listing or revoking invites are for the member, signed in, on the Members page. Who is in a workspace decides who can read and change everything in it, that isn't a change in history that could be reverted, and an agent reads notes other people wrote, so one that was talked into it could invite a stranger as admin. The core refuses these to an agent whatever its member's role, not only the tools.
@@ -16,6 +16,8 @@ A member connects an agent in the web app, on the Agents page (`/agents`, from t
 - A token works only in an `Authorization: Bearer` header. It is not a cookie, so a web page can't use it.
 
 - An agent can archive a note, move it to Trash and restore it, with edit on the note, since each can be taken back. It can't remove a note from Trash for good: that takes the note's history with it and nothing brings it back, so it is for the member, signed in, on the Trash page.
+
+- An agent can list uploads, read one's details and where it is used, upload a file, download one, move, archive, trash and restore one, with the same access its member has. It can't remove an upload from Trash for good or make one private: both are for the member, signed in.
 
 - An agent reads its member's data sources and no other member's: `list_events`, `list_contacts` and `read_record` answer for the member who connected the agent, whatever their role, and there is no argument that names anyone else. `update_event` changes the member's real calendar, as the member, and a read-only token is refused it and `refer_record`. A change to an event is not in Common Ink's history and can't be reverted from here. An agent can't connect or disconnect a data source: agreeing is the member's, in their browser. What an agent reads from a data source is the member's private data, and an agent that writes it into a shared note has shared it (`docs/adr/0006-data-sources-are-one-persons.md`).
 
@@ -33,9 +35,9 @@ Optional fields on the POST: `label` (up to 60 characters), `expiresInDays` (def
 
 `POST /mcp` with `Authorization: Bearer cink_...` and `Content-Type: application/json`. Streamable HTTP, stateless: one JSON-RPC message (or a batch) per POST, answered as JSON. No server-sent events, no sessions. Without a valid token the answer is 401.
 
-Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `backlinks`, `rebuild_links`, `list_todos`, `todo_filters`, `set_todo`, `todo_history`, `daily_note`, `rebuild_todos`, `move_note`, `note_history`, `search`, `list_tags`, for a note's state `archive_note`, `trash_note`, `restore_note`, `list_trash`, for the member's data sources `list_sources`, `list_events`, `update_event`, `list_contacts`, `refer_record`, `read_record`, for folders `list_folders`, `create_folder`, `rename_folder`, `delete_folder`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `revert_author`, `undo`, `redo`, and `list_members` for who is in the workspace. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace. An argument a tool doesn't take is refused by name, not left out.
+Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `backlinks`, `rebuild_links`, `list_todos`, `todo_filters`, `set_todo`, `todo_history`, `daily_note`, `rebuild_todos`, `move_note`, `note_history`, `search`, `list_tags`, for a note's state `archive_note`, `trash_note`, `restore_note`, `list_trash`, for the member's data sources `list_sources`, `list_events`, `update_event`, `list_contacts`, `refer_record`, `read_record`, for uploads `list_uploads`, `read_upload`, `move_upload`, `archive_upload`, `trash_upload`, `restore_upload`, `list_trashed_uploads`, for folders `list_folders`, `create_folder`, `rename_folder`, `delete_folder`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `revert_author`, `undo`, `redo`, and `list_members` for who is in the workspace. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace. An argument a tool doesn't take is refused by name, not left out.
 
-Every operation the web app performs has a tool with the same fields, and every tool has an `ink` command. `test/core/agent-parity.test.ts` reads the operation schema and fails when one is missing; an operation kept from agents on purpose is listed with its reason in `NOT_FOR_AGENTS` (`src/worker/mcp/tools.ts`). Two kinds are kept from agents: reading and writing the member's settings, which shape the member's own app and are checked against a schema only the app has, and every change to a workspace's members and invites (see Rules). The core refuses them to an agent, not only the tools. Connecting and disconnecting agents is not an operation: it needs a member's session, so an agent can't make another token.
+Every operation the web app performs has a tool with the same fields, and every tool has an `ink` command. `test/core/agent-parity.test.ts` reads the operation schema and fails when one is missing; an operation kept from agents on purpose is listed with its reason in `NOT_FOR_AGENTS` (`src/worker/mcp/tools.ts`). The two operations that carry a file's bytes, `upload.create` and `upload.open`, have no tool because a tool call carries only text: they are listed in `OVER_HTTP` beside it with the address an agent uses instead, and each has an `ink` command (see Uploads over HTTP). Two kinds are kept from agents: reading and writing the member's settings, which shape the member's own app and are checked against a schema only the app has, and every change to a workspace's members and invites (see Rules). The core refuses them to an agent, not only the tools. Connecting and disconnecting agents is not an operation: it needs a member's session, so an agent can't make another token.
 
 History tools never rewrite the record. A revert, an undo, or a redo is a new change under the agent's name that names the changes it took back out (`reverts`), and each change it took out names it (`revertedBy`). `history` filters by `authors`, so an agent's changes can be listed on their own and passed to `revert_changes`. `revert_author` takes back out every change one author made that still stands, across the workspace or in `noteIds`, as one new change in each note by whoever asks. It leaves alone what somebody else already took out and what the author undid themselves, and puts back what the author took out of others'. It covers ten notes a call and reads only those notes: while the answer's `next` isn't null, call again with it as `after`. A note that refuses the change, such as one it would make too long, is left as it was and named in `failed`, and the notes after it are still covered. A note the revert leaves with no text, such as one the author created, is named in `emptied` with the title it had: it stays, since there is no deleting a note yet. `ink revert-author` makes those calls itself until every note is covered. The web app does the same from an agent's entry on the Agents page and from History mode when it is filtered to one agent. A read-only token can list history and is refused the rest.
 
@@ -51,11 +53,41 @@ A note is live, archived, or in Trash, and every listing of it says which as `st
 
 `search` finds notes by their text: every word must be in the note, each matching the start of a word, ignoring case and accents. `"a phrase"` matches in order, `#tag` narrows to notes with that tag, `+project` to notes with a todo in that project. Each result has the note and the first lines that matched, with `marks` saying where in each line. `list_tags` lists the tags of the notes the agent can see with how many notes have each, and `list_notes` with `tag` lists the notes under one.
 
+An upload is a file in a workspace, kept in a folder as a note is, with a `state` and `access` as a note has. `list_uploads` lists the ones the agent can see, in one folder or all, without archived ones unless `includeArchived` is true. Each has its `id`, `name`, `type` (what its bytes are served as), `kind` (`image`, `video`, `audio` or `file`), `size` in bytes, and `width` and `height` for an image whose bytes say them. `read_upload` answers one upload with `usedIn`, the notes the agent can see that refer to it. A note refers to an upload with an embed on a line of its own that starts with the upload's id: `::image{<id> WIDTHxHEIGHT}`, `::video{<id> WIDTHxHEIGHT}`, `::audio{<id>}`, or `::file{<id>}` for anything else. The size is the room the app keeps for it, and the upload's name is never in the note. `read_note` answers with `uploads`, each upload the text refers to, with a null `upload` for one that doesn't exist or that the member can't see. `move_upload` puts one in another folder and `archive_upload` archives or unarchives it; neither changes what notes show. `trash_upload` moves one to Trash for 30 days, where `list_trashed_uploads` lists it with `purgesAt`, and the notes that refer to it say it is in Trash until `restore_upload` brings it back. Each of these needs edit on the upload.
+
+Three operations on uploads are kept from agents, and the core refuses them whatever the tools do. Removing an upload from Trash for good (`upload.purge`) removes its bytes past recovery, as removing a note for good does its history. Making an upload private (`upload.setPrivate`) hides it from every other member and is not a change in history, as with a private note; an agent can't upload a file as private either. Reading an upload through a shared link (`shared.upload`) is for whoever holds the link, in a browser, with no token. Sharing an upload is kept from agents with all other sharing.
+
 A member's calendar and contacts are data sources (`docs/adr/0006-data-sources-are-one-persons.md`). `list_sources` says which the member has and each one's `state` (`connected`, `needs_reconnect`, `not_connected`) and `writable`. `list_events` takes a span as two times and the `timeZone` whose days all-day events are matched by; an event's `when` is `{ allDay: false, from, to }` in milliseconds or `{ allDay: true, from, to }` with its first and last day. `update_event` takes the event's `sourceId`, `id` and `etag` as read and only the fields to change, and is refused with `conflict` when the event changed since, and with `forbidden` for an event whose `editable` is false. `list_contacts` lists contacts, narrowed by `query`. A note references a record with an embed that holds no copy of it: `refer_record` answers the `::event{<ref> <label>}` or `::contact{<ref> <label>}` to write, and `read_record` reads what a `ref` stands for now. The label is plain text in the note, which every reader sees. The ref leads to the record only for the member who made it.
 
 Most clients take a URL and a header:
 
     claude mcp add --transport http common-ink https://commonink.app/mcp --header "Authorization: Bearer $INK_TOKEN"
+
+## Uploads over HTTP
+
+A file's bytes never travel in a tool call. An agent sends and fetches them at two addresses, with the same token as `/mcp` in the same `Authorization: Bearer` header. The core decides each request as it decides a tool call: the member's role and grants, a read-only token, and a token pinned to one workspace all hold here.
+
+    POST /api/workspaces/<workspace id>/uploads
+         Authorization: Bearer cink_...
+         Content-Type: application/octet-stream
+         Content-Length: <how many bytes>
+         X-Ink-Upload: <encodeURIComponent of the JSON {"name": "cat.png", "folderId": "<folder id>"}>
+         <the bytes>
+      ->  201 with the upload, as list_uploads gives it
+
+    GET  /api/workspaces/<workspace id>/uploads/<upload id>
+         Authorization: Bearer cink_...
+      ->  200 with the bytes
+
+`name` is required. `folderId` is optional, and the file goes to Unsorted without it. Uploading needs edit on the folder, so a viewer's agent and a read-only token are refused with 403. A workspace the token can't reach, and an upload the member can't see, answer 404. No token, or one Common Ink doesn't know, answers 401. `Content-Length` is required (411 without it) and the body must be exactly that long. Any type but `application/octet-stream` is refused with 415.
+
+A file can be at most 50 MB: a longer `Content-Length` is refused with 413 before any of the body is read. A workspace's uploads can be at most 1 GB together, those in Trash too, and an upload that would pass that is refused with 409.
+
+What a file is served as is decided by the server from the ending of its name and its first bytes together, and never from a type the client declares. It is a picture, a video or a sound only when both agree: `.png`, `.jpg`, `.gif`, `.webp`, `.avif`, `.svg`, `.mp4`, `.m4v`, `.mov`, `.webm`, `.mp3`, `.m4a`, `.wav`, `.ogg` (`src/core/filetypes.ts`). Anything else, such as a PDF, an HTML page, or a file named `.png` whose bytes are not a PNG, is kept as it came and served as `application/octet-stream` with `Content-Disposition: attachment`, a download that no browser will show as a page. An SVG is served as `image/svg+xml` and also as a download, since opened as a page it could run script.
+
+The GET honours `Range` (206 with `Content-Range`) and `If-None-Match` with the `ETag` of an earlier answer (304 with no body), and `HEAD` answers the headers alone. Every answer with an upload's bytes carries `X-Content-Type-Options: nosniff`, a `Content-Security-Policy` that sandboxes it, `Cross-Origin-Resource-Policy: same-origin`, `Referrer-Policy: no-referrer` and `Cache-Control: private, no-cache`. There is no other address for a file, and none that outlasts the request: access that was taken away stops the next one.
+
+`ink upload` and `ink download` are these two requests. `upload` prints the upload and the line a note shows it with. `download` saves under the upload's name in the current directory, using only the last part of the name, or at `--out`, and never replaces a file that is there unless `--force true`.
 
 ## The `ink` command
 
@@ -81,6 +113,16 @@ Most clients take a URL and a header:
     npm run ink -- daily [--on 2026-10-11]
     npm run ink -- todos-rebuild
     npm run ink -- move <id> --folder <folder id>
+    npm run ink -- uploads [--folder <folder id>] [--archived true]
+    npm run ink -- upload cat.png [--folder <folder id>] [--name "Tabby.png"]
+    npm run ink -- download <upload id> [--out cat.png] [--force true]
+    npm run ink -- upload-info <upload id>
+    npm run ink -- upload-move <upload id> --folder <folder id>
+    npm run ink -- upload-archive <upload id>
+    npm run ink -- upload-unarchive <upload id>
+    npm run ink -- upload-trash <upload id>
+    npm run ink -- upload-restore <upload id>
+    npm run ink -- uploads-trashed
     npm run ink -- folders
     npm run ink -- folder-create "Plans" [--parent <folder id>]
     npm run ink -- folder-rename <folder id> --name "Plans"

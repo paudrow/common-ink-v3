@@ -11,11 +11,13 @@ interface Props {
   host: PluginHost;
   app: App;
   on: SharedItem;
+  /** What an upload is called. A note and a folder are named by the app. */
+  name?: string;
   close: () => void;
 }
 
-/** Who a note or a folder is shared with, where a member who may share it changes that. */
-export function ShareDialog({ host, app, on, close }: Props) {
+/** Who a note, a folder or an upload is shared with, where a member who may share it changes that. */
+export function ShareDialog({ host, app, on, name, close }: Props) {
   const ids = useId();
   const ref = useRef<HTMLDivElement>(null);
   const [sharing, setSharing] = useState<Sharing | null>(null);
@@ -24,16 +26,17 @@ export function ShareDialog({ host, app, on, close }: Props) {
   useDismiss(close, ref);
 
   const isNote = "noteId" in on;
-  const itemId = isNote ? on.noteId : on.folderId;
-  const what = isNote ? "note" : "folder";
-  const title = isNote ? app.notes?.find((n) => n.id === itemId)?.title || "Untitled" : (app.folders?.byId.get(itemId)?.name ?? "this folder");
+  const isUpload = "uploadId" in on;
+  const itemId = "noteId" in on ? on.noteId : "folderId" in on ? on.folderId : on.uploadId;
+  const what = isNote ? "note" : isUpload ? "file" : "folder";
+  const title = isNote ? app.notes?.find((n) => n.id === itemId)?.title || "Untitled" : isUpload ? (name ?? "this file") : (app.folders?.byId.get(itemId)?.name ?? "this folder");
   const workspace = app.workspace.name;
 
   /** How many grants and links went when the note was last made private here. */
   const [removed, setRemoved] = useState(0);
   const others = (sharing?.grants ?? []).filter((g) => g.grantedBy.personId !== app.me.id).length;
   const counted = (n: number) => (n === 1 ? "1 grant or link" : `${n} grants and links`);
-  const load = useCallback(() => host.sharing.of(isNote ? { noteId: itemId } : { folderId: itemId }).then(setSharing), [host, isNote, itemId]);
+  const load = useCallback(() => host.sharing.of(isNote ? { noteId: itemId } : isUpload ? { uploadId: itemId } : { folderId: itemId }).then(setSharing), [host, isNote, isUpload, itemId]);
   useEffect(() => void load().catch((err: Error) => setError(err.message)), [load]);
 
   /** Does one thing and reads the sharing again, whether or not it worked: a refusal may mean it has changed. */
@@ -212,35 +215,39 @@ export function ShareDialog({ host, app, on, close }: Props) {
               </section>
             )}
 
-            <section className="share-section" aria-labelledby={`${ids}-link`}>
-              <h3 id={`${ids}-link`}>Link</h3>
-              <select
-                aria-labelledby={`${ids}-link`}
-                value={link?.link ?? "off"}
-                disabled={busy}
-                onChange={(e) => {
-                  const choice = e.target.value as LinkChoice;
-                  void change(() => host.sharing.link(on, choice === "off" ? null : choice));
-                }}
-              >
-                {LINK_CHOICES.map((choice) => (
-                  <option key={choice} value={choice}>
-                    {LINK_LABEL[choice]}
-                  </option>
-                ))}
-              </select>
-              {link ? (
-                <>
-                  <Copyable label="Link address" value={linkAddress(location.origin, link.token)} />
-                  <p className="hint">
-                    {link.link === "public" ? "Anyone who has this address can read" : "Anyone who has this address and signs in to Common Ink can read"} {isNote ? "this note" : "the notes in this folder"}, and can't change{" "}
-                    {isNote ? "it" : "them"}. Turning the link off stops it at once.
-                  </p>
-                </>
-              ) : (
-                <p className="hint">A link lets people read without being added here.</p>
-              )}
-            </section>
+            {isUpload && <p className="hint">A file has no link of its own. A link on the folder it is in opens it, for whoever holds that link.</p>}
+
+            {!isUpload && (
+              <section className="share-section" aria-labelledby={`${ids}-link`}>
+                <h3 id={`${ids}-link`}>Link</h3>
+                <select
+                  aria-labelledby={`${ids}-link`}
+                  value={link?.link ?? "off"}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const choice = e.target.value as LinkChoice;
+                    void change(() => host.sharing.link(on, choice === "off" ? null : choice));
+                  }}
+                >
+                  {LINK_CHOICES.map((choice) => (
+                    <option key={choice} value={choice}>
+                      {LINK_LABEL[choice]}
+                    </option>
+                  ))}
+                </select>
+                {link ? (
+                  <>
+                    <Copyable label="Link address" value={linkAddress(location.origin, link.token)} />
+                    <p className="hint">
+                      {link.link === "public" ? "Anyone who has this address can read" : "Anyone who has this address and signs in to Common Ink can read"} {isNote ? "this note" : "the notes in this folder"}, and can't change{" "}
+                      {isNote ? "it" : "them"}. Turning the link off stops it at once.
+                    </p>
+                  </>
+                ) : (
+                  <p className="hint">A link lets people read without being added here.</p>
+                )}
+              </section>
+            )}
           </>
         )}
       </div>

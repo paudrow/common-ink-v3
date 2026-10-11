@@ -1,11 +1,17 @@
 // The `ink` command's logic, for an agent working from a shell. It is a thin client of the /mcp endpoint,
 // so it does what the MCP tools do and nothing more. scripts/ink.ts runs it on this machine.
+import { writtenUpload, type UploadEmbed } from "../src/core/uploadRefs.ts";
+
 export interface Io {
   fetch: typeof fetch;
   env: Record<string, string | undefined>;
   /** The text piped in, when there is any. */
   stdin: () => Promise<string>;
   out: (line: string) => void;
+  /** The bytes of a file on this machine, for upload. */
+  readFile?: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+  /** Writes a file on this machine, for download. Answers false, and writes nothing, when there is one at `path` and `replace` is false. */
+  writeFile?: (path: string, bytes: Uint8Array, replace: boolean) => Promise<boolean>;
 }
 
 export const USAGE = `Usage: ink [--workspace ID] <command>
@@ -43,6 +49,19 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   daily [--on DAY]                    your daily note for a day, made if it isn't there
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
+  uploads [--folder ID] [--archived true]
+                                      the uploads in a workspace, or in one folder
+  upload FILE [--folder ID] [--name NAME]
+                                      put a file in a folder, or in Unsorted, and say how a note shows it
+  download ID [--out PATH] [--force true]
+                                      save an upload's bytes under its name here, or at PATH
+  upload-info ID                      one upload, and the notes that refer to it
+  upload-move ID --folder ID          put an upload in another folder
+  upload-archive ID                   archive an upload: kept, and left out of listings
+  upload-unarchive ID                 bring an archived upload back
+  upload-trash ID                     move an upload to Trash, where it waits 30 days
+  upload-restore ID                   bring an upload back from Trash, to the folder it was in
+  uploads-trashed                     the uploads in Trash, and when each is removed for good
   folders                             the folders in a workspace
   folder-create NAME [--parent ID]    a new folder
   folder-rename ID --name NAME        give a folder another name
@@ -93,6 +112,10 @@ its next due date and files the checked line on your daily note for --on, or for
 SOURCE is a data source's id from sources, such as google-calendar. EVENT and RECORD are ids from
 events and contacts, quoted when they have a space. A reference is your member's alone: nobody else
 who reads the note can follow it.
+
+A note shows an upload with a line of its own: ::image{ID WIDTHxHEIGHT}, ::video{ID WIDTHxHEIGHT},
+::audio{ID} or ::file{ID}. upload prints the line for the file it sent. A file can be at most 50 MB,
+and download never replaces a file that is there unless --force true.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
 
@@ -148,6 +171,16 @@ const read = (answer: string): { next?: string | null; done?: boolean } => {
   }
 };
 
+/** What is left of a name after its folders, so a name can never say where on this machine a file goes. */
+const lastPart = (name: string) => name.split(/[/\\]/).at(-1) ?? "";
+
+interface Sent {
+  id: string;
+  kind: UploadEmbed;
+  width: number | null;
+  height: number | null;
+}
+
 /** Runs one command. Returns the process exit code. */
 export async function run(argv: string[], io: Io): Promise<number> {
   try {
@@ -168,6 +201,75 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const ids = (_: string, value: string) => value.split(",");
     const author = (_: string, value: string) => authorRef(value);
     const truth = (_: string, value: string) => value !== "false";
+
+    const base = (io.env.INK_URL ?? "https://commonink.app").replace(/\/+$/, "");
+    const UNKNOWN_TOKEN = "Common Ink doesn't know that token: it was mistyped or the agent was disconnected";
+    const call = async (tool: string, args: Record<string, unknown>): Promise<{ answer: string; isError: boolean }> => {
+      const res = await io.fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } }),
+      });
+      if (res.status === 401) throw new UsageError(UNKNOWN_TOKEN);
+      const body = (await res.json()) as { result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { message: string } };
+      if (body.error) throw new UsageError(body.error.message);
+      return { answer: (body.result?.content ?? []).map((c) => c.text).join("\n"), isError: !!body.result?.isError };
+    };
+
+    // A file's bytes go over HTTP and not through a tool, at an address that names the workspace.
+    if (command === "upload" || command === "download") {
+      const { readFile, writeFile } = io;
+      if (!readFile || !writeFile) throw new UsageError(`${command} needs files, which this ink has none of`);
+      let workspace = flags.get("workspace");
+      if (workspace === undefined) {
+        const listed = await call("list_workspaces", {});
+        const reach = ((JSON.parse(listed.answer) as { workspaces?: Array<{ id: string }> }).workspaces ?? []).map((w) => w.id);
+        if (reach.length !== 1) throw new UsageError(`Pass --workspace: you can reach ${reach.length} (${reach.join(", ")})`);
+        workspace = reach[0]!;
+      }
+      const uploads = `${base}/api/workspaces/${encodeURIComponent(workspace)}/uploads`;
+      const refusal = async (res: Response) => {
+        if (res.status === 401) throw new UsageError(UNKNOWN_TOKEN);
+        const told = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+        io.out(told?.error ? `${told.error}: ${told.message ?? ""}`.trim() : `Common Ink answered ${res.status}`);
+        return 1;
+      };
+
+      if (command === "upload") {
+        const path = need("a file");
+        const name = flags.get("name") ?? lastPart(path);
+        const bytes = await readFile(path).catch(() => {
+          throw new UsageError(`Can't read ${path}`);
+        });
+        const res = await io.fetch(uploads, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name, ...given({ folderId: ["folder"] }) })) },
+          body: bytes,
+        });
+        if (res.status !== 201) return refusal(res);
+        const sent = (await res.json()) as Sent;
+        io.out(JSON.stringify(sent, null, 2));
+        io.out(`In a note: ${writtenUpload(sent.kind, sent.id, sent.width && sent.height ? { width: sent.width, height: sent.height } : null)}`);
+        return 0;
+      }
+
+      const uploadId = need("an upload id");
+      const info = await call("read_upload", { id: uploadId, workspace });
+      if (info.isError) {
+        io.out(info.answer);
+        return 1;
+      }
+      // The name is somebody else's words. Only its last part is used, so it can't name another directory.
+      const named = lastPart((JSON.parse(info.answer) as { name: string }).name);
+      const path = flags.get("out") ?? named;
+      if (!flags.has("out") && (!named || named === "." || named === "..")) throw new UsageError("That upload's name can't be a file's here. Pass --out");
+      const res = await io.fetch(`${uploads}/${encodeURIComponent(uploadId)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status !== 200) return refusal(res);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (!(await writeFile(path, bytes, flags.get("force") === "true"))) throw new UsageError(`${path} is already there. Pass --force true to replace it, or --out for another place`);
+      io.out(`Saved ${path} (${bytes.byteLength} bytes, ${res.headers.get("Content-Type")})`);
+      return 0;
+    }
 
     let tool: string;
     let args: Record<string, unknown> = {};
@@ -272,6 +374,31 @@ export async function run(argv: string[], io: Io): Promise<number> {
         tool = "move_note";
         args = { id: needId(), folderId: needFlag("folder") };
         break;
+      case "uploads":
+        tool = "list_uploads";
+        args = given({ folderId: ["folder"], includeArchived: ["archived", truth] });
+        break;
+      case "upload-info":
+        tool = "read_upload";
+        args = { id: need("an upload id") };
+        break;
+      case "upload-move":
+        tool = "move_upload";
+        args = { id: need("an upload id"), folderId: needFlag("folder") };
+        break;
+      case "upload-archive":
+      case "upload-unarchive":
+        tool = "archive_upload";
+        args = { id: need("an upload id"), archived: command === "upload-archive" };
+        break;
+      case "upload-trash":
+      case "upload-restore":
+        tool = `${command.slice("upload-".length)}_upload`;
+        args = { id: need("an upload id") };
+        break;
+      case "uploads-trashed":
+        tool = "list_trashed_uploads";
+        break;
       case "folders":
         tool = "list_folders";
         break;
@@ -369,19 +496,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
     }
     if (flags.has("workspace")) args = { ...args, workspace: flags.get("workspace") };
 
-    const base = (io.env.INK_URL ?? "https://commonink.app").replace(/\/+$/, "");
     for (;;) {
-      const res = await io.fetch(`${base}/mcp`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } }),
-      });
-      if (res.status === 401) throw new UsageError("Common Ink doesn't know that token: it was mistyped or the agent was disconnected");
-      const body = (await res.json()) as { result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { message: string } };
-      if (body.error) throw new UsageError(body.error.message);
-      const answer = (body.result?.content ?? []).map((c) => c.text).join("\n");
+      const { answer, isError } = await call(tool, args);
       io.out(answer);
-      if (body.result?.isError) return 1;
+      if (isError) return 1;
       // These cover a few notes a call, so the command carries on until every note is covered.
       if (tool === "rebuild_links" || tool === "rebuild_todos") {
         if (read(answer).done !== false) return 0;

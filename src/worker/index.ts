@@ -1,11 +1,12 @@
 import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
 import { perform, type Visitor } from "../core/operations.ts";
 import { OpError, type OpErrorCode, type OpInput } from "../core/protocol.ts";
-import { purgeTrash } from "../core/purge.ts";
+import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
+import { handleFiles } from "./files.ts";
 import { embedResponse, framing } from "./frames.ts";
 import { redirectFor } from "./hosts.ts";
 import { sourcesFor } from "./sources/index.ts";
@@ -44,7 +45,12 @@ async function handleShared(req: Request, env: Env, url: URL, token: string, not
   }
 }
 
+/** Operations whose bytes come or go with the request, each at an address of its own in files.ts. */
+const CARRIES_BYTES: ReadonlySet<unknown> = new Set(["upload.create", "upload.open", "shared.upload"]);
+
 async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
+  const files = await handleFiles(req, env, url);
+  if (files) return files;
   const shared = SHARED_API.exec(url.pathname);
   if (shared) return handleShared(req, env, url, shared[1]!, shared[2]);
 
@@ -76,8 +82,9 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     } catch {
       return json({ error: "invalid", message: "The body isn't JSON" }, 400);
     }
+    if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads" }, 400);
     try {
-      return json(await perform(env.DB, { kind: "member", personId, workspaceId: opsRoute[1]! }, op as never, Date.now(), sourcesFor(env, url)));
+      return json(await perform(env.DB, { kind: "member", personId, workspaceId: opsRoute[1]! }, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
     } catch (err) {
       if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
       throw err;
@@ -105,9 +112,11 @@ export default {
     for (const [name, value] of Object.entries(UNLISTED)) unlisted.headers.set(name, value);
     return unlisted;
   },
-  // The one job on a timer: removing the notes whose 30 days in Trash are up. A run that doesn't finish is carried on by the next.
+  // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, and uploads that never finished. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env) {
     const { removed, failed, more } = await purgeTrash(env.DB, controller.scheduledTime);
     if (removed || failed.length) console.log(`Removed ${removed} notes from Trash${failed.length ? `, and couldn't remove ${failed.length}` : ""}${more ? ", with more waiting" : ""}`);
+    const uploads = await clearUploads(env.DB, env.FILES, controller.scheduledTime);
+    if (uploads.removed || uploads.failed.length) console.log(`Removed ${uploads.removed} uploads${uploads.failed.length ? `, and couldn't remove ${uploads.failed.length}` : ""}${uploads.more ? ", with more waiting" : ""}`);
   },
 } satisfies ExportedHandler<Env>;

@@ -1,4 +1,4 @@
-import { allows, noteLevel } from "./access.ts";
+import { allows, itemLevel } from "./access.ts";
 import { newId } from "./ids.ts";
 import type { Me, Standing } from "./protocol.ts";
 import { MAKER_SHARES } from "./sharing.ts";
@@ -58,7 +58,8 @@ export async function arrive(db: D1Database, personId: string, now = Date.now())
       .prepare(
         `DELETE FROM grants WHERE kind = 'person' AND person_id = ?1
            AND EXISTS (SELECT 1 FROM invites i JOIN people p ON p.email = i.email WHERE p.id = ?1 AND i.workspace_id = grants.workspace_id AND i.state = 'pending' AND ${STANDS})
-           AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.private_owner IS NOT NULL)`,
+           AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.private_owner IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM uploads u WHERE u.id = grants.upload_id AND u.private_owner IS NOT NULL)`,
       )
       .bind(personId),
     db.prepare(`UPDATE invites AS i SET state = 'accepted', decided_at = ?2 WHERE i.state = 'pending' AND i.email = (SELECT email FROM people WHERE id = ?1) AND ${STANDS}`).bind(personId, now),
@@ -114,7 +115,7 @@ export async function workspaceOfNote(db: D1Database, personId: string, noteId: 
   const note = await db.prepare("SELECT id, workspace_id, folder_id, private_owner FROM notes WHERE id = ?").bind(noteId).first<{ id: string; workspace_id: string; folder_id: string; private_owner: string | null }>();
   if (!note) return null;
   const standing = await standingIn(db, personId, note.workspace_id);
-  return standing && allows(noteLevel(standing.sight, note), "view") ? note.workspace_id : null;
+  return standing && allows(itemLevel(standing.sight, note), "view") ? note.workspace_id : null;
 }
 
 /**

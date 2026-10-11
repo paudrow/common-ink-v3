@@ -164,6 +164,7 @@ describe("notes", () => {
       text: "# Plan\n\n- [x] book a room\n- [ ] send [[invites]]",
       links: [],
       mentions: [],
+      uploads: [],
     });
   });
 

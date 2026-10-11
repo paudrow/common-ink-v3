@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { UploadKind } from "./filetypes.ts";
 import type { NoteState } from "./lifecycle.ts";
 import { readableName } from "./mentions.ts";
 import { parseRule } from "./recurrence.ts";
@@ -34,8 +35,15 @@ const Email = z
 const RoleName = z.enum(["admin", "editor", "viewer"]);
 const GrantAccess = z.enum(["view", "edit"]);
 const LinkKind = z.enum(["public", "signed_in"]);
-/** What a grant is on: one note or one folder, so exactly one of the two. The operation checks that. */
-const On = { noteId: Id.optional(), folderId: Id.optional() };
+/** What a grant is on: one note, one folder or one upload, so exactly one of the three. The operation checks that. */
+const On = { noteId: Id.optional(), folderId: Id.optional(), uploadId: Id.optional() };
+
+/** The most bytes one upload may be. */
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+/** The most bytes a workspace's uploads may be together, those in Trash among them. */
+export const WORKSPACE_UPLOAD_BYTES = 1024 * 1024 * 1024;
+/** A file's name as it was given. What is kept of it is its last part, cleaned: see `cleanName`. */
+const FileName = z.string().min(1).max(1000);
 
 const FolderName = z
   .string()
@@ -364,6 +372,38 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("shared.open") }),
   /** One note the visitor's link covers. */
   z.object({ type: z.literal("shared.read"), id: Id }),
+  /** The bytes of one upload the visitor's link covers: one in the folder the link is on, or in a folder inside it. A link on a note covers no upload. */
+  z.object({ type: z.literal("shared.upload"), id: Id }),
+  /**
+   * Puts a file in a folder, or in Unsorted. The bytes come with the request and not in the
+   * operation: over HTTP as the body of `POST /api/workspaces/<id>/uploads`, which docs/mcp.md
+   * describes. `size` is how many bytes are coming, at most MAX_UPLOAD_BYTES, and a body of any
+   * other length is refused. What the file is served as is decided from its name's ending and its
+   * first bytes. `private` makes it private to the member who uploads it, as a private note is.
+   */
+  z.object({ type: z.literal("upload.create"), name: FileName, size: z.number().int().min(1), folderId: Id.optional(), private: z.boolean().default(false) }),
+  /** The uploads the asker can see, latest first, in one folder or in all. */
+  z.object({ type: z.literal("upload.list"), folderId: Id.optional(), includeArchived: IncludeArchived }),
+  /** One upload, and the notes the asker can see that refer to it. */
+  z.object({ type: z.literal("upload.read"), id: Id }),
+  /** The bytes of one upload. Over HTTP it is `GET /api/workspaces/<id>/uploads/<upload id>`. */
+  z.object({ type: z.literal("upload.open"), id: Id }),
+  z.object({ type: z.literal("upload.move"), id: Id, folderId: Id }),
+  /** Archives an upload, or brings it back, as note.archive does a note. Notes that refer to it still show it. */
+  z.object({ type: z.literal("upload.archive"), id: Id, archived: z.boolean() }),
+  /**
+   * Moves an upload to Trash, where it waits 30 days and is then removed with its bytes. Notes that
+   * refer to it say it is in Trash until it is restored, and after it is removed read as they would
+   * for an upload that never was.
+   */
+  z.object({ type: z.literal("upload.trash"), id: Id }),
+  z.object({ type: z.literal("upload.restore"), id: Id }),
+  /** Removes an upload in Trash now, with its bytes, instead of after its 30 days. Nothing brings it back. */
+  z.object({ type: z.literal("upload.purge"), id: Id }),
+  /** The uploads in Trash that the asker can see, latest trashed first. */
+  z.object({ type: z.literal("upload.trashed") }),
+  /** Makes an upload private to the member who uploaded it, or stops it being so, as note.setPrivate does a note. */
+  z.object({ type: z.literal("upload.setPrivate"), id: Id, private: z.boolean() }),
   /**
    * The data sources of whoever asks, each with whether it is connected and whether it takes changes.
    * A data source is a person's own. Every operation on one answers for the person asking and nobody
@@ -520,6 +560,8 @@ export interface ReadNote extends Note {
   links: LinkedNote[];
   /** Each person the text mentions, once, in the order they first appear. */
   mentions: Mentioned[];
+  /** Each upload the text refers to, once, in the order they first appear. */
+  uploads: ReferredUpload[];
 }
 
 /** A todo as a listing gives it. `revision`, `line` and `text` are what todo.set finds it by. */
@@ -588,10 +630,55 @@ export interface Folder {
   parentId: string | null;
 }
 
+/** A file in a workspace. Its name is for showing, and is in no address. */
+export interface Upload {
+  id: string;
+  name: string;
+  /** What its bytes are served as. */
+  type: string;
+  kind: UploadKind;
+  size: number;
+  /** For an image whose size its bytes say. */
+  width: number | null;
+  height: number | null;
+  /** Null when the one asking can't see the folder it is in. */
+  folderId: string | null;
+  createdAt: number;
+  uploadedBy: Author;
+  access: GrantAccess;
+  private: boolean;
+  state: NoteState;
+  purgesAt: number | null;
+  stateAt: number | null;
+}
+
+export interface TrashedUpload extends Upload {
+  trashedAt: number;
+  trashedBy: Author;
+}
+
+/** An upload that a note's text refers to. */
+export interface ReferredUpload {
+  id: string;
+  /** Null when there is no such upload or the one asking can't see it. Nothing tells the two apart, and nothing else is told of it. */
+  upload: Pick<Upload, "name" | "type" | "kind" | "size" | "width" | "height" | "state"> | null;
+}
+
+/** An upload's bytes as they were read from the bucket: all of them, the part that was asked for, or none when the asker already has them. */
+export interface OpenedUpload {
+  upload: Upload;
+  /** Absent when the asker's copy, named by the validator they sent, is still good. */
+  body?: ReadableStream<Uint8Array>;
+  /** Names these bytes, for asking again. */
+  etag: string;
+  /** The part read, when a part was asked for. */
+  range?: { offset: number; length: number };
+}
+
 /** A grant as someone who may share its item is told of it. */
 export interface Grant {
   id: string;
-  on: { kind: "note" | "folder"; id: string; name: string };
+  on: { kind: "note" | "folder" | "upload"; id: string; name: string };
   access: GrantAccess;
   to:
     | {
@@ -651,6 +738,8 @@ export interface Shared {
 export interface ListedFolder extends Folder {
   /** Notes directly in this folder that the one asking can see, not in its children. */
   noteCount: number;
+  /** Uploads directly in this folder that the one asking can see. */
+  uploadCount: number;
   /** What the one asking may do with the folder: with edit, make notes and folders in it. */
   access: GrantAccess;
 }
@@ -808,7 +897,20 @@ export interface Results {
   /** `removed` is how many grants and links other people had put on the note, which went as it became private. */
   "note.setPrivate": { id: string; private: boolean; removed: number };
   "shared.open": Shared;
-  "shared.read": SharedNote & { text: string; revision: number; links: LinkedNote[] };
+  "shared.read": SharedNote & { text: string; revision: number; links: LinkedNote[]; uploads: ReferredUpload[] };
+  "shared.upload": OpenedUpload;
+  "upload.create": Upload;
+  "upload.list": Upload[];
+  "upload.read": Upload & { usedIn: NoteSummary[] };
+  "upload.open": OpenedUpload;
+  "upload.move": Upload;
+  "upload.archive": Upload;
+  /** `usedIn` is how many notes the asker can see still refer to it. */
+  "upload.trash": Upload & { usedIn: number };
+  "upload.restore": Upload & { folderGone: boolean };
+  "upload.purge": { id: string };
+  "upload.trashed": TrashedUpload[];
+  "upload.setPrivate": { id: string; private: boolean; removed: number };
   "source.list": { sources: Source[] };
   /** `redirect` is where the member's browser goes to agree, or null when the data source is connected already. */
   "source.connect": { sources: Source[]; redirect: string | null };

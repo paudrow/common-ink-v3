@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canShare, folderLevel, noteLevel, resolve, sightOf, type Asked, type GrantLevel, type Level } from "../../src/core/access.ts";
+import { canShare, folderLevel, itemLevel, resolve, sightOf, type Asked, type GrantLevel, type Level } from "../../src/core/access.ts";
 import type { Role } from "../../src/core/protocol.ts";
 
 const ROLES = ["admin", "editor", "viewer", null] as const;
@@ -83,25 +83,25 @@ describe("what one actor sees across a workspace", () => {
   const folders = (sight: ReturnType<typeof sightOf>) => Object.fromEntries([...parents.keys()].map((id) => [id, folderLevel(sight, id)]));
 
   it("gives a guest a granted folder and everything in it, and a closer grant its own say", () => {
-    const sight = sightOf({ personId: "gus", role: null }, [{ folderId: "work", access: "edit" }, { folderId: "plans", access: "view" }, { noteId: "n9", access: "edit" }], parents);
+    const sight = sightOf({ personId: "gus", role: null }, [{ folderId: "work", access: "edit" }, { folderId: "plans", access: "view" }, { itemId: "n9", access: "edit" }], parents);
 
     expect(folders(sight)).toEqual({ work: "edit", plans: "view", q3: "view", archive: "edit", home: "none" });
-    expect(noteLevel(sight, note("n1", "archive"))).toBe("edit");
-    expect(noteLevel(sight, note("n2", "q3"))).toBe("view");
-    expect(noteLevel(sight, note("n9", "q3"))).toBe("edit");
-    expect(noteLevel(sight, note("n3", "home"))).toBe("none");
-    expect(noteLevel(sight, note("n4", "archive", "ada"))).toBe("none");
-    expect(JSON.parse(sight.bind)).toEqual({ owner: null, all: 0, folders: ["work", "plans", "q3", "archive"], notes: ["n9"] });
+    expect(itemLevel(sight, note("n1", "archive"))).toBe("edit");
+    expect(itemLevel(sight, note("n2", "q3"))).toBe("view");
+    expect(itemLevel(sight, note("n9", "q3"))).toBe("edit");
+    expect(itemLevel(sight, note("n3", "home"))).toBe("none");
+    expect(itemLevel(sight, note("n4", "archive", "ada"))).toBe("none");
+    expect(JSON.parse(sight.bind)).toEqual({ owner: null, all: 0, folders: ["work", "plans", "q3", "archive"], items: ["n9"] });
   });
 
   it("narrows a member where a grant names them and nowhere else", () => {
-    const sight = sightOf({ personId: "ed", role: "editor" }, [{ folderId: "plans", access: "view" }, { noteId: "n9", access: "edit" }], parents);
+    const sight = sightOf({ personId: "ed", role: "editor" }, [{ folderId: "plans", access: "view" }, { itemId: "n9", access: "edit" }], parents);
 
     expect(folders(sight)).toEqual({ work: "edit", plans: "view", q3: "view", archive: "edit", home: "edit" });
-    expect(noteLevel(sight, note("n2", "q3"))).toBe("view");
-    expect(noteLevel(sight, note("n9", "q3"))).toBe("edit");
-    expect(noteLevel(sight, note("n5", "q3", "ed"))).toBe("view");
-    expect(noteLevel(sight, note("n6", "home", "ada"))).toBe("none");
+    expect(itemLevel(sight, note("n2", "q3"))).toBe("view");
+    expect(itemLevel(sight, note("n9", "q3"))).toBe("edit");
+    expect(itemLevel(sight, note("n5", "q3", "ed"))).toBe("view");
+    expect(itemLevel(sight, note("n6", "home", "ada"))).toBe("none");
     expect(JSON.parse(sight.bind)).toMatchObject({ owner: "ed", all: 1 });
   });
 

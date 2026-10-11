@@ -135,7 +135,7 @@ test("the bottom bar is there in writing mode, and gone with every plugin that p
   await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");
   await page.keyboard.press("ControlOrMeta+.");
 
-  for (const name of ["Note clocks", "Quick timer", "Word count"]) await run(page, `Disable plugin: ${name}`);
+  for (const name of ["Note clocks", "Quick timer", "Word count", "Uploads"]) await run(page, `Disable plugin: ${name}`);
   await expect(bar(page)).toHaveCount(0);
   await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveAttribute("aria-pressed", "true");
 });
@@ -161,7 +161,7 @@ test("every embed is in the / menu and every command-started widget is in the co
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/");
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^YouTube video/, /^Social post/, /^Link/, /^HTML/]);
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^YouTube video/, /^Social post/, /^Link/, /^HTML/, /^Upload a file/]);
   await page.keyboard.press("Escape");
 
   await page.keyboard.press("ControlOrMeta+Shift+P");

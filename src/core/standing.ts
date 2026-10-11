@@ -19,10 +19,11 @@ export interface Standing {
 interface GrantRow {
   note_id: string | null;
   folder_id: string | null;
+  upload_id: string | null;
   access: GrantLevel;
 }
 
-const reaching = (row: GrantRow): Reaching => (row.note_id !== null ? { noteId: row.note_id, access: row.access } : { folderId: row.folder_id!, access: row.access });
+const reaching = (row: GrantRow): Reaching => (row.folder_id !== null ? { folderId: row.folder_id, access: row.access } : { itemId: (row.note_id ?? row.upload_id)!, access: row.access });
 
 async function folderParents(db: D1Database, workspaceId: string): Promise<Map<string, string | null>> {
   const { results } = await db.prepare("SELECT id, parent_id FROM folders WHERE workspace_id = ?").bind(workspaceId).all<{ id: string; parent_id: string | null }>();
@@ -38,7 +39,7 @@ const MOST: Record<Role, Standing["most"]> = { admin: "manage", editor: "edit", 
 export async function standingIn(db: D1Database, personId: string, workspaceId: string): Promise<Standing | null> {
   const [who, granted] = await db.batch<{ name: string; role: Role | null } & GrantRow>([
     db.prepare("SELECT p.name, m.role FROM people p LEFT JOIN members m ON m.person_id = p.id AND m.workspace_id = ?2 WHERE p.id = ?1").bind(personId, workspaceId),
-    db.prepare("SELECT note_id, folder_id, access FROM grants WHERE workspace_id = ?2 AND person_id = ?1 AND kind = 'person'").bind(personId, workspaceId),
+    db.prepare("SELECT note_id, folder_id, upload_id, access FROM grants WHERE workspace_id = ?2 AND person_id = ?1 AND kind = 'person'").bind(personId, workspaceId),
   ]);
   const person = who!.results[0];
   const grants = granted!.results;
@@ -67,7 +68,7 @@ export const SIGN_IN_FIRST = "Sign in to open this link";
 export async function standingByLink(db: D1Database, token: string, personId: string | null): Promise<Standing> {
   const link = await db
     // A link on a note in Trash opens nothing until the note is restored.
-    .prepare("SELECT workspace_id, note_id, folder_id, access, kind FROM grants WHERE token = ? AND kind IN ('public', 'signed_in') AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.state = 'trashed')")
+    .prepare("SELECT workspace_id, note_id, folder_id, upload_id, access, kind FROM grants WHERE token = ? AND kind IN ('public', 'signed_in') AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.state = 'trashed')")
     .bind(token)
     .first<GrantRow & { workspace_id: string; kind: "public" | "signed_in" }>();
   if (!link) throw new OpError("not_found", NO_SUCH_LINK);

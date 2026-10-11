@@ -36,7 +36,7 @@ export interface MemberSettings {
 }
 
 /** What the app gives each plugin beyond registering: its reach into the workspace, bound to that plugin. */
-export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "sharing" | "storage">;
+export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "sharing" | "uploads" | "storage">;
 
 export interface HostOptions {
   /** Every installed plugin, in the order their contributions are shown. */
@@ -44,8 +44,8 @@ export interface HostOptions {
   required?: readonly string[];
   /**
    * The plugins that are Common Ink's own, as the very values in `plugins`: nothing a plugin says of
-   * itself, such as its id, puts it here. Only they are given `host.agents`, `host.members` and
-   * `host.sharing`. Any other plugin is handed ones whose every method refuses.
+   * itself, such as its id, puts it here. Only they are given `host.agents`, `host.members`,
+   * `host.sharing` and `host.uploads`. Any other plugin is handed ones whose every method refuses.
    */
   trusted?: readonly Plugin[];
   /** The member's settings as they are at the start. */
@@ -111,17 +111,29 @@ function withheld(plugin: Plugin, given: Provided): Pick<Provided, (typeof OWN_O
   return Object.fromEntries(OWN_ONLY.map((capability) => [capability, refusing(capability)])) as never;
 }
 
+/** `host.uploads` for a plugin that isn't Common Ink's own: no upload is known, none has an address, and nothing is sent. */
+const noUploads = (plugin: Plugin): Provided["uploads"] => ({
+  referred: () => null,
+  onReferred: () => () => {},
+  learn: () => {},
+  address: () => "about:blank",
+  send: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.send: only Common Ink's own plugins are`)),
+});
+
 /** Why `host.perform` won't take an operation, or null when it will. The type `KeptFromPerform` says the same to a plugin written in TypeScript. */
 function keptFromPerform(type: string): string | null {
   if (type.startsWith("settings.")) return "a plugin can't read or change the member's settings";
   if (type.startsWith("invite.") || (type.startsWith("member.") && type !== "member.list")) return "who is in a workspace is changed through host.members, by a plugin that is given it";
   if (type.startsWith("grant.") || type === "note.setPrivate") return "who a note or folder is shared with is read and changed through host.sharing, by a plugin that is given it";
+  if (type === "upload.setPrivate") return "who an upload is shared with is read and changed through host.sharing, by a plugin that is given it";
+  if (type === "upload.create" || type === "upload.open") return "an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it";
   if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
   return null;
 }
 
 /** Why a plugin that isn't Common Ink's own is refused an operation, or null when it isn't. The type `OwnOnly` says the same. */
-const ownOnly = (type: string): string | null => (/^(source|event|contact|record)\./.test(type) ? "a member's data sources are theirs, and are read only by Common Ink's own plugins" : null);
+const ownOnly = (type: string): string | null =>
+  /^(source|event|contact|record)\./.test(type) ? "a member's data sources are theirs, and are read only by Common Ink's own plugins" : type.startsWith("upload.") ? "a workspace's uploads are read and changed only by Common Ink's own plugins" : null;
 
 export function createPluginHost({ plugins, required = [], trusted = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
@@ -180,7 +192,7 @@ export function createPluginHost({ plugins, required = [], trusted = [], setting
 
   function hostFor(plugin: Plugin, index: number, mine: Set<Dispose>): PluginHost {
     const given = provide({ id: plugin.id, name: plugin.name });
-    const provided = trusted.includes(plugin) ? given : { ...given, ...withheld(plugin, given) };
+    const provided = trusted.includes(plugin) ? given : { ...given, ...withheld(plugin, given), uploads: noUploads(plugin) };
     const keep = (dispose: Dispose) => {
       mine.add(dispose);
       return dispose;
@@ -240,7 +252,7 @@ export function createPluginHost({ plugins, required = [], trusted = [], setting
         list: () =>
           contributions()
             .embeds.filter((e) => e.menu !== false)
-            .map(({ name, title, block, starts }) => ({ name, title, block, starts })),
+            .map(({ name, title, block, starts, pick }) => ({ name, title, block, starts, ...(pick && { pick }) })),
       },
       completions: {
         register(completion) {
@@ -266,7 +278,7 @@ export function createPluginHost({ plugins, required = [], trusted = [], setting
         if (arrived) queueMicrotask(() => arriving.has(heard) && heard());
         return keep(() => void arriving.delete(heard));
       },
-      onNotes(listener) {
+      onItems(listener) {
         const heard = () => listener();
         listing.add(heard);
         return keep(() => void listing.delete(heard));
