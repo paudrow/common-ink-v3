@@ -1,0 +1,908 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Not production code. Issue #53.
+  Question: where do the panel toggles live, and how do the left panels give way as the window narrows?
+  Five structurally different answers on one fake shell, switchable via ?v=A|B|C|D|E and the floating bar (or ← / →).
+  Round three adds H (today's shell, the note-list column replaced by folder tabs; ?h=1|2, ?x=short|full).
+  Round five adds Q4 (?q=4, the default; ?grid=0|1): a separated list of cards modelled on v1's Notes feed (paudrow/commonink, web/src/notesPage.ts).
+  Round four quiets H's folder tab: ?q=1|2|3 (river, quiet list, one at a time); ?q=0 is round three's.
+  Round two adds F (B with the panel order fixed) and G (a folder opens as a tab; ?g=1|2|3 picks what a note click does).
+  Open this file directly in a browser. No build, no persistence; all state (including panel widths) is in memory.
+  Follows prototypes/layout/ on the branch prototype/layout, which chose today's three-column layout.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Common Ink — narrow layout prototype</title>
+<style>
+  /* Tokens copied from src/web/style.css */
+  :root {
+    --bg: #fbfaf8; --bg-elev: #ffffff; --ink: #1f1e1c; --muted: #6f6b66; --line: #e7e4df;
+    --hover: rgb(31 30 28 / 0.06); --accent: #5b5bd6; --accent-soft: rgb(91 91 214 / 0.12); --on-accent: #fff;
+    --bg-side: #f4f2ee; --line-strong: #d9d4ca; --faint: #a8a39b;
+    --shadow: 0 18px 48px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
+    --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --pb: 96px;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #171716; --bg-elev: #22211f; --ink: #e8e6e3; --muted: #9a958f; --line: #2c2b29;
+    --hover: rgb(232 230 227 / 0.08); --accent: #8f8ff0; --accent-soft: rgb(143 143 240 / 0.16); --on-accent: #10101a;
+    --bg-side: #1d1c1b; --line-strong: #403e3b; --faint: #6b6762;
+    --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 13.5px/1.45 var(--prose); color: var(--ink); overflow: hidden;
+    background: repeating-linear-gradient(45deg, #0000 0 8px, rgb(128 128 128 / .08) 8px 16px), var(--bg-side); }
+  body.dragging { cursor: col-resize; user-select: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+  svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .muted { color: var(--muted); } .sp { flex: 1; }
+  kbd { font: 10.5px var(--mono); color: var(--muted); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+
+  #app { position: fixed; inset: 0 0 var(--pb) 0; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; border-bottom: 1px solid var(--line-strong); }
+  .row { display: flex; flex: 1; min-height: 0; min-width: 0; }
+
+  .icon-button { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 6px; color: var(--muted); position: relative; }
+  .icon-button:hover, .icon-button.on { background: var(--hover); color: var(--ink); }
+  .icon-button.on { color: var(--accent); }
+  .icon-button.auto::before { content: ""; position: absolute; right: 3px; top: 3px; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--accent); background: var(--bg-side); }
+  .icon-button.dim { opacity: .35; }
+
+  [data-tip]:hover::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); white-space: nowrap;
+    background: var(--ink); color: var(--bg); font: 500 11px var(--prose); padding: 3px 7px; border-radius: 5px; z-index: 200; pointer-events: none; }
+  .tip-r[data-tip]:hover::after { top: 50%; left: calc(100% + 8px); transform: translateY(-50%); }
+  .tip-l[data-tip]:hover::after { top: 50%; left: auto; right: calc(100% + 8px); transform: translateY(-50%); }
+  .tip-u[data-tip]:hover::after { top: auto; bottom: calc(100% + 6px); }
+  .tip-e[data-tip]:hover::after { left: auto; right: 0; transform: none; }
+  .tip-s[data-tip]:hover::after { left: 0; transform: none; }
+
+  /* panels */
+  .panel { display: flex; flex: none; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+  .p-folders { padding: 8px 6px; background: var(--bg-side); border-right: 1px solid var(--line); }
+  .p-list, .p-nav { background: var(--bg-elev); border-right: 1px solid var(--line); }
+  .p-insp { background: var(--bg-side); border-left: 1px solid var(--line); }
+  .panel.over { position: absolute; top: 0; bottom: 0; left: 0; z-index: 30; box-shadow: var(--shadow); }
+  .panel.over.p-insp { left: auto; right: 0; }
+  .scrim { position: absolute; inset: 0; z-index: 20; background: rgb(0 0 0 / .12); }
+
+  .split { flex: none; width: 0; position: relative; z-index: 10; }
+  .split::after { content: ""; position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; }
+  .split::before { content: ""; position: absolute; top: 0; bottom: 0; left: -1.5px; width: 3px; background: var(--accent); opacity: 0; transition: opacity .1s; }
+  .split:hover::before, .split.drag::before { opacity: .7; }
+
+  .ws { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-elev); margin-bottom: 8px; }
+  .ws b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ws small { color: var(--muted); font-size: 11.5px; }
+  .ws > span { min-width: 0; }
+  .drop { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); display: grid; place-items: center; flex: none; }
+  .drop svg { width: 12px; height: 12px; fill: #fff; stroke: none; }
+  .item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 5px 9px; border-radius: 6px; white-space: nowrap; }
+  .item > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .item:hover { background: var(--hover); } .item.sel { background: var(--accent-soft); font-weight: 600; }
+  .item svg { color: var(--muted); } .item .n { color: var(--faint); font-size: 12px; }
+  .label { display: flex; align-items: center; justify-content: space-between; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); font-weight: 650; padding: 14px 9px 4px; }
+
+  .item.ind { padding-left: 27px; } .item.quiet { color: var(--muted); font-size: 12.5px; padding-top: 3px; padding-bottom: 3px; } .item.quiet svg { opacity: .7; }
+  button.label.lbtn { width: 100%; border-radius: 6px; cursor: pointer; } button.label.lbtn:hover { background: var(--hover); color: var(--muted); }
+  .lbtn span { display: inline-flex; align-items: center; gap: 5px; } .lbtn svg { width: 12px; height: 12px; }
+  .rel { position: relative; display: block; } .rail .rel, .iconrow .rel { display: inline-block; }
+  .menu.side { top: 0; left: calc(100% + 8px); } .menu.end { left: auto; right: 0; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .list-head { display: flex; align-items: center; gap: 6px; padding: 10px 8px 4px 14px; position: relative; }
+  .list-head h2 { margin: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .back { display: inline-flex; align-items: center; gap: 3px; margin: 8px 8px 0 8px; padding: 2px 8px 2px 4px; border-radius: 6px; color: var(--accent); font-size: 12px; font-weight: 600; align-self: flex-start; }
+  .back:hover { background: var(--accent-soft); }
+  .picker { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; min-width: 0; }
+  .picker:hover { background: var(--hover); }
+  .menu { position: absolute; top: 100%; left: 8px; z-index: 40; min-width: 200px; padding: 4px; border-radius: 8px; background: var(--bg-elev); box-shadow: var(--shadow); }
+  .list-tools { display: flex; flex-direction: column; gap: 8px; padding: 4px 8px 10px; border-bottom: 1px solid var(--line); }
+  .filter { width: 100%; padding: 5px 9px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+  .pills { display: flex; gap: 5px; overflow: hidden; }
+  .pill { font-size: 11.5px; padding: 1px 8px; border: 1px solid var(--line-strong); border-radius: 99px; color: var(--muted); white-space: nowrap; }
+  .pill.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .note { display: block; width: 100%; padding: 9px 14px; border-bottom: 1px solid var(--line); border-left: 3px solid transparent; }
+  .note:hover { background: var(--hover); } .note.sel { background: var(--accent-soft); border-left-color: var(--accent); }
+  .note b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: 12.5px; }
+  .note small { color: var(--faint); font-size: 11.5px; }
+
+  .itabs { display: flex; flex: none; gap: 14px; height: 38px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+  .itabs button { color: var(--muted); font-size: 12px; font-weight: 600; } .itabs button.sel { box-shadow: inset 0 -2px 0 var(--accent); color: var(--ink); }
+  .ibody { padding: 4px 14px 20px; } .ibody h4 { margin: 14px 0 4px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
+  .ibody p { margin: 0 0 4px; } .ibody .box { border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; background: var(--bg-elev); font-size: 12.5px; }
+  .ibody .mono { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+
+  /* editor */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+  .tabrow { display: flex; flex: none; height: 34px; border-bottom: 1px solid var(--line); background: var(--bg-side); }
+  .tab-bar { display: flex; flex: 1; min-width: 0; overflow: hidden; }
+  .tab { display: flex; flex: 0 1 auto; align-items: center; gap: 4px; min-width: 60px; max-width: 200px; padding: 0 6px 0 12px; border-right: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+  .tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab.sel { background: var(--bg); color: var(--ink); box-shadow: inset 0 2px 0 var(--accent); } .tab.preview { font-style: italic; }
+  .tab i { font-style: normal; opacity: .6; padding: 0 4px; }
+  .cell { display: flex; align-items: center; gap: 2px; padding: 0 4px; flex: none; }
+  .cell.l { border-right: 1px solid var(--line); } .cell.r { border-left: 1px solid var(--line); }
+  .note-head { display: flex; flex: none; align-items: center; gap: 12px; height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+  .pane { flex: 1; overflow: auto; min-height: 0; }
+  .doc { max-width: 720px; margin: 0 auto; padding: 32px 40px 80px; font-size: 15px; line-height: 1.65; }
+  .doc h1 { font-size: 27px; line-height: 1.2; margin: 0 0 10px; letter-spacing: -.02em; } .doc h2 { font-size: 17px; margin: 24px 0 4px; }
+  .doc .h { color: var(--faint); font-weight: 400; } .doc p { margin: 8px 0; } .doc .todo { display: flex; gap: 8px; align-items: baseline; }
+  .doc .cb { width: 13px; height: 13px; border: 1.5px solid var(--line-strong); border-radius: 3px; flex: none; transform: translateY(2px); }
+
+  /* rails (B, E) */
+  .rail { display: flex; flex: none; flex-direction: column; align-items: center; gap: 4px; width: 44px; padding: 10px 0; background: var(--bg-side); }
+  .rail.l { border-right: 1px solid var(--line); } .rail.r { border-left: 1px solid var(--line); }
+  .rail hr { width: 20px; border: 0; border-top: 1px solid var(--line-strong); margin: 4px 0; }
+
+  /* A: top bar */
+  .topbar { display: flex; flex: none; align-items: center; gap: 4px; height: 40px; padding: 0 8px; background: var(--bg-side); border-bottom: 1px solid var(--line); }
+  .topbar .wsb { display: flex; align-items: center; gap: 7px; padding: 3px 8px 3px 4px; border-radius: 7px; font-weight: 650; white-space: nowrap; margin-right: 6px; }
+  .topbar .wsb:hover { background: var(--hover); }
+  .topbar .search { flex: 1; max-width: 420px; min-width: 60px; margin: 0 auto; display: flex; align-items: center; gap: 8px; height: 27px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--bg); color: var(--muted); overflow: hidden; white-space: nowrap; }
+  .tg { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 6px; border-radius: 6px; color: var(--muted); position: relative; flex: none; }
+  .tg:hover, .tg.on { background: var(--hover); color: var(--ink); } .tg.on svg { color: var(--accent); }
+  .tg.auto::before { content: ""; position: absolute; left: 17px; top: 3px; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--accent); background: var(--bg-side); }
+
+  /* C: status bar + merged column */
+  .status { display: flex; flex: none; align-items: center; gap: 6px; height: 28px; padding: 0 6px; background: var(--bg-side); border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .status .tg { height: 22px; font-size: 12px; }
+  .iconrow { display: flex; justify-content: space-between; padding: 0 10px 6px; }
+  .p-nav .ws { margin: 8px 8px 6px; width: auto; }
+  .p-nav .item { margin: 0 6px; width: auto; }
+
+  /* E: stepper */
+  .steps { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 7px; overflow: visible; margin: 0 2px; }
+  .steps button { display: inline-grid; place-items: center; width: 28px; height: 24px; color: var(--muted); position: relative; }
+  .steps button + button { border-left: 1px solid var(--line-strong); }
+  .steps button.on { background: var(--accent-soft); color: var(--accent); } .steps button.dim { opacity: .35; }
+
+  /* round two: F and G */
+  .phead { display: flex; flex: none; align-items: center; height: 30px; padding: 0 0 0 9px; font-size: 12px; color: var(--muted); }
+  .p-list .phead { padding: 6px 6px 0 14px; height: 38px; color: var(--ink); } .p-list .phead b { font-size: 15px; }
+  .itabs .x { align-self: center; margin-right: -8px; }
+  .floats { position: absolute; top: 0; bottom: 0; left: 0; z-index: 30; display: flex; box-shadow: var(--shadow); }
+  .gmain { flex-direction: row; }
+  .gpane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .gpane + .split + .gpane { border-left: 1px solid var(--line); }
+  .gpane:not(.focused) .tab.sel { box-shadow: none; }
+  .tab svg { width: 13px; height: 13px; } .tab { cursor: pointer; } .tab i[data-act]:hover { opacity: 1; background: var(--hover); border-radius: 4px; }
+  .fview { max-width: 760px; margin: 0 auto; }
+  .crumbs { display: flex; align-items: center; gap: 3px; padding: 14px 14px 0; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .crumbs button { color: var(--accent); font-weight: 600; padding: 1px 4px; border-radius: 5px; } .crumbs button:hover { background: var(--accent-soft); } .crumbs svg { width: 11px; height: 11px; }
+  .fview .list-head .n { color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .newnote { padding: 3px 10px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .kids { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 8px 10px; }
+  .kid { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--bg-elev); white-space: nowrap; }
+  .kid:hover { background: var(--hover); } .kid svg { color: var(--muted); } .kid .n { color: var(--faint); font-size: 12px; }
+  .dropping { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+  .note[draggable] { cursor: grab; }
+  .empty { margin: auto; text-align: center; color: var(--muted); } .empty button { color: var(--accent); font-weight: 600; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 14px; } .cards div { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg-elev); font-size: 13px; }
+
+  /* round three: H */
+  .wsrow { display: flex; gap: 2px; align-items: flex-start; } .wsrow .ws { flex: 1; min-width: 0; } .wsrow .icon-button { margin-top: 6px; }
+  .hnote { border-bottom: 1px solid var(--line); } .hnote.open { background: var(--bg-elev); }
+  .hrow { display: flex; gap: 6px; padding: 9px 14px 9px 8px; cursor: pointer; } .hrow:hover { background: var(--hover); }
+  .hrow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .chev { color: var(--faint); padding-top: 2px; } .hrow:hover .chev, .hnote.open .chev { color: var(--ink); }
+  .hmain { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+  .htitle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; color: var(--accent); border-radius: 3px; }
+  .htitle:hover { text-decoration: underline; } .htitle:hover::after { content: "  ↗ open"; font-weight: 500; font-size: 11px; }
+  .snip { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: 12.5px; }
+  .hmain small { color: var(--faint); font-size: 11.5px; }
+  .hbody { position: relative; margin: 0 14px 0 30px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+  .hbody .doc { max-width: none; margin: 0; padding: 12px 18px; font-size: 14px; line-height: 1.6; } .hbody .doc h1 { font-size: 19px; margin-bottom: 4px; } .hbody .doc h2 { font-size: 15px; margin: 12px 0 2px; } .hbody .doc p { margin: 4px 0; }
+  .hbody.short { max-height: 204px; overflow: hidden; } .hbody.short::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 44px; border-radius: 0 0 8px 8px; background: linear-gradient(#0000, var(--bg)); }
+  .hbody.full { max-height: 320px; overflow: auto; }
+  .hfoot { display: flex; align-items: center; gap: 14px; margin: 6px 14px 10px 30px; font-size: 12px; color: var(--muted); } .hfoot button { color: var(--accent); font-weight: 600; } .hfoot button:hover { text-decoration: underline; }
+
+  /* round four: the quieter folder tab (Q1 river, Q2 quiet list, Q3 one at a time). One type scale, the editor's; accent only on focus and on links inside notes. */
+  .qview { max-width: 720px; margin: 0 auto; padding: 24px clamp(14px, 6%, 40px) 90px; font-size: 14.5px; line-height: 1.6; }
+  .qtop { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 18px; }
+  .qtop h2 { margin: 0; font-size: 21px; letter-spacing: -.01em; } .qcount { color: var(--faint); font-size: 12.5px; }
+  .qtop button, .qfilter { color: var(--muted); font-size: 12.5px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 5px; }
+  .qtop button:hover { color: var(--ink); background: var(--hover); } .qtop svg { width: 12px; height: 12px; }
+  .qfilter input { width: 76px; border: 0; border-bottom: 1px solid transparent; background: none; color: var(--ink); font: inherit; outline: 0; padding: 0; transition: width .15s; }
+  .qfilter input:focus { width: 150px; border-bottom-color: var(--accent); } .qfilter input::placeholder { color: var(--muted); }
+  .qnote { position: relative; outline: 0; }
+  .qnote:focus-visible::before { content: ""; position: absolute; left: -12px; top: 4px; bottom: 4px; width: 2px; border-radius: 2px; background: var(--accent); }
+  .qtitle { color: var(--ink); font-weight: 650; text-align: left; border-radius: 3px; flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qtitle:hover { text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
+  .qmeta { color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .qsaved { color: var(--faint); font-size: 12px; margin-left: 10px; visibility: hidden; } .qnote:has(.wys:focus) .qsaved { visibility: visible; }
+  .qbody { position: relative; }
+  .qnote.short .qbody { overflow: hidden; } .qnote.short .qbody::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(#0000, var(--bg)); pointer-events: none; }
+  .qmore { color: var(--faint); font-size: 12px; padding: 0 2px; border-radius: 3px; } .qmore:hover { color: var(--ink); }
+  .qmore { display: block; margin-top: 1px; } .qnote.full .more, .qnote.short .less, .qnote.closed .less { display: none; }
+  .wys { outline: 0; cursor: text; } .doc .wys { font-size: 15px; line-height: 1.65; }
+  .wys p { margin: 5px 0; } .wys h2 { font-size: 1.05em; font-weight: 650; margin: 14px 0 2px; } .wys > :first-child { margin-top: 0; }
+  .wys ul { margin: 5px 0; padding-left: 20px; } .wys a { color: var(--accent); } .wys code { font: 0.87em var(--mono); background: var(--hover); border-radius: 3px; padding: 1px 4px; }
+  .wys .todo { display: flex; gap: 8px; align-items: baseline; } .wys .cb { width: 13px; height: 13px; border: 1.5px solid var(--line-strong); border-radius: 3px; flex: none; transform: translateY(2px); }
+  .wys .cur[data-md]::before { content: attr(data-md); color: var(--faint); font-weight: 400; }
+  /* Q1 river */
+  .q1 .qnote { margin-bottom: 30px; } .q1 .qtitle { font-size: 17px; } .q1 .qhead:hover .qtitle::after { content: "  ↗"; color: var(--faint); font-weight: 400; }
+  .q1 .qmeta { margin: -1px 0 5px; } .q1 .qnote.short .qbody { max-height: 142px; }
+  /* Q2 quiet list, Q3 one at a time: single-line rows */
+  .qrow { display: flex; align-items: baseline; gap: 10px; padding: 5px 8px; margin: 0 -8px; border-radius: 6px; cursor: pointer; }
+  .qrow:hover { background: var(--hover); } .qrow .qtitle { font-weight: 600; max-width: 60%; }
+  .qsnip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
+  .qrow .chev { margin-left: -2px; padding: 0; opacity: 0; align-self: center; display: inline-flex; } .qrow .chev svg { width: 12px; height: 12px; } .qrow:hover .chev, .qnote:not(.closed) .chev { opacity: 1; }
+  .q2 .qnote:not(.closed) { margin-bottom: 8px; } .q2 .qbody { margin-left: 13px; } .q2 .qmore { margin-left: 28px; } .q2 .qbody { padding-left: 16px; border-left: 1px solid var(--line-strong); margin-top: 2px; }
+  .q2 .qnote.short .qbody { max-height: 186px; }
+  .q3 .qnote:not(.closed) { padding: 16px 0 22px; } .q3 .qnote:not(.closed) .qrow { cursor: default; background: none; padding-bottom: 8px; } .q3 .qnote:not(.closed) .qtitle { font-size: 19px; font-weight: 680; max-width: none; }
+  .q3 .qnote.short .qbody { max-height: 186px; }
+
+  /* round five: Q4, a separated list of cards after v1's Notes feed (.feed-card), with today's panel header scaled up */
+  .q4 { max-width: 780px; margin: 0 auto; padding: 30px clamp(14px, 5%, 32px) 50vh; } .q4.grid { max-width: 1240px; }
+  .q4head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; } .q4head h2 { margin: 0; font-size: 24px; letter-spacing: -.02em; } .q4head .n { color: var(--faint); font-size: 12.5px; padding-top: 6px; }
+  .q4head .newnote { padding: 6px 13px; border-radius: 8px; font-size: 13px; }
+  .q4filter { height: 38px; padding: 0 12px; border-radius: 9px; background: var(--bg-elev); font-size: 14.5px; } .q4filter:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .q4pills { margin: 10px 0 16px; overflow: visible; flex-wrap: wrap; } .q4pills .pill { font-size: 12.5px; padding: 2px 11px; }
+  .q4list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; } .q4.grid .q4list { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); align-items: start; }
+  .q4card { padding: 12px 12px 14px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg-elev); cursor: pointer; min-width: 0; }
+  .q4card:hover { border-color: var(--line-strong); } .q4card:not(.closed) { cursor: default; border-color: var(--line-strong); }
+  .q4card.qnote:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); } .q4card.qnote:focus-visible::before { content: none; }
+  .q4card.sel { box-shadow: inset 3px 0 0 var(--accent); }
+  .q4h { display: flex; align-items: center; gap: 8px; height: 28px; cursor: pointer; }
+  .q4title { font-weight: 650; font-size: 15.5px; letter-spacing: -.01em; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; border-radius: 3px; }
+  .q4title:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
+  .q4chev svg { transition: transform .12s; } .q4card:not(.closed) .q4chev svg { transform: rotate(90deg); }
+  .q4open { opacity: 0; } .q4card:hover .q4open, .q4card:focus-within .q4open, .q4card:not(.closed) .q4open { opacity: 1; }
+  .q4meta { display: flex; gap: 0; height: 18px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; cursor: pointer; } .q4meta span + span::before { content: "·"; margin: 0 8px; color: var(--faint); }
+  .q4prev { margin-top: 7px; font-size: 13.5px; line-height: 1.55; color: var(--muted); max-height: 3.1em; overflow: hidden; cursor: pointer; }
+  .q4prev p, .q4prev h2, .q4prev ul { margin: 0; } .q4prev h2 { font-size: 1em; } .q4prev a { color: inherit; pointer-events: none; }
+  .q4body { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14.5px; line-height: 1.65; max-width: 70ch; cursor: text; }
+  .q4card.short .q4body { max-height: 300px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }
+  .q4foot { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .q4foot button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 12.5px; font-weight: 600; }
+  .q4foot button:hover { border-color: var(--muted); } .q4foot .q4edit { background: var(--accent); border-color: var(--accent); color: var(--on-accent); } .q4foot svg { width: 13px; height: 13px; }
+
+  /* prototype switcher: deliberately not the app's look */
+  #proto { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 500; max-width: calc(100vw - 16px); width: max-content;
+    background: #111; color: #f4f4f4; border-radius: 14px; padding: 7px 12px; font: 12px/1.4 var(--prose); box-shadow: 0 8px 30px rgb(0 0 0 / .45), 0 0 0 1px rgb(255 255 255 / .15); }
+  #proto .l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #proto button { color: #f4f4f4; padding: 2px 8px; border-radius: 7px; } #proto button:hover { background: #333; }
+  #proto .vs button.on, #proto .mk button.on { background: #f4f4f4; color: #111; font-weight: 700; }
+  #proto .name { font-weight: 700; } #proto .mk { color: #bdbdbd; } #proto .st { font-family: var(--mono); font-size: 11px; color: #bdbdbd; }
+  #proto .st b { color: #fff; font-weight: 600; } #proto .st .warn { color: #ffb86b; }
+  #proto .l2 { margin-top: 4px; color: #cfcfcf; text-align: center; max-width: 880px; } #proto .l2 b { color: #9fe0a8; } #proto .l2 i { color: #ffb0a0; font-style: normal; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="proto"></div>
+<script>
+const MIN = 420; // the editor never gets narrower than this; panels give way first
+const q = new URLSearchParams(location.search);
+const S = {
+  v: (q.get('v') || 'A').toUpperCase(),
+  theme: q.get('theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'),
+  want: { folders: true, list: true, insp: true, nav: true },
+  w: { folders: 216, list: 280, insp: 300, nav: 280, gl: 300 },
+  recent: ['insp', 'list', 'folders'], // A: least recently asked for first; first gives way first
+  over: null, writing: false, folder: null, inspTab: 'Info', step: 3, menu: false,
+  gmode: +q.get('g') || 3, hmode: +q.get('h') || 1, q: q.get('q') == null ? 4 : +q.get('q'), grid: q.get('grid') === '1', qs: {}, qsort: 0, hx: q.get('x') === 'full' ? 'full' : 'short', hexp: new Set(), notes: q.get('notes') ? q.get('notes') === '1' : undefined, opened: [], toast: '', g: null,
+  more: (q.get('more') || '').toLowerCase() || null, moreOpen: q.get('open') === '1', page: null,
+};
+
+const P = {
+  drop: '<path d="M8 1.5C5.5 5 4 7.2 4 9.6a4 4 0 0 0 8 0C12 7.2 10.5 5 8 1.5z"/>',
+  left: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6 3v10"/>',
+  list: '<path d="M5.5 4.5h8M5.5 8h8M5.5 11.5h8M2.5 4.5h.01M2.5 8h.01M2.5 11.5h.01"/>',
+  right: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M10 3v10"/>',
+  write: '<path d="M2.5 6V3.5a1 1 0 0 1 1-1H6M10 2.5h2.5a1 1 0 0 1 1 1V6M13.5 10v2.5a1 1 0 0 1-1 1H10M6 13.5H3.5a1 1 0 0 1-1-1V10"/>',
+  search: '<circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2 13.5 13.5"/>',
+  dash: '<circle cx="8" cy="8" r="5.8"/><circle cx="8" cy="8" r="1.8"/>',
+  todo: '<rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.5 8.2 7.3 10l3.4-3.8"/>',
+  cal: '<rect x="2.5" y="3.5" width="11" height="10" rx="2"/><path d="M2.5 7h11M5.5 2v3M10.5 2v3"/>',
+  more: '<path d="M3.5 8h.01M8 8h.01M12.5 8h.01"/>',
+  plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+  back: '<path d="M9.5 3.5 5 8l4.5 4.5"/>',
+  fwd: '<path d="M6.5 3.5 11 8l-4.5 4.5"/>',
+  down: '<path d="M4 6.5 8 10.5l4-4"/>',
+  folder: '<path d="M2 5a1.5 1.5 0 0 1 1.5-1.5h2.6l1.4 1.6h5A1.5 1.5 0 0 1 14 6.6v4.9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>',
+  all: '<path d="M8 2 2 5l6 3 6-3zM2 8l6 3 6-3M2 11l6 3 6-3"/>',
+  hist: '<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/>',
+  link: '<path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.7.7M9.2 6.8a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.7-.7"/>',
+  info: '<circle cx="8" cy="8" r="5.8"/><path d="M8 7.3v3.6M8 5h.01"/>',
+  x: '<path d="M4 4l8 8M12 4l-8 8"/>',
+  edit: '<path d="M3 13l.5-3L11 2.5l2.5 2.5L6 12.5z"/>',
+  doc: '<path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3"/>',
+  contacts: '<circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5c.4-2.6 2.4-4 5-4s4.6 1.4 5 4"/>',
+  upload: '<path d="M8 10.5V2.5M5 5.2l3-2.9 3 2.9M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/>',
+  plug: '<path d="M6 2v3.5M10 2v3.5M4 5.5h8v2.2a4 4 0 0 1-8 0zM8 11.7V14"/>',
+  s3: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5.5 3v10M9 3v10"/>',
+  s2: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M7 3v10"/>',
+  s1: '<rect x="2" y="3" width="12" height="10" rx="2"/>',
+};
+const ic = n => `<svg viewBox="0 0 16 16">${P[n]}</svg>`;
+
+const FOLDERS = [['Unsorted', 2, 0], ['Projects', 5, 0], ['Common Ink', 3, 1], ['Website', 2, 1], ['Meetings', 2, 0], ['Journal', 2, 0], ['Reading', 1, 0]];
+const NOTES = [
+  ['Layout feedback', 'Panel toggles sit in the note header as if they belonged to the note. Move them up.', '3m ago · Dev User', 'Unsorted'],
+  ['Try in this PR', 'This PR adds history: who changed a note and how, across the workspace, with…', '7m ago · Dev User', 'Unsorted'],
+  ['Sync protocol notes', 'Yjs updates are batched per document and flushed on idle or every 2 s.', '1h ago · Dev User', 'Common Ink'],
+  ['Agent tokens', 'Tokens are scoped to a workspace and can be revoked from Settings.', '5h ago · Shell agent', 'Common Ink'],
+  ['v3 launch checklist', 'Redirect www to the apex, retire the v2 service worker, announce.', '16h ago · Dev User', 'Common Ink'],
+  ['Landing page copy', 'An agent-first markdown notes app. Your notes, and your agents’ notes.', 'Yesterday · Dev User', 'Website'],
+  ['Pricing ideas', 'Free for one workspace; paid for shared workspaces and long history.', '2d ago · Dev User', 'Website'],
+  ['Weekly sync, Oct 5', 'Folders shipped. Next: history, backlinks, the narrow window.', '6d ago · Dev User', 'Meetings'],
+  ['Design review', 'Rails in writing mode feel right. Inspector tabs: History, Backlinks, Info.', 'Sep 29 · Dev User', 'Meetings'],
+  ['Oct 10', 'Rode to the reservoir. Wrote the uploads change on the train back.', 'Yesterday · Dev User', 'Journal'],
+  ['Oct 9', 'Slow morning. Fixed the tab drag bug that only showed up in splits.', '2d ago · Dev User', 'Journal'],
+  ['A Philosophy of Software Design', 'Deep modules: simple interface, a lot behind it. Shallow ones leak.', 'Sep 21 · Dev User', 'Reading'],
+];
+const notesFor = f => NOTES.filter(n => f == null || n[3] === f || (f === 'Projects' && (n[3] === 'Common Ink' || n[3] === 'Website')));
+const W = () => innerWidth;
+
+/* ---------- shared pieces (panels and the editor; each variant owns its own layout) ---------- */
+const item = (icon, text, extra = '', attrs = '') => `<button class="item" ${attrs}>${ic(icon)}<span>${text}</span>${extra}</button>`;
+const wsButton = () => `<button class="ws"><span class="drop">${ic('drop')}</span><span><b>Dev's workspace</b><small>Admin</small></span></button>`;
+const tree = () => `<button class="item ${S.folder == null ? 'sel' : ''}" data-act="folder:">${ic('all')}<span>All notes</span><span class="n">12</span></button>` +
+  FOLDERS.map(([n, c, d]) => `<button class="item ${S.folder === n ? 'sel' : ''}" style="padding-left:${9 + d * 18}px" data-act="folder:${n}" data-folder="${n}">${ic('folder')}<span>${n}</span><span class="n">${notesFor(n).length}</span></button>`).join('');
+/* The More pages, four treatments (see MORE_KINDS). Every control is a real button with aria-expanded, so Tab / Enter / Space / Esc work. */
+const MORE = [['contacts', 'Contacts'], ['upload', 'Uploads'], ['hist', 'History'], ['plug', 'Plugins']];
+const MORE_KINDS = {
+  a: 'Chevron row: "› More" closed, "⌄ Less" open, pages indented beneath.',
+  b: 'Section: a small MORE heading like FOLDERS, with a chevron; pages beneath it.',
+  c: 'No toggle: every page listed, the less-used ones quieter; folds into a "···" menu only when the window is short (try under 700 px tall).',
+  d: 'Always a menu: "More ›" opens a popover and never changes its label; the page you pick is promoted into the list while you are on it.',
+};
+const moreKind = () => S.more || V[S.v].more;
+const page = (icon, text, cls = '', extra = '') => `<button class="item ${cls} ${S.page === text ? 'sel' : ''}" data-act="page:${text}">${ic(icon)}<span>${text}</span>${extra}</button>`;
+const morePages = cls => MORE.map(([i, t]) => page(i, t, cls)).join('');
+const moreMenu = (cls = '') => S.moreOpen ? `<div class="menu ${cls}" role="menu">${morePages('')}</div>` : '';
+const moreIcon = (cls, mcls) => `<span class="rel"><button class="icon-button ${cls} ${S.moreOpen ? 'on' : ''}" data-act="more" aria-haspopup="menu" aria-expanded="${S.moreOpen}" data-tip="More pages">${ic('more')}</button>${moreMenu(mcls)}</span>`;
+function navBody() {
+  const k = moreKind(), o = S.moreOpen, x = `aria-expanded="${o}" data-act="more"`;
+  const main = page('dash', 'Dashboard') + page('search', 'Search', '', '<kbd>⌘K</kbd>') + page('todo', 'Todos') + page('cal', 'Calendar');
+  if (k === 'a') return main + `<button class="item" ${x}>${ic(o ? 'down' : 'fwd')}<span>${o ? 'Less' : 'More'}</span></button>` + (o ? morePages('ind') : '');
+  if (k === 'b') return main + `<button class="label lbtn" ${x}><span>${ic(o ? 'down' : 'fwd')}More</span></button>` + (o ? morePages('') : '');
+  if (k === 'c') return main + (innerHeight >= 700 ? morePages('quiet')
+    : `<div class="rel"><button class="item" aria-haspopup="menu" ${x}>${ic('more')}<span>4 more pages</span></button>${moreMenu()}</div>`);
+  const promoted = MORE.find(m => m[1] === S.page);
+  return main + (promoted ? page(promoted[0], promoted[1]) : '') + `<div class="rel"><button class="item" aria-haspopup="menu" ${x}>${ic('more')}<span>More</span>${ic('fwd')}</button>${moreMenu()}</div>`;
+}
+const foldersBody = (nav = true) => wsButton() + (nav ? navBody() : '') + `<div class="label">Folders ${ic('plus')}</div>` + tree();
+const noteRows = f => notesFor(f).map((n, i) => `<button class="note ${n === NOTES[0] ? 'sel' : ''}"><b>${n[0]}</b><span>${n[1]}</span><small>${n[2]}</small></button>`).join('');
+const listTools = f => `<div class="list-tools"><input class="filter" placeholder="Filter ${notesFor(f).length} notes"><div class="pills"><span class="pill on">Recent</span><span class="pill">Created</span><span class="pill">Title</span><span class="pill">Has todos</span></div></div>`;
+const backToAll = () => S.folder != null ? `<button class="back" data-act="folder:">${ic('back')}All notes</button>` : '';
+const listBody = (picker) => backToAll() + `<div class="list-head">` +
+  (picker ? `<button class="picker" data-act="menu"><h2>${S.folder || 'All notes'}</h2>${ic('down')}</button>` : `<h2>${S.folder || 'All notes'}</h2>`) +
+  `<span class="sp"></span><span class="icon-button">${ic('plus')}</span>` +
+  (picker && S.menu ? `<div class="menu">${tree()}</div>` : '') + `</div>` + listTools(S.folder) + noteRows(S.folder);
+const inspBody = () => `<div class="itabs">${['History', 'Backlinks', 'Info'].map(t => `<button class="${S.inspTab === t ? 'sel' : ''}" data-act="itab:${t}">${t}</button>`).join('')}</div><div class="ibody">` + ({
+  Info: `<h4>Folder</h4><p>Unsorted</p><div class="box">Unsorted</div><h4>Sharing</h4><p>Everyone in this workspace</p><p class="muted">Sharing with people and links arrives with #15.</p><h4>Tags</h4><p class="muted">Tags arrive with #21.</p><h4>URL</h4><div class="box mono">https://commonink.app/note/layout-feedback-3r9v</div><h4>Archive</h4><span class="box">Archive</span>`,
+  History: `<h4>Today</h4><p>Dev User <span class="muted">· 3m ago</span></p><div class="box mono">+ Move the toggles out of the note tab</div><h4>Yesterday</h4><p>Shell agent <span class="muted">· 16h ago</span></p><div class="box mono">+ - [ ] Prototype narrow layouts</div>`,
+  Backlinks: `<h4>2 notes link here</h4><p>Weekly sync, Oct 5</p><p class="muted">…see [[Layout feedback]] for the narrow window…</p><p>v3 launch checklist</p><p class="muted">…blocked on [[Layout feedback]]…</p>`,
+})[S.inspTab] + `</div>`;
+const BODY = { folders: () => foldersBody(V[S.v].navInPanel !== false), list: () => listBody(false), insp: inspBody };
+const panel = (p, body, over) => `<aside class="panel p-${p} ${over ? 'over' : ''}" style="width:${S.w[p]}px">${(body || BODY[p])()}</aside>`;
+const split = (p, dir) => `<div class="split" data-split="${p}" data-dir="${dir}"></div>`;
+const overlay = bodies => S.over ? `<div class="scrim" data-act="close"></div>` + panel(S.over, (bodies || {})[S.over], true) : '';
+
+// The note header now holds only what belongs to the note. tl / tr are cells on the tab row for variants that put controls there.
+const DOC0 = `<h1><span class="h"># </span>Layout feedback</h1>
+  <p>After trying the previews for the app layout. Four things, roughly in order of how much they bother me.</p>
+  <h2><span class="h">## </span>The toggles are not part of a note</h2>
+  <p>The collapse-inspector and writing-mode buttons sit in the note's header bar, under its tab, as if they belonged to that note. They belong to the app. Move them up and out of the note tab.</p>
+  <h2><span class="h">## </span>Narrow windows</h2>
+  <p>At about 870 px the two left columns and the inspector take the room. The editor is a sliver and I can't even see the button to expand the note. The left panels need a way to collapse.</p>
+  <h2><span class="h">## </span>Also</h2>
+  <div class="todo"><span class="cb"></span><span>Drag the panel edges to resize them</span></div>
+  <div class="todo"><span class="cb"></span><span>A way back to All notes</span></div>
+  <div class="todo"><span class="cb"></span><span>Prototype some options before building</span></div>`;
+const editor = (tl = '', tr = '', ov = overlay()) => `<div class="main"><div class="tabrow">${tl}<div class="tab-bar">
+  <div class="tab sel"><span>Layout feedback</span><i>×</i></div><div class="tab preview"><span>Try in this PR</span><i>×</i></div></div>${tr}</div>
+  <div class="note-head"><b>Unsorted</b><span class="muted">edited 3m ago by Dev User</span><span class="sp"></span><span class="muted">Saved</span></div>
+  <div class="pane"><div class="doc">${DOC0}
+  </div></div>${ov}</div>`;
+
+/* ---------- fitting: drop panels, in the given order, until the editor has MIN ---------- */
+function fit(order, chrome) {
+  const on = {}; let used = chrome;
+  for (const p of order) { on[p] = S.want[p] && !S.writing; if (on[p]) used += S.w[p]; }
+  for (const p of order) { if (W() - used >= MIN) break; if (on[p]) { on[p] = false; used -= S.w[p]; } }
+  return on;
+}
+const stateOf = (p, on) => on[p] ? 'on' : S.over === p ? 'on' : (V[S.v].wants(p) && !S.writing ? 'auto' : '');
+const tip = (label, k) => `${label}  ${k}`;
+const ibtn = (p, on, icon, label, k, cls = '') => `<button class="icon-button ${stateOf(p, on)} ${cls}" data-act="toggle:${p}" data-tip="${tip(label, k)}">${ic(icon)}</button>`;
+const wbtn = (cls = '') => `<button class="icon-button ${S.writing ? 'on' : ''} ${cls}" data-act="writing" data-tip="${tip('Writing mode', '⌘.')}">${ic('write')}</button>`;
+
+/* ---------- variants ---------- */
+const V = {
+  A: {
+    name: 'Top bar', more: 'a',
+    pro: 'Toggles are plainly app-level and never move; the workspace switcher and search stay reachable when every panel is gone. Opening a panel that does not fit pushes out the one you used longest ago, so everything stays a real column.',
+    con: 'Costs a 40 px row on every screen, and a panel closing on its own when you open another can surprise.',
+    panels: ['folders', 'list', 'insp'], wants: p => S.want[p],
+    on: () => fit(S.recent, 0),
+    render(on) {
+      const wide = W() >= 1000;
+      const tg = (p, icon, label, k) => `<button class="tg ${stateOf(p, on)}" data-act="toggle:${p}" data-tip="${tip(label, k)}">${ic(icon)}${wide ? `<kbd>${k}</kbd>` : ''}</button>`;
+      return `<div class="topbar"><button class="wsb"><span class="drop">${ic('drop')}</span>${W() >= 760 ? "Dev's workspace" : ''}${ic('down')}</button>
+        ${tg('folders', 'left', 'Folders', '⌘\\')}${tg('list', 'list', 'Note list', '⌘⇧\\')}
+        <button class="icon-button" data-act="folder:" data-tip="All notes">${ic('all')}</button>
+        <div class="search">${ic('search')}<span>Search notes</span><span class="sp"></span><kbd>⌘K</kbd></div>
+        ${tg('insp', 'right', 'Inspector', '⌘I')}<button class="tg tip-e ${S.writing ? 'on' : ''}" data-act="writing" data-tip="${tip('Writing mode', '⌘.')}">${ic('write')}${wide ? '<kbd>⌘.</kbd>' : ''}</button></div>
+        <div class="row">${on.folders ? panel('folders') + split('folders', 1) : ''}${on.list ? panel('list') + split('list', 1) : ''}${editor()}${on.insp ? split('insp', -1) + panel('insp') : ''}</div>`;
+    },
+  },
+  B: {
+    name: 'Rails always', more: 'd', navInPanel: false,
+    pro: 'One model at every width: an icon on a rail opens its panel, pinned if there is room, as a popover over the editor if not. Nothing is ever out of reach, and writing mode is just "all unpinned".',
+    con: 'Two rails cost 88 px for good, which hurts most in exactly the narrow window; pinned vs popover is a mode the user has to notice.',
+    panels: ['folders', 'list', 'insp'], wants: p => S.want[p],
+    on: () => fit(['insp', 'folders', 'list'], 88), // the note list outlives the folder tree here
+    render(on) {
+      const r = (icon, label) => `<button class="icon-button tip-r" data-tip="${label}">${ic(icon)}</button>`;
+      const it = (t, icon) => `<button class="icon-button tip-l ${(on.insp || S.over === 'insp') && S.inspTab === t ? 'on' : (S.want.insp && !on.insp && !S.writing && S.inspTab === t ? 'auto' : '')}" data-act="insp:${t}" data-tip="${tip(t, t === 'Info' ? '⌘I' : '')}">${ic(icon)}</button>`;
+      return `<div class="row"><div class="rail l"><span class="drop tip-r" data-tip="Dev's workspace" style="position:relative;margin-bottom:8px">${ic('drop')}</span>
+        <button class="icon-button tip-r ${S.folder == null ? '' : ''}" data-act="allnotes" data-tip="All notes">${ic('all')}</button>
+        ${ibtn('folders', on, 'folder', 'Folders', '⌘\\', 'tip-r')}${ibtn('list', on, 'list', 'Note list', '⌘⇧\\', 'tip-r')}<hr>
+        ${r('dash', 'Dashboard')}${r('search', 'Search  ⌘K')}${r('todo', 'Todos')}${r('cal', 'Calendar')}${moreIcon('tip-r', 'side')}</div>
+        ${on.folders ? panel('folders') + split('folders', 1) : ''}${on.list ? panel('list') + split('list', 1) : ''}${editor()}${on.insp ? split('insp', -1) + panel('insp') : ''}
+        <div class="rail r">${it('History', 'hist')}${it('Backlinks', 'link')}${it('Info', 'info')}<span class="sp"></span>${wbtn('tip-l')}</div></div>`;
+    },
+  },
+  C: {
+    name: 'One left column', more: 'd',
+    pro: 'The left side is never more than one column: All notes is home, a folder is a drill-in with a back button. Fits at 870 with no collapsing at all. Toggles sit in a status bar with their shortcuts spelled out.',
+    con: 'You lose seeing the folder tree and a folder\'s notes side by side (moving notes between folders gets harder), and the status bar is a new strip of chrome far from where the panels are.',
+    panels: ['nav', 'insp'], wants: p => S.want[p],
+    on: () => fit(['insp', 'nav'], 0),
+    render(on) {
+      const sub = S.folder === 'Projects' ? FOLDERS.filter(f => f[2] === 1) : [];
+      const frow = ([n, c]) => `<button class="item" data-act="folder:${n}">${ic('folder')}<span>${n}</span><span class="n">${c}</span>${ic('fwd')}</button>`;
+      const nav = () => wsButton() + `<div class="iconrow">${['dash', 'search', 'todo', 'cal'].map(i => `<button class="icon-button">${ic(i)}</button>`).join('')}${moreIcon('', 'end')}</div>` +
+        (S.folder == null
+          ? `<div class="list-head"><h2>All notes</h2><span class="sp"></span><span class="icon-button">${ic('plus')}</span></div><div class="label">Folders ${ic('plus')}</div>${FOLDERS.filter(f => f[2] === 0).map(frow).join('')}<div class="label">Notes</div>`
+          : `<button class="back" data-act="folder:${FOLDERS.find(f => f[0] === S.folder)[2] ? 'Projects' : ''}">${ic('back')}${FOLDERS.find(f => f[0] === S.folder)[2] ? 'Projects' : 'All notes'}</button><div class="list-head"><h2>${S.folder}</h2><span class="sp"></span><span class="icon-button">${ic('plus')}</span></div>${sub.map(frow).join('')}`)
+        + listTools(S.folder) + noteRows(S.folder);
+      const tg = (p, icon, label, k, cls) => `<button class="tg tip-u ${cls} ${stateOf(p, on)}" data-act="toggle:${p}" data-tip="${tip(label, k)}">${ic(icon)}${W() >= 700 ? label + ' ' : ''}<kbd>${k}</kbd></button>`;
+      return `<div class="row">${on.nav ? panel('nav', nav) + split('nav', 1) : ''}${editor('', '', overlay({ nav }))}${on.insp ? split('insp', -1) + panel('insp') : ''}</div>
+        <div class="status">${tg('nav', 'left', 'Notes', '⌘\\', 'tip-s')}<button class="tg tip-u" data-act="folder:" data-tip="Back to All notes">${ic('all')}${W() >= 700 ? 'All notes' : ''}</button><span class="sp"></span>
+        ${W() >= 900 ? '<span>Saved · 148 words</span><span class="sp"></span>' : ''}${tg('insp', 'right', 'Inspector', '⌘I', 'tip-e')}
+        <button class="tg tip-u tip-e ${S.writing ? 'on' : ''}" data-act="writing" data-tip="${tip('Writing mode', '⌘.')}">${ic('write')}${W() >= 700 ? 'Write ' : ''}<kbd>⌘.</kbd></button></div>`;
+    },
+  },
+  D: {
+    name: 'Tab-bar controls', more: 'b',
+    pro: 'No new chrome: the toggles take the two ends of the row the tabs already use, next to the panels they open, and each panel collapses on its own. Panels give way by priority (inspector, note list, folders); one that has no room opens over the editor.',
+    con: 'They share a row with tabs, so they eat tab space in a narrow editor and still read as "near the note"; with splits, the ends belong to the outer groups only.',
+    panels: ['folders', 'list', 'insp'], wants: p => S.want[p],
+    on: () => fit(['insp', 'list', 'folders'], 0),
+    render(on) {
+      const tl = `<div class="cell l">${ibtn('folders', on, 'left', 'Folders', '⌘\\', 'tip-s')}${ibtn('list', on, 'list', 'Note list', '⌘⇧\\', 'tip-s')}<button class="icon-button tip-s" data-act="allnotes" data-tip="All notes">${ic('all')}</button></div>`;
+      const tr = `<div class="cell r">${ibtn('insp', on, 'right', 'Inspector', '⌘I', 'tip-e')}${wbtn('tip-e')}</div>`;
+      return `<div class="row">${on.folders ? panel('folders') + split('folders', 1) : ''}${on.list ? panel('list') + split('list', 1) : ''}${editor(tl, tr)}${on.insp ? split('insp', -1) + panel('insp') : ''}</div>`;
+    },
+  },
+  E: {
+    name: 'Layout steps', more: 'c',
+    pro: 'One control, three named layouts: Browse (folders + notes), Notes (icon rail + note list with a folder picker in its header), Write (rail only). The window picks the widest step that fits and ⌘\\ steps by hand, so there is one thing to learn and no half-states. The inspector is the only separate toggle and becomes a drawer when it has no room.',
+    con: 'Less freedom: you cannot have folders without the note list. The folder picker is a second way to choose a folder.',
+    panels: ['folders', 'list', 'insp'],
+    wants: p => p === 'insp' ? S.want.insp : p === 'folders' ? S.step === 3 : S.step >= 2,
+    maxStep: () => W() - S.w.folders - S.w.list >= MIN ? 3 : W() - 44 - S.w.list >= MIN ? 2 : 1,
+    step() { return S.writing ? 1 : Math.min(S.step, this.maxStep()); },
+    on() {
+      const s = this.step(), used = s === 3 ? S.w.folders + S.w.list : s === 2 ? S.w.list + 44 : 44;
+      return { folders: s === 3, list: s >= 2, insp: S.want.insp && !S.writing && W() - used - S.w.insp >= MIN };
+    },
+    render(on) {
+      const s = this.step(), max = this.maxStep();
+      const sb = (n, icon, label) => `<button class="${s === n ? 'on' : ''} ${n > max ? 'dim' : ''} ${n === 3 ? 'tip-s' : ''}" data-act="step:${n}" data-tip="${label}${n > max ? ' (needs a wider window)' : ''}  ${n === 1 ? '⌘.' : '⌘\\'}">${ic(icon)}</button>`;
+      const tl = `<div class="cell l"><span class="steps">${sb(3, 's3', 'Browse: folders + notes')}${sb(2, 's2', 'Notes')}${sb(1, 's1', 'Write')}</span></div>`;
+      const tr = `<div class="cell r">${ibtn('insp', on, 'right', 'Inspector', '⌘I', 'tip-e')}</div>`;
+      const r = (icon, label) => `<button class="icon-button tip-r" data-tip="${label}">${ic(icon)}</button>`;
+      const rail = `<div class="rail l"><span class="drop" style="margin-bottom:8px">${ic('drop')}</span>
+        <button class="icon-button tip-r" data-act="allnotes" data-tip="All notes">${ic('all')}</button>
+        <button class="icon-button tip-r ${S.over === 'folders' ? 'on' : ''}" data-act="peek:folders" data-tip="Folders">${ic('folder')}</button>
+        <button class="icon-button tip-r ${S.over === 'list' ? 'on' : ''}" data-act="peek:list" data-tip="Note list">${ic('list')}</button><hr>
+        ${r('dash', 'Dashboard')}${r('search', 'Search  ⌘K')}${r('todo', 'Todos')}${r('cal', 'Calendar')}${moreIcon('tip-r', 'side')}</div>`;
+      const list = () => listBody(s === 2);
+      return `<div class="row">${s < 3 ? rail : ''}${on.folders ? panel('folders') + split('folders', 1) : ''}${on.list ? panel('list', list) + split('list', 1) : ''}${editor(tl, tr)}${on.insp ? split('insp', -1) + panel('insp') : ''}</div>`;
+    },
+  },
+};
+
+/* ---------- round two: F and G, both on B's rails ---------- */
+const xbtn = (p, k) => `<button class="icon-button x tip-e" data-act="toggle:${p}" data-tip="Close  ${k}" aria-label="Close">${ic('x')}</button>`;
+const treeBody = () => `<div class="phead"><b>Folders</b><span class="sp"></span>${xbtn('folders', '⌘\\')}</div>` + navBody() + `<div class="label">Folders ${ic('plus')}</div>` + tree();
+const inspX = () => inspBody().replace('</div><div class="ibody">', `<span class="sp"></span>${xbtn('insp', '⌘I')}</div><div class="ibody">`);
+const railPages = () => ['Dashboard:dash', 'Search:search', 'Todos:todo', 'Calendar:cal'].map(x => { const [t, i] = x.split(':');
+  return `<button class="icon-button tip-r ${S.page === t ? 'on' : ''}" data-act="page:${t}" data-tip="${t}${t === 'Search' ? '  ⌘K' : ''}">${ic(i)}</button>`; }).join('') + moreIcon('tip-r', 'side');
+const railRight = on => `<div class="rail r">${[['History', 'hist'], ['Backlinks', 'link'], ['Info', 'info']].map(([t, i]) =>
+  `<button class="icon-button tip-l ${(on.insp || S.over === 'insp') && S.inspTab === t ? 'on' : ''}" data-act="insp:${t}" data-tip="${tip(t, t === 'Info' ? '⌘I' : '')}">${ic(i)}</button>`).join('')}<span class="sp"></span>${wbtn('tip-l')}</div>`;
+const brand = `<span class="drop tip-r" data-tip="Dev's workspace" style="position:relative;margin-bottom:8px">${ic('drop')}</span>`;
+
+V.F = {
+  name: 'B, fixed', more: 'c',
+  pro: 'B with the order nailed down: folders always left, notes always to their right, whatever you click first. One Folders button on the rail; All notes is the first row of the tree; clicking any folder brings up its notes beside the tree. Every panel has a close × in its header and Esc closes the last one opened.',
+  con: 'Still two columns to fit: at 870 the tree and the notes cannot both be pinned, so the notes float over the editor while the tree is open, and at 640 both float. The baseline to compare G against.',
+  panels: ['folders', 'list', 'insp'], wants: p => S.want[p],
+  lay() { // pin left to right while the editor keeps MIN; whatever is left floats over the editor, in the same order
+    const avail = W() - 88, pin = [], fl = []; let used = 0;
+    for (const p of ['folders', 'list']) if (S.want[p] && !S.writing) { if (!fl.length && avail - used - S.w[p] >= MIN) { pin.push(p); used += S.w[p]; } else fl.push(p); }
+    return { pin, fl, insp: S.want.insp && !S.writing && avail - used - S.w.insp >= MIN };
+  },
+  on() { const l = this.lay(); return { folders: l.pin.includes('folders'), list: l.pin.includes('list'), insp: l.insp }; },
+  floats: p => V.F.lay().fl.includes(p),
+  render(on) {
+    const l = this.lay();
+    const list = () => `<div class="phead"><b>${S.folder || 'All notes'}</b><span class="sp"></span><span class="icon-button">${ic('plus')}</span>${xbtn('list', '⌘⇧\\')}</div>` + listTools(S.folder) + noteRows(S.folder);
+    const bodies = { folders: treeBody, list, insp: inspX };
+    const fl = l.fl.length ? `<div class="scrim" data-act="closefloat"></div><div class="floats">${l.fl.map(p => panel(p, bodies[p])).join('')}</div>` : '';
+    return `<div class="row"><div class="rail l">${brand}
+      <button class="icon-button tip-r ${S.want.folders && !S.writing ? 'on' : ''}" data-act="toggle:folders" data-tip="${tip('Folders', '⌘\\')}">${ic('folder')}</button><hr>${railPages()}</div>
+      ${l.pin.map(p => panel(p, bodies[p]) + split(p, 1)).join('')}${editor('', '', fl + overlay(bodies))}${on.insp ? split('insp', -1) + panel('insp', inspX) : ''}${railRight(on)}</div>`;
+  },
+};
+function fInit() { S.want.folders = S.want.list = true; S.opened = ['folders', 'list']; S.folder = null;
+  if (W() - 88 - S.w.folders - S.w.list < MIN) { S.want.folders = false; S.opened = ['list']; } }
+function ftoggle(p) {
+  if (S.writing) { S.writing = false; S.want.folders = S.want.list = S.want.insp = false; S.opened = []; }
+  S.want[p] = !S.want[p]; S.opened = S.opened.filter(x => x !== p); if (S.want[p]) S.opened.push(p);
+}
+
+/* G: no note-list column. A folder is a tab. Tabs follow the app's rule: single click = preview (italic, replaced by the next one), double click = keep. */
+const GM = {
+  1: 'Replace: the note takes the folder tab\'s place and a back arrow returns to the list. <i>Costs:</i> the list is gone while you read, so going through several notes is click, back, click, back; and Back is a new idea that tabs do not otherwise have.',
+  2: 'Beside as a tab: the folder tab stays and the note opens in a tab next to it. <i>Costs:</i> the list and the note are never on screen together, every folder you browse and keep leaves a tab behind, and the tab row fills up fastest in the narrow window where it is shortest.',
+  3: 'Auto split: the first note opens in a pane to the right and the folder tab stays on the left as a narrow list. <i>Costs:</i> one click rearranges the layout unasked, it behaves differently by width (it falls back to Replace when two panes do not fit), and the list is cramped or oddly wide if the folder tab is dragged anywhere else.',
+};
+const TODOS = [3, 0, 2, 0, 5, 0, 1, 4, 0, 0, 0, 2];
+const PAGE_ICON = { Dashboard: 'dash', Search: 'search', Todos: 'todo', Calendar: 'cal', Contacts: 'contacts', Uploads: 'upload', History: 'hist', Plugins: 'plug' };
+const gKids = f => f === '' ? FOLDERS.filter(x => x[2] === 0).map(x => x[0]) : f === 'Projects' ? ['Common Ink', 'Website'] : [];
+const gParent = f => f === 'Common Ink' || f === 'Website' ? 'Projects' : '';
+const gTitle = t => t.kind === 'folder' ? (t.id || 'All notes') : t.kind === 'note' ? NOTES[t.id][0] : t.id;
+const gIcon = t => t.kind === 'folder' ? (t.id ? 'folder' : 'all') : t.kind === 'note' ? 'doc' : PAGE_ICON[t.id];
+const gCanSplit = () => W() - 88 - S.w.gl >= MIN;
+let last = null; // the tab the last click opened: a second click within the double-click window keeps it
+function openTab(pi, t, keep) {
+  const p = S.g.panes[pi]; let j = p.tabs.findIndex(x => x.kind === t.kind && x.id === t.id);
+  if (j < 0) { t.preview = !keep; j = p.tabs.findIndex(x => x.preview && (S.v !== 'H' || (x.kind === 'folder') === (t.kind === 'folder'))); if (j < 0) { p.tabs.push(t); j = p.tabs.length - 1; } else p.tabs[j] = t; }
+  else if (keep) p.tabs[j].preview = false;
+  p.active = j; S.g.focus = pi; last = { tab: p.tabs[j], at: Date.now() };
+}
+function gFolder(f, keep) { openTab(S.g.panes.length === 2 ? 0 : S.g.focus, { kind: 'folder', id: f }, keep); }
+function gNote(i, keep) {
+  const g = S.g, p = g.panes[g.focus], ft = p.tabs[p.active], t = { kind: 'note', id: i };
+  if (S.gmode === 2 || !ft) { if (ft) ft.preview = false; openTab(g.focus, t, keep); }           // G2: acting inside a folder tab keeps it
+  else if (S.gmode === 3 && g.focus === 0 && gCanSplit()) { ft.preview = false; if (g.panes.length === 1) g.panes.push({ tabs: [], active: 0 }); openTab(1, t, keep); }
+  else { p.tabs[p.active] = { ...t, preview: !keep, back: ft.kind === 'folder' ? ft.id : ft.back }; last = { tab: p.tabs[p.active], at: Date.now() }; } // G1, and G3 when narrow
+}
+function gInit() { S.g = { panes: [{ tabs: [], active: 0 }], focus: 0 }; S.over = null; S.page = null; gFolder('', true); gNote(0); last = null; }
+function gContent(t, i) {
+  if (t.kind === 'note') { const n = NOTES[t.id];
+    return `<div class="note-head">${t.back !== undefined ? `<button class="back" style="margin:0 0 0 -8px" data-act="gback" title="Back to the folder's list">${ic('back')}${t.back || 'All notes'}</button>` : ''}<b>${n[3]}</b><span class="muted">edited ${n[2].replace(' · ', ' by ')}</span><span class="sp"></span><span class="muted">Saved</span></div>
+      <div class="pane"><div class="doc">${S.v === 'H' && S.q ? `<h1>${n[0]}</h1><div class="wys" contenteditable="true" spellcheck="false" data-edit="${t.id}">${noteHtml(t.id)}</div>` : S.v === 'H' ? docBody(t.id) : t.id === 0 ? DOC0 : `<h1><span class="h"># </span>${n[0]}</h1><p>${n[1]}</p>`}</div></div>`; }
+  if (t.kind === 'page') return `<div class="pane"><div class="doc"><h1>${t.id}</h1><p class="muted">Stand-in. Pages open as tabs like notes (asked for separately), so a folder is one more thing that opens in a tab.</p>${
+    t.id === 'Dashboard' ? `<div class="cards"><div><b>Today</b><br>3 todos due</div><div><b>Recent</b><br>Layout feedback<br>Try in this PR</div><div><b>Agents</b><br>Shell agent, 16h ago</div></div>`
+    : t.id === 'Search' ? `<input class="filter" placeholder="Search notes" style="margin-top:10px">` : ''}</div></div>`;
+  const f = t.id, ns = notesFor(f || null), open = S.g.panes.flatMap(p => p.tabs[p.active] ? [p.tabs[p.active]] : []).filter(x => x.kind === 'note').map(x => x.id);
+  const path = f === '' ? [] : gParent(f) ? ['', gParent(f)] : [''];
+  return `<div class="pane"><div class="fview">
+    <div class="crumbs">${path.map(x => `<button data-act="gnav:${x}">${x || 'All notes'}</button>${ic('fwd')}`).join('')}<span>${f || 'All notes'}</span></div>
+    <div class="list-head"><h2>${f || 'All notes'}</h2><span class="n">${ns.length} notes</span><span class="sp"></span><button class="newnote">+ New note</button></div>
+    ${gKids(f).length ? `<div class="kids">${gKids(f).map(k => `<button class="kid" data-act="gnav:${k}" data-folder="${k}">${ic('folder')}${k}<span class="n">${notesFor(k).length}</span></button>`).join('')}</div>` : ''}
+    ${listTools(f || null)}${ns.map(n => { const k = NOTES.indexOf(n);
+      return `<button class="note ${open.includes(k) ? 'sel' : ''}" draggable="true" data-note="${k}" data-act="gnote:${k}"><b>${n[0]}</b><span>${n[1]}</span><small>${n[2]}${TODOS[k] ? ` · ☐ ${TODOS[k]} open` : ''}${f ? '' : ' · ' + n[3]}</small></button>`; }).join('')}
+  </div></div>`;
+}
+V.G = {
+  name: 'Folder opens as a tab', more: 'c',
+  pro: 'No note-list column at all. The rail opens the folder tree only; clicking a folder (or the All notes rail button) opens a folder tab listing its notes, with child folders and a breadcrumb, so the tree is optional. It closes like any tab, and Dashboard, Search and the other pages open the same way: everything is a tab.',
+  con: 'The list of notes now competes with notes for the tab row and for the editor\'s space, a single-clicked folder is a preview tab that the next click replaces (double-click to keep), and "which folder am I in" lives in a tab instead of a fixed place.',
+  panels: ['folders', 'insp'], wants: p => S.want[p],
+  two: () => S.g.panes.length === 2 && gCanSplit(),
+  on() { return fit(['insp', 'folders'], 88 + (this.two() ? S.w.gl : 0)); },
+  extra: () => 'tabs: ' + S.g.panes.map((p, i) => p.tabs.map((t, j) => `${j === p.active ? '<b>' : ''}${t.kind === 'folder' ? '▤ ' : ''}${gTitle(t)}${t.preview ? ' <span class="warn">(preview)</span>' : ''}${j === p.active ? '</b>' : ''}`).join(', ') || 'none').join(' ┃ ') + (S.toast ? ` · ${S.toast}` : ''),
+  render(on) {
+    const g = S.g, two = this.two(); if (g.focus >= g.panes.length) g.focus = 0;
+    const at = g.panes[g.focus].tabs[g.panes[g.focus].active];
+    S.folder = at && at.kind === 'folder' ? (at.id || null) : '\u0000'; // what the tree highlights
+    const pane = i => { const p = g.panes[i], t = p.tabs[p.active];
+      return `<section class="gpane ${i === g.focus ? 'focused' : ''}" data-pane="${i}" ${i === (two ? 1 : g.focus) ? 'data-ed' : ''} style="${two && i === 0 ? `flex:none;width:${S.w.gl}px` : 'flex:1'}">
+        <div class="tabrow"><div class="tab-bar">${p.tabs.map((x, j) => `<div class="tab ${j === p.active ? 'sel' : ''} ${x.preview ? 'preview' : ''}" data-act="gtab:${i}.${j}" title="${x.preview ? 'Preview tab: double-click to keep it' : gTitle(x)}">${ic(gIcon(x))}<span>${gTitle(x)}</span><i data-act="gclose:${i}.${j}" title="Close tab">×</i></div>`).join('')}</div>
+        ${!two && g.panes.length === 2 ? `<div class="cell r"><button class="tg tip-e" data-act="gfocus" data-tip="Two panes do not fit: show the other one">${i === 0 ? 'note pane ›' : '‹ list pane'}</button></div>` : ''}</div>
+        ${t ? gContent(t, i) : `<div class="empty">No tabs open.<br><button data-act="allnotes">Open All notes</button></div>`}</section>`; };
+    const bodies = { folders: treeBody, insp: inspX };
+    return `<div class="row"><div class="rail l">${brand}
+      <button class="icon-button tip-r ${S.folder === null ? 'on' : ''}" data-act="allnotes" data-tip="All notes (opens as a tab)">${ic('all')}</button>
+      ${ibtn('folders', on, 'folder', 'Folder tree', '⌘\\', 'tip-r')}<hr>${railPages()}</div>
+      ${on.folders ? panel('folders', treeBody) + split('folders', 1) : ''}<div class="main gmain">${two ? pane(0) + split('gl', 1) + pane(1) : pane(g.focus)}${overlay(bodies)}</div>
+      ${on.insp ? split('insp', -1) + panel('insp', inspX) : ''}${railRight(on)}</div>`;
+  },
+};
+
+/* ---------- round three: H. Today's shell; the note-list column becomes a folder tab ---------- */
+const TAB = () => S.v === 'G' || S.v === 'H';
+const HM = {
+  1: 'H1: the note-list column is gone; a folder click opens a folder tab. <i>Costs:</i> the list and a note share one pane unless you split, and browsing folders happens in the tab row.',
+  2: 'H2 (comparison only): the note-list column stays as today and a folder can also be opened as a tab from the column header. <i>Costs:</i> two places that list the same notes, and the third column is back, so 870 px is tight again.',
+};
+const HX = { short: 'Expanded rows show about 8 lines and fade out; nothing scrolls inside the list.', full: 'Expanded rows show the whole note in a box capped at 320 px that scrolls on its own (a scroller inside a scroller).' };
+const FILL = ['The first pass kept everything on one screen, which read well at full width and fell apart as soon as the window narrowed. The second pass gives each part a job and lets the rest wait.',
+  'Nothing here is settled. The point of writing it down is to find the parts that do not survive being written down, and there are at least two of those so far.',
+  'Follow up with the people who use this every day before changing it again. What looks tidy in a mock-up tends to cost a click somewhere that matters more.'];
+const docBody = k => k === 0 ? DOC0 : `<h1><span class="h"># </span>${NOTES[k][0]}</h1><p>${NOTES[k][1]}</p><h2><span class="h">## </span>Context</h2><p>${FILL[k % 3]}</p>
+  <h2><span class="h">## </span>Next</h2>${Array.from({ length: TODOS[k] }, (_, i) => `<div class="todo"><span class="cb"></span><span>${['Write it up and share it', 'Check it against the spec', 'Ask for a second opinion', 'Try it on a narrow window', 'Decide and close the issue'][i]}</span></div>`).join('')}<p>${FILL[(k + 1) % 3]}</p><p>${FILL[(k + 2) % 3]}</p>`;
+function hInit() { S.g = { panes: [{ tabs: [], active: 0 }], focus: 0 }; S.over = null; S.page = null; S.folder = null; S.hexp = new Set();
+  openTab(0, { kind: 'folder', id: '' }); openTab(0, { kind: 'note', id: 0 }, true); S.g.panes[0].active = 0; last = null; }
+function hFolder(t) {
+  const f = t.id, ns = notesFor(f || null);
+  return `<div class="pane"><div class="fview">
+    <div class="list-head" style="padding-top:16px"><h2>${f || 'All notes'}</h2><span class="n">${ns.length} notes</span><span class="sp"></span><button class="newnote">+ New note</button></div>
+    ${listTools(f || null)}${ns.map(n => { const k = NOTES.indexOf(n), x = S.hexp.has(k);
+      return `<div class="hnote ${x ? 'open' : ''}" draggable="true" data-note="${k}">
+        <div class="hrow" role="button" tabindex="0" aria-expanded="${x}" data-act="hexp:${k}" title="${x ? 'Collapse' : 'Expand to read here'}  (Enter)">
+          <span class="chev">${ic(x ? 'down' : 'fwd')}</span>
+          <div class="hmain"><button class="htitle" data-act="hopen:${k}" title="Open in a tab (double-click to keep)">${n[0]}</button>${x ? '' : `<span class="snip">${n[1]}</span>`}
+          <small>${n[2]}${TODOS[k] ? ` · ☐ ${TODOS[k]} open` : ''}${f ? '' : ' · ' + n[3]}</small></div></div>
+        ${x ? `<div class="hbody ${S.hx}"><div class="doc">${docBody(k)}</div></div>
+          <div class="hfoot"><span>${S.hx === 'short' ? 'First 8 lines, read-only' : 'Whole note, read-only, scrolls'}</span><span class="sp"></span><button data-act="hopen:${k}">Open in a tab ↗</button><button data-act="hexp:${k}">Collapse</button></div>` : ''}
+      </div>`; }).join('')}
+  </div></div>`;
+}
+
+/* ---------- round four: the folder tab, quieter. Previews are the rendered note and are editable in place. ---------- */
+const QT = {
+  1: 'Q1 River: every note shows its short rendered preview, like one long document; a faint "more" at the fade shows the whole note in the list\'s own scroll. No rows, rules or chevrons. <i>Costs:</i> about three notes per screen, so finding one of fifty means scrolling or filtering.',
+  2: 'Q2 Quiet list: one line per note (title, muted snippet, time); click a row to unfold its short preview under it with a thin rule at the left; several can be open. <i>Costs:</i> a chevron on hover and a rule when open are still row chrome, and two click targets share one line.',
+  3: 'Q3 One at a time: the same one-line rows, but only one note is open at once and it reads like a note (big title, no indent, no rule); clicking into its text expands it to the whole note and puts the cursor there. ↑/↓ walk the open note through the list. <i>Costs:</i> you cannot compare two notes in one folder tab, and opening one moves the rows below it.',
+  0: 'Round three\'s folder tab, kept for comparison.',
+  4: 'Q4 Cards (after v1\'s Notes feed): today\'s panel header scaled up (name, filter box, sort chips, New note), then separate cards with title, details and a two-line rendered preview. A card expands in place to a read-only excerpt, then the whole note; its header does not move. Edit, the title, or the pencil open the note in a tab with the cursor in it. <i>Costs:</i> about seven notes per screen collapsed, and a border on every item.',
+};
+const NOTE_HTML = {};
+const noteHtml = k => NOTE_HTML[k] ??= k === 0
+  ? `<p>After trying the previews for the app layout. Four things, roughly in order of how much they bother me.</p><h2 data-md="## ">The toggles are not part of a note</h2><p>The collapse-inspector and writing-mode buttons sit in the note's <b>header bar</b>, under its tab, as if they belonged to that note. They belong to the app. Move them up and out of the note tab.</p><h2 data-md="## ">Narrow windows</h2><p>At about <code>870 px</code> the two left columns and the inspector take the room. The editor is a sliver and I can't even see the button to expand the note. See <a href="#" onclick="return false">#53</a>.</p><h2 data-md="## ">Also</h2><div class="todo"><span class="cb" contenteditable="false"></span><span>Drag the panel edges to resize them</span></div><div class="todo"><span class="cb" contenteditable="false"></span><span>A way back to All notes</span></div><div class="todo"><span class="cb" contenteditable="false"></span><span>Prototype some options before building</span></div>`
+  : `<p>${NOTES[k][1]}</p><p>${FILL[k % 3].replace('one screen', '<b>one screen</b>').replace('settled', '<b>settled</b>').replace('every day', '<b>every day</b>')}</p><h2 data-md="## ">Context</h2><ul><li>Started from <a href="#" onclick="return false">Layout feedback</a></li><li>Touches <code>src/web/style.css</code> and not much else</li></ul><p>${FILL[(k + 1) % 3]}</p>
+    <h2 data-md="## ">Next</h2>${Array.from({ length: Math.max(1, TODOS[k]) }, (_, i) => `<div class="todo"><span class="cb" contenteditable="false"></span><span>${['Write it up and share it', 'Check it against the spec', 'Ask for a second opinion', 'Try it on a narrow window', 'Decide and close the issue'][i]}</span></div>`).join('')}<p>${FILL[(k + 2) % 3]}</p>`;
+const qst = k => S.qs[k] ?? (S.q === 1 ? 'short' : 'closed');
+const SORTS = ['Recent', 'Created', 'Title', 'Has todos'];
+function qFolder(t) {
+  const f = t.id, ns = notesFor(f || null), q = S.q;
+  return `<div class="pane"><div class="qview q${q}">
+    <div class="qtop"><h2>${f || 'All notes'}</h2><span class="qcount">${ns.length}</span><span class="sp"></span>
+      <label class="qfilter">${ic('search')}<input placeholder="Filter"></label><button data-act="qsort" title="Sort: click to change">${SORTS[S.qsort]} ${ic('down')}</button><button>${ic('plus')} New note</button></div>
+    ${ns.map(n => { const k = NOTES.indexOf(n), st = qst(k), open = st !== 'closed', meta = n[2].split(' · ')[0] + (TODOS[k] ? ` · ${TODOS[k]} open` : '');
+      const title = `<button class="qtitle" data-act="hopen:${k}" data-open="${k}" title="Open in a tab  ·  ⌘-click or middle-click: open in the background  ·  ⌘Enter">${n[0]}</button>`;
+      const body = open ? `<div class="qbody"><div class="wys" contenteditable="true" spellcheck="false" data-edit="${k}">${noteHtml(k)}</div></div><button class="qmore more" data-act="qfull:${k}">${q === 2 ? 'Show all' : 'more'}</button><button class="qmore less" data-act="qfull:${k}">${q === 2 ? 'Show less' : 'less'}</button>` : '';
+      const head = q === 1 ? `<div class="qhead" draggable="true" data-note="${k}">${title}</div><div class="qmeta">${meta}<span class="qsaved">Saved</span></div>`
+        : `<div class="qhead qrow" draggable="true" data-note="${k}" data-act="qexp:${k}" data-open="${k}">${q === 2 ? `<span class="chev">${ic(open ? 'down' : 'fwd')}</span>` : ''}${title}${open ? '<span class="qsaved">Saved</span><span class="sp"></span>' : `<span class="qsnip">${n[1]}</span>`}<span class="qmeta">${meta}</span></div>`;
+      return `<section class="qnote ${st}" tabindex="0" data-fk="${k}">${head}${body}</section>`; }).join('')}
+  </div></div>`;
+}
+
+/* Q4: v1's feed cards. The header (title, details) is the same markup at the same size in every state, so it cannot move when the card expands; only what is under it grows. Read-only here: Edit opens the note in a tab with the cursor in it. */
+function q4Folder(t) {
+  const f = t.id, ns = notesFor(f || null), act = S.g.panes.flatMap(p => p.tabs[p.active] && p.tabs[p.active].kind === 'note' ? [p.tabs[p.active].id] : []);
+  return `<div class="pane"><div class="q4 ${S.grid ? 'grid' : ''}">
+    <div class="q4head"><h2>${f || 'All notes'}</h2><span class="n">${ns.length} notes</span><span class="sp"></span><button class="newnote">+ New note</button></div>
+    <input class="filter q4filter" placeholder="Filter ${ns.length} notes">
+    <div class="pills q4pills">${SORTS.map((x, i) => `<button class="pill ${i === S.qsort ? 'on' : ''}" data-act="qsortset:${i}">${x}</button>`).join('')}</div>
+    <div class="q4list" role="list">${ns.map(n => { const k = NOTES.indexOf(n), st = qst(k), closed = st === 'closed', [time, who] = n[2].split(' · ');
+      return `<section class="qnote q4card ${st} ${act.includes(k) ? 'sel' : ''}" role="listitem" tabindex="0" data-fk="${k}" ${closed ? `draggable="true" data-note="${k}" data-act="qexp:${k}" data-open="${k}"` : ''}>
+        <div class="q4h" data-act="qexp:${k}"><button class="q4title" data-act="hopen:${k}" data-open="${k}" title="Open to edit  ·  ⌘-click or middle-click: open in a background tab  ·  ⌘Enter">${n[0]}</button><span class="sp"></span>
+          <button class="icon-button q4open" data-act="hopen:${k}" data-open="${k}" title="Edit (opens in a tab)" tabindex="-1">${ic('edit')}</button>
+          <button class="icon-button q4chev" data-act="qexp:${k}" aria-expanded="${!closed}" title="${closed ? 'Expand' : 'Collapse'} (Enter)" tabindex="-1">${ic('fwd')}</button></div>
+        <div class="q4meta" data-act="qexp:${k}">${f ? '' : `<span>${n[3]}</span>`}<span>${who}</span><span>${time}</span>${TODOS[k] ? `<span>☐ ${TODOS[k]} open</span>` : ''}</div>
+        ${closed ? `<div class="q4prev wys">${noteHtml(k)}</div>`
+          : `<div class="q4body wys">${noteHtml(k)}</div><div class="q4foot"><button class="q4edit" data-act="hopen:${k}" data-open="${k}">${ic('edit')}Edit</button><button data-act="qfull:${k}">${st === 'full' ? 'Show less' : 'Show whole note'}</button><span class="sp"></span><button data-act="qexp:${k}">Collapse</button></div>`}
+      </section>`; }).join('')}</div>
+  </div></div>`;
+}
+function hBg(k) { const g = S.g, p = g.panes[g.panes.length === 2 ? 1 - g.focus : g.focus]; // ⌘-click / middle-click: a kept tab, opened behind
+  if (!p.tabs.some(x => x.kind === 'note' && x.id === k)) p.tabs.push({ kind: 'note', id: k, preview: false }); S.toast = `opened "${NOTES[k][0]}" in the background`; }
+function qExp(k) { const st = qst(k); if (S.q === 1) S.qs[k] = st === 'short' ? 'full' : 'short'; else if (S.q === 3) S.qs = st === 'closed' ? { [k]: 'short' } : {}; else S.qs[k] = st === 'closed' ? 'short' : 'closed'; }
+V.H = {
+  name: 'Today\'s shell, folders open as tabs', more: 'c',
+  pro: 'Looks like the app does now (folders column, tabs, inspector) minus the note-list column. A folder click opens a folder tab: heading, filter, sort chips, New note, the notes. A row expands in place to read; its title, a link, opens the note in its own tab. Inspector and writing-mode toggles sit at the right end of the tab row (as in D). One fewer column to fit, so 870 px gets a 654 px editor with the folders still pinned.',
+  con: 'The list and an open note are not side by side unless you split (the button left of the inspector toggle). The tab-row toggles still sit close to the note and take tab space. Two click targets in one row have to be learned.',
+  get panels() { return S.hmode === 2 ? ['folders', 'list', 'insp'] : ['folders', 'insp']; }, wants: p => S.want[p],
+  two: () => S.g.panes.length === 2 && W() - 44 - S.w.gl >= MIN,
+  on() { // inspector gives way first, then (H2) the note list, then the folders column, which leaves a 44 px rail
+    const sp = this.two() ? S.w.gl : 0, wr = !S.writing; let f = S.want.folders && wr, l = S.hmode === 2 && S.want.list && wr, i = S.want.insp && wr;
+    const room = () => W() - (f ? S.w.folders : 44) - (l ? S.w.list : 0) - (i ? S.w.insp : 0) - (S.writing ? 44 : 0) - sp >= MIN;
+    if (!room()) i = false; if (!room()) l = false; if (!room()) f = false;
+    return { folders: f, list: l, insp: i };
+  },
+  extra: () => V.G.extra() + ` · open in the list: <b>${S.q ? (S.q === 1 ? 'all (short)' : Object.values(S.qs).filter(x => x !== 'closed').length) : S.hexp.size}</b>`,
+  render(on) {
+    const g = S.g, two = this.two(); if (g.focus >= g.panes.length) g.focus = 0;
+    const at = g.panes[g.focus].tabs[g.panes[g.focus].active];
+    if (S.hmode === 1) S.folder = at && at.kind === 'folder' ? (at.id || null) : '\u0000';
+    const folders = () => `<div class="wsrow">${wsButton()}<button class="icon-button tip-e" data-act="toggle:folders" data-tip="${S.over === 'folders' ? 'Close' : 'Collapse to a rail'}  ⌘\\">${ic(S.over === 'folders' ? 'x' : 'left')}</button></div>` + navBody() + `<div class="label">Folders ${ic('plus')}</div>` + tree();
+    const list = () => `<div class="phead"><b>${S.folder || 'All notes'}</b><span class="sp"></span><button class="icon-button tip-e" data-act="hastab" data-tip="Open this folder as a tab">${ic('s1')}</button><span class="icon-button">${ic('plus')}</span></div>` + listTools(S.folder) +
+      notesFor(S.folder).map(n => `<button class="note" data-act="hnote:${NOTES.indexOf(n)}"><b>${n[0]}</b><span>${n[1]}</span><small>${n[2]}</small></button>`).join('');
+    const ctl = `<div class="cell r"><button class="icon-button tip-e ${g.panes.length === 2 ? 'dim' : ''}" data-act="hsplit" data-tip="Split right">${ic('s2')}</button>${ibtn('insp', on, 'right', 'Inspector', '⌘I', 'tip-e')}${wbtn('tip-e')}</div>`;
+    const pane = (i, lastPane) => { const p = g.panes[i], t = p.tabs[p.active];
+      return `<section class="gpane ${i === g.focus ? 'focused' : ''}" data-pane="${i}" ${i === (two ? 1 : g.focus) ? 'data-ed' : ''} style="${two && i === 0 ? `flex:none;width:${S.w.gl}px` : 'flex:1'}">
+        <div class="tabrow"><div class="tab-bar">${p.tabs.map((x, j) => `<div class="tab ${j === p.active ? 'sel' : ''} ${x.preview ? 'preview' : ''}" data-act="gtab:${i}.${j}" title="${x.preview ? 'Preview tab: double-click to keep it' : gTitle(x)}">${ic(gIcon(x))}<span>${gTitle(x)}</span><i data-act="gclose:${i}.${j}" title="Close tab">×</i></div>`).join('')}</div>
+        ${!two && g.panes.length === 2 ? `<div class="cell r"><button class="tg tip-e" data-act="gfocus" data-tip="Two panes do not fit: show the other one">${i === 0 ? 'other pane ›' : '‹ other pane'}</button></div>` : ''}${lastPane ? ctl : ''}</div>
+        ${t ? (t.kind === 'folder' ? (S.q === 4 ? q4Folder(t) : S.q ? qFolder(t) : hFolder(t)) : gContent(t, i)) : `<div class="empty">No tabs open.<br><button data-act="folder:">Open All notes</button></div>`}</section>`; };
+    const bodies = { folders, list, insp: inspX };
+    return `<div class="row">${on.folders ? panel('folders', folders) + split('folders', 1)
+        : `<div class="rail l">${brand}${ibtn('folders', on, 'left', 'Show folders', '⌘\\', 'tip-r')}<hr>${railPages()}</div>`}
+      ${on.list ? panel('list', list) + split('list', 1) : ''}
+      <div class="main gmain">${two ? pane(0) + split('gl', 1) + pane(1, true) : pane(g.focus, true)}${overlay(bodies)}</div>
+      ${on.insp ? split('insp', -1) + panel('insp', inspX) : S.writing ? railRight(on) : ''}</div>`;
+  },
+};
+if (!V[S.v]) S.v = 'A';
+if (S.v === 'G') gInit(); if (S.v === 'F') fInit(); if (S.v === 'H') hInit();
+
+/* ---------- render ---------- */
+function render() {
+  const v = V[S.v];
+  let on = v.on();
+  if (S.over && on[S.over]) S.over = null;
+  document.documentElement.dataset.theme = S.theme;
+  const scrolls = [...document.querySelectorAll('#app .pane')].map(x => [x.closest('[data-pane]')?.dataset.pane, x.scrollTop]);
+  const focus = document.activeElement?.dataset?.act, fk = document.activeElement?.dataset?.fk;
+  document.getElementById('app').innerHTML = v.render(on);
+  for (const [pi, top] of scrolls) { const x = document.querySelector(`#app [data-pane="${pi}"] .pane`); if (x && top) x.scrollTop = top; } // a re-render must not move what is under the pointer
+  if (S.reveal != null) { const c = document.querySelector(`#app [data-fk="${S.reveal}"]`), pn = c?.closest('.pane'); S.reveal = null; // collapsed from its foot, far below its header: bring the header back rather than leave the reader lost
+    if (c && c.getBoundingClientRect().top < pn.getBoundingClientRect().top) pn.scrollTop -= pn.getBoundingClientRect().top - c.getBoundingClientRect().top + 10; }
+  if (S.focusEd) { S.focusEd = false; const w = document.querySelector('#app .gpane.focused .doc .wys'); if (w) { w.focus(); getSelection().collapse(w, 0); } }
+  else if (fk != null) document.querySelector(`#app [data-fk="${fk}"]`)?.focus({ preventScroll: true }); else if (focus) document.querySelector(`#app [data-act="${focus}"]`)?.focus();
+  const ed = (document.querySelector('[data-ed]') || document.querySelector('.main')).clientWidth;
+  const st = v.panels.map(p => `${p === 'insp' ? 'inspector' : p === 'nav' ? 'notes column' : p}: ` +
+    (on[p] ? `<b>pinned ${Math.round(S.w[p])}</b>` : S.over === p || v.floats?.(p) ? '<b>over editor</b>' : v.wants(p) && !S.writing ? '<span class="warn">no room</span>' : 'closed')).join(' · ') + (v.extra ? ' · ' + v.extra() : '');
+  document.getElementById('proto').innerHTML = `<div class="l1"><button data-act="cycle:-1">←</button>
+    <span class="vs">${Object.keys(V).map(k => `<button class="${k === S.v ? 'on' : ''}" data-act="v:${k}">${k}</button>`).join('')}</span>
+    <span class="name">${S.v} · ${v.name}</span><button data-act="cycle:1">→</button>
+    <span class="st">window <b>${W()}</b> · ${S.v === 'G' ? 'note pane' : 'editor'} <b class="${ed < MIN ? 'warn' : ''}">${ed}</b>${S.writing ? ' · <b>writing mode</b>' : ''} · ${st}</span>
+    ${S.v === 'H' ? `<span class="mk">List column: ${[1, 2].map(n => `<button class="${n === S.hmode ? 'on' : ''}" data-act="hmode:${n}">H${n}</button>`).join('')}</span><span class="mk">Folder tab: ${[4, 1, 2, 3, 0].map(n => `<button class="${n === S.q ? 'on' : ''}" data-act="q:${n}">${n ? 'Q' + n : 'round 3'}</button>`).join('')}</span>${S.q === 4 ? `<span class="mk">Cards: ${[0, 1].map(n => `<button class="${!!n === S.grid ? 'on' : ''}" data-act="grid:${n}">${n ? 'grid' : 'column'}</button>`).join('')}</span>` : ''}${S.q ? '' : `<span class="mk">Expanded: ${['short', 'full'].map(n => `<button class="${n === S.hx ? 'on' : ''}" data-act="hx:${n}">${n}</button>`).join('')}</span>`}` : ''}
+    ${S.v === 'G' ? `<span class="mk">Note click: ${[1, 2, 3].map(n => `<button class="${n === S.gmode ? 'on' : ''}" data-act="gmode:${n}">G${n}</button>`).join('')}</span>` : ''}
+    <span class="mk">More: ${V[S.v].navInPanel === false || S.v === 'C' ? '<span title="icon-only nav: More is always a menu here">menu</span>' : Object.keys(MORE_KINDS).map(k => `<button class="${k === moreKind() ? 'on' : ''}" data-act="morekind:${k}" title="${MORE_KINDS[k].replace(/"/g, '&quot;')}">${k}</button>`).join('')}</span>
+    <button data-act="notes">${S.notes ?? W() >= 900 ? 'hide' : 'show'} trade-offs</button><button data-act="theme">${S.theme === 'dark' ? '☀ light' : '☾ dark'}</button></div>
+    ${S.notes ?? W() >= 900 ? `<div class="l2"><b>+</b> ${v.pro} <i>−</i> ${v.con}${S.v === 'G' ? `<br><b>G${S.gmode}</b> ${GM[S.gmode]}` : ''}${S.v === 'H' ? `<br>${HM[S.hmode]}<br>${S.q ? QT[S.q] + (S.q === 4 ? ' ⌘-click or middle-click opens a note behind; ↑↓ Enter ⌘Enter.' : ' Click text to edit in place; click a title to open it in a tab; ⌘-click or middle-click opens it behind; ↑↓ Enter ⌘Enter Esc.') : `<b>Expanded (${S.hx})</b> ${HX[S.hx]}`}` : ''}${V[S.v].navInPanel === false || S.v === 'C' ? '' : `<br><b>More (${moreKind()})</b> ${MORE_KINDS[moreKind()]}`}</div>` : ''}`;
+  document.documentElement.style.setProperty('--pb', document.getElementById('proto').offsetHeight + 20 + 'px');
+}
+
+/* ---------- actions ---------- */
+function toggle(p) {
+  S.menu = false;
+  if (S.v === 'F' && p !== 'insp') return ftoggle(p);
+  const on = V[S.v].on();
+  if (on[p]) { S.want[p] = false; S.over = null; }
+  else if (S.over === p) { S.over = null; if (S.v !== 'B') S.want[p] = S.want[p] && !S.writing; }
+  else {
+    S.want[p] = true;
+    S.recent = S.recent.filter(x => x !== p).concat(p); // A: the panel just asked for is the last to give way
+    S.over = V[S.v].on()[p] ? null : p;
+  }
+}
+const ACT = {
+  toggle, close: () => { S.over = null; S.menu = false; S.moreOpen = false; },
+  writing: () => { S.writing = !S.writing; S.over = null; },
+  folder: f => { if (S.v === 'H' && S.hmode === 1) { if (S.over === 'folders') S.over = null; return gFolder(f || ''); }
+    if (S.v === 'G') { if (S.over === 'folders') S.over = null; return gFolder(f || ''); } // a floating tree gets out of the way so the folder tab shows
+    if (S.v === 'F' && (!S.want.list || S.writing)) { if (S.writing) ftoggle('list'); else { S.want.list = true; S.opened.push('list'); } }
+    S.folder = f || null; S.menu = false; S.page = null; },
+  allnotes: () => { if (S.v === 'G') return gFolder(''); S.folder = null; if (!V[S.v].on().list) S.over = 'list'; },
+  itab: t => { S.inspTab = t; },
+  insp: t => { const open = V[S.v].on().insp || S.over === 'insp'; if (open && S.inspTab !== t) S.inspTab = t; else { S.inspTab = t; toggle('insp'); } },
+  peek: p => { S.over = S.over === p ? null : p; },
+  menu: () => { S.menu = !S.menu; },
+  more: () => { S.moreOpen = !S.moreOpen; },
+  page: t => { if (TAB()) { S.moreOpen = false; return openTab(S.g.focus, { kind: 'page', id: t }); } S.page = t; if (!'ab'.includes(moreKind()) || V[S.v].navInPanel === false || S.v === 'C') S.moreOpen = false; },
+  morekind: k => { S.more = k; S.moreOpen = false; url(); },
+  step: n => { n = +n; S.over = null; if (n === 1) S.writing = true; else { S.writing = false; S.step = n; } },
+  theme: () => { S.theme = S.theme === 'dark' ? 'light' : 'dark'; url(); },
+  v: k => { S.v = k; S.over = null; S.menu = false; S.folder = null; S.page = null; S.writing = false; S.want.folders = S.want.list = S.want.insp = true; if (k === 'G') gInit(); if (k === 'F') fInit(); if (k === 'H') hInit(); url(); },
+  hmode: n => { S.hmode = +n; S.want.list = true; hInit(); url(); },
+  hx: n => { S.hx = n; url(); },
+  q: n => { S.q = +n; S.qs = {}; url(); },
+  qexp: k => { if (S.q === 4 && qst(+k) !== 'closed') S.reveal = +k; qExp(+k); },
+  qfull: k => { k = +k; S.qs[k] = qst(k) === 'full' ? 'short' : 'full'; },
+  qsortset: i => { S.qsort = +i; },
+  grid: n => { S.grid = n === '1'; url(); },
+  qsort: () => { S.qsort = (S.qsort + 1) % SORTS.length; },
+  hexp: k => { k = +k; S.hexp.has(k) ? S.hexp.delete(k) : S.hexp.add(k); },
+  hopen: k => { const g = S.g; S.focusEd = S.q > 0; openTab(g.panes.length === 2 ? 1 - g.focus : g.focus, { kind: 'note', id: +k }); }, // with a split, notes open in the other pane
+  hnote: k => openTab(S.g.focus, { kind: 'note', id: +k }),
+  hastab: () => gFolder(S.folder || ''),
+  hsplit: () => { const g = S.g; if (g.panes.length === 2) return; const p = g.panes[g.focus], t = p.tabs[p.active]; if (!t) return;
+    if (p.tabs.length > 1) { p.tabs.splice(p.active, 1); p.active = Math.max(0, p.active - 1); g.panes.push({ tabs: [t], active: 0 }); } else g.panes.push({ tabs: [{ ...t }], active: 0 });
+    g.focus = 1; },
+  esc: () => { if (S.menu || S.moreOpen) S.menu = S.moreOpen = false; else if (S.over) S.over = null; else if (S.v === 'F' && S.opened.length) S.want[S.opened.pop()] = false; },
+  closefloat: () => { for (const p of V.F.lay().fl) { S.want[p] = false; S.opened = S.opened.filter(x => x !== p); } },
+  gmode: n => { S.gmode = +n; gInit(); url(); },
+  gnote: i => gNote(+i),
+  gnav: f => { const p = S.g.panes[S.g.focus]; p.tabs[p.active] = { ...p.tabs[p.active], id: f }; },
+  gback: () => { const p = S.g.panes[S.g.focus], t = p.tabs[p.active]; p.tabs[p.active] = { kind: 'folder', id: t.back, preview: t.preview }; },
+  gtab: a => { const [i, j] = a.split('.').map(Number); S.g.focus = i; S.g.panes[i].active = j; last = { tab: S.g.panes[i].tabs[j], at: Date.now() }; },
+  gclose: a => { const [i, j] = a.split('.').map(Number), g = S.g, p = g.panes[i]; p.tabs.splice(j, 1); if (p.active > j || p.active >= p.tabs.length) p.active = Math.max(0, p.active - 1);
+    if (!p.tabs.length && g.panes.length === 2) { g.panes.splice(i, 1); g.focus = 0; } },
+  notes: () => { S.notes = !(S.notes ?? W() >= 900); },
+  gfocus: () => { S.g.focus = 1 - S.g.focus; },
+  cycle: d => { const k = Object.keys(V); ACT.v(k[(k.indexOf(S.v) + +d + k.length) % k.length]); },
+};
+function url() { const u = new URL(location.href); u.searchParams.set('v', S.v); u.searchParams.set('theme', S.theme); if (S.more) u.searchParams.set('more', S.more); if (S.v === 'G') u.searchParams.set('g', S.gmode); else u.searchParams.delete('g');
+  if (S.v === 'H') { u.searchParams.set('h', S.hmode); u.searchParams.set('q', S.q); if (S.q === 4 && S.grid) u.searchParams.set('grid', 1); else u.searchParams.delete('grid'); if (S.q) u.searchParams.delete('x'); else u.searchParams.set('x', S.hx); } else { u.searchParams.delete('h'); u.searchParams.delete('x'); u.searchParams.delete('q'); } history.replaceState(null, '', u); }
+
+document.addEventListener('click', e => {
+  if (S.v === 'H' && (e.metaKey || e.ctrlKey)) { const o = e.target.closest('[data-open]'); if (o) { hBg(+o.dataset.open); e.preventDefault(); render(); return; } }
+  if (TAB() && e.detail >= 2 && last && Date.now() - last.at < 600) { last.tab.preview = false; last = null; render(); return; } // double click keeps the tab
+  const sec = e.target.closest('[data-pane]'); if (sec && TAB() && S.g.panes[+sec.dataset.pane]) S.g.focus = +sec.dataset.pane;
+  const a = e.target.closest('[data-act]');
+  if (!a) { if (S.menu || (S.moreOpen && !'ab'.includes(moreKind()))) { S.menu = S.moreOpen = false; render(); } return; }
+  const [name, arg] = a.dataset.act.split(':'); ACT[name](arg); render();
+});
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-act]')) { // Enter on a row expands it; Enter on the title (a real button) opens it
+    const [name, arg] = e.target.dataset.act.split(':'); ACT[name](arg); e.preventDefault(); render(); return; }
+  const wys = e.target.closest?.('.wys'), qn = e.target.closest?.('.qnote');
+  if (qn) { const k = +qn.dataset.fk, mod2 = e.metaKey || e.ctrlKey;
+    if (mod2 && e.key === 'Enter') { ACT.hopen(k); e.preventDefault(); render(); return; }
+    if (wys && e.key === 'Escape') { wys.blur(); qn.focus(); e.preventDefault(); return; }      // Esc leaves in-place editing, back to the note in the list
+    if (!wys && e.target === qn) {
+      if (e.key === 'Enter') { qExp(k); e.preventDefault(); render(); return; }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { const to = e.key === 'ArrowDown' ? qn.nextElementSibling : qn.previousElementSibling; e.preventDefault();
+        if (to?.matches('.qnote')) { if (S.q === 3 && Object.keys(S.qs).length) { S.qs = { [+to.dataset.fk]: 'short' }; render(); document.querySelector(`[data-fk="${to.dataset.fk}"]`)?.focus(); } else to.focus(); to.scrollIntoView?.({ block: 'nearest' }); }
+        return; } } }
+  const typing = e.target.matches('input, textarea, [contenteditable]');
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key === '\\') {
+    if (S.v === 'E') ACT.step(S.writing ? V.E.maxStep() : V.E.step() === 3 ? 2 : V.E.step() === 2 ? 1 : 3);
+    else toggle(S.v === 'C' ? 'nav' : e.shiftKey && S.v !== 'G' && !(S.v === 'H' && S.hmode === 1) ? 'list' : 'folders');
+  } else if (mod && e.key === '|') toggle(S.v === 'C' ? 'nav' : S.v === 'G' || (S.v === 'H' && S.hmode === 1) ? 'folders' : 'list');
+  else if (mod && e.key.toLowerCase() === 'i') toggle('insp');
+  else if (mod && e.key === '.') ACT.writing();
+  else if (e.key === 'Escape') ACT.esc();
+  else if (!typing && !mod && e.key === 'ArrowLeft') ACT.cycle(-1);
+  else if (!typing && !mod && e.key === 'ArrowRight') ACT.cycle(1);
+  else return;
+  e.preventDefault(); render();
+});
+
+/* drag a panel edge to resize; widths live in memory only, and the editor keeps MIN */
+let drag = null;
+document.addEventListener('pointerdown', e => {
+  const s = e.target.closest('.split'); if (!s) return;
+  const p = s.dataset.split;
+  drag = { p, dir: +s.dataset.dir, x: e.clientX, w: S.w[p], max: S.w[p] + (document.querySelector('[data-ed]') || document.querySelector('.main')).clientWidth - MIN };
+  document.body.classList.add('dragging'); e.preventDefault();
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  S.w[drag.p] = Math.max(160, Math.min(drag.max, drag.w + drag.dir * (e.clientX - drag.x)));
+  render();
+  document.querySelector(`.split[data-split="${drag.p}"]`)?.classList.add('drag');
+});
+document.addEventListener('pointerup', () => { if (drag) { drag = null; document.body.classList.remove('dragging'); render(); } });
+/* G: drag a note from a folder tab onto a folder in the tree (or a child-folder chip) to move it. Faked: it just retags the note. */
+let dragNote = null;
+document.addEventListener('dragstart', e => { const n = e.target.closest?.('[data-note]'); if (n) { dragNote = +n.dataset.note; e.dataTransfer.setData('text/plain', NOTES[dragNote][0]); } });
+document.addEventListener('dragover', e => { const f = e.target.closest?.('[data-folder]'); if (f && dragNote != null) { e.preventDefault(); f.classList.add('dropping'); } });
+document.addEventListener('dragleave', e => e.target.closest?.('[data-folder]')?.classList.remove('dropping'));
+document.addEventListener('drop', e => { const f = e.target.closest?.('[data-folder]'); if (!f || dragNote == null) return; e.preventDefault();
+  NOTES[dragNote][3] = f.dataset.folder; S.toast = `moved "${NOTES[dragNote][0]}" to ${f.dataset.folder}`; dragNote = null; render(); });
+document.addEventListener('dragend', () => { dragNote = null; });
+/* in-place editing (faked): the rendered preview is contenteditable; edits are kept in memory and mirrored to the same note open elsewhere */
+document.addEventListener('auxclick', e => { if (e.button !== 1 || S.v !== 'H') return; const o = e.target.closest('[data-open]'); if (o) { hBg(+o.dataset.open); e.preventDefault(); render(); } });
+document.addEventListener('mousedown', e => { if (e.button === 1 && e.target.closest?.('[data-open]')) e.preventDefault(); });
+document.addEventListener('focusin', e => { const w = e.target.closest?.('.qview.q3 .wys'); if (!w) return; const n = w.closest('.qnote'); // Q3: clicking into the text shows the whole note
+  if (n.classList.contains('short')) { n.classList.replace('short', 'full'); S.qs[+w.dataset.edit] = 'full'; } });
+document.addEventListener('input', e => { const w = e.target.closest?.('.wys[data-edit]'); if (!w) return; const k = w.dataset.edit;
+  NOTE_HTML[k] = w.innerHTML.replace(/ class="cur"/g, '').replace(/ cur"/g, '"');
+  document.querySelectorAll(`.wys[data-edit="${k}"]`).forEach(x => { if (x !== w) x.innerHTML = NOTE_HTML[k]; });
+  const sv = w.closest('.qnote')?.querySelector('.qsaved'); if (sv) { sv.textContent = 'Saving…'; clearTimeout(sv._t); sv._t = setTimeout(() => { sv.textContent = 'Saved'; }, 700); } });
+document.addEventListener('selectionchange', () => { // the block with the cursor shows its markdown mark, as the editor does
+  document.querySelectorAll('.wys .cur').forEach(x => x.classList.remove('cur'));
+  const w = document.activeElement; if (!w?.matches?.('.wys')) return; let n = getSelection().anchorNode; n = n && (n.nodeType === 1 ? n : n.parentElement);
+  while (n && n !== w && n.parentElement !== w) n = n.parentElement; if (n && n !== w) n.classList.add('cur'); });
+addEventListener('resize', render);
+render();
+</script>
+</body>
+</html>
