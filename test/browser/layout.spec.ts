@@ -5,9 +5,6 @@ const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });
 const editorPane = (page: Page) => page.getByRole("main", { name: "Editor" });
 const width = async (page: Page) => (await editorPane(page).boundingBox())!.width;
-/** In focus, the box of what is in front. */
-const filled = (page: Page) => page.locator(".group-body").filter({ visible: true }).boundingBox();
-const WINDOW = { x: 0, y: 0, width: 1280, height: 720 };
 const listHeading = (page: Page) => editorPane(page).getByRole("heading", { level: 1 });
 
 async function newFolder(page: Page, name: string, parent?: string) {
@@ -137,7 +134,7 @@ test("a folder is renamed in place", async ({ page }) => {
   await expect(tree(page).getByRole("treeitem")).toHaveText([/^All notes/, /^Unsorted/, /^Work/]);
 });
 
-test("More expands and collapses Contacts, Uploads, and History, and each mode names what builds it", async ({ page }) => {
+test("More expands and collapses Contacts, Uploads, and History, and a mode not built yet names what builds it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const modes = page.getByRole("navigation", { name: "Modes" });
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar"]);
@@ -151,7 +148,8 @@ test("More expands and collapses Contacts, Uploads, and History, and each mode n
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
-  await expect(editorPane(page).locator(".mode-view")).toHaveText("HistoryHistory arrives with #5.");
+  await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");
+  await expect(editorPane(page)).toContainText("Nothing has been written in this workspace yet.");
 
   await less.click();
   await expect(more).toHaveAttribute("aria-expanded", "false");
@@ -254,7 +252,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(panel.getByRole("button", { name: "Archive" })).toBeDisabled();
 
   await inspector.getByRole("tab", { name: "History" }).click();
-  await expect(panel).toHaveText("Who changed this note and how arrives with #5.");
+  await expect(panel.getByRole("list", { name: "Changes" }).getByRole("listitem")).toHaveAccessibleName("Change 1 by Ada Lovelace");
   await inspector.getByRole("tab", { name: "Backlinks" }).click();
   await expect(panel).toHaveText("Notes that link here arrive with #13.");
 
@@ -271,7 +269,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(inspector).toHaveCount(0);
 });
 
-test("⌘. toggles focus, which shows the note with neither side nor a bar of icons, and gives the editor the whole window", async ({ page }) => {
+test("⌘. toggles writing mode, which shows the note with neither side nor a bar of icons, and gives the editor the whole window", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
   await page.goto(`/note/draft-${note.id}`);
@@ -281,24 +279,23 @@ test("⌘. toggles focus, which shows the note with neither side nor a bar of ic
   await page.getByRole("textbox", { name: "Note text" }).click();
   await page.keyboard.press("ControlOrMeta+.");
 
-  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
   await expect(tree(page)).toHaveCount(0);
   await expect(page.getByRole("complementary")).toHaveCount(0);
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  await expect(page.getByRole("group", { name: "Window" })).toHaveCount(0);
-  await expect(page.getByRole("tab")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Focus" })).toHaveCount(1);
-  expect(await filled(page)).toEqual(WINDOW);
+  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
+  expect(await width(page)).toBe(1280);
+  expect((await editorPane(page).boundingBox())!.x).toBe(0);
 
   await page.reload();
-  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  await page.getByRole("button", { name: "Focus" }).click();
+  await page.getByRole("button", { name: "Writing mode" }).click();
   await expect(tree(page)).toBeVisible();
   expect(await width(page)).toBe(764);
 });
 
-test("focus shows neither bar when the sidebar and the inspector were closed, on a note and on a mode, and leaving it brings the bars back", async ({ page }) => {
+test("writing mode shows neither bar when the sidebar and the inspector were closed, on a note and on a mode, and leaving it brings the bars back", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
   await page.goto(`/note/draft-${note.id}`);
@@ -310,13 +307,13 @@ test("focus shows neither bar when the sidebar and the inspector were closed, on
 
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  expect(await filled(page)).toEqual(WINDOW);
+  expect(await width(page)).toBe(1280);
 
   await page.goto("/calendar");
   await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
   await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.getByRole("complementary")).toHaveCount(0);
-  expect(await filled(page)).toEqual(WINDOW);
+  expect(await width(page)).toBe(1280);
 
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();

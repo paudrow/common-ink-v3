@@ -1,4 +1,4 @@
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
@@ -38,16 +38,21 @@ interface Props {
   noteId: string;
   onLoaded: (note: Note) => void;
   onSaved: (note: Note) => void;
-  /** Called on each change typed, pasted, or undone, not on merges from the server. */
+  /** The note's latest revision as the workspace knows it. A later one than the editor has is read in. */
+  revision: number | undefined;
+  /** Called on each change typed or pasted, not on changes from the server. */
   onEdit: () => void;
+  /** Something the member should know about this note, such as an undo that failed. Shown in place of the save state. */
+  notice: string | null;
   /** Whether the editor is to take the cursor, now or once the note has loaded. `onFocused` is called when it has. */
   focus: boolean;
   onFocused: () => void;
   meta: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, focus, onFocused, meta }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, meta }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const syncRef = useRef<NoteSync | null>(null);
   const edited = useRef(onEdit);
   edited.current = onEdit;
   const viewRef = useRef<EditorView | null>(null);
@@ -68,16 +73,17 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, foc
         const fresh = note.text === "";
         const text = fresh ? TITLE_MARK : note.text;
         // The sync is told the mark is what the server has, so an untouched note is never sent: there is nothing of the member's in it.
-        sync = new NoteSync(workspaceId, { ...note, text }, onSaved, setSaveState);
+        sync = syncRef.current = new NoteSync(workspaceId, { ...note, text }, onSaved, setSaveState);
         view = viewRef.current = new EditorView({
           parent: host.current,
           state: EditorState.create({
             doc: text,
             selection: { anchor: fresh ? text.length : 0 },
             extensions: [
+              // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
               history(),
               titleMarkOnce,
-              keymap.of([...defaultKeymap, ...historyKeymap]),
+              keymap.of(defaultKeymap),
               markdown(),
               noteHighlighting,
               EditorView.lineWrapping,
@@ -102,6 +108,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, foc
 
     return () => {
       cancelled = true;
+      syncRef.current = null;
       viewRef.current = null;
       void sync?.close();
       view?.destroy();
@@ -114,13 +121,17 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, foc
     now.current.onFocused();
   }, [focus]);
 
+  useEffect(() => {
+    if (revision !== undefined) void syncRef.current?.pull(revision).catch(() => {});
+  }, [revision]);
+
   if (missing) return <p className="notice">This note doesn't exist, or you can't see it.</p>;
   return (
     <section className="note" data-save-state={saveState}>
       <header className="note-bar">
         <div className="note-meta">{meta}</div>
         <div className="save-state" role="status">
-          {SAVE_LABEL[saveState]}
+          {notice ?? SAVE_LABEL[saveState]}
         </div>
       </header>
       <div className="note-scroll">

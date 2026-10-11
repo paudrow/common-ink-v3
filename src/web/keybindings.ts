@@ -1,10 +1,16 @@
 /** Which command each chord runs. `mod` is ⌘ or Ctrl. */
 export const KEYBINDINGS: Readonly<Record<string, string>> = {
-  "mod+.": "view.toggleFocus",
+  "mod+.": "view.toggleWritingMode",
   "mod+\\": "view.toggleSidebar",
   "mod+p": "notes.quickOpen",
   "mod+shift+p": "commands.show",
+  "mod+z": "history.undo",
+  "mod+shift+z": "history.redo",
+  "mod+y": "history.redo",
 };
+
+/** Commands a text field has its own answer to. A key bound to one is left to the field while it has focus. */
+export const FIELD_COMMANDS: ReadonlySet<string> = new Set(["history.undo", "history.redo"]);
 
 interface Pressed {
   key: string;

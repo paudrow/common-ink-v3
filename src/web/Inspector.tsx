@@ -1,14 +1,27 @@
 import { useId, useRef, useState, type ReactNode } from "react";
-import type { NoteSummary } from "../core/protocol.ts";
+import type { Note, NoteSummary } from "../core/protocol.ts";
 import { notePath } from "../core/slug.ts";
 import { pathName, type FolderTree } from "./folders.ts";
+import { NoteHistory } from "./History.tsx";
 import type { IconName } from "./icons.tsx";
 import { Soon } from "./Soon.tsx";
 import { ago, useNow } from "./time.ts";
 
 /** What the inspector is about: the thing in front. A page is anything that is neither a note nor a folder's list. */
 export type Subject =
-  | { kind: "note"; note: NoteSummary; tree: FolderTree; canEdit: boolean; onMove: (noteId: string, folderId: string) => Promise<void> }
+  | {
+      kind: "note";
+      workspaceId: string;
+      note: NoteSummary;
+      tree: FolderTree;
+      canEdit: boolean;
+      onMove: (noteId: string, folderId: string) => Promise<void>;
+      /** Whether the note has changes by someone else that the member hasn't been shown. */
+      unseen: boolean;
+      onSeen: (noteId: string, revision: number) => void;
+      /** The note after History reverted it or applied a selection of its changes. */
+      onChanged: (note: Note) => void;
+    }
   | { kind: "folder"; name: string; notes: readonly NoteSummary[] }
   | { kind: "page" };
 
@@ -22,12 +35,23 @@ interface InspectorView<K extends Kind = Kind> {
   icon: IconName;
   for: K;
   render: (subject: SubjectOf<K>) => ReactNode;
+  /** What its tab is marked with, by a dot and these words, while there is something in it the member hasn't seen. */
+  mark?: (subject: SubjectOf<K>) => string | undefined;
 }
+
+export const UNSEEN = "Changes you haven't seen";
 
 const view = <K extends Kind>(v: InspectorView<K>) => v as unknown as InspectorView;
 
 const INSPECTOR_VIEWS: readonly InspectorView[] = [
-  view({ id: "history", label: "History", icon: "history", for: "note", render: () => <Soon issue={5}>Who changed this note and how arrives with</Soon> }),
+  view({
+    id: "history",
+    label: "History",
+    icon: "history",
+    for: "note",
+    render: (s) => <NoteHistory workspaceId={s.workspaceId} noteId={s.note.id} revision={s.note.revision} canEdit={s.canEdit} onChanged={s.onChanged} onSeen={s.onSeen} />,
+    mark: (s) => (s.unseen ? UNSEEN : undefined),
+  }),
   view({ id: "backlinks", label: "Backlinks", icon: "backlinks", for: "note", render: () => <Soon issue={13}>Notes that link here arrive with</Soon> }),
   view({ id: "info", label: "Info", icon: "info", for: "note", render: (subject) => <Info {...subject} /> }),
   view({ id: "folder-info", label: "Info", icon: "info", for: "folder", render: (subject) => <FolderInfo {...subject} /> }),
@@ -64,8 +88,18 @@ export function Inspector({ subject, picked, onPick }: Props) {
         <>
           <div role="tablist" className="tabs">
             {views.map((v) => (
-              <button key={v.id} type="button" role="tab" id={`${ids}-${v.id}`} aria-selected={v === shown} aria-controls={`${ids}-panel`} onClick={() => onPick(v.id)}>
+              <button
+                key={v.id}
+                type="button"
+                role="tab"
+                id={`${ids}-${v.id}`}
+                aria-selected={v === shown}
+                aria-controls={`${ids}-panel`}
+                aria-description={v.mark?.(subject)}
+                onClick={() => onPick(v.id)}
+              >
                 {v.label}
+                {v.mark?.(subject) && <span className="unseen-dot" />}
               </button>
             ))}
           </div>

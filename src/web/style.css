@@ -14,6 +14,9 @@
   --line-strong: #d9d4ca;
   --faint: #a8a39b;
   --danger: #c2410c;
+  --added: #15803d;
+  --added-soft: rgb(21 128 61 / 0.12);
+  --removed-soft: rgb(194 65 12 / 0.12);
   --shadow: 0 18px 48px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -38,6 +41,9 @@
     --line-strong: #403e3b;
     --faint: #6b6762;
     --danger: #f08a5d;
+    --added: #6dc98a;
+    --added-soft: rgb(109 201 138 / 0.14);
+    --removed-soft: rgb(240 138 93 / 0.14);
     --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
   }
 }
@@ -960,7 +966,7 @@ button.link:hover {
   scrollbar-width: none;
 }
 
-/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
+/* The window's own buttons, at the ends of the tab rows where no tab scrolls over them: the sidebar's before the first tab of the top left group, the rest after the last of the top right. */
 .window-controls {
   display: flex;
   flex: none;
@@ -969,51 +975,8 @@ button.link:hover {
   padding: 0 6px;
 }
 
-/* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
-.focus-button {
-  align-self: center;
-  margin: 0 6px 0 auto;
-}
-
-.group:not([data-front]) .focus-button {
-  opacity: 0.45;
-}
-
-/* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
-.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle),
-.groups[data-focus-mode] .group:not([data-front]),
-.groups[data-focus-mode] .resize-handle {
-  visibility: hidden;
-}
-
-.groups[data-focus-mode] .group[data-front] {
-  position: fixed;
-  inset: 0;
-  background: var(--bg);
-}
-
-.groups[data-focus-mode] .group[data-front] .tab-row {
-  position: absolute;
-  top: 3px;
-  right: 0;
-  z-index: 1;
-  height: auto;
-  border: 0;
-  background: none;
-}
-
-.groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
-  display: none;
-}
-
-/* A note's bar ends short of the way out, so its save state is not under it. */
-.groups[data-focus-mode] .note-bar {
-  padding-right: 40px;
-}
-
-.groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
-  background: none;
-  opacity: 0.45;
+.window-controls.end {
+  margin-left: auto;
 }
 
 /* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
@@ -1465,4 +1428,352 @@ button.link:hover {
   flex: none;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* History */
+
+.unseen-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.rail .icon-button,
+.tabs [role="tab"] {
+  position: relative;
+}
+
+.tabs .unseen-dot {
+  top: 9px;
+  right: -9px;
+}
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.popover.right > .changes {
+  flex: 1;
+  margin: 0;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.changes .error,
+.changes .empty {
+  margin: 0;
+}
+
+.changes .empty {
+  text-align: left;
+}
+
+.selection {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  font-size: 12px;
+}
+
+.selection-hint {
+  flex-basis: 100%;
+  color: var(--muted);
+}
+
+.change-meta button.link {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.change-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.change {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.change + .change {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.change-head,
+.change-meta,
+.change-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.change-head input {
+  margin: 0;
+}
+
+.change-author {
+  font-weight: 600;
+}
+
+.change[data-reverted] .change-author {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.badge,
+.label-chip {
+  padding: 0 6px;
+  border-radius: 99px;
+  font-size: 11px;
+}
+
+.badge {
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+}
+
+.label-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.change time,
+.change-meta,
+.change-note,
+.change-actions {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.change-stat {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.added {
+  color: var(--added);
+}
+
+.removed {
+  color: var(--danger);
+}
+
+.change-note {
+  margin: 0;
+  font-style: italic;
+}
+
+.change-actions button.link {
+  text-decoration: underline;
+}
+
+.change-actions input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.diff {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.hunk-head {
+  padding: 1px 8px;
+  background: var(--hover);
+  color: var(--faint);
+}
+
+.diff-line {
+  display: block;
+  padding: 0 8px 0 20px;
+  text-decoration: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+ins.diff-line {
+  background: var(--added-soft);
+}
+
+del.diff-line {
+  background: var(--removed-soft);
+}
+
+ins.diff-line::before,
+del.diff-line::before {
+  position: absolute;
+  margin-left: -13px;
+  color: var(--muted);
+  content: "+";
+}
+
+del.diff-line::before {
+  content: "−";
+}
+
+.diff-none {
+  margin: 0;
+  padding: 2px 8px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.history-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 54rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.history-mode h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-filters input[type="date"] {
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+}
+
+.note-scope {
+  position: relative;
+}
+
+.note-scope-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 260px;
+  max-height: 320px;
+  padding: 8px;
+}
+
+.note-scope-menu ul {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.note-scope-menu label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 2px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.note-scope-menu label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-total {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.activity-grid {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.activity-week {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-day {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: var(--hover);
+  cursor: pointer;
+}
+
+.activity-day[data-level="1"] {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.activity-day[data-level="2"] {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.activity-day[data-level="3"] {
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+.activity-day[data-level="4"] {
+  background: var(--accent);
+}
+
+.activity-day[aria-pressed="true"] {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
 }

@@ -29,6 +29,19 @@ describe("notes", () => {
     expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).revision).toBe(2);
   });
 
+  it("lists only the notes changed at or after a time when asked to", async () => {
+    const ada = await newMember();
+    await perform(env.DB, ada, { type: "note.create", text: "# Old" }, 1000);
+    const edited = await perform(env.DB, ada, { type: "note.create", text: "# Edited" }, 2000);
+    await perform(env.DB, ada, { type: "note.write", id: edited.id, baseRevision: 1, text: "# Edited again" }, 5000);
+    await perform(env.DB, ada, { type: "note.create", text: "# New" }, 6000);
+    const titles = async (updatedSince?: number) => (await perform(env.DB, ada, { type: "note.list", updatedSince })).map((n) => n.title);
+
+    expect(await titles(5000)).toEqual(["New", "Edited again"]);
+    expect(await titles(6001)).toEqual([]);
+    expect(await titles()).toEqual(["New", "Edited again", "Old"]);
+  });
+
   it("records each save as a change with its author and the revision it was based on", async () => {
     const ada = await newMember("Ada Lovelace");
     const note = await perform(env.DB, ada, { type: "note.create", text: "# Plan" });

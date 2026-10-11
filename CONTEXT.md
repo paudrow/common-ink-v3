@@ -104,7 +104,7 @@ _Avoid_: Pane
 Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
 
 **Window buttons**:
-The buttons that act on the window and on no one note, whatever is open: the sidebar's and the inspector's, together before the first tab of the top left editor group, where the sidebar meets the editor area.
+The buttons that act on the window and on no one note, at the ends of the tab rows along the top of the editor area, whatever is open: the sidebar's before the first tab at the top left, the inspector's and writing mode's after the last at the top right.
 
 **Sidebar bar**, **Inspector bar**:
 What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
@@ -112,9 +112,8 @@ What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The s
 **Inspector**:
 The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line.
 
-**Focus**:
-One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
-_Avoid_: Writing mode, fullscreen
+**Writing mode**:
+The editor area alone: no sidebar, no inspector, and neither bar. ⌘. and the window button leave it.
 
 **Command**:
 A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.
@@ -155,15 +154,25 @@ An author that is not a person. A member connects it. It acts with that member's
 _Avoid_: Bot
 
 **History**:
-The ordered record of every change in a workspace. Undo, redo, revert, and applying a selection move through it. The diff of the open note and the workspace history are this same record.
+The ordered record of every change in a workspace. Undo, redo, revert, and applying a selection move through it. Each is recorded as a new change that names the changes it took back out, so nothing is erased and a change either still stands or was taken back out. The diff of the open note and the workspace history are this same record.
 _Avoid_: Log, timeline, versions
 
 **Activity**:
 A view of history showing how many changes a member authored on each day, in that member's timezone. An agent's changes belong to the agent.
 _Avoid_: Contributions, streak
 
+**Revert**:
+Putting a note back to how it was at a revision, as a new change. Applying a selection takes only the chosen changes back out, or puts back ones that were taken out, and keeps the rest.
+_Avoid_: Restore, rollback
+
+**Undo**:
+Taking back the author's own latest change to a note that still stands. Redo puts back what their latest undo took out, until they edit again. Another author's changes are kept.
+
+**Unseen change**:
+A change to a note by anyone but the member, their own agent included, made since the member last looked at that note's history.
+
 **Label**:
-A name attached to one revision in history.
+A name attached to one revision in history. A revision has at most one, and a note uses a name once.
 
 ## Configuration
 
