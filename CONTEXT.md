@@ -242,7 +242,7 @@ A timer started from the command palette that belongs to no note. It shows in th
 Where an embed keeps what it shows that is more than a word in the line: a video, a post, an HTML embed's frame. Room is kept for it under the line that writes it, whether or not the cursor is on that line, and what fills the room is drawn once and left alone while the rest of the note is written. The room's size is read from the note alone.
 
 **Media embed**:
-An embed that shows something from another site below its line: a YouTube video (`::youtube{address}`) or a social post (`::social{address}`). Nothing is loaded from the other site until the member asks for it. A link embed (`::link{address title}`) is drawn from what the note says alone.
+Something from another site shown below the line that names it: a YouTube video, or a post on X or Bluesky. It is written as its web address alone on a line, with no syntax of its own, and the line stays the link it is. Room for it and a button are there as soon as the address is, and nothing is loaded from the other site until the member presses the button. An address inside a paragraph is only a link. `::youtube{address}`, `::social{address}` and `::link{address title}` are how notes used to write these: a note that has one still shows it, and nothing offers or writes them.
 
 **HTML embed**:
 A block embed (`:::html{}`) whose body is HTML, run below the block when the member presses Run, in a frame with an origin of its own. It can't read the app, the member's session, or anything the browser or the server keeps, can't fetch or send anything, and can't send its frame anywhere. The one way out it has is a WebRTC connection, which browsers give no way to refuse.

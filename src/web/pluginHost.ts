@@ -215,7 +215,10 @@ export function createPluginHost({ plugins, required = [], settings, write, mac,
           owners.set(embed, owner);
           return dispose;
         },
-        list: () => contributions().embeds.map(({ name, title, block, starts }) => ({ name, title, block, starts })),
+        list: () =>
+          contributions()
+            .embeds.filter((e) => e.menu !== false)
+            .map(({ name, title, block, starts }) => ({ name, title, block, starts })),
       },
       completions: {
         register(completion) {

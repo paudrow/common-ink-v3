@@ -59,7 +59,7 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 
 - `host.commands` registers commands, lists every command, and runs one by id. A command's `keys` are its default chords.
 - `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `rail`, `editor`, `folder`, `inspector`, `page`, `bar`, and `overlay`. A page gets a `go.<id>` command. A page is also shown at every address under its path, so the Plugins page at `/plugins` is the page at `/plugins/tabs` too, and reads which from `app.path`. A page registered at exactly that address wins. A page is opened in the editor area as a note is, which with Tabs and splits on is in a tab, and it does nothing for that: see [Pages are tabs](#pages-are-tabs).
-- `host.embeds` registers an embed, drawn wherever a note says `::name{config}`, or `:::name{config}` … `:::` for a block embed. `host.embeds.list()` is every embed that is on, as a menu would offer them.
+- `host.embeds` registers an embed, drawn wherever a note says `::name{config}`, or `:::name{config}` … `:::` for a block embed. `host.embeds.list()` is every embed that is on, as a menu would offer them. An embed registered with `menu: false` is left out of that list, and so out of the `/` menu: it is for a way of writing that notes are no longer started with and is still drawn where a note has it, as `::youtube{}`, `::social{}` and `::link{}` are.
 - `host.completions` registers a completion: a list offered at the cursor while the member types after a trigger, such as the embed menu on `/`.
 - `host.editorExtensions` registers an editor extension, added to the editor of every note. It is a value, or a function of the editor that is told its note.
 - `host.onNavigate(listener)` calls the listener each time the app arrives at an address.
@@ -109,11 +109,11 @@ A widget is a small live thing to glance at or press. There are three places one
 | --- | --- | --- | --- |
 | In a note, inline | `host.embeds.register({ name, render })`, written `::name{config}` | The note: its config | Timer (`timer`), Stopwatch (`stopwatch`), Link (`media`) |
 | In a note, as a block | `host.embeds.register({ name, block: true, render })`, written `:::name{config}` … `:::` | The note: its config and body | Kanban board (`kanban`) |
-| In a note, below its line | An embed, inline or block, that also gives `below: { box, render }` | The note: its config and body | YouTube video and Social post (`media`), HTML (`html`) |
+| In a note, below its line | An embed, inline or block, that also gives `below: { box, render }` | The note: its config and body | A video's or a post's address alone on a line (`media`, by `below.ofAddress`), HTML (`html`) |
 | The bottom bar | `host.views.register("bar", { id, component })` | Whatever it shows: the open note, the app | Note clocks (`note-clocks`), Word count (`word-count`) |
 | From the command palette only | A command that opens an `overlay` to ask what it needs, and a `bar` view that shows it | This browser, for this workspace: `host.storage` | Quick timer (`quick-timer`) |
 
-Every embed is in the `/` menu, and every command-started widget is a command in the palette.
+Every embed is in the `/` menu unless it says `menu: false`, and every command-started widget is a command in the palette.
 
 The other slots are not places for widgets. `column`, `section`, `editor`, and `page` are the structure of the app: where notes are found and read. A `section` is in a popover in writing mode, so a widget there would be out of sight just when a timer matters. `rail` holds icons that open something, not things that are live themselves. The `inspector` holds tabs about the open note, and which tabs it has is part of the product (History, Backlinks, Info), so a count or a clock is in the bar and not a fourth tab. An `overlay` is where a command-started widget asks its question, not where it stays.
 
@@ -210,6 +210,8 @@ host.embeds.register({
   },
 });
 ```
+
+`below.ofAddress(address)` lets the embed claim a web address written alone on a line, with no embed syntax: the address is then kept and drawn below its line exactly as `::name{address}` would be, with the address as `config`, and the line stays a link. `update` does nothing for one. It is how a video or a post is written (`plugins/media/`). An address in a paragraph, a list or code is never asked about.
 
 `box` says what room to keep, from what the note says of the embed alone, so the room is there in the first frame painted and nothing moves when what fills it loads. The room is under the line that writes the embed, or under a block embed's closing line, and stays while the cursor is on that line: the line is shown as written and what is below it is not touched.
 

@@ -18,6 +18,8 @@ interface Shown {
   embed: Embed & { below: Below };
   written: Written;
   box: BelowBox;
+  /** Whether the note writes it as an address alone on a line, and not in an embed's syntax. */
+  bare: boolean;
 }
 
 let ids = 0;
@@ -83,6 +85,17 @@ function boxOf(embed: Embed & { below: Below }, written: Written): BelowBox | nu
   }
 }
 
+/** A line that is one https address and nothing else. */
+const ALONE = /^[ \t]*(https:\/\/\S+)[ \t]*$/;
+
+function claims(embed: Embed & { below: Below }, address: string): boolean {
+  try {
+    return embed.below.ofAddress!(address) === true;
+  } catch {
+    return false;
+  }
+}
+
 function read(state: EditorState, { embeds, blocks }: Reading, before: readonly Shown[], moved: (pos: number) => number): Shown[] {
   const has = (embed: Embed | undefined): embed is Embed & { below: Below } => !!embed?.below;
   const drawnBlocks = blocks.filter((b) => embeds.get(b.name)?.block);
@@ -94,12 +107,29 @@ function read(state: EditorState, { embeds, blocks }: Reading, before: readonly 
       if (/Code/.test(syntaxTree(state).resolveInner(written.from, 1).name)) continue;
       found.push(written);
     }
-    found.sort((a, b) => a.from - b.from);
   }
+  const bare = new Set<Written>();
+  const claiming = [...embeds.values()].filter((e): e is Embed & { below: Below } => has(e) && !e.block && !!e.below.ofAddress);
+  if (claiming.length && state.doc.sliceString(0).includes("https://")) {
+    for (let n = 1; n <= state.doc.lines; n++) {
+      const line = state.doc.line(n);
+      const address = ALONE.exec(line.text);
+      if (!address) continue;
+      const from = line.from + address.index + address[0].indexOf(address[1]!);
+      if (drawnBlocks.some((b) => b.from <= from && b.to >= line.to) || /Code/.test(syntaxTree(state).resolveInner(from, 1).name)) continue;
+      const embed = claiming.find((e) => claims(e, address[1]!));
+      if (!embed) continue;
+      const to = from + address[1]!.length;
+      const written: Written = { name: embed.name, config: address[1]!, body: "", block: false, from, to, configFrom: from, bodyFrom: to };
+      bare.add(written);
+      found.push(written);
+    }
+  }
+  found.sort((a, b) => a.from - b.from);
   const boxed = found.flatMap((written) => {
     const embed = embeds.get(written.name) as Embed & { below: Below };
     const box = boxOf(embed, written);
-    return box ? [{ written, embed, box, from: written.from, name: written.name, source: `${written.config}\n${written.body}` }] : [];
+    return box ? [{ written, embed, box, from: written.from, name: written.name, source: `${written.config}\n${written.body}`, bare: bare.has(written) }] : [];
   });
   // An embed another plugin now draws is not the one that was there, whatever the note says.
   const same = before.filter((was) => embeds.get(was.embed.name) === was.embed);
@@ -246,7 +276,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
         /** Rewrites the embed in the note, if the note still says of it what this was drawn from. */
         const rewrite = (next: { config?: string; body?: string }) => {
           const now = view.state.field(field, false)?.shown.find((s) => s.id === id);
-          if (!now || now.source !== source || view.state.readOnly || this.live.get(id) !== live) return;
+          if (!now || now.bare || now.source !== source || view.state.readOnly || this.live.get(id) !== live) return;
           const changes = rewriteOf(now.written, next);
           if (changes.length) view.dispatch({ changes, userEvent: "input.embed" });
         };

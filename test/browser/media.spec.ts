@@ -93,24 +93,24 @@ async function expectOverItsRoom(page: Page, embed: string, when: string) {
     .toBeLessThanOrEqual(1);
 }
 
+// A video and a post are written as an address alone on a line now (media-address.spec.ts). These are the embeds notes used to
+// write them with, which no menu offers and which are still drawn where a note has one.
 for (const [typed, picked, written, address, shows] of [
   ["/you", "YouTube video", "::youtube{video address}", "https://youtu.be/dQw4w9WgXcQ", "Play video"],
   ["/soc", "Social post", "::social{post address}", "https://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/3l6oveex3ii2l", "Show post"],
 ] as const) {
-  test(`${picked} is picked from the embed menu, takes an address, and shows below its line without loading anything from the other site`, async ({ page, baseURL }) => {
+  test(`${picked} written the old way is not in the embed menu, and still shows below its line without loading anything from the other site`, async ({ page, baseURL }) => {
     const outside: string[] = [];
     page.on("request", (request) => !request.url().startsWith(new URL(baseURL!).origin) && outside.push(request.url()));
     await open(page, "# Media\n\n");
     await page.keyboard.press("ControlOrMeta+End");
     await page.keyboard.type(typed, { delay: 20 });
-    await expect(menu(page).getByRole("option", { name: picked })).toBeVisible();
     await settled(page);
-    await page.keyboard.press("Enter");
-    await expect(editor(page)).toContainText(written);
-    await page.keyboard.type(address);
-    await page.keyboard.press("End");
-    await page.keyboard.type(" and words after");
+    await expect(menu(page).getByRole("option", { name: picked })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    for (let i = 0; i < typed.length; i++) await page.keyboard.press("Backspace");
     const name = written.slice(2, written.indexOf("{"));
+    await page.keyboard.type(`::${name}{${address}} and words after`);
     await expect(below(page, name).getByRole("button", { name: shows })).toBeVisible();
     await expect(line(page, "and words after")).toContainText(`::${name}{${address}}`);
     await page.keyboard.press("ControlOrMeta+Home");
@@ -121,16 +121,17 @@ for (const [typed, picked, written, address, shows] of [
   });
 }
 
-test("a link is picked from the embed menu and drawn from what the note says, with nothing fetched", async ({ page, baseURL }) => {
+test("a link card written the old way is not in the embed menu, and is still drawn from what the note says, with nothing fetched", async ({ page, baseURL }) => {
   const outside: string[] = [];
   page.on("request", (request) => !request.url().startsWith(new URL(baseURL!).origin) && outside.push(request.url()));
   await open(page, "# Media\n\n");
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/link", { delay: 20 });
-  await expect(menu(page).getByRole("option", { name: "Link" })).toBeVisible();
   await settled(page);
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("https://example.com/docs The docs");
+  await expect(menu(page).getByRole("option", { name: "Link" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  for (let i = 0; i < "/link".length; i++) await page.keyboard.press("Backspace");
+  await page.keyboard.type("::link{https://example.com/docs The docs}");
   await page.keyboard.press("ControlOrMeta+Home");
   const card = editor(page).getByRole("link", { name: "The docs example.com" });
   await expect(card).toHaveAttribute("href", "https://example.com/docs");

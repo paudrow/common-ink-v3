@@ -43,13 +43,14 @@ function framed(into: HTMLElement, { title, action, from, src, allow }: { title:
   });
 }
 
+/** A video is written as its address alone on a line. `::youtube{address}` is how notes used to write one: it is still drawn, and no menu writes it. */
 const youtube: Embed = {
   name: "youtube",
   title: "YouTube video",
-  starts: { config: "video address" },
+  menu: false,
   render(into, embed) {
     if (videoIn(embed.config)) named(into, embed, "YouTube video");
-    else unread(into, "YouTube: write it like ::youtube{https://youtu.be/…}");
+    else unread(into, "YouTube: write the video's address on a line of its own");
   },
   below: {
     box: ({ config }) => (videoIn(config) ? { ratio: 16 / 9 } : null),
@@ -57,17 +58,19 @@ const youtube: Embed = {
       const video = videoIn(config);
       if (video) framed(into, { title: "YouTube video", action: "Play video", from: "youtube-nocookie.com", src: playerFor(video), allow: "autoplay; encrypted-media; picture-in-picture; fullscreen" });
     },
+    ofAddress: (address) => videoIn(address) !== null,
   },
 };
 
+/** A post is written as its address alone on a line too, and `::social{address}` is still drawn. */
 const social: Embed = {
   name: "social",
   title: "Social post",
-  starts: { config: "post address" },
+  menu: false,
   render(into, embed) {
     const post = postIn(embed.config);
     if (post) named(into, embed, `Post on ${post.site}`);
-    else unread(into, `Social post: write it like ::social{https://x.com/…/status/…}. Posts on ${SOCIAL_SITES.join(" and ")} can be shown, Bluesky's by an address with the account's did:plc:… in it.`);
+    else unread(into, `Social post: write the post's address on a line of its own. Posts on ${SOCIAL_SITES.join(" and ")} can be shown, Bluesky's by an address with the account's did:plc:… in it.`);
   },
   below: {
     box({ config }) {
@@ -78,17 +81,18 @@ const social: Embed = {
       const post = postIn(config);
       if (post) framed(into, { title: `Post on ${post.site}`, action: "Show post", from: new URL(post.frame).hostname, src: post.frame });
     },
+    ofAddress: (address) => postIn(address) !== null,
   },
 };
 
-/** A link drawn from what the note says of it alone: nothing is fetched from the address to show it. */
+/** A link is markdown's `[title](address)`. `::link{address title}` is how notes used to write a card for one: it is still drawn, and no menu writes it. */
 const link: Embed = {
   name: "link",
   title: "Link",
-  starts: { config: "address and a title" },
+  menu: false,
   render(into, embed) {
     const found = linkIn(embed.config);
-    if (!found) return unread(into, "Link: write it like ::link{https://example.com A title}");
+    if (!found) return unread(into, "Link: write it like [A title](https://example.com)");
     const card = into.appendChild(el("a", "link-card"));
     card.href = found.href;
     card.target = "_blank";
@@ -97,7 +101,10 @@ const link: Embed = {
   },
 };
 
-/** Videos, posts and links in a note: `::youtube{address}`, `::social{address}` and `::link{address title}`. */
+/**
+ * Videos and posts in a note, each written as its address alone on a line and shown below that line.
+ * The embeds notes used to write them with, and `::link{}`, are still drawn where a note has them.
+ */
 export const media: Plugin = {
   id: "media",
   name: "Media embeds",
