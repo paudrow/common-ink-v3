@@ -1,8 +1,7 @@
 import { useState, type DragEvent, type ReactNode } from "react";
 import type { EditorAction, EditorLayout, Group } from "./editorLayout.ts";
-import { Icon } from "./icons.tsx";
-import { ContextMenu } from "./Menu.tsx";
-import { NOTE_DRAG } from "./NoteList.tsx";
+import { Icon, NOTE_DRAG } from "../../plugin-api.ts";
+import { ContextMenu } from "../lib/Menu.tsx";
 
 /** Where a dragged note would land: a gap between a group's tabs, or half of its editor, which splits it. */
 type Drop = { groupId: string; at: number | "left" | "right" };

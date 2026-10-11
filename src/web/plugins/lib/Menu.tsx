@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useDismiss } from "./dismiss.ts";
+import { useDismiss } from "../../plugin-api.ts";
 
 export interface MenuItem {
   label: string;

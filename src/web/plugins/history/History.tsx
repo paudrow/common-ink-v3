@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { Author, AuthorRef, Diff, HistoryEntry, HistoryPage, Note, NoteSummary, OpInput } from "../core/protocol.ts";
-import { perform } from "./api.ts";
-import { useDismiss } from "./dismiss.ts";
-import { RevertAuthor } from "./RevertAuthor.tsx";
-import { moveThroughHistory } from "./sync.ts";
-import { ago, useNow } from "./time.ts";
+import { ago, useDismiss, useNow, type Author, type AuthorRef, type Diff, type HistoryEntry, type HistoryPage, type Note, type NoteSummary, type OpInput, type PluginHost } from "../../plugin-api.ts";
+import { RevertAuthor } from "../lib/RevertAuthor.tsx";
 
 type Query = Omit<Extract<OpInput, { type: "history.list" }>, "type" | "before">;
 
@@ -50,7 +46,7 @@ function DiffView({ diff }: { diff: Diff }) {
 }
 
 interface ChangesProps {
-  workspaceId: string;
+  host: PluginHost;
   query: Query;
   /** Changes when the notes do, so the list is read again. */
   version: number;
@@ -67,7 +63,7 @@ interface ChangesProps {
 }
 
 /** A list of changes with their diffs, where a revision can be labeled or reverted to and a selection applied. */
-function Changes({ workspaceId, query, version, showNote, canEdit, head, empty, onChanged, onOpenNote, onLoaded }: ChangesProps) {
+function Changes({ host, query, version, showNote, canEdit, head, empty, onChanged, onOpenNote, onLoaded }: ChangesProps) {
   const now = useNow();
   const [changes, setChanges] = useState<HistoryEntry[] | null>(null);
   const [next, setNext] = useState<HistoryPage["next"]>(null);
@@ -82,7 +78,7 @@ function Changes({ workspaceId, query, version, showNote, canEdit, head, empty, 
 
   useEffect(() => {
     let live = true;
-    perform(workspaceId, { type: "history.list", ...(JSON.parse(asked) as Query) }).then(
+    host.perform({ type: "history.list", ...(JSON.parse(asked) as Query) }).then(
       (page) => {
         if (!live) return;
         setChanges(page.changes);
@@ -94,25 +90,25 @@ function Changes({ workspaceId, query, version, showNote, canEdit, head, empty, 
     return () => {
       live = false;
     };
-  }, [workspaceId, asked, version, reloads]);
+  }, [host, asked, version, reloads]);
 
   useEffect(() => setSelected(new Set()), [asked]);
 
   const more = async () => {
     if (!next) return;
-    const page = await perform(workspaceId, { type: "history.list", ...query, before: next });
+    const page = await host.perform({ type: "history.list", ...query, before: next });
     setChanges((shown) => [...(shown ?? []), ...page.changes]);
     setNext(page.next);
   };
 
   /** Runs history operations one note at a time, and says which notes they couldn't change. */
-  const act = async (ops: Parameters<typeof moveThroughHistory>[1][]) => {
+  const act = async (ops: Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.reapplyChanges" }>[]) => {
     setBusy(true);
     setError(null);
     const failed: string[] = [];
     for (const op of ops) {
       try {
-        onChanged(await moveThroughHistory(workspaceId, op));
+        onChanged(await host.perform(op));
       } catch (err) {
         failed.push((err as Error).message);
       }
@@ -126,7 +122,7 @@ function Changes({ workspaceId, query, version, showNote, canEdit, head, empty, 
     setLabeling(null);
     setError(null);
     try {
-      await perform(workspaceId, { type: "note.label", id: change.noteId, revision: change.revision, name: name.trim() || null });
+      await host.perform({ type: "note.label", id: change.noteId, revision: change.revision, name: name.trim() || null });
       reload((n) => n + 1);
     } catch (err) {
       setError((err as Error).message);
@@ -251,7 +247,7 @@ function Changes({ workspaceId, query, version, showNote, canEdit, head, empty, 
 }
 
 interface NoteHistoryProps {
-  workspaceId: string;
+  host: PluginHost;
   noteId: string;
   /** The note's latest revision, so the list follows the note as it changes. */
   revision: number;
@@ -262,11 +258,11 @@ interface NoteHistoryProps {
 }
 
 /** The open note's changes, for the inspector. */
-export function NoteHistory({ workspaceId, noteId, revision, canEdit, onChanged, onSeen }: NoteHistoryProps) {
+export function NoteHistory({ host, noteId, revision, canEdit, onChanged, onSeen }: NoteHistoryProps) {
   const query = useMemo(() => ({ noteIds: [noteId] }), [noteId]);
   return (
     <Changes
-      workspaceId={workspaceId}
+      host={host}
       query={query}
       version={revision}
       showNote={false}
@@ -287,7 +283,7 @@ const longDate = (key: string) => dayStart(key).toLocaleDateString(undefined, { 
 const level = (n: number) => (n === 0 ? 0 : n < 3 ? 1 : n < 6 ? 2 : n < 10 ? 3 : 4);
 
 interface ActivityProps {
-  workspaceId: string;
+  host: PluginHost;
   author: AuthorRef;
   /** Who the author is, as a sentence names them: "you", or a name. */
   who: string;
@@ -297,7 +293,7 @@ interface ActivityProps {
 }
 
 /** How many changes one author made on each day of the last year, in this browser's time zone. */
-function Activity({ workspaceId, author, who, version, pickedDay, onPickDay }: ActivityProps) {
+function Activity({ host, author, who, version, pickedDay, onPickDay }: ActivityProps) {
   const [counts, setCounts] = useState<ReadonlyMap<string, number> | null>(null);
   const today = dateKey(new Date());
   const weeks = useMemo(() => {
@@ -311,13 +307,13 @@ function Activity({ workspaceId, author, who, version, pickedDay, onPickDay }: A
 
   useEffect(() => {
     let live = true;
-    perform(workspaceId, { type: "history.activity", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, author, from }).then(
+    host.perform({ type: "history.activity", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, author, from }).then(
       (activity) => live && setCounts(new Map(activity.days.map((d) => [d.date, d.count]))),
     );
     return () => {
       live = false;
     };
-  }, [workspaceId, author.kind, author.id, from, version]);
+  }, [host, author.kind, author.id, from, version]);
 
   const total = [...(counts?.values() ?? [])].reduce((sum, n) => sum + n, 0);
   return (
@@ -350,7 +346,7 @@ function Activity({ workspaceId, author, who, version, pickedDay, onPickDay }: A
 }
 
 interface NoteScopeProps {
-  notes: NoteSummary[];
+  notes: readonly NoteSummary[];
   picked: string[];
   onPick: (noteIds: string[]) => void;
 }
@@ -394,14 +390,13 @@ function NoteScope({ notes, picked, onPick }: NoteScopeProps) {
 }
 
 interface HistoryModeProps {
-  workspaceId: string;
+  host: PluginHost;
   personId: string;
   /** Every note in the workspace, for scoping history to some of them. */
-  notes: NoteSummary[];
+  notes: readonly NoteSummary[];
   canEdit: boolean;
-  /** An author, as `kind:id`, to show the changes of. Answered with `onShownAuthor` once the filter is set. */
+  /** An author, as `kind:id`, to show the changes of when the page opens. */
   showAuthor: string | null;
-  onShownAuthor: () => void;
   onOpenNote: (noteId: string) => void;
   onChanged: (note: Note) => void;
   /** Called once an author's changes were reverted across notes, so the notes are read again. */
@@ -409,12 +404,9 @@ interface HistoryModeProps {
 }
 
 /** The workspace's history: every change, filtered by author, date, and notes, with the member's activity above it. */
-export function HistoryMode({ workspaceId, personId, notes, canEdit, showAuthor, onShownAuthor, onOpenNote, onChanged, onReverted }: HistoryModeProps) {
+export function HistoryMode({ host, personId, notes, canEdit, showAuthor, onOpenNote, onChanged, onReverted }: HistoryModeProps) {
   const [authors, setAuthors] = useState<Author[]>([]);
   const [byAuthors, setByAuthors] = useState<string[]>(showAuthor ? [showAuthor] : []);
-  useEffect(() => {
-    if (showAuthor) onShownAuthor();
-  }, [showAuthor]);
   const [noteIds, setNoteIds] = useState<string[]>([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -423,11 +415,11 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, showAuthor,
 
   useEffect(() => {
     let live = true;
-    perform(workspaceId, { type: "history.authors" }).then((all) => live && setAuthors(all));
+    host.perform({ type: "history.authors" }).then((all) => live && setAuthors(all));
     return () => {
       live = false;
     };
-  }, [workspaceId, version]);
+  }, [host, version]);
 
   const chosen = authors.filter((a) => byAuthors.includes(authorKey(a)));
   const query = useMemo<Query>(
@@ -448,7 +440,7 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, showAuthor,
     <section className="history-mode" aria-label="History">
       <h1>History</h1>
       <Activity
-        workspaceId={workspaceId}
+        host={host}
         author={one ? refOf(one) : me}
         who={!one || authorKey(one) === authorKey({ kind: "member", personId, name: "" }) ? "you" : one.name}
         version={version}
@@ -496,7 +488,7 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, showAuthor,
         <div className="revert-author">
           <RevertAuthor
             key={authorKey(one)}
-            workspaceId={workspaceId}
+            host={host}
             author={refOf(one)}
             name={one.name}
             where={noteIds.length ? `in the ${count(noteIds.length, "note")} chosen` : "in this workspace"}
@@ -506,7 +498,7 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, showAuthor,
         </div>
       )}
       <Changes
-        workspaceId={workspaceId}
+        host={host}
         query={query}
         version={version}
         showNote

@@ -863,6 +863,44 @@ button.link:hover {
   font-size: 22px;
 }
 
+.embed {
+  display: inline-block;
+}
+
+.stopwatch {
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-side);
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.stopwatch[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.plugins {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugins label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.plugins .error {
+  margin-left: 8px;
+}
+
 /* Inspector */
 
 .inspector {

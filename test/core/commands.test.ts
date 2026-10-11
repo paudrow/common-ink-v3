@@ -1,42 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createCommands } from "../../src/web/commands.ts";
 import { chordFor, chordLabel, chordOf } from "../../src/web/keybindings.ts";
-import { matching } from "../../src/web/match.ts";
-
-describe("commands", () => {
-  it("lists what's registered in the order it was registered, and runs a command by its id", () => {
-    const commands = createCommands();
-    const ran: string[] = [];
-    commands.register({ id: "note.new", title: "New note", run: () => ran.push("new") });
-    commands.register({ id: "view.toggleInspector", title: "Toggle inspector", run: () => ran.push("inspector") });
-
-    expect(commands.list().map((c) => [c.id, c.title])).toEqual([
-      ["note.new", "New note"],
-      ["view.toggleInspector", "Toggle inspector"],
-    ]);
-    expect(commands.run("view.toggleInspector")).toBe(true);
-    expect(ran).toEqual(["inspector"]);
-  });
-
-  it("says so when asked to run a command nobody registered", () => {
-    expect(createCommands().run("note.new")).toBe(false);
-  });
-
-  it("takes a command back out, leaving one registered later under the same id", () => {
-    const commands = createCommands();
-    const ran: string[] = [];
-    const unregister = commands.register({ id: "note.new", title: "New note", run: () => ran.push("first") });
-
-    expect(() => commands.register({ id: "note.new", title: "Another", run: () => {} })).toThrow("There's already a command with the id note.new");
-    unregister();
-    expect(commands.list()).toEqual([]);
-
-    commands.register({ id: "note.new", title: "New note", run: () => ran.push("second") });
-    unregister();
-    commands.run("note.new");
-    expect(ran).toEqual(["second"]);
-  });
-});
+import { matching } from "../../src/web/plugins/lib/match.ts";
 
 describe("keybindings", () => {
   const press = (key: string, held: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>

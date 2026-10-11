@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, type Agent, type WorkspaceSummary } from "../core/protocol.ts";
-import { connectAgent, disconnectAgent, listAgents, perform } from "./api.ts";
-import { RevertAuthor } from "./RevertAuthor.tsx";
-import { ago, useNow } from "./time.ts";
+import { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, ago, useNow, type Agent, type PluginHost, type WorkspaceSummary } from "../../plugin-api.ts";
+import { RevertAuthor } from "../lib/RevertAuthor.tsx";
 
 const DAY_MS = 86_400_000;
 const EXPIRIES = [30, DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS];
 
 interface Props {
+  host: PluginHost;
   /** The workspace whose history an agent's changes are shown and reverted in. */
   workspace: WorkspaceSummary;
   /** Every workspace the member is in, for limiting a token to one. */
-  workspaces: WorkspaceSummary[];
+  workspaces: readonly WorkspaceSummary[];
   /** Changes when the workspace's notes do, so which agents have changed one is read again. */
   version: number;
-  onShowChanges: (agentId: string) => void;
+  /** Left out when there is nowhere to show them. */
+  onShowChanges?: (agentId: string) => void;
   /** Called once an agent's changes were reverted, so the notes are read again. */
   onReverted: () => void;
 }
@@ -71,7 +71,7 @@ function NewToken({ agent, token, onDone }: { agent: Agent; token: string; onDon
 }
 
 /** Where a member connects and disconnects their agents, and reverts what one of them changed. */
-export function Agents({ workspace, workspaces, version, onShowChanges, onReverted }: Props) {
+export function Agents({ host, workspace, workspaces, version, onShowChanges, onReverted }: Props) {
   const now = useNow();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   /** The agents that have changed a note in this workspace. */
@@ -81,15 +81,15 @@ export function Agents({ workspace, workspaces, version, onShowChanges, onRevert
   const [error, setError] = useState<string | null>(null);
   const canEdit = workspace.role !== "viewer";
 
-  const load = useCallback(() => listAgents().then(setAgents, (err: Error) => setError(err.message)), []);
+  const load = useCallback(() => host.agents.list().then(setAgents, (err: Error) => setError(err.message)), [host]);
   useEffect(() => {
     void load();
     let live = true;
-    perform(workspace.id, { type: "history.authors" }).then((authors) => live && setWrote(new Set(authors.flatMap((a) => (a.kind === "agent" ? [a.agentId] : [])))));
+    host.perform({ type: "history.authors" }).then((authors) => live && setWrote(new Set(authors.flatMap((a) => (a.kind === "agent" ? [a.agentId] : [])))));
     return () => {
       live = false;
     };
-  }, [workspace.id, version, load]);
+  }, [host, version, load]);
 
   const connect = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -98,7 +98,7 @@ export function Agents({ workspace, workspaces, version, onShowChanges, onRevert
     setError(null);
     try {
       setFresh(
-        await connectAgent(data.get("name") as string, {
+        await host.agents.connect(data.get("name") as string, {
           label: (data.get("label") as string) || undefined,
           workspaceId: (data.get("workspace") as string) || undefined,
           expiresInDays: Number(data.get("expires")),
@@ -116,7 +116,7 @@ export function Agents({ workspace, workspaces, version, onShowChanges, onRevert
     setDisconnecting(null);
     setError(null);
     try {
-      await disconnectAgent(agent.id);
+      await host.agents.disconnect(agent.id);
       if (fresh?.agent.id === agent.id) setFresh(null);
       await load();
     } catch (err) {
@@ -146,12 +146,14 @@ export function Agents({ workspace, workspaces, version, onShowChanges, onRevert
       <div className="agent-actions">
         {wrote.has(agent.id) ? (
           <>
-            <button type="button" className="button small" onClick={() => onShowChanges(agent.id)}>
-              See its changes
-            </button>
+            {onShowChanges && (
+              <button type="button" className="button small" onClick={() => onShowChanges(agent.id)}>
+                See its changes
+              </button>
+            )}
             {canEdit && (
               <RevertAuthor
-                workspaceId={workspace.id}
+                host={host}
                 author={{ kind: "agent", id: agent.id }}
                 name={agent.name}
                 where={`in ${workspace.name}`}

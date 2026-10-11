@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
-import type { ListedFolder, OpInput, Role } from "../core/protocol.ts";
-import { perform } from "./api.ts";
-import { pathOf, type FolderTree as Tree } from "./folders.ts";
-import { Icon } from "./icons.tsx";
-import { ContextMenu } from "./Menu.tsx";
-import { NOTE_DRAG } from "./NoteList.tsx";
-import { isStrings, useStored } from "./stored.ts";
+import { Icon, NOTE_DRAG, type Folders as Tree, type ListedFolder, type OpInput, type Plugin, type PluginHost, type Role } from "../plugin-api.ts";
+import { useKept } from "./lib/kept.ts";
+import { ContextMenu } from "./lib/Menu.tsx";
+
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((id) => typeof id === "string");
 
 type Editing = { kind: "create"; parentId: string | null } | { kind: "rename"; id: string };
 type Menu = { folder: ListedFolder; x: number; y: number };
@@ -13,7 +11,7 @@ type Menu = { folder: ListedFolder; x: number; y: number };
 const indent = (depth: number) => ({ "--depth": depth }) as CSSProperties;
 
 interface Props {
-  workspaceId: string;
+  host: PluginHost;
   tree: Tree;
   role: Role;
   selectedId: string | null;
@@ -22,9 +20,9 @@ interface Props {
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
 }
 
-export function FolderTree({ workspaceId, tree, role, selectedId, onSelect, onChanged, onMoveNote }: Props) {
+function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveNote }: Props) {
   const ids = useId();
-  const [expandedList, setExpanded] = useStored(`ink.expanded.${workspaceId}`, isStrings, []);
+  const [expandedList, setExpanded] = useKept(host.storage, "expanded", isStrings, []);
   const expanded = new Set(expandedList);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -38,7 +36,7 @@ export function FolderTree({ workspaceId, tree, role, selectedId, onSelect, onCh
 
   useEffect(() => {
     if (!selectedId) return;
-    const ancestors = pathOf(tree, selectedId)
+    const ancestors = tree.pathOf(selectedId)
       .slice(0, -1)
       .map((f) => f.id);
     setExpanded((list) => (ancestors.every((id) => list.includes(id)) ? list : [...new Set([...list, ...ancestors])]));
@@ -56,7 +54,7 @@ export function FolderTree({ workspaceId, tree, role, selectedId, onSelect, onCh
   }
 
   async function run(op: OpInput) {
-    if (await attempt(() => perform(workspaceId, op))) {
+    if (await attempt(() => host.perform(op))) {
       setEditing(null);
       onChanged();
     }
@@ -250,3 +248,17 @@ function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit:
     />
   );
 }
+
+export const folders: Plugin = {
+  id: "folders",
+  name: "Folders",
+  activate(host) {
+    host.views.register("section", {
+      id: "folders",
+      component: ({ app }) =>
+        app.folders && (
+          <FolderTree host={host} tree={app.folders} role={app.workspace.role} selectedId={app.folderId} onSelect={app.selectFolder} onChanged={app.refresh} onMoveNote={app.moveNote} />
+        ),
+    });
+  },
+};

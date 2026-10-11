@@ -1,147 +1,46 @@
-import { useId, useRef, useState } from "react";
-import type { Note, NoteSummary } from "../core/protocol.ts";
-import { notePath } from "../core/slug.ts";
-import { pathName, type FolderTree } from "./folders.ts";
-import { NoteHistory } from "./History.tsx";
-import type { IconName } from "./icons.tsx";
-import { Soon } from "./Soon.tsx";
+import { useId, useState } from "react";
+import { Drawn } from "./Drawn.tsx";
+import type { App, NoteSummary, Slots } from "./plugin-api.ts";
+import type { Host } from "./pluginHost.ts";
 
-export const INSPECTOR_TABS = [
-  { id: "history", label: "History", icon: "history" },
-  { id: "backlinks", label: "Backlinks", icon: "backlinks" },
-  { id: "info", label: "Info", icon: "info" },
-] as const satisfies readonly { id: string; label: string; icon: IconName }[];
-
-export type InspectorTab = (typeof INSPECTOR_TABS)[number]["id"];
-
-export interface PanelProps {
-  workspaceId: string;
+interface Props {
+  host: Host;
+  tabs: readonly Slots["inspector"][];
+  app: App;
   note: NoteSummary;
-  tree: FolderTree;
-  canEdit: boolean;
-  onMove: (noteId: string, folderId: string) => Promise<void>;
-  /** Whether the note has changes by someone else that the member hasn't been shown. */
-  unseen: boolean;
-  onSeen: (noteId: string, revision: number) => void;
-  /** The note after History reverted it or applied a selection of its changes. */
-  onChanged: (note: Note) => void;
 }
 
-export const UNSEEN = "Changes you haven't seen";
-
-export function Inspector(props: PanelProps) {
+/** The tabs plugins have added about the open note. It opens on the last one. */
+export function Inspector({ host, tabs, app, note }: Props) {
   const ids = useId();
-  const [tab, setTab] = useState<InspectorTab>("info");
+  const [chosen, setChosen] = useState<string | null>(null);
+  const tab = tabs.find((t) => t.id === chosen) ?? tabs.at(-1);
+  if (!tab) return null;
   return (
     <aside className="inspector" aria-label="Inspector">
       <div role="tablist" className="tabs">
-        {INSPECTOR_TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            id={`${ids}-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls={`${ids}-panel`}
-            aria-description={t.id === "history" && props.unseen ? UNSEEN : undefined}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-            {t.id === "history" && props.unseen && <span className="unseen-dot" />}
-          </button>
-        ))}
+        {tabs.map((t) => {
+          const badge = t.badge?.(app) ?? null;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`${ids}-${t.id}`}
+              aria-selected={tab === t}
+              aria-controls={`${ids}-panel`}
+              aria-description={badge ?? undefined}
+              onClick={() => setChosen(t.id)}
+            >
+              {t.label}
+              {badge && <span className="unseen-dot" />}
+            </button>
+          );
+        })}
       </div>
-      <div role="tabpanel" id={`${ids}-panel`} aria-labelledby={`${ids}-${tab}`} className="panel">
-        <InspectorPanel tab={tab} {...props} />
+      <div role="tabpanel" id={`${ids}-panel`} aria-labelledby={`${ids}-${tab.id}`} className="panel">
+        <Drawn key={tab.id} host={host} view={tab} note={note} />
       </div>
     </aside>
-  );
-}
-
-export function InspectorPanel({ tab, ...props }: PanelProps & { tab: InspectorTab }) {
-  switch (tab) {
-    case "history":
-      return (
-        <NoteHistory
-          workspaceId={props.workspaceId}
-          noteId={props.note.id}
-          revision={props.note.revision}
-          canEdit={props.canEdit}
-          onChanged={props.onChanged}
-          onSeen={props.onSeen}
-        />
-      );
-    case "backlinks":
-      return <Soon issue={13}>Notes that link here arrive with</Soon>;
-    case "info":
-      return <Info {...props} />;
-  }
-}
-
-function Info({ note, tree, canEdit, onMove }: PanelProps) {
-  const url = `${location.origin}${notePath(note)}`;
-  const urlField = useRef<HTMLInputElement>(null);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const targets = [...tree.byId.keys()].map((id) => ({ id, name: pathName(tree, id) })).sort((a, b) => a.name.localeCompare(b.name));
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      // A preview served over plain http has no Clipboard API.
-      urlField.current?.select();
-      document.execCommand("copy");
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <dl className="info">
-      <dt>Folder</dt>
-      <dd>
-        <span>{pathName(tree, note.folderId)}</span>
-        <select
-          aria-label="Move to"
-          value={note.folderId}
-          disabled={!canEdit}
-          onChange={(e) => {
-            setError(null);
-            onMove(note.id, e.target.value).catch((err: Error) => setError(err.message));
-          }}
-        >
-          {targets.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-        {error && <span role="alert" className="error">{error}</span>}
-      </dd>
-      <dt>Sharing</dt>
-      <dd>
-        <span>Everyone in this workspace</span>
-        <Soon issue={15}>Sharing with people and links arrives with</Soon>
-      </dd>
-      <dt>Tags</dt>
-      <dd>
-        <Soon issue={21}>Tags arrive with</Soon>
-      </dd>
-      <dt>URL</dt>
-      <dd className="url">
-        <input ref={urlField} readOnly aria-label="Note URL" value={url} onFocus={(e) => e.target.select()} />
-        <button type="button" className="button small" onClick={copy}>
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </dd>
-      <dt>Archive</dt>
-      <dd>
-        <button type="button" className="button small" disabled>
-          Archive
-        </button>
-        <Soon issue={21}>Archiving arrives with</Soon>
-      </dd>
-    </dl>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { editorReducer, isEditorLayout, type EditorLayout } from "../../src/web/editorLayout.ts";
+import { editorReducer, isEditorLayout, type EditorLayout } from "../../src/web/plugins/tabs/editorLayout.ts";
 
 const one = (tabs: [string, boolean][], active: string | null = tabs.at(-1)?.[0] ?? null): EditorLayout => ({
   groups: [{ id: "1", tabs: tabs.map(([noteId, preview]) => ({ noteId, preview })), activeNoteId: active }],

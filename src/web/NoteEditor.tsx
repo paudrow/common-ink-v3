@@ -1,11 +1,13 @@
 import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorState, Transaction } from "@codemirror/state";
+import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
+import { embedding } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
+import type { Embed } from "./plugin-api.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
@@ -23,15 +25,21 @@ interface Props {
   onEdit: () => void;
   /** Something the member should know about this note, such as an undo that failed. Shown in place of the save state. */
   notice: string | null;
+  /** What plugins have registered to draw inside a note. */
+  embeds: readonly Embed[];
   meta: ReactNode;
   actions: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, meta, actions }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, embeds, meta, actions }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const syncRef = useRef<NoteSync | null>(null);
   const edited = useRef(onEdit);
   edited.current = onEdit;
+  const viewRef = useRef<EditorView | null>(null);
+  const [embedded] = useState(() => new Compartment());
+  const embedsNow = useRef(embeds);
+  embedsNow.current = embeds;
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [missing, setMissing] = useState(false);
 
@@ -45,7 +53,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         if (cancelled || !host.current) return;
         onLoaded(note);
         sync = syncRef.current = new NoteSync(workspaceId, note, onSaved, setSaveState);
-        view = new EditorView({
+        view = viewRef.current = new EditorView({
           parent: host.current,
           state: EditorState.create({
             doc: note.text,
@@ -55,6 +63,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               keymap.of(defaultKeymap),
               markdown(),
               noteHighlighting,
+              embedded.of(embedding(embedsNow.current)),
               EditorView.lineWrapping,
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
@@ -75,11 +84,15 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
 
     return () => {
       cancelled = true;
-      syncRef.current = null;
+      syncRef.current = viewRef.current = null;
       void sync?.close();
       view?.destroy();
     };
-  }, [workspaceId, noteId, onLoaded, onSaved]);
+  }, [workspaceId, noteId, onLoaded, onSaved, embedded]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: embedded.reconfigure(embedding(embeds)) });
+  }, [embeds, embedded]);
 
   useEffect(() => {
     if (revision !== undefined) void syncRef.current?.pull(revision).catch(() => {});

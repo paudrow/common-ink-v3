@@ -1,35 +1,40 @@
 import { useCallback, useEffect, useState } from "react";
 import { noteIdFromPath } from "../core/slug.ts";
-import { MODES, modePath, type ModeId } from "./modes.ts";
 
-export type Route = { kind: "home" } | { kind: "note"; id: string } | { kind: "mode"; mode: ModeId } | { kind: "agents" } | { kind: "missing" };
+/** A page is whatever a plugin registered at that path, if any did. */
+export type Route = { kind: "home" } | { kind: "note"; id: string } | { kind: "page"; path: string };
 
-/** Where a member connects and disconnects their agents. */
-export const AGENTS_PATH = "/agents";
+export interface Place {
+  path: string;
+  /** What `navigate` was handed for this entry of the browser's history. */
+  state: unknown;
+  route: Route;
+}
 
-export type Navigate = (path: string, options?: { replace?: boolean }) => void;
+export type Navigate = (path: string, options?: { replace?: boolean; state?: unknown }) => void;
 
 export function routeOf(pathname: string): Route {
   if (pathname === "/") return { kind: "home" };
-  if (pathname === AGENTS_PATH) return { kind: "agents" };
-  const mode = MODES.find((m) => modePath(m.id) === pathname);
-  if (mode) return { kind: "mode", mode: mode.id };
   const id = noteIdFromPath(pathname);
-  return id ? { kind: "note", id } : { kind: "missing" };
+  return id ? { kind: "note", id } : { kind: "page", path: pathname };
 }
 
-export function useRoute(): [Route, Navigate] {
-  const [path, setPath] = useState(location.pathname);
+export function useRoute(): [Place, Navigate] {
+  const [at, setAt] = useState({ path: location.pathname, state: history.state as unknown });
   useEffect(() => {
-    const onPop = () => setPath(location.pathname);
+    const onPop = () => setAt({ path: location.pathname, state: history.state });
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
   }, []);
-  const navigate = useCallback<Navigate>((to, options = {}) => {
+  // State is handed to the page once. Taken off the entry, it isn't handed over again on Back or a reload.
+  useEffect(() => {
+    if (history.state !== null) history.replaceState(null, "", location.href);
+  }, [at]);
+  const navigate = useCallback<Navigate>((to, { replace, state = null } = {}) => {
     if (to === location.pathname) return;
-    if (options.replace) history.replaceState(null, "", to);
-    else history.pushState(null, "", to);
-    setPath(to);
+    if (replace) history.replaceState(state, "", to);
+    else history.pushState(state, "", to);
+    setAt({ path: to, state });
   }, []);
-  return [routeOf(path), navigate];
+  return [{ ...at, route: routeOf(at.path) }, navigate];
 }

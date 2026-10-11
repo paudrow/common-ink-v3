@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { useDismiss } from "./dismiss.ts";
+import { useDismiss } from "../../plugin-api.ts";
 import { matching } from "./match.ts";
 
 export interface PaletteItem {

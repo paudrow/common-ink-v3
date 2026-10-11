@@ -1,10 +1,5 @@
 import { useId, useState } from "react";
-import type { NoteSummary } from "../core/protocol.ts";
-import { notePath } from "../core/slug.ts";
-import { Icon } from "./icons.tsx";
-import { ago, useNow } from "./time.ts";
-
-export const NOTE_DRAG = "application/x-common-ink-note";
+import { Icon, NOTE_DRAG, ago, useNow, type NoteSummary, type Plugin } from "../plugin-api.ts";
 
 const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -19,15 +14,16 @@ type Sort = (typeof SORTS)[number]["id"];
 interface Props {
   heading: string;
   /** Null while the folder's notes load. */
-  notes: NoteSummary[] | null;
+  notes: readonly NoteSummary[] | null;
   openId: string | null;
+  pathOf: (noteId: string) => string;
   canEdit: boolean;
   onNew: () => void;
   /** A single click opens a preview; a double click keeps the note open. */
   onOpen: (note: NoteSummary, keep: boolean) => void;
 }
 
-export function NoteList({ heading, notes, openId, canEdit, onNew, onOpen }: Props) {
+function NoteList({ heading, notes, openId, pathOf, canEdit, onNew, onOpen }: Props) {
   const ids = useId();
   const now = useNow();
   const [filter, setFilter] = useState("");
@@ -77,7 +73,7 @@ export function NoteList({ heading, notes, openId, canEdit, onNew, onOpen }: Pro
           {shown.map((note) => (
             <li key={note.id}>
               <a
-                href={notePath(note)}
+                href={pathOf(note.id)}
                 className="note-row"
                 draggable
                 aria-current={note.id === openId ? "page" : undefined}
@@ -111,3 +107,25 @@ export function NoteList({ heading, notes, openId, canEdit, onNew, onOpen }: Pro
     </section>
   );
 }
+
+export const noteList: Plugin = {
+  id: "note-list",
+  name: "Note list",
+  activate(host) {
+    host.views.register("column", {
+      id: "notes",
+      popover: true,
+      component: ({ app }) => (
+        <NoteList
+          heading={app.folderId && app.folders ? (app.folders.byId.get(app.folderId)?.name ?? "") : "All notes"}
+          notes={app.notes && (app.folderId ? app.notes.filter((n) => n.folderId === app.folderId) : app.notes)}
+          openId={app.note?.id ?? null}
+          pathOf={app.notePath}
+          canEdit={app.canEdit}
+          onNew={app.createNote}
+          onOpen={(note, keep) => app.openNote(note.id, { preview: !keep })}
+        />
+      ),
+    });
+  },
+};

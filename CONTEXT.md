@@ -145,11 +145,28 @@ A name attached to one revision in history. A revision has at most one, and a no
 ## Configuration
 
 **Plugin**:
-A unit of functionality that adds commands, views, data sources, or settings through the public plugin API. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. Built-in plugins are trusted and on by default. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
+A unit of functionality that adds commands, views, embeds, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
 _Avoid_: Extension, add-on
 
+**Built-in plugin**:
+A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs and splits, and the command palette. It is trusted and on by default, and it uses the same plugin API a third-party plugin does.
+
+**Plugin host**:
+The part of the core that turns plugins on and off, hands each one its reach into the workspace, and keeps what each has contributed.
+
+**Contribution**:
+One thing a plugin adds: a command, a view, or an embed. It is there while its plugin is on.
+
+**View**:
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, an inspector tab, a page, an overlay, or an icon in a rail.
+_Avoid_: Panel, widget
+
+**Page**:
+A view with its own address, shown in place of the editor, such as History or Agents.
+_Avoid_: Mode, screen
+
 **Embed**:
-Content rendered inside a note, such as HTML. It cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission.
+Content a plugin draws inside a note where the note says `::name{config}`, such as a stopwatch or HTML. It is handed its config and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written.
 
 **Plugin permission**:
 The capabilities a plugin has in a workspace. One set per plugin applies to every member. An admin sets them and can lock them. A non-admin's yes becomes a request, and the capability stays off until an admin approves. This is not settings.

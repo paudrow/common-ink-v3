@@ -1,9 +1,8 @@
 import { useState } from "react";
-import type { AuthorRef } from "../core/protocol.ts";
-import { revertAuthor } from "./sync.ts";
+import type { AuthorRef, PluginHost } from "../../plugin-api.ts";
 
 interface Props {
-  workspaceId: string;
+  host: PluginHost;
   author: AuthorRef;
   name: string;
   /** Where the changes are, as a sentence ends: "in Acme", "in the 2 notes chosen". */
@@ -20,7 +19,7 @@ const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 const list = new Intl.ListFormat("en", { type: "conjunction" });
 
 /** Takes one author's changes back out and keeps everyone else's, after asking once. */
-export function RevertAuthor({ workspaceId, author, name, where, noteIds, beyond, onReverted }: Props) {
+export function RevertAuthor({ host, author, name, where, noteIds, beyond, onReverted }: Props) {
   const [step, setStep] = useState<"idle" | "asking" | "busy">("idle");
   const [said, say] = useState<{ text: string; failed?: boolean } | null>(null);
   const title = `Revert ${name}'s changes`;
@@ -28,7 +27,17 @@ export function RevertAuthor({ workspaceId, author, name, where, noteIds, beyond
   const run = async () => {
     setStep("busy");
     try {
-      const done = await revertAuthor(workspaceId, author, noteIds);
+      const done = { notes: 0, changes: 0, emptied: [] as string[], failed: [] as { title: string; message: string }[] };
+      // A few notes are covered a request, so it is asked again until every note has been.
+      for (let after: string | undefined, more = true; more; ) {
+        const { reverted, emptied, failed, next } = await host.perform({ type: "history.revertAuthor", author, noteIds, after });
+        done.notes += reverted.length;
+        for (const { revisions } of reverted) done.changes += revisions.length;
+        done.emptied.push(...emptied.map((e) => e.title));
+        done.failed.push(...failed);
+        more = next !== null;
+        after = next ?? undefined;
+      }
       const took = done.notes ? `Took ${count(done.changes, "change")} by ${name} back out of ${count(done.notes, "note")}.` : done.failed.length ? "" : `Nothing by ${name} still stands ${where}.`;
       const empty = done.emptied.length ? `${list.format(done.emptied.map((title) => title || "Untitled"))} ${done.emptied.length === 1 ? "is now empty. It" : "are now empty. They"} can be deleted once Trash exists.` : "";
       const left = done.failed.map((f) => `${f.title || "Untitled"} was left as it is: ${f.message}.`);
