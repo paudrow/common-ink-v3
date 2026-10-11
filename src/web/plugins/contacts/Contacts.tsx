@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Contact, PluginHost, ViewProps } from "../../plugin-api.ts";
+import { CopyReference } from "../lib/CopyReference.tsx";
 import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
 import { matches } from "./matching.ts";
 
@@ -75,6 +76,7 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
                     )}
                   </span>
                 </div>
+                <CopyReference host={host} sourceId={contact.sourceId} id={contact.id} />
               </li>
             ))}
           </ul>

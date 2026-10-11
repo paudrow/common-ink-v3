@@ -1,7 +1,7 @@
 /*
  * Google, as far as Common Ink asks anything of it: a stand-in at the one place the Worker reaches
  * out. It answers in the shapes Google's API reference gives for the token and revoke endpoints,
- * Calendar's calendarList, events and events.insert, and People's connections, and refuses the way they refuse.
+ * Calendar's calendarList and events, and People's connections, and refuses the way they refuse.
  * It throws for a request to any other host, so no test passes by reaching somewhere else.
  */
 
@@ -140,16 +140,6 @@ export class FakeGoogle {
     }
     const calendar = this.calendars.find((c) => c.id === path[1]);
     if (path[0] !== "calendars" || path[2] !== "events" || !calendar) return refusal(404, "notFound");
-    const writer = calendar.accessRole === "writer" || calendar.accessRole === "owner";
-    // Google's insert takes a null as a field left out, and answers the event as it keeps it.
-    const kept = (time: FakeEvent["start"]) => Object.fromEntries(Object.entries(time).filter(([, v]) => v !== null));
-    if (path.length === 3 && method === "POST") {
-      if (!writer) return refusal(403, "requiredAccessLevel");
-      const given = JSON.parse(body) as FakeEvent;
-      const made: FakeEvent = { ...given, id: `made${calendar.events.length}`, etag: '"1"', status: "confirmed", htmlLink: "https://www.google.com/calendar/event?eid=bWFkZQ", start: kept(given.start), end: kept(given.end), organizer: { self: true } };
-      calendar.events.push(made);
-      return json(made);
-    }
     if (path.length === 3) {
       const [min, max] = [Date.parse(url.searchParams.get("timeMin")!), Date.parse(url.searchParams.get("timeMax")!)];
       const at = (time: FakeEvent["start"]) => Date.parse(time.dateTime ?? `${time.date}T00:00:00Z`);
@@ -160,7 +150,7 @@ export class FakeGoogle {
     if (!event) return refusal(404, "notFound");
     if (method === "GET") return json(event);
     if (method !== "PATCH") return refusal(405, "methodNotAllowed");
-    if (!writer) return refusal(403, "forbidden");
+    if (calendar.accessRole !== "writer" && calendar.accessRole !== "owner") return refusal(403, "forbidden");
     if (headers.get("If-Match") !== event.etag) return refusal(412, "conditionNotMet");
     const patch = JSON.parse(body) as Partial<FakeEvent>;
     // Google's patch: a field given replaces, an object given is merged, and null takes a field away.

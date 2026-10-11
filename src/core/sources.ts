@@ -1,7 +1,7 @@
 import { inOrder, widened, within, type Span } from "./events.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type EventWhen, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { OpError, type CalendarEvent, type Contact, type EventWhen, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -10,7 +10,7 @@ import { OpError, type Calendar, type CalendarEvent, type Contact, type EventWhe
  * there is no way to ask for another's: not as an admin, and not as someone else's agent.
  */
 
-/** What a data source says of itself. Whether it takes changes isn't said: it does when it has `update`, and one that does has `create` too. */
+/** What a data source says of itself. Whether it takes changes isn't said: it does when it has `update`. */
 export type Described = Omit<Source, "writable" | "kind">;
 
 export interface EventChange {
@@ -20,25 +20,14 @@ export interface EventChange {
   when?: EventWhen;
 }
 
-export interface NewEvent {
-  title: string;
-  when: EventWhen;
-  location?: string;
-  description?: string;
-}
-
 export interface CalendarSource {
   kind: "calendar";
   info: Described;
-  /** Its calendars, and every event in them that overlaps the span, each occurrence of a recurring one on its own. */
-  list(span: { from: number; to: number }): Promise<{ calendars: Calendar[]; events: CalendarEvent[] }>;
+  /** Every event that overlaps the span, each occurrence of a recurring one on its own. */
+  list(span: { from: number; to: number }): Promise<CalendarEvent[]>;
   get(id: string): Promise<CalendarEvent | null>;
-  /** One of its calendars by its id, or null for one the person doesn't have. */
-  calendar(id: string): Promise<Calendar | null>;
   /** Absent on a read-only data source. `etag` is the event's as the member read it. */
   update?(id: string, change: EventChange, etag: string): Promise<CalendarEvent>;
-  /** Absent on a read-only data source. */
-  create?(calendarId: string, fields: NewEvent): Promise<CalendarEvent>;
 }
 
 export interface ContactsSource {
@@ -138,7 +127,7 @@ async function readEach<S extends DataSource, T>(asker: Asker, kind: S["kind"], 
   return { sources: answers.map((a) => a.source), read: answers.flatMap((a) => (a.read === null ? [] : [a.read])) };
 }
 
-export async function listEvents(asker: Asker, span: Span): Promise<{ events: CalendarEvent[]; sources: Source[]; calendars: Calendar[] }> {
+export async function listEvents(asker: Asker, span: Span): Promise<{ events: CalendarEvent[]; sources: Source[] }> {
   if (span.to <= span.from) throw new OpError("invalid", "The span ends before it starts");
   if (span.to - span.from > MAX_SPAN_MS) throw new OpError("invalid", `A span can be at most ${MAX_SPAN_DAYS} days`);
   try {
@@ -146,14 +135,10 @@ export async function listEvents(asker: Asker, span: Span): Promise<{ events: Ca
   } catch {
     throw new OpError("invalid", `"${span.timeZone}" isn't a time zone`);
   }
-  const { sources, read } = await readEach<CalendarSource, { calendars: Calendar[]; events: CalendarEvent[] }>(asker, "calendar", (source) => source.list(widened(span)));
+  const { sources, read } = await readEach<CalendarSource, CalendarEvent[]>(asker, "calendar", (source) => source.list(widened(span)));
   const writable = new Set(sources.filter((s) => s.writable).map((s) => s.id));
-  const events = read.flatMap((r) => r.events).filter((event) => within(event.when, span));
-  return {
-    events: inOrder(events, span.timeZone).map((event) => ({ ...event, editable: event.editable && writable.has(event.sourceId) })),
-    sources,
-    calendars: read.flatMap((r) => r.calendars).map((calendar) => ({ ...calendar, writable: calendar.writable && writable.has(calendar.sourceId) })),
-  };
+  const events = read.flat().filter((event) => within(event.when, span));
+  return { events: inOrder(events, span.timeZone).map((event) => ({ ...event, editable: event.editable && writable.has(event.sourceId) })), sources };
 }
 
 /**
@@ -170,24 +155,6 @@ export async function updateEvent(asker: Asker, sourceId: string, id: string, et
     if (!event.editable) throw new OpError("forbidden", `You can only read the calendar "${event.calendar}"`);
     if (change.title === undefined && change.location === undefined && change.description === undefined && change.when === undefined) return event;
     return await source.update(id, change, etag);
-  } catch (err) {
-    if (err instanceof OpError) throw err;
-    return failed(source, err);
-  }
-}
-
-/**
- * Adds an event to one of the person's calendars where it is kept. As with a change, whether it may
- * be added is decided here, from the calendar as it is now, before anything is sent.
- */
-export async function createEvent(asker: Asker, sourceId: string, calendarId: string, fields: NewEvent): Promise<CalendarEvent> {
-  const source = await sourceOf(asker, sourceId, "calendar");
-  if (!source.create) throw new OpError("forbidden", `${source.info.name} is read-only`);
-  try {
-    const calendar = await source.calendar(calendarId);
-    if (!calendar) throw new OpError("not_found", "No such calendar");
-    if (!calendar.writable) throw new OpError("forbidden", `You can only read the calendar "${calendar.name}"`);
-    return await source.create(calendarId, fields);
   } catch (err) {
     if (err instanceof OpError) throw err;
     return failed(source, err);
@@ -215,11 +182,8 @@ export async function listContacts(asker: Asker, query: string | undefined): Pro
   return { contacts, sources, more: read.some((r) => r.more) };
 }
 
-/**
- * What a note may hold of a record: its reference, and words its owner is content for every reader of the note to see.
- * An event's title can be someone else's, who invited the member: it writes no embed, link or code into the note.
- */
-const labelled = (label: string) => label.replace(/[{}[\]`\s]+/g, " ").replace(/ +/g, " ").trim().slice(0, 200);
+/** What a note may hold of a record: its reference, and words its owner is content for every reader of the note to see. */
+const labelled = (label: string) => label.replace(/[{}\s]+/g, " ").trim().slice(0, 200);
 
 /** A reference as a note writes it: an embed whose config is the reference, then the label. */
 export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) => `::${kind}{${[ref, labelled(label)].filter(Boolean).join(" ")}}`;
@@ -255,42 +219,6 @@ export async function refer(asker: Asker, sourceId: string, id: string): Promise
     .first<{ id: string }>();
   const label = record.kind === "event" ? record.event.title : record.contact.name;
   return { ref: row!.id, kind: RECORD[source.kind], text: writtenReference(RECORD[source.kind], row!.id, label) };
-}
-
-/** The most references to one record that the notes about it are looked for by: the asker's own, and one for each other member. */
-const MAX_REFERENCES = 50;
-
-/**
- * Whether the asker can read the event now, from their own calendar. Any failure is a no: asked only
- * when a teammate referenced the event, a failure said aloud would tell the asker that someone had.
- */
-async function readsEvent(asker: Asker, sourceId: string, id: string): Promise<boolean> {
-  const source = (await asker.sources.of(asker.personId)).find((s) => s.info.id === sourceId);
-  if (source?.kind !== "calendar" || source.info.state !== "connected") return false;
-  return source.get(id).then(
-    (event) => event !== null,
-    () => false,
-  );
-}
-
-/**
- * The references the notes about one of the asker's records hold: the asker's own, and for an event
- * the asker can read now, every other member's of the workspace to the same event. An event's id
- * names it for everyone whose calendar holds it (Google's is its calendar's id and its own), so the
- * members of a shared calendar refer to one event by one id. A contact is one person's own, and
- * only their own reference is theirs. Following a reference is still its maker's alone (`readRecord`).
- */
-export async function referencesTo(asker: Asker, workspaceId: string, sourceId: string, id: string): Promise<string[]> {
-  const { results } = await asker.db
-    .prepare(
-      `SELECT id, person_id FROM source_refs WHERE data_source = ?1 AND record_id = ?2 AND (person_id = ?3 OR person_id IN (SELECT person_id FROM members WHERE workspace_id = ?4))
-       ORDER BY person_id = ?3 DESC, created_at, id LIMIT ?5`,
-    )
-    .bind(sourceId, id, asker.personId, workspaceId, MAX_REFERENCES)
-    .all<{ id: string; person_id: string }>();
-  const own = results.filter((r) => r.person_id === asker.personId).map((r) => r.id);
-  if (own.length === results.length || !(await readsEvent(asker, sourceId, id))) return own;
-  return results.map((r) => r.id);
 }
 
 /** The record a reference stands for, read where it is kept. Someone else's reference is no reference. */

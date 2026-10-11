@@ -1,24 +1,26 @@
 import type { ChangeSet } from "@codemirror/state";
-import { following } from "./follow.ts";
 import { linesOutsideCode } from "./lines.ts";
-import { RULE_PATTERN, counted, nextDue, parseRule, skippedTo, writeRule, type Rule } from "./recurrence.ts";
+import { mentionKey, mentionsOn, personKey, writtenMention, type WrittenMention } from "./mentions.ts";
+import { RULE_PATTERN, nextDue, parseRule, type Rule } from "./recurrence.ts";
 import { applyChanges } from "./text.ts";
 
 /**
  * A todo as a note writes it: a list item with a checkbox, and its options as tokens on the same line.
  *
- *     - [ ] !! Call the bank due:2026-10-14 #money
+ *     - [ ] !! Call the bank due:2026-10-14 +Home #money
  *
  * - `[ ]` is open and `[x]` is done.
  * - `!`, `!!` or `!!!` right after the checkbox is its importance. None is normal.
  * - `due:YYYY-MM-DD` is the day it is due: a calendar date, with no time and no time zone.
  * - `every:2w` is how it recurs. `recurrence.ts` has the rules.
  * - `done:2026-10-10x12` is the day a recurring todo was last checked off, and how many times it has been.
+ * - `+Name` puts it in a project. A name starts with a letter and goes on in letters, digits, `_` and `-`.
  * - `#tag` tags the whole note, on this line as on any other.
+ * - `@[[id|Name]]` or `@[[Name]]` assigns it to a person. `mentions.ts` has how a mention is written.
  *
  * A token stands alone: after a space, and before a space, the end of the line, or `.,;:!?)`. Text
- * in inline code, in a link to a note, and in a link's address is never a token. Tags match
- * ignoring case. docs/todos.md says the same to a person.
+ * in inline code, in a link to a note, and in a link's address is never a token. Projects and tags
+ * match ignoring case. docs/todos.md says the same to a person.
  */
 export interface Todo {
   /** Where the `[ ]` is. */
@@ -33,9 +35,11 @@ export interface Todo {
   every: (Span & { rule: Rule; written: string }) | null;
   /** The first `done:` with a real date. With no count it was done once. */
   lastDone: (Span & LastDone) | null;
-  /** The tags written on this line. They tag its note, as a tag on any line does. */
+  projects: (Span & { name: string })[];
   tags: (Span & { name: string })[];
-  /** The line without its list mark, checkbox, importance, due date, recurrence and last-done mark. */
+  /** The people mentioned on the line, who are who it is assigned to. */
+  assignees: WrittenMention[];
+  /** The line without its list mark, checkbox, importance, due date, recurrence, last-done mark, projects and assignees. */
   words: string;
 }
 
@@ -62,7 +66,9 @@ const IMPORTANCE = /^\s+(!{1,3})(?=\s|$)/;
 const DUE = new RegExp(`(?<=\\s)due:(\\d{4}-\\d{2}-\\d{2})${AFTER}`, "g");
 const EVERY = new RegExp(`(?<=\\s)every:(${RULE_PATTERN})${AFTER}`, "g");
 const LAST_DONE = new RegExp(`(?<=\\s)done:(\\d{4}-\\d{2}-\\d{2})(?:x([1-9]\\d{0,5}))?${AFTER}`, "g");
+const PROJECT = new RegExp(`(?<=\\s)\\+(\\p{L}[\\p{L}\\p{N}_-]*)${AFTER}`, "gu");
 const TAG = new RegExp(`(?<=^|\\s)#([\\p{L}\\p{N}_][\\p{L}\\p{N}_/-]*)${AFTER}`, "gu");
+const PROJECT_NAME = /^\p{L}[\p{L}\p{N}_-]*$/u;
 
 /** The line with what is never a token put out of the way, each character still where it was. */
 const readable = (line: string) => {
@@ -79,7 +85,9 @@ export function isDay(day: string): boolean {
   return year >= 1000 && made.getUTCFullYear() === year && made.getUTCMonth() === month - 1 && made.getUTCDate() === date;
 }
 
-/** What a tag is matched by: its name in lower case. */
+export const isProjectName = (name: string) => PROJECT_NAME.test(name);
+
+/** What a project or a tag is matched by: its name in lower case. */
 export const nameKey = (name: string) => name.toLowerCase();
 
 /** The tags on one line of a note, which starts at `offset`. A tag has something in it besides digits, so `#12` is not one. */
@@ -105,10 +113,12 @@ export function parseTodo(line: string, offset = 0): Todo | null {
   const every = recurs ? { ...span(recurs.m.index, recurs.m[0].length), rule: recurs.rule!, written: recurs.m[1]! } : null;
   const did = [...body.matchAll(LAST_DONE)].find((m) => isDay(m[1]!));
   const lastDone = did ? { ...span(did.index, did[0].length), on: did[1]!, times: Number(did[2] ?? 1) } : null;
+  const projects = [...body.matchAll(PROJECT)].map((m) => ({ ...span(m.index, m[0].length), name: m[1]! }));
+  const assignees = mentionsOn(line, offset).filter((m) => m.from >= offset + start);
 
   let words = "";
   let at = start;
-  for (const taken of [importanceAt, due, every, lastDone].filter((s) => s !== null).sort((a, b) => a.from - b.from)) {
+  for (const taken of [importanceAt, due, every, lastDone, ...projects, ...assignees].filter((s) => s !== null).sort((a, b) => a.from - b.from)) {
     words += line.slice(at, taken.from - offset);
     at = taken.to - offset;
   }
@@ -122,7 +132,9 @@ export function parseTodo(line: string, offset = 0): Todo | null {
     due,
     every,
     lastDone,
+    projects,
     tags: tagsOn(line, offset),
+    assignees,
     words,
   };
 }
@@ -137,13 +149,14 @@ export interface TodoChange {
   every?: string | null;
   /** When it was last checked off and how many times, or null to take the mark away. */
   lastDone?: LastDone | null;
-  /** True moves a recurring todo's due date to its next one, with nothing checked off. */
-  skip?: boolean;
-  /**
-   * What the todo says, as `words` reads it: the line but its list mark, checkbox, importance and due date,
-   * with its tags. Its importance stays where it is and its due date goes after the words. One line.
-   */
-  words?: string;
+  /** Puts it in a project, unless it is in it already. With `removeProject`, the new one takes the old one's place on the line. */
+  addProject?: string;
+  /** Takes it out of a project, ignoring case. */
+  removeProject?: string;
+  /** Assigns it to a person, unless it is theirs already: a member by their id and name, anyone else by name. */
+  assign?: { id?: string | null; name: string };
+  /** Takes it from a person, named by their id or by a name ignoring case, or from each of several such. */
+  unassign?: string | readonly string[];
 }
 
 export interface Edit extends Span {
@@ -153,11 +166,11 @@ export interface Edit extends Span {
 /**
  * The edits to a todo's line that make `change`, as offsets into the line, in order and apart from
  * each other. Each replaces one token's own characters. Taking a token away takes the space before it
- * too, and adding one writes a space before it: a due date goes at the end of the line,
+ * too, and adding one writes a space before it: due dates and projects go at the end of the line,
  * importance right after the checkbox. Nothing else on the line is touched. None when the line
  * isn't a todo or already says all of it.
  */
-export function todoEdits(line: string, change: Omit<TodoChange, "words">): Edit[] {
+export function todoEdits(line: string, change: TodoChange): Edit[] {
   const todo = parseTodo(line);
   if (!todo) return [];
   const edits: Edit[] = [];
@@ -180,7 +193,7 @@ export function todoEdits(line: string, change: Omit<TodoChange, "words">): Edit
   }
 
   if (change.every !== undefined && change.every !== (todo.every?.written ?? null)) {
-    if (change.every !== null && !parseRule(change.every)) throw new RangeError(`${change.every} isn't a way to repeat. docs/todos.md has the rules, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 and 1m-times-5`);
+    if (change.every !== null && !parseRule(change.every)) throw new RangeError(`${change.every} isn't a way to recur. docs/todos.md has the rules, such as 2w, mon,thu, 3d-after-done and last-fri`);
     if (!todo.every) tail += ` every:${change.every}`;
     else if (change.every) edits.push({ from: todo.every.from, to: todo.every.to, insert: `every:${change.every}` });
     else edits.push({ from: todo.every.from - 1, to: todo.every.to, insert: "" });
@@ -194,6 +207,22 @@ export function todoEdits(line: string, change: Omit<TodoChange, "words">): Edit
     else edits.push({ from: todo.lastDone.from - 1, to: todo.lastDone.to, insert: "" });
   }
 
+  if (change.addProject !== undefined && !isProjectName(change.addProject)) throw new RangeError(`${change.addProject} isn't a project's name: a letter, then letters, digits, _ and -`);
+  const adding = change.addProject !== undefined && !todo.projects.some((p) => nameKey(p.name) === nameKey(change.addProject!)) ? change.addProject : undefined;
+  const leaving = change.removeProject === undefined ? [] : todo.projects.filter((p) => nameKey(p.name) === nameKey(change.removeProject!));
+  // A project asked to be both taken out and put in stays as it is written.
+  if (change.addProject === undefined || change.removeProject === undefined || nameKey(change.addProject) !== nameKey(change.removeProject)) {
+    leaving.forEach((p, i) => edits.push(i === 0 && adding ? { from: p.from, to: p.to, insert: `+${adding}` } : { from: p.from - 1, to: p.to, insert: "" }));
+    if (adding && !leaving.length) tail += ` +${adding}`;
+  }
+
+  const mention = change.assign === undefined ? undefined : writtenMention(change.assign);
+  if (mention === "") throw new RangeError("A todo is assigned to a member's id or to a name, and that is neither");
+  const taking = new Set((change.unassign === undefined ? [] : typeof change.unassign === "string" ? [change.unassign] : change.unassign).map(personKey));
+  for (const assignee of todo.assignees) if (taking.has(mentionKey(assignee))) edits.push({ from: assignee.from - (line[assignee.from - 1] === " " ? 1 : 0), to: assignee.to, insert: "" });
+  const theirs = change.assign && personKey(change.assign.id || change.assign.name);
+  if (mention && !taking.has(theirs!) && !todo.assignees.some((a) => mentionKey(a) === theirs)) tail += ` ${mention}`;
+
   if (tail) {
     const end = Math.max(line.trimEnd().length, todo.box.to);
     edits.push({ from: end, to: end, insert: tail });
@@ -201,25 +230,8 @@ export function todoEdits(line: string, change: Omit<TodoChange, "words">): Edit
   return edits.sort((a, b) => a.from - b.from);
 }
 
-/**
- * The todo's line saying `words`, with the importance it has before them and the due date, the rule and
- * the last-done mark it has after them, unless the words write their own: then theirs is the one, and
- * the line has one of each.
- */
-function reworded(line: string, words: string): string {
-  if (/[\r\n]/.test(words)) throw new RangeError("A todo's words are one line");
-  const todo = parseTodo(line);
-  const said = words.trim();
-  if (!todo || said.replace(/\s+/g, " ") === todo.words) return line;
-  const own = parseTodo(`- [ ] ${said}`)!;
-  const kept = (span: Span | null, theirs: Span | null) => (span && !theirs ? line.slice(span.from, span.to) : "");
-  const after = [kept(todo.due, own.due), kept(todo.every, own.every), kept(todo.lastDone, own.lastDone)];
-  return [line.slice(0, todo.box.to), kept(todo.importanceAt, own.importanceAt), said, ...after].filter(Boolean).join(" ");
-}
-
-/** The todo's line with `change` made. Every character it doesn't change is as it was, unless its words are rewritten. */
-export function rewriteTodo(line: string, { words, ...change }: TodoChange): string {
-  if (words !== undefined) line = reworded(line, words);
+/** The todo's line with `change` made, and every other character as it was. */
+export function rewriteTodo(line: string, change: TodoChange): string {
   let out = "";
   let at = 0;
   for (const edit of todoEdits(line, change)) {
@@ -237,47 +249,24 @@ export interface Completed {
 
 /**
  * Checking a todo off on the day `on`. A todo that recurs stays open: its due date moves to the next
- * one, its `done:` mark says `on` and one more time, a rule that ends after so many times has one
- * fewer left, and the line as it was, checked and without how it recurs, is what gets filed. The
- * last time of a rule that ends checks the todo off for good, its tokens as written, and is filed
- * the same. Any other todo is checked, and nothing is filed. Every completion comes through here on
- * the server: the todo.set operation, and a write that checks a recurring todo's box, which is what
- * the editor's checkbox and a typed `x` are. The Todos page calls it to show at once what the server
- * will answer.
+ * one, its `done:` mark says `on` and one more time, and the line as it was, checked and without how
+ * it recurs, is what gets filed. Any other todo is checked, and nothing is filed. Every completion
+ * comes through here on the server: the todo.set operation, and a write that checks a recurring
+ * todo's box, which is what the editor's checkbox and a typed `x` are. The Todos page calls it to
+ * show at once what the server will answer.
  */
 export function completeTodo(line: string, on: string): Completed {
   const todo = parseTodo(line);
   if (!todo || todo.done) return { line, filed: null };
-  const rule = todo.every?.rule;
-  const next = rule && nextDue(rule, { due: todo.due?.date ?? null, done: on });
-  if (!rule || (!next && !rule.end)) return { line: rewriteTodo(line, { done: true }), filed: null };
-  const filed = `- ${rewriteTodo(line, { done: true, every: null, lastDone: null }).slice(todo.box.from)}`;
-  if (!next) return { line: rewriteTodo(line, { done: true }), filed };
-  return { line: rewriteTodo(line, { due: next, every: writeRule(counted(rule)), lastDone: { on, times: (todo.lastDone?.times ?? 0) + 1 } }), filed };
+  const next = todo.every && nextDue(todo.every.rule, { due: todo.due?.date ?? null, done: on });
+  if (!next) return { line: rewriteTodo(line, { done: true }), filed: null };
+  const checked = rewriteTodo(line, { done: true, every: null, lastDone: null });
+  return { line: rewriteTodo(line, { due: next, lastDone: { on, times: (todo.lastDone?.times ?? 0) + 1 } }), filed: `- ${checked.slice(todo.box.from)}` };
 }
 
-/**
- * Skipping a recurring todo's occurrence on the day `on`: its due date moves to the next one after
- * both its due date and that day, as if it had been done on the later of the two, and it counts as
- * one of the times of a rule that ends after so many. Nothing is checked off. It is refused for a
- * todo that doesn't recur, one that is done, and one with no later time to skip to.
- */
-export function skipTodo(line: string, on: string): string {
-  const todo = parseTodo(line);
-  if (!todo?.every || todo.done) throw new RangeError("Only an open todo that repeats can be skipped");
-  const next = skippedTo(todo.every.rule, { due: todo.due?.date ?? null, on });
-  if (!next) throw new RangeError("This is the last time this todo repeats, so there is no later one to skip to. Check it off, or stop it repeating");
-  return rewriteTodo(line, { due: next, every: writeRule(counted(todo.every.rule)) });
-}
-
-/**
- * The todo's line with `change` made, as todo.set makes it on the day `on`: checking it off is
- * `completeTodo`'s to do, skipping it `skipTodo`'s, and the rest is `rewriteTodo`'s.
- */
-export function changeTodo(line: string, { done, skip, ...rest }: TodoChange, on: string): Completed {
-  if (done && skip) throw new RangeError("A todo is checked off or skipped, not both");
+/** The todo's line with `change` made, as todo.set makes it on the day `on`: checking it off is `completeTodo`'s to do, and the rest is `rewriteTodo`'s. */
+export function changeTodo(line: string, { done, ...rest }: TodoChange, on: string): Completed {
   const next = rewriteTodo(line, done === false ? { ...rest, done } : rest);
-  if (skip) return { line: skipTodo(next, on), filed: null };
   return done ? completeTodo(next, on) : { line: next, filed: null };
 }
 
@@ -329,9 +318,9 @@ const reopened = (todo: NoteTodo) => rewriteTodo(todo.text, { done: false });
  * a change to `was`. A todo is checked off when its line was an open todo and is a done, recurring
  * one now, whatever else on the line changed with it, and however the box came to be checked: the
  * checkbox, an `x` typed between the brackets, an agent writing the whole note. Which line is which
- * is read from where the changes are. Where a change puts some lines in the place of others and so
- * doesn't say, the line is the one most like it there (`following`). A line written already checked
- * was never open, and one replaced by a line unlike it is gone, so neither is a completion.
+ * is read from where the changes are, never from what a line says. A line written already checked
+ * was never open, and a change that runs from inside the line out past either end of it has replaced
+ * the line with another, so neither is a completion.
  */
 export function checkedOff(was: string, changes: ChangeSet): NoteTodo[] {
   const text = applyChanges(changes, was);
@@ -339,11 +328,16 @@ export function checkedOff(was: string, changes: ChangeSet): NoteTodo[] {
   const done = todosIn(text).filter((todo) => todo.done && todo.every);
   if (!done.length) return [];
   const found = new Set<NoteTodo>();
-  const after = following(was, changes, text);
   for (const open of todosIn(was)) {
     if (open.done) continue;
-    const at = after(open.from);
-    const now = at === null ? undefined : done.find((todo) => todo.from <= at && at <= todo.from + todo.text.length);
+    const [from, to] = [open.from, open.from + open.text.length];
+    let replaced = false;
+    changes.iterChangedRanges((fromA, toA) => {
+      if ((fromA < from && toA > from) || (fromA < to && toA > to)) replaced = true;
+    });
+    if (replaced) continue;
+    const at = changes.mapPos(from, 1);
+    const now = done.find((todo) => todo.from <= at && at <= todo.from + todo.text.length);
     if (now) found.add(now);
   }
   return [...found].sort((a, b) => a.from - b.from);
@@ -370,12 +364,14 @@ export function rolledForward(text: string, checked: readonly NoteTodo[], on: st
 }
 
 /**
- * What the index of todos holds for one note: its todos, and the note's tags. It is made from the
- * text alone, so it can always be made again.
+ * What the index of todos holds for one note: its todos, their projects, and the note's tags. It is
+ * made from the text alone, so it can always be made again.
  */
 export interface TodoIndex {
   /** Line, done, importance, due, and the line as written. */
   todos: [line: number, done: 0 | 1, importance: Importance, due: string | null, text: string][];
+  /** Line, the project's key, and its name as written. */
+  projects: [line: number, key: string, name: string][];
   tags: [key: string, name: string][];
 }
 
@@ -383,6 +379,7 @@ export function todoIndex(text: string): TodoIndex {
   const todos = todosIn(text);
   return {
     todos: todos.map((t) => [t.line, t.done ? 1 : 0, t.importance, t.due?.date ?? null, t.text]),
+    projects: todos.flatMap((t) => [...new Map(t.projects.map((p) => [nameKey(p.name), p.name])).entries()].map(([key, name]): [number, string, string] => [t.line, key, name])),
     tags: tagsIn(text).map((name) => [nameKey(name), name]),
   };
 }

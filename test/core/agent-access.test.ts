@@ -59,7 +59,6 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "note.label": { id: noteId, revision: 1, name: "Start" },
   "note.revert": { id: noteId, revision: 1 },
   "note.revertChanges": { id: noteId, revisions: [2] },
-  "note.previewRevert": { id: noteId, revisions: [2] },
   "note.diff": { id: noteId, revision: 1 },
   "history.summary": {},
   "note.undo": { id: noteId },
@@ -67,9 +66,6 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "history.list": {},
   "history.authors": {},
   "history.revertAuthor": { author: { kind: "agent", id: "aaaaaaaaaaaa" } },
-  "history.diff": { changes: [{ noteId, revisions: [2] }] },
-  "history.previewRevert": { changes: [{ noteId, revisions: [2] }] },
-  "history.revert": { changes: [{ noteId, revisions: [2] }] },
   "folder.list": {},
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
@@ -84,11 +80,9 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "source.list": {},
   "event.list": { from: 0, to: 1, timeZone: "UTC" },
   "event.update": { sourceId: "google-calendar", id: "none", etag: "none", title: "No" },
-  "event.create": { sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } },
   "contact.list": {},
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },
-  "record.notes": { sourceId: "google-calendar", id: "none" },
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {
@@ -121,7 +115,6 @@ describe("an agent's access is its member's", () => {
       "note.undo",
       "note.redo",
       "history.revertAuthor",
-      "history.revert",
       "folder.create",
       "folder.rename",
       "folder.delete",

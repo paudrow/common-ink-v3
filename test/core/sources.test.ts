@@ -1,11 +1,9 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { signIn, whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { inOrder, within } from "../../src/core/events.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type OpInput } from "../../src/core/protocol.ts";
-import { namedReferences } from "../../src/core/references.ts";
+import { OpError, type CalendarEvent, type Contact, type OpInput } from "../../src/core/protocol.ts";
 import { SourceError, contactMatches, writtenReference, type CalendarSource, type ContactsSource, type DataSource, type Sources } from "../../src/core/sources.ts";
 import worker from "../../src/worker/index.ts";
 import { sign } from "../../src/worker/session.ts";
@@ -18,7 +16,6 @@ const WEEK = { from: Date.UTC(2026, 9, 11), to: Date.UTC(2026, 9, 18), timeZone:
 const event = (id: string, title: string, more: Partial<CalendarEvent> = {}): CalendarEvent => ({
   sourceId: "cal",
   id,
-  calendarId: "mine",
   calendar: "Mine",
   color: null,
   title,
@@ -33,35 +30,28 @@ const event = (id: string, title: string, more: Partial<CalendarEvent> = {}): Ca
   ...more,
 });
 
-const calendar = (id: string, name: string, more: Partial<Calendar> = {}): Calendar => ({ sourceId: "cal", id, name, color: null, writable: true, ...more });
-const MINE = calendar("mine", "Mine");
-
 const contact = (id: string, name: string, more: Partial<Contact> = {}): Contact => ({ sourceId: "people", id, name, emails: [], phones: [], organization: null, url: null, ...more });
 
 /** Data sources held in memory, each person's their own, with a record of everything asked of them. */
 function world(options: { readOnly?: boolean; fails?: SourceError } = {}) {
   const events = new Map<string, CalendarEvent[]>();
-  const calendars = new Map<string, Calendar[]>();
   const contacts = new Map<string, Contact[]>();
   const asked: string[] = [];
   const updates: unknown[] = [];
-  const creates: unknown[] = [];
   const state = new Map<string, DataSource["info"]["state"]>();
   const sources: Sources = {
     async of(personId) {
       asked.push(personId);
       const info = (id: string, name: string) => ({ id, name, provider: "Test", state: state.get(personId) ?? ("connected" as const), account: `${personId}@test` });
       const mine = () => events.get(personId) ?? [];
-      const theirs = () => calendars.get(personId) ?? [];
-      const cal: CalendarSource = {
+      const calendar: CalendarSource = {
         kind: "calendar",
         info: info("cal", "Test calendar"),
         async list() {
           if (options.fails) throw options.fails;
-          return { calendars: theirs(), events: mine() };
+          return mine();
         },
         get: async (id) => mine().find((e) => e.id === id) ?? null,
-        calendar: async (id) => theirs().find((c) => c.id === id) ?? null,
         ...(options.readOnly
           ? {}
           : {
@@ -73,22 +63,16 @@ function world(options: { readOnly?: boolean; fails?: SourceError } = {}) {
                 mine()[at] = next;
                 return next;
               },
-              async create(calendarId, fields) {
-                creates.push({ personId, calendarId, fields });
-                const made = event(`n${creates.length}`, fields.title, { calendarId, when: fields.when, location: fields.location ?? null, description: fields.description ?? null });
-                events.set(personId, [...mine(), made]);
-                return made;
-              },
             }),
       };
       const people: ContactsSource = { kind: "contacts", info: info("people", "Test contacts"), list: async () => ({ contacts: contacts.get(personId) ?? [], more: false }), get: async (id) => (contacts.get(personId) ?? []).find((c) => c.id === id) ?? null };
-      return [cal, people];
+      return [calendar, people];
     },
     connect: async () => ({ redirect: "/somewhere" }),
     disconnect: async () => {},
   };
   const ask = <T extends OpInput>(actor: Actor, op: T) => perform(env.DB, actor, op, T0, sources);
-  return { events, calendars, contacts, asked, updates, creates, state, sources, ask };
+  return { events, contacts, asked, updates, state, sources, ask };
 }
 
 const refusal = async (asking: Promise<unknown>) => {
@@ -223,70 +207,6 @@ describe("changing an event", () => {
   });
 });
 
-describe("adding an event", () => {
-  const AT = { allDay: false as const, from: T0, to: T0 + 1_800_000 };
-
-  it("adds it to a calendar the member may write, answers it as made, and lists it after", async () => {
-    const w = world();
-    const ada = await newMember();
-    w.calendars.set(ada.personId, [MINE]);
-    const made = await w.ask(ada, { type: "event.create", sourceId: "cal", calendarId: "mine", title: "Dentist", when: AT, location: "Main St" });
-    expect(made).toEqual({ sourceId: "cal", id: "n1", calendarId: "mine", calendar: "Mine", color: null, title: "Dentist", when: AT, timeZone: null, location: "Main St", description: null, recurring: false, editable: true, etag: "e1", url: null });
-    expect(w.creates).toEqual([{ personId: ada.personId, calendarId: "mine", fields: { title: "Dentist", when: AT, location: "Main St" } }]);
-    expect((await w.ask(ada, { type: "event.list", ...WEEK })).events.map((e) => [e.id, e.calendarId, e.title])).toEqual([["n1", "mine", "Dentist"]]);
-  });
-
-  it("is refused by a read-only data source, in a calendar the member can only read, and in one they don't have, before anything is sent", async () => {
-    const ada = await newMember();
-    const readOnly = world({ readOnly: true });
-    readOnly.calendars.set(ada.personId, [MINE]);
-    expect(await refusal(readOnly.ask(ada, { type: "event.create", sourceId: "cal", calendarId: "mine", title: "No", when: AT }))).toBe("forbidden: Test calendar is read-only");
-
-    const w = world();
-    w.calendars.set(ada.personId, [MINE, calendar("holidays", "Holidays", { writable: false })]);
-    expect(await refusal(w.ask(ada, { type: "event.create", sourceId: "cal", calendarId: "holidays", title: "Workday", when: AT }))).toBe('forbidden: You can only read the calendar "Holidays"');
-    expect(await refusal(w.ask(ada, { type: "event.create", sourceId: "cal", calendarId: "nowhere", title: "No", when: AT }))).toBe("not_found: No such calendar");
-    expect(await refusal(w.ask(ada, { type: "event.create", sourceId: "people", calendarId: "mine", title: "No", when: AT }))).toBe("not_found: No such data source");
-    expect(await refusal(w.ask(ada, { type: "event.create", sourceId: "cal", calendarId: "mine", title: "Backwards", when: { allDay: true, from: "2026-10-15", to: "2026-10-14" } }))).toContain("invalid:");
-    // Past the last instant a Date holds, no data source could write it as a date.
-    expect(await refusal(w.ask(ada, { type: "event.create", sourceId: "cal", calendarId: "mine", title: "Far", when: { allDay: false, from: 0, to: 9e15 } }))).toContain("invalid:");
-    expect(w.creates).toEqual([]);
-  });
-
-  it("is refused in another person's calendar as one that doesn't exist, whoever asks, and a read-only token is refused it outright", async () => {
-    const w = world();
-    const ada = await newMember("Ada");
-    const eve = await addMember(ada, "editor", "Eve");
-    w.calendars.set(eve.personId, [calendar("eves", "Eve's")]);
-    const eveReads = await agentOf(eve, { readOnly: true });
-    w.asked.length = 0;
-    for (const actor of [ada, await agentOf(ada)]) expect(await refusal(w.ask(actor, { type: "event.create", sourceId: "cal", calendarId: "eves", title: "Taken", when: AT }))).toBe("not_found: No such calendar");
-    expect(new Set(w.asked)).toEqual(new Set([ada.personId]));
-    expect(await refusal(w.ask(eveReads, { type: "event.create", sourceId: "cal", calendarId: "eves", title: "No", when: AT }))).toBe("forbidden: A read-only token can't event.create");
-    expect(w.creates).toEqual([]);
-    expect(w.events.get(eve.personId)).toBeUndefined();
-  });
-
-  it("lists every calendar of each connected calendar data source, with or without events, and none it can't write as writable", async () => {
-    const ada = await newMember();
-    const both = [MINE, calendar("holidays", "Holidays", { color: "#8e24aa", writable: false })];
-    const w = world();
-    w.calendars.set(ada.personId, both);
-    expect((await w.ask(ada, { type: "event.list", ...WEEK })).calendars).toEqual([
-      { sourceId: "cal", id: "mine", name: "Mine", color: null, writable: true },
-      { sourceId: "cal", id: "holidays", name: "Holidays", color: "#8e24aa", writable: false },
-    ]);
-    const readOnly = world({ readOnly: true });
-    readOnly.calendars.set(ada.personId, both);
-    expect((await readOnly.ask(ada, { type: "event.list", ...WEEK })).calendars.map((c) => [c.id, c.writable])).toEqual([["mine", false], ["holidays", false]]);
-    const lapsed = world({ fails: new SourceError("needs_reconnect", "No longer accepted") });
-    lapsed.calendars.set(ada.personId, both);
-    expect(await lapsed.ask(ada, { type: "event.list", ...WEEK })).toMatchObject({ calendars: [], sources: [{ id: "cal", state: "needs_reconnect" }] });
-    lapsed.state.set(ada.personId, "not_connected");
-    expect((await lapsed.ask(ada, { type: "event.list", ...WEEK })).calendars).toEqual([]);
-  });
-});
-
 describe("a data source that stopped answering", () => {
   it("is listed as needing to be reconnected, and is not asked again until it is", async () => {
     const w = world({ fails: new SourceError("needs_reconnect", "No longer accepted") });
@@ -412,8 +332,6 @@ describe("a reference to a record", () => {
   it("is written so a label can't end the embed or start another", () => {
     expect(writtenReference("event", "aaaaaaaaaaaa", "Plan {Q4}\n::html{x}")).toBe("::event{aaaaaaaaaaaa Plan Q4 ::html x}");
     expect(writtenReference("contact", "aaaaaaaaaaaa", "  ")).toBe("::contact{aaaaaaaaaaaa}");
-    // Nor can the title of an event someone else sent write a link or code into the note of whoever references it.
-    expect(writtenReference("event", "aaaaaaaaaaaa", "Lunch [[Board minutes]] `x` [[y|z]]")).toBe("::event{aaaaaaaaaaaa Lunch Board minutes x y|z}");
   });
 
   it("stays the person's own in a note other members read: the note holds the label, and they can follow nothing", async () => {
@@ -427,264 +345,6 @@ describe("a reference to a record", () => {
     expect(read.text).toContain(`::event{${ref} Lunch with Sam}`);
     expect(JSON.stringify(read)).not.toMatch(/Cafe Lula|Bring the contract|a1"/);
     expect(await refusal(w.ask(eve, { type: "record.read", ref }))).toBe("not_found: No such record");
-  });
-});
-
-describe("the notes that reference a record", () => {
-  it("are the notes holding the asker's own reference as one, not in code or Trash, each saying who sees it", async () => {
-    const w = world();
-    const ada = await newMember("Ada");
-    const eve = await addMember(ada, "editor", "Eve");
-    w.events.set(ada.personId, [event("a1", "Lunch with Sam"), event("a2", "Planning")]);
-    const lunch = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
-    const planning = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a2" });
-    expect(await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a1" }), "none yet").toEqual({ notes: [] });
-    const at = (text: string) => w.ask(ada, { type: "note.create", text });
-    const team = await at(`# Team notes\n\n${lunch.text}\n`);
-    const mine = await at(`# Just mine\n\nAbout ${lunch.text}, and ${planning.text}\n`);
-    await w.ask(ada, { type: "note.setPrivate", id: mine.id, private: true });
-    const withEve = await at(`# With Eve\n\n- [ ] ask ${lunch.text}\n`);
-    await w.ask(ada, { type: "note.setPrivate", id: withEve.id, private: true });
-    await w.ask(ada, { type: "grant.set", noteId: withEve.id, email: (await whoAmI(env.DB, eve.personId)).person.email, access: "view" });
-    const old = await at(`# Archived\n\n${lunch.text}\n`);
-    await w.ask(ada, { type: "note.archive", id: old.id, archived: true });
-    const binned = await at(`# Binned\n\n${lunch.text}\n`);
-    await w.ask(ada, { type: "note.trash", id: binned.id });
-    await at(`# Code\n\n\`${lunch.text}\`\n\n\`\`\`\n${lunch.text}\n\`\`\`\n`);
-    await at(`# Words\n\nthe ref ${lunch.ref} said in words\n`);
-    await at(`# Other\n\n${planning.text}\n`);
-
-    const listed = await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a1" });
-    const byTitle = <T extends { title: string }>(notes: readonly T[]) => notes.toSorted((a, b) => a.title.localeCompare(b.title));
-    expect(byTitle(listed.notes).map((n) => [n.title, n.audience, n.id])).toEqual([
-      ["Archived", "workspace", old.id],
-      ["Just mine", "private", mine.id],
-      ["Team notes", "workspace", team.id],
-      ["With Eve", "shared", withEve.id],
-    ]);
-    // Her agent is told the same, read-only or not.
-    for (const agent of [await agentOf(ada), await agentOf(ada, { readOnly: true })]) expect(await w.ask(agent, { type: "record.notes", sourceId: "cal", id: "a1" })).toEqual(listed);
-    expect(byTitle((await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a2" })).notes).map((n) => n.title)).toEqual(["Just mine", "Other"]);
-  });
-
-  it("leaves out a note the asker can't see, title and all, until they can, and lists none of anyone else's references", async () => {
-    const w = world();
-    const ada = await newMember("Ada");
-    const eve = await addMember(ada, "editor", "Eve");
-    w.events.set(ada.personId, [event("a1", "Lunch with Sam")]);
-    w.events.set(eve.personId, [event("e1", "Eve's own lunch")]);
-    const lunch = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
-    await w.ask(ada, { type: "note.create", text: `# Ada's lunch\n\n${lunch.text}\n` });
-    // Eve copies Ada's reference into a note of her own and makes it private.
-    const hers = await w.ask(eve, { type: "note.create", text: `# Eve-secret-plans\n\n${lunch.text}\n` });
-    await w.ask(eve, { type: "note.setPrivate", id: hers.id, private: true });
-    const asked = await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a1" });
-    expect(asked.notes.map((n) => n.title)).toEqual(["Ada's lunch"]);
-    expect(JSON.stringify(asked)).not.toMatch(/Eve-secret|${hers.id}/);
-    // Eve's own event is not Ada's, and Ada's, which Eve's calendar doesn't have, lists nothing for her.
-    expect(await w.ask(eve, { type: "record.notes", sourceId: "cal", id: "e1" })).toEqual({ notes: [] });
-    expect(await w.ask(eve, { type: "record.notes", sourceId: "cal", id: "a1" })).toEqual({ notes: [] });
-    await w.ask(eve, { type: "grant.set", noteId: hers.id, email: (await whoAmI(env.DB, ada.personId)).person.email, access: "view" });
-    expect((await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a1" })).notes.map((n) => [n.title, n.audience]).toSorted()).toEqual([
-      ["Ada's lunch", "workspace"],
-      ["Eve-secret-plans", "shared"],
-    ]);
-    // Of a record nobody referenced, or one that isn't there, there are none.
-    expect(await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "nothing" })).toEqual({ notes: [] });
-    expect(await w.ask(ada, { type: "record.notes", sourceId: "nowhere", id: "a1" })).toEqual({ notes: [] });
-  });
-});
-
-describe("the notes about an event on a calendar members share", () => {
-  /** The same event in each member's calendar, as a calendar they all have holds it: one id for all of them. */
-  const SYNC = event("team s1", "Team sync", { calendarId: "team", calendar: "Team" });
-
-  it("lists a teammate's notes about it while the asker's own calendar has it, only those the asker can see, each saying who sees it", async () => {
-    const w = world();
-    const ada = await newMember("Ada");
-    const eve = await addMember(ada, "editor", "Eve");
-    const vic = await addMember(ada, "viewer", "Vic");
-    for (const member of [ada, eve]) w.events.set(member.personId, [SYNC]);
-    const adas = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "team s1" });
-    const at = async (by: Actor, text: string, as: "workspace" | "private" | { with: Actor } = "workspace") => {
-      const note = await w.ask(by, { type: "note.create", text });
-      if (as !== "workspace") await w.ask(by, { type: "note.setPrivate", id: note.id, private: true });
-      if (typeof as === "object") await w.ask(by, { type: "grant.set", noteId: note.id, email: (await whoAmI(env.DB, as.with.personId)).person.email, access: "view" });
-      return note;
-    };
-    await at(ada, `# Sync agenda\n\n${adas.text}\n`);
-    await at(ada, `# Ada-private-sync\n\n${adas.text}\n`, "private");
-    await at(ada, `# For Eve\n\n${adas.text}\n`, { with: eve });
-    const titles = async (actor: Actor) => (await w.ask(actor, { type: "record.notes", sourceId: "cal", id: "team s1" })).notes.map((n) => [n.title, n.audience]).toSorted();
-
-    // Eve never referenced it: Ada's notes she can see are listed for her all the same, and Ada's private one is not, title and all.
-    expect(await titles(eve)).toEqual([
-      ["For Eve", "shared"],
-      ["Sync agenda", "workspace"],
-    ]);
-    expect(JSON.stringify(await w.ask(eve, { type: "record.notes", sourceId: "cal", id: "team s1" }))).not.toMatch(/Ada-private/);
-    // Her agents are told the same, read-only or not.
-    for (const agent of [await agentOf(eve), await agentOf(eve, { readOnly: true })]) expect((await w.ask(agent, { type: "record.notes", sourceId: "cal", id: "team s1" })).notes.map((n) => [n.title, n.audience]).toSorted()).toEqual(await titles(eve));
-    // Her own reference adds her own notes, and Ada is told of them in turn.
-    const eves = await w.ask(eve, { type: "record.refer", sourceId: "cal", id: "team s1" });
-    expect(eves.ref).not.toBe(adas.ref);
-    await at(eve, `# Eve's take\n\n${eves.text}\n`);
-    await at(eve, `# Eve-private-take\n\n${eves.text}\n`, "private");
-    expect(await titles(ada)).toEqual([
-      ["Ada-private-sync", "private"],
-      ["Eve's take", "workspace"],
-      ["For Eve", "shared"],
-      ["Sync agenda", "workspace"],
-    ]);
-    // Following Eve's reference is still Eve's alone.
-    expect(await refusal(w.ask(ada, { type: "record.read", ref: eves.ref }))).toBe("not_found: No such record");
-
-    // Vic sees every workspace note, and his calendar doesn't have the event: none is listed for him, by its id or anyone's reference.
-    expect(await w.ask(vic, { type: "record.notes", sourceId: "cal", id: "team s1" })).toEqual({ notes: [] });
-    w.events.set(vic.personId, [event("team s2", "Another meeting", { calendarId: "team", calendar: "Team" })]);
-    expect(await w.ask(vic, { type: "record.notes", sourceId: "cal", id: "team s1" })).toEqual({ notes: [] });
-    // Once his calendar has it too, it is his to be told of, by the same rule.
-    w.events.set(vic.personId, [SYNC]);
-    expect(await titles(vic)).toEqual([
-      ["Eve's take", "workspace"],
-      ["Sync agenda", "workspace"],
-    ]);
-    // Taken off Eve's calendar, or her calendar needing reconnecting, she is told only of the notes with her own reference.
-    w.events.set(eve.personId, []);
-    expect(await titles(eve)).toEqual([
-      ["Eve's take", "workspace"],
-      ["Eve-private-take", "private"],
-    ]);
-    // A calendar that fails, however it fails, is told no more than one that answers without the event, which says nothing of whether a teammate referenced it.
-    const failing = w.sources.of;
-    w.sources.of = async (personId) => (await failing(personId)).map((source) => (source.kind === "calendar" && personId === eve.personId ? ({ ...source, get: async () => Promise.reject(new Error("boom")) } as DataSource) : source));
-    expect(await titles(eve)).toEqual([
-      ["Eve's take", "workspace"],
-      ["Eve-private-take", "private"],
-    ]);
-    expect(await w.ask(eve, { type: "record.notes", sourceId: "cal", id: "team nobody" })).toEqual({ notes: [] });
-    w.sources.of = failing;
-    w.events.set(eve.personId, [SYNC]);
-    w.state.set(eve.personId, "needs_reconnect");
-    expect(await titles(eve)).toEqual([
-      ["Eve's take", "workspace"],
-      ["Eve-private-take", "private"],
-    ]);
-  });
-
-  it("is told only of members of the workspace, and never of another's reference to a contact", async () => {
-    const w = world();
-    const ada = await newMember("Ada");
-    const eve = await addMember(ada, "editor", "Eve");
-    const elsewhere = await newMember("Olga");
-    for (const person of [ada, eve, elsewhere]) w.events.set(person.personId, [SYNC]);
-    for (const person of [ada, eve]) w.contacts.set(person.personId, [contact("people/c1", "Sam Okafor")]);
-    const sam = await w.ask(eve, { type: "record.refer", sourceId: "people", id: "people/c1" });
-    await w.ask(eve, { type: "note.create", text: `# About Sam\n\n${sam.text}\n` });
-    expect(await w.ask(ada, { type: "record.notes", sourceId: "people", id: "people/c1" })).toEqual({ notes: [] });
-    // A reference made by someone in no part of the workspace, copied into a note here, is not a teammate's.
-    const olgas = await w.ask(elsewhere, { type: "record.refer", sourceId: "cal", id: "team s1" });
-    await w.ask(eve, { type: "note.create", text: `# Copied\n\n${olgas.text}\n` });
-    expect(await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "team s1" })).toEqual({ notes: [] });
-    // Nor is a member who has left.
-    const eves = await w.ask(eve, { type: "record.refer", sourceId: "cal", id: "team s1" });
-    await w.ask(eve, { type: "note.create", text: `# Eve's take\n\n${eves.text}\n` });
-    expect((await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "team s1" })).notes.map((n) => n.title)).toEqual(["Eve's take"]);
-    await w.ask(ada, { type: "member.remove", memberId: eve.personId });
-    expect(await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "team s1" })).toEqual({ notes: [] });
-  });
-});
-
-describe("a reference in a note, asked about by everyone it doesn't belong to", () => {
-  const PRIVATE = /Cafe-Lula-private|contract-private|sam-private@example\.com|555-0100|Okafor-Works-private|"a1"|people\/c1/;
-  const NEVER_MADE = "aaaaaaaaaaaa";
-
-  it("is a reference that was never made to an admin, an editor, a viewer, a guest, each one's agents and whoever holds a link, and the note tells them its label alone", async () => {
-    const w = world();
-    const olga = await newMember("Olga Owner");
-    const ada = await addMember(olga, "editor", "Ada");
-    const others: Record<string, Actor> = { admin: olga, editor: await addMember(olga, "editor", "Eve"), viewer: await addMember(olga, "viewer", "Vic") };
-    w.events.set(ada.personId, [event("a1", "Lunch with Sam", { location: "Cafe-Lula-private", description: "contract-private" })]);
-    w.calendars.set(ada.personId, [MINE]);
-    w.contacts.set(ada.personId, [contact("people/c1", "Sam Okafor", { emails: ["sam-private@example.com"], phones: ["555-0100"], organization: "Okafor-Works-private" })]);
-    const lunch = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
-    const sam = await w.ask(ada, { type: "record.refer", sourceId: "people", id: "people/c1" });
-    const note = await w.ask(ada, { type: "note.create", text: `# Plans\n\n${lunch.text} with ${sam.text}\n` });
-    const guestEmail = `${crypto.randomUUID()}@example.com`;
-    await w.ask(olga, { type: "grant.set", noteId: note.id, email: guestEmail, access: "edit" });
-    others.guest = { kind: "member", personId: (await signIn(env.DB, { email: guestEmail, name: "Gus Guest" })).personId, workspaceId: olga.workspaceId };
-    for (const [name, person] of Object.entries({ ...others })) {
-      others[`${name}'s agent`] = await agentOf(person);
-      others[`${name}'s read-only agent`] = await agentOf(person, { readOnly: true });
-    }
-    expect((await w.ask(ada, { type: "record.read", ref: lunch.ref })).kind).toBe("event");
-    const askedForAda = w.asked.filter((id) => id === ada.personId).length;
-
-    for (const [name, actor] of Object.entries(others)) {
-      const said: unknown[] = [];
-      const read = await w.ask(actor, { type: "note.read", id: note.id });
-      expect(read.text, name).toContain(`::event{${lunch.ref} Lunch with Sam} with ::contact{${sam.ref} Sam Okafor}`);
-      said.push(read, await w.ask(actor, { type: "source.list" }), await w.ask(actor, { type: "event.list", ...WEEK }), await w.ask(actor, { type: "contact.list" }), await w.ask(actor, { type: "contact.list", query: "sam" }));
-      expect((said[2] as { events: unknown[] }).events, name).toEqual([]);
-      expect((said[2] as { calendars: unknown[] }).calendars, name).toEqual([]);
-      expect((said[3] as { contacts: unknown[] }).contacts, name).toEqual([]);
-      const readOnly = actor.kind === "agent" && actor.scope?.readOnly;
-      for (const ref of [lunch.ref, sam.ref]) expect(await refusal(w.ask(actor, { type: "record.read", ref })), name).toBe(await refusal(w.ask(actor, { type: "record.read", ref: NEVER_MADE })));
-      expect(await refusal(w.ask(actor, { type: "record.read", ref: lunch.ref })), name).toBe("not_found: No such record");
-      // The record's own id is no way in either: it names a record of the asker's, and they have none by it.
-      expect(await refusal(w.ask(actor, { type: "record.refer", sourceId: "cal", id: "a1" })), name).toBe(readOnly ? "forbidden: A read-only token can't record.refer" : "not_found: No such record");
-      expect(await refusal(w.ask(actor, { type: "event.update", sourceId: "cal", id: "a1", etag: "e1", title: "Taken" })), name).toBe(readOnly ? "forbidden: A read-only token can't event.update" : "not_found: No such event");
-      expect(await refusal(w.ask(actor, { type: "event.create", sourceId: "cal", calendarId: "mine", title: "Taken", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } })), name).toBe(readOnly ? "forbidden: A read-only token can't event.create" : "not_found: No such calendar");
-      expect(JSON.stringify(said), name).not.toMatch(PRIVATE);
-    }
-    // Whoever may write a note copies the reference into one of their own, and it is still Ada's.
-    const copied = await w.ask(others.editor!, { type: "note.create", text: `# Mine\n\n::event{${lunch.ref} Lunch with Sam}\n` });
-    expect(copied.text).toContain(lunch.ref);
-    expect(await refusal(w.ask(others.editor!, { type: "record.read", ref: lunch.ref }))).toBe("not_found: No such record");
-    // Nor does it lead to a record of their own that goes by the same id where it is kept, as an event two people are both at does.
-    w.events.set(others.editor!.personId, [event("a1", "Eve's own lunch")]);
-    expect(await refusal(w.ask(others.editor!, { type: "record.read", ref: lunch.ref }))).toBe("not_found: No such record");
-
-    const link = await w.ask(olga, { type: "grant.link", noteId: note.id, link: "public" });
-    const token = link!.to.kind === "link" ? link!.to.token : "";
-    for (const personId of [null, others.editor!.personId, ada.personId]) {
-      const visitor = { kind: "visitor", token, personId } as const;
-      const shared = await perform(env.DB, visitor, { type: "shared.read", id: note.id }, T0, w.sources);
-      expect(shared.text).toContain(`::event{${lunch.ref} Lunch with Sam}`);
-      expect(JSON.stringify(shared)).not.toMatch(PRIVATE);
-      for (const op of [{ type: "record.read", ref: lunch.ref }, { type: "contact.list" }, { type: "source.list" }] as const) expect(await refusal(perform(env.DB, visitor, op, T0, w.sources))).toBe(`forbidden: A link can't ${op.type}`);
-    }
-
-    expect(w.updates).toEqual([]);
-    expect(w.creates).toEqual([]);
-    expect(w.events.get(ada.personId)!.map((e) => e.title)).toEqual(["Lunch with Sam"]);
-    // Nobody's question was ever put to Ada's data sources but her own.
-    expect(w.asked.filter((id) => id === ada.personId)).toHaveLength(askedForAda);
-  });
-
-  it("stays its member's when they are removed from the workspace, and is nobody's there", async () => {
-    const w = world();
-    const olga = await newMember("Olga Owner");
-    const ada = await addMember(olga, "editor", "Ada");
-    w.events.set(ada.personId, [event("a1", "Lunch with Sam", { location: "Cafe-Lula-private" })]);
-    const { ref, text } = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
-    const note = await w.ask(ada, { type: "note.create", text: `# Plans\n\n${text}\n` });
-    await w.ask(olga, { type: "member.remove", memberId: ada.personId });
-    expect(await refusal(w.ask(ada, { type: "record.read", ref }))).toBe("not_found: No such workspace");
-    expect(await refusal(w.ask(olga, { type: "record.read", ref }))).toBe("not_found: No such record");
-    expect(JSON.stringify(await w.ask(olga, { type: "note.read", id: note.id }))).not.toMatch(PRIVATE);
-    // In a workspace of their own it is still theirs: the reference is beside the person, not in the workspace they left.
-    const own = (await whoAmI(env.DB, ada.personId)).workspaces.find((s) => s.id !== olga.workspaceId)!;
-    expect((await w.ask({ ...ada, workspaceId: own.id } as Actor, { type: "record.read", ref })).kind).toBe("event");
-  });
-});
-
-describe("a record named where a reference would be", () => {
-  it("is found outside code, with where it is written, and one that holds a reference already is left", () => {
-    const text = ["# Try", "", "::event{Lunch with Sam} with ::contact{ Sam Okafor }.", "Typed as `::event{Not this}`, and ::event{abcdefghij12 Lunch} is a reference already, as ::contact{abcdefghij12} is.", "```", "::event{Nor this}", "```", "::event{} and ::timer{5m} name nothing."].join("\n");
-    const named = namedReferences(text);
-    expect(named.map(({ kind, name }) => [kind, name])).toEqual([["event", "Lunch with Sam"], ["contact", "Sam Okafor"]]);
-    expect(named.map(({ from, to }) => text.slice(from, to))).toEqual(["::event{Lunch with Sam}", "::contact{ Sam Okafor }"]);
   });
 });
 
@@ -721,10 +381,6 @@ describe("the sample data", () => {
       "2026-10-14 Offsite",
       "2026-10-14T14:00 Standup",
       "2026-10-15T14:00 Standup",
-      "2026-10-15T15:00 Design review",
-      "2026-10-15T15:15 Dentist",
-      "2026-10-15T17:00 Focus time",
-      "2026-10-15T17:45 Coffee with Ada",
       "2026-10-15T23:30 Call with Tokyo",
       "2026-10-16 Company holiday",
       "2026-10-16T14:00 Standup",
@@ -744,44 +400,6 @@ describe("the sample data", () => {
     expect((await ask(ada, { type: "source.disconnect", id: "sample-calendar" })).sources.map((s) => s.state)).toEqual(["not_connected", "not_connected"]);
     await ask(ada, { type: "source.connect", id: "sample-calendar" });
     expect((await ask(ada, { type: "event.list", ...WEEK })).events.map((e) => e.title)).not.toContain("Lunch with Sam and Lin");
-  });
-
-  it("has three calendars, takes a new event in the two that can be written, keeps it beside the person, and forgets it on disconnect", async () => {
-    const sources = offered({ DEV_SIGN_IN: "1" }, "localhost");
-    const ada = await newMember("Ada");
-    const eve = await addMember(ada, "editor", "Eve");
-    const ask = <T extends OpInput>(actor: Actor, op: T) => perform(env.DB, actor, op, T0, sources);
-    await ask(ada, { type: "source.connect", id: "sample-calendar" });
-    await ask(eve, { type: "source.connect", id: "sample-calendar" });
-    const listed = await ask(ada, { type: "event.list", ...WEEK });
-    expect(listed.calendars).toEqual([
-      { sourceId: "sample-calendar", id: "work", name: "Work", color: "#3f51b5", writable: true },
-      { sourceId: "sample-calendar", id: "personal", name: "Personal", color: "#0b8043", writable: true },
-      { sourceId: "sample-calendar", id: "holidays", name: "Holidays", color: "#8e24aa", writable: false },
-    ]);
-    expect(new Set(listed.events.map((e) => `${e.calendarId} ${e.calendar}`))).toEqual(new Set(["work Work", "personal Personal", "holidays Holidays"]));
-
-    const when = { allDay: false as const, from: Date.parse("2026-10-14T19:00:00Z"), to: Date.parse("2026-10-14T20:00:00Z") };
-    const made = await ask(ada, { type: "event.create", sourceId: "sample-calendar", calendarId: "personal", title: "Piano lesson", when, description: "Bring the Chopin" });
-    expect(made).toEqual({ sourceId: "sample-calendar", id: expect.stringMatching(/^new\.[a-z0-9]{12}$/), calendarId: "personal", calendar: "Personal", color: "#0b8043", title: "Piano lesson", when, timeZone: null, location: null, description: "Bring the Chopin", recurring: false, editable: true, etag: "1", url: null });
-    const titles = async (actor: Actor, span = WEEK) => (await ask(actor, { type: "event.list", ...span })).events.map((e) => e.title);
-    expect(await titles(ada)).toContain("Piano lesson");
-    expect(await titles(ada, { from: Date.parse("2026-10-14T20:00:00Z"), to: Date.parse("2026-10-14T21:00:00Z"), timeZone: "UTC" })).toEqual(["Offsite"]);
-    expect(await titles(eve)).not.toContain("Piano lesson");
-
-    const moved = await ask(ada, { type: "event.update", sourceId: "sample-calendar", id: made.id, etag: made.etag, location: "Hall B" });
-    expect([moved.title, moved.location, moved.description, moved.etag]).toEqual(["Piano lesson", "Hall B", "Bring the Chopin", "2"]);
-    expect(await refusal(ask(ada, { type: "event.update", sourceId: "sample-calendar", id: made.id, etag: made.etag, title: "Clobbered" }))).toContain("conflict:");
-    const { ref } = await ask(ada, { type: "record.refer", sourceId: "sample-calendar", id: made.id });
-    expect(await ask(ada, { type: "record.read", ref })).toMatchObject({ kind: "event", event: { id: made.id, title: "Piano lesson", location: "Hall B", etag: "2" } });
-    expect(await refusal(ask(eve, { type: "event.update", sourceId: "sample-calendar", id: made.id, etag: "2", title: "Taken" }))).toBe("not_found: No such event");
-
-    expect(await refusal(ask(ada, { type: "event.create", sourceId: "sample-calendar", calendarId: "holidays", title: "Day off", when }))).toBe('forbidden: You can only read the calendar "Holidays"');
-    expect(await refusal(ask(ada, { type: "event.create", sourceId: "sample-calendar", calendarId: "Work", title: "No", when }))).toBe("not_found: No such calendar");
-
-    await ask(ada, { type: "source.disconnect", id: "sample-calendar" });
-    await ask(ada, { type: "source.connect", id: "sample-calendar" });
-    expect(await titles(ada)).not.toContain("Piano lesson");
   });
 });
 
@@ -809,9 +427,6 @@ describe("through the Worker", () => {
     };
     expect(await tool("localhost", "list_events", WEEK)).toContain("Lunch with Sam");
     expect(await tool("localhost", "list_contacts", { query: "sam" })).toContain("Sam Okafor");
-    const made = JSON.parse(await tool("localhost", "create_event", { sourceId: "sample-calendar", calendarId: "work", title: "Retro", when: { allDay: true, from: "2026-10-16", to: "2026-10-16" } }));
-    expect([made.calendar, made.title, made.when]).toEqual(["Work", "Retro", { allDay: true, from: "2026-10-16", to: "2026-10-16" }]);
-    expect(JSON.parse(await tool("localhost", "list_events", WEEK)).calendars.map((c: { id: string }) => c.id)).toEqual(["work", "personal", "holidays"]);
-    expect(JSON.parse(await tool("commonink.app", "list_events", WEEK))).toEqual({ events: [], sources: [], calendars: [] });
+    expect(JSON.parse(await tool("commonink.app", "list_events", WEEK))).toEqual({ events: [], sources: [] });
   });
 });

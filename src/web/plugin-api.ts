@@ -7,71 +7,30 @@
  * `test/core/plugin-boundary.test.ts` checks.
  *
  * A plugin declares its options as `settings` and reads them through its host. It cannot change
- * them, other than one it declares `remembered`, or read anyone else's: settings are the member's.
+ * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary, Written } from "../core/protocol.ts";
+import type { Agent, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
-import type { Showing } from "./inspected.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, TODO_SORT_WORDS } from "../core/protocol.ts";
-/**
- * The query language notes and todos are found by, as the server reads it: what is typed to a query
- * and back, every filter there is with what it takes and means, and what is being typed at the
- * cursor. A bar that takes a query, a builder of one and the help are all made from these.
- */
-export {
-  EMPTY as EMPTY_QUERY,
-  FILTERS,
-  PRIORITIES,
-  fieldMeans,
-  fieldName,
-  fieldOf,
-  fieldsOf,
-  filterOf,
-  keyNamed,
-  keyOf,
-  keysFor,
-  keysStarting,
-  names as queryNames,
-  parse as parseQuery,
-  print as printQuery,
-  soughtIn,
-  syntax as querySyntax,
-  typingAt,
-  wordsFor,
-  wordsIn,
-  wordsOf,
-  written as writtenValue,
-  type Cmp,
-  type Field as QueryField,
-  type Filter as QueryFilter,
-  type FilterKey,
-  type In as QueryIn,
-  type Key as QueryKey,
-  type Node as QueryNode,
-  type Query,
-  type QueryError,
-  type Scope as QueryScope,
-  type SortKey,
-  type SyntaxRow,
-} from "../core/query.ts";
-/** Where two lists of lines differ, for a view that marks what changed inside a line. */
-export { lineHunks } from "../core/text.ts";
+export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_SEARCH_LENGTH } from "../core/protocol.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
+/** How a note writes a mention of a person, which is the same for a plugin as for an agent. */
+export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, writtenMention, type WrittenMention } from "../core/mentions.ts";
+
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { changeTodo, completeTodo, skipTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
 
 /** The lines of a note that aren't in a fenced code block, which is where the core reads todos and tags. */
 export { linesOutsideCode } from "../core/lines.ts";
 
 /** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
-export { DAY_NAMES, MONTHS, MONTH_NAMES, WEEKDAYS, counted, describeRule, endLabel, isInterval, nextDue, occurrences, ordinal, parseRule, pastThe28th, ruleLabel, skippedTo, writeRule, type End, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
+export { WEEKDAYS, describeRule, nextDue, parseRule, writeRule, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
 
 /** The settings a daily note is made by, which the daily plugin declares under exactly these keys and the server reads. */
 export { DAILY_SETTINGS } from "../core/daily.ts";
@@ -81,38 +40,20 @@ export type TodoCompletion = Results["todo.history"]["completions"][number];
 
 export { dismissing, useDismiss } from "./dismiss.ts";
 export { sandboxed } from "./htmlFrame.ts";
-export { askSite } from "./otherSites.ts";
-/** The theme the app is drawn in, for what is drawn by someone else and has to be asked for in one: another site's frame. */
-export { onTheme, themeNow, type Theme } from "./theme.ts";
 /** Whether an editor state is that of a reading of a note, where nothing is shown as written whatever is selected. */
 export { isReading } from "./readOnly.ts";
-export { ResizeHandle } from "./resize.tsx";
 export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
-/** Help shown over the page, such as the query syntax or the keyboard shortcuts: one look for every help there is. */
-export { HelpOverlay } from "./HelpOverlay.tsx";
 export { ago, dayOf, today, useNow } from "./time.ts";
-/** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
-export { useOpenNote, type OpenNote } from "./openNotes.ts";
 
-/**
- * Dragging to the editor area. `carry` puts a note, a folder's list or a page on a drag, `carried`
- * reads it back where it is dropped, and `carriesTab` says while it is over something whether it
- * has one. A note is carried under `NOTE_DRAG` as its id, so it also drops wherever a note does.
- */
-export { NOTE_DRAG, carried, carriesTab, carry } from "./dragged.ts";
+/** The drag type that carries a note's id, so a note dragged out of one plugin's view can be dropped on another's. */
+export const NOTE_DRAG = "application/x-common-ink-note";
 
 export interface Plugin {
   /** What the plugin is known by in storage and in what it contributes. It never changes. */
   id: string;
   /** What a person sees it called. */
   name: string;
-  /** One line on what it is for, said beside its name on the Plugins page. */
-  description?: string;
-  /** What stands for it on the Plugins page. Without one, the picture every plugin has. */
-  icon?: IconName;
-  /** Pictures of it at work, shown in its details on the Plugins page. */
-  screenshots?: readonly Screenshot[];
   /**
    * The plugin's options, by name. Each is a setting the member can change, kept under the key
    * `<plugin id>.<name>`. They are data, so they are listed whether or not the plugin is on.
@@ -129,40 +70,16 @@ export interface Plugin {
   enabledByDefault?: boolean;
 }
 
-/** A picture of a plugin at work. `dark` is the same picture taken in the dark theme, shown in its place there. */
-export interface Screenshot {
-  src: string;
-  dark?: string;
-  /** What the picture shows, for whoever can't see it. It is also its caption. */
-  alt: string;
-}
-
 /**
  * One setting: what it holds, what it is when the member hasn't changed it, and what a person is
  * told about it. The words are JSON Schema's, and it is plain data: no functions and no classes.
  */
-export type Setting = {
-  title: string;
-  description?: string;
-  /**
-   * Set for an option the plugin remembers from what the member does in its own views, such as which
-   * calendars the Calendar shows or the order the Todos page is sorted in, so it is kept on the server with the member's settings and not in one browser. The
-   * plugin may change it with `host.settings.set`; it can change no other, and the member can reset it.
-   */
-  remembered?: true;
-} & (
+export type Setting = { title: string; description?: string } & (
   | { type: "boolean"; default: boolean }
-  /**
-   * `unreadable` is what it reads as when the member's value isn't one it can take, if that is not the default: the safe choice, for a
-   * setting that guards something. `defaultWithoutEmbedSite` is its default instead on a server whose HTML embeds have no host of
-   * their own (`EMBED_ORIGIN`), as the server says: the safe choice there.
-   */
-  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number; unreadable?: string; defaultWithoutEmbedSite?: string }
+  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number }
   | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
   /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
   | { type: "chords"; default: readonly string[] }
-  /** Words, each at most `maxLength` characters, at most `maxItems` of them. */
-  | { type: "list"; default: readonly string[]; maxItems: number; maxLength: number }
 );
 
 export type SettingValue = boolean | string | number | readonly string[];
@@ -183,6 +100,13 @@ export type KeptFromPerform =
   | "note.setPrivate"
   | `shared.${string}`;
 
+/**
+ * The operations `host.perform` takes only from Common Ink's own plugins: everything of the
+ * member's data sources, which are theirs and nobody else's. A plugin that isn't Common Ink's own
+ * is refused them, and so can't copy a member's contacts or calendar into a note or a frame.
+ */
+export type OwnOnly = `source.${string}` | `event.${string}` | `contact.${string}` | `record.${string}`;
+
 /** What a grant is on: one note or one folder. */
 export type SharedItem = { noteId: string } | { folderId: string };
 
@@ -197,12 +121,10 @@ export const SHARED_WITH_ME = "shared-with-me";
 export const ALL_NOTES = "all";
 
 /**
- * What the editor area has in front, and what an address can name there: a note, a folder's list
- * of notes, or a page. A folder's `id` is a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}.
- * A page's `id` is the id it was registered with, and `path` is the address it is at:
- * `/plugins/tabs` for the page at `/plugins`. Wherever under its path a page is, it is the same page.
+ * What the editor area has in front, and what an address can name there: a note, or a folder's list
+ * of notes. A folder's `id` is a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}.
  */
-export type Opened = { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "page"; id: string; path: string };
+export type Opened = { kind: "note"; id: string } | { kind: "folder"; id: string };
 
 /** The operations a plugin can perform. */
 export type PluginOp = Exclude<OpInput, { type: KeptFromPerform }>;
@@ -226,8 +148,8 @@ export interface PluginHost {
     register<S extends keyof Slots>(slot: S, view: Slots[S]): Dispose;
   };
   readonly embeds: {
-    register(embed: Embed | AddressEmbed): Dispose;
-    /** Every embed from every plugin that is on, as a menu would offer them. An {@link AddressEmbed} is not among them: nothing writes one but its address. */
+    register(embed: Embed): Dispose;
+    /** Every embed from every plugin that is on, as a menu would offer them, so without those that say `menu: false`. */
     list(): EmbedInfo[];
   };
   readonly completions: {
@@ -249,21 +171,16 @@ export interface PluginHost {
   app(): App;
   /**
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
-   * is saved before an operation that moves a note through its history or previews that, and the editors take the result.
+   * is saved before an operation that moves a note through its history, and the editors take the result.
    * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites,
-   * and one that reads or changes who a note or folder is shared with.
+   * and one that reads or changes who a note or folder is shared with. A plugin that isn't Common
+   * Ink's own is also refused each {@link OwnOnly} operation.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
-  /** This plugin's own options, as the member set them or as they default. Only one declared `remembered` can be changed. */
+  /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
   readonly settings: {
     /** The option declared under `name` in the plugin's `settings`. A value the member got wrong reads as the default. */
     get<T extends SettingValue = SettingValue>(name: string): T;
-    /**
-     * Changes an option the plugin declared `remembered`, for the member, wherever they sign in. Any
-     * other throws. False when it wasn't changed: the member's settings aren't read yet, or the value
-     * isn't one the option takes.
-     */
-    set(name: string, value: SettingValue): boolean;
     /** Calls `listener` when the member's settings change. A view is drawn again without asking. */
     subscribe(listener: () => void): Dispose;
   };
@@ -271,8 +188,6 @@ export interface PluginHost {
   readonly agents: {
     list(): Promise<Agent[]>;
     connect(name: string, options: ConnectOptions): Promise<{ agent: Agent; token: string }>;
-    /** Changes what an agent may do. Its token stays the one it has. */
-    edit(id: string, edit: AgentEdit): Promise<Agent>;
     disconnect(id: string): Promise<void>;
   };
   /**
@@ -296,8 +211,8 @@ export interface PluginHost {
   readonly sharing: {
     /** How one note or folder is shared: its grants, those on the folders above it, and for a note whether it is private. */
     of(on: SharedItem): Promise<Sharing>;
-    /** Gives whoever signs in with `email` view or edit, or changes what they have. */
-    grant(on: SharedItem, email: string, access: GrantAccess): Promise<Grant>;
+    /** Gives whoever signs in with an email view or edit, or changes what they have. A member can be named by their id instead, since only an admin is told a member's email. */
+    grant(on: SharedItem, to: string | { memberId: string }, access: GrantAccess): Promise<Grant>;
     /** Sets who the item's link opens for, or takes the link away with null. The address is `/s/<token>`. */
     link(on: SharedItem, kind: LinkKind | null): Promise<Grant | null>;
     revoke(grantId: string): Promise<void>;
@@ -327,11 +242,6 @@ export interface Command {
   when?: () => boolean;
   /** A text field has its own answer to this command, so its keys are left to a field that has focus. */
   leaveToFields?: boolean;
-  /**
-   * The heading the keyboard shortcuts list it under: by convention one of `Navigation`, `Notes`,
-   * `Editor`, or a plugin's own, as vim's are under `Vim`. One with none is under Other.
-   */
-  group?: string;
 }
 
 export interface CommandInfo {
@@ -339,9 +249,6 @@ export interface CommandInfo {
   title: string;
   /** The first chord that runs it now, as a person reads it, such as `⇧⌘P`. */
   shortcut: string | undefined;
-  /** Every chord that runs it now, as a person reads them: its own, or the member's in their place. */
-  keys: readonly string[];
-  group: string | undefined;
 }
 
 /** What a view is drawn with. */
@@ -353,76 +260,51 @@ export type View = ComponentType<ViewProps>;
 
 /** The places a view can go. Views in a slot are drawn in the order of the plugins that added them. */
 export interface Slots {
-  /**
-   * A column left of the editor: the sidebar. It is drawn closed too, when `app.sidebarOpen` is
-   * false, and is then to be a narrow bar of icons (`<nav class="rail">`) for what it lists when
-   * open. Its edge is the member's way back to open, and `app.toggleSidebar` is the view's own.
-   * In focus it is still drawn, out of sight.
-   */
+  /** A column left of the editor. In writing mode there is no room for it. */
   column: { id: string; component: View };
-  /**
-   * A section of the sidebar, such as the folder tree. A column places them with `app.sections` while it is open, and may show one
-   * over the page from its bar with `app.sectionsOpening`. `label` and `icon` are what stands for it there: one with both is in
-   * `app.sectionNames`.
-   */
-  section: { id: string; component: View; label?: string; icon?: IconName };
-  /** What fills the editor area when a note, a folder's list, a page, or nothing is open. The last one registered is used; with none, the app shows what the address names alone. */
+  /** A section of the sidebar, such as the folder tree. A column places them with `app.sections`; in writing mode they are in the left popover. */
+  section: { id: string; component: View };
+  /** An icon, or a few, in the left rail of writing mode. */
+  rail: { id: string; component: View };
+  /** What fills the editor area when a note, a folder's list, or nothing is open. The last one registered is used; with none, the app shows what the address names alone. */
   editor: {
     id: string;
     component: ComponentType<EditorProps>;
     /**
-     * Asked to open a note, a folder's list or a page, in place of the app going to it. Call
-     * `app.show` with what ends up in front. With `background` it is opened without being put in front.
+     * Asked to open a note or a folder's list, in place of the app going to it. Call `app.show` with
+     * what ends up in front. With `background` it is opened without being put in front.
      */
     open?: (tab: Opened, options: { preview: boolean; background?: boolean }) => void;
-    /**
-     * Asked to open a note, a folder's list or a page in a part of the editor area of its own,
-     * right of or under what is in front, and to keep it there. An editor area that has this is
-     * what `app.openBeside` goes to, and what makes a page's link and a folder's row in the sidebar
-     * offer "Open in a split".
-     */
-    split?: (tab: Opened, side: "right" | "down") => void;
   };
   /**
    * A folder's list of notes, drawn in the editor area where a folder is open. The last one
    * registered is used; with none, the app lists the folder's notes by title.
    */
   folder: { id: string; component: ComponentType<FolderProps> };
+  /** A tab of the inspector, about the open note. It is also an icon in the right rail of writing mode. The inspector opens on the last tab. */
+  inspector: {
+    id: string;
+    label: string;
+    icon: IconName;
+    component: ComponentType<ViewProps & { note: NoteSummary }>;
+    /** Something to flag on the tab, read to a screen reader, or null. */
+    badge?: (app: App) => string | null;
+  };
   /**
-   * A panel of the inspector. The inspector has a narrow bar of icons at the right of the window,
-   * one for each view, which is the same whatever the editor area has in front. An icon shows its
-   * panel over the page until the member goes elsewhere, or beside the page once they pin it; the
-   * app keeps which panel, and whether it is pinned, as the member last had them. A panel is about
-   * what is in front ({@link About}): the view says which kinds of thing it has something to show
-   * `for`, and its component is handed the thing. For any other kind, and for a page that says
-   * nothing of what it shows, the inspector says "Nothing to show for this view" in the panel's
-   * place. Each view gets an `inspector.<id>` command that does what its icon does.
-   */
-  inspector: InspectorView;
-  /**
-   * A page with its own address, shown in the editor area as a note is: in a tab, where the editor
-   * area has tabs. A page does nothing for that. It is drawn with an `app` whose `path` and
-   * `pageState` are its own, so two pages open side by side each read their own address, and
-   * `app.go` to an address under its path moves that page and no other. `nav` says where its link goes:
+   * A page with its own address, shown in place of the editor. `nav` says where its link goes:
    * with the main links of the sidebar, under More, or in the workspace menu. Each page gets a
    * `go.<id>` command. `order` places its link among the others: lower first, and those with none
    * after them, in the order of their plugins. A page is also shown at every address under its
-   * path, such as `/plugins/tabs` for the page at `/plugins`, unless another page is at exactly that address:
-   * it reads the rest from `app.path`. One that is `transient` only leads somewhere else, as Today
-   * leads to the day's note with `app.show`: it is never a tab, and is drawn in place of the editor
-   * area for the moment it takes to find where to go, with the editor area kept as it is underneath.
+   * path, such as `/tags/work` for the page at `/tags`, unless another page is at exactly that address:
+   * it reads the rest from `app.path`.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; component: View };
+  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; component: View };
   /**
-   * An item in the bottom bar: one thin line along the foot of the window for small things to
-   * glance at, such as a count of the open note's words. `side` is the end it sits at, the left
-   * unless said, and `order` places it among the others at that end, lowest first and 0 unless
-   * said. Items of one order stay in the order of the plugins that added them. A component with
-   * nothing to say draws nothing, and takes no room. The bar is there while any plugin has an item
-   * in it, with something to say or not, so nothing above it moves as items come and go. In focus
-   * it is out of sight.
+   * A widget in the bar along the bottom of the app, such as a running timer. The bar is one line of
+   * small things to glance at. It is there in writing mode too, and keeps its height when a widget
+   * has nothing to show, so nothing above it moves when one appears.
    */
-  bar: { id: string; component: View; side?: "left" | "right"; order?: number };
+  bar: { id: string; component: View };
   /**
    * A word or two about a note in the bar above its text, after its folder, in every editor showing
    * it: that it is archived, say, with a button that undoes it. The bar keeps its height, so the
@@ -439,36 +321,6 @@ export interface Slots {
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
 }
 
-/**
- * What the inspector is about: what the editor area has in front. A note; a folder's list, where
- * `folderId` is a folder's id or {@link ALL_NOTES}, `name` is what the list is called and `notes`
- * are the live notes in it, as its list counts them, none archived or in Trash; or the notes a page
- * says it is showing, under the name the page gave them.
- */
-export type About =
-  | { kind: "note"; note: NoteSummary }
-  | { kind: "folder"; folderId: string; name: string; notes: readonly NoteSummary[] }
-  | { kind: "notes"; label: string; notes: readonly NoteSummary[] };
-
-export interface InspectorView {
-  id: string;
-  label: string;
-  icon: IconName;
-  /** The kinds of thing it has something to show for. With any other in front the inspector says there is nothing to show, and the component is not drawn. */
-  for: readonly About["kind"][];
-  component: ComponentType<ViewProps & { about: About }>;
-  /** Something to flag on its icon in the bar, by a dot and these words for a screen reader, or null. */
-  badge?: (app: App) => string | null;
-}
-
-/**
- * How a page says what it is showing, so the inspector's panels are about that while the page is
- * in front: `useInspected(app, { kind: "notes", label: "Open todos", noteIds })`, or a single
- * note with `{ kind: "note", noteId }`, or null while it has nothing to say. Notes the member
- * can't see are left out.
- */
-export { useInspected, type Showing } from "./inspected.ts";
-
 export interface FolderProps extends ViewProps {
   /** The folder whose notes to list: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. It may name no folder the member can see. */
   folderId: string;
@@ -481,17 +333,12 @@ export interface FolderProps extends ViewProps {
 
 export interface EditorProps extends ViewProps {
   /**
-   * Draws the editor for a note. `onEdit` is called on each change typed or pasted. With `focus`
-   * the editor takes the cursor once the note is there, and then calls `onFocused`: for a note the
-   * view moved to another part of itself, where its editor is drawn anew.
+   * Draws the editor for a note. `onEdit` is called on each change typed or pasted. `corner` is
+   * for the editor at the right edge, which carries the buttons for the inspector and writing mode.
    */
-  renderNote: (noteId: string, options?: { onEdit?: () => void; focus?: boolean; onFocused?: () => void }) => ReactNode;
+  renderNote: (noteId: string, options?: { onEdit?: () => void; corner?: boolean }) => ReactNode;
   /** Draws a folder's list of notes, with whatever is in the `folder` slot. */
   renderFolder: (folderId: string) => ReactNode;
-  /** Draws a page at the address it is at, which is {@link Opened}'s `path`. One no plugin has registered any more is drawn as nothing being there. */
-  renderPage: (pageId: string, path: string) => ReactNode;
-  /** What to show where nothing is open: a line saying to pick a note. */
-  empty: ReactNode;
 }
 
 /**
@@ -509,6 +356,8 @@ export interface Embed {
   block?: boolean;
   /** What a new one is written with when it is picked from the embed menu. With none, an empty config and an empty body. */
   starts?: { config?: string; body?: string };
+  /** False for one no menu writes: what it holds is picked somewhere else, as a reference to an event is copied from the Calendar page, or it is a way of writing that notes are no longer started with and is still drawn where a note has it. `host.embeds.list()` leaves it out. */
+  menu?: boolean;
   /**
    * Draws into `el`, once, all of it before returning, so the embed is never seen half drawn. May
    * return a function that stops whatever it started, or a {@link Drawn}. An embed is registered
@@ -517,39 +366,7 @@ export interface Embed {
   render(el: HTMLElement, embed: Embedded): void | (() => void) | Drawn;
   /** What it keeps below the line that writes it, such as a video. */
   below?: Below;
-  /**
-   * What a member can adjust about it without reading its config. The host draws one options button
-   * in the embed's card, and opens beneath the card a field for each of these. An embed that has
-   * none, or gives none for what the note says of it now, has no button, and neither has a member
-   * who can't change the note.
-   */
-  options?: EmbedOptions;
 }
-
-/**
- * An embed's options. Both are given what the note says of the embed now and nothing else, so they
- * are as pure as `render`'s reading of it. What `set` returns is written as {@link Embedded.update}
- * writes: one change by the member, saved, recorded, undone and seen by everyone else as typing is.
- */
-export interface EmbedOptions {
-  /** The fields to show, each with its value as the note has it. None for one that can't be read. */
-  fields(written: { config: string; body: string }): readonly EmbedField[];
-  /** The embed with the field `id` set to `value`, or a sentence saying why that value can't be taken, which is shown under the fields. */
-  set(written: { config: string; body: string }, id: string, value: string): { config?: string; body?: string } | string;
-}
-
-/**
- * One thing to adjust: text that is typed and taken on Enter or when the keyboard leaves it, or one
- * of a few choices. A choice with a `swatch` is drawn as a dot of that colour and not as its label:
- * one of {@link SWATCHES}, or `""` for no colour.
- */
-export type EmbedField =
-  | { id: string; label: string; kind: "text"; value: string; placeholder?: string; hint?: string }
-  | { id: string; label: string; kind: "choice"; value: string; choices: readonly { value: string; label: string; swatch?: Swatch | "" }[] };
-
-/** The colours an embed can ask for by name. Each is drawn to suit the theme, light or dark, as `--swatch` on an element with `data-colour`. */
-export const SWATCHES = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "gray"] as const;
-export type Swatch = (typeof SWATCHES)[number];
 
 /** What an embed can give back from `render`. */
 export interface Drawn {
@@ -587,38 +404,23 @@ export interface Below {
    * Draws into `el`, which is as large as the room. May return a function that stops whatever it
    * started. `update` rewrites the embed in the note as {@link Embedded.update} does, which is how
    * what is only known once it has loaded, such as a picture's size, gets into the note for `box` to
-   * read. `resize` is for what the note can't hold, such as how tall a post turned out to be once it
-   * had loaded: it gives the room that height in pixels, which moves what is under it once, and does
-   * nothing for a room sized by a ratio.
+   * read: the room is worked out from the note alone, and `render` can't change it any other way.
    */
-  render(el: HTMLElement, embed: Pick<Embedded, "config" | "body" | "readOnly" | "update"> & { resize(height: number): void }): void | (() => void);
+  render(el: HTMLElement, embed: Pick<Embedded, "config" | "body" | "readOnly" | "update">): void | (() => void);
+  /**
+   * Whether a web address written alone on a line, with no embed's syntax around it, is this embed's
+   * to show below that line, such as a video's address. It is then kept and drawn as if the note said
+   * `::name{address}`, with the address as its config, and the line stays the link it is. `update`
+   * does nothing for one: an address has no config to rewrite. The first embed to say so has it.
+   */
+  ofAddress?(address: string): boolean;
 }
 
-/** The room kept below a line. `maxWidth` is a limit in pixels narrower than the host's own, for what is drawn no wider, such as a post. */
-export type BelowBox = ({ ratio: number } | { height: number }) & { maxWidth?: number };
-
-/**
- * Something shown below a line that is one https address and nothing else: a video, a post. It has
- * no syntax of its own and is in no menu. Pasting or typing the address is the only way to write
- * one. The address is its config, and `update` does nothing for it. The line stays in the note, as
- * small as a caption, and its text is seen only with the pointer over the line or over what is shown
- * below it, or with the cursor on the line. So the address comes and goes and nothing moves.
- */
-export interface AddressEmbed {
-  /** A name of its own among the embeds. A note that says `::name{}` is not this, and stays text. */
-  name: string;
-  /** What a person sees it called. */
-  title: string;
-  /** Whether `address` is this one's to show. The first registered to say so has it. */
-  claims(address: string): boolean;
-  below: Below;
-}
+export type BelowBox = { ratio: number } | { height: number };
 
 /** What an embed is handed about one place a note writes it. */
 export interface Embedded {
   config: string;
-  /** The note the embed is written in. */
-  noteId: string;
   /** A block embed's body: the note's lines between its opening and closing lines, each with its line break. Empty for an inline embed. */
   body: string;
   /** Whether the member can't change the note. `update` then does nothing, so an embed draws what it shows without the controls that would call it. */
@@ -632,13 +434,11 @@ export interface Embedded {
    */
   update(next: { config?: string; body?: string }): void;
   /**
-   * Puts the cursor in the embed as the note writes it, to be changed there, as moving the cursor
-   * onto it does. The embed stays drawn, the element it was, and its text is shown above its
-   * drawing for as long as the cursor is in it: an inline embed's in rows of their own above its
-   * line, a block's lines above its card. For a block, `at` is how far into its body the cursor goes,
-   * as a board puts it on the line of the card that was pressed. Without it the cursor goes in the config.
+   * Puts the cursor in the embed as the note writes it, to be changed there. An inline embed is
+   * shown as written while the cursor is on it. A block stays drawn, with its lines shown under the
+   * drawing until the cursor leaves them, and this is the only way into them.
    */
-  edit(at?: number): void;
+  edit(): void;
 }
 
 export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts">;
@@ -657,36 +457,22 @@ export interface Completion {
   spaces?: boolean;
   /** Whether the trigger opens the list anywhere outside code, such as right after a bracket or a word. For a trigger nobody types by accident, as `[[` is. */
   anywhere?: boolean;
-  /**
-   * Whether the trigger is written in prose too, as `/` is. After other words on its line Enter is
-   * then always a new line, and Tab, the arrow keys or a click pick from the list.
-   */
-  prose?: boolean;
   /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
   items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
-  /**
-   * Where its items go in the list among those of the other completions that fit: lower first, 0 when
-   * not said, and in the order of their plugins where it is the same. The calendar's events come after
-   * the notes `[[` offers this way.
-   */
-  order?: number;
 }
 
 export interface CompletionItem {
   label: string;
   /** Said after the label, more quietly. */
   detail?: string;
-  /**
-   * What takes the place of the trigger and what was typed after it. A function is asked only when
-   * the item is picked, for text that is made then, as a reference to an event is: what it answers is
-   * written once it does, where the trigger and what was typed still are. Null, a failure, or a change
-   * to them meanwhile writes nothing.
-   */
-  insert: string | (() => Promise<string | null>);
+  /** What takes the place of the trigger and what was typed after it. */
+  insert: string;
   /** The part of `insert` left selected, as offsets into it, such as a value to type over. Without it the cursor goes after. */
   select?: readonly [from: number, to: number];
   /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after. */
   block?: boolean;
+  /** How the label is coloured: `accent` is the theme colour and `muted` is gray. Without it, as the list's text is. */
+  tone?: "accent" | "muted";
 }
 
 /**
@@ -727,17 +513,12 @@ export interface Folders {
   pathName(id: string | null): string;
 }
 
-/** Something the app tells the member in a card in the window's bottom right corner, which goes after a few seconds or when pressed. */
+/** Something the app tells the member in a line at its foot, which goes after a few seconds or when dismissed. */
 export interface Notice {
   message: string;
-  /** The icon in the card's tile: "info" unless said. */
-  icon?: IconName;
-  /**
-   * A button beside the message, such as Undo. While what `run` answers is on its way the card stays,
-   * without the button. A notice it answers with is said in the card's place; nothing, and the card goes.
-   */
-  action?: { label: string; run: () => void | Notice | Promise<void | Notice | undefined> };
-  /** Whether it stays until it is answered, pressed or taken down, as one that says something still true does. */
+  /** A button beside the message, such as Undo. The notice goes when it is pressed. */
+  action?: { label: string; run: () => void };
+  /** Whether it waits to be answered or dismissed, in place of going after a few seconds. For a question, such as an offer to share. */
   stays?: boolean;
 }
 
@@ -762,7 +543,7 @@ export interface App {
   query: string;
   /** What `go` was handed for this address, if anything. It is handed over once: Back or a reload finds nothing. */
   pageState: unknown;
-  /** What the address names in the editor area: the note, the folder's list or the page in front. Null when nothing is open, and at an address nothing is at. */
+  /** What the address names in the editor area: the note or the folder's list in front. Null on a page, and when nothing is open. */
   opened: Opened | null;
   /** The note the address names. Null on a page, on a folder's list, and when nothing is open. */
   noteId: string | null;
@@ -786,26 +567,10 @@ export interface App {
    * nothing is open. The folder tree marks it.
    */
   folderId: string | null;
-  /**
-   * Focus: what is in front in the editor area fills the window. The sidebar, the inspector and
-   * their bars are still drawn, out of sight, so leaving focus puts everything back as it was. A
-   * view in the `editor` slot marks what fills the window: `data-focus-mode` on its `.groups`
-   * and `data-front` on the one `.group` to show.
-   */
-  focus: boolean;
-  /** Whether the sidebar is open. Closed, the `column` view is a narrow bar of icons. */
-  sidebarOpen: boolean;
+  writing: boolean;
   pages: readonly PageInfo[];
-  /** What plugins put in the `section` slot, for the column that shows them. Null when there is nothing in it. */
+  /** What plugins put in the `section` slot, for the column that shows them. */
   sections: ReactNode;
-  /** Each section that says what it is called, in the order they are drawn, for a column that is closed to stand an icon for. */
-  sectionNames: readonly { id: string; label: string; icon: IconName }[];
-  /**
-   * One of those sections by its id, for a place that goes away once something is opened from it, as
-   * the closed sidebar's picker over the page does. `opened` is called each time it opens a note, a
-   * folder's list or a page, or goes to an address.
-   */
-  sectionsOpening: (opened: () => void, id: string) => ReactNode;
   /** Draws a note's text to be read and not changed, as {@link FolderProps.readNote} does, for a page that lists notes. */
   readNote: (noteId: string) => ReactNode;
   /** The overlay that is open. */
@@ -816,28 +581,17 @@ export interface App {
   /** Where a note lives, such as `/note/plan-3k2j5h8d9f0a`. */
   notePath(noteId: string): string;
   /**
-   * Opens a note. There is one preview in the window at most: a preview takes the place of the one there, a folder's list among them, wherever in the
-   * editor area that is. `focus` puts the cursor in its
+   * Opens a note. A preview gives way to the next thing previewed, and takes the place of the one there, unless that is the folder's list in front: a list a note is previewed from is kept. `focus` puts the cursor in its
    * editor. `background` opens it in a tab of its own, which is kept, without leaving what is in
    * front. Where the editor area has no tabs the note is opened as it otherwise would be.
    */
   openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean }): void;
   /** Opens a folder's list of notes: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
   openFolder(folderId: string, options?: { preview?: boolean }): void;
-  /**
-   * Opens a note, a folder's list or a page in a split: a part of the editor area of its own, right
-   * of or under what is in front, where it is kept. Null where the editor area has no splits.
-   */
-  openBeside: ((tab: Opened, side: "right" | "down") => void) | null;
   /** Where a folder's list lives, such as `/folder/all`. */
   folderPath(folderId: string): string;
-  /**
-   * For the editor area: puts a note, a folder's list or a page at the app's address, or nothing.
-   * `replace` keeps Back from retracing the step. `move` is a step between things already open, as a
-   * click on a tab is: Back retraces it, and the next move takes its place, so a run of moves is one
-   * step and none of them takes the place of an open.
-   */
-  show(tab: Opened | null, options?: { replace?: boolean; move?: boolean }): void;
+  /** For the editor area: puts a note or a folder's list at the app's address, or nothing. `replace` keeps Back from retracing the step. */
+  show(tab: Opened | null, options?: { replace?: boolean }): void;
   /**
    * Creates a note and opens it. It goes in `folderId` when that is a folder; otherwise in the
    * folder in front, which is the open note's folder when a note is in front; otherwise in Unsorted.
@@ -849,30 +603,14 @@ export interface App {
   noteChanged(note: Note): void;
   /** Reads the folders and notes again, after a change the app wasn't told about. */
   refresh(): void;
-  /**
-   * Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a
-   * change that must reach the server as it is, before anything else is typed. It answers with the
-   * note as that write left it, `filed` saying whether it checked off a recurring todo, and with
-   * nothing when there was nothing to send, no editor of the note, or the write didn't land.
-   */
-  saveNote(noteId: string): Promise<Written | undefined>;
+  /** Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a change that must reach the server as it is, before anything else is typed. */
+  saveNote(noteId: string): void;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
-  /** Tells the member something that just happened, such as that a note was moved to Trash. Notices stack, newest at the foot, three at most; one saying what a shown one says takes its place. It answers with what takes the card down, which does nothing once it has gone. */
-  notify(notice: Notice): () => void;
+  /** Tells the member something that just happened, such as that a note was moved to Trash. One notice shows at a time: the next takes its place. */
+  notify(notice: Notice): void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
   toggleOverlay(id: string, state?: unknown): void;
-  toggleSidebar(): void;
-  /** Does what a panel's icon in the inspector's bar does: shows that panel, or closes it if it is the one showing. */
-  togglePanel(viewId: string): void;
-  /**
-   * For a page: says what the page is showing, for the inspector to be about while the page is in
-   * front, or null for nothing. {@link useInspected} calls it and takes it back when the page goes.
-   * Anywhere but in a page it does nothing.
-   */
-  inspect(showing: Showing | null): void;
-  /** Enters or leaves focus. */
-  setFocus(on: boolean): void;
   switchWorkspace(workspaceId: string): void;
   /** Reads again which workspaces the member is in and their role in each, after a change to members that may be to the member themself. */
   reloadWorkspaces(): void;

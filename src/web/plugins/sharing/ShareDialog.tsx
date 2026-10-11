@@ -157,6 +157,8 @@ export function ShareDialog({ host, app, on, close }: Props) {
                 </li>
                 {people.map((grant) => {
                   const who = whoOf(grant.to);
+                  // A member let in to one's own private note is named by who they are, and their email was never told.
+                  const changeable = grant.to.email !== null || (grant.to.role !== null && note?.private === true);
                   return (
                     <li key={grant.id} className="share-row" aria-label={who}>
                       <span className="share-who">
@@ -171,10 +173,10 @@ export function ShareDialog({ host, app, on, close }: Props) {
                       <select
                         aria-label={`Access of ${who}`}
                         value={grant.access}
-                        // The email is kept from an editor who didn't make the grant, and the grant is changed by email.
-                        disabled={busy || grant.to.email === null}
-                        title={grant.to.email === null ? "Remove them and add them again to change this" : undefined}
-                        onChange={(e) => void change(() => host.sharing.grant(on, grant.to.email!, e.target.value as GrantAccess))}
+                        // A grant is changed by its email, or for a member by who they are. The email of a guest is kept from an editor who didn't make the grant.
+                        disabled={busy || !changeable}
+                        title={changeable ? undefined : "Remove them and add them again to change this"}
+                        onChange={(e) => void change(() => host.sharing.grant(on, grant.to.email ?? { memberId: grant.to.personId! }, e.target.value as GrantAccess))}
                       >
                         {ACCESS.map((access) => (
                           <option key={access} value={access}>

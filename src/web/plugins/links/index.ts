@@ -19,8 +19,6 @@ const MOST_OFFERED = 50;
 export const links: Plugin = {
   id: "links",
   name: "Links",
-  description: "Links between notes, written with [[ and kept when a note is renamed.",
-  icon: "link",
   activate(host) {
     const editors = new Map<string, EditorView>();
     /** Every note a link can be to: archived ones, and ones in Trash, which a link still opens. */
@@ -78,7 +76,6 @@ export const links: Plugin = {
     host.commands.register({
       id: "links.follow",
       title: "Follow the link at the cursor",
-      group: "Editor",
       run() {
         const view = focused() ?? editors.get(host.app().noteId ?? "");
         const to = view && linkAt(view.state, view.state.selection.main.head);
@@ -92,7 +89,6 @@ export const links: Plugin = {
     host.commands.register({
       id: "links.edit",
       title: "Edit the link at the cursor",
-      group: "Editor",
       keys: ["alt+enter"],
       when: () => {
         const view = focused();

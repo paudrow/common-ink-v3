@@ -26,8 +26,8 @@ test("a new note starts with the mark of its title and the cursor after it, so t
   page.on("request", (request) => /"note\.write"/.test(request.postData() ?? "") && sent.push(request.postData()!));
   await tabs(page).first().focus();
   await page.waitForTimeout(1500);
-  await expect.poll(() => read(page, id)).toMatchObject({ text: "", title: "", snippet: "", revision: 0 });
-  await expect.poll(() => perform(page, { type: "note.history", id })).toEqual([]);
+  expect(await read(page, id)).toMatchObject({ text: "", title: "", snippet: "", revision: 0 });
+  expect(await perform(page, { type: "note.history", id })).toEqual([]);
   expect(sent).toEqual([]);
   await expect(page.getByRole("status")).toHaveText("Saved");
   await expect(tabs(page).last()).toHaveText("Untitled");
@@ -37,7 +37,7 @@ test("a new note starts with the mark of its title and the cursor after it, so t
   await expect(page.locator(".cm-line").first()).toHaveText("# Groceries");
   await expect.poll(async () => (await read(page, id)).text).toBe("# Groceries");
   // The mark and the title are the note's one change.
-  await expect.poll(async () => (await perform(page, { type: "note.history", id })).map((c) => c.revision)).toEqual([1]);
+  expect((await perform(page, { type: "note.history", id })).map((c) => c.revision)).toEqual([1]);
   await expect(tabs(page).last()).toHaveText("Groceries");
   await expect(page).toHaveURL(/\/note\/groceries-/);
 });

@@ -11,13 +11,10 @@ import { itemOf } from "./words.ts";
 export const sharing: Plugin = {
   id: "sharing",
   name: "Sharing",
-  description: "Share a note or a folder with people or by a link, and make a note private.",
-  icon: "share",
   activate(host) {
     host.commands.register({
       id: SHARE_COMMAND,
       title: "Share this note…",
-      group: "Notes",
       run() {
         const app = host.app();
         if (app.noteId) app.toggleOverlay(SHARE_OVERLAY, { noteId: app.noteId });

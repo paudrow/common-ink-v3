@@ -6,7 +6,7 @@ import { dailySettings } from "../../src/core/daily.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type OpInput } from "../../src/core/protocol.ts";
 import { changesBetween } from "../../src/core/text.ts";
-import { changeTodo, checkedOff, completeTodo, parseTodo, rewriteTodo, rolledForward, skipTodo, todoIndex } from "../../src/core/todos.ts";
+import { checkedOff, completeTodo, parseTodo, rewriteTodo, rolledForward, todoIndex } from "../../src/core/todos.ts";
 import { addMember, newMember } from "./members.ts";
 
 const SUNDAY = "2026-10-11";
@@ -42,9 +42,9 @@ async function indexed(noteId: string) {
 describe("how a recurring todo is written", () => {
   it("reads every: and done: as tokens of the todo, and leaves them out of its words", () => {
     const todo = parseTodo("- [ ] Water the plants due:2026-10-10 every:mon,thu done:2026-10-08x12 +Home")!;
-    expect(todo.every).toMatchObject({ written: "mon,thu", rule: { unit: "w", n: 1, days: [{ nth: 0, day: 1 }, { nth: 0, day: 4 }] } });
+    expect(todo.every).toMatchObject({ written: "mon,thu", rule: { kind: "weekdays", days: [1, 4] } });
     expect(todo.lastDone).toMatchObject({ on: "2026-10-08", times: 12 });
-    expect(todo.words).toBe("Water the plants +Home");
+    expect(todo.words).toBe("Water the plants");
     expect(parseTodo("- [ ] Stretch every:1d done:2026-10-08")!.lastDone).toMatchObject({ on: "2026-10-08", times: 1 });
   });
 
@@ -85,67 +85,6 @@ describe("how a recurring todo is written", () => {
   it("checks a recurring todo off for good when its next due date would be past the year 9999, and leaves a done one alone", () => {
     expect(completeTodo("- [ ] Last every:1y due:9999-06-01", SUNDAY)).toEqual({ line: "- [x] Last every:1y due:9999-06-01", filed: null });
     expect(completeTodo("- [x] Done every:1w", SUNDAY)).toEqual({ line: "- [x] Done every:1w", filed: null });
-  });
-});
-
-describe("a recurring todo whose rule ends", () => {
-  it("has one fewer time left with each completion, and is filed as any other is", () => {
-    expect(completeTodo("- [ ] Pills due:2026-10-10 every:1d-times-3", SUNDAY)).toEqual({ line: `- [ ] Pills due:2026-10-12 every:1d-times-2 done:${SUNDAY}x1`, filed: "- [x] Pills due:2026-10-10" });
-    expect(completeTodo(`- [ ] Pills due:2026-10-12 every:1d-times-2 done:${SUNDAY}x1`, "2026-10-12")).toEqual({ line: "- [ ] Pills due:2026-10-13 every:1d-times-1 done:2026-10-12x2", filed: "- [x] Pills due:2026-10-12" });
-  });
-
-  it("is checked off for good the last time, its tokens as written, and that time is filed too", () => {
-    const last = "- [ ] Pills due:2026-10-13 every:1d-times-1 done:2026-10-12x2 #health";
-    expect(completeTodo(last, "2026-10-13")).toEqual({ line: "- [x] Pills due:2026-10-13 every:1d-times-1 done:2026-10-12x2 #health", filed: "- [x] Pills due:2026-10-13 #health" });
-    expect(completeTodo("- [x] Pills due:2026-10-13 every:1d-times-1", "2026-10-13")).toEqual({ line: "- [x] Pills due:2026-10-13 every:1d-times-1", filed: null });
-  });
-
-  it("keeps recurring up to the day it runs until, and is checked off for good when the next would be after it", () => {
-    expect(completeTodo("- [ ] Course due:2026-10-05 every:mon,thu-until-2026-10-12", "2026-10-05")).toEqual({ line: "- [ ] Course due:2026-10-08 every:mon,thu-until-2026-10-12 done:2026-10-05x1", filed: "- [x] Course due:2026-10-05" });
-    expect(completeTodo("- [ ] Course due:2026-10-08 every:mon,thu-until-2026-10-12", "2026-10-08").line).toBe("- [ ] Course due:2026-10-12 every:mon,thu-until-2026-10-12 done:2026-10-08x1");
-    expect(completeTodo("- [ ] Course due:2026-10-12 every:mon,thu-until-2026-10-12", "2026-10-12")).toEqual({ line: "- [x] Course due:2026-10-12 every:mon,thu-until-2026-10-12", filed: "- [x] Course due:2026-10-12" });
-    // Done after the day it ran until: there is no next one.
-    expect(completeTodo("- [ ] Course due:2026-10-05 every:1w-until-2026-10-12", "2026-11-01").line).toBe("- [x] Course due:2026-10-05 every:1w-until-2026-10-12");
-  });
-
-  it("never writes a count of none", () => {
-    let line = "- [ ] Pills due:2026-10-10 every:2d-after-done-times-4";
-    const lines: string[] = [];
-    for (let i = 0; i < 6; i++) lines.push((line = completeTodo(line, "2026-10-20").line));
-    expect(lines.map((l) => l.match(/\[.\]|times-\d+/g)!.join(" "))).toEqual(["[ ] times-3", "[ ] times-2", "[ ] times-1", "[x] times-1", "[x] times-1", "[x] times-1"]);
-  });
-});
-
-describe("skipping a recurring todo", () => {
-  it("moves its due date to the next one, with nothing checked, counted as done or handed back to file", () => {
-    expect(skipTodo(WATER, SUNDAY)).toBe("- [ ] ! Water the plants due:2026-10-17 every:1w +Home");
-    expect(changeTodo(WATER, { skip: true }, SUNDAY)).toEqual({ line: "- [ ] ! Water the plants due:2026-10-17 every:1w +Home", filed: null });
-    expect(skipTodo(WATERED, SUNDAY)).toBe("- [ ] ! Water the plants due:2026-10-24 every:1w +Home done:2026-10-11x1");
-  });
-
-  it("goes to the first one after both the due date and the day it is skipped on", () => {
-    // Due later than today: the one after that. Overdue: the first after today, as checking it off would give.
-    expect(skipTodo("- [ ] Bins due:2026-11-06 every:1m", SUNDAY)).toBe("- [ ] Bins due:2026-12-06 every:1m");
-    expect(skipTodo("- [ ] Bins due:2026-09-01 every:1w", SUNDAY)).toBe("- [ ] Bins due:2026-10-13 every:1w");
-    expect(skipTodo("- [ ] Bins every:mon,thu", SUNDAY)).toBe("- [ ] Bins every:mon,thu due:2026-10-12");
-    // Counted from the day it was done, it is as if it were done on the later of the two days.
-    expect(skipTodo("- [ ] Filter due:2026-10-20 every:3d-after-done", SUNDAY)).toBe("- [ ] Filter due:2026-10-23 every:3d-after-done");
-    expect(skipTodo("- [ ] Filter due:2026-10-01 every:3d-after-done", SUNDAY)).toBe("- [ ] Filter due:2026-10-14 every:3d-after-done");
-  });
-
-  it("counts as one of the times of a rule that ends after so many", () => {
-    expect(skipTodo("- [ ] Pills due:2026-10-11 every:1d-times-3", SUNDAY)).toBe("- [ ] Pills due:2026-10-12 every:1d-times-2");
-  });
-
-  it("is refused for a todo that doesn't recur, one that is done, the last time of a rule that ends, and together with checking it off", () => {
-    expect(() => skipTodo("- [ ] Plain due:2026-10-11", SUNDAY)).toThrow(RangeError);
-    expect(() => skipTodo("- [x] Old every:1d", SUNDAY)).toThrow(RangeError);
-    expect(() => skipTodo("Not a todo every:1d", SUNDAY)).toThrow(RangeError);
-    expect(() => skipTodo("- [ ] Pills due:2026-10-11 every:1d-times-1", SUNDAY)).toThrow(/last time/);
-    expect(() => skipTodo("- [ ] Course due:2026-10-11 every:1w-until-2026-10-15", SUNDAY)).toThrow(/last time/);
-    expect(() => changeTodo(WATER, { skip: true, done: true }, SUNDAY)).toThrow(RangeError);
-    // Setting how it recurs and skipping it are one call.
-    expect(changeTodo("- [ ] Plain due:2026-10-11", { every: "2w", skip: true }, SUNDAY).line).toBe("- [ ] Plain due:2026-10-25 every:2w");
   });
 });
 
@@ -443,145 +382,9 @@ describe("checking off a recurring todo", () => {
     const { todos } = await perform(env.DB, ada, { type: "todo.list", noteId: note.id });
 
     expect(todos.map((t) => [t.words, t.every, t.lastDone, t.due])).toEqual([
-      ["Water the plants +Home", "1w", { on: SUNDAY, times: 1 }, "2026-10-17"],
+      ["Water the plants", "1w", { on: SUNDAY, times: 1 }, "2026-10-17"],
       ["Plain", null, null, null],
     ]);
-    expect(todos.map((t) => t.recurs)).toEqual(["every week", null]);
-    const ending = await create(ada, "- [ ] Course every:2w-mon,thu-times-5");
-    expect((await perform(env.DB, ada, { type: "todo.list", noteId: ending.id })).todos.map((t) => [t.every, t.recurs])).toEqual([["2w-mon,thu-times-5", "every 2 weeks on Mon, Thu · 5 left"]]);
-  });
-});
-
-describe("checking off a recurring todo whose rule ends", () => {
-  const PILLS = "- [ ] Pills due:2026-10-10 every:1d-times-2";
-  const LAST = `- [ ] Pills due:2026-10-12 every:1d-times-1 done:${SUNDAY}x1`;
-
-  it("counts down through todo.set, and the last time checks it off for good, recorded and filed like any other", async () => {
-    const ada = await newMember();
-    const note = await create(ada, PILLS);
-
-    const first = await check(ada, note.id, 0, PILLS);
-    const last = await check(ada, note.id, 0, LAST);
-
-    expect(first.text).toBe(LAST);
-    expect(last.text).toBe(`- [x] Pills due:2026-10-12 every:1d-times-1 done:${SUNDAY}x1`);
-    expect(last.filed).toMatchObject({ on: SUNDAY, todos: 1 });
-    expect((await dailies(ada))[0]!.text).toBe(`# ${SUNDAY}\n\n- [x] Pills due:2026-10-10 [[${note.id}]]\n- [x] Pills due:2026-10-12 [[${note.id}]]\n`);
-    expect((await history(ada, note.id, 0, last.text)).completions.map((c) => c.on)).toEqual([SUNDAY, SUNDAY]);
-    // Asked again, it is done already.
-    expect((await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: first.revision, line: 0, text: LAST, done: true, on: SUNDAY })).revision).toBe(last.revision);
-    expect((await dailies(ada))[0]!.text.match(/Pills/g)).toHaveLength(2);
-  });
-
-  it("does the same when the box is checked by a write, and leaves the box checked", async () => {
-    const ada = await newMember();
-    const claude = await agentOf(ada);
-    const note = await create(ada, `${LAST}\n- [ ] Course due:2026-10-12 every:mon,thu-until-2026-10-12`);
-
-    const written = await perform(env.DB, claude, { type: "note.write", id: note.id, baseRevision: 1, text: note.text.replaceAll("[ ]", "[x]"), on: "2026-10-12", writeId: "once" });
-
-    expect(written.text).toBe(`- [x] Pills due:2026-10-12 every:1d-times-1 done:${SUNDAY}x1\n- [x] Course due:2026-10-12 every:mon,thu-until-2026-10-12`);
-    expect(written.filed).toMatchObject({ on: "2026-10-12", todos: 2 });
-    expect((await dailies(ada))[0]!.text).toBe(`# 2026-10-12\n\n- [x] Pills due:2026-10-12 [[${note.id}]]\n- [x] Course due:2026-10-12 [[${note.id}]]\n`);
-    // The same write sent again is the one already recorded, and a later check of a box that stands checked completes nothing.
-    const again = await perform(env.DB, claude, { type: "note.write", id: note.id, baseRevision: 1, text: note.text.replaceAll("[ ]", "[x]"), on: "2026-10-12", writeId: "once" });
-    expect(again.revision).toBe(written.revision);
-    const reworded = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: written.revision, text: written.text.replace("Pills", "Tablets"), on: "2026-10-12" });
-    expect(reworded.filed).toBeUndefined();
-    expect((await dailies(ada))[0]!.text.match(/\[x\]/g)).toHaveLength(2);
-  });
-
-  it("takes the last time back with an undo: the box, and the line it filed", async () => {
-    const ada = await newMember();
-    const note = await create(ada, LAST);
-    const last = await check(ada, note.id, 0, LAST);
-
-    const undone = await perform(env.DB, ada, { type: "note.undo", id: note.id });
-
-    expect(undone.text).toBe(LAST);
-    expect(undone.unfiled).toMatchObject({ removed: 1, left: 0 });
-    expect((await dailies(ada))[0]!.text).toBe(`# ${SUNDAY}\n\n`);
-    expect((await history(ada, note.id, 0, LAST)).completions).toEqual([]);
-    expect(last.revision).toBe(2);
-  });
-});
-
-describe("skipping a recurring todo through todo.set", () => {
-  const skip = async (as: Actor, id: string, line: number, text: string, more: Partial<Extract<OpInput, { type: "todo.set" }>> = {}) =>
-    perform(env.DB, as, { type: "todo.set", id, revision: await revisionOf(id), line, text, skip: true, on: SUNDAY, ...more }, NOON);
-
-  it("moves the due date on as the asker's change, with no completion recorded and nothing filed", async () => {
-    const ada = await newMember();
-    const note = await create(ada, `${WATER}\n- [ ] Pills due:2026-10-11 every:1d-times-3`);
-
-    const skipped = await skip(ada, note.id, 0, WATER);
-    const counted = await skip(ada, note.id, 1, "- [ ] Pills due:2026-10-11 every:1d-times-3");
-
-    expect(skipped.text.split("\n")[0]).toBe("- [ ] ! Water the plants due:2026-10-17 every:1w +Home");
-    expect(skipped.filed).toBeUndefined();
-    expect(counted.text.split("\n")[1]).toBe("- [ ] Pills due:2026-10-12 every:1d-times-2");
-    expect(await dailies(ada)).toEqual([]);
-    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM completions WHERE note_id = ?").bind(note.id).first<{ n: number }>())!.n).toBe(0);
-    expect((await perform(env.DB, ada, { type: "note.history", id: note.id })).slice(1).map((c) => c.author)).toMatchObject([{ kind: "member", personId: ada.personId }, { kind: "member", personId: ada.personId }]);
-    expect(await indexed(note.id)).toEqual([
-      [0, 0, 1, "2026-10-17", "- [ ] ! Water the plants due:2026-10-17 every:1w +Home"],
-      [1, 0, 0, "2026-10-12", "- [ ] Pills due:2026-10-12 every:1d-times-2"],
-    ]);
-  });
-
-  it("is done once when asked twice, and is undone by an undo", async () => {
-    const ada = await newMember();
-    const note = await create(ada, WATER);
-
-    const once = await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 0, text: WATER, skip: true, on: SUNDAY });
-    const twice = await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 0, text: WATER, skip: true, on: SUNDAY });
-
-    expect(twice.revision).toBe(once.revision);
-    expect(twice.text).toBe("- [ ] ! Water the plants due:2026-10-17 every:1w +Home");
-    expect((await perform(env.DB, ada, { type: "note.undo", id: note.id })).text).toBe(WATER);
-  });
-
-  it("is the day the asker's settings name when no day is given", async () => {
-    const ada = await newMember();
-    await settings(ada, { "daily.timeZone": "Pacific/Auckland" });
-    const note = await create(ada, "- [ ] Bins due:2026-10-01 every:1d");
-
-    // Noon in UTC on the 11th is the 12th in Auckland.
-    const skipped = await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 0, text: "- [ ] Bins due:2026-10-01 every:1d", skip: true }, NOON);
-
-    expect(skipped.text).toBe("- [ ] Bins due:2026-10-13 every:1d");
-  });
-
-  it("is refused for a todo that doesn't recur, the last time of a rule that ends, and together with done, and changes nothing", async () => {
-    const ada = await newMember();
-    const text = "- [ ] Plain due:2026-10-11\n- [ ] Pills due:2026-10-11 every:1d-times-1\n- [ ] Bins every:1w";
-    const note = await create(ada, text);
-
-    expect(await codeOf(skip(ada, note.id, 0, "- [ ] Plain due:2026-10-11"))).toBe("invalid");
-    expect(await codeOf(skip(ada, note.id, 1, "- [ ] Pills due:2026-10-11 every:1d-times-1"))).toBe("invalid");
-    expect(await codeOf(skip(ada, note.id, 2, "- [ ] Bins every:1w", { done: true }))).toBe("invalid");
-    await expect(skip(ada, note.id, 1, "- [ ] Pills due:2026-10-11 every:1d-times-1")).rejects.toThrow(/last time/);
-    expect((await read(ada, note.id)).text).toBe(text);
-    expect((await read(ada, note.id)).revision).toBe(1);
-  });
-
-  it("is anyone's with edit on the note: a guest and an agent, each under their own name, and not a viewer's", async () => {
-    const ada = await newMember();
-    const claude = await agentOf(ada);
-    const viewer = await addMember(ada, "viewer", "Vic");
-    const guestEmail = `${crypto.randomUUID()}@example.com`;
-    const guest: Actor = { kind: "member", personId: (await signIn(env.DB, { email: guestEmail, name: "Gus" })).personId, workspaceId: ada.workspaceId };
-    const note = await create(ada, "- [ ] A due:2026-10-11 every:1d\n- [ ] B due:2026-10-11 every:1d\n- [ ] C due:2026-10-11 every:1d");
-    await perform(env.DB, ada, { type: "grant.set", noteId: note.id, email: guestEmail, access: "edit" });
-
-    const byGuest = await skip(guest, note.id, 0, "- [ ] A due:2026-10-11 every:1d");
-    const byAgent = await skip(claude, note.id, 1, "- [ ] B due:2026-10-11 every:1d");
-
-    expect(byAgent.text).toBe("- [ ] A due:2026-10-12 every:1d\n- [ ] B due:2026-10-12 every:1d\n- [ ] C due:2026-10-11 every:1d");
-    expect(await codeOf(skip(viewer, note.id, 2, "- [ ] C due:2026-10-11 every:1d"))).toBe("forbidden");
-    expect((await perform(env.DB, ada, { type: "note.history", id: note.id })).slice(1).map((c) => c.author)).toMatchObject([{ kind: "member", personId: guest.personId }, { kind: "agent", agentId: (claude as Extract<Actor, { kind: "agent" }>).agentId }]);
-    expect(byGuest.filed).toBeUndefined();
-    expect([...(await dailies(ada)), ...(await dailies(guest))]).toEqual([]);
   });
 });
 
@@ -771,24 +574,6 @@ describe("taking a completion back", () => {
     expect(reverted.unfiled).toEqual({ removed: 1, left: 0, dailyNoteIds: [] });
   });
 
-  it("does so for changes of several notes reverted at once, as History's page reverts them, and files the line again when that revert is reverted", async () => {
-    const { ada, note, daily, text } = await setUp();
-    const other = await create(ada, "# Other\n\nwords");
-    await perform(env.DB, ada, { type: "note.write", id: other.id, baseRevision: 1, text: "# Other\n\nwords, and more" });
-
-    const done = await perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: note.id, revisions: [2] }, { noteId: other.id, revisions: [2] }] });
-
-    expect(done.skipped).toEqual([]);
-    expect(done.reverted.map((r) => [r.noteId, r.unfiled])).toEqual([[note.id, { removed: 1, left: 0, dailyNoteIds: [daily] }], [other.id, undefined]]);
-    expect(await text()).toBe(`# ${SUNDAY}\n\n`);
-    expect((await read(ada, note.id)).text).toBe(`# Chores\n\n${WATER}`);
-    expect((await history(ada, note.id, 2, WATER)).completions).toEqual([]);
-
-    await perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: note.id, revisions: [3] }] });
-    expect(await text()).toBe(`# ${SUNDAY}\n\n${filedLine(note.id)}\n`);
-    expect((await history(ada, note.id, 2, WATERED)).completions).toHaveLength(1);
-  });
-
   it.each(["the todo's note first", "the daily note first"] as const)("takes an agent's completions back out of the daily note when the agent's changes are reverted, %s", async (order) => {
     const ada = await newMember();
     const claude = await agentOf(ada);
@@ -803,8 +588,8 @@ describe("taking a completion back", () => {
     const answers = order === "the todo's note first" ? [await revert(note.id), await revert(daily)] : [await revert(daily), await revert(note.id)].reverse();
 
     expect(answers[0]!.reverted[0]!.note.unfiled).toEqual({ removed: 1, left: 0, dailyNoteIds: [daily] });
-    // The agent's completion made the daily note, so its heading was the agent's change too and goes with the rest, as does the empty line that ended the note. What Ada filed stays.
-    expect((await read(ada, daily)).text).toBe(`- [x] Bins [[${note.id}]]`);
+    // The agent's completion made the daily note, so its heading was the agent's change too and goes with the rest. What Ada filed stays.
+    expect((await read(ada, daily)).text).toBe(`- [x] Bins [[${note.id}]]\n`);
     expect((await read(ada, note.id)).text).toBe(`# Chores\n\n${WATER}\n- [ ] Bins every:2w due:2026-10-25 done:${SUNDAY}x1`);
     expect((await perform(env.DB, ada, { type: "daily.open", on: SUNDAY })).id).toBe(daily);
   });
