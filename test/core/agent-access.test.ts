@@ -38,8 +38,11 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** Every operation with arguments the core accepts, so what refuses it is who is asking. */
-const everyOp = (noteId: string, folderId: string): { [K in OpType]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
+/** The operations an agent has a tool for. Settings are kept from agents, which test/core/settings.test.ts checks. */
+type ToolOp = Exclude<OpType, "settings.read" | "settings.write">;
+
+/** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
+const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
   "note.list": {},
   "note.create": { text: "# New" },
   "note.read": { id: noteId },
@@ -49,7 +52,6 @@ const everyOp = (noteId: string, folderId: string): { [K in OpType]: Omit<Extrac
   "note.label": { id: noteId, revision: 1, name: "Start" },
   "note.revert": { id: noteId, revision: 1 },
   "note.revertChanges": { id: noteId, revisions: [2] },
-  "note.previewRevert": { id: noteId, revisions: [2] },
   "note.diff": { id: noteId, revision: 1 },
   "history.summary": {},
   "note.undo": { id: noteId },
@@ -57,9 +59,6 @@ const everyOp = (noteId: string, folderId: string): { [K in OpType]: Omit<Extrac
   "history.list": {},
   "history.authors": {},
   "history.revertAuthor": { author: { kind: "agent", id: "aaaaaaaaaaaa" } },
-  "history.diff": { changes: [{ noteId, revisions: [2] }] },
-  "history.previewRevert": { changes: [{ noteId, revisions: [2] }] },
-  "history.revert": { changes: [{ noteId, revisions: [2] }] },
   "folder.list": {},
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
@@ -76,7 +75,7 @@ const refusedTo = async (run: () => Promise<unknown>) => {
 };
 
 describe("an agent's access is its member's", () => {
-  const REFUSED: Record<Role, OpType[]> = {
+  const REFUSED: Record<Role, ToolOp[]> = {
     admin: [],
     editor: ["folder.delete"],
     viewer: [
@@ -89,7 +88,6 @@ describe("an agent's access is its member's", () => {
       "note.undo",
       "note.redo",
       "history.revertAuthor",
-      "history.revert",
       "folder.create",
       "folder.rename",
       "folder.delete",
@@ -100,9 +98,9 @@ describe("an agent's access is its member's", () => {
     it(`for ${role === "viewer" ? "a" : "an"} ${role}: its tools are refused exactly the operations the member is`, async () => {
       const { member, token, noteId, folderId, workspace } = await team(role);
       const ops = everyOp(noteId, folderId);
-      const refused: { member: OpType[]; agent: OpType[] } = { member: [], agent: [] };
+      const refused: { member: ToolOp[]; agent: ToolOp[] } = { member: [], agent: [] };
 
-      for (const type of Object.keys(ops) as OpType[]) {
+      for (const type of Object.keys(ops) as ToolOp[]) {
         const name = TOOLS.find((t) => t.op === type)!.name;
         const answer = await tool(token, name, { workspace, ...ops[type] });
         if (answer.isError && answer.text.startsWith("forbidden: ")) refused.agent.push(type);
@@ -131,7 +129,7 @@ describe("an agent's access is its member's", () => {
     const ops = everyOp(noteId, folderId);
     await remove(member);
 
-    for (const type of Object.keys(ops) as OpType[]) {
+    for (const type of Object.keys(ops) as ToolOp[]) {
       const name = TOOLS.find((t) => t.op === type)!.name;
       expect(await tool(token, name, { workspace, ...ops[type] }), name).toMatchObject({ isError: true, text: "not_found: No such workspace" });
     }

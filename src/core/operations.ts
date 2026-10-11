@@ -1,28 +1,24 @@
 import { ChangeSet } from "@codemirror/state";
 import { z } from "zod";
-import { lineDiff, textDiff } from "./diff.ts";
-import { dayIn, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
+import { lineDiff } from "./diff.ts";
+import { dayIn, redoTarget, revertOfAuthor, revertedBy, takeBackOut, undoTarget } from "./history.ts";
 import { newId } from "./ids.ts";
 import { summarize } from "./markdown.ts";
 import {
   MAX_NOTE_LENGTH,
+  MAX_SETTINGS_LENGTH,
   Op,
   OpError,
   type Author,
   type AuthorRef,
   type ChangeEntry,
-  type DiffRun,
   type Folder,
   type HistoryEntry,
   type Note,
-  type NoteDiff,
-  type NoteRevertPreview,
   type NoteSummary,
   type OpInput,
   type OpType,
   type Results,
-  type Resolve,
-  type RevertedNotes,
   type Reverts,
   type Role,
 } from "./protocol.ts";
@@ -59,6 +55,8 @@ const ALLOWS: Record<Role, ReadonlySet<Access>> = {
 
 type Handler<K extends OpType> = {
   needs: Access;
+  /** Set when only the member themself may ask, and an agent acting for them may not. */
+  by?: "member";
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
 
@@ -75,6 +73,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor, i
     .bind(actor.kind === "agent" ? actor.agentId : null, actor.workspaceId, actor.personId)
     .first<{ role: Role; name: string; agent_name: string | null }>();
   if (!member) throw new OpError("not_found", "No such workspace");
+  if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
   if (actor.kind === "agent" && actor.scope?.readOnly && handler.needs !== "view") throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if (!ALLOWS[member.role].has(handler.needs)) throw new OpError("forbidden", `A ${member.role} can't ${op.type}`);
 
@@ -152,8 +151,6 @@ function written(ctx: Context, text: string) {
   };
 }
 
-const kindOf = (by: "people" | "agents" | undefined) => (by === "people" ? "member" : by === "agents" ? "agent" : null);
-
 const sameAuthor = (a: AuthorRef, b: AuthorRef) => a.kind === b.kind && a.id === b.id;
 const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx.actor.kind, id: authorId(ctx.actor) });
 
@@ -199,20 +196,20 @@ async function intoFolder(write: Promise<unknown>, name?: string): Promise<void>
   }
 }
 
-/** The note's text at `revision`, and the changes after it up to `current`. */
-async function replay(ctx: Context, id: string, revision: number, current: number): Promise<{ text: string; since: ChangeSet[] }> {
+/** The note's text at `revision`, and the changes after it up to `current` composed into one. */
+async function replay(ctx: Context, id: string, revision: number, current: number): Promise<{ text: string; since: ChangeSet }> {
   const { results } = await ctx.db
     .prepare("SELECT revision, diff FROM changes WHERE note_id = ? AND revision <= ? ORDER BY revision")
     .bind(id, current)
     .all<{ revision: number; diff: string }>();
   let text = "";
-  const since: ChangeSet[] = [];
+  let since: ChangeSet | null = null;
   for (const row of results) {
     const changes = ChangeSet.fromJSON(JSON.parse(row.diff));
     if (row.revision <= revision) text = applyChanges(changes, text);
-    else since.push(changes);
+    else since = since ? since.compose(changes) : changes;
   }
-  return { text, since };
+  return { text, since: since ?? ChangeSet.empty(text.length) };
 }
 
 const MAX_WRITE_ATTEMPTS = 5;
@@ -224,28 +221,14 @@ const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constrai
 interface Recording {
   writeId?: string;
   reverts?: Reverts;
-  resolution?: Resolution | null;
 }
 
 /** Records `changes` to a note whose text was `before`, with the lines it added and removed counted. */
-function insertChange(ctx: Context, noteId: string, revision: number, baseRevision: number, before: string, changes: ChangeSet, { writeId, reverts, resolution }: Recording = {}) {
+function insertChange(ctx: Context, noteId: string, revision: number, baseRevision: number, before: string, changes: ChangeSet, { writeId, reverts }: Recording = {}) {
   const { added, removed } = lineDiff(before, changes);
   return ctx.db
-    .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, write_id, reverts, resolution, added, removed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(
-      noteId,
-      revision,
-      baseRevision,
-      ctx.actor.kind,
-      authorId(ctx.actor),
-      JSON.stringify(changes.toJSON()),
-      ctx.now,
-      writeId ?? null,
-      reverts ? JSON.stringify(reverts) : null,
-      resolution ? JSON.stringify({ reverted: resolution.reverted.toJSON(), edit: resolution.edit.toJSON() }) : null,
-      added,
-      removed,
-    );
+    .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, write_id, reverts, added, removed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(noteId, revision, baseRevision, ctx.actor.kind, authorId(ctx.actor), JSON.stringify(changes.toJSON()), ctx.now, writeId ?? null, reverts ? JSON.stringify(reverts) : null, added, removed);
 }
 
 /**
@@ -330,15 +313,7 @@ const CHANGE_COLUMNS = `c.note_id, c.revision, c.base_revision, c.author_kind, c
 const revertsOf = (json: string | null) => (json ? (JSON.parse(json) as Reverts) : null);
 const stepOf = (r: { revision: number; reverts: string | null }) => ({ revision: r.revision, reverts: revertsOf(r.reverts) });
 
-/** What a note's changes come to: which were taken back out and by what, and which took others out. */
-interface Standing {
-  reverted: ReadonlyMap<number, number>;
-  reverts: ReadonlySet<number>;
-}
-
-const standingOf = (steps: readonly Step[]): Standing => ({ reverted: revertedBy(steps), reverts: new Set(steps.filter((s) => s.reverts).map((s) => s.revision)) });
-
-const toEntry = (r: ChangeRow, { reverted, reverts }: Standing): ChangeEntry => ({
+const toEntry = (r: ChangeRow, reverted: ReadonlyMap<number, number>): ChangeEntry => ({
   revision: r.revision,
   baseRevision: r.base_revision,
   author: authorOf(r.author_kind, r.author_id, r.name, r.agent_owner),
@@ -348,111 +323,46 @@ const toEntry = (r: ChangeRow, { reverted, reverts }: Standing): ChangeEntry => 
   revertedBy: reverted.get(r.revision) ?? null,
   added: r.added ?? 0,
   removed: r.removed ?? 0,
-  restores: revertsOf(r.reverts)?.revisions.filter((revision) => reverts.has(revision)).length ?? 0,
 });
 
 /** A note's change as moving through history reads it. */
 interface Recorded {
   revision: number;
   author: AuthorRef;
-  named: Author;
   changes: ChangeSet;
   reverts: Reverts | null;
-  resolution: Resolution | null;
 }
 
 interface RecordedRow {
   revision: number;
   author_kind: AuthorRef["kind"];
   author_id: string;
-  name: string | null;
-  agent_owner: string | null;
   diff: string;
   reverts: string | null;
-  resolution: string | null;
-}
-
-function resolutionOf(json: string | null): Resolution | null {
-  if (!json) return null;
-  const { reverted, edit } = JSON.parse(json) as { reverted: unknown; edit: unknown };
-  return { reverted: ChangeSet.fromJSON(reverted), edit: ChangeSet.fromJSON(edit) };
 }
 
 const toRecorded = (r: RecordedRow): Recorded => ({
   ...stepOf(r),
   author: { kind: r.author_kind, id: r.author_id },
-  named: authorOf(r.author_kind, r.author_id, r.name, r.agent_owner),
   changes: ChangeSet.fromJSON(JSON.parse(r.diff)),
-  resolution: resolutionOf(r.resolution),
 });
 
-/** Names the changes to take back out from the note's changes so far, or returns null to leave the note as it is. */
-type Choose = (history: Recorded[], reverted: Map<number, number>) => Reverts | null;
-
-/** A revert as it would be made: the note as it stands, what the revert finds in it, and the change to record with its conflicts settled as asked. Null `reverts` leaves the note as it is. */
-interface TakingBack {
-  row: NoteRow;
-  history: Recorded[];
-  reverts: Reverts | null;
-  found: Reverting;
-  changes: ChangeSet;
-  resolution: Resolution | null;
-}
-
-const RECORDED_COLUMNS = `c.note_id, c.revision, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner, c.diff, c.reverts, c.resolution
-       FROM changes c
-       LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
-       LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id`;
-
-async function takingBack(ctx: Context, id: string, choose: Choose, resolve?: Resolve): Promise<TakingBack> {
-  const row = await loadNote(ctx, id);
-  const { results } = await ctx.db.prepare(`SELECT ${RECORDED_COLUMNS} WHERE c.note_id = ? AND c.revision <= ? ORDER BY c.revision`).bind(row.id, row.revision).all<RecordedRow>();
-  return takingBackOf(row, results.map(toRecorded), choose, resolve);
-}
-
-/** The notes named, each with its changes up to the revision it was read at, in two reads however many they are. A note that isn't in the workspace is left out. */
-async function loadWithHistory(ctx: Context, ids: readonly string[]): Promise<Map<string, { row: NoteRow; history: Recorded[] }>> {
-  const named = JSON.stringify(ids);
-  const [notes, changes] = await ctx.db.batch<NoteRow & RecordedRow & { note_id: string }>([
-    ctx.db.prepare(`SELECT n.text, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ? AND n.id IN (SELECT value FROM json_each(?))`).bind(ctx.actor.workspaceId, named),
-    ctx.db
-      .prepare(`SELECT ${RECORDED_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ? AND c.note_id IN (SELECT value FROM json_each(?)) ORDER BY c.note_id, c.revision`)
-      .bind(ctx.actor.workspaceId, named),
-  ]);
-  const recorded = Map.groupBy(changes!.results, (r) => r.note_id);
-  return new Map(notes!.results.map((row) => [row.id, { row, history: (recorded.get(row.id) ?? []).filter((r) => r.revision <= row.revision).map(toRecorded) }]));
-}
-
-/** `takingBack` of a note already read with its changes. */
-function takingBackOf(row: NoteRow, history: Recorded[], choose: Choose, resolve?: Resolve): TakingBack {
-  if (resolve && resolve.at !== row.revision) {
-    throw new OpError("invalid", `The note has changed since this revert was previewed: it was at revision ${resolve.at} and is at ${row.revision}. Preview the revert again, and settle its conflicts as they are now`);
-  }
-  const reverts = choose(history, revertedBy(history));
-  const found: Reverting = reverts ? reverting(history, reverts, row.text) : { changes: ChangeSet.empty(row.text.length), overlaps: [], conflicts: [] };
-  const settled = settledRevert(found, row.text, choicesFor(found, resolve));
-  // Said of a preview too, so that a revert it shows is one that can be made.
-  if (settled.changes.newLength > MAX_NOTE_LENGTH) throw new OpError("invalid", `With ${resolve ? "these choices" : "the other changes merged in,"} the note would be over ${MAX_NOTE_LENGTH} characters`);
-  return { row, history, reverts, found, ...settled };
-}
-
-/** A choice for each conflict the revert has. */
-function choicesFor({ conflicts }: Reverting, resolve?: Resolve): Choice[] {
-  const choices = resolve?.choices ?? "keep";
-  if (typeof choices === "string") return conflicts.map(() => choices);
-  if (choices.length !== conflicts.length) {
-    const count = (n: number, thing: string) => `${n} ${thing}${n === 1 ? "" : "s"}`;
-    throw new OpError("invalid", `This revert has ${count(conflicts.length, "conflict")} to settle, and ${count(choices.length, "choice")} ${choices.length === 1 ? "was" : "were"} given: give one for each, in the order the preview lists them`);
-  }
-  return choices;
-}
-
-/** Records one change that takes other changes back out of a note. */
-function takeBack(ctx: Context, id: string, choose: Choose, resolve?: Resolve): Promise<Note> {
+/**
+ * Records one change that takes other changes back out of a note. `choose` names them from the note's
+ * changes so far, or returns null to leave the note as it is.
+ */
+function takeBack(ctx: Context, id: string, choose: (history: Recorded[], reverted: Map<number, number>) => Reverts | null): Promise<Note> {
   return settle(async () => {
-    const { row, reverts, changes, resolution } = await takingBack(ctx, id, choose, resolve);
+    const row = await loadNote(ctx, id);
+    const { results } = await ctx.db
+      .prepare("SELECT revision, author_kind, author_id, diff, reverts FROM changes WHERE note_id = ? AND revision <= ? ORDER BY revision")
+      .bind(row.id, row.revision)
+      .all<RecordedRow>();
+    const history = results.map(toRecorded);
+    const reverts = choose(history, revertedBy(history));
     if (!reverts) return toNote(row);
-    const next = await record(ctx, row, changes, row.revision, { reverts, resolution });
+    const changes = takeBackOut(history, reverts);
+    const next = await record(ctx, row, changes, row.revision, { reverts });
     return next && toNote(next);
   });
 }
@@ -464,49 +374,14 @@ function chosen(revisions: number[], history: Recorded[]): number[] {
   return [...new Set(revisions)].sort((a, b) => a - b);
 }
 
-/** Every change after `revision`: the note goes back to how it was then. */
-const revertBy =
-  (author: AuthorRef): Choose =>
-  (history) =>
-    revertOfAuthor(history, (c) => sameAuthor(c.author, author));
-
-const revertTo =
-  (revision: number): Choose =>
-  (history) => {
-    if (revision > history.length) throw new OpError("not_found", `The note has no revision ${revision}`);
-    if (revision === history.length) return null;
-    return { how: "revert", revisions: history.slice(revision).map((c) => c.revision), to: revision };
-  };
-
-const revertOf =
-  (revisions: number[]): Choose =>
-  (history, reverted) => {
-    const standing = chosen(revisions, history);
-    const gone = standing.find((r) => reverted.has(r));
-    if (gone !== undefined) throw new OpError("invalid", `Change ${gone} was already reverted, by change ${reverted.get(gone)}. Revert change ${reverted.get(gone)} to have it again`);
-    return { how: "revert", revisions: standing };
-  };
-
-/** The picked changes that still stand, or that a picked change took out: a change something else already took out is left be. */
-const revertStanding =
-  (revisions: number[]): Choose =>
-  (history) => {
-    const standing = revertible(history, chosen(revisions, history)).revisions;
-    return standing.length ? { how: "revert", revisions: standing } : null;
-  };
-
-type RevertedItem = Extract<Op, { type: "history.revert" }>["changes"][number];
-
-/** One note's revert among several, as it would be made. */
-function takingBackItem(row: NoteRow, history: Recorded[], item: RevertedItem): TakingBack {
-  const choose = item.author ? revertBy(item.author) : item.to !== undefined ? revertTo(item.to) : revertStanding(item.revisions!);
-  return takingBackOf(row, history, choose, item.choices !== undefined ? { at: item.at!, choices: item.choices } : undefined);
+function isJsonObject(text: string) {
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  } catch {
+    return false;
+  }
 }
-
-const titled = (row: NoteRow) => ({ noteId: row.id, noteTitle: row.title });
-
-/** As many diff lines as one answer of `history.diff` holds. A run past them comes without its diff. */
-export const MAX_ANSWER_LINES = 2000;
 
 const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.list": {
@@ -563,7 +438,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           changes = changesBetween(row.text, op.text);
         } else {
           const base = await replay(ctx, row.id, op.baseRevision, row.revision);
-          changes = rebased(base.text, op.text, base.since);
+          // At a tie, the stale write's insertion goes first: it stays next to the text it was typed after.
+          changes = changesBetween(base.text, op.text).map(base.since, true);
         }
         if (changes.empty) return toNote(row);
         const next = await record(ctx, row, changes, op.baseRevision, { writeId: op.writeId });
@@ -577,8 +453,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       await loadNote(ctx, op.id);
       await countLines(ctx, [op.id]);
       const { results } = await ctx.db.prepare(`SELECT ${CHANGE_COLUMNS} WHERE c.note_id = ? ORDER BY c.revision`).bind(op.id).all<ChangeRow>();
-      const standing = standingOf(results.map(stepOf));
-      return results.map((r) => toEntry(r, standing));
+      const reverted = revertedBy(results.map(stepOf));
+      return results.map((r) => toEntry(r, reverted));
     },
   },
 
@@ -588,7 +464,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row = await loadNote(ctx, op.id);
       if (op.revision > row.revision) throw new OpError("not_found", `The note has no change ${op.revision}`);
       const { text, since } = await replay(ctx, row.id, op.revision - 1, op.revision);
-      return lineDiff(text, since[0]!);
+      return lineDiff(text, since);
     },
   },
 
@@ -619,24 +495,23 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
 
   "note.revert": {
     needs: "edit",
-    run: (ctx, op) => takeBack(ctx, op.id, revertTo(op.revision), op.resolve),
+    run: (ctx, op) =>
+      takeBack(ctx, op.id, (history) => {
+        if (op.revision > history.length) throw new OpError("not_found", `The note has no revision ${op.revision}`);
+        if (op.revision === history.length) return null;
+        return { how: "revert", revisions: history.slice(op.revision).map((c) => c.revision), to: op.revision };
+      }),
   },
 
   "note.revertChanges": {
     needs: "edit",
-    run: (ctx, op) => takeBack(ctx, op.id, revertOf(op.revisions), op.resolve),
-  },
-
-  "note.previewRevert": {
-    // It shows nothing a viewer can't already read: the note at any revision, and every change's diff.
-    needs: "view",
-    async run(ctx, op) {
-      const author = op.author;
-      const choose: Choose = author ? revertBy(author) : op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!);
-      const { row, history, reverts, found, changes } = await takingBack(ctx, op.id, choose, op.resolve);
-      const conflicts = found.conflicts.map((c) => ({ ...c, later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })) }));
-      return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts };
-    },
+    run: (ctx, op) =>
+      takeBack(ctx, op.id, (history, reverted) => {
+        const revisions = chosen(op.revisions, history);
+        const gone = revisions.find((r) => reverted.has(r));
+        if (gone !== undefined) throw new OpError("invalid", `Change ${gone} was already reverted, by change ${reverted.get(gone)}. Revert change ${reverted.get(gone)} to have it again`);
+        return { how: "revert", revisions };
+      }),
   },
 
   "note.undo": {
@@ -666,9 +541,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
              AND (?2 IS NULL OR c.note_id IN (SELECT value FROM json_each(?2)))
              AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
              AND (?4 IS NULL OR c.created_at >= ?4)
-             AND (?5 IS NULL OR c.created_at < ?5)
-             AND (?6 IS NULL OR c.author_kind = ?6)`;
-      const binds = [ctx.actor.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.authors ? JSON.stringify(op.authors) : null, op.from ?? null, op.to ?? null, kindOf(op.by)];
+             AND (?5 IS NULL OR c.created_at < ?5)`;
+      const binds = [ctx.actor.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.authors ? JSON.stringify(op.authors) : null, op.from ?? null, op.to ?? null];
       interface Row {
         note_id: string;
         title: string;
@@ -687,9 +561,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
              FROM changes c JOIN notes n ON n.id = c.note_id
              WHERE ${narrowed}
              GROUP BY c.note_id
-             HAVING ?7 IS NULL OR last_at < ?7 OR (last_at = ?7 AND c.note_id < ?8)
+             HAVING ?6 IS NULL OR last_at < ?6 OR (last_at = ?6 AND c.note_id < ?7)
              ORDER BY last_at DESC, c.note_id DESC
-             LIMIT ?9`,
+             LIMIT ?8`,
           )
           .bind(...binds, op.before?.lastAt ?? null, op.before?.noteId ?? null, op.limit + 1)
           .all<Row>();
@@ -708,7 +582,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
            JOIN notes n ON n.id = c.note_id
            LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
            LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
-           WHERE ${narrowed} AND c.note_id IN (SELECT value FROM json_each(?7))
+           WHERE ${narrowed} AND c.note_id IN (SELECT value FROM json_each(?6))
            GROUP BY c.note_id, c.author_kind, c.author_id
            ORDER BY MAX(c.created_at) DESC, c.author_id`,
         )
@@ -745,7 +619,6 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
                AND (?4 IS NULL OR c.created_at >= ?4)
                AND (?5 IS NULL OR c.created_at < ?5)
                AND (?6 IS NULL OR (c.created_at, c.note_id, c.revision) < (?6, ?7, ?8))
-               AND (?10 IS NULL OR c.author_kind = ?10)
              ORDER BY c.created_at DESC, c.note_id DESC, c.revision DESC
              LIMIT ?9`,
           )
@@ -759,7 +632,6 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             op.before?.noteId ?? null,
             op.before?.revision ?? null,
             op.limit + 1,
-            kindOf(op.by),
           )
           .all<ChangeRow & { title: string }>();
       let { results } = await read();
@@ -776,10 +648,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .prepare(`SELECT note_id, revision, reverts${op.diffs ? ", diff" : ""} FROM changes WHERE note_id IN (SELECT value FROM json_each(?)) ORDER BY note_id, revision`)
         .bind(JSON.stringify([...new Set(page.map((r) => r.note_id))]))
         .all<{ note_id: string; revision: number; reverts: string | null; diff?: string }>();
-      const standing = new Map<string, Standing>();
+      const reverted = new Map<string, Map<number, number>>();
       const diffs = new Map<string, HistoryEntry["diff"]>();
       for (const [noteId, rows] of Map.groupBy(recorded, (r) => r.note_id)) {
-        standing.set(noteId, standingOf(rows.map(stepOf)));
+        reverted.set(noteId, revertedBy(rows.map(stepOf)));
         if (!op.diffs) continue;
         const shown = new Set(page.filter((r) => r.note_id === noteId).map((r) => r.revision));
         let text = "";
@@ -790,7 +662,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         }
       }
       return {
-        changes: page.map((r) => ({ ...toEntry(r, standing.get(r.note_id)!), noteId: r.note_id, noteTitle: r.title, diff: diffs.get(`${r.note_id}/${r.revision}`) ?? null })),
+        changes: page.map((r) => ({ ...toEntry(r, reverted.get(r.note_id)!), noteId: r.note_id, noteTitle: r.title, diff: diffs.get(`${r.note_id}/${r.revision}`) ?? null })),
         next: last && { createdAt: last.created_at, noteId: last.note_id, revision: last.revision },
       };
     },
@@ -836,7 +708,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       for (const { id, title } of page) {
         let reverts: Reverts | null = null;
         try {
-          const { text, ...note } = await takeBack(ctx, id, (history) => (reverts = revertOfAuthor(history, theirs)), op.resolve?.[id]);
+          const { text, ...note } = await takeBack(ctx, id, (history) => (reverts = revertOfAuthor(history, theirs)));
           if (!reverts) continue;
           answer.reverted.push({ note, revisions: (reverts as Reverts).revisions });
           if (!text.trim()) answer.emptied.push({ noteId: id, title });
@@ -846,119 +718,6 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         }
       }
       return answer;
-    },
-  },
-
-  "history.diff": {
-    needs: "view",
-    async run(ctx, op) {
-      const asked = new Map(op.changes.map((c) => [c.noteId, c.revisions]));
-      const named = JSON.stringify([...asked.keys()]);
-      const [read, recorded] = await ctx.db.batch<SummaryRow & ChangeRow & { diff: string }>([
-        ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ? AND n.id IN (SELECT value FROM json_each(?))`).bind(ctx.actor.workspaceId, named),
-        ctx.db.prepare(`SELECT c.diff, ${CHANGE_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ? AND c.note_id IN (SELECT value FROM json_each(?)) ORDER BY c.note_id, c.revision`).bind(ctx.actor.workspaceId, named),
-      ]);
-      const rows = Map.groupBy(recorded!.results, (r) => r.note_id);
-      if (read!.results.length < asked.size) throw new OpError("not_found", "No such note");
-      const notes = read!.results.map((note) => {
-        const changes = rows.get(note.id) ?? [];
-        const runs = runsOf(asked.get(note.id)!);
-        if (runs.at(-1)!.to > changes.length) throw new OpError("not_found", `${note.title || "The note"} has no change ${runs.at(-1)!.to}`);
-        const texts = new Map<number, string>([[0, ""]]);
-        const wanted = new Set(runs.flatMap((r) => [r.from - 1, r.to]));
-        let text = "";
-        for (const row of changes.slice(0, runs.at(-1)!.to)) {
-          text = applyChanges(ChangeSet.fromJSON(JSON.parse(row.diff)), text);
-          if (wanted.has(row.revision)) texts.set(row.revision, text);
-        }
-        return {
-          ...{ noteId: note.id, noteTitle: note.title, revision: note.revision },
-          runs: runs.map((run) => {
-            const made = changes.slice(run.from - 1, run.to);
-            const authors = new Map(made.map((r) => [`${r.author_kind}:${r.author_id}`, authorOf(r.author_kind, r.author_id, r.name, r.agent_owner)]));
-            return { ...run, saves: made.length, firstAt: made[0]!.created_at, lastAt: made.at(-1)!.created_at, authors: [...authors.values()], label: made.at(-1)!.label, diff: textDiff(texts.get(run.from - 1)!, texts.get(run.to)!) };
-          }),
-        };
-      });
-      notes.sort((a, b) => b.runs.at(-1)!.lastAt - a.runs.at(-1)!.lastAt || (a.noteId < b.noteId ? 1 : -1));
-      let room = MAX_ANSWER_LINES;
-      return {
-        notes: notes.map((note): NoteDiff => {
-          // A note comes with all its diffs or with none, so that asking for it alone always gives them.
-          const fits = room > 0;
-          const runs = note.runs.map(({ diff, ...run }): DiffRun => {
-            room -= diff.hunks.reduce((sum, h) => sum + h.lines.length, 0);
-            return { ...run, added: diff.added, removed: diff.removed, diff: fits ? diff : null };
-          });
-          return { ...note, runs, added: runs.reduce((sum, r) => sum + r.added, 0), removed: runs.reduce((sum, r) => sum + r.removed, 0) };
-        }),
-      };
-    },
-  },
-
-  "history.previewRevert": {
-    needs: "view",
-    async run(ctx, op) {
-      const read = await loadWithHistory(ctx, op.changes.map((c) => c.noteId));
-      return op.changes.map((item): NoteRevertPreview => {
-        const note = read.get(item.noteId);
-        const none = { revisions: [], already: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0, lines: 0 }, overlaps: [], conflicts: [] };
-        if (!note) return { noteId: item.noteId, noteTitle: "", revision: 0, ...none, refused: "No such note" };
-        try {
-          const { row, history, reverts, found, changes } = takingBackItem(note.row, note.history, item);
-          const conflicts = found.conflicts.map((c) => ({ ...c, later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })) }));
-          return {
-            ...titled(row),
-            revision: row.revision,
-            revisions: reverts?.revisions ?? [],
-            already: item.revisions ? revertible(history, item.revisions).already : [],
-            diff: lineDiff(row.text, changes),
-            overlaps: found.overlaps,
-            conflicts,
-          };
-        } catch (err) {
-          // One note that can't be reverted is no reason to show nothing of the others.
-          if (!(err instanceof OpError)) throw err;
-          return { ...titled(note.row), revision: note.row.revision, ...none, refused: err.message };
-        }
-      });
-    },
-  },
-
-  "history.revert": {
-    needs: "edit",
-    async run(ctx, op) {
-      const read = await loadWithHistory(ctx, op.changes.map((c) => c.noteId));
-      const done: RevertedNotes = { reverted: [], skipped: [] };
-      for (const item of op.changes) {
-        const note = read.get(item.noteId);
-        if (!note) {
-          done.skipped.push({ noteId: item.noteId, noteTitle: "", why: "refused", message: "No such note" });
-          continue;
-        }
-        const { row, history } = note;
-        const name = row.title || "Untitled";
-        const moved = () => done.skipped.push({ ...titled(row), why: "changed", message: `${name} has changed since this revert was previewed, so it was left as it is. Preview its revert again` });
-        if (item.at !== undefined && item.at !== row.revision) {
-          moved();
-          continue;
-        }
-        try {
-          const { reverts, changes, resolution } = takingBackItem(row, history, item);
-          if (!reverts || applyChanges(changes, row.text) === row.text) {
-            done.skipped.push({ ...titled(row), why: "nothing", message: `Nothing in ${name} would change` });
-            continue;
-          }
-          const next = await record(ctx, row, changes, row.revision, { reverts, resolution });
-          // By the title it had: a revert can leave a note with another, or with none.
-          if (next) done.reverted.push({ ...titled(row), revision: next.revision, reverted: reverts.revisions });
-          else moved();
-        } catch (err) {
-          if (!(err instanceof OpError)) throw err;
-          done.skipped.push({ ...titled(row), why: "refused", message: err.message });
-        }
-      }
-      return done;
     },
   },
 
@@ -1023,6 +782,42 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const folder = await loadFolder(ctx, op.id);
       if (folder.unsorted) throw new OpError("invalid", "Unsorted can't be deleted");
       throw new OpError("invalid", `"${folder.name}" isn't empty. Move or delete what's in it first.`);
+    },
+  },
+
+  "settings.read": {
+    needs: "view",
+    by: "member",
+    async run(ctx) {
+      const row = await ctx.db
+        .prepare("SELECT text, revision, updated_at FROM settings WHERE workspace_id = ? AND person_id = ?")
+        .bind(ctx.actor.workspaceId, ctx.actor.personId)
+        .first<{ text: string; revision: number; updated_at: number }>();
+      return row ? { text: row.text, revision: row.revision, updatedAt: row.updated_at } : { text: "{}", revision: 0, updatedAt: null };
+    },
+  },
+
+  // A viewer has settings too, so this needs no more than belonging to the workspace.
+  "settings.write": {
+    needs: "view",
+    by: "member",
+    async run(ctx, op) {
+      if (op.text.length > MAX_SETTINGS_LENGTH) throw new OpError("invalid", `Settings can be at most ${MAX_SETTINGS_LENGTH} characters`);
+      if (!isJsonObject(op.text)) throw new OpError("invalid", "Settings are a JSON object, such as {}");
+      // One statement, so of two writes on the same revision exactly one is taken.
+      const taken = "settings.revision = ?6 OR (settings.revision = ?6 + 1 AND settings.write_id = ?7)";
+      const statement =
+        op.baseRevision === 0
+          ? `INSERT INTO settings (workspace_id, person_id, text, updated_at, write_id, revision) VALUES (?1, ?2, ?3, ?4, ?5, 1)
+             ON CONFLICT (workspace_id, person_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at, write_id = excluded.write_id, revision = settings.revision + 1 WHERE ${taken}
+             RETURNING revision`
+          : `UPDATE settings SET text = ?3, updated_at = ?4, write_id = ?5, revision = revision + 1 WHERE workspace_id = ?1 AND person_id = ?2 AND (${taken}) RETURNING revision`;
+      const row = await ctx.db
+        .prepare(statement)
+        .bind(ctx.actor.workspaceId, ctx.actor.personId, op.text, ctx.now, op.writeId ?? null, op.baseRevision, op.supersedes ?? null)
+        .first<{ revision: number }>();
+      if (!row) throw new OpError("conflict", "Your settings changed somewhere else since they were read here");
+      return { text: op.text, revision: row.revision, updatedAt: ctx.now };
     },
   },
 };

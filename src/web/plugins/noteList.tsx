@@ -13,6 +13,8 @@ interface Kept {
 }
 
 interface Props extends FolderProps {
+  /** Whether each collapsed card shows the first lines of its note. */
+  snippets: boolean;
   /** How the list was left the last time it was drawn for this folder, and where to keep how it is left now. */
   kept: Kept;
 }
@@ -50,7 +52,7 @@ function folderForNew(app: App, folderId: string) {
   return app.canEdit ? ((folderId === ALL_NOTES ? app.folders?.unsortedId : folderId) ?? null) : null;
 }
 
-function FolderList({ app, folderId, readNote, kept }: Props) {
+function FolderList({ app, folderId, readNote, snippets, kept }: Props) {
   const ids = useId();
   const now = useNow();
   const [view, setView] = useState(kept.view);
@@ -266,7 +268,7 @@ function FolderList({ app, folderId, readNote, kept }: Props) {
                       </div>
                       <div className="card-details">{details(note)}</div>
                     </header>
-                    {!expanded && note.snippet && <p className="card-preview">{note.snippet}</p>}
+                    {!expanded && snippets && note.snippet && <p className="card-preview">{note.snippet}</p>}
                     {expanded && (
                       <CardBody
                         whole={expanded === "whole"}
@@ -306,6 +308,9 @@ export const noteList: Plugin = {
   name: "Note list",
   description: "A folder's notes as cards, each with its details and its first lines, to sort and to filter.",
   icon: "list",
+  settings: {
+    snippets: { type: "boolean", default: true, title: "Show snippets", description: "Show the first lines of each note under its title." },
+  },
   activate(host) {
     /** How each folder's list was left, for as long as the app is open. */
     const kept = new Map<string, Kept>();
@@ -315,7 +320,7 @@ export const noteList: Plugin = {
     };
     host.views.register("folder", {
       id: "notes",
-      component: (props) => <FolderList {...props} kept={keptFor(props.folderId)} />,
+      component: (props) => <FolderList {...props} snippets={host.settings.get<boolean>("snippets")} kept={keptFor(props.folderId)} />,
     });
   },
 };

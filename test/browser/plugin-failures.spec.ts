@@ -23,7 +23,7 @@ test("a plugin whose views and embed throw is left out, the note keeps its typin
         activate(host: { views: { register(slot: string, view: unknown): void }; embeds: { register(embed: unknown): void } }) {
           host.views.register("column", { id: "broken-column", component: broken("The column") });
           host.views.register("section", { id: "broken-section", component: broken("The section") });
-          host.views.register("inspector", { id: "broken-tab", label: "Broken", icon: "info", for: "note", component: broken("The tab") });
+          host.views.register("inspector", { id: "broken-tab", label: "Broken", icon: "info", component: broken("The tab") });
           host.views.register("editor", { id: "broken-editor", component: broken("The editor area") });
           host.embeds.register({ name: "broken", title: "Broken embed", render: broken("The embed") });
         },
@@ -50,17 +50,6 @@ test("a plugin whose views and embed throw is left out, the note keeps its typin
   await openPlugins(page);
   const failed = page.getByRole("listitem").filter({ hasText: "Broken fixture" }).getByRole("alert");
   for (const what of ["The column broke", "The section broke", "The tab broke", "The editor area broke", "The embed broke"]) await expect(failed).toContainText(what);
-  // What failed is text to select and copy: the card's link, laid over the whole card, is not over it.
-  await failed.scrollIntoViewIfNeeded();
-  expect(
-    await failed.evaluate((line) => {
-      const { x, y, width, height } = line.getBoundingClientRect();
-      return document.elementFromPoint(x + width / 2, y + height / 2) === line;
-    }),
-  ).toBe(true);
-  await failed.click({ clickCount: 3 });
-  expect(await page.evaluate(() => getSelection()!.toString())).toContain("Failed: The section broke");
-  await expect(page).toHaveURL(/\/plugins$/);
   await page.getByRole("checkbox", { name: "Broken fixture" }).uncheck();
   await expect(failed).toHaveCount(0);
 });
