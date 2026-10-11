@@ -1,17 +1,3 @@
-/** Which command each chord runs. `mod` is ⌘ or Ctrl. */
-export const KEYBINDINGS: Readonly<Record<string, string>> = {
-  "mod+.": "view.toggleFocus",
-  "mod+\\": "view.toggleSidebar",
-  "mod+p": "notes.quickOpen",
-  "mod+shift+p": "commands.show",
-  "mod+z": "history.undo",
-  "mod+shift+z": "history.redo",
-  "mod+y": "history.redo",
-};
-
-/** Commands a text field has its own answer to. A key bound to one is left to the field while it has focus. */
-export const FIELD_COMMANDS: ReadonlySet<string> = new Set(["history.undo", "history.redo"]);
-
 interface Pressed {
   key: string;
   metaKey: boolean;
@@ -23,7 +9,7 @@ interface Pressed {
 /** The keys whose own character is what keys are written with: a chord is joined with + and a sequence is spaced. */
 const NAMED: Record<string, string> = { " ": "space", "+": "plus" };
 
-/** A key press written the way `KEYBINDINGS` writes it: modifiers in the order mod, alt, shift, then the key. */
+/** A key press written the way a command writes its keys: modifiers in the order mod, alt, shift, then the key. `mod` is ⌘ or Ctrl. */
 export const chordOf = (e: Pressed) => [(e.metaKey || e.ctrlKey) && "mod", e.altKey && "alt", e.shiftKey && "shift", NAMED[e.key] ?? e.key.toLowerCase()].filter(Boolean).join("+");
 
 /** A key that is held with another and is no press of its own. */
@@ -54,7 +40,7 @@ export function typed(keys: string) {
   return !parts.some((part) => part !== "shift") && key !== "escape" && !/^f\d{1,2}$/.test(key);
 }
 
-export const chordFor = (commandId: string, bindings = KEYBINDINGS) => Object.keys(bindings).find((chord) => bindings[chord] === commandId);
+export const chordFor = (commandId: string, bindings: Readonly<Record<string, string>>) => Object.keys(bindings).find((chord) => bindings[chord] === commandId);
 
 const SYMBOLS: Record<string, string> = { mod: "⌘", alt: "⌥", shift: "⇧" };
 const WORDS: Record<string, string> = { mod: "Ctrl", alt: "Alt", shift: "Shift" };

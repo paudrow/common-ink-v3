@@ -1,33 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
-import { Agents } from "./Agents.tsx";
-import { ApiError, perform } from "./api.ts";
-import { createCommands, type Command } from "./commands.ts";
-import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
-import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction, type EditorLayout, type Group, type Opened } from "./editorLayout.ts";
-import { ALL_NOTES, folderTitle, folderTree, pathName, type FolderTree as Tree } from "./folders.ts";
-import { FolderTree } from "./FolderTree.tsx";
-import { HistoryMode, type Scope } from "./History.tsx";
-import { Icon, type IconName } from "./icons.tsx";
-import { Inspector, markOf, viewsFor, type Subject } from "./Inspector.tsx";
-import { FIELD_COMMANDS, KEYBINDINGS, advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
-import { MODES, modePath, type ModeId } from "./modes.ts";
+import { ApiError, connectAgent, disconnectAgent, listAgents, perform, signOut } from "./api.ts";
+import { useDismiss } from "./dismiss.ts";
+import { Drawn } from "./Drawn.tsx";
+import { folderTree } from "./folders.ts";
+import { Icon } from "./icons.tsx";
+import { Inspector } from "./Inspector.tsx";
+import { advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
-import { FolderList, type Kept } from "./NoteList.tsx";
-import { INITIAL_VIEW, notesIn } from "./noteListView.ts";
 import { NoteReader } from "./NoteReader.tsx";
-import { Palette } from "./Palette.tsx";
+import { ALL_NOTES, folderTitle, type App, type Embed, type Folders, type Opened, type Plugin } from "./plugin-api.ts";
+import { createPluginHost, type Host } from "./pluginHost.ts";
+import { BUILT_INS } from "./plugins/index.ts";
+import { Plugins } from "./Plugins.tsx";
 import { ResizeHandle } from "./resize.tsx";
-import { AGENTS_PATH, folderPath, type Navigate, type Route } from "./router.ts";
-import { Sidebar } from "./Sidebar.tsx";
-import { Soon } from "./Soon.tsx";
-import { isBoolean, useStored } from "./stored.ts";
-import { undoOrRedo } from "./sync.ts";
+import { folderPath, type Navigate, type Place } from "./router.ts";
+import { isBoolean, isStrings, readStored, useStored, writeStored } from "./stored.ts";
+import { performInSync, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
-const FOCUS_KEY = "ink.focus";
-const SIDEBAR_KEY = "ink.sidebar";
+type Popover = { side: "left" } | { side: "right"; tab: string };
+/** Writing mode collapses both sides to rails; a rail opens its panel as a popover over the editor. */
+type Layout = { writing: false } | { writing: true; popover: Popover | null };
+
+const BROWSING: Layout = { writing: false };
+const WRITING: Layout = { writing: true, popover: null };
+const WRITING_KEY = "ink.writing";
 const INSPECTOR_KEY = "ink.inspector";
 /** How wide the sidebar and the inspector start, and how far a member can drag each. */
 const SIDEBAR = { start: 216, min: 150, max: 480 };
@@ -41,19 +40,11 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 /** How often the notes changed since the last look are listed, so an agent's or another member's change shows up. */
 const REFRESH_MS = 5000;
 
+const isAnything = (_: unknown): _ is unknown => true;
 const isRevisions = (v: unknown): v is Record<string, number> => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number");
 const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 
-/** A layout is kept as it was written, and read by `keptLayout`, which knows the shape it had before a folder could have a tab. */
-const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
-const isAnything = (_: unknown): _ is unknown => true;
-
-/** What a tab can hold besides a note and a folder's list: each mode, and Agents. */
-const PAGES: readonly { id: string; label: string; icon: IconName; path: string }[] = [
-  ...MODES.map((mode) => ({ id: mode.id, label: mode.label, icon: mode.icon, path: modePath(mode.id) })),
-  { id: "agents", label: "Agents", icon: "agent", path: AGENTS_PATH },
-];
-
+const popoverKey = (p: Popover | null) => (p ? (p.side === "left" ? "left" : p.tab) : null);
 
 const summaryOf = ({ text: _, ...summary }: Note): NoteSummary => summary;
 
@@ -61,9 +52,6 @@ const pathTo = (byId: ReadonlyMap<string, NoteSummary>, id: string) => {
   const note = byId.get(id);
   return note ? notePath(note) : `/note/${id}`;
 };
-
-/** Where a tab lives: a folder's list at `/folder/<id>`, a page at its path, a note at its own address. */
-const addressOf = (byId: ReadonlyMap<string, NoteSummary>, tab: Opened) => (tab.kind === "folder" ? folderPath(tab.id) : tab.kind === "page" ? tab.path : pathTo(byId, tab.id));
 
 /**
  * A listing can answer after a save or a new note it was sent before. A note learned since it was
@@ -79,67 +67,164 @@ function newest(listed: NoteSummary[], known: NoteSummary[] | null, learned: Rea
   return [...[...learned.values()].filter((n) => !listedIds.has(n.id)), ...fresh];
 }
 
-const shortcut = (commandId: string) => {
-  const chord = chordFor(commandId);
-  return chord && chordLabel(chord, MAC);
-};
+/** Functions that stay the same from one render to the next, each calling the latest one it was handed. */
+function useLatest<T extends Record<string, (...args: never[]) => unknown>>(fns: T): T {
+  const latest = useRef(fns);
+  latest.current = fns;
+  return useState(() => Object.fromEntries(Object.keys(fns).map((name) => [name, (...args: never[]) => latest.current[name]!(...args)])) as T)[0];
+}
 
-const CLOSES: { scope: CloseScope; id: string; title: string }[] = [
-  { scope: "tab", id: "tab.close", title: "Close tab" },
-  { scope: "others", id: "tab.closeOthers", title: "Close other tabs" },
-  { scope: "left", id: "tab.closeLeft", title: "Close tabs to the left" },
-  { scope: "right", id: "tab.closeRight", title: "Close tabs to the right" },
-  { scope: "all", id: "tab.closeAll", title: "Close all tabs" },
-];
+/** A folder's notes by title, for when no plugin lists them. */
+function FolderNotes({ folderId, folders, notes, pathOf, onOpen }: { folderId: string; folders: Folders | null; notes: readonly NoteSummary[] | null; pathOf: (noteId: string) => string; onOpen: (noteId: string) => void }) {
+  if (!folders || !notes) return null;
+  const title = folderTitle(folders, folderId);
+  if (title === null) return <p className="notice">This folder doesn't exist, or you can't see it.</p>;
+  const listed = notes.filter((n) => folderId === ALL_NOTES || n.folderId === folderId);
+  return (
+    <section className="folder-notes" aria-label={title}>
+      <h1>{title}</h1>
+      {listed.length === 0 && <p className="empty">No notes in this folder.</p>}
+      <ul data-list>
+        {listed.map((note) => (
+          <li key={note.id}>
+            <a
+              href={pathOf(note.id)}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                onOpen(note.id);
+              }}
+            >
+              {note.title || "Untitled"}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 interface Props {
   me: Me;
   workspace: WorkspaceSummary;
-  route: Route;
+  place: Place;
   navigate: Navigate;
   onSwitch: (workspaceId: string) => void;
 }
 
-export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
+export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
+  const { route } = place;
   const workspaceId = workspace.id;
   const canEdit = workspace.role !== "viewer";
   const now = useNow();
-  const [tree, setTree] = useState<Tree | null>(null);
-  /** Every note in the workspace, for a folder's list, tab titles, and quick open. */
+  const [tree, setTree] = useState<Folders | null>(null);
+  /** Every note in the workspace, for the note list, tab titles, and quick open. */
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
   const [listVersion, setListVersion] = useState(0);
-  /** In focus the tab in front of the focused group fills the window, over everything else, which stays as it is underneath. Which group that is, the layout already says. */
-  const [focusMode, setFocusMode] = useStored(FOCUS_KEY, isBoolean, false);
-  const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
+  const [layout, setLayout] = useState<Layout>(() => (readStored(WRITING_KEY, isBoolean) ? WRITING : BROWSING));
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
-  /** The inspector's tab the member last picked, kept in this browser as the widths are. Only a pick changes it: what is in front shows it when it has it. */
-  const [picked, setPicked] = useStored<string | null>(`ink.inspectorTab.${me.person.id}`, isStringOrNull, null);
   /** How wide the member dragged the sidebar and the inspector. Kept in this browser, as the layout is: a width suits the screen it was set on. */
   const [widths, setWidths] = useStored<Widths>(`ink.widths.${me.person.id}`, isWidths, {});
   const sidebarWidth = within(SIDEBAR, widths.sidebar ?? SIDEBAR.start);
   const inspectorWidth = within(INSPECTOR, widths.inspector ?? INSPECTOR.start);
-  const [keptEditor, setEditor] = useStored<unknown>(`ink.editor.${workspaceId}`, isAnything, null);
-  const editor = useMemo(() => keptLayout(keptEditor), [keptEditor]);
-  /** How each folder's list was left, for as long as the app is open. */
-  const [keptLists] = useState(() => new Map<string, Kept>());
-  const [commands] = useState(createCommands);
-  const [palette, setPalette] = useState<"commands" | "notes" | null>(null);
+  const [overlay, setOverlay] = useState<string | null>(null);
   /** An undo or redo that didn't happen, and why, shown on its note until the member's next step. */
   const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
 
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
-  const notesVersion = useMemo(() => (notes ?? []).reduce((sum, n) => sum + n.revision, 0), [notes]);
   const routeNoteId = route.kind === "note" ? route.id : null;
   const current = (routeNoteId && byId.get(routeNoteId)) || null;
   const routeFolderId = route.kind === "folder" ? route.id : null;
-  const routePage = route.kind === "mode" ? PAGES.find((p) => p.id === route.mode) : route.kind === "agents" ? PAGES.find((p) => p.id === "agents") : undefined;
-  /** What the address names in the editor area: the note, the folder's list or the page in front. */
-  const opened = useMemo<Opened | null>(
-    () => (routeNoteId ? { kind: "note", id: routeNoteId } : routeFolderId ? { kind: "folder", id: routeFolderId } : routePage ? { kind: "page", id: routePage.id, path: routePage.path } : null),
-    [routeNoteId, routeFolderId, routePage],
-  );
-  /** The folder in front: the one whose list is open, or the open note's. The folder tree marks it. */
+  /** The folder in front: the one whose list is open, or the open note's. */
   const frontFolderId = routeFolderId ?? current?.folderId ?? null;
+
+  const appNow = useRef<App>(null!);
+  const lastNoteId = useRef<string | null>(null);
+  /** What the app's own commands do, as of the latest render. */
+  const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; toggleWriting: () => void; toggleInspector: () => void }>(null!);
+  const [host] = useState(() => {
+    let created: Host;
+    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} mac={MAC} path={app.path} go={app.go} />;
+    /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
+    const core: Plugin = {
+      id: "core",
+      name: "Common Ink",
+      activate(h) {
+        h.commands.register({ id: "notes.all", title: "Open All notes", run: () => h.app().openFolder(ALL_NOTES) });
+        if (canEdit) {
+          h.commands.register({ id: "note.new", title: "New note", run: () => h.app().createNote() });
+          h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], leaveToFields: true, run: () => inner.current.step("note.undo") });
+          h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], leaveToFields: true, run: () => inner.current.step("note.redo") });
+        }
+        h.commands.register({ id: "view.toggleWritingMode", title: "Toggle writing mode", keys: ["mod+."], run: () => inner.current.toggleWriting() });
+        h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", run: () => inner.current.toggleInspector() });
+      },
+    };
+    /** Kept apart from the rest so its link and command come after the plugins', where the others come before. */
+    const pluginsPage: Plugin = {
+      id: "plugins",
+      name: "Plugins",
+      activate: (h) => void h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage }),
+    };
+    const disabledKey = `ink.plugins.off.${workspaceId}.${me.person.id}`;
+    created = createPluginHost({
+      // A test puts plugins on the page before the app loads. Loading a member's own plugins is another matter.
+      plugins: [core, ...BUILT_INS, ...((window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__ ?? []), pluginsPage],
+      required: [core.id, pluginsPage.id],
+      // Settings will keep this per member per workspace; until then it is kept in this browser.
+      disabled: { read: () => readStored(disabledKey, isStrings) ?? [], write: (ids) => writeStored(disabledKey, ids) },
+      mac: MAC,
+      provide: (plugin) => ({
+        workspace,
+        app: () => appNow.current,
+        // Made for the one plugin that asked, so this is where its permissions will be checked. The server records the member as the author.
+        perform: (op) => performInSync(workspaceId, op),
+        agents: { list: listAgents, connect: connectAgent, disconnect: (id) => disconnectAgent(id).then(() => {}) },
+        storage: {
+          get: (key) => readStored(`ink.plugin.${plugin.id}.${workspaceId}.${key}`, isAnything),
+          set: (key, value) => writeStored(`ink.plugin.${plugin.id}.${workspaceId}.${key}`, value),
+        },
+      }),
+    });
+    return created;
+  });
+  const contributed = useSyncExternalStore(host.subscribe, host.contributions);
+  /** The page the address names: the one at exactly that address, or else the one whose path it is under. */
+  const routePage = route.kind === "page" ? (contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`))) : undefined;
+  /** A page that only leads somewhere else is no tab: it has the editor area's place while it finds where to go. */
+  const passing = routePage?.transient ? routePage : undefined;
+  const routePageId = passing ? undefined : routePage?.id;
+  const address = place.path;
+  const opened = useMemo<Opened | null>(
+    () => (routeNoteId ? { kind: "note", id: routeNoteId } : routeFolderId ? { kind: "folder", id: routeFolderId } : routePageId ? { kind: "page", id: routePageId, path: address } : null),
+    [routeNoteId, routeFolderId, routePageId, address],
+  );
+  useEffect(() => () => host.dispose(), [host]);
+  /** Each embed as registered, but telling the host when it throws while being drawn. One is made per embed, so a drawn embed isn't redrawn when something else changes. */
+  const [guarded] = useState(() => new WeakMap<Embed, Embed>());
+  const embeds = useMemo(
+    () =>
+      contributed.embeds.map((embed) => {
+        const guard: Embed = guarded.get(embed) ?? {
+          ...embed,
+          render(el, written) {
+            try {
+              return embed.render(el, written);
+            } catch (err) {
+              host.fail(embed, err);
+              throw err;
+            }
+          },
+        };
+        guarded.set(embed, guard);
+        return guard;
+      }),
+    [host, guarded, contributed.embeds],
+  );
+  const shortcut = (commandId: string) => {
+    const chord = chordFor(commandId, contributed.keybindings);
+    return chord && chordLabel(chord, MAC);
+  };
 
   const loadFolders = useCallback(() => perform(workspaceId, { type: "folder.list" }).then((r) => setTree(folderTree(r))), [workspaceId]);
   useEffect(() => void loadFolders(), [loadFolders]);
@@ -188,44 +273,18 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     [navigate],
   );
 
-  const shown = useRef({ editor, byId });
-  shown.current = { editor, byId };
-  /** The URL names the focused group's active tab, so every change to the layout goes through here. */
-  const showEditor = useCallback(
-    (next: EditorLayout, move = false) => {
-      shown.current.editor = next;
-      setEditor(next);
-      const tab = focused(next);
+  const byIdNow = useRef(byId);
+  byIdNow.current = byId;
+  const show = useCallback(
+    (tab: Opened | null, { replace = false }: { replace?: boolean } = {}) => {
       if (!tab) navigate("/");
+      else if (tab.kind === "folder") navigate(folderPath(tab.id), { replace });
+      else if (tab.kind === "page") navigate(tab.path, { replace });
       // A note's address may be written with an older title, and is still the note's.
-      else if (tab.kind !== "note" || noteIdFromPath(location.pathname) !== tab.id) navigate(addressOf(shown.current.byId, tab), { move });
+      else if (noteIdFromPath(location.pathname) !== tab.id) navigate(pathTo(byIdNow.current, tab.id), { replace });
     },
-    [setEditor, navigate],
+    [navigate],
   );
-  /**
-   * Back retraces every open and close. Moving between tabs already open is one step however many moves it took, and never takes the place of an open.
-   * A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
-   */
-  const dispatch = useCallback(
-    (action: EditorAction) => {
-      const next = editorReducer(shown.current.editor, action);
-      if ((action.type === "split" || action.type === "send") && next !== shown.current.editor) setFocusMode(false);
-      if (action.type !== "resize") return showEditor(next, action.type === "focus" || action.type === "activate");
-      // Dragging the edge of a split goes nowhere.
-      shown.current.editor = next;
-      setEditor(next);
-    },
-    [showEditor, setEditor, setFocusMode],
-  );
-
-  useEffect(() => {
-    if (opened && !same(focused(shown.current.editor), opened)) dispatch({ type: "open", tab: opened, preview: true });
-  }, [opened, dispatch]);
-
-  useEffect(() => {
-    const tab = focused(shown.current.editor);
-    if (route.kind === "home" && tab) navigate(addressOf(shown.current.byId, tab), { replace: true });
-  }, [route.kind, navigate]);
 
   /** The latest revision of each note the member has been shown the changes up to. It is kept in this browser. */
   const [seen, setSeen] = useStored(`ink.seen.${workspaceId}.${me.person.id}`, isRevisions, {});
@@ -253,50 +312,46 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   }, [workspaceId, currentId, currentRevision, me.person.id]);
   const unseen = !!current && others?.noteId === current.id && others.revision > (seen[current.id] ?? 0);
 
-  /** Asked for on a group, focus turns to that group first, so what fills the window is its tab in front. */
-  const toggleFocus = useCallback(
-    (groupId?: string) => {
-      if (groupId && groupId !== shown.current.editor.focusedGroupId) dispatch({ type: "focus", groupId });
-      setFocusMode((on) => !on);
-    },
-    [dispatch, setFocusMode],
-  );
-  const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), [setSidebarOpen]);
-  const toggleInspector = useCallback(() => setInspectorOpen((open) => !open), [setInspectorOpen]);
-  const closePalette = useCallback(() => setPalette(null), []);
+  const closePopover = useCallback(() => setLayout((l) => (l.writing ? WRITING : l)), []);
+  const toggleWriting = useCallback(() => setLayout((l) => (l.writing ? BROWSING : WRITING)), []);
+  const togglePopover = (p: Popover) => setLayout((l) => (l.writing ? { writing: true, popover: popoverKey(l.popover) === popoverKey(p) ? null : p } : l));
+  const toggleInspector = () => {
+    const last = host.contributions().views.inspector.at(-1);
+    if (!layout.writing) setInspectorOpen(!inspectorOpen);
+    else if (last) togglePopover({ side: "right", tab: last.id });
+  };
+  const closeOverlay = useCallback(() => setOverlay(null), []);
 
-  const go = navigate;
-  /** The notes the History page is narrowed to, when it was opened from a note's or a folder's History tab. */
-  const [historyScope, setHistoryScope] = useState<Scope | null>(null);
-  const openHistory = (scope: Scope | null) => {
-    setHistoryScope(scope);
-    go(modePath("history"));
+  /** Where a new note goes: the folder asked for, or else the folder in front, when that is a folder; otherwise Unsorted. */
+  const folderForNew = (asked: string | null) => (asked && tree?.byId.has(asked) ? asked : tree?.unsortedId) ?? null;
+  const newNoteFolderId = folderForNew(frontFolderId);
+
+  useEffect(() => writeStored(WRITING_KEY, layout.writing), [layout.writing]);
+
+  const go = (path: string, options: { state?: unknown; replace?: boolean } = {}) => {
+    navigate(path, options);
+    closePopover();
   };
 
   /** The note whose editor is to take the cursor once it is there. */
   const [toFocus, setToFocus] = useState<string | null>(null);
-  /**
-   * Opens a note. A preview gives way to the next note previewed. `focus` puts the cursor in its
-   * editor. `background` opens it in a tab of its own, which is kept, without leaving what is in front.
-   */
   const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean } = {}) => {
-    const tab: Opened = { kind: "note", id: noteId };
-    if (options.background) return dispatch({ type: "open", tab, preview: false, background: true });
+    const area = host.contributions().views.editor.at(-1);
+    if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true });
     setToFocus(options.focus ? noteId : null);
-    dispatch({ type: "open", tab, preview: options.preview ?? false });
+    if (area?.open) area.open({ kind: "note", id: noteId }, { preview: options.preview ?? false });
+    else show({ kind: "note", id: noteId });
+    closePopover();
   };
-  /** Opens a folder's list of notes. A preview, which it is unless kept, gives way to the next folder previewed and to no note. */
-  const openFolder = (folderId: string, keep = false) => {
-    dispatch({ type: "open", tab: { kind: "folder", id: folderId }, preview: !keep });
+  const openFolder = (folderId: string, options: { preview?: boolean } = {}) => {
+    const area = host.contributions().views.editor.at(-1);
+    if (area?.open) area.open({ kind: "folder", id: folderId }, { preview: options.preview ?? true });
+    else show({ kind: "folder", id: folderId });
+    closePopover();
   };
 
-  /** Opens a folder's list or a page in a group of its own, beside or under the one in front, as a tab's Split does. It is kept there. */
-  const openBeside = (tab: Opened, side: "right" | "down") => dispatch({ type: "split", groupId: shown.current.editor.focusedGroupId, side, tab, keep: true });
-
-  /** A new note goes in the folder asked for, or else the folder in front, when that is a folder; otherwise in Unsorted. */
   const createNote = async (folderId?: string) => {
-    const asked = folderId ?? frontFolderId;
-    const note = await perform(workspaceId, { type: "note.create", folderId: asked && tree?.byId.has(asked) ? asked : undefined });
+    const note = await perform(workspaceId, { type: "note.create", folderId: (folderId === undefined ? newNoteFolderId : folderForNew(folderId)) ?? undefined });
     void loadFolders();
     remember(note);
     openNote(note.id);
@@ -311,126 +366,98 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     [workspaceId, refresh],
   );
 
-  const latest = useRef({ createNote, openFolder, go, routeNoteId });
-  latest.current = { createNote, openFolder, go, routeNoteId };
-  useEffect(() => {
-    const show = (which: "commands" | "notes") => () => setPalette((p) => (p === which ? null : which));
-    const onTab = (action: (at: { groupId: string; tab: Opened }) => EditorAction) => () => {
-      const tab = focused(shown.current.editor);
-      if (tab) dispatch(action({ groupId: shown.current.editor.focusedGroupId, tab }));
-    };
-    const step = (type: "note.undo" | "note.redo") => () => {
-      const id = latest.current.routeNoteId;
-      if (!id) return;
-      undoOrRedo(workspaceId, { type, id }).then(
-        (note) => {
-          setStuck(null);
-          if (note) remember(note);
-        },
-        (err: Error) => setStuck({ noteId: id, message: err instanceof ApiError ? err.message : `Couldn't ${type === "note.undo" ? "undo" : "redo"}. Common Ink can't be reached.` }),
-      );
-    };
-    const all: Command[] = [
-      ...(canEdit
-        ? [
-            { id: "note.new", title: "New note", run: () => void latest.current.createNote() },
-            { id: "history.undo", title: "Undo", run: step("note.undo") },
-            { id: "history.redo", title: "Redo", run: step("note.redo") },
-          ]
-        : []),
-      { id: "notes.quickOpen", title: "Go to note…", run: show("notes") },
-      { id: "notes.all", title: "Open All notes", run: () => latest.current.openFolder(ALL_NOTES) },
-      { id: "commands.show", title: "Show all commands", run: show("commands") },
-      { id: "view.toggleFocus", title: "Toggle focus", run: () => toggleFocus() },
-      { id: "view.toggleSidebar", title: "Toggle sidebar", run: toggleSidebar },
-      { id: "view.toggleInspector", title: "Toggle inspector", run: toggleInspector },
-      { id: "tab.keep", title: "Keep tab open", run: onTab((tab) => ({ type: "pin", ...tab })) },
-      ...CLOSES.map(({ scope, id, title }) => ({ id, title, run: onTab((tab) => ({ type: "close", scope, ...tab })) })),
-      { id: "editor.splitRight", title: "Split editor right", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) },
-      { id: "editor.splitDown", title: "Split editor down", run: onTab((tab) => ({ type: "split", side: "down", ...tab })) },
-      { id: "tab.moveToNextGroup", title: "Move tab to next group", run: onTab((tab) => ({ type: "send", to: "next", ...tab })) },
-      { id: "tab.moveToPreviousGroup", title: "Move tab to previous group", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) },
-      { id: "tab.menu", title: "Show tab menu", run: showTabMenu },
-      ...MODES.map((mode) => ({ id: `go.${mode.id}`, title: `Go to ${mode.label}`, run: () => latest.current.go(modePath(mode.id)) })),
-      { id: "go.agents", title: "Go to Agents", run: () => latest.current.go(AGENTS_PATH) },
-    ];
-    const unregister = all.map((command) => commands.register(command));
-    return () => unregister.forEach((off) => off());
-  }, [commands, canEdit, dispatch, toggleFocus, toggleSidebar, toggleInspector, workspaceId, remember]);
+  const step = (type: "note.undo" | "note.redo") => {
+    if (!routeNoteId) return;
+    undoOrRedo(workspaceId, { type, id: routeNoteId }).then(
+      (note) => {
+        setStuck(null);
+        if (note) remember(note);
+      },
+      (err: Error) => setStuck({ noteId: routeNoteId, message: err instanceof ApiError ? err.message : `Couldn't ${type === "note.undo" ? "undo" : "redo"}. Common Ink can't be reached.` }),
+    );
+  };
+  inner.current = { step, toggleWriting, toggleInspector };
 
   useEffect(() => {
     let pending = "";
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || isModifier(e.key)) return;
+      const { keybindings, commands } = host.contributions();
       const chord = chordOf(e);
       const begun = pending;
       pending = "";
-      const ready = Object.keys(KEYBINDINGS).filter((keys) => {
+      const commandFor = (keys: string) => commands.find((c) => c.id === keybindings[keys]);
+      const ready = Object.keys(keybindings).filter((keys) => {
         if (keys !== chord && !keys.startsWith(`${chord} `) && !(begun && keys.startsWith(`${begun} `))) return false;
+        const command = commandFor(keys)!;
         // Keys that would type are left to what is being typed in.
         if (typed(keys) && (inField(e.target) || (e.target instanceof HTMLElement && e.target.isContentEditable))) return false;
-        return !(inField(e.target) && FIELD_COMMANDS.has(KEYBINDINGS[keys]!));
+        return !(inField(e.target) && command.leaveToFields);
       });
       const next = advance(begun, chord, ready);
       if (!next) return;
       if (next !== "dropped" && "pending" in next) pending = next.pending;
-      else if (next !== "dropped" && !commands.run(KEYBINDINGS[next.run]!)) return;
+      else if (next !== "dropped" && !host.run(commandFor(next.run)!.id)) return;
       e.preventDefault();
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [commands]);
+  }, [host]);
 
-  const pageOf = (tab: Opened) => PAGES.find((p) => p.id === tab.id);
-  const titleOf = (tab: Opened) =>
-    tab.kind === "page" ? (pageOf(tab)?.label ?? "Page") : tab.kind === "folder" ? (tree ? (folderTitle(tree, tab.id) ?? "Folder") : "") : notes ? byId.get(tab.id)?.title || "Untitled" : "";
-  const iconOf = (tab: Opened): IconName | undefined => (tab.kind === "folder" ? "folders" : tab.kind === "page" ? pageOf(tab)?.icon : undefined);
-
-  const folders = tree && (
-    <FolderTree
-      workspaceId={workspaceId}
-      tree={tree}
-      role={workspace.role}
-      total={(notes ?? []).length}
-      selectedId={frontFolderId}
-      onOpen={openFolder}
-      onSplit={(id, side) => openBeside({ kind: "folder", id }, side)}
-      onChanged={refresh}
-      onMoveNote={moveNote}
-    />
-  );
-  const keptFor = (folderId: string) => {
-    if (!keptLists.has(folderId)) keptLists.set(folderId, { view: INITIAL_VIEW, scrollTop: 0 });
-    return keptLists.get(folderId)!;
+  const actions = useLatest({
+    go,
+    notePath: (noteId: string) => pathTo(byId, noteId),
+    openNote,
+    openFolder,
+    folderPath,
+    show,
+    createNote: (folderId?: string) => void createNote(folderId),
+    moveNote,
+    noteChanged: remember,
+    refresh,
+    markSeen,
+    toggleOverlay: (id: string) => setOverlay((open) => (open === id ? null : id)),
+    switchWorkspace: onSwitch,
+    signOut: () => void signOut().then(() => location.assign("/")),
+  });
+  const app: App = {
+    me: me.person,
+    workspace,
+    workspaces: me.workspaces,
+    canEdit,
+    path: place.path,
+    pageState: place.state,
+    opened,
+    noteId: routeNoteId,
+    note: current,
+    unseen,
+    notes,
+    folders: tree,
+    folderId: frontFolderId,
+    writing: layout.writing,
+    pages: contributed.views.page,
+    sections: null,
+    readNote: () => null,
+    overlay,
+    ...actions,
   };
-  const renderFolder = (folderId: string) => (
-    <FolderList
-      key={folderId}
-      folderId={folderId}
-      tree={tree}
-      notes={notes}
-      openId={routeNoteId}
-      canEdit={canEdit}
-      readNote={(noteId) => <NoteReader key={noteId} workspaceId={workspaceId} noteId={noteId} revision={byId.get(noteId)?.revision} />}
-      kept={keptFor(folderId)}
-      onNew={(id) => void createNote(id)}
-      onOpen={(noteId, how) => (how === "behind" ? openNote(noteId, { background: true }) : openNote(noteId, { preview: how === "preview", focus: true }))}
-    />
-  );
-  /** What is in front, for the inspector to be about: the tab in front of the focused group. Null while it loads. */
-  const subject = ((): Subject | null => {
-    if (routeNoteId)
-      return current && tree ? { kind: "note", workspaceId, me: me.person.id, note: current, tree, canEdit, onMove: moveNote, unseen, onSeen: markSeen, onReverted: refresh, onOpenNote: (id) => openNote(id), onOpenHistory: openHistory } : null;
-    if (!routeFolderId) return { kind: "page" };
-    if (!tree || !notes) return null;
-    const name = folderTitle(tree, routeFolderId);
-    if (name === null) return { kind: "page" };
-    return { kind: "folder", workspaceId, me: me.person.id, name, notes: notesIn(notes, routeFolderId), whole: routeFolderId === ALL_NOTES, canEdit, onOpenNote: (id) => openNote(id), onReverted: refresh, onOpenHistory: openHistory };
-  })();
-  const pick = setPicked;
-  const activeMode = route.kind === "mode" ? route.mode : null;
+  appNow.current = app;
+  const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
+  const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay);
 
-  const renderNote = (group: Group, noteId: string) => {
+  const editorArea = contributed.views.editor.at(-1);
+  app.sections = contributed.views.section.map((section) => <Drawn key={section.id} host={host} view={section} />);
+  const inspectorTabs = contributed.views.inspector;
+  /**
+   * The note the inspector is about, once there is enough to show it: the note in front, and while a
+   * folder's list is in front the note that was in front before it. So the inspector keeps its place
+   * and the list keeps its width when the member goes between a list and the notes opened from it.
+   */
+  if (routeNoteId) lastNoteId.current = routeNoteId;
+  else if (!routeFolderId) lastNoteId.current = null;
+  const inspected = tree && (current ?? ((routeFolderId && lastNoteId.current && byId.get(lastNoteId.current)) || null));
+
+  const renderNote = (noteId: string, { onEdit }: { onEdit?: () => void } = {}) => {
     const note = byId.get(noteId);
     return (
       <NoteEditor
@@ -442,15 +469,16 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
         revision={note?.revision}
         onEdit={() => {
           if (stuck) setStuck(null);
-          dispatch({ type: "pin", groupId: group.id, tab: { kind: "note", id: noteId } });
+          onEdit?.();
         }}
         notice={stuck?.noteId === noteId ? stuck.message : null}
         focus={toFocus === noteId}
         onFocused={() => setToFocus(null)}
+        embeds={embeds}
         meta={
           note && (
             <>
-              <span className="crumbs">{tree && pathName(tree, note.folderId)}</span>
+              <span className="crumbs">{tree?.pathName(note.folderId)}</span>
               <span>
                 edited {ago(note.updatedAt, now)} by {note.updatedBy.name}
               </span>
@@ -461,149 +489,166 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     );
   };
 
-  const renderPage = (pageId: string) => {
-    const mode = MODES.find((m) => m.id === pageId);
+  const readNote = (noteId: string) => (
+    <NoteReader key={noteId} workspaceId={workspaceId} noteId={noteId} revision={byId.get(noteId)?.revision} embeds={embeds} />
+  );
+  app.readNote = readNote;
+  const folderView = contributed.views.folder.at(-1);
+  const renderFolder = (folderId: string) => {
+    const plain = <FolderNotes folderId={folderId} folders={tree} notes={notes} pathOf={(id) => pathTo(byId, id)} onOpen={(id) => openNote(id, { preview: true })} />;
+    return folderView ? <Drawn key={folderId} host={host} view={folderView} folderId={folderId} readNote={readNote} fallback={plain} /> : plain;
+  };
+
+  /**
+   * A page as it is at `path`, which may be another address than the app's: a page in one half of a
+   * split stays where it was while the member works in the other. So it is told its own address,
+   * and that no note or folder is in front, as when it had the editor area to itself.
+   */
+  const renderPage = (pageId: string, path: string) => {
+    const page = contributed.views.page.find((p) => p.id === pageId);
+    if (!page) return <p className="notice">There's nothing at this address.</p>;
+    const here = routePageId === pageId && path === address;
+    const at = { path, pageState: here ? place.state : null };
     return (
-      <div className="page-pane" key={pageId}>
-        {pageId === "agents" ? (
-          <Agents workspace={workspace} workspaces={me.workspaces} version={notesVersion} onShowChanges={(agent) => openHistory({ label: `By ${agent.name}`, author: { kind: "agent", id: agent.id } })} onReverted={refresh} />
-        ) : pageId === "history" ? (
-          <HistoryMode workspaceId={workspaceId} me={me.person.id} notes={notes ?? []} canEdit={canEdit} scope={historyScope} onScope={setHistoryScope} onOpenNote={(id) => openNote(id)} onChanged={refresh} />
-        ) : mode ? (
-          <ModeView mode={mode.id} />
-        ) : (
-          <p className="notice">There's nothing at this address.</p>
-        )}
+      <div className="page-pane" key={page.id}>
+        <Drawn host={host} view={page} as={(app) => ({ ...app, ...at, opened: { kind: "page", id: pageId, path }, noteId: null, note: null, unseen: false, folderId: null })} />
       </div>
     );
   };
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
-  /** The buttons that act on the window and on no one note, together where the sidebar meets the editor area: before the first tab of the top left group. */
+  /** The buttons that act on the window and on no one note. The editor area puts them at its top right corner, out of any note's bar. */
   const controls = (
     <div className="window-controls" role="group" aria-label="Window">
-      <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
-        <Icon name="sidebar" />
-      </button>
-      <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
-        <Icon name="inspector" />
+      {!layout.writing && inspectorTabs.length > 0 && (
+        <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
+          <Icon name="inspector" />
+        </button>
+      )}
+      <button type="button" className="icon-button" aria-label="Writing mode" title={`Writing mode (${shortcut("view.toggleWritingMode")})`} aria-pressed={layout.writing} onClick={toggleWriting}>
+        <Icon name="writing" />
       </button>
     </div>
   );
 
+  /**
+   * What the address names alone, for when no plugin fills the editor area or the one that does
+   * throws. At `/` it is every note, so there is a way to a note whatever is turned off.
+   */
+  const loneEditor = (
+    <div className="groups">
+      <section className="group">
+        <div className="tab-row">{controls}</div>
+        <div className="group-body">
+          {routeNoteId ? renderNote(routeNoteId) : routeFolderId ? renderFolder(routeFolderId) : opened?.kind === "page" ? renderPage(opened.id, opened.path) : renderFolder(ALL_NOTES)}
+        </div>
+      </section>
+    </div>
+  );
+
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const leftRail = useRef<HTMLElement>(null);
+  const rightRail = useRef<HTMLElement>(null);
+  const popover = layout.writing ? layout.popover : null;
+  const popoverTab = popover?.side === "right" ? inspectorTabs.find((t) => t.id === popover.tab) : undefined;
+  useDismiss(popover ? closePopover : null, popoverRef, leftRail, rightRail);
+
   return (
-    <div className="app" data-focus-mode={focusMode || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
-      <Sidebar
-        me={me}
-        workspace={workspace}
-        activeMode={activeMode}
-        onSwitch={onSwitch}
-        onGo={go}
-        onSplit={openBeside}
-        onNewNote={canEdit ? () => void createNote() : undefined}
-        newNoteIn={(frontFolderId && tree?.byId.get(frontFolderId)?.name) || "Unsorted"}
-        open={sidebarOpen}
-        onOpen={() => setSidebarOpen(true)}
-      >
-        {folders}
-      </Sidebar>
-      {sidebarOpen && (
-        <ResizeHandle
-          label="Resize sidebar"
-          orientation="vertical"
-          value={sidebarWidth}
-          {...SIDEBAR}
-          step={WIDTH_STEP}
-          onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
-          onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
-        />
+    <div className="app" data-writing={layout.writing || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+      {layout.writing ? (
+        <nav ref={leftRail} className="rail" aria-label="Left rail">
+          <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />
+          {contributed.views.section.length > 0 && (
+            <button type="button" className="icon-button" aria-label="Folders" aria-pressed={popover?.side === "left"} onClick={() => togglePopover({ side: "left" })}>
+              <Icon name="folders" />
+            </button>
+          )}
+          {contributed.views.rail.map((item) => (
+            <Drawn key={item.id} host={host} view={item} />
+          ))}
+        </nav>
+      ) : (
+        <>
+          {contributed.views.column.map((column) => (
+            <Drawn key={column.id} host={host} view={column} />
+          ))}
+          {contributed.views.column.length > 0 && (
+            <ResizeHandle
+              label="Resize sidebar"
+              orientation="vertical"
+              value={sidebarWidth}
+              {...SIDEBAR}
+              step={WIDTH_STEP}
+              onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
+              onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
+            />
+          )}
+        </>
       )}
 
       <main className="main" aria-label="Editor">
-        {route.kind === "missing" && <p className="notice">There's nothing at this address.</p>}
-        {route.kind !== "missing" && (
-          <EditorGroups
-            layout={editor}
-            titleOf={titleOf}
-            iconOf={iconOf}
-            dispatch={dispatch}
-            render={(group, tab) => (tab.kind === "folder" ? renderFolder(tab.id) : tab.kind === "page" ? renderPage(tab.id) : renderNote(group, tab.id))}
-            empty={empty}
-            controls={controls}
-            focusMode={{ on: focusMode, keys: shortcut("view.toggleFocus"), toggle: toggleFocus }}
-          />
+        {route.kind === "page" && !routePage ? (
+          <p className="notice">There's nothing at this address.</p>
+        ) : passing ? (
+          <Drawn key={passing.id} host={host} view={passing} />
+        ) : editorArea ? (
+          <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} controls={controls} fallback={loneEditor} />
+        ) : (
+          loneEditor
         )}
       </main>
 
-      {inspectorOpen ? (
-        <>
-          <ResizeHandle
-            label="Resize inspector"
-            orientation="vertical"
-            value={inspectorWidth}
-            {...INSPECTOR}
-            step={WIDTH_STEP}
-            perPixel={() => -1}
-            onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
-            onReset={() => setWidths(({ inspector: _, ...w }) => w)}
-          />
-          <Inspector subject={subject} picked={picked} onPick={pick} />
-        </>
-      ) : (
-        <nav className="rail" aria-label="Inspector bar">
-          {viewsFor(subject).map((v) => (
-            <button
-              key={v.id}
-              type="button"
-              className="icon-button"
-              aria-label={v.label}
-              title={v.label}
-              aria-description={markOf(v, subject)}
-              onClick={() => {
-                pick(v.id);
-                setInspectorOpen(true);
-              }}
-            >
-              <Icon name={v.icon} />
-              {markOf(v, subject) && <span className="unseen-dot" />}
-            </button>
-          ))}
+      {layout.writing ? (
+        <nav ref={rightRail} className="rail" aria-label="Right rail">
+          {inspectorTabs.map((tab) => {
+            const badge = tab.badge?.(app) ?? null;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                className="icon-button"
+                aria-label={tab.label}
+                title={tab.label}
+                aria-pressed={popoverKey(popover) === tab.id}
+                aria-description={badge ?? undefined}
+                disabled={!inspected}
+                onClick={() => togglePopover({ side: "right", tab: tab.id })}
+              >
+                <Icon name={tab.icon} />
+                {badge && <span className="unseen-dot" />}
+              </button>
+            );
+          })}
         </nav>
+      ) : (
+        inspected && inspectorOpen && inspectorTabs.length > 0 && (
+          <>
+            <ResizeHandle
+              label="Resize inspector"
+              orientation="vertical"
+              value={inspectorWidth}
+              {...INSPECTOR}
+              step={WIDTH_STEP}
+              perPixel={() => -1}
+              onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
+              onReset={() => setWidths(({ inspector: _, ...w }) => w)}
+            />
+            <Inspector host={host} tabs={inspectorTabs} app={app} note={inspected} />
+          </>
+        )
       )}
-      {palette === "commands" && (
-        <Palette
-          key="commands"
-          label="Commands"
-          placeholder="Run a command"
-          empty="No commands match."
-          items={commands
-            .list()
-            .filter((c) => c.id !== "commands.show")
-            .map((c) => ({ id: c.id, label: c.title, hint: shortcut(c.id) }))}
-          onPick={(id) => commands.run(id)}
-          onClose={closePalette}
-        />
-      )}
-      {palette === "notes" && (
-        <Palette
-          key="notes"
-          label="Go to note"
-          placeholder="Find a note by its title"
-          empty={notes?.length ? "No notes match." : notes ? "There are no notes yet." : "Loading notes…"}
-          items={(notes ?? []).map((n) => ({ id: n.id, label: n.title || "Untitled", hint: tree ? pathName(tree, n.folderId) : undefined }))}
-          onPick={(id) => openNote(id)}
-          onClose={closePalette}
-        />
-      )}
-    </div>
-  );
-}
 
-function ModeView({ mode }: { mode: ModeId }) {
-  const { label, issue } = MODES.find((m) => m.id === mode)!;
-  return (
-    <section className="mode-view">
-      <h1>{label}</h1>
-      <Soon issue={issue}>{label} arrives with</Soon>
-    </section>
+      {popover?.side === "left" && (
+        <div ref={popoverRef} className="popover left" role="dialog" aria-label="Folders">
+          <div className="popover-folders">{app.sections}</div>
+        </div>
+      )}
+      {popoverTab && inspected && (
+        <div ref={popoverRef} className="popover right" role="dialog" aria-label={popoverTab.label}>
+          <h2>{popoverTab.label}</h2>
+          <Drawn key={popoverTab.id} host={host} view={popoverTab} note={inspected} />
+        </div>
+      )}
+      {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} />}
+    </div>
   );
 }

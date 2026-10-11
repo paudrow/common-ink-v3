@@ -1,11 +1,13 @@
 import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorState, Transaction } from "@codemirror/state";
+import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
+import { embedding } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
+import type { Embed } from "./plugin-api.ts";
 import { TITLE_MARK } from "./titleMark.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
@@ -47,15 +49,20 @@ interface Props {
   /** Whether the editor is to take the cursor, now or once the note has loaded. `onFocused` is called when it has. */
   focus: boolean;
   onFocused: () => void;
+  /** What plugins have registered to draw inside a note. */
+  embeds: readonly Embed[];
   meta: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, meta }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, embeds, meta }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const syncRef = useRef<NoteSync | null>(null);
   const edited = useRef(onEdit);
   edited.current = onEdit;
   const viewRef = useRef<EditorView | null>(null);
+  const [embedded] = useState(() => new Compartment());
+  const embedsNow = useRef(embeds);
+  embedsNow.current = embeds;
   const now = useRef({ focus, onFocused });
   now.current = { focus, onFocused };
   const [saveState, setSaveState] = useState<SaveState>("saved");
@@ -86,6 +93,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               keymap.of(defaultKeymap),
               markdown(),
               noteHighlighting,
+              embedded.of(embedding(embedsNow.current)),
               EditorView.lineWrapping,
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
@@ -108,18 +116,21 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
 
     return () => {
       cancelled = true;
-      syncRef.current = null;
-      viewRef.current = null;
+      syncRef.current = viewRef.current = null;
       void sync?.close();
       view?.destroy();
     };
-  }, [workspaceId, noteId, onLoaded, onSaved]);
+  }, [workspaceId, noteId, onLoaded, onSaved, embedded]);
 
   useEffect(() => {
     if (!focus || !viewRef.current) return;
     viewRef.current.focus();
     now.current.onFocused();
   }, [focus]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: embedded.reconfigure(embedding(embeds)) });
+  }, [embeds, embedded]);
 
   useEffect(() => {
     if (revision !== undefined) void syncRef.current?.pull(revision).catch(() => {});

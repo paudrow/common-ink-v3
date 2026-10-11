@@ -94,27 +94,17 @@ A tab that holds a page, such as History. A page already open is turned to and n
 A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
 
 **Preview tab**:
-The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, in whichever editor group is focused when something is opened: the next thing opened with a single click takes its place, whatever either is of, and a preview in another group closes there. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, a card's pencil, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
+The tab a single click opens, shown in italics. A group has at most one. The next thing opened with a single click takes its place, whatever either is of. One case keeps the member's place: a note opened from a previewed folder's list makes that list's tab a kept one, and the note is the preview, so a list stays while notes are looked through from it. Double-clicking a folder or a tab, a card's pencil, or editing the note, keeps the tab.
 
 **Editor group**:
-A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. The inspector shows the tab the member last picked wherever what is in front has it, and otherwise one it does have, with the pick left as it was. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
+A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL follows the focused group's showing tab, and the inspector its note. While a folder's list is in front the inspector stays on the note that was in front before it.
 _Avoid_: Pane
 
 **Split**:
 Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
 
 **Window buttons**:
-The buttons that act on the window and on no one note, whatever is open: the sidebar's and the inspector's, together before the first tab of the top left editor group, where the sidebar meets the editor area.
-
-**Sidebar bar**, **Inspector bar**:
-What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
-
-**Inspector**:
-The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line. A note has History, Backlinks and Info; a folder's list has History, the folder's notes that changed as History mode lists them, and Info.
-
-**Focus**:
-One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
-_Avoid_: Writing mode, fullscreen
+The buttons that act on the window and on no one note: the inspector and writing mode. They are at the top right corner of the editor area, at the end of the tab row there, whatever is open.
 
 **Command**:
 A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.
@@ -151,34 +141,16 @@ _Avoid_: Commit, event, op
 Who made a change: a member, a named agent, or a plugin.
 
 **Agent**:
-An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. What an agent may do (read only or not, the workspace it reaches, when it expires or that it never does) is set when it is connected and can be edited afterwards by the member who connected it, with the same token. An agent's changes can be reverted on their own, which keeps everyone else's.
+An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. An agent's changes can be reverted on their own, which keeps everyone else's.
 _Avoid_: Bot
 
 **History**:
-The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as a list of changes, by time or by note, beside what the selected ones did. The history of the open note, of a folder, and of the workspace are this same record.
+The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as the notes that changed, each with the lines its changes added and removed, then a note's changes, then one change's diff. The diff of the open note and the workspace history are this same record.
 _Avoid_: Log, timeline, versions
 
 **Revert**:
 A new change that takes the effect of earlier changes out of a note and keeps every other change. Reverting a note to a revision reverts every change after it. A revert is a change like any other, so reverting it has the changes it reverted stand again, and that is the only way to have them again.
 _Avoid_: Restore, rollback, put back, reapply, take back out
-
-**Selection**:
-The changes picked in History, of one note or of many, to read together and to revert together. Reverting a selection makes one revert in each note it has changes of. A selected change that was already reverted is left as it is, and one selected together with the revert that reverted it stays reverted while that revert goes: the note is as if neither had been made.
-
-**Run**:
-A note's selected changes that follow one another, read as one diff: from the note before the first of them to the note after the last. A change left out between two selected ones ends a run, and the next run says how many were skipped.
-
-**Sitting**:
-One author's edits to one note that follow one another less than ten minutes apart. History lists a sitting as one row, which is selected and reverted as a whole.
-
-**Revert preview**:
-What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Every revert in the app is shown as one first, an author's changes note by note. Anyone who can read the note's history can ask for one.
-
-**Overlap**:
-A later change that still stands and edited a line a revert changes. A preview names each one. A line added or removed whole next to such a line is not an overlap.
-
-**Conflict**:
-A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
 
 **Undo**:
 Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
@@ -192,11 +164,28 @@ A name attached to one revision in history. A revision has at most one, and a no
 ## Configuration
 
 **Plugin**:
-A unit of functionality that adds commands, views, data sources, or settings through the public plugin API. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. Built-in plugins are trusted and on by default. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
+A unit of functionality that adds commands, views, embeds, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
 _Avoid_: Extension, add-on
 
+**Built-in plugin**:
+A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs and splits, and the command palette. It is trusted and on by default, and it uses the same plugin API a third-party plugin does.
+
+**Plugin host**:
+The part of the core that turns plugins on and off, hands each one its reach into the workspace, and keeps what each has contributed.
+
+**Contribution**:
+One thing a plugin adds: a command, a view, or an embed. It is there while its plugin is on.
+
+**View**:
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, an inspector tab, a page, an overlay, or an icon in a rail.
+_Avoid_: Panel, widget
+
+**Page**:
+A view with its own address, shown in place of the editor, such as History or Agents.
+_Avoid_: Mode, screen
+
 **Embed**:
-Content rendered inside a note, such as HTML. It cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission.
+Content a plugin draws inside a note where the note says `::name{config}`, such as a stopwatch or HTML. It is handed its config and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written.
 
 **Plugin permission**:
 The capabilities a plugin has in a workspace. One set per plugin applies to every member. An admin sets them and can lock them. A non-admin's yes becomes a request, and the capability stays off until an admin approves. This is not settings.
