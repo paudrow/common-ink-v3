@@ -38,14 +38,18 @@ interface Props {
   noteId: string;
   onLoaded: (note: Note) => void;
   onSaved: (note: Note) => void;
+  /** Called on each change typed, pasted, or undone, not on merges from the server. */
+  onEdit: () => void;
   /** Whether the editor is to take the cursor, now or once the note has loaded. `onFocused` is called when it has. */
   focus: boolean;
   onFocused: () => void;
   meta: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, focus, onFocused, meta }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, focus, onFocused, meta }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const edited = useRef(onEdit);
+  edited.current = onEdit;
   const viewRef = useRef<EditorView | null>(null);
   const now = useRef({ focus, onFocused });
   now.current = { focus, onFocused };
@@ -80,6 +84,9 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, focus, onFo
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
               sync.extension,
+              EditorView.updateListener.of((u) => {
+                if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();
+              }),
             ],
           }),
         });

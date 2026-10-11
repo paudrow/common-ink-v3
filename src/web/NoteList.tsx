@@ -33,7 +33,7 @@ interface Props {
   /** How the list was left the last time it was drawn for this folder, and where to keep how it is left now. */
   kept: Kept;
   onNew: (folderId: string) => void;
-  /** Opens a note with the cursor in it in the list's place, or, `behind`, somewhere that leaves the list in front. */
+  /** Opens a note with the cursor in it, as a preview or in a tab that is kept, or in a kept tab behind the list. */
   onOpen: (noteId: string, how: "preview" | "keep" | "behind") => void;
 }
 

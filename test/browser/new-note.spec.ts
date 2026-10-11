@@ -9,6 +9,7 @@ test.beforeEach(({ page }) => {
 test.afterEach(() => expect(errors).toEqual([]));
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
+const tabs = (page: Page) => page.getByRole("tablist", { name: "Open notes" }).first().getByRole("tab");
 const read = async (page: Page, id: string) => perform(page, { type: "note.read", id });
 
 test("a new note starts with the mark of its title and the cursor after it, so the title is typed at once", async ({ page }) => {
@@ -23,12 +24,13 @@ test("a new note starts with the mark of its title and the cursor after it, so t
   // The mark is in the editor alone: untouched, the note is as empty as it was made, with no change recorded, and leaving it sends nothing.
   const sent: string[] = [];
   page.on("request", (request) => /"note\.write"/.test(request.postData() ?? "") && sent.push(request.postData()!));
-  await page.getByRole("button", { name: "Writing mode" }).focus();
+  await tabs(page).first().focus();
   await page.waitForTimeout(1500);
   expect(await read(page, id)).toMatchObject({ text: "", title: "", snippet: "", revision: 0 });
   expect(await perform(page, { type: "note.history", id })).toEqual([]);
   expect(sent).toEqual([]);
   await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(tabs(page).last()).toHaveText("Untitled");
   await editor(page).focus();
 
   await page.keyboard.type("Groceries");
@@ -36,6 +38,7 @@ test("a new note starts with the mark of its title and the cursor after it, so t
   await expect.poll(async () => (await read(page, id)).text).toBe("# Groceries");
   // The mark and the title are the note's one change.
   expect((await perform(page, { type: "note.history", id })).map((c) => c.revision)).toEqual([1]);
+  await expect(tabs(page).last()).toHaveText("Groceries");
   await expect(page).toHaveURL(/\/note\/groceries-/);
 });
 
@@ -70,11 +73,12 @@ test("typing or pasting a heading's mark in a new note gives that heading, and n
   await expect.poll(async () => (await read(page, third)).text).toBe("# C# notes");
 });
 
-test("a note with no heading is titled by its first words: in its address and the list", async ({ page }) => {
+test("a note with no heading is titled by its first words: in its tab, its address, and the list", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "Shopping for **the week**\n\n- milk" });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Shopping for");
+  await expect(tabs(page)).toHaveText(["Shopping for the week"]);
   await expect(page).toHaveURL(new RegExp(`/note/shopping-for-the-week-${note.id}$`));
 
   // The old address, by another title, still opens it.

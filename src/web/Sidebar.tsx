@@ -16,13 +16,10 @@ interface Props {
   /** Makes a note in the folder in front, named by `newNoteIn`, or in Unsorted. Left out for a viewer, who has no such button. */
   onNewNote?: () => void;
   newNoteIn: string;
-  /** Closed, it is a narrow bar with an icon for each thing the open sidebar lists, in the same order. */
-  open: boolean;
-  onOpen: () => void;
   children: ReactNode;
 }
 
-export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, newNoteIn, open, onOpen, children }: Props) {
+export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, newNoteIn, children }: Props) {
   // It opens on arriving at a mode that is under it, however that mode was reached, so the mode the member is on is marked in the
   // list. Closed by hand, it stays closed until they arrive at such a mode again.
   const on = MODES.find((m) => !m.primary && m.id === activeMode)?.id ?? null;
@@ -32,32 +29,7 @@ export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, 
     setWas(on);
     if (on !== null) setMore(true);
   }
-  const link = (mode: (typeof MODES)[number]) => <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={onGo} labelled={open} />;
-  const modes = (
-    <>
-      {MODES.filter((m) => m.primary).map(link)}
-      <button type="button" className="mode more-toggle" aria-expanded={more} aria-label={open ? undefined : more ? "Less" : "More"} title={open ? undefined : more ? "Less" : "More"} onClick={() => setMore(!more)}>
-        <Icon name="chevron" />
-        {open && <span>{more ? "Less" : "More"}</span>}
-      </button>
-      {more && MODES.filter((m) => !m.primary).map(link)}
-    </>
-  );
-  if (!open)
-    return (
-      <nav className="rail" aria-label="Sidebar bar">
-        <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />
-        {onNewNote && (
-          <button type="button" className="icon-button new-note" aria-label="New note" title={`New note in ${newNoteIn}`} onClick={onNewNote}>
-            <Icon name="plus" />
-          </button>
-        )}
-        {modes}
-        <button type="button" className="icon-button" aria-label="Folders" title="Folders" onClick={onOpen}>
-          <Icon name="folders" />
-        </button>
-      </nav>
-    );
+  const link = (mode: (typeof MODES)[number]) => <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={onGo} labelled />;
   return (
     <aside className="sidebar" aria-label="Sidebar">
       <WorkspaceMenu me={me} workspace={workspace} onSwitch={onSwitch} />
@@ -68,14 +40,19 @@ export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, 
         </button>
       )}
       <nav aria-label="Modes" className="modes">
-        {modes}
+        {MODES.filter((m) => m.primary).map(link)}
+        <button type="button" className="mode more-toggle" aria-expanded={more} onClick={() => setMore(!more)}>
+          <Icon name="chevron" />
+          <span>{more ? "Less" : "More"}</span>
+        </button>
+        {more && MODES.filter((m) => !m.primary).map(link)}
       </nav>
       {children}
     </aside>
   );
 }
 
-function ModeLink({ mode, active, onGo, labelled }: { mode: (typeof MODES)[number]; active: boolean; onGo: (path: string) => void; labelled?: boolean }) {
+export function ModeLink({ mode, active, onGo, labelled }: { mode: (typeof MODES)[number]; active: boolean; onGo: (path: string) => void; labelled?: boolean }) {
   const path = modePath(mode.id);
   return (
     <a

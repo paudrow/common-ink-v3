@@ -310,6 +310,12 @@ button.link:hover {
   outline: none;
 }
 
+.menu > button:disabled {
+  background: none;
+  color: var(--faint);
+  cursor: default;
+}
+
 .menu > button[aria-checked="true"] {
   color: var(--accent);
   font-weight: 600;
@@ -886,30 +892,214 @@ button.link:hover {
   outline: none;
 }
 
-/* The window's own buttons, in a row over the top of the editor area: the sidebar's at the left end, the rest at the right. A note's bar leaves
-   them room. The row itself takes no clicks, so what lies under the gap between its ends still does. */
-.window-controls {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 5;
+.groups {
   display: flex;
+  height: 100%;
+}
+
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split[data-direction="column"] {
+  flex-direction: column;
+}
+
+.pane {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Between two panes the edge is also the line that parts them, and that line is the one pixel of room it takes. */
+.split > .resize-handle {
+  width: 7px;
+}
+
+.split > .resize-handle[aria-orientation="horizontal"] {
+  width: auto;
+  height: 7px;
+}
+
+.split > .resize-handle::before {
+  position: absolute;
+  inset: 0 3px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.split > .resize-handle[aria-orientation="horizontal"]::before {
+  inset: 3px 0;
+}
+
+.group {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tab-row {
+  display: flex;
+  flex: none;
+  height: 34px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-side);
+}
+
+.tab-bar {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* The window's own buttons, at the end of the tab row where no tab scrolls over them. */
+.window-controls {
+  display: flex;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  height: 38px;
+  gap: 2px;
+  margin-left: auto;
   padding: 0 6px;
+}
+
+/* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
+.page-pane {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.tab {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 72px;
+  max-width: 200px;
+  padding: 0 6px 0 12px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab[aria-selected="true"] {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.group[data-focused] .tab[aria-selected="true"] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tab[data-preview] {
+  font-style: italic;
+}
+
+.tab[data-drop="before"] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tab[data-drop="after"] {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tab-kind {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+
+.tab-kind svg {
+  width: 13px;
+  height: 13px;
+}
+
+.tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.tab:hover .tab-close,
+.tab[aria-selected="true"] .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.tab-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.group-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Where a dragged tab would land: over the whole group for the middle, which adds it there, and over the half a split would give it for an edge. */
+.drop-zone {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
   pointer-events: none;
 }
 
-.window-controls-end {
-  display: flex;
-  gap: 2px;
-  margin-left: auto;
+.drop-zone[data-zone="left"] {
+  right: 50%;
 }
 
-.window-controls button {
-  pointer-events: auto;
+.drop-zone[data-zone="right"] {
+  left: 50%;
+}
+
+.drop-zone[data-zone="up"] {
+  bottom: 50%;
+}
+
+.drop-zone[data-zone="down"] {
+  top: 50%;
 }
 
 .note {
@@ -925,7 +1115,7 @@ button.link:hover {
   align-items: center;
   gap: 10px;
   height: 38px;
-  padding: 0 80px 0 40px;
+  padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-size: 12px;
@@ -945,7 +1135,7 @@ button.link:hover {
   text-overflow: ellipsis;
 }
 
-/* In a narrow window, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
+/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
 @container note (max-width: 520px) {
   .note-bar {
     flex-wrap: wrap;
@@ -1124,7 +1314,7 @@ button.link:hover {
   font-size: 11.5px;
 }
 
-/* A closed sidebar and a closed inspector: a bar of icons, one for each thing the open one lists. */
+/* Writing mode */
 
 .rail {
   display: flex;
@@ -1156,13 +1346,105 @@ button.link:hover {
   padding: 0;
 }
 
-.rail .new-note svg {
-  color: var(--accent);
+.popover {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  z-index: 30;
+  display: flex;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
 }
 
-.inspector-empty {
+.popover.left {
+  left: 50px;
+}
+
+.popover.right {
+  right: 50px;
+  flex-direction: column;
+  width: 340px;
+}
+
+.popover-folders {
+  width: 216px;
+  padding: 0 6px 8px;
+  overflow-y: auto;
+  background: var(--bg-side);
+}
+
+.popover.right h2 {
   margin: 0;
-  padding: 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.popover.right > :not(h2) {
+  margin: 14px;
+}
+
+/* Command palette and quick open */
+
+.palette {
+  position: absolute;
+  top: 12vh;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100% - 32px));
+  max-height: 60vh;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.palette input {
+  flex: none;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.palette ul {
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.palette li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.palette li[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.palette-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-hint {
+  flex: none;
   color: var(--muted);
   font-size: 12px;
 }

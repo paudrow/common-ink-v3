@@ -26,7 +26,7 @@ export const noteIdIn = (page: Page) => /([a-z0-9]{12})$/.exec(new URL(page.url(
 /** The folder tree's row for a folder, or for the list that stands beside the folders: "All notes". */
 export const folderRow = (page: Page, name: string) => page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name, exact: true });
 
-/** Opens the list of every note in the main area, which is where a note is found by its title. A second call comes back to it from a note opened since. */
+/** Opens the list of every note in a tab, which is where a note is found by its title. A second call comes back to it from a note opened since. */
 export const openAllNotes = (page: Page) => folderRow(page, "All notes").click();
 
 /** The titles in the folder's list that is showing, in order. Clicking one opens its note. */
