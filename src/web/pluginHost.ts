@@ -8,8 +8,6 @@ export interface PluginState {
   enabled: boolean;
   /** A required plugin can't be turned off. */
   required: boolean;
-  /** Whether it came with the app, and wasn't added to it. */
-  builtIn: boolean;
   /** Why the plugin isn't running though it is turned on, or what of it failed while being drawn. */
   error: string | null;
   description: string | null;
@@ -58,8 +56,6 @@ export interface HostOptions {
   /** Every installed plugin, in the order their contributions are shown. */
   plugins: readonly Plugin[];
   required?: readonly string[];
-  /** The ids of the plugins that came with the app. */
-  builtIn?: readonly string[];
   /** The member's settings as they are at the start. */
   settings: SettingsDocument;
   /**
@@ -102,14 +98,14 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "rail", "editor", "folder", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
-const RESERVED = ["plugins.", "go.", "settings.", "inspector."];
+const RESERVED = ["plugins.", "go.", "settings."];
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
-export function createPluginHost({ plugins, required = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
+export function createPluginHost({ plugins, required = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed>>();
   const completions = new Map<string, Owned<Completion>>();
@@ -183,14 +179,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
           return contributions().settings.values[`${plugin.id}.${name}`] as T;
         },
         subscribe(listener) {
-          // A listener that throws is its plugin's failure, and not the end of telling the others or of the change it was told of.
-          const heard = () => {
-            try {
-              listener();
-            } catch (err) {
-              record(plugin.id, err);
-            }
-          };
+          const heard = () => listener();
           watching.add(heard);
           return keep(() => void watching.delete(heard));
         },
@@ -211,14 +200,12 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
           if (slot === "page" && [...table.values()].some((o) => (o.value as Slots["page"]).path === (view as Slots["page"]).path)) throw new Error(`There's already a page at ${(view as Slots["page"]).path}`);
           const dispose = keep(add(table, view.id, view, index, `a ${slot} view with the id`));
           owners.set(view, owner);
-          if (slot !== "page" && slot !== "inspector") return dispose;
-          const own =
-            slot === "page"
-              ? keep(command({ id: `go.${view.id}`, title: `Go to ${(view as Slots["page"]).label}`, run: () => provided.app().go((view as Slots["page"]).path) }))
-              : keep(command({ id: `inspector.${view.id}`, title: `Toggle ${(view as Slots["inspector"]).label} panel`, run: () => provided.app().togglePanel(view.id) }));
+          if (slot !== "page") return dispose;
+          const page = view as Slots["page"];
+          const go = keep(command({ id: `go.${page.id}`, title: `Go to ${page.label}`, run: () => provided.app().go(page.path) }));
           return () => {
             dispose();
-            own();
+            go();
           };
         },
       },
@@ -267,7 +254,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
       running.set(plugin.id, mine);
     } catch (err) {
       // A plugin that can't start is left out whole, and the rest of the app carries on.
-      undo(mine);
+      for (const dispose of mine) dispose();
       errors.set(plugin.id, err instanceof Error ? err.message : String(err));
     }
   }
@@ -276,22 +263,8 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
     const mine = running.get(plugin.id) ?? [];
     // It stops running before its contributions go one by one, so what it added is remembered whole and not as it stood halfway out.
     running.delete(plugin.id);
-    const failed = undo(mine);
+    for (const dispose of mine) dispose();
     errors.delete(plugin.id);
-    if (failed.length) errors.set(plugin.id, failed.join("; "));
-  }
-
-  /** Takes back everything a plugin added. One part that throws as it goes doesn't keep the rest in, or stop whatever turned the plugin off: what it said is returned. */
-  function undo(disposes: Iterable<Dispose>): string[] {
-    const failed: string[] = [];
-    for (const dispose of disposes) {
-      try {
-        dispose();
-      } catch (err) {
-        failed.push(err instanceof Error ? err.message : String(err));
-      }
-    }
-    return failed;
   }
 
   /** The hint is the chord that runs the command now, which another command may have claimed first. */
@@ -396,8 +369,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
       .filter((p) => !required.includes(p.id))
       .map((p): Command => {
         const enable = off.has(p.id);
-        // One id whichever way it goes, so a key given to it turns the plugin off and then on again. Only its title says which.
-        return { id: `plugins.toggle.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
+        return { id: `plugins.${enable ? "enable" : "disable"}.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
       });
     const all = [...inOrder(commands.values()), ...toggles];
     const declared = declare(all);
@@ -416,7 +388,6 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
         name: p.name,
         enabled: !off.has(p.id),
         required: required.includes(p.id),
-        builtIn: builtIn.includes(p.id),
         error: errors.get(p.id) ?? null,
         description: p.description ?? null,
         icon: p.icon ?? null,

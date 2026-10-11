@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 const history = (page: Page, id: string) => perform(page, { type: "note.history", id });
 
@@ -50,10 +50,9 @@ test("typing is committed as soon as the note loses focus", async ({ page }) => 
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Draft");
 
-  // The save leaves well inside the second a pause in typing waits; how long the server takes to answer is not the point.
-  const sent = page.waitForRequest((req) => req.url().endsWith("/ops") && req.postDataJSON()?.type === "note.write", { timeout: 600 });
+  const saved = page.waitForResponse((res) => res.url().endsWith("/ops") && res.request().postDataJSON()?.type === "note.write", { timeout: 600 });
   await leaveEditor(page);
-  expect((await (await sent).response())?.ok()).toBe(true);
+  await saved;
 
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(await history(page, noteIdIn(page))).toHaveLength(1);
@@ -125,7 +124,6 @@ test("leaving a note while its save is on the way keeps the other writer's chang
   await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page).toHaveURL(/\/note\/untitled-[a-z0-9]{12}$/);
   await expect(page).not.toHaveURL(new RegExp(id));
-  await showPanel(page, "Info");
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" })).toHaveValue(new RegExp(`${noteIdIn(page)}$`));
 
   await openAllNotes(page);

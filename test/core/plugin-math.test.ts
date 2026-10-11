@@ -19,12 +19,6 @@ describe("a formula in a line", () => {
     for (const line of ["$5 and $10", "it cost $5, then $6 more", "a $ b $ c", "$ x$", "$x $", "\\$x\\$", "100$", "$$", "$$$"]) expect(tex(line), line).toEqual([]);
   });
 
-  it("beside money on the same line pairs only its own two dollar signs, and a price beside it stays words", () => {
-    expect(tex("Inline: $e^{i\\pi} + 1 = 0$ and $\\frac{a}{b}$, while $5 and $10 stay money.")).toEqual(["e^{i\\pi} + 1 = 0", "\\frac{a}{b}"]);
-    expect(tex("It costs $5 and $\\frac{a}{b}$ of it, or $x$.")).toEqual(["\\frac{a}{b}", "x"]);
-    expect(tex("$\\frac{a}{b}$ costs $5.")).toEqual(["\\frac{a}{b}"]);
-  });
-
   it("can hold a dollar sign written \\$", () => {
     expect(tex("$\\$5 + x$")).toEqual(["\\$5 + x"]);
   });

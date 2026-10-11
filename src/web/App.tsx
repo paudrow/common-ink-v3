@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { Me } from "../core/protocol.ts";
-import { ApiError, getMe, perform, session } from "./api.ts";
+import { ApiError, getMe, perform } from "./api.ts";
 import { useRoute } from "./router.ts";
 import { createSettingsStore, type SettingsStore } from "./settingsStore.ts";
 import { isString, useStored } from "./stored.ts";
@@ -52,7 +52,6 @@ function SignedIn({ me }: { me: Me }) {
   const [chosenId, choose] = useStored("ink.workspace", isString, me.workspaces[0]!.id);
   const workspace = me.workspaces.find((w) => w.id === chosenId) ?? me.workspaces[0]!;
   const { store, status, waited } = useSettings(workspace.id);
-  const signedOut = useSignedOut(store);
   // Drawing before the settings are read would flash the plugins that are off and the wrong theme, so it waits a little.
   if (status.kind === "loading" && !waited) return null;
   return (
@@ -69,17 +68,6 @@ function SignedIn({ me }: { me: Me }) {
           navigate("/");
         }}
       />
-      {signedOut && (
-        <p role="alert" className="settings-banner signed-out">
-          You're signed out, so nothing is being saved. What you typed stays in this tab: sign in, then come back to it.
-          <a className="button small" href={`/auth/google?next=${encodeURIComponent(place.path)}`} target="_blank" rel="noreferrer">
-            Sign in
-          </a>
-          <button type="button" className="button small" onClick={() => void getMe().catch(() => {})}>
-            Try again
-          </button>
-        </p>
-      )}
       {status.kind === "loading" && (
         <p role="status" className="settings-banner">
           Loading your settings. The defaults are in use until they arrive.
@@ -95,30 +83,6 @@ function SignedIn({ me }: { me: Me }) {
       )}
     </>
   );
-}
-
-/**
- * Whether the session has ended under this page. While it has, coming back to the tab asks the
- * server who this is, and an answer says the member is signed in again: what was typed is then sent
- * by whatever kept it, and the settings by this.
- */
-function useSignedOut(store: SettingsStore) {
-  const signedOut = useSyncExternalStore(session.subscribe, session.signedOut);
-  const was = useRef(signedOut);
-  useEffect(() => {
-    const back = was.current && !signedOut;
-    was.current = signedOut;
-    if (back) void store.refresh();
-    if (!signedOut) return;
-    const check = () => document.visibilityState === "visible" && void getMe().catch(() => {});
-    addEventListener("focus", check);
-    document.addEventListener("visibilitychange", check);
-    return () => {
-      removeEventListener("focus", check);
-      document.removeEventListener("visibilitychange", check);
-    };
-  }, [signedOut, store]);
-  return signedOut;
 }
 
 /** The member's settings in a workspace, and whether they have been waited for long enough to go on without them. */

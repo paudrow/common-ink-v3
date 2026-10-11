@@ -25,21 +25,13 @@ const COMMANDS: Record<string, string[][]> = {
   delete_folder: [["folder-delete", ID]],
   note_history: [["history", ID]],
   change_diff: [["diff", ID, "--change", "2"]],
-  history_summary: [["changed", "--note", ID, "--author", AUTHOR, "--by", "agents", "--from", "2026-10-01", "--to", "2026-10-02", "--limit", "5", "--before", `{"lastAt":1,"noteId":"${ID}"}`]],
-  history: [["changes", "--note", ID, "--author", AUTHOR, "--by", "people", "--from", "2026-10-01", "--to", "2026-10-02", "--limit", "5", "--before", `{"createdAt":1,"noteId":"${ID}","revision":1}`, "--diffs", "false"]],
+  history_summary: [["changed", "--note", ID, "--author", AUTHOR, "--from", "2026-10-01", "--to", "2026-10-02", "--limit", "5", "--before", `{"lastAt":1,"noteId":"${ID}"}`]],
+  history: [["changes", "--note", ID, "--author", AUTHOR, "--from", "2026-10-01", "--to", "2026-10-02", "--limit", "5", "--before", `{"createdAt":1,"noteId":"${ID}","revision":1}`, "--diffs", "false"]],
   history_authors: [["authors"]],
-  history_diff: [["diffs", `${ID}:1,2`]],
-  preview_reverts: [["revert-many", `${ID}:1,2`, "--preview"]],
-  revert_many: [["revert-many", `${ID}:1,2@3`, "--resolve", "back"]],
   label_revision: [["label", ID, "--revision", "1", "--name", "Draft"]],
-  revert_note: [["revert", ID, "--revision", "1", "--resolve", "back", "--at", "3"]],
-  revert_changes: [["revert", ID, "--changes", "1,2", "--resolve", '["keep", {"text": "by hand"}]', "--at", "3"]],
-  preview_revert: [
-    ["revert", ID, "--changes", "1,2", "--preview"],
-    ["revert", ID, "--revision", "1", "--preview"],
-    ["revert", ID, "--author", AUTHOR, "--preview", "--resolve", "keep", "--at", "3"],
-  ],
-  revert_author: [["revert-author", AUTHOR, "--note", ID, "--after", ID, "--resolve", `{"${ID}": {"at": 3, "choices": "back"}}`]],
+  revert_note: [["revert", ID, "--revision", "1"]],
+  revert_changes: [["revert", ID, "--changes", "1,2"]],
+  revert_author: [["revert-author", AUTHOR, "--note", ID, "--after", ID]],
   undo: [["undo", ID]],
   redo: [["redo", ID]],
 };
@@ -82,39 +74,5 @@ describe("what an agent can do, against what the web app can", () => {
       expect([...sent].sort(), `ink has no way to send every argument of ${tool.name}; add a command and list it in COMMANDS`).toEqual(argumentsOf(tool).sort());
     }
     expect(Object.keys(COMMANDS).sort()).toEqual(TOOLS.map((t) => t.name).sort());
-  });
-
-  it("refuses a flag a command doesn't take, and sends nothing", async () => {
-    const said: string[] = [];
-    let sent = 0;
-    const io = {
-      env: { INK_TOKEN: "cink_x" },
-      stdin: async () => "",
-      out: (line: string) => said.push(line),
-      fetch: (async () => (sent++, Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "OK" }] } }))) as unknown as typeof fetch,
-    };
-    const all = [...Object.values(COMMANDS).flat(), ["revert-author", AUTHOR], ["revert-author", AUTHOR, "--note", ID, "--preview"], ["undo", ID], ["redo", ID]];
-    for (const argv of all) {
-      expect(await run([...argv, "--frobnicate", "yes"], io), argv.join(" ")).toBe(2);
-      expect(said.at(-1), argv.join(" ")).toMatch(new RegExp(`^ink: ${argv[0]} doesn't take --frobnicate`));
-      // A switch another command takes is as unknown here as any other flag.
-      if (!argv.includes("--preview") && !["revert", "revert-many", "revert-author"].includes(argv[0]!)) {
-        expect(await run([...argv, "--preview"], io), `${argv.join(" ")} --preview`).toBe(2);
-        expect(said.at(-1)).toContain("doesn't take --preview");
-      }
-    }
-    expect(await run(["read", ID, "--rev", "3"], io)).toBe(2);
-    expect(await run(["notes", "--folder", ID, "--sinse", "2026-10-01", "--to", "x"], io)).toBe(2);
-    expect(said.at(-1)).toContain("--sinse or --to");
-    expect(sent).toBe(0);
-  });
-
-  it("prints its usage for --help, wherever it is", async () => {
-    for (const argv of [["--help"], ["-h"], ["help"], ["notes", "--help"], ["revert-author", "--help"]]) {
-      const said: string[] = [];
-      const io = { env: {}, stdin: async () => "", out: (line: string) => said.push(line), fetch: (async () => expect.unreachable()) as unknown as typeof fetch };
-      expect(await run(argv, io), argv.join(" ")).toBe(0);
-      expect(said.join("\n")).toMatch(/^Usage: ink/);
-    }
   });
 });

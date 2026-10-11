@@ -48,7 +48,7 @@ _Avoid_: Folder, tag
 A note for one calendar date, belonging to one member. Its heading is that date in that member's timezone. Which member it belongs to is stored outside the note. The folder comes from that member's settings, and the default is Daily. Changing that setting leaves daily notes already created where they are. An agent files a completion on the connecting member's daily note.
 
 **Kanban board**:
-A block embed whose body is markdown: each heading is a column and each list item under it is a card. Anything else in the body is kept and not shown. A column's colour is written at the end of its heading, `## Doing {.blue}`. The cursor goes into a board's markdown from the lines around it, and the markdown is shown above the board while the cursor is in it. Cards are dragged on the board, and a press on one puts the cursor on its line.
+A block embed whose body is markdown: each heading is a column and each list item under it is a card. Anything else in the body is kept and not shown. A column's colour is written at the end of its heading, `## Doing {.blue}`. The cursor goes into a board from the lines around it, and its cards are moved through and moved with the keyboard.
 
 **Kanban card**:
 A list item inside a kanban block in a note. Moving it on the board moves its lines in the note, as a change by the member who moved it.
@@ -97,37 +97,17 @@ A tab that holds a page. It is one tab wherever under the page's address it is, 
 A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
 
 **Preview tab**:
-The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, and it is where the next thing opened with a single click goes, whatever either is of and whichever editor group is focused: so no group is closed by opening something in another. With none, it opens in the focused group. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, a card's pencil, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
+The tab a single click opens, shown in italics. A group has at most one. The next thing opened with a single click takes its place, whatever either is of. One case keeps the member's place: a note opened from a previewed folder's list makes that list's tab a kept one, and the note is the preview, so a list stays while notes are looked through from it. Double-clicking a folder or a tab, a card's pencil, or editing the note, keeps the tab.
 
 **Editor group**:
-A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
+A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL follows the focused group's showing tab, and the inspector its note. While a folder's list is in front the inspector stays on the note that was in front before it.
 _Avoid_: Pane
 
 **Split**:
 Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
 
-**Edge**:
-The line where the sidebar or the inspector meets the editor area, with a short grip half way down it. Dragged, it resizes its side. Dragged in well past the side's least width, the side folds: the sidebar to its bar, and the inspector's pinned panel away, leaving its bar. The folded edge dragged out, or pressed, opens it again, as wide as it was, and it follows the pointer only once the pointer is out that far; the inspector's panel opened this way is pinned. There are no buttons for the sidebar, and the commands Toggle sidebar (⌘\) and Toggle inspector do the same.
-
-**Sidebar bar**:
-What a closed sidebar leaves: a narrow bar of icons, one for each thing the open sidebar lists, in the same order. A mode's icon goes to the mode and Folders opens the folder picker.
-
-**Inspector bar**:
-The narrow bar of icons at the right of the window, one for each of the inspector's panels. It is always there, the same whatever is in front: no icon comes or goes with what is open, and it never closes by itself. An icon shows its panel, and the same icon again closes it.
-
-**Folder picker**:
-The sidebar's folder tree shown over the page beside the sidebar bar, from the bar's Folders icon, while the sidebar stays closed. Nothing under it moves. It goes when a folder is opened from it, on Escape, and on a press outside it.
-
-**Inspector**:
-The inspector bar and the panel it shows, which is about whatever is in front: the tab in front of the focused group. The panels are History, Backlinks and Info. A panel opens over the page and goes when the member presses elsewhere or presses Escape; pinned, by the one control in its header, it is beside the page and stays. Which panel, whether it shows and whether it is pinned are as the member last had them. A panel with nothing for what is in front says "Nothing to show for this view". The History panel is History itself, narrowed to what is in front and with what is selected under the list: a note's changes by time, a folder's or a page's notes by time or by note.
-_Avoid_: Right sidebar, inspector tab
-
-**About**:
-What the inspector's panels are told is in front: a note, a folder's list, or the notes a page says it is showing. A page says so itself, as the History page does with the notes whose changes are ticked; a page that says nothing is nothing to be about.
-
-**Focus**:
-One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
-_Avoid_: Writing mode, fullscreen
+**Window buttons**:
+The buttons that act on the window and on no one note: the inspector and writing mode. They are at the top right corner of the editor area, at the end of the tab row there, whatever is open.
 
 **Command**:
 A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.
@@ -141,7 +121,7 @@ _Avoid_: Shortcut, hotkey
 The list of commands, narrowed by typing.
 
 **Vim mode**:
-A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
+A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
 
 **Selected row**:
 The row of a list that vim's keys are on. It has focus, is marked, and is kept in view.
@@ -150,7 +130,7 @@ The row of a list that vim's keys are on. It has focus, is marked, and is kept i
 A part of the window that `ctrl+w` moves between: the sidebar, each editor group, the inspector.
 
 **Drawn** and **as written**:
-The two ways a note's editor shows markdown. Drawn is what the markdown means: bold words, a table, a formula, a checkbox. As written is its source, with every mark. A construct is shown as written only while the cursor is on that construct itself, inside it or at its edge: a bold word, a link, inline code, a formula, a task's box, a list mark, each alone, so the rest of its line stays drawn. A heading's mark and a code block's fence go by their line. Nothing else moves when one changes from drawn to written. A table is always drawn, and its cells are typed in where they are; its own lines are shown as written above it while the cursor is in them, reached with the keys.
+The two ways a note's editor shows markdown. Drawn is what the markdown means: bold words, a table, a formula, a checkbox. As written is its source, with every mark. A line is shown as written while the cursor is on it, and nothing moves when it changes from one to the other. A table is always drawn, and its cells are typed in where they are.
 _Avoid_: Preview, rendered view, source mode
 
 **Chip**:
@@ -195,34 +175,16 @@ _Avoid_: Commit, event, op
 Who made a change: a member, a named agent, or a plugin.
 
 **Agent**:
-An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. What an agent may do (read only or not, the workspace it reaches, when it expires or that it never does) is set when it is connected and can be edited afterwards by the member who connected it, with the same token. An agent's changes can be reverted on their own, which keeps everyone else's.
+An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. An agent's changes can be reverted on their own, which keeps everyone else's.
 _Avoid_: Bot
 
 **History**:
-The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as a list of changes under the day each was made, by time or by note, beside what the selected ones did. A day's tick selects the whole day. The history of the open note, of a folder, and of the workspace are this same record.
+The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as the notes that changed, each with the lines its changes added and removed, then a note's changes, then one change's diff. The diff of the open note and the workspace history are this same record.
 _Avoid_: Log, timeline, versions
 
 **Revert**:
 A new change that takes the effect of earlier changes out of a note and keeps every other change. Reverting a note to a revision reverts every change after it. A revert is a change like any other, so reverting it has the changes it reverted stand again, and that is the only way to have them again.
 _Avoid_: Restore, rollback, put back, reapply, take back out
-
-**Selection**:
-The changes picked in History, of one note or of many, to read together and to revert together. Nothing is picked but by the member, and each place History is shown keeps its own selection while the app is open. Where a selection has a **conflict** is marked on its diff before any revert is asked for. Reverting a selection makes one revert in each note it has changes of. A selected change that was already reverted is left as it is, and one selected together with the revert that reverted it stays reverted while that revert goes: the note is as if neither had been made.
-
-**Run**:
-A note's selected changes that follow one another, read as one diff: from the note before the first of them to the note after the last. A change left out between two selected ones ends a run, and the next run says how many were skipped.
-
-**Sitting**:
-One author's edits to one note that follow one another less than ten minutes apart. History lists a sitting as one row, which is selected and reverted as a whole.
-
-**Revert preview**:
-What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Every revert in the app is shown as one first, an author's changes note by note. Anyone who can read the note's history can ask for one.
-
-**Overlap**:
-A later change that still stands and edited a line a revert changes. A preview names each one. A line added or removed whole next to such a line is not an overlap.
-
-**Conflict**:
-A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was, or left whole as it is when the later edit was to the same words or removed the line; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
 
 **Undo**:
 Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
@@ -249,22 +211,18 @@ The part of the core that turns plugins on and off, hands each one its reach int
 One thing a plugin adds: a command, a view, an embed, a completion, or an editor extension. It is there while its plugin is on.
 
 **View**:
-Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector panel, a page, the bottom bar, or an overlay.
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, an inspector tab, a page, the bottom bar, an overlay, or an icon in a rail.
 _Avoid_: Panel
-
-**Bottom bar**:
-The thin line along the foot of the window where plugins put small things to glance at, such as the word count of the note in front, the open note's running timers and stopwatches, and a quick timer. An item sits at its left or its right end. It is there while any plugin has an item in it, is the same height whatever the items say, and is out of sight in focus.
-_Avoid_: Status bar, footer
 
 **Page**:
 A view with its own address, such as History or Agents, opened in a tab of the editor as a note is.
 _Avoid_: Mode, screen
 
 **Embed**:
-Content a plugin draws inside a note where the note says `::name{config}`, such as a timer or HTML. It is handed what the note says of it and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Everything it knows is in the note, so it can rewrite its own config and body, which is a change by the member who was using it. A timer or stopwatch keeps when it started there, so it runs the same for everyone reading the note. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written. An embed is drawn in a card and stays drawn, the element it was, so the cursor never stops or resets it. While the cursor is on it, it is shown as written too, above its drawing: an inline embed's text in rows above its line, a block embed's markdown lines above its card.
+Content a plugin draws inside a note where the note says `::name{config}`, such as a timer or HTML. It is handed what the note says of it and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Everything it knows is in the note, so it can rewrite its own config and body, which is a change by the member who was using it. A timer or stopwatch keeps when it started there, so it runs the same for everyone reading the note. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written. An inline embed is shown as written while the cursor is on it. One whose drawing is doing something, as a running clock is, stays drawn then too, with its text after it, so the cursor never stops or resets it. A block embed's markdown is shown under it only when the member asks to edit it, from its options.
 
 **Embed options**:
-What a member adjusts about an embed without reading its config, from the one options button in the embed's card, which opens them beneath the card: a timer's length, a board's column colours. Setting one rewrites the embed in the note, as the member's change. An embed with nothing to adjust has no button.
+What a member adjusts about an embed without reading its config, from the options button at the embed's top corner: a timer's length, a board's column colours. Setting one rewrites the embed in the note, as the member's change. "Edit as markdown" is always among them.
 
 **Block embed**:
 An embed written on lines of its own: `:::name{config}`, then its body as markdown, then `:::`. A kanban board is one.
@@ -273,8 +231,24 @@ An embed written on lines of its own: `:::name{config}`, then its body as markdo
 A small live thing a plugin adds, to glance at or press: a timer, a board, a count. It lives in one of three places. In a note it is an embed, inline or block, and what it knows is in the note. In the bottom bar it shows something about the open note or the app. Started from the command palette, it has no place in any note, shows in the bottom bar, and keeps what it knows in this browser. A widget never flashes: it is drawn whole at its size when it first appears, and changed where it stands after.
 _Avoid_: Gadget, applet
 
+**Bottom bar**:
+The line along the bottom of the app where plugins put widgets, such as the open note's running timers, a quick timer, and the word count. It is there in writing mode too, and is the same height whatever is in it.
+_Avoid_: Status bar, footer
+
 **Quick timer**:
 A timer started from the command palette that belongs to no note. It shows in the bottom bar and is kept in the member's browser for that workspace: it runs on through a reload there, and nobody else sees it.
+
+**Below the line**:
+Where an embed keeps what it shows that is more than a word in the line: a video, a post, an HTML embed's frame. Room is kept for it under the line that writes it, whether or not the cursor is on that line, and what fills the room is drawn once and left alone while the rest of the note is written. The room's size is read from the note alone.
+
+**Media embed**:
+An embed that shows something from another site below its line: a YouTube video (`::youtube{address}`) or a social post (`::social{address}`). Nothing is loaded from the other site until the member asks for it. A link embed (`::link{address title}`) is drawn from what the note says alone.
+
+**HTML embed**:
+A block embed (`:::html{}`) whose body is HTML, run below the block when the member presses Run, in a frame with an origin of its own. It can't read the app, the member's session, or anything the browser or the server keeps, can't fetch or send anything, and can't send its frame anywhere. The one way out it has is a WebRTC connection, which browsers give no way to refuse.
+
+**Run**:
+What a member does to start what a frame holds: a video, a post, an HTML embed. Nothing in a frame runs because a note was opened, and an embed that has changed since it was run asks again.
 
 **Embed menu**:
 The list of embeds that opens at the cursor when a member types `/` at the start of a line or after a space. Typing filters it, and picking one writes that embed into the note.
