@@ -5,6 +5,7 @@ export const noteHighlighting = syntaxHighlighting(
   HighlightStyle.define([
     { tag: tags.heading1, fontSize: "1.6em", fontWeight: "700" },
     { tag: tags.heading2, fontSize: "1.3em", fontWeight: "700" },
+    { tag: tags.heading3, fontSize: "1.15em", fontWeight: "700" },
     { tag: tags.heading, fontWeight: "700" },
     { tag: tags.processingInstruction, color: "var(--muted)" },
     { tag: tags.strong, fontWeight: "700" },

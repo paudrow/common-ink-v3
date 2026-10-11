@@ -16,7 +16,7 @@ _Avoid_: Directory, space
 The default folder. A note created with no other folder selected is placed here.
 
 **Note**:
-A markdown file in a workspace, identified by a stable id. Its title is the first `#` heading. The id does not change when the title or folder changes.
+A markdown file in a workspace, identified by a stable id. Its title is the words of its first `#` heading, without their markdown. A note with no such heading is titled by its first line of words, cut to a title's length, and a line that is only a web address is passed over for one that says something. A note with no words has no title and is shown as "Untitled". The id does not change when the title or folder changes, and a note's address names it by id, so an address with an old title still opens it. A note a member makes in the app starts as `# `, the mark of its title, with the cursor after it. Until something is typed it is an untitled note with no words.
 _Avoid_: Document, page
 
 **Link**:

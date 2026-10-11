@@ -175,7 +175,15 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
         </nav>
       ) : (
         <>
-          <Sidebar me={me} workspace={workspace} activeMode={activeMode} onSwitch={onSwitch} onGo={go}>
+          <Sidebar
+            me={me}
+            workspace={workspace}
+            activeMode={activeMode}
+            onSwitch={onSwitch}
+            onGo={go}
+            onNewNote={canEdit ? () => void createNote() : undefined}
+            newNoteIn={(selectedFolderId && tree?.byId.get(selectedFolderId)?.name) || "Unsorted"}
+          >
             {folders}
           </Sidebar>
           {noteList}

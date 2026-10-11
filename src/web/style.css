@@ -227,6 +227,33 @@ button.link:hover {
   cursor: pointer;
 }
 
+/* Under the workspace, where the eye starts in this column and the pointer is while picking a folder. */
+.sidebar .new-note {
+  flex: none;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 5px 9px;
+  border-radius: 8px;
+}
+
+.sidebar .new-note svg {
+  color: var(--accent);
+}
+
+.sidebar .new-note[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
+
+.sidebar .new-note[aria-disabled="true"]:hover {
+  background: var(--bg-elev);
+}
+
+.sidebar .new-note[aria-disabled="true"] svg {
+  color: var(--faint);
+}
+
 .workspace-text {
   display: flex;
   flex-direction: column;

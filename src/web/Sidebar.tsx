@@ -13,15 +13,24 @@ interface Props {
   activeMode: ModeId | null;
   onSwitch: (workspaceId: string) => void;
   onGo: (path: string) => void;
+  /** Makes a note in the folder in front, named by `newNoteIn`, or in Unsorted. Left out for a viewer, who has no such button. */
+  onNewNote?: () => void;
+  newNoteIn: string;
   children: ReactNode;
 }
 
-export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, children }: Props) {
+export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, newNoteIn, children }: Props) {
   const [more, setMore] = useState(false);
   const link = (mode: (typeof MODES)[number]) => <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={onGo} labelled />;
   return (
     <aside className="sidebar" aria-label="Sidebar">
       <WorkspaceMenu me={me} workspace={workspace} onSwitch={onSwitch} />
+      {onNewNote && (
+        <button type="button" className="button new-note" title={`New note in ${newNoteIn}`} onClick={onNewNote}>
+          <Icon name="plus" />
+          New note
+        </button>
+      )}
       <nav aria-label="Modes" className="modes">
         {MODES.filter((m) => m.primary).map(link)}
         <button type="button" className="mode" aria-expanded={more} onClick={() => setMore(!more)}>

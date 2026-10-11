@@ -1,16 +1,34 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
 import { noteHighlighting } from "./highlight.ts";
+import { TITLE_MARK } from "./titleMark.ts";
 import { NoteSync, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
   rejected: "Couldn't save this version. Edit the note to try again.",
 };
+
+/**
+ * Someone who types or pastes a heading's mark after that one anyway, as they would in an empty
+ * note, means that heading and not a second mark after the first.
+ */
+const titleMarkOnce = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged || !tr.isUserEvent("input") || tr.startState.doc.toString() !== TITLE_MARK) return tr;
+  let typed: string | null = null;
+  let changes = 0;
+  tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+    changes++;
+    if (from === TITLE_MARK.length && to === from) typed = inserted.toString();
+  });
+  if (changes !== 1 || typed === null || !/^#{1,6}(?:\s|$)/.test(typed)) return tr;
+  const insert: string = typed;
+  return { changes: { from: 0, to: TITLE_MARK.length, insert }, selection: { anchor: insert.length }, annotations: Transaction.userEvent.of(tr.annotation(Transaction.userEvent)!), scrollIntoView: true };
+});
 
 interface Props {
   workspaceId: string;
@@ -35,13 +53,18 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta, actio
       (note) => {
         if (cancelled || !host.current) return;
         onLoaded(note);
-        sync = new NoteSync(workspaceId, note, onSaved, setSaveState);
+        const fresh = note.text === "";
+        const text = fresh ? TITLE_MARK : note.text;
+        // The sync is told the mark is what the server has, so an untouched note is never sent: there is nothing of the member's in it.
+        sync = new NoteSync(workspaceId, { ...note, text }, onSaved, setSaveState);
         view = new EditorView({
           parent: host.current,
           state: EditorState.create({
-            doc: note.text,
+            doc: text,
+            selection: { anchor: fresh ? text.length : 0 },
             extensions: [
               history(),
+              titleMarkOnce,
               keymap.of([...defaultKeymap, ...historyKeymap]),
               markdown(),
               noteHighlighting,

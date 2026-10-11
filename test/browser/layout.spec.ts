@@ -58,14 +58,14 @@ test("a new note lands in the selected folder, or Unsorted when none is selected
   await signInAsNewPerson(page, "Ada Lovelace");
   await expect(page.getByRole("heading", { level: 2 })).toHaveText("All notes");
 
-  await page.getByRole("button", { name: "New note" }).click();
+  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("heading", { level: 2 })).toHaveText("Unsorted");
   await expect(noteRows(page)).toHaveText(["Untitledjust now · Ada Lovelace"]);
   await expect(folder(page, "Unsorted")).toHaveAccessibleDescription("1");
 
   await newFolder(page, "Projects");
   await folder(page, "Projects").click();
-  await page.getByRole("button", { name: "New note" }).click();
+  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Plan");
 
