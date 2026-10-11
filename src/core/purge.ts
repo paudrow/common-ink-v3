@@ -15,11 +15,14 @@ const DUE = "EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND state = 'trashed' AND
 export const REMOVALS = [
   `DELETE FROM note_search WHERE rowid = (SELECT id FROM note_search_rows WHERE note_id = ?1) AND ${DUE}`,
   `DELETE FROM note_search_rows WHERE note_id = ?1 AND ${DUE}`,
+  `DELETE FROM todo_projects WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM todos WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM note_tags WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM mentions WHERE note_id = ?1 AND ${DUE}`,
   // What the note links to. What links to it stays: that is what another note's text says.
   `DELETE FROM links WHERE source_id = ?1 AND ${DUE}`,
+  // Which uploads the note refers to. The uploads stay: each is a thing of its own, which other notes may refer to.
+  `DELETE FROM upload_refs WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM labels WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM completions WHERE note_id = ?1 AND ${DUE}`,
   // A todo completed elsewhere and filed on this note stays completed, filed nowhere.
@@ -70,19 +73,7 @@ async function remove(db: D1Database, ids: readonly string[], due: number): Prom
  * is all or nothing, so when one fails its notes are removed one at a time: the note that can't be
  * removed is left whole and named, and the rest go.
  */
-/**
- * Rewrites the search index without what removed rows held. Deleting a row marks its words as gone
- * and leaves them in the index's own pages until those are merged, which this does at once.
- */
-export const forgetRemoved = (db: D1Database) => db.prepare("INSERT INTO note_search (note_search) VALUES ('optimize')").run();
-
 export async function purgeTrash(db: D1Database, now: number, log: (message: string) => void = console.error): Promise<Purged> {
-  const purged = await purgeDue(db, now, log);
-  if (purged.removed) await forgetRemoved(db).catch((err: unknown) => log(`Couldn't merge the search index after removing notes: ${err instanceof Error ? err.message : String(err)}`));
-  return purged;
-}
-
-async function purgeDue(db: D1Database, now: number, log: (message: string) => void): Promise<Purged> {
   const due = now - TRASH_MS;
   const purged: Purged = { removed: 0, failed: [], more: true };
   for (let batch = 0; batch < PURGE_BATCHES; batch++) {
@@ -106,4 +97,60 @@ async function purgeDue(db: D1Database, now: number, log: (message: string) => v
     }
   }
   return purged;
+}
+
+/** How long an upload may be pending before it is taken for one that will never finish. */
+export const PENDING_MS = 86_400_000;
+/**
+ * Removing an upload takes two stores, and nothing makes a change to both at once. So it goes in
+ * three steps, each of which can be done again:
+ *
+ * 1. The row becomes `removing`, in one statement that does nothing unless the upload is in Trash
+ *    (or pending). From here nothing reads the upload, and nothing restores it.
+ * 2. The bytes are deleted from the bucket. Deleting what is already gone is nothing.
+ * 3. The row and its grants are deleted.
+ *
+ * Stopped after any step, what is left is a row that is `removing`, which `clearUploads` finds and
+ * carries on from step 2. So there are never bytes that can be read with no row to decide who may,
+ * and never a row that can be read with no bytes behind it.
+ */
+async function finishRemoving(db: D1Database, bucket: R2Bucket, ids: readonly string[]): Promise<void> {
+  if (!ids.length) return;
+  await bucket.delete([...ids]);
+  const removing = "(SELECT u.id FROM uploads u WHERE u.state = 'removing' AND u.id IN (SELECT value FROM json_each(?1)))";
+  await db.batch([db.prepare(`DELETE FROM grants WHERE upload_id IN ${removing}`).bind(JSON.stringify(ids)), db.prepare(`DELETE FROM uploads WHERE id IN ${removing}`).bind(JSON.stringify(ids))]);
+}
+
+/** Removes one upload in Trash for good. False when it was not in Trash, as one restored a moment before isn't. */
+export async function removeUpload(db: D1Database, bucket: R2Bucket, id: string): Promise<boolean> {
+  const { meta } = await db.prepare("UPDATE uploads SET state = 'removing' WHERE id = ? AND state = 'trashed'").bind(id).run();
+  if (!meta.changes) return false;
+  await finishRemoving(db, bucket, [id]);
+  return true;
+}
+
+/** As many uploads as one run removes, which is as many as the bucket deletes at once. What is left waits for the next run. */
+const CLEAR_UPLOADS = 1000;
+
+/**
+ * Removes the uploads that have been in Trash for 30 days as of `now`, in every workspace, and
+ * clears away the ones left pending or half removed by a request that never finished. Run twice, or
+ * again after stopping partway, it removes what is left and nothing else. When it fails, every
+ * upload it was removing is left as it is, unread, for the next run.
+ */
+export async function clearUploads(db: D1Database, bucket: R2Bucket, now: number, log: (message: string) => void = console.error): Promise<Purged> {
+  await db.batch([
+    db.prepare("UPDATE uploads SET state = 'removing' WHERE state = 'trashed' AND state_at <= ?").bind(now - TRASH_MS),
+    db.prepare("UPDATE uploads SET state = 'removing' WHERE state = 'pending' AND created_at <= ?").bind(now - PENDING_MS),
+  ]);
+  const { results } = await db.prepare("SELECT id FROM uploads WHERE state = 'removing' ORDER BY id LIMIT ?").bind(CLEAR_UPLOADS + 1).all<{ id: string }>();
+  const ids = results.slice(0, CLEAR_UPLOADS).map((r) => r.id);
+  const more = results.length > CLEAR_UPLOADS;
+  try {
+    await finishRemoving(db, bucket, ids);
+    return { removed: ids.length, failed: [], more };
+  } catch (err) {
+    log(`Couldn't remove ${ids.length} uploads: ${err instanceof Error ? err.message : String(err)}`);
+    return { removed: 0, failed: ids, more };
+  }
 }

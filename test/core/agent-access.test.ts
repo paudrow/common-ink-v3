@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, and removing a note for good are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts check. */
-type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "contact.update" | "contact.photo" | "contact.create">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, and removing a note for good are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
+type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -59,22 +59,16 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "note.label": { id: noteId, revision: 1, name: "Start" },
   "note.revert": { id: noteId, revision: 1 },
   "note.revertChanges": { id: noteId, revisions: [2] },
-  "note.previewRevert": { id: noteId, revisions: [2] },
   "note.diff": { id: noteId, revision: 1 },
-  "note.blame": { id: noteId },
   "history.summary": {},
   "note.undo": { id: noteId },
   "note.redo": { id: noteId },
   "history.list": {},
   "history.authors": {},
   "history.revertAuthor": { author: { kind: "agent", id: "aaaaaaaaaaaa" } },
-  "history.diff": { changes: [{ noteId, revisions: [2] }] },
-  "history.previewRevert": { changes: [{ noteId, revisions: [2] }] },
-  "history.revert": { changes: [{ noteId, revisions: [2] }] },
   "folder.list": {},
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
-  "folder.move": { id: folderId, parentId: null },
   "folder.delete": { id: "aaaaaaaaaaaa" },
   "member.list": {},
   "tag.list": {},
@@ -86,12 +80,16 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "source.list": {},
   "event.list": { from: 0, to: 1, timeZone: "UTC" },
   "event.update": { sourceId: "google-calendar", id: "none", etag: "none", title: "No" },
-  "event.create": { sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } },
   "contact.list": {},
-  "person.read": { who: "Sam Okafor" },
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },
-  "record.notes": { sourceId: "google-calendar", id: "none" },
+  "upload.list": {},
+  "upload.read": { id: "aaaaaaaaaaaa" },
+  "upload.move": { id: "aaaaaaaaaaaa", folderId },
+  "upload.archive": { id: "aaaaaaaaaaaa", archived: false },
+  "upload.trash": { id: "aaaaaaaaaaaa" },
+  "upload.restore": { id: "aaaaaaaaaaaa" },
+  "upload.trashed": {},
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {
@@ -118,16 +116,18 @@ describe("an agent's access is its member's", () => {
       "note.archive",
       "note.trash",
       "note.restore",
+      "upload.move",
+      "upload.archive",
+      "upload.trash",
+      "upload.restore",
       "note.label",
       "note.revert",
       "note.revertChanges",
       "note.undo",
       "note.redo",
       "history.revertAuthor",
-      "history.revert",
       "folder.create",
       "folder.rename",
-      "folder.move",
       "folder.delete",
     ],
   };

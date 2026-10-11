@@ -3,8 +3,3 @@ declare namespace Cloudflare {
     TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];
   }
 }
-
-declare module "*.md?raw" {
-  const text: string;
-  export default text;
-}

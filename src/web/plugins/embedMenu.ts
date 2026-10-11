@@ -1,8 +1,9 @@
 import type { CompletionItem, EmbedInfo, Plugin } from "../plugin-api.ts";
-import { starting } from "./lib/match.ts";
+import { matching } from "./lib/match.ts";
 
 /** How a new embed is written, with its config left selected when there is one to type over. */
-function itemFor({ name, title, block, starts }: EmbedInfo): CompletionItem {
+function itemFor({ name, title, block, starts, pick }: EmbedInfo): CompletionItem {
+  if (pick) return { label: pick.title, detail: pick.detail, insert: "", run: pick.run };
   const config = starts?.config ?? "";
   const opening = `${block ? ":::" : "::"}${name}{`;
   const written = `${opening}${config}}`;
@@ -15,14 +16,17 @@ function itemFor({ name, title, block, starts }: EmbedInfo): CompletionItem {
 export const embedMenu: Plugin = {
   id: "embed-menu",
   name: "Embed menu",
-  description: "Type / in a note to pick something to embed from a list.",
-  icon: "slash",
   activate(host) {
     host.completions.register({
       id: "embeds",
       trigger: "/",
-      prose: true,
-      items: (typed) => starting(host.embeds.list(), typed, (e) => `${e.title} ${e.name}`).map(itemFor),
+      // The embeds the menu writes come first, then what it can only ask for, such as a file to upload.
+      items: (typed) =>
+        matching(
+          host.embeds.list().toSorted((a, b) => Number(!!a.pick) - Number(!!b.pick)),
+          typed,
+          (e) => `${e.pick?.title ?? e.title} ${e.name}`,
+        ).map(itemFor),
     });
   },
 };

@@ -1,4 +1,4 @@
-import { readKeys } from "./keybindings.ts";
+import { readChord } from "./keybindings.ts";
 import type { Setting, SettingValue } from "./plugin-api.ts";
 
 /** A member's settings as they wrote them: any JSON object. Only some of its keys are settings. */
@@ -15,8 +15,6 @@ export interface Declared {
   group: { id: string; name: string };
   /** False when its plugin is off, so it changes nothing for now. */
   active: boolean;
-  /** True for the setting that turns its plugin on and off, which is the Plugins page's to show and no part of the Settings page. */
-  switch?: true;
 }
 
 export interface Problem {
@@ -27,7 +25,7 @@ export interface Problem {
 }
 
 export interface Resolved {
-  /** Every declared setting's value: the member's where it is valid, the default otherwise (or what the setting says an unreadable value reads as). */
+  /** Every declared setting's value: the member's where it is valid, the default otherwise. */
   values: Readonly<Record<string, SettingValue>>;
   problems: readonly Problem[];
   /** The keys whose value is the member's. */
@@ -60,17 +58,12 @@ export function readSetting(setting: Setting, value: unknown): { value: SettingV
       if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return { reason: `Expected a list of keys, such as ["mod+k"], not ${shown(value)}` };
       const chords: string[] = [];
       for (const text of value as string[]) {
-        const read = readKeys(text);
+        const read = readChord(text);
         if ("reason" in read) return read;
-        if (!chords.includes(read.keys)) chords.push(read.keys);
+        if (!chords.includes(read.chord)) chords.push(read.chord);
       }
       return { value: chords };
     }
-    case "list":
-      if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return { reason: `Expected a list of words in quotes, such as ["one", "two"], not ${shown(value)}` };
-      if (value.length > setting.maxItems) return { reason: `Expected at most ${setting.maxItems} of them` };
-      if (value.some((v: string) => v.length > setting.maxLength)) return { reason: `Expected each to be at most ${setting.maxLength} characters` };
-      return { value: [...new Set(value as string[])] };
   }
 }
 
@@ -85,11 +78,8 @@ export function resolve(declared: readonly Declared[], document: SettingsDocumen
     values[key] = setting.default;
     if (!Object.hasOwn(document, key)) continue;
     const read = readSetting(setting, document[key]);
-    if ("reason" in read) {
-      const unreadable = setting.type === "string" ? setting.unreadable : undefined;
-      if (unreadable !== undefined) values[key] = unreadable;
-      problems.push({ key, kind: "invalid", reason: `${read.reason}. ${unreadable === undefined ? "The default is used" : `${JSON.stringify(unreadable)} is used`}.` });
-    } else {
+    if ("reason" in read) problems.push({ key, kind: "invalid", reason: `${read.reason}. The default is used.` });
+    else {
       values[key] = read.value;
       chosen.add(key);
     }

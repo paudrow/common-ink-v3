@@ -4,14 +4,11 @@ import { Soon } from "./lib/Soon.tsx";
 /** Pages that aren't built yet, each with the issue that builds it. The plugin that builds one takes its entry out of here. */
 const PAGES: readonly { id: string; label: string; icon: IconName; nav: "primary" | "more"; order?: number; issue: number }[] = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard", nav: "primary", order: 10, issue: 23 },
-  { id: "uploads", label: "Uploads", icon: "uploads", nav: "more", issue: 22 },
 ];
 
 export const comingSoon: Plugin = {
   id: "coming-soon",
   name: "Pages to come",
-  description: "Pages that are not built yet, each naming the issue that builds it.",
-  icon: "calendar",
   activate(host) {
     for (const { issue, ...page } of PAGES) {
       host.views.register("page", {

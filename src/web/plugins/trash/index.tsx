@@ -43,8 +43,6 @@ function TrashBanner({ host, note }: NoteView) {
 export const trash: Plugin = {
   id: "trash",
   name: "Archive and Trash",
-  description: "Archives a note out of the way, and keeps a deleted one in Trash for 30 days to restore.",
-  icon: "trash",
   activate(host) {
     const { setArchived, trash: moveToTrash } = lifecycle(host);
     /** The open note, when the member may change it. Otherwise they are told why nothing happened. */
@@ -60,7 +58,6 @@ export const trash: Plugin = {
     host.commands.register({
       id: "note.toggleArchived",
       title: "Archive or unarchive note",
-      group: "Notes",
       // Free in Chrome and Safari, in the editor's own keys, and in vim mode, which has no Ctrl+Shift keys.
       keys: ["mod+shift+e"],
       run() {
@@ -71,7 +68,6 @@ export const trash: Plugin = {
     host.commands.register({
       id: "note.trash",
       title: "Move note to Trash",
-      group: "Notes",
       run() {
         const note = open();
         if (note) void moveToTrash(note.id);
@@ -80,7 +76,7 @@ export const trash: Plugin = {
 
     host.views.register("mark", { id: "archived", component: (props) => <ArchivedMark host={host} {...props} /> });
     host.views.register("notice", { id: "trashed", component: (props) => <TrashBanner host={host} {...props} /> });
-    // Under More, and with no order so that it comes after the modes there: it is where notes go, not a way to work.
+    // Under More, and with no order so that it comes last there: it is where notes go, not a way to work.
     host.views.register("page", { id: "trash", path: "/trash", label: "Trash", icon: "trash", nav: "more", component: (props) => <TrashPage host={host} {...props} /> });
   },
 };

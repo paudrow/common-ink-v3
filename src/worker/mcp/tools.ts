@@ -1,8 +1,6 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { perform, type Actor } from "../../core/operations.ts";
-import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } from "../../core/protocol.ts";
-import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
-import { RULE_GRAMMAR } from "../../core/recurrence.ts";
+import { NO_SUCH_WORKSPACE, OpError, type OpInput, type OpType } from "../../core/protocol.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 import type { Sources } from "../../core/sources.ts";
 
@@ -34,15 +32,12 @@ const MEMBERS =
   "Who is in a workspace decides who can read and change everything in it, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could invite a stranger as admin or remove the other admins. Only the member, signed in, changes who is in a workspace.";
 
 const SHARING =
-  "Who a note or a folder is shared with decides who can read it, up to anyone on the internet for a public link, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could publish a note or hand a folder to a stranger. Only the member, signed in, shares.";
+  "Who a note, a folder or an upload is shared with decides who can read it, up to anyone on the internet for a public link, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could publish a note or hand a folder to a stranger. Only the member, signed in, shares.";
 
 /**
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
  * tool below, and test/core/agent-parity.test.ts fails when one has neither.
  */
-const CONTACTS =
-  "A contact is how the member reaches someone: the address their mail goes to, the number their phone calls, in every app that reads their Google contacts. A change to one is not a change in history, so it can't be reverted the way an agent's edits can, and nothing in Common Ink shows it was made. An agent reads notes other people wrote, so one that was talked into it could quietly send the member's mail or calls for a colleague to a stranger. An agent reads the member's contacts, and only the member, signed in, changes or adds one.";
-
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
   "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
@@ -52,7 +47,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "member.leave": "Leaving ends the member's own access and their agents' with it, and only an admin can undo it. The member does that themself.",
   "invite.list": "Invites name people who are not in the workspace yet, by email, and are only of use for managing them, which an agent can't do.",
   "invite.revoke": MEMBERS,
-  "grant.list": "How a note is shared names people outside the workspace by email, and is only of use for sharing it, which an agent can't do. What the agent itself may do with a note is in every listing of it, as access.",
+  "grant.list": "How a note, a folder or an upload is shared names people outside the workspace by email, and is only of use for sharing it, which an agent can't do. What the agent itself may do with a note or an upload is in every listing of it, as access.",
   "grant.set": SHARING,
   "grant.link": SHARING,
   "grant.revoke": SHARING,
@@ -60,11 +55,22 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "note.purge": "Removing a note from Trash for good takes its history with it, and nothing brings it back: not a revert, not Trash. An agent reads notes other people wrote, so one that was talked into it could destroy them past recovery. An agent moves a note to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
   "source.connect": "Connecting a data source is the member agreeing, in their own browser, to let Common Ink into their calendar or contacts. An agent can't agree for them. It reads and changes what the member connected.",
   "source.disconnect": "Disconnecting ends the member's own agreement and cuts off every reference in their notes until they agree again. The member does that themself, in the app.",
-  "contact.update": CONTACTS,
-  "contact.photo": CONTACTS,
-  "contact.create": CONTACTS,
   "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
+  "shared.upload": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the uploads its member can see.",
+  "upload.setPrivate": "A private upload is hidden from every other member, admins too, and that is not a change in history. The member who uploaded it decides it, in the app.",
+  "upload.purge": "Removing an upload from Trash for good removes its bytes, and nothing brings them back: not Trash, and no note that showed it. An agent reads notes other people wrote, so one that was talked into it could destroy files past recovery. An agent moves an upload to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
+};
+
+/**
+ * Operations an agent performs with its token at an HTTP address instead of with a tool, each with
+ * the reason and the address. A file's bytes are the body of a request there. `ink upload` and
+ * `ink download` use them.
+ */
+export const OVER_HTTP: Partial<Record<OpType, string>> = {
+  "upload.create":
+    "A file's bytes are not text, and a tool call carries only text. POST /api/workspaces/<workspace>/uploads with the token as Authorization: Bearer, the bytes as the body, Content-Type: application/octet-stream, Content-Length, and X-Ink-Upload: encodeURIComponent of the JSON { name, folderId? }. The answer is 201 with the upload.",
+  "upload.open": "A file's bytes are not text, and a tool answer carries only text. GET /api/workspaces/<workspace>/uploads/<id> with the token as Authorization: Bearer answers with the bytes. Range and If-None-Match are honoured.",
 };
 
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -78,49 +84,14 @@ const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
 const mentionNames = { type: "string", enum: ["resolve", "keep"], description: 'What to do with mentions you add, @[[Name]] or @[[id]]. "resolve", the default, stores a mention of the one member with that name by their id, as @[[id|Name]], and refuses the write when several members have the name. A name no member has stays a name. "keep" leaves every mention as you wrote it.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
-/** The query language, as much of it as a model needs to write a query unaided. It is read from the filters' table, as docs/search.md is. */
-const QUERY = (scope: Scope) =>
-  `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or an editor: naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`;
-const queryDays = {
-  today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
-  zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated: and created:. Left out, it is the zone your member's settings name, or UTC" },
-};
 const TODOS =
-  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\
-" +
-  RULE_GRAMMAR +
-  "\ndone:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.";
+  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, due:YYYY-MM-DD for the day it is due, +Name for a project, and @[[Name]] for someone it is assigned to. every:RULE makes it recur: 2w (every 2 weeks, in d, w, m or y), mon,thu, 3d-after-done, 3rd-day or last-day of the month, 2nd-tue or last-fri of the month. done:YYYY-MM-DDxN is when a recurring todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note.";
 const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
 const MENTIONS =
-  "A mention of a person is @[[id|Name]] for a member of the workspace, with their id from list_members, or @[[Name]] for anyone else, such as one of your member's contacts. You can write @[[Name]] for a member too and it is stored by their id, unless your token is limited to folders: it is then not told who is a member, and every mention is kept and read as written. A mention on a todo's line assigns the todo. A mention gives nobody access and tells nobody. Every reader of the note sees the name, so write only the name of a contact: never their email or anything else list_contacts told you.";
+  "A mention of a person is @[[id|Name]] for a member of the workspace, with their id from list_members, or @[[Name]] for anyone else, such as one of your member's contacts. You can write @[[Name]] for a member too and it is stored by their id. A mention on a todo's line assigns the todo. A mention gives nobody access and tells nobody. Every reader of the note sees the name, so write only the name of a contact: never their email or anything else list_contacts told you.";
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
 const revisions = { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, description: "The revisions of the changes, from note_history or history" };
-const choice = {
-  anyOf: [
-    { type: "string", enum: ["keep", "back"] },
-    { type: "object", properties: { text: { type: "string", description: "The lines to have there, typed out; an empty string for no lines" } }, required: ["text"], additionalProperties: false },
-  ],
-};
-const choices = { anyOf: [{ type: "string", enum: ["keep", "back"] }, { type: "array", items: choice }] };
-const resolve = {
-  type: "object",
-  description:
-    'How to settle the conflicts preview_revert lists: places where later changes edited lines this revert changes. "keep" keeps the later edits (what a revert does when this is left out), "back" returns the lines to how they were before the reverted changes and drops the later edits to them, and { text } puts the lines given there. Pass one choice for all of them, or a list with one for each conflict in the order preview_revert lists them.',
-  properties: {
-    at: { type: "integer", minimum: 0, description: "The revision preview_revert answered with. The revert is refused when the note has changed since: preview again" },
-    choices,
-  },
-  required: ["at", "choices"],
-  additionalProperties: false,
-};
-const resolveByNote = {
-  type: "object",
-  description:
-    "How to settle the conflicts of the notes named here, by note id: for each, what preview_revert with author listed, settled as resolve settles them there. A note left out keeps every later edit. A note that has changed since its preview is left as it was and named in failed.",
-  additionalProperties: resolve,
-  maxProperties: 200,
-};
 const author = {
   type: "object",
   properties: { kind: { type: "string", enum: ["member", "agent", "plugin"] }, id: { type: "string" } },
@@ -131,34 +102,11 @@ const noteIds = (description: string) => ({ type: "array", items: { type: "strin
 const includeArchived = { type: "boolean", description: "True to cover archived notes too, which are left out otherwise" };
 const archivedToo = { enum: [true, false, "only"], description: 'True to cover archived notes too, which are left out otherwise, or "only" for the archived notes alone' };
 const LIFE = "A note is live, archived or in Trash, which its state says. An archived note is left out of listings unless includeArchived is true, and is read and changed as any other. A note in Trash is listed only by list_trash, can be read, and can't be changed until restore_note brings it back.";
-const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
-const selected = (item: Record<string, unknown>, required: string[], description: string) => ({
-  type: "array",
-  minItems: 1,
-  maxItems: 40,
-  description,
-  items: { type: "object", properties: { noteId, ...item }, required: ["noteId", ...required], additionalProperties: false },
-});
-const reverted = selected(
-  {
-    revisions,
-    to: { type: "integer", minimum: 0, description: "Instead of revisions: the revision to return the note to" },
-    author: { ...author, description: "Instead of revisions: the member or agent whose changes to this note that still stand are reverted, as revert_author picks them" },
-    at: { type: "integer", minimum: 0, description: "The note's revision that preview_reverts answered with. The note is skipped when it has changed since" },
-    choices: { ...choices, description: "How to settle this note's conflicts, as resolve.choices of revert_changes does. Needs at" },
-  },
-  [],
-  "The notes to revert, each named once: up to 40, each with revisions (its changes to revert), to (the revision to return to) or author (whose changes to revert)",
-);
-const SOURCES = "A data source is your member's own: no other member of the workspace sees its records, whatever their role, and you see no other member's. What you read from one is your member's private data, so put it in a note only where they asked for it there. A token limited to folders is refused every data source tool: the member's calendar and contacts are in no folder.";
+const uploadId = { type: "string", description: "The upload's id, from list_uploads" };
+const UPLOADS =
+  "A note shows an upload with an embed on a line of its own that starts with the upload's id: ::image{<id> WIDTHxHEIGHT} or ::video{<id> WIDTHxHEIGHT}, with the room to keep for it, ::audio{<id>}, or ::file{<id>} for anything else. The upload's name is never in the note. Its bytes are not in any tool's answer: GET /api/workspaces/<workspace>/uploads/<id> with the same bearer token answers with them, and POST /api/workspaces/<workspace>/uploads takes a new file.";
+const SOURCES = "A data source is your member's own: no other member of the workspace sees its records, whatever their role, and you see no other member's. What you read from one is your member's private data, so put it in a note only where they asked for it there.";
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
-const when = {
-  description: "When it is: { allDay: true, from, to } with its first and last day as YYYY-MM-DD, or { allDay: false, from, to } with instants in milliseconds since 1970",
-  oneOf: [
-    { type: "object", properties: { allDay: { const: true }, from: { type: "string" }, to: { type: "string" } }, required: ["allDay", "from", "to"], additionalProperties: false },
-    { type: "object", properties: { allDay: { const: false }, from: { type: "integer", minimum: 0 }, to: { type: "integer", minimum: 0 } }, required: ["allDay", "from", "to"], additionalProperties: false },
-  ],
-};
 
 export const TOOLS: Tool[] = [
   {
@@ -181,7 +129,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are @[[id|Name]] or @[[Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. A note in Trash is read as any other, and its state says trashed.",
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are @[[id|Name]] or @[[Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. Uploads in the text are ::image{id ...}, ::video{id ...}, ::audio{id} or ::file{id}: uploads names each one's id with its name, type, kind and size, or a null upload for one that doesn't exist or that you can't see. A note in Trash is read as any other, and its state says trashed.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "An earlier revision; default is the latest" } }, ["id"]),
     op: "note.read",
   },
@@ -194,7 +142,7 @@ export const TOOLS: Tool[] = [
   {
     name: "write_note",
     description:
-      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a recurring todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         id: noteId,
@@ -203,7 +151,7 @@ export const TOOLS: Tool[] = [
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
         mentionNames,
-        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+        on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "baseRevision", "text"],
     ),
@@ -223,26 +171,19 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see that query finds: with no query, every open one. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more.\
-\
-${QUERY("todos")}\
-\
-The arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the most important. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance, due, projects, assignees, the note's tags, and access. Narrow it by project, by who it is assigned to, by a tag of the note, by a range of due days, both included, or to those with no due date, and by importance. Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
     inputSchema: object({
-      query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
-      ...queryDays,
-      folderId: { type: "string", description: "Only todos in notes in this folder or in a folder under it, from list_folders. In the query: folder:" },
-      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case: a tag on the todo's own line, or anywhere else in its note. In the query: tag:" },
-      dueFrom: day("Only todos due on or after this day. In the query: due:>="),
-      dueTo: day("Only todos due on or before this day. In the query: due:<="),
-      noDue: { type: "boolean", description: "True for only todos with no due date. In the query: no:due" },
-      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these priorities: 0 is None, 1 Low (!), 2 Medium (!!), 3 High (!!!). In the query: priority:" },
-      assignee: { type: "string", description: "Only todos assigned to this person: a member's id from list_members, or anyone else's name as the todo writes it, ignoring case. In the query: assignee:" },
-      assignedToMe: { type: "boolean", description: "True for only todos assigned to your member. In the query: assignee:@me" },
-      includeCompleted: { type: "boolean", description: "True to list done todos too. In the query: is:open OR is:done" },
+      project: { type: "string", description: "Only todos in this project, without the +, ignoring case" },
+      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case" },
+      dueFrom: day("Only todos due on or after this day"),
+      dueTo: day("Only todos due on or before this day"),
+      noDue: { type: "boolean", description: "True for only todos with no due date" },
+      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these levels: 0 is normal, 1 to 3 are !, !! and !!!" },
+      assignee: { type: "string", description: "Only todos assigned to this person: a member's id from list_members, or anyone else's name as the todo writes it, ignoring case" },
+      assignedToMe: { type: "boolean", description: "True for only todos assigned to your member" },
+      includeCompleted: { type: "boolean", description: "True to list done todos too" },
       includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
-      sort: { type: "string", enum: [...TODO_SORTS], description: "The order, when the query has no sort:, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
       limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
       offset: { type: "integer", minimum: 0, description: "The next of the page before" },
     }),
@@ -250,14 +191,14 @@ The arguments beside query are from before it could say them, and narrow it furt
   },
   {
     name: "todo_filters",
-    description: "What list_todos can be narrowed by: the tags of the notes that have todos and who todos are assigned to, among the notes you can see. The folders it can be narrowed by are list_folders'.",
+    description: "What list_todos can be narrowed by: the projects of the todos, who they are assigned to, and the tags of the notes that have todos, in the notes you can see.",
     inputSchema: object({ includeArchived }),
     op: "todo.filters",
   },
   {
     name: "set_todo",
     description:
-      "Check a todo off, skip it, or change its priority, due date, how it repeats, who it is assigned to or its words, by rewriting its line in its note. Checking off a todo that repeats leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. A rule that ends (-times-N, -until-DAY) counts down, and its last time checks the todo off for good. skip moves a repeating todo to its next due date with nothing checked off, and is refused for one that doesn't repeat or is on its last time. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Check a todo off, or change its importance, due date, project, who it is assigned to or how it recurs, by rewriting its line in its note. Checking off a todo that recurs leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         id: noteId,
@@ -265,15 +206,14 @@ The arguments beside query are from before it could say them, and narrow it furt
         line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" },
         text: { type: "string", description: "The todo's line as written, from list_todos" },
         done: { type: "boolean", description: "True checks it off, false opens it again" },
-        importance: { type: "integer", minimum: 0, maximum: 3, description: "Its priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
+        importance: { type: "integer", minimum: 0, maximum: 3, description: "0 for normal, 1 to 3 for !, !! and !!!" },
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
-        every: { type: ["string", "null"], description: `How it repeats, as written after every:, or null to stop it repeating. The rules:\
-${RULE_GRAMMAR}` },
-        skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Not together with done" },
+        addProject: { type: "string", description: "A project to put it in, without the +. With removeProject, it takes that one's place on the line." },
+        removeProject: { type: "string", description: "A project to take it out of, without the +" },
+        every: { type: ["string", "null"], description: "How it recurs, as written after every:, such as 2w, mon,thu, 3d-after-done or last-fri, or null to stop it recurring" },
         assign: { type: "string", description: "Someone to assign it to, by writing a mention of them on the line: a member's id or name, or anyone else's name. Assigning gives nobody access and tells nobody." },
         unassign: { type: "string", description: "Someone to take it from: a member's id or name, or anyone else's name as the line writes it. Refused when the todo isn't assigned to them." },
-        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
-        words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, priority, due date, rule and done: mark, tags included, on one line. Its due date and how it repeats are written after them" },
+        on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "revision", "line", "text"],
     ),
@@ -281,13 +221,13 @@ ${RULE_GRAMMAR}` },
   },
   {
     name: "todo_history",
-    description: "Each time a repeating todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. Pass id, revision, line and text as list_todos gave them.",
+    description: "Each time a recurring todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. Pass id, revision, line and text as list_todos gave them.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision of the note, from list_todos" }, line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" }, text: { type: "string", description: "The todo's line as written, from list_todos" } }, ["id", "revision", "line", "text"]),
     op: "todo.history",
   },
   {
     name: "daily_note",
-    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings name. A member has one for each day, and it is where a repeating todo they or you check off is filed. Needs the editor or admin role.",
+    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings name. A member has one for each day, and it is where a recurring todo they or you check off is filed. Needs the editor or admin role.",
     inputSchema: object({ on: day("The day. Left out, it is today in the time zone your member's settings name, or in UTC") }),
     op: "daily.open",
   },
@@ -305,15 +245,15 @@ ${RULE_GRAMMAR}` },
   },
   {
     name: "search",
-    description: `Find the notes you can see with a query: words, each matching the start of a word in the note, ignoring case and accents, and filters. Todos and tags are text like any other, so their words are found too. A query with no word and no filter finds nothing: list_notes lists. Notes whose title matches come first, then the latest changed, unless the query's sort: or else sort asks for another order. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless the query says is:archived, and notes in Trash unless it says is:trashed. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.\n\n${QUERY("notes")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
+    description:
+      "Find the notes you can see by their text: every word of query must be in the note, each matching the start of a word, ignoring case and accents. Words in \"double quotes\" match as a phrase. #name narrows to notes with that tag, and +name to notes with a todo in that project. Todos, tags and projects are text like any other, so their words are found too. Notes whose title matches come first, then the latest changed, unless sort asks for another order. folderId narrows to the notes in one folder, not those of the folders inside it, and hasTodos to notes with an open todo. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless includeArchived is true, or \"only\" for them alone, and notes in Trash always. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.",
     inputSchema: object(
       {
-        query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'What to find, such as: budget "second quarter" #money -is:archived, or: editor:@me updated:>=7d (has:open-todo OR has:backlink)' },
-        ...queryDays,
-        folderId: folderId("Only notes in this folder, not those of the folders inside it, from list_folders. In the query, folder: takes the folders inside too"),
+        query: { type: "string", maxLength: 200, description: 'What to find, such as: budget "second quarter" #money +Home' },
+        folderId: folderId("Only notes in this folder, from list_folders"),
         includeArchived: archivedToo,
-        hasTodos: { type: "boolean", description: "True for only the notes with an open todo. In the query: has:open-todo" },
-        sort: { enum: ["match", "recent", "created", "title"], description: "match, the default: title matches first, then the latest changed. recent: the latest changed. created: the latest made. title: by title. The query's sort: wins over it" },
+        hasTodos: { type: "boolean", description: "True for only the notes with an open todo" },
+        sort: { enum: ["match", "recent", "created", "title"], description: "match, the default: title matches first, then the latest changed. recent: the latest changed. created: the latest made. title: by title" },
         limit: { type: "integer", minimum: 1, maximum: 50, description: "How many notes; default 20" },
         offset: { type: "integer", minimum: 0, description: "The next of the page before" },
       },
@@ -352,8 +292,50 @@ ${RULE_GRAMMAR}` },
     op: "trash.list",
   },
   {
+    name: "list_uploads",
+    description: `The uploads in a workspace that you can see, latest first: id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, state, and access, which is edit or view. An upload you can't see is never listed, and reads as no such upload everywhere. Narrow it to one folder. Archived uploads are left out unless includeArchived is true, and those in Trash are listed only by list_trashed_uploads. ${UPLOADS}`,
+    inputSchema: object({ folderId: folderId("Only uploads in this folder, from list_folders"), includeArchived: { type: "boolean", description: "True to cover archived uploads too, which are left out otherwise" } }),
+    op: "upload.list",
+  },
+  {
+    name: "read_upload",
+    description: `One upload as list_uploads gives it, and usedIn: the notes you can see that refer to it, each as list_notes gives it. An upload in Trash is read as any other, and its state says trashed. ${UPLOADS}`,
+    inputSchema: object({ id: uploadId }, ["id"]),
+    op: "upload.read",
+  },
+  {
+    name: "move_upload",
+    description: "Put an upload in another folder. Its id stays the same, so the notes that refer to it still show it. Needs edit on the upload and on the folder.",
+    inputSchema: object({ id: uploadId, folderId: folderId("The folder to move it to, from list_folders") }, ["id", "folderId"]),
+    op: "upload.move",
+  },
+  {
+    name: "archive_upload",
+    description: "Archive an upload, or with archived false bring it back. An archived upload keeps its folder and id, is left out of list_uploads unless includeArchived is true, and is still shown by the notes that refer to it. Needs edit on the upload.",
+    inputSchema: object({ id: uploadId, archived: { type: "boolean", description: "True to archive, false to unarchive" } }, ["id", "archived"]),
+    op: "upload.archive",
+  },
+  {
+    name: "trash_upload",
+    description: "Move an upload to Trash. It waits there 30 days, listed by list_trashed_uploads, and is then removed for good with its bytes. Until then restore_upload brings it back as it was. The answer's usedIn is how many notes you can see refer to it: each says the upload is in Trash until it is restored. Needs edit on the upload.",
+    inputSchema: object({ id: uploadId }, ["id"]),
+    op: "upload.trash",
+  },
+  {
+    name: "restore_upload",
+    description: "Bring an upload back from Trash to the folder it was in, archived if it was, and to every note that refers to it. When that folder was deleted meanwhile it comes back to Unsorted and folderGone is true, which also needs edit on Unsorted. Needs edit on the upload.",
+    inputSchema: object({ id: uploadId }, ["id"]),
+    op: "upload.restore",
+  },
+  {
+    name: "list_trashed_uploads",
+    description: "The uploads in Trash that you can see, latest trashed first: each as list_uploads gives it, with who trashed it and when, and purgesAt, the time it is removed for good. An agent can't remove one sooner; a member does that in the app.",
+    inputSchema: object({}),
+    op: "upload.trashed",
+  },
+  {
     name: "list_folders",
-    description: "The folders in a workspace: id, name, the folder each is inside (parentId), and how many notes are directly in it. unsortedId is the folder a note goes to when none is named.",
+    description: "The folders in a workspace: id, name, the folder each is inside (parentId), and how many notes and uploads are directly in it. unsortedId is the folder a note goes to when none is named.",
     inputSchema: object({}),
     op: "folder.list",
   },
@@ -370,13 +352,6 @@ ${RULE_GRAMMAR}` },
     op: "folder.rename",
   },
   {
-    name: "move_folder",
-    description:
-      "Put a folder inside another, or at the top level with a null parentId. The notes and folders in it go with it and keep their ids. A folder can't go inside itself or a folder in it, and Unsorted stays where it is. Needs the editor or admin role, and edit on both folders.",
-    inputSchema: object({ id: folderId("The folder to move"), parentId: { type: ["string", "null"], description: "The folder to put it inside, from list_folders, or null for the top level" } }, ["id", "parentId"]),
-    op: "folder.move",
-  },
-  {
     name: "delete_folder",
     description: "Delete a folder that has no notes and no folders in it. Archived notes count, and notes in Trash don't: those are restored to Unsorted afterwards. Needs the admin role.",
     inputSchema: object({ id: folderId("The folder id") }, ["id"]),
@@ -388,13 +363,6 @@ ${RULE_GRAMMAR}` },
       "A note's recorded changes, oldest first: revision, the revision it was based on, who made it (a member, or an agent by name), when, its label, the lines it added and removed, the changes it reverted (reverts) and the later change that reverted it (revertedBy).",
     inputSchema: object({ id: noteId }, ["id"]),
     op: "note.history",
-  },
-  {
-    name: "note_blame",
-    description:
-      "Who wrote each line of a note as it is now: the change that last wrote or edited the line. Answers the note's text and revision, lines as runs { from, to, revision } counted from 1, the changes those name (each with its author, a member or an agent by name, and when), and for a member who sees the whole workspace the name of each member whose agent wrote a line (owners, by person id). Lines put in or taken out around a line don't change it; a word taken out of it does. A line a revert brought back is named by the change that wrote it, not the revert.",
-    inputSchema: object({ id: noteId }, ["id"]),
-    op: "note.blame",
   },
   {
     name: "change_diff",
@@ -409,7 +377,6 @@ ${RULE_GRAMMAR}` },
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
-      by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),
       before: { type: "object", description: "The next of the page before" },
@@ -424,7 +391,6 @@ ${RULE_GRAMMAR}` },
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
-      by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),
       before: { type: "object", description: "The next of the page before" },
@@ -440,27 +406,6 @@ ${RULE_GRAMMAR}` },
     op: "history.authors",
   },
   {
-    name: "history_diff",
-    description:
-      "What a selection of changes did, note by note, across up to 40 notes. A note's selected changes that follow one another are one run with one line diff, from the note before the first of them to the note after the last, so a line written and taken out again within a run shows in neither. A change left out in between starts a new run, which says how many were skipped. Each run has its revisions (from, to), how many changes it is (saves), who made them, when, and the lines it added and removed. An answer holds about 2000 diff lines: a run past them has diff null, and asking for its note alone returns it. A run's diff shows at most 200 lines and counts the rest in omitted.",
-    inputSchema: object({ changes: selected({ revisions }, ["revisions"], "The selection: each note once, with the revisions of its changes") }, ["changes"]),
-    op: "history.diff",
-  },
-  {
-    name: "preview_reverts",
-    description:
-      "What revert_many would do to each note, with nothing written: for each, the note's revision it was worked out at (pass it back as at), the changes that would be reverted (revisions), the ones left out because something already reverted them (already), the diff from the note as it is to the note after, and its conflicts as preview_revert lists them. A change selected together with the change that reverted it stays reverted and that revert goes too. An empty diff means the note would not change.",
-    inputSchema: object({ changes: reverted }, ["changes"]),
-    op: "history.previewRevert",
-  },
-  {
-    name: "revert_many",
-    description:
-      "Revert changes of up to 40 notes at once, each note as one new change under your agent's name. Each note is reverted or skipped whole, by itself: the answer lists reverted (each with the revision the revert made and the changes it reverted) and skipped (each with why: changed, when the note is no longer at the revision passed as at; nothing, when the revert would change nothing; refused, with the reason). Call preview_reverts first and pass each note's revision back as at. To undo a revert, revert the revision it made, with at set to that revision: the note is skipped if it has been changed since. Needs the editor or admin role.",
-    inputSchema: object({ changes: reverted }, ["changes"]),
-    op: "history.revert",
-  },
-  {
     name: "label_revision",
     description: "Name one revision of a note, so it can be found and reverted to. A null name takes the label away. Needs the editor or admin role.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 1 }, name: { type: ["string", "null"], maxLength: 60 } }, ["id", "revision", "name"]),
@@ -468,31 +413,31 @@ ${RULE_GRAMMAR}` },
   },
   {
     name: "revert_note",
-    description:
-      "Put a note back to how it was at a revision. This is recorded as a new change under your agent's name; nothing is erased. Call preview_revert first; if it lists conflicts, pass resolve to settle them. Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision to return to" }, resolve }, ["id", "revision"]),
+    description: "Put a note back to how it was at a revision. This is recorded as a new change under your agent's name; nothing is erased. Needs the editor or admin role.",
+    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision to return to" } }, ["id", "revision"]),
     op: "note.revert",
   },
   {
     name: "revert_changes",
     description:
-      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Call preview_revert first; if it lists conflicts, pass resolve to settle them, or the later edits are kept. Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revisions, resolve }, ["id", "revisions"]),
+      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Needs the editor or admin role.",
+    inputSchema: object({ id: noteId, revisions }, ["id", "revisions"]),
     op: "note.revertChanges",
   },
   {
     name: "revert_author",
     description:
-      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. To settle a note's conflicts, preview_revert it with author first and pass resolve; without it the later edits are kept. A note left with no text, such as one the author created, is named in emptied, and with trashEmptied it is moved to Trash, where restore_note finds it. Notes in Trash are not reverted. Needs the editor or admin role.",
-    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" }, resolve: resolveByNote, trashEmptied: { type: "boolean", description: "True to move each note this leaves with no text to Trash" } }, ["author"]),
+      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. A note left with no text, such as one the author created, is named in emptied, and with trashEmptied it is moved to Trash, where restore_note finds it. Notes in Trash are not reverted. Needs the editor or admin role.",
+    inputSchema: object(
+      {
+        author: { ...author, description: "Whose changes, from history_authors" },
+        noteIds: noteIds("Only in these notes"),
+        after: { type: "string", description: "The next of the call before" },
+        trashEmptied: { type: "boolean", description: "True to move each note this leaves with no text to Trash" },
+      },
+      ["author"],
+    ),
     op: "history.revertAuthor",
-  },
-  {
-    name: "preview_revert",
-    description:
-      "What a revert would do to a note, with nothing written. Pass one of: revisions to preview revert_changes of those changes, to to preview revert_note to that revision, or author to preview what revert_author would do to this note. Returns the note's revision it was worked out at, the changes that would be reverted (revisions), the diff from the note as it is to the note after (diff), overlaps: later changes that still stand and edited the same lines, and conflicts: each place they did, top of the note first, with the lines as they were before the reverted changes (before), as they are now (now), as the revert leaves them with the later edits kept (kept), the line of the result kept starts at (line), and the later changes that edited them with their authors (later). Settle each conflict with resolve on the revert; pass the same resolve here to see the diff of the revert settled that way. A read-only token can use it.",
-    inputSchema: object({ id: noteId, revisions, to: { type: "integer", minimum: 0, description: "The revision to return to" }, author: { ...author, description: "Whose changes, from history_authors" }, resolve }, ["id"]),
-    op: "note.previewRevert",
   },
   {
     name: "undo",
@@ -516,7 +461,7 @@ ${RULE_GRAMMAR}` },
   {
     name: "list_events",
     description:
-      `Your member's calendar events in a span of time of at most 400 days, soonest first, each occurrence of a recurring event on its own. An event's when is either two instants in milliseconds since 1970 (allDay false) or its first and last day as YYYY-MM-DD (allDay true), which has no time and no zone. An all-day event is in the span when one of its days is a day the span covers in timeZone. Each event's calendarId is the calendar it is in. sources says whether each calendar data source answered: one in needs_reconnect has no events here until the member reconnects it. calendars is every calendar in the connected ones, with or without events in the span, each with its sourceId, id, name, color and writable; create_event adds to one whose writable is true. ${SOURCES}`,
+      `Your member's calendar events in a span of time of at most 400 days, soonest first, each occurrence of a recurring event on its own. An event's when is either two instants in milliseconds since 1970 (allDay false) or its first and last day as YYYY-MM-DD (allDay true), which has no time and no zone. An all-day event is in the span when one of its days is a day the span covers in timeZone. sources says whether each calendar answered: one in needs_reconnect has no events here until the member reconnects it. ${SOURCES}`,
     inputSchema: object({ from: time("The start of the span"), to: time("The end of the span"), timeZone: { type: "string", description: 'The IANA zone whose days all-day events are matched by, such as "America/Chicago"' } }, ["from", "to", "timeZone"]),
     op: "event.list",
   },
@@ -532,41 +477,23 @@ ${RULE_GRAMMAR}` },
         title: { type: "string", maxLength: 1000 },
         location: { type: "string", maxLength: 1000 },
         description: { type: "string", maxLength: 8000 },
-        when,
+        when: {
+          description: "When it is: { allDay: true, from, to } with its first and last day as YYYY-MM-DD, or { allDay: false, from, to } with instants in milliseconds since 1970",
+          oneOf: [
+            { type: "object", properties: { allDay: { const: true }, from: { type: "string" }, to: { type: "string" } }, required: ["allDay", "from", "to"], additionalProperties: false },
+            { type: "object", properties: { allDay: { const: false }, from: { type: "integer", minimum: 0 }, to: { type: "integer", minimum: 0 } }, required: ["allDay", "from", "to"], additionalProperties: false },
+          ],
+        },
       },
       ["sourceId", "id", "etag"],
     ),
     op: "event.update",
   },
   {
-    name: "create_event",
-    description:
-      `Add an event to one of your member's calendars where it is kept, such as in Google Calendar, as your member. Pass the calendar's sourceId and id from the calendars list_events answers: one whose writable is false is refused. Answers the event as it was made. This changes the member's real calendar and is not in Common Ink's history, so it can't be reverted from here. ${SOURCES}`,
-    inputSchema: object(
-      {
-        sourceId: { type: "string", description: "The data source the calendar is in, from list_events' calendars" },
-        calendarId: { type: "string", description: "The calendar's id, from list_events' calendars" },
-        title: { type: "string", maxLength: 1000 },
-        when,
-        location: { type: "string", maxLength: 1000 },
-        description: { type: "string", maxLength: 8000 },
-      },
-      ["sourceId", "calendarId", "title", "when"],
-    ),
-    op: "event.create",
-  },
-  {
     name: "list_contacts",
-    description: `Your member's contacts by name: id, name, emails, phones and organization. Each email, phone, address and website is { value, type }: type is the label, Google's own (an email's home, work or other; a phone's mobile, home, work, main, homeFax, workFax, pager or other; an address's home, work or other; a website's homePage, work, blog, profile or other), one your member wrote, as written, or null for none. query keeps those with every word of it at the start of a word of their name, email or organization. Contacts are read-only. more is true when a data source has more than it lists. ${SOURCES}`,
+    description: `Your member's contacts by name: id, name, emails, phones and organization. query keeps those with every word of it at the start of a word of their name, email or organization. Contacts are read-only. more is true when a data source has more than it lists. ${SOURCES}`,
     inputSchema: object({ query: { type: "string", maxLength: 100, description: "Words a contact's name, email or organization must have" } }),
     op: "contact.list",
-  },
-  {
-    name: "read_person",
-    description:
-      "A person, as a mention names them: their page. who is a member's id from list_members, or a name. A name one member has is that member. It answers the member they are (when your token is told who the members are), your member's own contacts that are them with all those contacts hold (each email, phone, address and website as { value, type }, as list_contacts says), the open todos assigned to them, and each line that mentions them in the notes you can see, the note changed latest first. query is what search_notes takes to find the notes that mention them; add words to it to search among those. Write nothing a contact told you into a note: every reader of the note sees it.",
-    inputSchema: object({ who: { type: "string", maxLength: 200, description: "A member's id, or a name as a mention writes it" }, limit: { type: "integer", minimum: 1, maximum: 200, description: "How many lines that mention them, at most. Default 50" } }, ["who"]),
-    op: "person.read",
   },
   {
     name: "refer_record",
@@ -580,12 +507,6 @@ ${RULE_GRAMMAR}` },
     description: `The event or contact a reference in a note stands for, as it is now. ref is the first word inside ::event{...} or ::contact{...}. A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
     inputSchema: object({ ref: { type: "string", description: "The reference, from the note" } }, ["ref"]),
     op: "record.read",
-  },
-  {
-    name: "notes_about_record",
-    description: `The notes that reference one of your member's events or contacts with your member's own reference (the one refer_record answers), and for an event your member's calendar has now, another member's reference to the same event (a teammate's notes about a meeting on a shared calendar), among the notes your member can see and not in Trash, latest change first: id, title, updatedAt, and audience, who sees the note: private (only its owner), shared (its owner and the people it is shared with) or workspace (every member). ${SOURCES}`,
-    inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
-    op: "record.notes",
   },
   {
     name: "list_members",
@@ -609,7 +530,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
     const me = await whoAmI(db, agent.personId);
     // A token pinned to one workspace sees only that one, as if the member belonged to no other.
     if (agent.workspaceId) me.workspaces = me.workspaces.filter((w) => w.id === agent.workspaceId);
-    if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces, readOnly: agent.readOnly, folderIds: agent.folderIds });
+    if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces, readOnly: agent.readOnly });
 
     const { workspace, ...rest } = args;
     let workspaceId: string;
@@ -620,7 +541,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
-    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly, folderIds: agent.folderIds } };
+    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly } };
     return text(await perform(db, actor, { ...rest, type: tool.op! } as OpInput, Date.now(), sources));
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${err.message}`, true);

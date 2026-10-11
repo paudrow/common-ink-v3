@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canShare, folderLevel, noteLevel, resolve, seesEveryFolder, sightOf, type Asked, type GrantLevel, type Level } from "../../src/core/access.ts";
+import { canShare, folderLevel, itemLevel, resolve, sightOf, type Asked, type GrantLevel, type Level } from "../../src/core/access.ts";
 import type { Role } from "../../src/core/protocol.ts";
 
 const ROLES = ["admin", "editor", "viewer", null] as const;
@@ -83,55 +83,26 @@ describe("what one actor sees across a workspace", () => {
   const folders = (sight: ReturnType<typeof sightOf>) => Object.fromEntries([...parents.keys()].map((id) => [id, folderLevel(sight, id)]));
 
   it("gives a guest a granted folder and everything in it, and a closer grant its own say", () => {
-    const sight = sightOf({ personId: "gus", role: null }, [{ folderId: "work", access: "edit" }, { folderId: "plans", access: "view" }, { noteId: "n9", access: "edit" }], parents);
+    const sight = sightOf({ personId: "gus", role: null }, [{ folderId: "work", access: "edit" }, { folderId: "plans", access: "view" }, { itemId: "n9", access: "edit" }], parents);
 
     expect(folders(sight)).toEqual({ work: "edit", plans: "view", q3: "view", archive: "edit", home: "none" });
-    expect(noteLevel(sight, note("n1", "archive"))).toBe("edit");
-    expect(noteLevel(sight, note("n2", "q3"))).toBe("view");
-    expect(noteLevel(sight, note("n9", "q3"))).toBe("edit");
-    expect(noteLevel(sight, note("n3", "home"))).toBe("none");
-    expect(noteLevel(sight, note("n4", "archive", "ada"))).toBe("none");
-    expect(JSON.parse(sight.bind)).toEqual({ owner: null, all: 0, folders: ["work", "plans", "q3", "archive"], notes: ["n9"], within: null });
+    expect(itemLevel(sight, note("n1", "archive"))).toBe("edit");
+    expect(itemLevel(sight, note("n2", "q3"))).toBe("view");
+    expect(itemLevel(sight, note("n9", "q3"))).toBe("edit");
+    expect(itemLevel(sight, note("n3", "home"))).toBe("none");
+    expect(itemLevel(sight, note("n4", "archive", "ada"))).toBe("none");
+    expect(JSON.parse(sight.bind)).toEqual({ owner: null, all: 0, folders: ["work", "plans", "q3", "archive"], items: ["n9"] });
   });
 
   it("narrows a member where a grant names them and nowhere else", () => {
-    const sight = sightOf({ personId: "ed", role: "editor" }, [{ folderId: "plans", access: "view" }, { noteId: "n9", access: "edit" }], parents);
+    const sight = sightOf({ personId: "ed", role: "editor" }, [{ folderId: "plans", access: "view" }, { itemId: "n9", access: "edit" }], parents);
 
     expect(folders(sight)).toEqual({ work: "edit", plans: "view", q3: "view", archive: "edit", home: "edit" });
-    expect(noteLevel(sight, note("n2", "q3"))).toBe("view");
-    expect(noteLevel(sight, note("n9", "q3"))).toBe("edit");
-    expect(noteLevel(sight, note("n5", "q3", "ed"))).toBe("view");
-    expect(noteLevel(sight, note("n6", "home", "ada"))).toBe("none");
+    expect(itemLevel(sight, note("n2", "q3"))).toBe("view");
+    expect(itemLevel(sight, note("n9", "q3"))).toBe("edit");
+    expect(itemLevel(sight, note("n5", "q3", "ed"))).toBe("view");
+    expect(itemLevel(sight, note("n6", "home", "ada"))).toBe("none");
     expect(JSON.parse(sight.bind)).toMatchObject({ owner: "ed", all: 1 });
-  });
-
-  it("leaves an agent limited to folders exactly what its member has inside them, and nothing outside, whoever the member is", () => {
-    const inside = { plans: true, q3: true };
-    for (const role of ROLES) {
-      const grants = [{ folderId: "work", access: "edit" }, { folderId: "q3", access: "view" }, { noteId: "n9", access: "edit" }, { noteId: "n8", access: "edit" }] as const;
-      const whole = sightOf({ personId: "per", role }, grants, parents);
-      const limited = sightOf({ personId: "per", role }, grants, parents, ["plans", "gone"]);
-      for (const id of parents.keys()) expect(folderLevel(limited, id), `${role}: ${id}`).toBe(id in inside ? folderLevel(whole, id) : "none");
-      for (const [id, folder, owner] of [["n1", "plans", null], ["n2", "q3", null], ["n9", "q3", null], ["n8", "home", null], ["n8", "archive", "ada"], ["n5", "plans", "per"], ["n6", "q3", "ada"], ["n7", "work", null]] as const) {
-        expect(noteLevel(limited, note(id, folder, owner)), `${role}: ${id} in ${folder}`).toBe(folder in inside ? noteLevel(whole, note(id, folder, owner)) : "none");
-      }
-      expect(JSON.parse(limited.bind)).toMatchObject({ all: 0, within: ["plans", "q3"] });
-      expect(JSON.parse(limited.bind).folders.every((id: string) => id in inside)).toBe(true);
-      expect(seesEveryFolder(limited)).toBe(false);
-      expect(seesEveryFolder(whole)).toBe(role !== null);
-      // A limit to folders that are all gone is a limit to nothing, and never no limit.
-      const nothing = sightOf({ personId: "per", role }, grants, parents, ["gone"]);
-      expect([...parents.keys()].map((id) => folderLevel(nothing, id))).toEqual(["none", "none", "none", "none", "none"]);
-      expect(noteLevel(nothing, note("n9", "q3"))).toBe("none");
-      expect(JSON.parse(nothing.bind)).toMatchObject({ all: 0, folders: [], within: [] });
-    }
-  });
-
-  it("never lets what is outside a limit be shared or reached, whatever else is true of it", () => {
-    for (const role of ROLES) for (const privacy of PRIVACY) for (const own of GRANTS) for (const above of GRANTS) {
-      expect(resolve({ role, grants: [own, above], private: privacy, outside: true })).toBe("none");
-      expect(canShare({ role, grants: [own, above], private: privacy, outside: true })).toBe(false);
-    }
   });
 
   it("ends at a folder that is its own ancestor", () => {

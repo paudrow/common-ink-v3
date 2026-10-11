@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { ago, useNow, type PluginHost, type TrashedNote, type ViewProps } from "../../plugin-api.ts";
-import { lifecycle, mayPurge } from "../lib/lifecycle.ts";
+import { ago, useNow, type PluginHost, type TrashedNote, type TrashedUpload, type ViewProps } from "../../plugin-api.ts";
+import { lifecycle, mayPurge, restoredMessage } from "../lib/lifecycle.ts";
 import { daysLeft, leftLabel } from "./days.ts";
 import { Purge } from "./Purge.tsx";
 
@@ -10,9 +10,9 @@ const titleOf = (note: { title: string }) => note.title || "Untitled";
 export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   const now = useNow();
   const [listed, setListed] = useState<TrashedNote[] | null>(null);
-  /** Why Trash couldn't be read, until it is. */
-  const [unread, setUnread] = useState<string | null>(null);
+  const [said, say] = useState<{ text: string; failed?: boolean } | null>(null);
   const [asked, setAsked] = useState(0);
+  const [files, setFiles] = useState<TrashedUpload[]>([]);
   const { restoring, purge } = lifecycle(host);
   // Read again whenever the app learns that Trash changed, here or anywhere else.
   const known = app.trashed.map((n) => n.id).sort().join(",");
@@ -20,34 +20,54 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   useEffect(() => {
     let live = true;
     host.perform({ type: "trash.list" }).then(
-      (notes) => {
-        if (!live) return;
-        setListed(notes);
-        setUnread(null);
-      },
-      (err: Error) => live && setUnread(err.message),
+      (notes) => live && setListed(notes),
+      (err: Error) => live && say({ text: err.message, failed: true }),
     );
     return () => {
       live = false;
     };
   }, [host, known, asked]);
 
+  useEffect(() => {
+    let live = true;
+    host.perform({ type: "upload.trashed" }).then(
+      (uploads) => live && setFiles(uploads),
+      // A guest is told nothing of the workspace's files.
+      () => live && setFiles([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [host, asked]);
+
+  /** Tells the app what a file is now, so each note that shows it follows. */
+  const restoreFile = (file: TrashedUpload) =>
+    host.perform({ type: "upload.restore", id: file.id }).then(
+      ({ folderGone, name, type, kind, size, width, height, state }) => {
+        host.uploads.learn([{ id: file.id, upload: { name, type, kind, size, width, height, state } }]);
+        say({ text: `${file.name}: ${restoredMessage(folderGone)}` });
+        setAsked((n) => n + 1);
+        app.refresh();
+      },
+      (err: Error) => say({ text: err.message, failed: true }),
+    );
+
   const restore = (note: TrashedNote) =>
     restoring(note.id).then(
-      (said) => host.app().notify({ ...said, message: `${titleOf(note)}: ${said.message}` }),
-      (err: Error) => host.app().notify({ message: err.message }),
+      ({ folderGone }) => say({ text: `${titleOf(note)}: ${restoredMessage(folderGone)}` }),
+      (err: Error) => say({ text: err.message, failed: true }),
     );
 
   return (
     <section className="mode-view trash-page" aria-label="Trash">
       <h1>Trash</h1>
-      <p className="trash-lede">A note moved to Trash waits here for 30 days and is then removed for good, with its history. Until then it can be read and restored.</p>
-      {unread && (
-        <p role="alert" className="said failed">
-          {unread}
+      <p className="trash-lede">A note or a file moved to Trash waits here for 30 days and is then removed for good: a note with its history, a file with its bytes. Until then it can be restored.</p>
+      {said && (
+        <p role={said.failed ? "alert" : "status"} className={said.failed ? "said failed" : "said"}>
+          {said.text}
         </p>
       )}
-      {listed && !listed.length && <p className="trash-none">Trash is empty.</p>}
+      {listed && !listed.length && !files.length && <p className="trash-none">Trash is empty.</p>}
       {listed && listed.length > 0 && (
         <ul className="trash-list" aria-label="Notes in Trash">
           {listed.map((note) => {
@@ -83,7 +103,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
                       title={note.title}
                       onPurge={async () => {
                         await purge(note.id);
-                        host.app().notify({ message: `${titleOf(note)} was deleted forever.`, icon: "trash" });
+                        say({ text: `${titleOf(note)} was deleted forever.` });
                         setAsked((n) => n + 1);
                       }}
                     />
@@ -93,6 +113,47 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
             );
           })}
         </ul>
+      )}
+      {files.length > 0 && (
+        <>
+          <h2 className="trash-part">Files</h2>
+          <ul className="trash-list" aria-label="Files in Trash">
+            {files.map((file) => {
+              const folder = file.folderId && app.folders?.byId.has(file.folderId) ? app.folders.pathName(file.folderId) : null;
+              return (
+                <li key={file.id}>
+                  <div className="trash-what">
+                    <span className="trash-title">{file.name}</span>
+                    <span className="trash-meta">
+                      {folder && <span>Returns to {folder}</span>}
+                      <span>
+                        Trashed by {file.trashedBy.name} {ago(file.trashedAt, now)}
+                      </span>
+                      <span>{leftLabel(daysLeft(file.purgesAt ?? now, now))}</span>
+                    </span>
+                  </div>
+                  <div className="trash-actions">
+                    <button type="button" className="button small" disabled={file.access !== "edit"} onClick={() => void restoreFile(file)}>
+                      Restore
+                    </button>
+                    {file.access === "edit" && (host.workspace.role === "admin" || host.workspace.role === "editor") && (
+                      <Purge
+                        title={file.name}
+                        gone="The file is removed now, and can't be brought back. Notes that use it will say a file isn't available."
+                        onPurge={async () => {
+                          await host.perform({ type: "upload.purge", id: file.id });
+                          host.uploads.learn([{ id: file.id, upload: null }]);
+                          say({ text: `${file.name} was deleted forever.` });
+                          setAsked((n) => n + 1);
+                        }}
+                      />
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </section>
   );

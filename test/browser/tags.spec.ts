@@ -101,7 +101,7 @@ test("a tag's page takes its name from the address as text: a slash, other lette
   await expect(tagPage(page, markup).getByRole("heading", { level: 1 })).toHaveText(`#${markup}`);
   await expect(tagPage(page, markup)).toContainText(`No notes have #${markup}.`);
   await expect(tagPage(page, markup).locator("img")).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => (window as { pwned?: number }).pwned)).toBeUndefined();
+  expect(await page.evaluate(() => (window as { pwned?: number }).pwned)).toBeUndefined();
 
   await page.goto("/tags");
   await expect(page.getByRole("heading", { level: 1, name: "Tags" })).toBeVisible();
@@ -143,7 +143,7 @@ function expectUnmoved(now: Place, was: Place, when: string, within = 0.01) {
 /** The browser places each run of text on a grid of 1/64 of a pixel, so a tag's own run can start that far from where the letter was in its line's run. */
 const A_RUN = 2 / 64;
 
-const NOTE = ["# Tagged", "", "Intro line", "", "A line with #alpha in the middle, and #beta-2 at its end", "", "- [ ] !! Buy seeds #alpha due:2026-10-14", "", "`#incode` and #12 and [a link](https://example.com/#anchor) stay as they are", "", "```", "#fenced", "```", "", "Last line"].join("\n");
+const NOTE = ["# Tagged", "", "Intro line", "", "A line with #alpha in the middle, and #beta-2 at its end", "", "- [ ] Buy seeds +Garden #alpha due:2026-10-14", "", "`#incode` and #12 and [a link](https://example.com/#anchor) stay as they are", "", "```", "#fenced", "```", "", "Last line"].join("\n");
 const PROSE = /A line with/;
 
 async function openTagged(page: Page) {
@@ -163,7 +163,7 @@ test("a tag in a note is drawn as a tag where its characters were: nothing moves
   const tags = editor(page).locator(".md-tag");
   // What the server takes for a tag and nothing else: not `#12`, code, a fence, or a link's address.
   await expect(tags).toHaveText(["#alpha", "#beta-2", "#alpha"]);
-  await expect.poll(() => perform(page, { type: "tag.list" })).toEqual({ tags: [{ name: "alpha", notes: 1 }, { name: "beta-2", notes: 1 }], indexing: false });
+  expect(await perform(page, { type: "tag.list" })).toEqual({ tags: [{ name: "alpha", notes: 1 }, { name: "beta-2", notes: 1 }], indexing: false });
 
   const look = (el: Element) => {
     const { color, fontSize, fontFamily, fontWeight, padding, margin, borderWidth, letterSpacing } = getComputedStyle(el);
@@ -183,17 +183,14 @@ test("a tag in a note is drawn as a tag where its characters were: nothing moves
   await page.keyboard.press("Home");
   expectUnmoved(await placeOf(line(page, PROSE)), off.prose, "with the cursor at the start of the tag's line");
 
-  // A todo's line draws its options as chips and its tag as a tag, once. With the cursor on one of them that token alone is as written, and the tag is where it was.
+  // A todo's line draws its options as chips and its tag as a tag, once. With the cursor there every token is as written, and the tag is where it was.
   await expect(line(page, /Buy seeds/).locator(".md-tag")).toHaveText(["#alpha"]);
   await expect(line(page, /Buy seeds/).locator(".md-todo-chip")).toHaveCount(2);
   const tagOnTodo = () => line(page, /Buy seeds/).locator(".md-tag").evaluate((el) => el.getBoundingClientRect().toJSON() as { x: number; y: number; width: number; height: number });
   const drawn = await tagOnTodo();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
-  await expect(line(page, /Buy seeds/).locator(".md-todo-chip")).toHaveCount(2);
-  await page.keyboard.press("End");
-  await expect(line(page, /Buy seeds/).locator(".md-todo-chip")).toHaveCount(1);
-  await expect(line(page, /Buy seeds/)).toContainText("due:2026-10-14");
+  await expect(line(page, /Buy seeds/).locator(".md-todo-chip")).toHaveCount(0);
   await expect(line(page, /Buy seeds/).locator(".md-tag")).toHaveText(["#alpha"]);
   const written = await tagOnTodo();
   // A chip is as wide as its token to within a fraction of a pixel, which is all the tag after it can differ by.

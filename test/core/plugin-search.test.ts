@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NoteSummary, SearchResult } from "../../src/core/protocol.ts";
 import { pieces } from "../../src/web/plugins/search/marks.ts";
-import { IDLE, addressOf, againLimit, queryIn, reduce, type Ask, type Event, type Search } from "../../src/web/plugins/search/request.ts";
+import { IDLE, addressOf, againLimit, reduce, viewOf, type Addressed, type Ask, type Event, type Search } from "../../src/web/plugins/search/request.ts";
 
 const result = (id: string): SearchResult => ({ note: { id } as NoteSummary, matches: [] });
 const ids = (state: Search) => (state.status === "listed" ? state.results.map((r) => r.note.id) : null);
@@ -164,21 +164,26 @@ describe("the search request", () => {
 });
 
 describe("a search's address", () => {
-  it("carries the query, which says which notes, whether they have todos and the order, and reads back the same", () => {
-    expect(addressOf('"call the bank" #money +Home')).toBe("/search?q=%22call+the+bank%22+%23money+%2BHome");
-    expect(queryIn("?q=%22call+the+bank%22+%23money+%2BHome")).toBe('"call the bank" #money +Home');
-    expect(addressOf(" plan is:archived has:todo sort:title-asc ")).toBe("/search?q=plan+is%3Aarchived+has%3Atodo+sort%3Atitle-asc");
-    expect(queryIn("?q=plan+is%3Aarchived+has%3Atodo+sort%3Atitle-asc")).toBe("plan is:archived has:todo sort:title-asc");
+  const PLAIN: Addressed = { query: "", show: "open", sort: null, hasTodos: false };
+
+  it("carries what was typed, which notes are shown, the order and whether only notes with todos are wanted, and reads back the same", () => {
+    expect(addressOf({ ...PLAIN, query: '"call the bank" #money +Home' })).toBe("/search?q=%22call+the+bank%22+%23money+%2BHome");
+    expect(viewOf("?q=%22call+the+bank%22+%23money+%2BHome")).toEqual({ ...PLAIN, query: '"call the bank" #money +Home' });
+    expect(addressOf({ ...PLAIN, query: " plan ", show: "all" })).toBe("/search?q=plan&archived=1");
+    expect(viewOf("?q=plan&archived=1")).toEqual({ ...PLAIN, query: "plan", show: "all" });
+    const set: Addressed = { query: "plan", show: "archived", sort: "title", hasTodos: true };
+    expect(addressOf(set)).toBe("/search?q=plan&archived=only&sort=title&todos=1");
+    expect(viewOf("?q=plan&archived=only&sort=title&todos=1")).toEqual(set);
   });
 
-  it("is the page's own with nothing typed, and reads nothing but the query", () => {
-    expect(addressOf("  ")).toBe("/search");
-    expect(queryIn("")).toBe("");
-    expect(queryIn("?archived=1&sort=title&todos=1")).toBe("");
-    expect(queryIn("?q=plan&archived=only")).toBe("plan");
+  it("is the page's own with nothing typed, and reads what it doesn't know as nothing said", () => {
+    expect(addressOf({ ...PLAIN, query: "  " })).toBe("/search");
+    expect(viewOf("")).toEqual(PLAIN);
+    expect(viewOf("?archived=1")).toEqual({ ...PLAIN, show: "all" });
+    expect(viewOf("?archived=yes&sort=match&todos=true")).toEqual(PLAIN);
   });
 
   it("cuts a query longer than a search may be", () => {
-    expect(queryIn(`?q=${"a".repeat(500)}`)).toBe("a".repeat(200));
+    expect(viewOf(`?q=${"a".repeat(500)}`).query).toBe("a".repeat(200));
   });
 });

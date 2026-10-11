@@ -1,13 +1,17 @@
-import { syntaxText } from "../src/core/query.ts";
-
 // The `ink` command's logic, for an agent working from a shell. It is a thin client of the /mcp endpoint,
 // so it does what the MCP tools do and nothing more. scripts/ink.ts runs it on this machine.
+import { writtenUpload, type UploadEmbed } from "../src/core/uploadRefs.ts";
+
 export interface Io {
   fetch: typeof fetch;
   env: Record<string, string | undefined>;
   /** The text piped in, when there is any. */
   stdin: () => Promise<string>;
   out: (line: string) => void;
+  /** The bytes of a file on this machine, for upload. */
+  readFile?: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+  /** Writes a file on this machine, for download. Answers false, and writes nothing, when there is one at `path` and `replace` is false. */
+  writeFile?: (path: string, bytes: Uint8Array, replace: boolean) => Promise<boolean>;
 }
 
 export const USAGE = `Usage: ink [--workspace ID] <command>
@@ -16,12 +20,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   members                             everyone in a workspace, with their role
   notes [--folder ID] [--since TIME] [--tag NAME] [--archived true|only]
                                       the notes in a workspace, in one folder, with a tag, or changed since a time
-  search QUERY [--today DAY] [--zone ZONE] [--folder ID] [--archived true|only] [--has-todos true]
-        [--sort match|recent|created|title] [--limit N] [--offset N]
-                                      the notes a query finds: words, "a phrase", and filters such as
-                                      folder:Plans, #tag, editor:@me, updated:>=7d, is:archived, has:link,
-                                      with -, OR, NOT and ( ). "ink syntax" lists every one. --today and
-                                      --zone are this machine's unless given
+  search QUERY [--folder ID] [--archived true|only] [--has-todos true] [--sort match|recent|created|title] [--limit N] [--offset N]
+                                      the notes whose text has every word; "a phrase", #tag and +project narrow it
   tags [--archived true]              the tags of the notes you can see, and how many notes have each
   archive ID                          archive a note: kept, and left out of listings
   unarchive ID                        bring an archived note back
@@ -35,56 +35,50 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       replace a note's text (from stdin if --text is left out)
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
-  todos [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY]
-        [--no-due true] [--importance N,N] [--assignee WHO]
-        [--assigned-to-me true] [--completed true] [--archived true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
-                                      the todos a query finds, such as "due:<today priority:>=medium", or every
-                                      open one with none; --query QUERY is the same. "ink syntax todos" lists
-                                      what a query can say
-  syntax [todos]                      the query language of search, or of todos
-  todo-filters [--archived true]      the tags and assignees that todos can be narrowed by
-  todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
-        [--every RULE|none] [--skip true] [--assign WHO]
+  todos [--project NAME] [--tag NAME] [--due-from DAY] [--due-to DAY] [--no-due true] [--importance N,N]
+        [--assignee WHO] [--assigned-to-me true] [--completed true] [--archived true] [--note ID]
+        [--limit N] [--offset N]
+                                      the todos in the notes you can see, open ones unless --completed
+  todo-filters [--archived true]      the projects, assignees and tags that todos can be narrowed by
+  todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none]
+        [--add-project NAME] [--remove-project NAME] [--every RULE|none] [--assign WHO]
         [--unassign WHO] [--on DAY]
-                                      check a todo off, change it, or skip a repeating todo to its next
-                                      due date; ID, both Ns and LINE are from todos
+                                      check a todo off or change it; ID, both Ns and LINE are from todos
   todo-history ID --revision N --line N --text LINE
-                                      each time a repeating todo was checked off, and by whom
+                                      each time a recurring todo was checked off, and by whom
   daily [--on DAY]                    your daily note for a day, made if it isn't there
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
+  uploads [--folder ID] [--archived true]
+                                      the uploads in a workspace, or in one folder
+  upload FILE [--folder ID] [--name NAME]
+                                      put a file in a folder, or in Unsorted, and say how a note shows it
+  download ID [--out PATH] [--force true]
+                                      save an upload's bytes under its name here, or at PATH
+  upload-info ID                      one upload, and the notes that refer to it
+  upload-move ID --folder ID          put an upload in another folder
+  upload-archive ID                   archive an upload: kept, and left out of listings
+  upload-unarchive ID                 bring an archived upload back
+  upload-trash ID                     move an upload to Trash, where it waits 30 days
+  upload-restore ID                   bring an upload back from Trash, to the folder it was in
+  uploads-trashed                     the uploads in Trash, and when each is removed for good
   folders                             the folders in a workspace
   folder-create NAME [--parent ID]    a new folder
   folder-rename ID --name NAME        give a folder another name
-  folder-move ID [--parent ID]        put a folder inside another, or at the top level without --parent
   folder-delete ID                    delete an empty folder
   history ID                          a note's changes and who made them
   diff ID --change N                  what one change did to its note, as a line diff
-  blame ID                            who wrote each line of a note: the change that last wrote or edited it
-  changed [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
+  changed [--note ID,ID] [--author KIND:ID] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
                                       the notes that changed, latest first, with the lines added and removed in each
-  changes [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT] [--diffs false]
+  changes [--note ID,ID] [--author KIND:ID] [--from TIME] [--to TIME] [--limit N] [--before NEXT] [--diffs false]
                                       changes across the workspace, newest first, with diffs
   authors                             everyone who has changed a note
-  diffs ID:N,N [ID:N,N ...]           what a selection of changes did, note by note: changes that follow one another as one diff
-  revert-many ID:N,N[@AT] [ID:N,N[@AT] ...] [--preview] [--resolve keep|back]
-                                      revert changes of several notes, each note as one new change. --preview writes nothing and
-                                      prints each note's revision: pass it back as @AT and a note changed since is skipped, not reverted
   label ID --revision N [--name NAME] name a revision, or take its name away without --name
   revert ID --revision N              put a note back to a revision, as a new change
   revert ID --changes N,N             revert chosen changes, as one new change; revert a revert to have its changes again
-  revert ID ... --preview             what either revert would do, and each conflict with later changes to the same lines, with nothing written
-  revert ID ... --resolve keep|back|JSON --at N
-                                      settle the conflicts the preview listed at revision N: keep the later edits, go back to the
-                                      lines as they were, or a JSON list with "keep", "back" or {"text": "..."} for each conflict
-  revert ID --author KIND:ID --preview [--resolve keep|back|JSON --at N]
-                                      what revert-author would do to this one note, with nothing written
-  revert-author KIND:ID [--note ID,ID] [--after ID] [--resolve JSON] [--trash-emptied true]
-                                      revert every change an author made that still stands; --resolve settles the conflicts of the
-                                      notes it names, as {"NOTE ID": {"at": N, "choices": "keep"|"back"|[...]}};
-                                      with --trash-emptied the notes that leaves empty go to Trash
-  revert-author KIND:ID [--note ID,ID] --preview
-                                      what that would do to each note the author changed, with nothing written
+  revert-author KIND:ID [--note ID,ID] [--after ID] [--trash-emptied true]
+                                      revert every change an author made that still stands,
+                                      and with --trash-emptied move the notes that leaves empty to Trash
   undo ID                             take back your latest change to a note
   redo ID                             revert your latest undo, so what it undid stands again
   sources                             your member's data sources: their calendar and contacts, and whether each is connected
@@ -93,17 +87,9 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   event-update SOURCE EVENT --etag ETAG [--title TEXT] [--location TEXT] [--description TEXT]
                [--days DAY,DAY | --start TIME --end TIME]
                                       change an event where it is kept; --days makes it all-day, first and last day
-  event-new SOURCE CALENDAR --title TEXT (--days DAY,DAY | --start TIME --end TIME)
-            [--location TEXT] [--description TEXT]
-                                      add an event to one of the calendars events lists
   contacts [QUERY]                    your member's contacts, or those matching every word
-  person WHO [--limit N]              a person's page: the member they are, your member's contacts that are
-                                      them, their open todos, and the lines that mention them
   refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
   record REF                          the event or contact a reference stands for, as it is now
-  notes-about SOURCE RECORD           the notes that reference a record, by your member's reference or a teammate's to the same event, and who sees each
-
-A flag a command doesn't take is refused, and nothing is sent.
 
 TIME is anything a date parses, such as 2026-10-09 or 2026-10-09T14:00:00Z. KIND:ID is an author
 from authors, such as agent:abc123def456. NEXT is the next of the page before, as JSON.
@@ -117,67 +103,32 @@ else. Write @[[Name]] for a member and create and write store it by their id, or
 members have the name. --mention-names keep leaves every mention as written. On a todo's line a
 mention assigns the todo. WHO is a member's id or a name. A mention gives nobody access.
 
-A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
-DAY is a calendar date, YYYY-MM-DD. --importance is the priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!).
-RULE is how a todo repeats, written every:RULE on its line:
-  2w (d, w, m or y)   every N after the due date     3d-after-done      N after it was last done
-  mon,thu             those days of every week       2w-mon,thu         of every 2nd week
-  3rd-day last-day    that day of every month        2nd-tue last-fri   that weekday of every month
-  1st-day,15th-day    several of either, in order    3m-last-fri        of every 3rd month
-  mar-1               that date every year           1st-mon-mar        that weekday of that month
-  then -until-DAY (none after that day) or -times-N (N more times, counting the one due now)
-Checking off a todo that repeats leaves it open with its next due date and files the checked line on
-your daily note for --on, or for today when left out. Its last time checks it off for good.
+A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14 +Home
+DAY is a calendar date, YYYY-MM-DD. Importance is 0 for normal and 1 to 3 for !, !! and !!!.
+RULE is how a todo recurs, written every:RULE on its line: 2w (d, w, m or y), mon,thu, 3d-after-done,
+3rd-day, last-day, 2nd-tue, last-fri. Checking off a todo that recurs leaves it open with
+its next due date and files the checked line on your daily note for --on, or for today when left out.
 
 SOURCE is a data source's id from sources, such as google-calendar. EVENT and RECORD are ids from
 events and contacts, quoted when they have a space. A reference is your member's alone: nobody else
 who reads the note can follow it.
 
+A note shows an upload with a line of its own: ::image{ID WIDTHxHEIGHT}, ::video{ID WIDTHxHEIGHT},
+::audio{ID} or ::file{ID}. upload prints the line for the file it sent. A file can be at most 50 MB,
+and download never replaces a file that is there unless --force true.
+
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
 
 export class UsageError extends Error {}
 
-/** The server couldn't be reached or didn't do it, which no other way of asking would change. */
-class Failed extends Error {}
-
-/** Flags that take no value. */
-const SWITCHES = new Set(["--preview"]);
-
-/** How many notes one preview_reverts call takes, and how many history_summary lists a page. */
-const PREVIEWED_A_CALL = 40;
-const SUMMARIZED_A_CALL = 100;
-
-/** The flags given. A command reads the ones it takes, and `unread` is the rest: flags it would otherwise drop without a word. */
-class Flags {
-  private readonly given = new Map<string, string>();
-  private readonly read = new Set<string>();
-  set(name: string, value: string) {
-    this.given.set(name, value);
-  }
-  has(name: string) {
-    this.read.add(name);
-    return this.given.has(name);
-  }
-  get(name: string) {
-    this.read.add(name);
-    return this.given.get(name);
-  }
-  unread() {
-    return [...this.given.keys()].filter((name) => !this.read.has(name));
-  }
-}
-
-function parse(argv: string[]): { command: string; positional: string[]; flags: Flags } {
-  const flags = new Flags();
+function parse(argv: string[]): { command: string; positional: string[]; flags: Map<string, string> } {
+  const flags = new Map<string, string>();
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg === "--help" || arg === "-h") return { command: "help", positional: [], flags: new Flags() };
-    if (SWITCHES.has(arg)) flags.set(arg.slice(2), "");
-    else if (arg.startsWith("--")) {
+    if (arg.startsWith("--")) {
       const value = argv[++i];
-      // A switch right after it is the next flag, and never the value that was left out.
-      if (value === undefined || SWITCHES.has(value)) throw new UsageError(`${arg} needs a value`);
+      if (value === undefined) throw new UsageError(`${arg} needs a value`);
       flags.set(arg.slice(2), value);
     } else positional.push(arg);
   }
@@ -191,26 +142,6 @@ const integer = (name: string, value: string): number => {
 };
 
 const integers = (name: string, value: string) => value.split(",").map((part) => integer(name, part));
-
-/** How a revert's conflicts are settled: one word for all of them, or a JSON list with a choice for each. The server checks the choices. */
-function choices(value: string): unknown {
-  if (value === "keep" || value === "back") return value;
-  try {
-    const list: unknown = JSON.parse(value);
-    if (Array.isArray(list)) return list;
-  } catch {
-    // Said below.
-  }
-  throw new UsageError('--resolve must be keep, back, or a JSON list with "keep", "back" or {"text": "..."} for each conflict');
-}
-
-/** One note's changes of a selection, written ID:N,N, with @AT for the revision its revert was previewed at. */
-function selected(value: string, resolve?: string): Record<string, unknown> {
-  const found = /^([^:@]+):([\d,]+)(?:@(\d+))?$/.exec(value);
-  if (!found) throw new UsageError(`${value} isn't a note's changes: write ID:N,N, or ID:N,N@AT`);
-  const at = found[3] === undefined ? {} : { at: Number(found[3]) };
-  return { noteId: found[1], revisions: integers("a change", found[2]!), ...at, ...(resolve !== undefined && found[3] !== undefined ? { choices: resolve } : {}) };
-}
 
 const time = (name: string, value: string): number => {
   const parsed = Date.parse(value);
@@ -240,6 +171,16 @@ const read = (answer: string): { next?: string | null; done?: boolean } => {
   }
 };
 
+/** What is left of a name after its folders, so a name can never say where on this machine a file goes. */
+const lastPart = (name: string) => name.split(/[/\\]/).at(-1) ?? "";
+
+interface Sent {
+  id: string;
+  kind: UploadEmbed;
+  width: number | null;
+  height: number | null;
+}
+
 /** Runs one command. Returns the process exit code. */
 export async function run(argv: string[], io: Io): Promise<number> {
   try {
@@ -249,14 +190,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
       io.out(USAGE);
       return command ? 0 : 1;
     }
-    const id = positional[0];
-    // What a query can say is the same for everyone, so it is said with no token.
-    if (command === "syntax") {
-      if (id !== undefined && id !== "todos") throw new UsageError("syntax takes nothing, or todos");
-      io.out(syntaxText(id === "todos" ? "todos" : "notes"));
-      return 0;
-    }
     if (!token) throw new UsageError("Set INK_TOKEN to an agent token from Common Ink");
+    const id = positional[0];
     const need = (what: string) => id ?? (() => { throw new UsageError(`${command} needs ${what}`); })();
     const needId = () => need("a note id");
     const needFlag = (name: string) => flags.get(name) ?? (() => { throw new UsageError(`${command} needs --${name}`); })();
@@ -268,24 +203,77 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const truth = (_: string, value: string) => value !== "false";
     const archivedToo = (_: string, value: string) => (value === "only" ? "only" : value !== "false");
 
-    /** When an event is: --days makes it all-day, first and last day, and --start with --end two times. Undefined when neither is given. */
-    const whenGiven = () => {
-      if (flags.has("days") && (flags.has("start") || flags.has("end"))) throw new UsageError(`${command} takes --days, or --start and --end, not both`);
-      if (flags.has("start") !== flags.has("end")) throw new UsageError(`${command} needs --start and --end together`);
-      const [from, to = from] = (flags.get("days") ?? "").split(",");
-      return flags.has("days") ? { allDay: true, from, to } : flags.has("start") ? { allDay: false, from: time("--start", flags.get("start")!), to: time("--end", flags.get("end")!) } : undefined;
+    const base = (io.env.INK_URL ?? "https://commonink.app").replace(/\/+$/, "");
+    const UNKNOWN_TOKEN = "Common Ink doesn't know that token: it was mistyped or the agent was disconnected";
+    const call = async (tool: string, args: Record<string, unknown>): Promise<{ answer: string; isError: boolean }> => {
+      const res = await io.fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } }),
+      });
+      if (res.status === 401) throw new UsageError(UNKNOWN_TOKEN);
+      const body = (await res.json()) as { result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { message: string } };
+      if (body.error) throw new UsageError(body.error.message);
+      return { answer: (body.result?.content ?? []).map((c) => c.text).join("\n"), isError: !!body.result?.isError };
     };
-    /** What a query's days are read by: this machine's day and zone, unless they are given. */
-    const days = () => {
-      const now = new Date();
-      const local = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      return { today: flags.get("today") ?? local, zone: flags.get("zone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone };
-    };
+
+    // A file's bytes go over HTTP and not through a tool, at an address that names the workspace.
+    if (command === "upload" || command === "download") {
+      const { readFile, writeFile } = io;
+      if (!readFile || !writeFile) throw new UsageError(`${command} needs files, which this ink has none of`);
+      let workspace = flags.get("workspace");
+      if (workspace === undefined) {
+        const listed = await call("list_workspaces", {});
+        const reach = ((JSON.parse(listed.answer) as { workspaces?: Array<{ id: string }> }).workspaces ?? []).map((w) => w.id);
+        if (reach.length !== 1) throw new UsageError(`Pass --workspace: you can reach ${reach.length} (${reach.join(", ")})`);
+        workspace = reach[0]!;
+      }
+      const uploads = `${base}/api/workspaces/${encodeURIComponent(workspace)}/uploads`;
+      const refusal = async (res: Response) => {
+        if (res.status === 401) throw new UsageError(UNKNOWN_TOKEN);
+        const told = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+        io.out(told?.error ? `${told.error}: ${told.message ?? ""}`.trim() : `Common Ink answered ${res.status}`);
+        return 1;
+      };
+
+      if (command === "upload") {
+        const path = need("a file");
+        const name = flags.get("name") ?? lastPart(path);
+        const bytes = await readFile(path).catch(() => {
+          throw new UsageError(`Can't read ${path}`);
+        });
+        const res = await io.fetch(uploads, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name, ...given({ folderId: ["folder"] }) })) },
+          body: bytes,
+        });
+        if (res.status !== 201) return refusal(res);
+        const sent = (await res.json()) as Sent;
+        io.out(JSON.stringify(sent, null, 2));
+        io.out(`In a note: ${writtenUpload(sent.kind, sent.id, sent.width && sent.height ? { width: sent.width, height: sent.height } : null)}`);
+        return 0;
+      }
+
+      const uploadId = need("an upload id");
+      const info = await call("read_upload", { id: uploadId, workspace });
+      if (info.isError) {
+        io.out(info.answer);
+        return 1;
+      }
+      // The name is somebody else's words. Only its last part is used, so it can't name another directory.
+      const named = lastPart((JSON.parse(info.answer) as { name: string }).name);
+      const path = flags.get("out") ?? named;
+      if (!flags.has("out") && (!named || named === "." || named === "..")) throw new UsageError("That upload's name can't be a file's here. Pass --out");
+      const res = await io.fetch(`${uploads}/${encodeURIComponent(uploadId)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status !== 200) return refusal(res);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (!(await writeFile(path, bytes, flags.get("force") === "true"))) throw new UsageError(`${path} is already there. Pass --force true to replace it, or --out for another place`);
+      io.out(`Saved ${path} (${bytes.byteLength} bytes, ${res.headers.get("Content-Type")})`);
+      return 0;
+    }
 
     let tool: string;
     let args: Record<string, unknown> = {};
-    /** Set by a command that only looks: the author whose revert is previewed, in `noteIds` or in every note they changed. */
-    let previewOf: { author: { kind: string; id: string }; noteIds?: string[] } | undefined;
     switch (command) {
       case "workspaces":
         tool = "list_workspaces";
@@ -299,7 +287,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "search":
         tool = "search";
-        args = { query: need("what to find"), ...days(), ...given({ folderId: ["folder"], includeArchived: ["archived", archivedToo], hasTodos: ["has-todos", truth], sort: ["sort"], limit: ["limit", integer], offset: ["offset", integer] }) };
+        args = { query: need("what to find"), ...given({ folderId: ["folder"], includeArchived: ["archived", archivedToo], hasTodos: ["has-todos", truth], sort: ["sort"], limit: ["limit", integer], offset: ["offset", integer] }) };
         break;
       case "tags":
         tool = "list_tags";
@@ -340,28 +328,21 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "todos":
         tool = "list_todos";
-        if (id !== undefined && flags.has("query")) throw new UsageError("todos takes its query once: after the command, or as --query");
-        args = {
-          ...(id !== undefined && { query: id }),
-          ...days(),
-          ...given({
-            query: ["query"],
-            folderId: ["folder"],
-            tag: ["tag"],
-            dueFrom: ["due-from"],
-            dueTo: ["due-to"],
-            noDue: ["no-due", truth],
-            importance: ["importance", integers],
-            assignee: ["assignee"],
-            assignedToMe: ["assigned-to-me", truth],
-            includeCompleted: ["completed", truth],
-            includeArchived: ["archived", truth],
-            noteId: ["note"],
-            sort: ["sort"],
-            limit: ["limit", integer],
-            offset: ["offset", integer],
-          }),
-        };
+        args = given({
+          project: ["project"],
+          tag: ["tag"],
+          dueFrom: ["due-from"],
+          dueTo: ["due-to"],
+          noDue: ["no-due", truth],
+          importance: ["importance", integers],
+          assignee: ["assignee"],
+          assignedToMe: ["assigned-to-me", truth],
+          includeCompleted: ["completed", truth],
+          includeArchived: ["archived", truth],
+          noteId: ["note"],
+          limit: ["limit", integer],
+          offset: ["offset", integer],
+        });
         break;
       case "todo-filters":
         tool = "todo_filters";
@@ -375,7 +356,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           revision: integer("--revision", flags.get("revision")!),
           line: integer("--line", flags.get("line")!),
           text: flags.get("text")!,
-          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], every: ["every", (_, value) => (value === "none" ? null : value)], skip: ["skip", truth], assign: ["assign"], unassign: ["unassign"], on: ["on"], words: ["words"] }),
+          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], addProject: ["add-project"], removeProject: ["remove-project"], every: ["every", (_, value) => (value === "none" ? null : value)], assign: ["assign"], unassign: ["unassign"], on: ["on"] }),
         };
         break;
       case "todo-history":
@@ -394,6 +375,31 @@ export async function run(argv: string[], io: Io): Promise<number> {
         tool = "move_note";
         args = { id: needId(), folderId: needFlag("folder") };
         break;
+      case "uploads":
+        tool = "list_uploads";
+        args = given({ folderId: ["folder"], includeArchived: ["archived", truth] });
+        break;
+      case "upload-info":
+        tool = "read_upload";
+        args = { id: need("an upload id") };
+        break;
+      case "upload-move":
+        tool = "move_upload";
+        args = { id: need("an upload id"), folderId: needFlag("folder") };
+        break;
+      case "upload-archive":
+      case "upload-unarchive":
+        tool = "archive_upload";
+        args = { id: need("an upload id"), archived: command === "upload-archive" };
+        break;
+      case "upload-trash":
+      case "upload-restore":
+        tool = `${command.slice("upload-".length)}_upload`;
+        args = { id: need("an upload id") };
+        break;
+      case "uploads-trashed":
+        tool = "list_trashed_uploads";
+        break;
       case "folders":
         tool = "list_folders";
         break;
@@ -405,20 +411,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
         tool = "rename_folder";
         args = { id: need("a folder id"), name: needFlag("name") };
         break;
-      case "folder-move":
-        tool = "move_folder";
-        args = { id: need("a folder id"), parentId: flags.get("parent") ?? null };
-        break;
       case "folder-delete":
         tool = "delete_folder";
         args = { id: need("a folder id") };
         break;
       case "history":
         tool = "note_history";
-        args = { id: needId() };
-        break;
-      case "blame":
-        tool = "note_blame";
         args = { id: needId() };
         break;
       case "diff":
@@ -428,14 +426,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "changed":
         tool = "history_summary";
-        args = given({ noteIds: ["note", ids], authors: ["author", (_, value) => [authorRef(value)]], by: ["by"], from: ["from", time], to: ["to", time], limit: ["limit", integer], before: ["before", json] });
+        args = given({ noteIds: ["note", ids], authors: ["author", (_, value) => [authorRef(value)]], from: ["from", time], to: ["to", time], limit: ["limit", integer], before: ["before", json] });
         break;
       case "changes":
         tool = "history";
         args = given({
           noteIds: ["note", ids],
           authors: ["author", (_, value) => [authorRef(value)]],
-          by: ["by"],
           from: ["from", time],
           to: ["to", time],
           limit: ["limit", integer],
@@ -446,19 +443,6 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "authors":
         tool = "history_authors";
         break;
-      case "diffs":
-        if (!id) throw new UsageError("diffs needs a note's changes, as ID:N,N");
-        tool = "history_diff";
-        args = { changes: positional.map((value) => selected(value)) };
-        break;
-      case "revert-many": {
-        if (!id) throw new UsageError("revert-many needs a note's changes, as ID:N,N");
-        const resolve = flags.get("resolve");
-        if (resolve !== undefined && resolve !== "keep" && resolve !== "back") throw new UsageError("revert-many takes --resolve keep or --resolve back, for the notes given with @AT");
-        tool = flags.has("preview") ? "preview_reverts" : "revert_many";
-        args = { changes: positional.map((value) => selected(value, resolve)) };
-        break;
-      }
       case "sources":
         tool = "list_sources";
         break;
@@ -468,25 +452,17 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "event-update": {
         if (positional.length < 2) throw new UsageError("event-update needs a data source and an event id");
-        const when = whenGiven();
+        if (flags.has("days") && (flags.has("start") || flags.has("end"))) throw new UsageError("event-update takes --days, or --start and --end, not both");
+        if (flags.has("start") !== flags.has("end")) throw new UsageError("event-update needs --start and --end together");
+        const [from, to = from] = (flags.get("days") ?? "").split(",");
+        const when = flags.has("days") ? { allDay: true, from, to } : flags.has("start") ? { allDay: false, from: time("--start", flags.get("start")!), to: time("--end", flags.get("end")!) } : undefined;
         tool = "update_event";
         args = { sourceId: positional[0], id: positional[1], etag: needFlag("etag"), ...given({ title: ["title"], location: ["location"], description: ["description"] }), ...(when ? { when } : {}) };
-        break;
-      }
-      case "event-new": {
-        if (positional.length < 2) throw new UsageError("event-new needs a data source and a calendar id");
-        const when = whenGiven() ?? (() => { throw new UsageError("event-new needs --days, or --start and --end"); })();
-        tool = "create_event";
-        args = { sourceId: positional[0], calendarId: positional[1], title: needFlag("title"), when, ...given({ location: ["location"], description: ["description"] }) };
         break;
       }
       case "contacts":
         tool = "list_contacts";
         args = id === undefined ? {} : { query: id };
-        break;
-      case "person":
-        tool = "read_person";
-        args = { who: need("a member's id or a name"), ...given({ limit: ["limit", integer] }) };
         break;
       case "refer":
         if (positional.length < 2) throw new UsageError("refer needs a data source and a record id");
@@ -497,42 +473,19 @@ export async function run(argv: string[], io: Io): Promise<number> {
         tool = "read_record";
         args = { ref: need("a reference") };
         break;
-      case "notes-about":
-        if (positional.length < 2) throw new UsageError("notes-about needs a data source and a record id");
-        tool = "notes_about_record";
-        args = { sourceId: positional[0], id: positional[1] };
-        break;
       case "label":
         if (!flags.has("revision")) throw new UsageError("label needs --revision");
         tool = "label_revision";
         args = { id: needId(), revision: integer("--revision", flags.get("revision")!), name: flags.get("name") ?? null };
         break;
       case "revert":
-        if (flags.has("author")) {
-          if (!flags.has("preview") || flags.has("revision") || flags.has("changes")) throw new UsageError("revert --author takes --preview, and --resolve with --at to preview it settled: revert-author is what reverts an author's changes");
-        } else if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to revert those");
-        if (flags.has("resolve") !== flags.has("at")) throw new UsageError("revert needs --resolve and --at together: how to settle the conflicts, and the revision the preview was of");
-        if (flags.has("author")) {
-          tool = "preview_revert";
-          args = { id: needId(), author: authorRef(flags.get("author")!) };
-        } else if (flags.has("preview")) {
-          tool = "preview_revert";
-          args = flags.has("revision") ? { id: needId(), to: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
-        } else {
-          tool = flags.has("revision") ? "revert_note" : "revert_changes";
-          args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
-        }
-        if (flags.has("resolve")) args.resolve = { at: integer("--at", flags.get("at")!), choices: choices(flags.get("resolve")!) };
+        if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to revert those");
+        tool = flags.has("revision") ? "revert_note" : "revert_changes";
+        args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
         break;
       case "revert-author":
-        if (flags.has("preview")) {
-          if (flags.has("resolve") || flags.has("after")) throw new UsageError("revert-author --preview takes only --note: preview one note settled with revert ID --author KIND:ID --preview --resolve ... --at N");
-          tool = "preview_reverts";
-          previewOf = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids] }) };
-          break;
-        }
         tool = "revert_author";
-        args = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids], after: ["after"], resolve: ["resolve", json], trashEmptied: ["trash-emptied", truth] }) };
+        args = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids], after: ["after"], trashEmptied: ["trash-emptied", truth] }) };
         break;
       case "undo":
       case "redo":
@@ -542,60 +495,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
       default:
         throw new UsageError(`No such command: ${command}`);
     }
-    const workspace = flags.has("workspace") ? { workspace: flags.get("workspace") } : {};
-    const unread = flags.unread();
-    if (unread.length) throw new UsageError(`${command} doesn't take ${unread.map((name) => `--${name}`).join(" or ")}: nothing was sent. Run ink help for what it takes`);
-
-    const base = (io.env.INK_URL ?? "https://commonink.app").replace(/\/+$/, "");
-    const call = async (name: string, given: Record<string, unknown>): Promise<{ answer: string; failed: boolean }> => {
-      const res = await io
-        .fetch(`${base}/mcp`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { ...given, ...workspace } } }),
-        })
-        .catch((err: unknown) => {
-          throw new Failed(`Couldn't reach ${base}: ${err instanceof Error ? err.message : String(err)}`);
-        });
-      if (res.status === 401) throw new UsageError("Common Ink doesn't know that token: it was mistyped or the agent was disconnected");
-      type Answer = { result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { code?: number; message?: string } | string; message?: string };
-      const body = await (res.json() as Promise<Answer | null>).catch(() => {
-        throw new Failed(`${base} answered ${res.status}${res.statusText ? ` ${res.statusText}` : ""}, and not with JSON`);
-      });
-      // What isn't a JSON-RPC answer, such as a body too large, says what was wrong as a word and sometimes a sentence.
-      if (typeof body?.error === "string" || !body || (!res.ok && !body.error)) throw new Failed(`${base} answered ${res.status}: ${body?.message ?? (typeof body?.error === "string" ? body.error : res.statusText)}`);
-      if (body.error) throw new (body.error.code === -32603 ? Failed : UsageError)(body.error.message ?? "Common Ink refused that, and didn't say why");
-      return { answer: (body.result?.content ?? []).map((c) => c.text).join("\n"), failed: body.result?.isError === true };
-    };
-
-    if (previewOf) {
-      const { author } = previewOf;
-      let noteIds = previewOf.noteIds;
-      if (!noteIds) {
-        noteIds = [];
-        for (let before: unknown; ; ) {
-          const { answer, failed } = await call("history_summary", { authors: [author], limit: SUMMARIZED_A_CALL, ...(before ? { before } : {}) });
-          if (failed) return io.out(answer), 1;
-          const page = json("The list of what the author changed", answer) as { notes?: { noteId: string }[]; next?: unknown };
-          noteIds.push(...(page.notes ?? []).map((changed) => changed.noteId));
-          if (!(before = page.next)) break;
-        }
-      }
-      // One list however many calls it took, so what is printed is one JSON document.
-      const previews: unknown[] = [];
-      for (let from = 0; from < noteIds.length; from += PREVIEWED_A_CALL) {
-        const { answer, failed } = await call("preview_reverts", { changes: noteIds.slice(from, from + PREVIEWED_A_CALL).map((noteId) => ({ noteId, author })) });
-        if (failed) return io.out(answer), 1;
-        previews.push(...(json("A preview", answer) as unknown[]));
-      }
-      io.out(JSON.stringify(previews));
-      return 0;
-    }
+    if (flags.has("workspace")) args = { ...args, workspace: flags.get("workspace") };
 
     for (;;) {
-      const { answer, failed } = await call(tool, args);
+      const { answer, isError } = await call(tool, args);
       io.out(answer);
-      if (failed) return 1;
+      if (isError) return 1;
       // These cover a few notes a call, so the command carries on until every note is covered.
       if (tool === "rebuild_links" || tool === "rebuild_todos") {
         if (read(answer).done !== false) return 0;
@@ -609,10 +514,6 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (err instanceof UsageError) {
       io.out(`ink: ${err.message}`);
       return 2;
-    }
-    if (err instanceof Failed) {
-      io.out(`ink: ${err.message}`);
-      return 1;
     }
     throw err;
   }

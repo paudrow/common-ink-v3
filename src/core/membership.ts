@@ -42,9 +42,9 @@ const orphaned = ({ db, workspaceId, now }: Asking, by: { id: string } | { email
  */
 const gone = (member: string) => `NOT EXISTS (SELECT 1 FROM members m WHERE m.workspace_id = ?1 AND m.person_id = ${member})`;
 const ungranted = ({ db, workspaceId }: Asking, memberId: string) => db.prepare(`DELETE FROM grants WHERE workspace_id = ?1 AND person_id = ?2 AND ${gone("?2")}`).bind(workspaceId, memberId);
-const released = ({ db, workspaceId, personId, now }: Asking, memberId: string) =>
+const released = ({ db, workspaceId, personId, now }: Asking, memberId: string, table: "notes" | "uploads" = "notes") =>
   db
-    .prepare(`UPDATE notes SET private_owner = NULL, released_from = ?3, released_by = ?2, released_at = ?4 WHERE workspace_id = ?1 AND private_owner = ?3 AND ${gone("?3")}`)
+    .prepare(`UPDATE ${table} SET private_owner = NULL, released_from = ?3, released_by = ?2, released_at = ?4 WHERE workspace_id = ?1 AND private_owner = ?3 AND ${gone("?3")}`)
     .bind(workspaceId, personId, memberId, now);
 
 const LAST_ADMIN = "A workspace needs an admin. Make someone else an admin first.";
@@ -99,6 +99,7 @@ export async function removeMember(asking: Asking, memberId: string): Promise<{ 
     orphaned(asking, { id: memberId }),
     ungranted(asking, memberId),
     released(asking, memberId),
+    released(asking, memberId, "uploads"),
   ]);
   if (!removed!.meta.changes) throw await refusal(asking, "member.remove", memberId);
   return { memberId };
@@ -122,6 +123,8 @@ export async function leave(asking: Asking): Promise<{ memberId: string }> {
     ungranted(asking, personId),
     // Their daily notes were made private for them, not by them, so they don't hold them here: each stops being private and keeps whose it was.
     released(asking, personId),
+    // A private upload doesn't hold them here either. It goes to the workspace as their daily notes do.
+    released(asking, personId, "uploads"),
   ]);
   if (!left!.meta.changes) throw await refusal(asking, "member.leave", personId, "member");
   return { memberId: personId };

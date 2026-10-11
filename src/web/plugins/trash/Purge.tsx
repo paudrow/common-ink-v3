@@ -2,12 +2,14 @@ import { useState } from "react";
 
 interface Props {
   title: string;
-  /** Removes the note. What it throws is said beside the button. */
+  /** What goes with it, said before it does. Without it, a note and its history. */
+  gone?: string;
+  /** Removes it. What it throws is said beside the button. */
   onPurge: () => Promise<void>;
 }
 
-/** Removes a note in Trash for good, after asking once and naming the note. */
-export function Purge({ title, onPurge }: Props) {
+/** Removes a note or a file in Trash for good, after asking once and naming it. */
+export function Purge({ title, gone = "The note and its history are removed now, and can't be brought back.", onPurge }: Props) {
   const [step, setStep] = useState<"idle" | "asking" | "busy">("idle");
   const [problem, setProblem] = useState<string | null>(null);
   const name = title || "Untitled";
@@ -16,7 +18,7 @@ export function Purge({ title, onPurge }: Props) {
     return (
       <div className="confirm" role="group" aria-label={`Delete ${name} forever`}>
         <span>
-          Delete “{name}” forever? The note and its history are removed now, and can't be brought back.
+          Delete “{name}” forever? {gone}
         </span>
         <button
           type="button"

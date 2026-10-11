@@ -1,18 +1,14 @@
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carriesTab, carry, type App, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
-import { canMove, movable, placesFor, type Place } from "./lib/folderMoves.ts";
+import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
+import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
 import { useKept } from "./lib/kept.ts";
 import { listable } from "./lib/listable.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
-import { Palette } from "./lib/Palette.tsx";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "./sharing/Summary.tsx";
 
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((id) => typeof id === "string");
 
 type Editing = { kind: "create"; parentId: string | null } | { kind: "rename"; id: string };
-/** A row's menu. `folder` is left out for a row that is a list and no folder, which can be opened and not changed. */
-type Menu = { id: string; name: string; folder?: ListedFolder; x: number; y: number };
+type Menu = { folder: ListedFolder; x: number; y: number };
 
 const indent = (depth: number) => ({ "--depth": depth }) as CSSProperties;
 
@@ -28,19 +24,13 @@ interface Props {
   selectedId: string | null;
   /** A single click opens a folder's list as a preview; a double click keeps it open. */
   onOpen: (id: string, keep: boolean) => void;
-  /** Opens a folder's list in a split, right of or under what is in front. Null where the editor area has no splits. */
-  onSplit: ((id: string, side: "right" | "down") => void) | null;
   onChanged: () => void;
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
-  /** True once it is moved. */
-  onMoveFolder: (id: string, place: Place) => Promise<boolean>;
-  /** Opens the picker of where a folder goes. */
-  onPickPlace: (id: string) => void;
   /** Opens the Share dialog for a folder. Left out when there is none to open. */
   onShare?: (folderId: string) => void;
 }
 
-function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSplit, onChanged, onMoveNote, onMoveFolder, onPickPlace, onShare }: Props) {
+function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChanged, onMoveNote, onShare }: Props) {
   const ids = useId();
   const [expandedList, setExpanded] = useKept(host.storage, "expanded", isStrings, []);
   const expanded = new Set(expandedList);
@@ -49,17 +39,12 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
   const closeMenu = useCallback(() => setMenu(null), []);
   const [error, setError] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const [dropTop, setDropTop] = useState(false);
-  /** The folder being dragged from this tree. A drag only says what it carries once it is dropped, and a folder can't be dropped where it can't go. */
-  const dragging = useRef<string | null>(null);
-  /** The folder dragged from this tree, while the drag in hand is that one. A drag from anywhere else carries something else. */
-  const draggedFolder = (e: DragEvent) => (dragging.current && carriesTab(e.dataTransfer) && !e.dataTransfer.types.includes(NOTE_DRAG) ? dragging.current : null);
   const canEdit = role !== "viewer";
   /** A guest has no place at the top of the workspace to put a folder. */
   const member = role !== "guest";
   /** The folder the server said the member may share, asked when its menu opens. */
   const [shareable, setShareable] = useState<string | null>(null);
-  const menuFolderId = menu?.folder?.id;
+  const menuFolderId = menu?.folder.id;
   useEffect(() => {
     if (!menuFolderId || !onShare) return;
     let live = true;
@@ -119,10 +104,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
     </div>
   );
 
-  /** Dragged to the editor area, a row's list is dropped in a group as a tab is. */
-  const dragged = (id: string) => ({ draggable: true, onDragStart: (e: DragEvent) => carry(e.dataTransfer, { kind: "folder", id }) });
-
-  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and its menu only opens it. */
+  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and it has no menu. */
   const listRow = (id: string, name: string, count: number) => (
     <div
       key={id}
@@ -134,13 +116,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
       aria-labelledby={`${ids}-${id}`}
       aria-describedby={`${ids}-${id}-count`}
       tabIndex={selectedId === id || (id === ALL_NOTES && !(selectedId && (tree.byId.has(selectedId) || (selectedId === SHARED_WITH_ME && loose > 0)))) ? 0 : -1}
-      {...dragged(id)}
       onClick={() => onOpen(id, false)}
       onDoubleClick={() => onOpen(id, true)}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenu({ id, name, x: e.clientX, y: e.clientY });
-      }}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
@@ -182,16 +159,6 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             aria-labelledby={`${ids}-${folder.id}`}
             aria-describedby={`${ids}-${folder.id}-count`}
             tabIndex={folder.id === selectedId ? 0 : -1}
-            draggable
-            onDragStart={(e) => {
-              carry(e.dataTransfer, { kind: "folder", id: folder.id });
-              dragging.current = folder.id;
-            }}
-            onDragEnd={() => {
-              dragging.current = null;
-              setDropTarget(null);
-              setDropTop(false);
-            }}
             onClick={choose}
             onDoubleClick={() => onOpen(folder.id, true)}
             onKeyDown={(e) => {
@@ -200,12 +167,12 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
               choose();
             }}
             onContextMenu={(e) => {
+              if (folder.access !== "edit") return;
               e.preventDefault();
-              setMenu({ id: folder.id, name: folder.name, folder, x: e.clientX, y: e.clientY });
+              setMenu({ folder, x: e.clientX, y: e.clientY });
             }}
             onDragOver={(e) => {
-              const moving = draggedFolder(e);
-              if (!e.dataTransfer.types.includes(NOTE_DRAG) && !(moving && canMove(tree, moving, folder.id, member))) return;
+              if (!e.dataTransfer.types.includes(NOTE_DRAG)) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
               setDropTarget(folder.id);
@@ -216,18 +183,12 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
               setDropTarget(null);
               const noteId = e.dataTransfer.getData(NOTE_DRAG);
               if (noteId) void attempt(() => onMoveNote(noteId, folder.id));
-              else {
-                const moving = draggedFolder(e);
-                dragging.current = null;
-                if (moving && canMove(tree, moving, folder.id, member)) void onMoveFolder(moving, folder.id).then((moved) => moved && expand(folder.id));
-              }
             }}
           >
             {hasChildren ? (
               <button
                 type="button"
                 className="chevron"
-                data-row-toggle
                 data-open={open || undefined}
                 tabIndex={-1}
                 aria-label={`${open ? "Collapse" : "Expand"} ${folder.name}`}
@@ -248,7 +209,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             <span className="count" id={`${ids}-${folder.id}-count`}>
               {folder.noteCount}
             </span>
-            <button
+            {folder.access === "edit" && (
+              <button
                 type="button"
                 className="row-actions"
                 tabIndex={-1}
@@ -256,11 +218,12 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
                 onClick={(e) => {
                   e.stopPropagation();
                   const box = e.currentTarget.getBoundingClientRect();
-                  setMenu({ id: folder.id, name: folder.name, folder, x: box.left, y: box.bottom + 2 });
+                  setMenu({ folder, x: box.left, y: box.bottom + 2 });
                 }}
               >
                 <Icon name="more" />
               </button>
+            )}
           </div>,
         );
       }
@@ -273,51 +236,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
   visit(null, 1);
   if (editing?.kind === "create" && editing.parentId === null) rows.push(nameRow("new", 1, "", (name) => run({ type: "folder.create", name })));
 
-  /** The arrow keys move through the rows, Home and End go to the first and last, and Right and Left open a folder out and shut it. */
-  const move = (e: KeyboardEvent<HTMLDivElement>) => {
-    const row = e.target;
-    if (!(row instanceof HTMLElement) || row.role !== "treeitem" || e.altKey || e.ctrlKey || e.metaKey) return;
-    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]')];
-    const at = rows.indexOf(row);
-    const to = { ArrowDown: rows[at + 1], ArrowUp: rows[at - 1], Home: rows[0], End: rows.at(-1) }[e.key];
-    const turns = { ArrowRight: "false", ArrowLeft: "true" }[e.key];
-    // Right on a folder that is open goes into it, and Left on a row inside one goes to the folder it is in.
-    const parent = rows.slice(0, at).findLast((r) => Number(r.ariaLevel) < Number(row.ariaLevel));
-    const through = e.key === "ArrowRight" ? (row.ariaExpanded === "true" ? rows[at + 1] : undefined) : e.key === "ArrowLeft" && row.ariaExpanded !== "true" ? parent : undefined;
-    if (to ?? through) (to ?? through)!.focus();
-    else if (turns && row.ariaExpanded === turns) row.querySelector<HTMLElement>("[data-row-toggle]")?.click();
-    else if (!(e.key in { ArrowDown: 0, ArrowUp: 0 })) return;
-    e.preventDefault();
-  };
-
-  /** Off every row, a folder dragged in the tree goes to the top of the workspace. */
-  const toTop = (e: DragEvent) => {
-    const moving = draggedFolder(e);
-    return moving && !(e.target as Element).closest(".folder-row") && canMove(tree, moving, null, member) ? moving : null;
-  };
-
   return (
-    <div
-      className="folders"
-      data-drop-top={dropTop || undefined}
-      onDragOver={(e) => {
-        if (!toTop(e)) return setDropTop(false);
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setDropTop(true);
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTop(false);
-      }}
-      onDrop={(e) => {
-        const moving = toTop(e);
-        if (!moving) return;
-        e.preventDefault();
-        setDropTop(false);
-        dragging.current = null;
-        void onMoveFolder(moving, null);
-      }}
-    >
+    <div className="folders">
       <div className="section-head">
         <span id={`${ids}-label`}>Folders</span>
         {canEdit && member && (
@@ -326,7 +246,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
           </button>
         )}
       </div>
-      <div role="tree" aria-labelledby={`${ids}-label`} className="tree" onKeyDown={move}>
+      <div role="tree" aria-labelledby={`${ids}-label`} className="tree">
         {rows}
         {loose > 0 && listRow(SHARED_WITH_ME, "Shared with me", loose)}
       </div>
@@ -337,31 +257,24 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
       )}
       {menu && (
         <ContextMenu
-          label={`${menu.name} actions`}
+          label={`${menu.folder.name} actions`}
           x={menu.x}
           y={menu.y}
           onClose={closeMenu}
           items={[
-            ...(onSplit
-              ? [
-                  { label: "Open in a split right", action: () => onSplit(menu.id, "right") },
-                  { label: "Open in a split down", action: () => onSplit(menu.id, "down") },
-                ]
-              : []),
-            ...(menu.folder?.access === "edit" ? [{ label: "New folder inside", action: () => startCreate(menu.id) }] : []),
-            ...(menu.folder && placesFor(tree, menu.id, member).length ? [{ label: "Move to…", action: () => onPickPlace(menu.id) }] : []),
-            ...(onShare && menu.folder && shareable === menu.id ? [{ label: "Share", action: () => onShare(menu.id) }] : []),
-            ...(menu.folder?.access !== "edit" || menu.id === tree.unsortedId
+            { label: "New folder inside", action: () => startCreate(menu.folder.id) },
+            ...(onShare && shareable === menu.folder.id ? [{ label: "Share", action: () => onShare(menu.folder.id) }] : []),
+            ...(menu.folder.id === tree.unsortedId
               ? []
               : [
                   {
                     label: "Rename",
                     action: () => {
                       setError(null);
-                      setEditing({ kind: "rename", id: menu.id });
+                      setEditing({ kind: "rename", id: menu.folder.id });
                     },
                   },
-                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.id }) }] : []),
+                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.folder.id }) }] : []),
                 ]),
           ]}
         />
@@ -372,8 +285,6 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
 
 function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit: (name: string) => void; onCancel: () => void }) {
   const [value, setValue] = useState(initial);
-  /** Ended from the keyboard, the cursor goes back to the tree's rows, where the arrow keys are. */
-  const toRows = (field: HTMLElement) => field.closest('[role="tree"]')?.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]')?.focus();
   return (
     <input
       className="name-input"
@@ -388,116 +299,11 @@ function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit:
           e.preventDefault();
           if (value.trim() && value.trim() !== initial) onCommit(value.trim());
           else onCancel();
-          toRows(e.currentTarget);
         } else if (e.key === "Escape") {
           e.stopPropagation();
           onCancel();
-          toRows(e.currentTarget);
         }
       }}
-    />
-  );
-}
-
-const MOVE_OVERLAY = "move-folder";
-const TOP = "top";
-
-/** What the last move of a folder said, and the move that takes it back. */
-type Said = { text: string; back?: { id: string; place: Place } };
-
-/** Moves folders and says so, with an Undo, wherever the move was made from. */
-function mover(host: PluginHost) {
-  let said: Said | null = null;
-  const listeners = new Set<() => void>();
-  // In the bottom bar only while there is something to say: an item there keeps the bar, which is gone when nothing else is in it.
-  let shown: (() => void) | null = null;
-  const say = (next: Said | null) => {
-    said = next;
-    if (said && !shown) shown = host.views.register("bar", { id: "folder-moved", component: () => <Moved moves={moves} /> });
-    if (!said && shown) {
-      shown();
-      shown = null;
-    }
-    for (const listener of listeners) listener();
-  };
-  const where = (tree: Tree, place: Place) => (place === null ? "to the top" : `into "${tree.byId.get(place)?.name ?? "a folder"}"`);
-  async function move(id: string, place: Place, undoing = false): Promise<boolean> {
-    const app = host.app();
-    const tree = app.folders;
-    const folder = tree?.byId.get(id);
-    if (!tree || !folder) return false;
-    let moved = false;
-    try {
-      await host.perform({ type: "folder.move", id, parentId: place });
-      say({ text: `Moved "${folder.name}" ${undoing ? "back " : ""}${where(tree, place)}`, back: undoing ? undefined : { id, place: folder.parentId } });
-      moved = true;
-    } catch (err) {
-      say({ text: `Couldn't move "${folder.name}": ${err instanceof Error ? err.message : String(err)}` });
-    }
-    app.refresh();
-    return moved;
-  }
-  const moves = {
-    move,
-    say,
-    said: () => said,
-    subscribe: (listener: () => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
-  return moves;
-}
-type Mover = ReturnType<typeof mover>;
-
-/** Drawn from the bottom bar so it is there whatever is open, and shown over the window. */
-function Moved({ moves }: { moves: Mover }) {
-  const said = useSyncExternalStore(moves.subscribe, moves.said);
-  if (!said) return null;
-  return createPortal(
-    <div className="toast" role="status">
-      <span>{said.text}</span>
-      {said.back && (
-        <button type="button" className="link" onClick={() => void moves.move(said.back!.id, said.back!.place, true)}>
-          Undo
-        </button>
-      )}
-      <button type="button" className="icon-button" aria-label="Dismiss" onClick={() => moves.say(null)}>
-        <Icon name="close" />
-      </button>
-    </div>,
-    document.body,
-  );
-}
-
-/** Where a folder goes, picked by typing: first which folder, unless one was handed over, then where. */
-function MovePicker({ app, state, close, moves }: { app: App; state: unknown; close: () => void; moves: Mover }) {
-  const tree = app.folders;
-  if (!tree) return null;
-  const top = app.workspace.role !== "guest";
-  const handed = (state as { folderId?: unknown } | undefined)?.folderId;
-  const moving = typeof handed === "string" && placesFor(tree, handed, top).length ? handed : null;
-  if (!moving)
-    return (
-      <Palette
-        key="which"
-        label="Move which folder"
-        placeholder="Find the folder to move"
-        empty="There's no folder you can move."
-        items={movable(tree, top).map((id) => ({ id, label: tree.byId.get(id)!.name, hint: tree.pathName(tree.byId.get(id)!.parentId) || undefined }))}
-        onPick={(id) => app.toggleOverlay(MOVE_OVERLAY, { folderId: id })}
-        onClose={close}
-      />
-    );
-  return (
-    <Palette
-      key={moving}
-      label={`Move "${tree.byId.get(moving)!.name}" to`}
-      placeholder={`Where "${tree.byId.get(moving)!.name}" goes`}
-      empty="No folder matches."
-      items={placesFor(tree, moving, top).map((place) => ({ id: place ?? TOP, label: place === null ? "Top of the workspace" : tree.pathName(place) }))}
-      onPick={(id) => void moves.move(moving, id === TOP ? null : id)}
-      onClose={close}
     />
   );
 }
@@ -505,17 +311,9 @@ function MovePicker({ app, state, close, moves }: { app: App; state: unknown; cl
 export const folders: Plugin = {
   id: "folders",
   name: "Folders",
-  description: "The folder tree in the sidebar, where notes are filed, moved and found.",
-  icon: "folders",
   activate(host) {
-    const moves = mover(host);
-    const pickPlace = (folderId: string | null) => host.app().toggleOverlay(MOVE_OVERLAY, { folderId });
-    host.commands.register({ id: "folders.move", title: "Move folder to…", run: () => pickPlace(host.app().folderId) });
-    host.views.register("overlay", { id: MOVE_OVERLAY, component: ({ app, state, close }) => <MovePicker app={app} state={state} close={close} moves={moves} /> });
     host.views.register("section", {
       id: "folders",
-      label: "Folders",
-      icon: "folders",
       component: ({ app }) => {
         const live = listable(app.notes ?? [], false);
         return (
@@ -528,11 +326,8 @@ export const folders: Plugin = {
             total={live.length}
             selectedId={app.folderId}
             onOpen={(id, keep) => app.openFolder(id, { preview: !keep })}
-            onSplit={app.openBeside && ((id, side) => app.openBeside?.({ kind: "folder", id }, side))}
             onChanged={app.refresh}
             onMoveNote={app.moveNote}
-            onMoveFolder={moves.move}
-            onPickPlace={pickPlace}
             onShare={host.commands.list().some((c) => c.id === SHARE_COMMAND) ? (folderId) => app.toggleOverlay(SHARE_OVERLAY, { folderId }) : undefined}
           />
           )

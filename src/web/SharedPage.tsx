@@ -3,7 +3,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Folder, NoteSummary, Results, Shared, SharedNote } from "../core/protocol.ts";
-import { ApiError, openShared, readShared } from "./api.ts";
+import { ApiError, openShared, readShared, sharedUploadAddress } from "./api.ts";
 import { forEditor, usable } from "./editorExtensions.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
@@ -18,12 +18,14 @@ import { kanban } from "./plugins/kanban/index.ts";
 import { links } from "./plugins/links/index.ts";
 import { math } from "./plugins/math/index.ts";
 import { media } from "./plugins/media/index.ts";
-import { mentions } from "./plugins/mentions/index.tsx";
+import { mentions } from "./plugins/mentions/index.ts";
 import { stopwatch } from "./plugins/stopwatch.ts";
 import { tables } from "./plugins/tables/index.ts";
 import { timer } from "./plugins/timer.ts";
 import { todos } from "./plugins/todos/index.tsx";
+import { uploadDrawing } from "./plugins/uploads/index.tsx";
 import { reading } from "./readOnly.ts";
+import { referredUploads } from "./referredUploads.ts";
 
 /** A link's address: `/s/<token>`. */
 const ADDRESS = /^\/s\/([A-Za-z0-9_-]{20,64})$/;
@@ -32,10 +34,10 @@ export const sharedToken = (pathname: string) => ADDRESS.exec(pathname)?.[1] ?? 
 
 /**
  * The plugins that draw a note's text. None of them needs the server, and the page gives them no way
- * to it: who is in the workspace, the one thing any asks for, is refused. So a mention is the name
- * the note writes and nothing more.
+ * to it: what any asks for, the projects a todo's chip offers and who is in the workspace, is refused.
+ * So nobody here can change a todo, and a mention is the name the note writes and nothing more.
  */
-const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, mentions, tables, math, codeBlocks, bullets, labelledReferences];
+const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, uploadDrawing, html, gfm, todos, links, mentions, tables, math, codeBlocks, bullets, labelledReferences];
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const NOT_HERE = () => Promise.reject(new Error("A link's page asks nothing of a workspace"));
@@ -64,26 +66,29 @@ function useHash() {
 /**
  * The plugins that draw a note, started with no workspace behind them: every way to the server is
  * shut, what one keeps is forgotten with the page, and the only notes they know of are the ones the
- * open note links to that the link covers.
+ * open note links to that the link covers. An upload's bytes are asked for by the link and never
+ * from the workspace, and only for an upload the read said the link covers.
  */
-function useDrawing(open: (noteId: string) => void) {
+function useDrawing(token: string, open: (noteId: string) => void) {
   const app = useRef<Pick<App, "notes" | "trashed" | "folders" | "noteId" | "openNote">>({ notes: [], trashed: [], folders: null, noteId: null, openNote: open });
   app.current.openNote = open;
+  const [referred] = useState(referredUploads);
   const [host] = useState(() => {
     const kept = new Map<string, unknown>();
     return createPluginHost({
       plugins: DRAWING,
-      // Whoever holds a link isn't a member and has no settings: HTML in a note it opens runs only when they press Run.
-      settings: { "html.run": "ask first" },
-      write: () => false,
+      trusted: DRAWING,
+      settings: {},
+      write: () => {},
       mac: MAC,
       provide: (plugin) => ({
         workspace: { id: "", name: "", role: "guest" },
         app: () => app.current as App,
         perform: NOT_HERE,
-        agents: { list: NOT_HERE, connect: NOT_HERE, edit: NOT_HERE, disconnect: NOT_HERE },
+        agents: { list: NOT_HERE, connect: NOT_HERE, disconnect: NOT_HERE },
         members: { invite: NOT_HERE, setRole: NOT_HERE, remove: NOT_HERE, leave: NOT_HERE, invites: NOT_HERE, revoke: NOT_HERE },
         sharing: { of: NOT_HERE, grant: NOT_HERE, link: NOT_HERE, revoke: NOT_HERE, setPrivate: NOT_HERE, all: NOT_HERE },
+        uploads: { referred: (id) => referred.get(id) ?? null, onReferred: referred.subscribe, learn: () => {}, address: (id) => sharedUploadAddress(token, id), send: NOT_HERE },
         storage: { get: (key) => kept.get(`${plugin.id}.${key}`), set: (key, value) => void kept.set(`${plugin.id}.${key}`, value) },
       }),
     });
@@ -93,6 +98,7 @@ function useDrawing(open: (noteId: string) => void) {
   const extensions = useMemo(() => usable(contributed.editorExtensions).taken, [contributed.editorExtensions]);
   /** Says which notes the open one links to that the link covers, so each such link is drawn with its title and opens. */
   const linksTo = (note: Results["shared.read"]) => {
+    referred.learn(note.uploads);
     app.current.noteId = note.id;
     app.current.notes = note.links.flatMap((l) => (l.title === null ? [] : [{ id: l.id, title: l.title, state: l.state ?? "live" } as NoteSummary]));
     host.notesChanged();
@@ -217,7 +223,7 @@ function Listing({ shared, openId }: { shared: Shared; openId: string | null }) 
 function SharedNoteView({ token, noteId }: { token: string; noteId: string }) {
   const [read, setRead] = useState<Read>({ kind: "loading" });
   const el = useRef<HTMLDivElement>(null);
-  const { embeds, extensions, linksTo } = useDrawing((id) => void (location.hash = id));
+  const { embeds, extensions, linksTo } = useDrawing(token, (id) => void (location.hash = id));
   const mine = useMemo(() => forEditor({ noteId }), [noteId]);
   const added = useMemo(() => mine(extensions).extensions, [mine, extensions]);
 
@@ -240,7 +246,7 @@ function SharedNoteView({ token, noteId }: { token: string; noteId: string }) {
       parent: el.current,
       state: EditorState.create({
         doc: note.text,
-        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding(noteId), embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "Note text" })],
+        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding, embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "Note text" })],
       }),
     });
     return () => view.destroy();

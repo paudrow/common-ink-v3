@@ -10,7 +10,7 @@ A todo is a checkbox line in a note, and its options are tokens on that line. Th
 
 **One parser.** `src/core/todos.ts` reads a line into a todo and rewrites one token of it. The server indexes with it, the editor draws with it, and the Todos page shows what it read. `docs/todos.md` is the grammar.
 
-**An index, kept with the text.** The tables `todos` and `note_tags` are written in the batch that changes a note's text, as `links` is. Listing reads them through `SEEN` and never reads a note's text. They hold nothing the text doesn't say, so they can be made again. A note that has never been indexed is indexed on its next write or the next time its workspace's todos are listed, so nobody runs a command after the migration.
+**An index, kept with the text.** The tables `todos`, `todo_projects` and `note_tags` are written in the batch that changes a note's text, as `links` is. Listing reads them through `SEEN` and never reads a note's text. They hold nothing the text doesn't say, so they can be made again. A note that has never been indexed is indexed on its next write or the next time its workspace's todos are listed, so nobody runs a command after the migration.
 
 **A rebuild covers every note and says nothing.** `todos.rebuild` and `links.rebuild` are one operation that makes both records again for every note in the workspace, including private notes the admin can't see. It reads their text on the server and writes records that are only read through `SEEN`. Its answer is `{ done }`. This replaces the choice in ADR 2 that a rebuild skips what the admin can't see, which left those notes' records wrong for good.
 
