@@ -207,8 +207,7 @@ button.link:hover {
   font-size: 12px;
 }
 
-.button:disabled,
-.button[aria-disabled="true"] {
+.button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -563,7 +562,7 @@ button.link:hover {
 .folder-column {
   max-width: 780px;
   margin: 0 auto;
-  padding: 30px clamp(14px, 5%, 32px);
+  padding: 30px clamp(14px, 5%, 32px) 50vh;
 }
 
 .folder-head {
@@ -1035,60 +1034,14 @@ button.link:hover {
   scrollbar-width: none;
 }
 
-/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
+/* The window's own buttons, at the end of the tab row where no tab scrolls over them. */
 .window-controls {
   display: flex;
   flex: none;
   align-items: center;
   gap: 2px;
+  margin-left: auto;
   padding: 0 6px;
-}
-
-/* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
-.focus-button {
-  align-self: center;
-  margin: 0 6px 0 auto;
-}
-
-.group:not([data-front]) .focus-button {
-  opacity: 0.45;
-}
-
-/* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
-.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle, .bar),
-.groups[data-focus-mode] .group:not([data-front]),
-.groups[data-focus-mode] .resize-handle {
-  visibility: hidden;
-}
-
-.groups[data-focus-mode] .group[data-front] {
-  position: fixed;
-  inset: 0;
-  background: var(--bg);
-}
-
-.groups[data-focus-mode] .group[data-front] .tab-row {
-  position: absolute;
-  top: 3px;
-  right: 0;
-  z-index: 1;
-  height: auto;
-  border: 0;
-  background: none;
-}
-
-.groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
-  display: none;
-}
-
-/* A note's bar ends short of the way out, so its save state is not under it. */
-.groups[data-focus-mode] .note-bar {
-  padding-right: 40px;
-}
-
-.groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
-  background: none;
-  opacity: 0.45;
 }
 
 /* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
@@ -1227,8 +1180,7 @@ button.link:hover {
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* Its height is a measure too: the room under a note's last line is a share of its own pane, not of the window. */
-  container: note / size;
+  container: note / inline-size;
 }
 
 .note-bar {
@@ -1306,7 +1258,7 @@ button.link:hover {
   max-width: 46rem;
   min-height: 100%;
   margin: 0 auto;
-  padding: 2rem 2rem 30cqh;
+  padding: 2rem 2rem 30vh;
 }
 
 /* What an editor extension keeps under a note, such as vim's mode: at the foot of the note's pane, as wide as the pane. */
@@ -1378,20 +1330,295 @@ button.link:hover {
   display: inline-block;
 }
 
-.stopwatch {
-  padding: 0 8px;
+.embed-block {
+  display: block;
+  padding: 6px 0;
+}
+
+.clock,
+.clock-reset {
+  /* The border is taken back out of the line's height, so a line with a clock in it is as tall as one without. */
+  margin-block: -1px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg-side);
   color: inherit;
   font: inherit;
-  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
-.stopwatch[aria-pressed="true"] {
+.clock {
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock:disabled {
+  cursor: default;
+}
+
+.clock[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.clock.done {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.clock-reset {
+  margin-left: 3px;
+  padding: 0 6px;
+  color: var(--muted);
+}
+
+/* Drawn here and not written in the button, so the time is the only text a stopwatch adds to its line. */
+/* Kept in its place and out of sight, so the line is as wide before the clock starts as after. Not hidden outright, which the caret is lost beside. */
+.clock-reset:disabled {
+  opacity: 0;
+  cursor: default;
+}
+
+.clock-reset::before {
+  content: "↺";
+}
+
+.clock-unread {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.kanban {
+  font-family: var(--prose);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.kanban-columns {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.kanban-column {
+  flex: 1 0 8rem;
+  max-width: 18rem;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-side);
+}
+
+.kanban-column.drop {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.kanban-column h3 {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 2px 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.kanban-count {
+  color: var(--faint);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.kanban-cards {
+  display: grid;
+  gap: 6px;
+  min-height: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kanban-card {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  cursor: grab;
+  overflow-wrap: anywhere;
+}
+
+.kanban-card:focus-visible,
+.kanban-add:focus-visible,
+.kanban-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.kanban-card.dragging {
+  opacity: 0.4;
+}
+
+.kanban-card-more {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.kanban-add,
+.kanban-edit {
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kanban-add {
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.kanban-add::before {
+  content: "+ ";
+}
+
+.kanban-add:hover,
+.kanban-edit:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.kanban-add-text {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.kanban-edit {
+  margin-top: 2px;
+  padding: 2px 6px;
+}
+
+.kanban-empty p {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
+.app[data-bar] {
+  box-sizing: border-box;
+  padding-bottom: 26px;
+}
+
+.bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-side);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.bar-item {
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-end {
+  margin-left: auto;
+}
+
+button.bar-item {
+  cursor: pointer;
+}
+
+button.bar-item:hover,
+button.bar-item:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
+}
+
+.bar-clock {
+  color: var(--accent);
+}
+
+.bar-clock[data-done] {
+  color: var(--danger);
+}
+
+.quick-timer-how {
+  margin: 0;
+  padding: 8px 14px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quick-timer input[aria-invalid="true"] {
+  color: var(--danger);
+}
+
+/* The list a completion offers at the cursor, such as the embed menu. */
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete {
+  border: 0;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  font-family: var(--prose);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul {
+  max-height: 16rem;
+  padding: 4px;
+  font-family: inherit;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li {
+  padding: 4px 8px;
+  border-radius: 5px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.cm-editor .cm-tooltip-autocomplete .cm-completionDetail {
+  margin-left: 1em;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-style: normal;
 }
 
 /* The Plugins page: every plugin there is, and one plugin's details. */
@@ -1417,10 +1644,9 @@ button.link:hover {
 }
 
 .plugin-list {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -1432,42 +1658,13 @@ button.link:hover {
   align-items: flex-start;
 }
 
-/* A plugin's card, in the look of a note's card in a folder's list. Its name is a link laid over the whole of it, and its switch lies above the link. */
-.plugin-card {
-  position: relative;
-  align-items: center;
-  padding: 12px 14px 12px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg-elev);
+.plugin-row {
+  padding: 10px 8px;
+  border-top: 1px solid var(--line);
 }
 
-.plugin-card:hover {
-  border-color: var(--line-strong);
-}
-
-.plugin-card:has(.plugin-name:focus-visible) {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.plugin-card .plugin-name {
-  font-size: 14.5px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  outline: none;
-}
-
-.plugin-card .plugin-name::after {
-  position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  content: "";
-}
-
-.plugin-card :is(.switch, .error) {
-  position: relative;
-  z-index: 1;
+.plugin-row:last-child {
+  border-bottom: 1px solid var(--line);
 }
 
 .plugin-icon {
@@ -1651,7 +1848,8 @@ button.link:hover {
   font-weight: 600;
 }
 
-.plugin-adds dd {
+.plugin-adds dd,
+.plugin-options li {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 8px;
@@ -1667,12 +1865,16 @@ button.link:hover {
   font-size: 11.5px;
 }
 
-/* A plugin's options on its own page are the rows Settings draws, in a frame with no border of its own. */
 .plugin-options {
-  min-width: 0;
-  margin: 0 0 10px;
+  display: grid;
+  gap: 6px;
+  margin: 0;
   padding: 0;
-  border: 0;
+  list-style: none;
+}
+
+.plugin-option {
+  font-weight: 600;
 }
 
 /* A switch is a checkbox drawn as one, so it is still a checkbox to the keyboard and to a screen reader. */
@@ -1771,10 +1973,8 @@ kbd {
   margin: 0;
 }
 
-/* Saved and Saving… take the same room, so the head wraps the same way through a save and nothing under it moves. */
 .settings-head .save-state {
   flex: 1;
-  min-width: 4.5rem;
 }
 
 .settings-tools {
@@ -1875,17 +2075,9 @@ kbd {
   .settings-pick {
     display: block;
   }
-}
 
-/* The table of shortcuts is rows of cells only where its own pane has room for the four columns. In less, each command is a card. */
-@container settings-pane (max-width: 38rem) {
-  /* The column names are out of sight and still read out, as the cells keep their order. */
   .shortcuts thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
+    display: none;
   }
 
   .shortcuts,
@@ -1894,28 +2086,15 @@ kbd {
     display: block;
   }
 
-  /* A row is its command, with where its keys are from at the end of that line, and under it the keys and the buttons. The buttons' column is as wide whatever is in it, so the keys' is too. */
   .shortcuts tr {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
+    display: flex;
+    flex-wrap: wrap;
     gap: 4px 10px;
     align-items: center;
   }
 
-  .shortcuts tr > .shortcut-from {
-    grid-area: 1 / 2;
-    justify-self: end;
-    align-self: start;
-    width: 48px;
-    text-align: right;
-  }
-
-  .shortcuts tr > .shortcut-keys {
-    grid-area: 2 / 1;
-  }
-
-  .shortcuts tr > .shortcut-actions {
-    grid-area: 2 / 2;
+  .shortcuts tr > th {
+    flex-basis: 100%;
   }
 
   .shortcuts tr > th,
@@ -1924,28 +2103,13 @@ kbd {
     border: 0;
   }
 
+  .shortcuts .shortcut-actions {
+    margin-left: auto;
+  }
+
   .shortcuts tr {
     padding: 8px 0 8px 8px;
     border-bottom: 1px solid var(--line);
-  }
-}
-
-/* In a pane narrower than the buttons and a key side by side, a card is one column: the command, its keys, where they are from, the buttons. */
-@container settings-pane (max-width: 18rem) {
-  .shortcuts tr {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .shortcuts tr > :is(.shortcut-from, .shortcut-keys, .shortcut-actions) {
-    grid-area: auto;
-    justify-self: stretch;
-    width: auto;
-    text-align: left;
-  }
-
-  .shortcuts .shortcut-buttons {
-    grid-template-columns: 50px 38px 48px;
-    justify-content: start;
   }
 }
 
@@ -1970,7 +2134,6 @@ kbd {
 }
 
 .settings-pane {
-  container: settings-pane / inline-size;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -1999,27 +2162,11 @@ kbd {
   font-weight: 400;
 }
 
-/* The columns have widths of their own, not their content's, so a key added to one row moves no other. */
 .shortcuts {
   width: 100%;
   margin-top: 8px;
   border-collapse: collapse;
   font-size: 13px;
-  table-layout: fixed;
-}
-
-@container settings-pane (width > 38rem) {
-  .shortcuts thead th:nth-child(2) {
-    width: 216px;
-  }
-
-  .shortcuts thead th:nth-child(3) {
-    width: 60px;
-  }
-
-  .shortcuts thead th:nth-child(4) {
-    width: 188px;
-  }
 }
 
 .shortcuts th,
@@ -2041,12 +2188,6 @@ kbd {
   border-left: 2px solid transparent;
 }
 
-/* A command's id is one long word, and the pane may be narrower than it, with both sidebars open or in a split. So it has a line of its own under the title and breaks where it must. */
-.shortcuts code {
-  display: block;
-  overflow-wrap: anywhere;
-}
-
 .shortcuts tr[data-modified] th {
   border-left-color: var(--accent);
 }
@@ -2061,18 +2202,12 @@ kbd {
   font-size: 12px;
 }
 
-/* A command's keys are one line whatever their number and their length, so a key added grows no row: those past the column's width are scrolled to, and the cell's title names them all. */
-.shortcut-chords {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  min-height: 22px;
-  overflow-x: auto;
-  scrollbar-width: none;
+.shortcut-keys {
+  white-space: nowrap;
 }
 
-.shortcut-chords > * {
-  flex: none;
+.shortcut-keys kbd + kbd {
+  margin-left: 4px;
 }
 
 .shortcut-keys kbd button {
@@ -2095,25 +2230,13 @@ kbd {
   font-size: 12px;
 }
 
-.shortcut-buttons {
-  display: grid;
-  grid-template-columns: 58px 44px 54px;
-  gap: 4px;
-  justify-content: end;
+.shortcut-actions {
+  text-align: right;
+  white-space: nowrap;
 }
 
-.shortcut-buttons .button {
-  grid-row: 1;
-  grid-column: 1;
-  padding-inline: 0;
-}
-
-.shortcut-buttons [data-does="add"] {
-  grid-column: 2;
-}
-
-.shortcut-buttons [data-does="reset"] {
-  grid-column: 3;
+.shortcut-actions .button + .button {
+  margin-left: 4px;
 }
 
 .recorder-backdrop {
@@ -2365,7 +2488,7 @@ kbd {
   font-size: 11.5px;
 }
 
-/* A closed sidebar and a closed inspector: a bar of icons, one for each thing the open one lists. */
+/* Writing mode */
 
 .rail {
   display: flex;
@@ -2397,15 +2520,44 @@ kbd {
   padding: 0;
 }
 
-.rail .new-note svg {
-  color: var(--accent);
+.popover {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  z-index: 30;
+  display: flex;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
 }
 
-.inspector-empty {
+.popover.left {
+  left: 50px;
+}
+
+.popover.right {
+  right: 50px;
+  flex-direction: column;
+  width: 340px;
+}
+
+.popover-folders {
+  width: 216px;
+  padding: 0 6px 8px;
+  overflow-y: auto;
+  background: var(--bg-side);
+}
+
+.popover.right h2 {
   margin: 0;
-  padding: 14px;
-  color: var(--muted);
-  font-size: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.popover.right > :not(h2) {
+  margin: 14px;
 }
 
 /* Command palette and quick open */
@@ -2493,7 +2645,71 @@ kbd {
   right: -9px;
 }
 
-/* History: a list of changes with a tick each, beside what everything picked did */
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.popover.right > .changes {
+  flex: 1;
+  margin: 0;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.changes .error,
+.changes .empty {
+  margin: 0;
+}
+
+.changes .empty {
+  text-align: left;
+}
+
+.changed-notes,
+.change-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changed-note,
+.change {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.changed-note + .changed-note,
+.change + .change {
+  border-top: 1px solid var(--line);
+}
+
+.changed-note-toggle,
+.change-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changed-note-toggle:hover .changed-note-title,
+.change-toggle:hover .change-author {
+  text-decoration: underline;
+}
 
 .caret {
   flex: none;
@@ -2510,689 +2726,93 @@ kbd {
   transform: rotate(90deg);
 }
 
-/* The page is the container its panes are laid out by: a pane can be narrow in a wide window, beside the sidebar and in a split. */
-.history-mode {
-  container: history / inline-size;
-  height: 100%;
-  min-height: 0;
-}
-
-.history-panes {
-  height: 100%;
-  min-height: 0;
-  font-size: 13px;
-}
-
-/* The page's two panes fill it side by side and each scrolls by itself. */
-.history-panes.page {
-  display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-}
-
-.history-panes.page > .hist-side {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.history-panes.page > .hist-main {
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.hist-side {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
-.history-panes.page .hist-side {
-  border-right: 1px solid var(--line);
-}
-
-.hist-head {
-  padding: 22px 18px 4px;
-}
-
-.hist-head h1 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.hist-sub {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.hist-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding-top: 10px;
-}
-
-.segmented {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--hover);
-}
-
-.segmented button {
-  padding: 2px 9px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.segmented button[aria-checked="true"] {
-  background: var(--bg-elev);
-  color: var(--ink);
-  box-shadow: 0 0 0 1px var(--line);
-}
-
-.hist-scope {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-  cursor: default;
-}
-
-.hist-scope button {
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  margin-right: -4px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-}
-
-.hist-scope button svg {
-  width: 10px;
-  height: 10px;
-}
-
-.hist-open-page {
-  align-self: flex-start;
-  margin-bottom: 6px;
-  text-decoration: underline;
-}
-
-.hist-all {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 18px 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.hist-all-tick {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-/* Room for the sticky day heading, so the arrow keys don't move a row under it. */
-.hist-list {
-  flex: 1;
-  min-height: 0;
-  padding: 0 8px 12px;
-  overflow-y: auto;
-  scroll-padding-top: 36px;
-}
-
-.hist-list:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.hist-list .empty {
-  padding: 24px 10px;
-}
-
-.hist-day {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 12px 10px 6px;
-  background: var(--bg);
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.hist-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.hist-row:hover {
-  background: var(--hover);
-}
-
-.hist-row.selected {
-  background: var(--accent-soft);
-}
-
-.hist-list:focus .hist-row.focused,
-.hist-row.focused {
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-.hist-row[aria-level="2"] {
-  margin-left: 26px;
-}
-
-.hist-check {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  margin-top: 3px;
-  border: 1.5px solid var(--line-strong);
-  border-radius: 5px;
-  background: var(--bg-elev);
-}
-
-.hist-all-tick .hist-check {
-  margin-top: 0;
-}
-
-.hist-row:hover .hist-check,
-.hist-all-tick:hover .hist-check {
-  border-color: var(--muted);
-}
-
-.hist-row.selected .hist-check,
-.hist-check.all,
-.hist-check.some {
-  border-color: var(--accent);
-  background: var(--accent);
-}
-
-.hist-row.selected .hist-check::after,
-.hist-check.all::after {
-  width: 8px;
-  height: 4px;
-  margin-top: -2px;
-  border: solid var(--on-accent);
-  border-width: 0 0 2px 2px;
-  transform: rotate(-45deg);
-  content: "";
-}
-
-.hist-check.some::after {
-  width: 8px;
-  height: 2px;
-  margin: 0;
-  border: 0;
-  background: var(--on-accent);
-  transform: none;
-  content: "";
-}
-
-.hist-caret {
-  margin-top: 6px;
-  align-self: flex-start;
-}
-
-.hist-note-row .hist-caret {
-  padding: 0;
-}
-
-.avatar {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: hsl(var(--hue) 75% 91%);
-  color: hsl(var(--hue) 50% 36%);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.02em;
-}
-
-.avatar.agent {
-  border-radius: 30%;
-}
-
-.avatar svg {
-  width: 14px;
-  height: 14px;
-}
-
-:root[data-theme="dark"] .avatar {
-  background: hsl(var(--hue) 35% 24%);
-  color: hsl(var(--hue) 85% 80%);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .avatar {
-    background: hsl(var(--hue) 35% 24%);
-    color: hsl(var(--hue) 85% 80%);
-  }
-}
-
-.hist-body {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.hist-line {
-  color: var(--muted);
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.hist-line b,
-.hist-note {
-  color: var(--ink);
-}
-
-.hist-line b {
-  font-weight: 600;
-}
-
-.hist-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 8px;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.hist-reverted {
-  padding: 0 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 99px;
-}
-
-.hist-row.reverted .hist-line b,
-.hist-row.reverted .hist-note {
-  color: var(--muted);
-}
-
-.hist-more {
-  padding: 6px 18px 12px;
-}
-
-.hist-more .link {
-  text-decoration: underline;
-}
-
-.hist-main {
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.hist-summary {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 52px;
-  padding: 8px 24px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg);
-}
-
-.hist-sum-text {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 12px;
-  margin: 0;
-  color: var(--muted);
-}
-
-.hist-sum-text b {
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.spacer {
-  flex: 1;
-}
-
-.hist-files {
-  display: grid;
-  gap: 16px;
-  padding: 18px 24px 64px;
-  transition: opacity 0.15s;
-}
-
-.hist-files.loading {
-  opacity: 0.55;
-}
-
-.hist-files > .button {
-  justify-self: start;
-}
-
-.hist-hint {
-  margin: 0;
-  padding: 64px 20px;
-  color: var(--muted);
-  font-size: 14px;
-  text-align: center;
-}
-
-.hist-file {
+.changed-note-title {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg-elev);
-}
-
-.hist-file-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px 6px 14px;
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg-side) 55%, var(--bg-elev));
-}
-
-.hist-file-name {
-  min-width: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-size: 13px;
   font-weight: 600;
-  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
 }
 
-.hist-file-name:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+.changed-note-toggle .change-stat {
+  flex: none;
+  min-width: 9ch;
+  margin-left: 0;
 }
 
-.hist-naming {
-  display: flex;
-  gap: 6px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.hist-naming input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-}
-
-.hist-file > .error {
-  margin: 8px 14px;
-}
-
-.hist-run + .hist-run {
-  border-top: 1px dashed var(--line-strong);
-}
-
-.hist-run-head {
+.changed-note-about,
+.changed-note-total,
+.change-meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  padding: 8px 14px 0;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
 }
 
-.hist-skip {
-  padding: 1px 8px;
-  border-radius: 99px;
-  background: color-mix(in srgb, #d9a400 18%, transparent);
-  color: var(--ink);
-  font-weight: 550;
+.changed-note-about,
+.change-meta,
+.change-body {
+  padding-left: 14px;
 }
 
-.hist-run .diff {
-  padding: 8px 0 10px;
-}
-
-/* A narrow page shows one pane at a time, and these lead from one to the other. */
-.hist-back,
-.hist-open {
-  display: none;
-}
-
-.hist-back {
-  align-items: center;
-  gap: 2px;
-  padding: 2px 6px 2px 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.hist-open {
-  padding: 8px 18px 12px;
-}
-
-@container history (max-width: 720px) {
-  .history-panes.page {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 46%) minmax(0, 1fr);
-  }
-
-  .history-panes.page > .hist-main {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .history-panes.page .hist-side {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .history-panes.page .hist-head {
-    padding-top: 12px;
-  }
-
-  .history-panes.page .hist-sub {
-    display: none;
-  }
-}
-
-@container history (max-width: 480px) {
-  .history-panes.page {
-    grid-template-rows: minmax(0, 1fr);
-  }
-
-  .history-panes.page > .hist-main,
-  .history-panes.page.detail > .hist-side {
-    display: none;
-  }
-
-  .history-panes.page.detail > .hist-main {
-    display: block;
-    grid-row: 1;
-  }
-
-  .history-panes.page .hist-back {
-    display: inline-flex;
-  }
-
-  .history-panes.page .hist-open {
-    display: block;
-  }
-
-  .history-panes.page .hist-summary,
-  .history-panes.page .hist-files {
-    padding-right: 14px;
-    padding-left: 14px;
-  }
-}
-
-/* In the inspector the list stands over what it picked, and the panel scrolls the two as one. */
-.history-panes.panel {
-  display: flex;
-  flex-direction: column;
-  height: auto;
-  margin: -14px;
-}
-
-.history-panes.panel .hist-side {
-  padding-top: 10px;
-}
-
-.history-panes.panel .hist-open-page {
-  margin: 0 14px 2px;
-}
-
-.history-panes.panel .hist-all {
-  padding: 6px 14px;
-}
-
-.history-panes.panel .hist-list {
-  flex: none;
-  max-height: 44vh;
-  padding: 0 6px 8px;
-}
-
-.history-panes.panel .hist-row {
-  gap: 8px;
-  padding: 6px 8px;
-}
-
-.history-panes.panel .hist-row[aria-level="2"] {
-  margin-left: 14px;
-}
-
-.history-panes.panel .hist-more {
-  padding: 2px 14px 8px;
-}
-
-.history-panes.panel .hist-main {
-  overflow: visible;
-  border-top: 1px solid var(--line);
-}
-
-.history-panes.panel .hist-summary {
-  position: static;
-  min-height: 0;
-  padding: 8px 14px;
-  background: none;
-}
-
-.history-panes.panel .hist-files {
-  gap: 10px;
-  padding: 10px 10px 24px;
-}
-
-.history-panes.panel .hist-hint {
-  padding: 24px 14px;
-  font-size: 13px;
-}
-
-.history-panes.panel .diff {
-  --diff-gutter: 22px;
-  font-size: 13px;
-}
-
-.toast {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: min(560px, calc(100vw - 32px));
-  padding: 8px 8px 8px 14px;
-  border-radius: 10px;
-  background: var(--ink);
-  color: var(--bg);
-  font-size: 13px;
-  box-shadow: var(--shadow);
-  transform: translateX(-50%);
-}
-
-.toast .link {
-  color: inherit;
-  font-weight: 650;
+.changed-note-about button.link,
+.change-meta button.link,
+.change-actions button.link {
   text-decoration: underline;
 }
 
-.toast .icon-button {
-  color: inherit;
+.changed-note-total .change-stat {
+  margin-left: 0;
 }
 
-.change-stat {
-  font-family: var(--mono);
-  font-size: 11px;
+.changed-note .note-changes {
+  padding: 4px 0 0 14px;
+}
+
+.note-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.note-changes > .button {
+  align-self: flex-start;
+}
+
+.change-author {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.hist-sum-text .change-stat,
-.hist-file-head .change-stat {
-  font-size: 12px;
+.change-toggle .badge,
+.change-toggle time {
+  flex: none;
 }
 
-.added {
-  color: var(--added);
+.change-revert {
+  margin-left: auto;
 }
 
-.removed {
-  color: var(--danger);
+.change-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.change-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
 }
 
 .badge,
@@ -3213,66 +2833,75 @@ kbd {
   font-weight: 600;
 }
 
-/* A diff, read as prose. Each line's marker is part of the line, so it scrolls with it and sits on its first row when the text wraps. */
-.diff {
-  --diff-gutter: 34px;
-  font-family: var(--prose);
-  font-size: 14px;
-  line-height: 1.65;
-}
-
-.diff-line {
-  position: relative;
-  display: block;
-  min-height: 1.65em;
-  padding: 1px 18px 1px var(--diff-gutter);
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.diff-line.same {
+.change time,
+.change-actions {
   color: var(--muted);
-}
-
-.diff-line.add {
-  background: var(--added-soft);
-}
-
-.diff-line.del {
-  background: var(--removed-soft);
-  color: var(--muted);
-}
-
-.diff-line.del .diff-text {
-  text-decoration: line-through;
-  text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent);
-}
-
-.diff-line.mod {
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-
-.diff-mark {
-  position: absolute;
-  top: 1px;
-  left: calc(var(--diff-gutter) - 20px);
-  color: var(--muted);
-  font-family: var(--mono);
   font-size: 12px;
-  line-height: calc(14px * 1.65);
-  user-select: none;
 }
 
-.diff-line.add .diff-mark {
+.change-stat {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.added {
   color: var(--added);
 }
 
-.diff-line.del .diff-mark {
+.removed {
   color: var(--danger);
 }
 
-.diff-line.mod .diff-mark {
-  color: var(--accent);
+.change-actions input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.diff {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.hunk-head {
+  padding: 1px 8px;
+  background: var(--hover);
+  color: var(--faint);
+}
+
+/* The marker is a cell of its line's own row, so it scrolls with the line and sits on the first row when the text wraps. */
+.diff-line {
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr);
+  align-items: start;
+  padding: 0 8px 0 4px;
+  text-decoration: none;
+}
+
+ins.diff-line {
+  background: var(--added-soft);
+}
+
+del.diff-line {
+  background: var(--removed-soft);
+}
+
+.diff-mark {
+  color: var(--muted);
+  text-align: center;
+  user-select: none;
 }
 
 .diff-text {
@@ -3280,291 +2909,83 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-.diff-text ins {
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--added) 24%, transparent);
-  text-decoration: none;
-}
-
-.diff-text del {
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--danger) 18%, transparent);
-  color: var(--muted);
-  text-decoration-color: color-mix(in srgb, var(--danger) 70%, transparent);
-}
-
-.diff-fold {
-  display: block;
-  width: 100%;
-  padding: 3px 18px 3px var(--diff-gutter);
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-family: var(--prose);
-  font-size: 12px;
-  text-align: left;
-}
-
-button.diff-fold {
-  cursor: pointer;
-}
-
-button.diff-fold:hover {
-  background: var(--hover);
-  color: var(--accent);
-}
-
 .diff-none {
   margin: 0;
-  padding: 10px 14px;
+  padding: 2px 8px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.history-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 54rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.history-mode h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
-.diff-none .link {
-  text-decoration: underline;
-}
-
-.revert-dialog {
-  width: min(560px, calc(100% - 32px));
-  max-height: calc(100% - 32px);
-  padding: 0;
-  border: 0;
-  border-radius: 10px;
+.history-filters input[type="date"] {
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
   background: var(--bg-elev);
   color: var(--ink);
-  box-shadow: var(--shadow);
+  font: inherit;
 }
 
-.revert-dialog::backdrop {
-  background: rgb(0 0 0 / 0.3);
+.note-scope {
+  position: relative;
 }
 
-.revert-dialog-body {
+.note-scope-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  font-size: 13px;
+  gap: 6px;
+  width: 260px;
+  max-height: 320px;
+  padding: 8px;
 }
 
-.revert-dialog h2,
-.revert-dialog p {
-  margin: 0;
-}
-
-.revert-dialog h2 {
-  font-size: 15px;
-}
-
-.revert-dialog .diff {
-  max-height: 50vh;
-  overflow-y: auto;
-  background: var(--bg);
-}
-
-.revert-dialog button.link {
-  text-decoration: underline;
-}
-
-.revert-started-over {
-  color: var(--muted);
-}
-
-.revert-dialog h3 {
-  margin: 0;
-  font-size: 13px;
-}
-
-.conflicts,
-.conflicts ol,
-.conflict,
-.revert-result {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
-.conflicts ol {
+.note-scope-menu ul {
+  min-height: 0;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
 }
 
-.conflicts-all {
+.note-scope-menu label {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.conflict {
-  padding: 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-}
-
-.conflict dl {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-}
-
-.conflict dt,
-.conflict-after > span {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.conflict dd {
-  margin: 0 0 2px;
-}
-
-.conflict-lines {
-  display: flex;
-  flex-direction: column;
-  padding: 2px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
-.conflict-lines.now {
-  background: var(--removed-soft);
-}
-
-.conflict-lines.after {
-  background: var(--added-soft);
-}
-
-.conflict-none {
-  color: var(--muted);
-  font-family: var(--prose);
-  font-style: italic;
-}
-
-.conflict-choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-}
-
-.conflict-choices label {
-  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 0;
+  padding: 3px 2px;
+  color: var(--ink);
   cursor: pointer;
 }
 
-.conflict-choices input {
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.conflict-after {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.conflict-typed {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 4px 8px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.revert-result-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
-}
-
-.revert-result output {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.revert-result[aria-busy="true"] .diff {
-  opacity: 0.6;
-}
-
-/* The buttons stay in reach under a preview taller than the window. */
-.revert-dialog-actions {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin: 0 -16px -16px;
-  padding: 10px 16px 16px;
-  background: var(--bg-elev);
-  box-shadow: 0 -1px 0 var(--line);
-}
-
-.revert-dialog {
-  width: min(680px, calc(100% - 32px));
-}
-
-.revert-dialog .diff {
-  --diff-gutter: 26px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 13px;
-}
-
-.revert-dialog h4 {
-  margin: 0;
-  font-size: 13px;
-}
-
-.revert-lead,
-.revert-beyond,
-.revert-already,
-.revert-nothing,
-.revert-unchanged {
-  color: var(--muted);
-}
-
-.revert-said {
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-}
-
-.revert-note {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.revert-note-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.revert-note-head h3 {
-  min-width: 0;
+.note-scope-menu label span {
   overflow: hidden;
-  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3655,17 +3076,6 @@ button.diff-fold:hover {
   justify-self: start;
 }
 
-.agent-edit {
-  margin-top: 4px;
-  background: var(--bg);
-}
-
-.agent-edit .hint,
-.agent-edit .agent-actions {
-  grid-column: 1 / -1;
-  margin: 0;
-}
-
 .new-token {
   display: flex;
   flex-direction: column;
@@ -3709,7 +3119,7 @@ button.diff-fold:hover {
   list-style: none;
 }
 
-.agent-list > .agent {
+.agent {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3720,6 +3130,7 @@ button.diff-fold:hover {
 
 .agent-head,
 .agent-actions,
+.revert-author,
 .confirm {
   display: flex;
   flex-wrap: wrap;
@@ -3737,7 +3148,8 @@ button.diff-fold:hover {
   font-size: 12px;
 }
 
-.confirm {
+.confirm,
+.said {
   font-size: 12px;
 }
 
@@ -3748,14 +3160,12 @@ button.diff-fold:hover {
   border-radius: 8px;
 }
 
-.revert-dialog-body > .button {
-  align-self: flex-start;
+.said {
+  color: var(--muted);
 }
 
-.hist-cut {
-  margin: 2px 10px 6px 36px;
-  color: var(--muted);
-  font-size: 11.5px;
+.said.failed {
+  color: var(--danger);
 }
 
 /* The row vim's keys are on, in any list. A card's row has the card's corners, so its mark does too. */
@@ -3768,54 +3178,4 @@ button.diff-fold:hover {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   background-color: var(--accent-soft);
-}
-
-/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
-.app[data-bar] {
-  box-sizing: border-box;
-  padding-bottom: 26px;
-}
-
-.bar {
-  position: absolute;
-  inset: auto 0 0 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  height: 26px;
-  padding: 0 10px;
-  border-top: 1px solid var(--line);
-  background: var(--bg-side);
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.bar-side {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-/* In a window too narrow for both ends, the left end is the one cut short. */
-.bar-side[data-side="right"] {
-  flex: none;
-  max-width: 100%;
-}
-
-.bar-item {
-  flex: none;
-  padding: 1px 8px;
-  border-radius: 5px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* An item with nothing to say takes no room. */
-.bar-item:empty {
-  display: none;
 }

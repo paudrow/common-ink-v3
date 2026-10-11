@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { noteIdFromPath } from "../core/slug.ts";
 
 /** A page is whatever a plugin registered at that path, if any did. */
@@ -15,12 +15,7 @@ export interface Place {
   route: Route;
 }
 
-/**
- * `replace` writes over the entry the browser is at. `move` is a step between things already open:
- * it adds an entry of its own, which the next move writes over, so Back retraces every open and
- * the last of a run of moves, and never loses an open to a move made after it.
- */
-export type Navigate = (path: string, options?: { replace?: boolean; move?: boolean; state?: unknown }) => void;
+export type Navigate = (path: string, options?: { replace?: boolean; state?: unknown }) => void;
 
 export function routeOf(pathname: string): Route {
   if (pathname === "/") return { kind: "home" };
@@ -32,13 +27,8 @@ export function routeOf(pathname: string): Route {
 
 export function useRoute(): [Place, Navigate] {
   const [at, setAt] = useState({ path: location.pathname, state: history.state as unknown });
-  /** Whether the entry the browser is at was written by a move. Back and Forward come to an entry that may not be. */
-  const moved = useRef(false);
   useEffect(() => {
-    const onPop = () => {
-      moved.current = false;
-      setAt({ path: location.pathname, state: history.state });
-    };
+    const onPop = () => setAt({ path: location.pathname, state: history.state });
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
   }, []);
@@ -46,11 +36,10 @@ export function useRoute(): [Place, Navigate] {
   useEffect(() => {
     if (history.state !== null) history.replaceState(null, "", location.href);
   }, [at]);
-  const navigate = useCallback<Navigate>((to, { replace, move, state = null } = {}) => {
+  const navigate = useCallback<Navigate>((to, { replace, state = null } = {}) => {
     if (to === location.pathname) return;
-    if (replace || (move && moved.current)) history.replaceState(state, "", to);
+    if (replace) history.replaceState(state, "", to);
     else history.pushState(state, "", to);
-    if (!replace) moved.current = Boolean(move);
     setAt({ path: to, state });
   }, []);
   return [{ ...at, route: routeOf(at.path) }, navigate];

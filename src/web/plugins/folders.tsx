@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useId, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
-import { ALL_NOTES, Icon, NOTE_DRAG, carry, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Role } from "../plugin-api.ts";
+import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
+import { ALL_NOTES, Icon, NOTE_DRAG, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Role } from "../plugin-api.ts";
 import { useKept } from "./lib/kept.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((id) => typeof id === "string");
 
 type Editing = { kind: "create"; parentId: string | null } | { kind: "rename"; id: string };
-/** A row's menu. `folder` is left out for a row that is a list and no folder, which can be opened and not changed. */
-type Menu = { id: string; name: string; folder?: ListedFolder; x: number; y: number };
+type Menu = { folder: ListedFolder; x: number; y: number };
 
 const indent = (depth: number) => ({ "--depth": depth }) as CSSProperties;
 
@@ -21,13 +20,11 @@ interface Props {
   selectedId: string | null;
   /** A single click opens a folder's list as a preview; a double click keeps it open. */
   onOpen: (id: string, keep: boolean) => void;
-  /** Opens a folder's list in a split, right of or under what is in front. Null where the editor area has no splits. */
-  onSplit: ((id: string, side: "right" | "down") => void) | null;
   onChanged: () => void;
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
 }
 
-function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onChanged, onMoveNote }: Props) {
+function FolderTree({ host, tree, role, total, selectedId, onOpen, onChanged, onMoveNote }: Props) {
   const ids = useId();
   const [expandedList, setExpanded] = useKept(host.storage, "expanded", isStrings, []);
   const expanded = new Set(expandedList);
@@ -85,10 +82,7 @@ function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onCh
     </div>
   );
 
-  /** Dragged to the editor area, a row's list is dropped in a group as a tab is. */
-  const dragged = (id: string) => ({ draggable: true, onDragStart: (e: DragEvent) => carry(e.dataTransfer, { kind: "folder", id }) });
-
-  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and its menu only opens it. */
+  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and it has no menu. */
   const listRow = (id: string, name: string, count: number) => (
     <div
       key={id}
@@ -100,13 +94,8 @@ function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onCh
       aria-labelledby={`${ids}-${id}`}
       aria-describedby={`${ids}-${id}-count`}
       tabIndex={selectedId === id || (id === ALL_NOTES && !(selectedId && tree.byId.has(selectedId))) ? 0 : -1}
-      {...dragged(id)}
       onClick={() => onOpen(id, false)}
       onDoubleClick={() => onOpen(id, true)}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenu({ id, name, x: e.clientX, y: e.clientY });
-      }}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
@@ -148,7 +137,6 @@ function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onCh
             aria-labelledby={`${ids}-${folder.id}`}
             aria-describedby={`${ids}-${folder.id}-count`}
             tabIndex={folder.id === selectedId ? 0 : -1}
-            {...dragged(folder.id)}
             onClick={choose}
             onDoubleClick={() => onOpen(folder.id, true)}
             onKeyDown={(e) => {
@@ -157,8 +145,9 @@ function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onCh
               choose();
             }}
             onContextMenu={(e) => {
+              if (!canEdit) return;
               e.preventDefault();
-              setMenu({ id: folder.id, name: folder.name, folder, x: e.clientX, y: e.clientY });
+              setMenu({ folder, x: e.clientX, y: e.clientY });
             }}
             onDragOver={(e) => {
               if (!e.dataTransfer.types.includes(NOTE_DRAG)) return;
@@ -199,7 +188,8 @@ function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onCh
             <span className="count" id={`${ids}-${folder.id}-count`}>
               {folder.noteCount}
             </span>
-            <button
+            {canEdit && (
+              <button
                 type="button"
                 className="row-actions"
                 tabIndex={-1}
@@ -207,11 +197,12 @@ function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onCh
                 onClick={(e) => {
                   e.stopPropagation();
                   const box = e.currentTarget.getBoundingClientRect();
-                  setMenu({ id: folder.id, name: folder.name, folder, x: box.left, y: box.bottom + 2 });
+                  setMenu({ folder, x: box.left, y: box.bottom + 2 });
                 }}
               >
                 <Icon name="more" />
               </button>
+            )}
           </div>,
         );
       }
@@ -244,29 +235,23 @@ function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onCh
       )}
       {menu && (
         <ContextMenu
-          label={`${menu.name} actions`}
+          label={`${menu.folder.name} actions`}
           x={menu.x}
           y={menu.y}
           onClose={closeMenu}
           items={[
-            ...(onSplit
-              ? [
-                  { label: "Open in a split right", action: () => onSplit(menu.id, "right") },
-                  { label: "Open in a split down", action: () => onSplit(menu.id, "down") },
-                ]
-              : []),
-            ...(canEdit && menu.folder ? [{ label: "New folder inside", action: () => startCreate(menu.id) }] : []),
-            ...(!canEdit || !menu.folder || menu.id === tree.unsortedId
+            { label: "New folder inside", action: () => startCreate(menu.folder.id) },
+            ...(menu.folder.id === tree.unsortedId
               ? []
               : [
                   {
                     label: "Rename",
                     action: () => {
                       setError(null);
-                      setEditing({ kind: "rename", id: menu.id });
+                      setEditing({ kind: "rename", id: menu.folder.id });
                     },
                   },
-                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.id }) }] : []),
+                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.folder.id }) }] : []),
                 ]),
           ]}
         />
@@ -317,7 +302,6 @@ export const folders: Plugin = {
             total={(app.notes ?? []).length}
             selectedId={app.folderId}
             onOpen={(id, keep) => app.openFolder(id, { preview: !keep })}
-            onSplit={app.openBeside && ((id, side) => app.openBeside?.({ kind: "folder", id }, side))}
             onChanged={app.refresh}
             onMoveNote={app.moveNote}
           />

@@ -22,7 +22,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       workspace: { id: "w1", name: "Acme", role: "editor" },
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
-      agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
+      agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,
@@ -45,7 +45,8 @@ const notes: Plugin = {
     host.commands.register({ id: "note.new", title: "New note", run: () => {}, keys: ["mod+n"] });
     host.views.register("column", { id: "list", component: View });
     host.views.register("page", { id: "todos", path: "/todos", label: "Todos", component: View });
-    host.embeds.register({ name: "timer", title: "Timer", render: () => {} });
+    host.embeds.register({ name: "timer", title: "Timer", starts: { config: "5m" }, render: () => {} });
+    host.completions.register({ id: "embeds", trigger: "/", items: () => host.embeds.list().map((e) => ({ label: e.title, insert: `::${e.name}{${e.starts?.config ?? ""}}` })) });
   },
 };
 
@@ -70,6 +71,30 @@ describe("plugin host", () => {
     expect(views.overlay.map((v) => v.id)).toEqual(["commands"]);
     expect(views.inspector).toEqual([]);
     expect(embeds.map((e) => e.name)).toEqual(["timer"]);
+  });
+
+  it("lists the embeds to a plugin as a menu would offer them, and takes a completion out with its plugin", async () => {
+    const board: Plugin = { id: "board", name: "Board", activate: (h) => void h.embeds.register({ name: "kanban", title: "Kanban board", block: true, render: () => {} }) };
+    const { host } = hostWith([notes, board]);
+    const [menu] = host.contributions().completions;
+
+    expect([menu!.id, menu!.trigger]).toEqual(["embeds", "/"]);
+    expect(await menu!.items("")).toEqual([
+      { label: "Timer", insert: "::timer{5m}" },
+      { label: "Kanban board", insert: "::kanban{}" },
+    ]);
+
+    host.setEnabled("board", false);
+    expect(await menu!.items("")).toEqual([{ label: "Timer", insert: "::timer{5m}" }]);
+    host.setEnabled("notes", false);
+    expect(host.contributions().completions).toEqual([]);
+  });
+
+  it("holds a completion that threw against its plugin", () => {
+    const { host } = hostWith([notes]);
+
+    host.fail(host.contributions().completions[0]!, new Error("The menu broke"));
+    expect(host.contributions().plugins.find((p) => p.id === "notes")!.error).toBe("The menu broke");
   });
 
   it("runs a command by its id, and says so when nobody registered it", () => {
@@ -126,16 +151,7 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
-  });
-
-  it("says which plugins came with the app, and no others", () => {
-    const { host } = hostWith([notes, palette], { builtIn: ["notes"] });
-
-    expect(host.contributions().plugins.map((p) => [p.id, p.builtIn])).toEqual([
-      ["notes", true],
-      ["palette", false],
-    ]);
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
   });
 
   it("leaves out the whole of a plugin that can't start, and says why", () => {

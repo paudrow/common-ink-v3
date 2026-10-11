@@ -1,5 +1,5 @@
 import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
-import type { App, Command, CommandInfo, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
+import type { App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
 export interface PluginState {
@@ -8,8 +8,6 @@ export interface PluginState {
   enabled: boolean;
   /** A required plugin can't be turned off. */
   required: boolean;
-  /** Whether it came with the app, and wasn't added to it. */
-  builtIn: boolean;
   /** Why the plugin isn't running though it is turned on, or what of it failed while being drawn. */
   error: string | null;
   description: string | null;
@@ -23,7 +21,8 @@ export interface PluginState {
 export interface Added {
   commands: readonly { id: string; title: string }[];
   views: readonly { slot: keyof Slots; id: string; label: string | null }[];
-  embeds: readonly { name: string; title: string }[];
+  embeds: readonly { name: string; title: string; block: boolean }[];
+  completions: readonly { id: string; trigger: string }[];
   editorExtensions: readonly string[];
 }
 
@@ -35,6 +34,7 @@ export interface Contributions {
   settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
   embeds: readonly Embed[];
+  completions: readonly Completion[];
   editorExtensions: readonly EditorExtension[];
   plugins: readonly PluginState[];
 }
@@ -56,8 +56,6 @@ export interface HostOptions {
   /** Every installed plugin, in the order their contributions are shown. */
   plugins: readonly Plugin[];
   required?: readonly string[];
-  /** The ids of the plugins that came with the app. */
-  builtIn?: readonly string[];
   /** The member's settings as they are at the start. */
   settings: SettingsDocument;
   /**
@@ -79,7 +77,7 @@ export interface Host {
   setEnabled(pluginId: string, enabled: boolean): void;
   /** The app as the plugin that registered a view is given it. */
   appFor(view: object): App;
-  /** Records against its plugin that a view or embed threw while being drawn, or that an editor extension couldn't be used. */
+  /** Records against its plugin that a view or embed threw while being drawn, that a completion threw, or that an editor extension couldn't be used. */
   fail(contribution: object, error: unknown): void;
   /** Turns every plugin off without forgetting which are on. They start again the next time contributions are read. */
   dispose(): void;
@@ -100,16 +98,17 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "rail", "editor", "folder", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
 const RESERVED = ["plugins.", "go.", "settings."];
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
-export function createPluginHost({ plugins, required = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
+export function createPluginHost({ plugins, required = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed>>();
+  const completions = new Map<string, Owned<Completion>>();
   const editorExtensions = new Map<string, Owned<EditorExtension>>();
   const views = new Map<keyof Slots, Map<string, Owned<Slots[keyof Slots]>>>(SLOTS.map((slot) => [slot, new Map()]));
   /** What each running plugin registered, to take back out when it is turned off. */
@@ -214,6 +213,14 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
         register(embed) {
           const dispose = keep(add(embeds, embed.name, embed, index, "an embed named"));
           owners.set(embed, owner);
+          return dispose;
+        },
+        list: () => contributions().embeds.map(({ name, title, block, starts }) => ({ name, title, block, starts })),
+      },
+      completions: {
+        register(completion) {
+          const dispose = keep(add(completions, completion.id, completion, index, "a completion with the id"));
+          owners.set(completion, owner);
           return dispose;
         },
       },
@@ -346,7 +353,8 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
     return {
       commands: mine(commands.values()).map(({ id, title }) => ({ id, title })),
       views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: "label" in view ? view.label : null }))),
-      embeds: mine(embeds.values()).map(({ name, title }) => ({ name, title })),
+      embeds: mine(embeds.values()).map(({ name, title, block }) => ({ name, title, block: block ?? false })),
+      completions: mine(completions.values()).map(({ id, trigger }) => ({ id, trigger })),
       editorExtensions: mine(editorExtensions.values()).map((extension) => extension.id),
     };
   }
@@ -373,13 +381,13 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
       settings: { declared, values, problems: [...problems, ...conflicts.map(({ commandId, reason }): Problem => ({ key: KEYBINDING + commandId, kind: "conflict", reason }))], document },
       views: Object.fromEntries(SLOTS.map((slot) => [slot, inOrder(views.get(slot)!.values())])) as unknown as Contributions["views"],
       embeds: inOrder(embeds.values()),
+      completions: inOrder(completions.values()),
       editorExtensions: inOrder(editorExtensions.values()),
       plugins: plugins.map((p) => ({
         id: p.id,
         name: p.name,
         enabled: !off.has(p.id),
         required: required.includes(p.id),
-        builtIn: builtIn.includes(p.id),
         error: errors.get(p.id) ?? null,
         description: p.description ?? null,
         icon: p.icon ?? null,

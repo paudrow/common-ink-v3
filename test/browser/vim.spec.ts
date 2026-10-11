@@ -176,7 +176,7 @@ test("visual mode selects by character and by line, and a search moves to each m
   await keys(page, "k", "Shift+V", "d");
 
   await expect(lines(page)).toHaveText(["# Pick", "green blue", "cyan magenta yellow", "cyan agenta yellow"]);
-  await expect.poll(() => page.evaluate(() => document.querySelectorAll(".cm-line")[1]!.textContent)).toBe(" green blue");
+  expect(await page.evaluate(() => document.querySelectorAll(".cm-line")[1]!.textContent)).toBe(" green blue");
 });
 
 test("u and ctrl+r are the app's undo and redo: local for typing not yet saved, and a recorded change for typing that was", async ({ page }) => {
@@ -305,7 +305,7 @@ test("in insert mode ctrl+o runs one normal command and ctrl+i types a tab, and 
   await page.keyboard.press("Control+i");
   await page.keyboard.type("Y");
   await expect(page).toHaveURL(/\/note\/beta-/);
-  await expect.poll(() => page.evaluate(() => document.querySelector(".cm-line")!.textContent)).toBe("Z\tY# Beta");
+  expect(await page.evaluate(() => document.querySelector(".cm-line")!.textContent)).toBe("Z\tY# Beta");
 
   await keys(page, "Escape", "Control+o");
   await expect(page).toHaveURL(/\/note\/alpha-/);
@@ -321,11 +321,11 @@ test("moving through a note in a preview tab leaves it a preview, and an edit ke
   await page.keyboard.type("second");
   await page.keyboard.press("Enter");
   await expect(statusLine(page)).toHaveText("--NORMAL--");
-  await expect.poll(() => italic(page)).toEqual([true]);
+  expect(await italic(page)).toEqual([false, true]);
 
   await page.keyboard.press("x");
   await expect(lines(page).nth(1)).toHaveText("econd line");
-  await expect.poll(() => italic(page)).toEqual([false]);
+  await expect.poll(() => italic(page)).toEqual([false, false]);
 });
 
 test("the cursor moves across an embed, which is shown as written while the cursor is on it and drawn again after", async ({ page }) => {
@@ -358,6 +358,7 @@ test("the cursor moves across an embed, which is shown as written while the curs
 
 test("Escape closes what is open before it leaves insert mode, and the app's keys still run from normal mode", async ({ page }) => {
   const [note] = await withVim(page, "# Keys\nsecond");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true, "keybindings.view.toggleInspector": ["mod+shift+u"] }), baseRevision: 1 });
   await edit(page, note!.id);
 
   await page.keyboard.press("j");
@@ -374,11 +375,17 @@ test("Escape closes what is open before it leaves insert mode, and the app's key
   await expect(lines(page)).toHaveText(["# Keys", "econd"]);
 
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
   await expect(statusLine(page)).toHaveText("--NORMAL--");
   await page.keyboard.press("i");
   await page.keyboard.type("S");
-  // Focus has no popovers to close, so Escape here has only insert mode to leave.
+  await page.keyboard.press("ControlOrMeta+Shift+U");
+  const popover = page.getByRole("dialog");
+  await expect(popover).toBeVisible();
+  await expect(editor(page)).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(popover).toHaveCount(0);
   await expect(statusLine(page)).toHaveText("--INSERT--");
   await page.keyboard.type("s");
   await page.keyboard.press("Escape");
@@ -424,8 +431,6 @@ test("ctrl+o and ctrl+i are left to a field that has focus, vim's own prompt inc
   await openNote(page, "Beta");
   await expect(page).toHaveURL(/\/note\/beta-/);
   await expect(statusLine(page)).toHaveText("--NORMAL--");
-  // A preview gives way to the list opened next, so Beta's tab is kept first.
-  await tabs(page).filter({ hasText: "Beta" }).dblclick();
 
   await openAllNotes(page);
   await page.getByRole("searchbox", { name: "Filter notes" }).click();

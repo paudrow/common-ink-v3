@@ -6,11 +6,12 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
-import { embedding } from "./embedding.ts";
+import { completing } from "./completing.ts";
+import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
-import type { EditorExtension, Embed } from "./plugin-api.ts";
+import { readOnly } from "./readOnly.ts";
 import { TITLE_MARK } from "./titleMark.ts";
-import { openNote } from "./openNotes.ts";
+import type { Completion, EditorExtension, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
@@ -51,8 +52,14 @@ interface Props {
   /** Whether the editor is to take the cursor, now or once the note has loaded. `onFocused` is called when it has. */
   focus: boolean;
   onFocused: () => void;
+  /** Whether the member can change the note. When they can't, nothing in the editor does: not typing, not an embed, not a plugin's keys. */
+  canEdit: boolean;
   /** What plugins have registered to draw inside a note. */
   embeds: readonly Embed[];
+  /** The lists plugins offer at the cursor, such as the embed menu. */
+  completions: readonly Completion[];
+  /** Called for a completion that threw while being asked what it offers. */
+  onContributionFailed: (contribution: object, error: unknown) => void;
   /** What plugins have added to every note's editor. One given as a function is made here, for this note. */
   extensions: readonly EditorExtension[];
   /** Called for an extension this editor had to leave out, with why. */
@@ -60,7 +67,7 @@ interface Props {
   meta: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, embeds, extensions: contributed, onExtensionRefused, meta,  }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, canEdit, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta,  }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const foot = useRef<HTMLDivElement>(null);
   const syncRef = useRef<NoteSync | null>(null);
@@ -70,11 +77,18 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const [embedded] = useState(() => new Compartment());
   const embedsNow = useRef(embeds);
   embedsNow.current = embeds;
+  const [completed] = useState(() => new Compartment());
+  const failed = useRef(onContributionFailed);
+  failed.current = onContributionFailed;
+  const offered = useMemo(() => completing(completions, (completion, err) => failed.current(completion, err)), [completions]);
+  const offeredNow = useRef(offered);
+  offeredNow.current = offered;
   const [added] = useState(() => new Compartment());
   const mine = useMemo(() => forEditor({ noteId }), [noteId]);
   const { extensions, refused } = useMemo(() => mine(contributed), [mine, contributed]);
-  const now = useRef({ focus, onFocused, extensions });
-  now.current = { focus, onFocused, extensions };
+  const [locked] = useState(() => new Compartment());
+  const now = useRef({ focus, onFocused, extensions, canEdit });
+  now.current = { focus, onFocused, extensions, canEdit };
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [missing, setMissing] = useState(false);
 
@@ -87,7 +101,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       (note) => {
         if (cancelled || !host.current) return;
         onLoaded(note);
-        const fresh = note.text === "";
+        const writable = now.current.canEdit;
+        const fresh = writable && note.text === "";
         const text = fresh ? TITLE_MARK : note.text;
         // The sync is told the mark is what the server has, so an untouched note is never sent: there is nothing of the member's in it.
         sync = syncRef.current = new NoteSync(workspaceId, { ...note, text }, onSaved, setSaveState);
@@ -97,6 +112,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
             doc: text,
             selection: { anchor: fresh ? text.length : 0 },
             extensions: [
+              locked.of(writable ? [] : readOnly),
               // Before the editor's own keys, so a plugin's keys are tried first.
               added.of(now.current.extensions),
               // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
@@ -105,14 +121,15 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               keymap.of(defaultKeymap),
               markdown(),
               noteHighlighting,
-              embedded.of(embedding(embedsNow.current)),
+              embedding,
+              embedded.of(embedsAre(embedsNow.current)),
+              completed.of(offeredNow.current),
               EditorView.lineWrapping,
               // What an extension keeps under the text, such as vim's mode, is kept at the foot of the pane and not under the last line.
               panels({ bottomContainer: foot.current ?? undefined }),
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
               sync.extension,
-              openNote(noteId),
               EditorView.updateListener.of((u) => {
                 if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();
               }),
@@ -135,7 +152,11 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       void sync?.close();
       view?.destroy();
     };
-  }, [workspaceId, noteId, onLoaded, onSaved, embedded, added]);
+  }, [workspaceId, noteId, onLoaded, onSaved, embedded, completed, added, locked]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: locked.reconfigure(canEdit ? [] : readOnly) });
+  }, [canEdit, locked]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: added.reconfigure(extensions) });
@@ -152,8 +173,12 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   }, [focus]);
 
   useEffect(() => {
-    viewRef.current?.dispatch({ effects: embedded.reconfigure(embedding(embeds)) });
+    viewRef.current?.dispatch({ effects: embedded.reconfigure(embedsAre(embeds)) });
   }, [embeds, embedded]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: completed.reconfigure(offered) });
+  }, [offered, completed]);
 
   useEffect(() => {
     if (revision !== undefined) void syncRef.current?.pull(revision).catch(() => {});
