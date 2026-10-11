@@ -94,7 +94,7 @@ test("turning the sidebar off takes the workspace menu, the page links, and the 
   await expect(sidebar.getByRole("link", { name: "Dashboard" })).toBeVisible();
   await expect(sidebar.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "Unsorted" })).toBeVisible();
   await sidebar.getByRole("button", { name: /Ada/ }).click();
-  await expect(page.getByRole("menuitem")).toHaveText(["Agents", "Plugins", "Sign out"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Agents", "Settings", "Plugins", "Sign out"]);
 });
 
 test("turning folders off takes the folder tree out of the sidebar and the popover, and leaves the notes", async ({ page }) => {

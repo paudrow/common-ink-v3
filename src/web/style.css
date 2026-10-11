@@ -25,8 +25,13 @@
   color: var(--ink);
 }
 
+/* The theme setting overrides the device's choice. The dark values are below twice, once for each way of arriving at them. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #171716;
     --bg-elev: #22211f;
     --ink: #e8e6e3;
@@ -46,6 +51,28 @@
     --removed-soft: rgb(240 138 93 / 0.14);
     --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #171716;
+  --bg-elev: #22211f;
+  --ink: #e8e6e3;
+  --muted: #9a958f;
+  --line: #2c2b29;
+  --hover: rgb(232 230 227 / 0.08);
+  --accent: #8f8ff0;
+  --accent-soft: rgb(143 143 240 / 0.16);
+  --on-accent: #10101a;
+  --selection: #34345c;
+  --bg-side: #1d1c1b;
+  --line-strong: #403e3b;
+  --faint: #6b6762;
+  --danger: #f08a5d;
+  --added: #6dc98a;
+  --added-soft: rgb(109 201 138 / 0.14);
+  --removed-soft: rgb(240 138 93 / 0.14);
+  --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
 }
 
 html,
@@ -830,7 +857,7 @@ button.link:hover {
 }
 
 .editor .cm-editor {
-  font-size: 1.05rem;
+  font-size: calc(1.05rem * var(--editor-text-scale, 1));
   line-height: 1.6;
 }
 
@@ -899,6 +926,175 @@ button.link:hover {
 
 .plugins .error {
   margin-left: 8px;
+}
+
+.settings-banner {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  max-width: 30rem;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.settings-banner[role="alert"] {
+  border-color: var(--danger);
+}
+
+.settings-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-bar .tabs {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.settings-problems {
+  margin: 12px 0 0;
+  padding: 8px 12px 8px 28px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.settings-problems code,
+.setting code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.settings-locked {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.settings .filter {
+  width: 100%;
+  margin-top: 14px;
+  box-sizing: border-box;
+}
+
+.settings-groups {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-group h2 {
+  margin: 22px 0 4px;
+  font-size: 14px;
+}
+
+.setting {
+  padding: 10px 0 10px 10px;
+  border-left: 2px solid transparent;
+}
+
+.setting[data-modified] {
+  border-left-color: var(--accent);
+}
+
+.setting[data-inactive] {
+  opacity: 0.6;
+}
+
+.setting-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.setting-head code {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.setting-about {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setting-control {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.setting-control input:not([type="checkbox"]),
+.setting-control select {
+  min-width: 12rem;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.setting-control [aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.setting-default {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setting .error {
+  margin: 6px 0 0;
+}
+
+.settings-json {
+  margin-top: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+
+.settings-json .cm-editor {
+  min-height: 16rem;
+  font-size: 13px;
+}
+
+.settings-json .cm-editor.cm-focused {
+  outline: none;
+}
+
+.settings-json .cm-content,
+.settings-json .cm-gutters {
+  font-family: var(--mono);
+}
+
+.settings-json .cm-gutters {
+  border-right: 0;
+  background: none;
+}
+
+.settings-json .cm-tooltip {
+  border-color: var(--line-strong);
+  background: var(--bg-elev);
+  color: var(--ink);
 }
 
 /* Inspector */

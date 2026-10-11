@@ -4,7 +4,7 @@ import { connectAgent, disconnectAgent, listAgents } from "../../core/agents.ts"
 import { OpError, type OpErrorCode } from "../../core/protocol.ts";
 import { sessionPersonId } from "../auth.ts";
 
-const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404 };
+const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409 };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 /** A null in the body means "not given". */

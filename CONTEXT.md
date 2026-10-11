@@ -87,6 +87,10 @@ _Avoid_: Pane, split
 A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.
 _Avoid_: Action
 
+**Keybinding**:
+The chords that run a command. A command comes with its default chords, and a member changes them in settings, under the command's id: other chords, or none. A chord the member gives to one command is taken from a command that only had it by default, and is flagged while two commands have it. A member's chord has mod or alt in it unless its key is Escape or an F key.
+_Avoid_: Shortcut, hotkey
+
 **Command palette**:
 The list of commands, narrowed by typing.
 
@@ -145,7 +149,7 @@ A name attached to one revision in history. A revision has at most one, and a no
 ## Configuration
 
 **Plugin**:
-A unit of functionality that adds commands, views, embeds, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
+A unit of functionality that adds commands, views, embeds, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves in settings, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
 _Avoid_: Extension, add-on
 
 **Built-in plugin**:
@@ -176,8 +180,15 @@ _Avoid_: Setting
 A non-admin's proposal to give a plugin a capability. An admin approves or denies it.
 
 **Settings**:
-JSON that configures one member's behavior in one workspace, such as theme, vim, keybindings, the daily-note folder, whether the share prompt appears, and plugin options that only change that member's layout. An admin does not set or lock these.
+JSON that configures one member's behavior in one workspace, such as theme, vim, keybindings, the daily-note folder, whether the share prompt appears, which plugins are on, and plugin options that only change that member's layout. It holds only what the member changed from a default, and follows them to any browser. A change made in one window is kept when another window changes a different key, and the later change wins on the same key. The member changes it as options or as the JSON itself. An admin does not set or lock these, a plugin cannot change them, and an agent can neither read nor change them.
 _Avoid_: Preferences, config
+
+**Setting**:
+One key in a member's settings, with a type, a default, and a description. The core declares some, each plugin declares its options under its own id, each plugin has one that turns it on and off, and each command has one for its keybinding. A value the setting doesn't allow is flagged and its default used. A key no setting has is flagged and does nothing. Neither is taken out of the member's JSON.
+_Avoid_: Option (except for a plugin's own), preference
+
+**Settings schema**:
+Every setting there is for a member in a workspace: the core's, those of each installed plugin whether it is on or off, and a keybinding for each command that is on. Settings are checked against it, and the options are drawn from it.
 
 **Upload**:
 A binary file in a workspace with one parent folder. The default folder is Unsorted. Grants apply as they do for notes. A note references an upload by its id. An upload can be archived the same way a note can. Deleting an upload uses Trash.

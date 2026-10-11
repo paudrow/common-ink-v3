@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, connectAgent, disconnectAgent, listAgents, perform, signOut } from "./api.ts";
@@ -14,7 +14,10 @@ import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
 import type { Navigate, Place } from "./router.ts";
-import { isBoolean, isStrings, readStored, useStored, writeStored } from "./stored.ts";
+import { documentOf } from "./settings.ts";
+import { Settings } from "./Settings.tsx";
+import type { SettingsStore } from "./settingsStore.ts";
+import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
 import { performInSync, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
@@ -67,12 +70,14 @@ function useLatest<T extends Record<string, (...args: never[]) => unknown>>(fns:
 interface Props {
   me: Me;
   workspace: WorkspaceSummary;
+  /** The member's settings in this workspace. */
+  settings: SettingsStore;
   place: Place;
   navigate: Navigate;
   onSwitch: (workspaceId: string) => void;
 }
 
-export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
+export function Workspace({ me, workspace, settings, place, navigate, onSwitch }: Props) {
   const { route } = place;
   const workspaceId = workspace.id;
   const canEdit = workspace.role !== "viewer";
@@ -103,6 +108,10 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
     const core: Plugin = {
       id: "core",
       name: "Common Ink",
+      settings: {
+        theme: { type: "string", default: "system", enum: ["system", "light", "dark"], title: "Theme", description: "Light or dark, or system to follow this device." },
+        editorTextSize: { type: "integer", default: 100, minimum: 75, maximum: 200, title: "Editor text size", description: "The size of a note's text, as a percentage." },
+      },
       activate(h) {
         if (canEdit) {
           h.commands.register({ id: "note.new", title: "New note", run: () => h.app().createNote() });
@@ -113,19 +122,22 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
         h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", run: () => inner.current.toggleInspector() });
       },
     };
-    /** Kept apart from the rest so its link and command come after the plugins', where the others come before. */
-    const pluginsPage: Plugin = {
+    /** Kept apart from the rest so their links and commands come after the plugins', where the others come before. */
+    const pages: Plugin = {
       id: "plugins",
       name: "Plugins",
-      activate: (h) => void h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", nav: "menu", component: PluginsPage }),
+      activate(h) {
+        h.views.register("page", { id: "settings", path: "/settings", label: "Settings", nav: "menu", component: () => <Settings host={created} store={settings} mac={MAC} /> });
+        h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", nav: "menu", component: PluginsPage });
+      },
     };
-    const disabledKey = `ink.plugins.off.${workspaceId}.${me.person.id}`;
     created = createPluginHost({
       // A test puts plugins on the page before the app loads. Loading a member's own plugins is another matter.
-      plugins: [core, ...BUILT_INS, ...((window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__ ?? []), pluginsPage],
-      required: [core.id, pluginsPage.id],
-      // Settings will keep this per member per workspace; until then it is kept in this browser.
-      disabled: { read: () => readStored(disabledKey, isStrings) ?? [], write: (ids) => writeStored(disabledKey, ids) },
+      plugins: [core, ...BUILT_INS, ...((window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__ ?? []), pages],
+      required: [core.id, pages.id],
+      settings: documentOf(settings.text()) ?? {},
+      // The member's own controls come through here: the Settings and Plugins pages, and the commands that turn a plugin on or off.
+      write: (key, value) => void settings.set(key, value),
       mac: MAC,
       provide: (plugin) => ({
         workspace,
@@ -141,6 +153,16 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
     });
     return created;
   });
+  useEffect(() => {
+    let last: string | null = null;
+    const read = () => {
+      if (settings.text() === last) return;
+      last = settings.text();
+      host.settingsChanged(documentOf(last) ?? {});
+    };
+    read();
+    return settings.subscribe(read);
+  }, [host, settings]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   useEffect(() => () => host.dispose(), [host]);
   /** Each embed as registered, but telling the host when it throws while being drawn. One is made per embed, so a drawn embed isn't redrawn when something else changes. */
@@ -164,6 +186,12 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
       }),
     [host, guarded, contributed.embeds],
   );
+  const theme = contributed.settings.values["core.theme"] as string;
+  useEffect(() => {
+    if (theme === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    return () => void delete document.documentElement.dataset.theme;
+  }, [theme]);
   const shortcut = (commandId: string) => {
     const chord = chordFor(commandId, contributed.keybindings);
     return chord && chordLabel(chord, MAC);
@@ -451,7 +479,7 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
   useDismiss(popover ? closePopover : null, popoverRef, leftRail, rightRail);
 
   return (
-    <div className="app" data-writing={layout.writing || undefined}>
+    <div className="app" data-writing={layout.writing || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100 } as CSSProperties}>
       {layout.writing ? (
         <nav ref={leftRail} className="rail" aria-label="Left rail">
           <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />

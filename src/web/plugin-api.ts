@@ -6,7 +6,8 @@
  * and nothing else from the app. The built-in plugins in `plugins/` follow the same rule, which
  * `test/core/plugin-boundary.test.ts` checks.
  *
- * Settings are not here. A plugin cannot read or change them.
+ * A plugin declares its options as `settings` and reads them through its host. It cannot change
+ * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
 import type { Agent, ConnectOptions, ListedFolder, Note, NoteSummary, OpInput, Results, WorkspaceSummary } from "../core/protocol.ts";
@@ -29,12 +30,35 @@ export interface Plugin {
   /** What a person sees it called. */
   name: string;
   /**
+   * The plugin's options, by name. Each is a setting the member can change, kept under the key
+   * `<plugin id>.<name>`. They are data, so they are listed whether or not the plugin is on.
+   * `enabled` is taken: it is the setting that turns the plugin on and off.
+   */
+  settings?: Readonly<Record<string, Setting>>;
+  /**
    * Called when the plugin is turned on. Everything it registers here is taken back out when it is
    * turned off. A plugin that starts anything else, such as a timer or a listener, returns a
    * function that stops it.
    */
   activate(host: PluginHost): void | Dispose;
 }
+
+/**
+ * One setting: what it holds, what it is when the member hasn't changed it, and what a person is
+ * told about it. The words are JSON Schema's, and it is plain data: no functions and no classes.
+ */
+export type Setting = { title: string; description?: string } & (
+  | { type: "boolean"; default: boolean }
+  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number }
+  | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
+  /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
+  | { type: "chords"; default: readonly string[] }
+);
+
+export type SettingValue = boolean | string | number | readonly string[];
+
+/** The operations a plugin can perform: all but the member's settings. */
+export type PluginOp = Exclude<OpInput, { type: `settings.${string}` }>;
 
 /** Takes one contribution back out. */
 export type Dispose = () => void;
@@ -62,8 +86,16 @@ export interface PluginHost {
   /**
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
    * is saved before an operation that moves a note through its history, and the editors take the result.
+   * A settings operation is refused.
    */
-  perform<T extends OpInput>(op: T): Promise<Results[T["type"]]>;
+  perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
+  /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
+  readonly settings: {
+    /** The option declared under `name` in the plugin's `settings`. A value the member got wrong reads as the default. */
+    get<T extends SettingValue = SettingValue>(name: string): T;
+    /** Calls `listener` when the member's settings change. A view is drawn again without asking. */
+    subscribe(listener: () => void): Dispose;
+  };
   /** The member's agents. The token in `connect`'s answer is the only time it can be seen. */
   readonly agents: {
     list(): Promise<Agent[]>;

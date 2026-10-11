@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const MAX_NOTE_LENGTH = 500_000;
+export const MAX_SETTINGS_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
 const Revision = z.number().int().min(0);
@@ -87,6 +88,22 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("folder.create"), name: FolderName, parentId: Id.optional() }),
   z.object({ type: z.literal("folder.rename"), id: Id, name: FolderName }),
   z.object({ type: z.literal("folder.delete"), id: Id }),
+  /** The settings of whoever asks, in this workspace. Nobody reads another member's. */
+  z.object({ type: z.literal("settings.read") }),
+  /**
+   * Replaces them. `text` is a JSON object; what its keys mean is the app's to say, so an unknown key is kept.
+   * `baseRevision` is the revision the writer read, and the write is refused as a conflict when the
+   * settings have been written since. `supersedes` names a write of the writer's own that may still be
+   * on its way: this one is also taken when that one was the only write since `baseRevision`.
+   */
+  z.object({
+    type: z.literal("settings.write"),
+    /** At most MAX_SETTINGS_LENGTH characters, which the operation checks so that it can say so plainly. */
+    text: z.string(),
+    baseRevision: Revision,
+    writeId: z.string().min(1).max(64).optional(),
+    supersedes: z.string().min(1).max(64).optional(),
+  }),
 ]);
 export type Op = z.output<typeof Op>;
 export type OpInput = z.input<typeof Op>;
@@ -199,6 +216,16 @@ export interface AuthorReverted {
   next: string | null;
 }
 
+/** One member's settings in one workspace, as they wrote them. */
+export interface StoredSettings {
+  /** A JSON object holding only what differs from the defaults. `{}` until the member changes something. */
+  text: string;
+  /** How many times they have been written. 0 until the member changes something. */
+  revision: number;
+  /** Null until the member changes something. */
+  updatedAt: number | null;
+}
+
 export interface Results {
   "note.list": NoteSummary[];
   "note.create": Note;
@@ -220,6 +247,8 @@ export interface Results {
   "folder.create": Folder;
   "folder.rename": Folder;
   "folder.delete": { id: string };
+  "settings.read": StoredSettings;
+  "settings.write": StoredSettings;
 }
 
 export const MAX_AGENT_NAME = 60;
@@ -264,7 +293,7 @@ export interface Me {
   workspaces: WorkspaceSummary[];
 }
 
-export type OpErrorCode = "invalid" | "not_found" | "forbidden";
+export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict";
 
 export class OpError extends Error {
   constructor(

@@ -18,12 +18,14 @@ interface Props {
   openId: string | null;
   pathOf: (noteId: string) => string;
   canEdit: boolean;
+  /** Whether each note's first lines are shown under its title. */
+  snippets: boolean;
   onNew: () => void;
   /** A single click opens a preview; a double click keeps the note open. */
   onOpen: (note: NoteSummary, keep: boolean) => void;
 }
 
-function NoteList({ heading, notes, openId, pathOf, canEdit, onNew, onOpen }: Props) {
+function NoteList({ heading, notes, openId, pathOf, canEdit, snippets, onNew, onOpen }: Props) {
   const ids = useId();
   const now = useNow();
   const [filter, setFilter] = useState("");
@@ -92,7 +94,7 @@ function NoteList({ heading, notes, openId, pathOf, canEdit, onNew, onOpen }: Pr
                 <span className="row-title" id={`${ids}-${note.id}`}>
                   {titleOf(note)}
                 </span>
-                {note.snippet && <span className="row-snippet">{note.snippet}</span>}
+                {snippets && note.snippet && <span className="row-snippet">{note.snippet}</span>}
                 <span className="row-meta">
                   <span>
                     {ago(note.updatedAt, now)} · {note.updatedBy.name}
@@ -111,6 +113,9 @@ function NoteList({ heading, notes, openId, pathOf, canEdit, onNew, onOpen }: Pr
 export const noteList: Plugin = {
   id: "note-list",
   name: "Note list",
+  settings: {
+    snippets: { type: "boolean", default: true, title: "Show snippets", description: "Show the first lines of each note under its title." },
+  },
   activate(host) {
     host.views.register("column", {
       id: "notes",
@@ -122,6 +127,7 @@ export const noteList: Plugin = {
           openId={app.note?.id ?? null}
           pathOf={app.notePath}
           canEdit={app.canEdit}
+          snippets={host.settings.get<boolean>("snippets")}
           onNew={app.createNote}
           onOpen={(note, keep) => app.openNote(note.id, { preview: !keep })}
         />

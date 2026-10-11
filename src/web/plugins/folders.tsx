@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
-import { Icon, NOTE_DRAG, type Folders as Tree, type ListedFolder, type OpInput, type Plugin, type PluginHost, type Role } from "../plugin-api.ts";
+import { Icon, NOTE_DRAG, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Role } from "../plugin-api.ts";
 import { useKept } from "./lib/kept.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 
@@ -53,7 +53,7 @@ function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveN
     }
   }
 
-  async function run(op: OpInput) {
+  async function run(op: PluginOp) {
     if (await attempt(() => host.perform(op))) {
       setEditing(null);
       onChanged();
