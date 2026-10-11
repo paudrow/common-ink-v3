@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { asViewerOfNote, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -56,19 +56,10 @@ async function clickLine(page: Page, text: string | RegExp) {
   await page.mouse.click(box.x + box.width - 3, box.y + box.height / 2);
 }
 
-/** Folds the bullet on the first line in `within` that says `text` with the key, the cursor at that line's end. Nothing is drawn to click for it. */
-async function fold(page: Page, text: string | RegExp, within = editor(page)) {
-  const at = within.locator(".cm-line").filter({ hasText: text }).first();
-  const box = (await at.boundingBox())!;
-  await page.mouse.click(box.x + box.width - 3, box.y + box.height / 2);
-  await page.keyboard.press("ControlOrMeta+Shift+.");
-  await expect(at).toContainText("…");
-}
-
 const TABLE = "# Stock\n\n| Name  | Qty |\n| ----- | --: |\n| Pens  | 12  |\n| Paper | 500 |\n\nAfter.";
 const OUTLINE = "# Trip\n\n- pack\n  - socks\n  - maps\n- book\n  - train\n- go\n\nAfter.";
 
-test("markdown is drawn where it is written, only what the cursor is on shows its marks, and the note's text is never changed by it", async ({ page }) => {
+test("markdown is drawn where it is written, a line shows its marks while the cursor is on it, and the note's text is never changed by it", async ({ page }) => {
   const text = "# Title\n\nSome **bold**, *italic*, ~~struck~~, `code` and a [link](https://example.com/a).\n\n## Section ##\n\n> quoted\n\n---\n\nPlain <b>html</b> <img src=x onerror=\"document.title='pwned'\"> stays.\n";
   const note = await open(page, text);
 
@@ -81,32 +72,15 @@ test("markdown is drawn where it is written, only what the cursor is on shows it
   // HTML in a note is text: nothing it names is made, and nothing it carries runs.
   await expect(lines(page).nth(10)).toHaveText("Plain <b>html</b> <img src=x onerror=\"document.title='pwned'\"> stays.");
   await expect(editor(page).locator("img:not(.cm-widgetBuffer), b")).toHaveCount(0);
-  await expect.poll(() => page.title()).not.toBe("pwned");
+  expect(await page.title()).not.toBe("pwned");
 
-  // The cursor at the end of the line is on none of them: the line stays drawn. On a word, that word alone shows its marks.
   await clickLine(page, "Some bold");
-  await expectShown(lines(page).nth(2), "Some bold, italic, struck, code and a link.");
+  await expectShown(lines(page).nth(2), "Some **bold**, *italic*, ~~struck~~, `code` and a [link](https://example.com/a).");
   await expectShown(lines(page).nth(0), "Title");
-  for (const [word, written] of [
-    ["bold", "Some **bold**, italic, struck, code and a link."],
-    ["italic", "Some bold, *italic*, struck, code and a link."],
-    ["struck", "Some bold, italic, ~~struck~~, code and a link."],
-    ["code", "Some bold, italic, struck, `code` and a link."],
-  ] as const) {
-    await lines(page).nth(2).getByText(word, { exact: true }).click();
-    await expectShown(lines(page).nth(2), written, `with the cursor on "${word}"`);
-  }
-  // A click on a drawn link opens it, so the cursor comes to this one by the keys: back from the end of the line, to the link's edge.
-  await keys(page, "End", "ArrowLeft");
-  await expectShown(lines(page).nth(2), "Some bold, italic, struck, code and a [link](https://example.com/a).");
-  // A heading's marks go by its line.
   await clickLine(page, "Section");
   await expectShown(lines(page).nth(4), "## Section ##");
   await expectShown(lines(page).nth(2), "Some bold, italic, struck, code and a link.");
-  // A quote's mark shows with the cursor on the mark, and not from its words.
   await clickLine(page, "quoted");
-  await expectShown(lines(page).nth(6), /^\s*quoted$/);
-  await page.keyboard.press("Home");
   await expectShown(lines(page).nth(6), "> quoted");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
@@ -117,7 +91,7 @@ test("markdown is drawn where it is written, only what the cursor is on shows it
   await expect.poll(() => read(page, note.id)).toBe(text.replace("---", "----"));
 });
 
-test("a drawn link opens in a new tab on a click, only for a web or mail address, and on a link the cursor is on a plain click is for the cursor and ⌘ or Ctrl-click opens it", async ({ page }) => {
+test("a drawn link opens in a new tab on a click, only for a web or mail address, and on the cursor's line a plain click is for the cursor and ⌘ or Ctrl-click opens it", async ({ page }) => {
   await open(page, "# Links\n\nSee [the docs](https://example.com/docs) or [this](javascript:alert(1)) or https://example.org/bare today.\n");
   await page.evaluate(() => {
     (window as unknown as { opened: unknown[][] }).opened = [];
@@ -135,27 +109,19 @@ test("a drawn link opens in a new tab on a click, only for a web or mail address
   ]);
   await expectShown(lines(page).nth(2), "See the docs or this or https://example.org/bare today.");
 
-  // A link to anything else is never opened: the click is a click in the text, which shows that link as written and no other.
+  // A link to anything else is never opened: the click is a click in the text, which shows the line as written.
   await editor(page).getByText("this", { exact: true }).click();
-  await expect(lines(page).nth(2)).toContainText("[this](javascript:alert(1))");
-  await expect(lines(page).nth(2)).not.toContainText("](https://example.com/docs)");
-  await expect.poll(async () => (await opened()).length).toBe(2);
-
-  // With the cursor elsewhere on the same line, a plain click on a drawn link still opens it.
-  await editor(page).getByText("the docs").click();
-  await expect.poll(async () => (await opened())[2]).toEqual(["https://example.com/docs", "_blank", "noopener,noreferrer"]);
-
-  // On a link the cursor is on, a plain click is for the cursor, and ⌘ or Ctrl-click opens the link.
-  await keys(page, "Home", "ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight");
   await expect(lines(page).nth(2)).toContainText("[the docs](https://example.com/docs)");
-  await expect(editor(page).locator(".md-link").first()).toHaveAttribute("title", /-click to open$/);
+  expect((await opened()).length).toBe(2);
+
+  // On the cursor's line a plain click is for the cursor, and ⌘ or Ctrl-click opens the link.
   await editor(page).getByText("the docs").click();
   await page.keyboard.type("!");
   await expect(lines(page).nth(2)).toContainText("](https://example.com/docs)");
   await expect(lines(page).nth(2)).toContainText("!");
-  await expect.poll(async () => (await opened()).length).toBe(3);
-  await editor(page).locator(".md-link").first().click({ modifiers: ["ControlOrMeta"] });
-  await expect.poll(async () => (await opened())[3]).toEqual(["https://example.com/docs", "_blank", "noopener,noreferrer"]);
+  expect((await opened()).length).toBe(2);
+  await editor(page).getByText("https://example.org/bare").click({ modifiers: ["ControlOrMeta"] });
+  expect((await opened())[2]).toEqual(["https://example.org/bare", "_blank", "noopener,noreferrer"]);
 });
 
 test("a task's checkbox writes [x] and [ ] into the note as the member's change, and is undone like typing", async ({ page }) => {
@@ -175,16 +141,10 @@ test("a task's checkbox writes [x] and [ ] into the note as the member's change,
   await expect.poll(() => read(page, note.id)).toContain("- [x] sweep\n- [x] mop");
   await expect(line(page, "mop").getByRole("checkbox")).toBeChecked();
 
-  // With the cursor on its line the box stays drawn, and is still clicked. On the box itself, the note shows what it writes.
+  // On the cursor's line, the note shows what it writes.
   await clickLine(page, "numbered");
-  await expect(editor(page).getByRole("checkbox")).toHaveCount(3);
-  await line(page, "numbered").getByRole("checkbox").click();
-  await expect.poll(() => read(page, note.id)).toContain("1. [x] numbered");
-  await keys(page, "Home", "ArrowRight", "ArrowRight", "ArrowRight");
-  await expectShown(line(page, "numbered"), "1. [x] numbered");
+  await expectShown(line(page, "numbered"), "1. [ ] numbered");
   await expect(editor(page).getByRole("checkbox")).toHaveCount(2);
-  await keys(page, "End");
-  await expect(editor(page).getByRole("checkbox")).toHaveCount(3);
 });
 
 test("a table is drawn as a table, and typing in a cell rewrites the markdown as the member's change", async ({ page }) => {
@@ -219,169 +179,65 @@ test("a table is drawn as a table, and typing in a cell rewrites the markdown as
   await expect(table.getByRole("row")).toHaveCount(3);
 });
 
-test("rows and columns are inserted and deleted from a cell's menu, by the pointer and by the keys, one plus on the bottom edge and one on the right add at the end, and a cell draws its markdown until it is typed in", async ({ page }) => {
+test("rows and columns are added and deleted from the table, and a cell draws its markdown until it is typed in", async ({ page }) => {
   const note = await open(page, "# Stock\n\n| Name | Qty |\n| ---- | --- |\n| **Pens** | 12 |\n\nAfter.");
   const table = editor(page).getByRole("table");
-  const menu = page.getByRole("menu", { name: "Table" });
-  const item = (name: string) => menu.getByRole("menuitem", { name, exact: true });
-  const written = (rows: string) => `# Stock\n\n${rows}\n\nAfter.`;
+  const tool = (name: string) => editor(page).getByRole("button", { name, exact: true });
 
   await expect(cell(page, 1, 0).locator("strong")).toHaveText("Pens");
   await cell(page, 1, 0).click();
   await expect(cell(page, 1, 0)).toHaveText("**Pens**");
-  // The table has two buttons and no more: the plus on each edge.
-  await expect(editor(page).locator(".md-table").getByRole("button")).toHaveText(["+", "+"]);
 
-  // A right-click on a cell lists what can be done from it.
-  await cell(page, 1, 0).click({ button: "right" });
-  await expect(menu.getByRole("menuitem")).toHaveText(["Insert row above", "Insert row below", "Insert column left", "Insert column right", "Delete row", "Delete column"]);
-  await item("Insert column right").click();
-  await expect(menu).toHaveCount(0);
+  await tool("Add column").click();
   await expect(cell(page, 1, 1)).toBeFocused();
   await page.keyboard.type("blue");
-
-  // From the keys: Shift+F10 opens the cell's menu, the arrows move in it, and Enter picks. What was being typed is kept.
-  await page.keyboard.press("Shift+F10");
-  await expect(item("Insert row above")).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(item("Insert row below")).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(cell(page, 2, 1)).toBeFocused();
+  await tool("Add row").click();
+  await expect(cell(page, 2, 0)).toBeFocused();
   await page.keyboard.type("Ink");
   await editor(page).focus();
-  await expect.poll(() => read(page, note.id)).toBe(written("| Name     |      | Qty |\n| -------- | ---- | --- |\n| **Pens** | blue | 12  |\n|          | Ink  |     |"));
+  await expect.poll(() => read(page, note.id)).toBe("# Stock\n\n| Name     |      | Qty |\n| -------- | ---- | --- |\n| **Pens** | blue | 12  |\n| Ink      |      |     |\n\nAfter.");
   await expect(table.getByRole("row")).toHaveCount(3);
 
-  // The menu key opens it too, Escape closes it with nothing done and the cell has the keyboard again, and End goes to the last item.
   await cell(page, 1, 1).click();
-  await page.keyboard.press("ContextMenu");
-  await expect(menu).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(menu).toHaveCount(0);
-  await expect(cell(page, 1, 1)).toBeFocused();
-  await keys(page, "Shift+F10", "End");
-  await expect(item("Delete column")).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect.poll(() => read(page, note.id)).toBe(written("| Name     | Qty |\n| -------- | --- |\n| **Pens** | 12  |\n|          |     |"));
-  await cell(page, 2, 0).click({ button: "right" });
-  await item("Delete row").click();
-  await expect.poll(() => read(page, note.id)).toBe(written("| Name     | Qty |\n| -------- | --- |\n| **Pens** | 12  |"));
-  // The cursor is in the row that has come to where the deleted one was, which shows what it writes.
-  await expect(cell(page, 1, 0)).toBeFocused();
-  await expect(table.getByRole("cell")).toHaveText(["**Pens**", "12"]);
+  await tool("Delete column").click();
+  await expect.poll(() => read(page, note.id)).toBe("# Stock\n\n| Name     | Qty |\n| -------- | --- |\n| **Pens** | 12  |\n| Ink      |     |\n\nAfter.");
+  await cell(page, 1, 0).click();
+  await tool("Delete row").click();
+  await expect.poll(() => read(page, note.id)).toBe("# Stock\n\n| Name | Qty |\n| ---- | --- |\n| Ink  |     |\n\nAfter.");
+  await expect(table.getByRole("cell")).toHaveText(["Ink", ""]);
 
-  // Nothing goes above the header and the header can't be deleted: the menu says so, and a row goes below it.
-  await cell(page, 0, 0).click({ button: "right" });
-  await expect(item("Insert row above")).toBeDisabled();
-  await expect(item("Delete row")).toBeDisabled();
-  await expect(item("Insert row below")).toBeFocused();
-  await item("Insert row below").click();
-  await expect(cell(page, 1, 0)).toBeFocused();
-
-  // The plus on the bottom edge adds a row at the end, and the plus on the right edge a column at the end.
-  await editor(page).getByRole("button", { name: "Add a row at the end" }).click();
-  await expect(cell(page, 3, 0)).toBeFocused();
-  await page.keyboard.type("Last");
-  await editor(page).getByRole("button", { name: "Add a column at the end" }).click();
-  await expect(cell(page, 0, 2)).toBeFocused();
-  await page.keyboard.type("New");
-  await editor(page).focus();
-  await expect.poll(() => read(page, note.id)).toBe(written("| Name     | Qty | New |\n| -------- | --- | --- |\n|          |     |     |\n| **Pens** | 12  |     |\n| Last     |     |     |"));
-
-  // From the palette, the same commands act on the cell last typed in.
-  await run(page, "Table: delete column");
-  await expect.poll(() => read(page, note.id)).toBe(written("| Name     | Qty |\n| -------- | --- |\n|          |     |\n| **Pens** | 12  |\n| Last     |     |"));
+  // The header can't be deleted, and the table is still one after trying.
+  await cell(page, 0, 0).click();
+  await tool("Delete row").click();
   await expect(table.getByRole("columnheader")).toHaveText(["Name", "Qty"]);
-
-  // Undo right after an action, from the empty cell it left the cursor in, puts the table back and writes nothing over the cell that returns to that place.
-  const before = await read(page, note.id);
-  await cell(page, 0, 0).click({ button: "right" });
-  await item("Insert column left").click();
-  await expect(cell(page, 0, 0)).toBeFocused();
-  await expect(table.getByRole("columnheader")).toHaveCount(3);
-  await page.keyboard.press("ControlOrMeta+z");
-  await expect(table.getByRole("columnheader")).toHaveCount(2);
-  await clickLine(page, "After.");
-  await expect(table.getByRole("columnheader")).toHaveText(["Name", "Qty"]);
-  await expect.poll(() => read(page, note.id)).toBe(before);
-
-  // The keyboard taken by the palette closes an open menu.
-  await cell(page, 1, 0).click({ button: "right" });
-  await expect(menu).toBeVisible();
-  await page.keyboard.press("ControlOrMeta+Shift+P");
-  await expect(menu).toHaveCount(0);
-  await page.keyboard.press("Escape");
+  expect(await read(page, note.id)).toBe("# Stock\n\n| Name | Qty |\n| ---- | --- |\n| Ink  |     |\n\nAfter.");
 });
 
-test("a table's lines are shown only by the keys: not by selecting the whole note that ends with it, and not by a press in the margin beside it", async ({ page }) => {
-  const text = "# Ends\n\nAbove.\n\n| a | b |\n| - | - |\n| 1 | 2 |";
-  const note = await open(page, text);
-  const source = editor(page).locator(".cm-line.md-table-source");
-  await expect(editor(page).getByRole("table")).toBeVisible();
-
-  await clickLine(page, "Above.");
-  await page.keyboard.press("ControlOrMeta+a");
-  await expect(editor(page).getByRole("table")).toBeVisible();
-  await expect(source).toHaveCount(0);
-
-  // A press left of the table, level with its middle: the cursor does not go into lines that are out of sight, and what is typed is not typed into them.
-  await clickLine(page, "Above.");
-  const box = (await editor(page).getByRole("table").boundingBox())!;
-  await page.mouse.click(box.x - 20, box.y + box.height / 2);
-  await expect(source).toHaveCount(0);
-  await page.keyboard.type("x");
-  await expect(editor(page).getByRole("table").getByRole("row")).toHaveCount(2);
-  await expect.poll(() => read(page, note.id)).toMatch(/^# Ends\n\nAbove\.x?\n\n?x?\| a \| b \|\n\| - \| - \|\n\| 1 \| 2 \|$/);
-});
-
-test("a table stays drawn wherever the cursor is, the arrow keys go into its lines, which are shown as written above it and typed in, and another member's change is drawn without taking a cell being typed in", async ({ page }) => {
+test("a table stays drawn wherever the cursor is, the arrow keys go through its rows, and another member's change is drawn without taking a cell being typed in", async ({ page }) => {
   const note = await open(page, TABLE);
   const table = editor(page).getByRole("table");
-  const source = editor(page).locator(".cm-line.md-table-source");
 
-  // Down from the line above goes into the table's first line. Its lines are shown, and the table under them is still drawn.
   await keys(page, "ArrowDown", "ArrowDown");
-  await expect(source).toHaveText(["| Name  | Qty |", "| ----- | --: |", "| Pens  | 12  |", "| Paper | 500 |"]);
+  await expect(cell(page, 0, 0)).toBeFocused();
   await expect(table).toBeVisible();
+  await keys(page, "ArrowDown", "ArrowDown");
+  await expect(cell(page, 2, 0)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
   await expect(editor(page)).toBeFocused();
-  // Down through them and out below: they are out of sight again.
-  await keys(page, "ArrowDown", "ArrowDown", "ArrowDown", "ArrowDown");
-  await expect(source).toHaveCount(0);
   await page.keyboard.type("x");
   await expect.poll(() => read(page, note.id)).toBe(TABLE.replace("\n\nAfter.", "\nx\nAfter."));
   await page.keyboard.press("Backspace");
-  // Up from the line below goes into its last line, which is typed in as any line is, and the table drawn under it follows.
   await page.keyboard.press("ArrowUp");
-  await expect(source).toHaveCount(4);
-  await keys(page, "Home", "ArrowRight", "ArrowRight");
-  await page.keyboard.type("Blue ");
-  await expect(cell(page, 2, 0)).toHaveText("Blue Paper");
-  await expect(source.nth(3)).toHaveText("| Blue Paper | 500 |");
-  await expect.poll(() => read(page, note.id)).toBe(TABLE.replace("| Paper |", "| Blue Paper |"));
-  await keys(page, "Backspace", "Backspace", "Backspace", "Backspace", "Backspace");
-  await expect(cell(page, 2, 0)).toHaveText("Paper");
-  await keys(page, "ArrowUp", "ArrowUp", "ArrowUp", "ArrowUp");
-  await expect(source).toHaveCount(0);
+  await expect(cell(page, 2, 0)).toBeFocused();
+  await keys(page, "ArrowUp", "ArrowUp", "ArrowUp");
   await expect(editor(page)).toBeFocused();
   await page.keyboard.type("y");
   await expect.poll(() => read(page, note.id)).toBe(TABLE.replace("# Stock\n\n", "# Stock\ny\n"));
   await page.keyboard.press("Backspace");
 
-  // A click in a cell is typed in the cell, and the table's lines stay out of sight.
-  await cell(page, 1, 0).click();
-  await expect(cell(page, 1, 0)).toBeFocused();
-  await expect(source).toHaveCount(0);
-  // The arrows go through the rows from a cell, and out of the table past its first and last.
-  await keys(page, "ArrowDown");
-  await expect(cell(page, 2, 0)).toBeFocused();
-  await keys(page, "ArrowDown");
-  await expect(editor(page)).toBeFocused();
-  await expect(source).toHaveCount(0);
-
   // Selecting everything doesn't write the table out either.
   await page.keyboard.press("ControlOrMeta+a");
   await expect(table).toBeVisible();
-  await expect(source).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+Home");
   await page.keyboard.press("ControlOrMeta+Alt+t");
   await expect(cell(page, 0, 0)).toBeFocused();
@@ -432,8 +288,8 @@ test("looking at a table writes nothing: a click into a cell and away, or Escape
   await page.waitForTimeout(1200);
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(writes).toEqual([]);
-  await expect.poll(() => read(page, note.id)).toBe(text);
-  await expect.poll(() => authors(page, note.id)).toHaveLength(1);
+  expect(await read(page, note.id)).toBe(text);
+  expect(await authors(page, note.id)).toHaveLength(1);
 
   // A cell that says something else is written, and the words under the table are still words under it.
   await cell(page, 1, 1).click();
@@ -457,7 +313,7 @@ test("in vim mode a deletion that reaches into a table from outside takes the wh
     await expect(editor(page).getByRole("table")).toBeVisible();
   };
 
-  // To an operator, j from the line above is one step over the table's unseen lines, to the blank line after it: dj takes the line above, the table, and that line.
+  // j passes the table whole, to the blank line after it, so dj takes the line above, the table, and that line.
   await from("above", "d", "j");
   await expect.poll(() => read(page, note.id)).toBe("# Vim tables\n\nbelow\nlast");
   await restored();
@@ -468,7 +324,7 @@ test("in vim mode a deletion that reaches into a table from outside takes the wh
   await from("above", "Shift+V", "j", "d");
   await expect.poll(() => read(page, note.id)).toBe("# Vim tables\n\nbelow\nlast");
   await restored();
-  // From below, dk is one step over the table the other way: it takes the blank line, the table, and the line above it.
+  // From below, k passes the table whole, so dk takes the blank line, the table, and the line above it.
   await from("below", "k", "d", "k");
   await expect.poll(() => read(page, note.id)).toBe("# Vim tables\n\nbelow\nlast");
   await restored();
@@ -476,13 +332,6 @@ test("in vim mode a deletion that reaches into a table from outside takes the wh
   await from("above", "d", "d");
   await expect.poll(() => read(page, note.id)).toBe("# Vim tables\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nbelow\nlast");
   await expect(editor(page).getByRole("table")).toBeVisible();
-
-  // With the cursor in the table's lines they are lines: dd takes the one it is on, and the table is drawn from the rest.
-  await keys(page, "g", "g", "j", "j", "j", "j");
-  await expect(editor(page).locator(".cm-line.md-table-source")).toHaveCount(3);
-  await keys(page, "d", "d");
-  await expect.poll(() => read(page, note.id)).toBe("# Vim tables\n\n| a | b |\n| - | - |\n\nbelow\nlast");
-  await expect(editor(page).getByRole("table").getByRole("row")).toHaveCount(1);
 });
 
 test("LaTeX is drawn in a line and on lines of its own, money is left alone, and the cursor shows a formula as written", async ({ page }) => {
@@ -496,7 +345,7 @@ test("LaTeX is drawn in a line and on lines of its own, money is left alone, and
   await expect(editor(page).locator(".math-block .mfrac")).toHaveCount(1);
   await expect(line(page, "in code")).toHaveText("After $x$ in code.");
   // The fonts came with the drawing: the formula is set in KaTeX's own face.
-  await expect.poll(() => editor(page).locator(".math-block .katex").evaluate((el) => getComputedStyle(el).fontFamily)).toContain("KaTeX_Main");
+  expect(await editor(page).locator(".math-block .katex").evaluate((el) => getComputedStyle(el).fontFamily)).toContain("KaTeX_Main");
 
   await line(page, "holds").locator(".katex").first().click();
   await expect(line(page, "holds")).toContainText("So $e = mc^2$ holds");
@@ -511,67 +360,6 @@ test("LaTeX is drawn in a line and on lines of its own, money is left alone, and
   await expect.poll(() => read(page, note.id)).toBe(text.replace("{2}\n", "{2}+0\n"));
 });
 
-test("a formula in a heading is drawn at the heading's size, as one in a paragraph is at the paragraph's", async ({ page }) => {
-  await open(page, "# Sizes\n\n# Big $x^2$ head\n\n## Less $y^2$ head\n\nSmall $z^2$ words.\n");
-  const sizes = () =>
-    page.evaluate(() =>
-      ["Big", "Less", "Small"].map((word) => {
-        const line = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes(word))!;
-        const words = [...line.querySelectorAll<HTMLElement>("span")].find((el) => el.firstChild?.nodeType === Node.TEXT_NODE && el.textContent!.includes(word)) ?? line;
-        const katex = line.querySelector<HTMLElement>(".katex");
-        return katex ? Math.round((parseFloat(getComputedStyle(katex).fontSize) / parseFloat(getComputedStyle(words).fontSize)) * 100) / 100 : null;
-      }),
-    );
-  // KaTeX sets a formula at 1.21 times the size of the words it is among, in a heading of either size as in a paragraph.
-  await expect.poll(sizes).toEqual([1.21, 1.21, 1.21]);
-  const heading = await line(page, "Big").locator(".katex").evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  const paragraph = await line(page, "Small").locator(".katex").evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  expect(heading / paragraph).toBeGreaterThan(1.4);
-});
-
-test("a formula in a table's cell is drawn, shown as written while the cell is typed in, and by its own rule in the table's lines", async ({ page }) => {
-  const text = "# Grid\n\nAbove.\n\n| Formula | Not one |\n| - | - |\n| **b** $y^2$ | `c $z$` |\n| $\\frac{a*b}{c}$ x | $5 and $10 |\n\nAfter.";
-  const note = await open(page, text);
-  await expect(cell(page, 1, 0).locator(".katex")).toHaveCount(1);
-  await expect(cell(page, 1, 0).locator("strong")).toHaveText("b");
-  await expect(cell(page, 2, 0).locator(".katex .mfrac")).toHaveCount(1);
-  await expect(cell(page, 2, 0)).toContainText("x");
-  // Code and money are left as written.
-  await expect(cell(page, 1, 1)).toHaveText("c $z$");
-  await expect(cell(page, 2, 1)).toHaveText("$5 and $10");
-  await expect(cell(page, 1, 0).locator(".katex")).toHaveCSS("font-family", /KaTeX_Main/);
-
-  // Typed in, the cell shows what the note writes for it, and drawn again once the cursor leaves.
-  await cell(page, 1, 0).locator(".katex").click();
-  await expect(cell(page, 1, 0)).toHaveText("**b** $y^2$");
-  await page.keyboard.press("End");
-  await page.keyboard.type("+1");
-  await page.keyboard.press("Tab");
-  await expect(cell(page, 1, 1)).toBeFocused();
-  await expect(cell(page, 1, 0).locator(".katex")).toHaveCount(1);
-  await expect(cell(page, 1, 0)).not.toContainText("$");
-  // Written back, the table is lined up as a table the member types in is.
-  const typed = "| Formula           | Not one    |\n| ----------------- | ---------- |\n| **b** $y^2$+1     | `c $z$`    |\n| $\\frac{a*b}{c}$ x | $5 and $10 |";
-  await expect.poll(() => read(page, note.id)).toBe(text.replace(/\| Formula[^]*\$10 \|/, () => typed));
-
-  // In the table's lines, reached by the keys, a formula is drawn in its own faces, and shown as written with the cursor on it.
-  await clickLine(page, "Above.");
-  await keys(page, "ArrowDown", "ArrowDown", "ArrowDown", "ArrowDown", "ArrowDown");
-  const source = editor(page).locator(".cm-line.md-table-source");
-  await expect(source).toHaveCount(4);
-  await expect(source.nth(3).locator(".katex")).toHaveCSS("font-family", /KaTeX_Main/);
-  await keys(page, "Home", "ArrowRight", "ArrowRight", "ArrowRight");
-  await expect(source.nth(3)).toContainText("$\\frac{a*b}{c}$");
-  await expect(source.nth(2).locator(".katex")).toHaveCount(1);
-
-  // With the math turned off a cell shows its formula as written.
-  await run(page, "Disable plugin: LaTeX");
-  await expect(cell(page, 2, 0)).toHaveText("$\\frac{a*b}{c}$ x");
-  await run(page, "Enable plugin: LaTeX");
-  await expect(cell(page, 2, 0).locator(".katex")).toHaveCount(1);
-  await expect.poll(() => read(page, note.id)).toBe(text.replace(/\| Formula[^]*\$10 \|/, () => typed));
-});
-
 test("a formula can't make a link, load an image, or put markup in the page", async ({ page }) => {
   const requests: string[] = [];
   page.on("request", (request) => requests.push(request.url()));
@@ -581,11 +369,11 @@ test("a formula can't make a link, load an image, or put markup in the page", as
   await expect(editor(page).locator(".math-block")).toBeVisible();
   await expect(editor(page).locator("a, img:not(.cm-widgetBuffer), [onclick], [data-onclick]")).toHaveCount(0);
   await editor(page).locator(".md-chip-math").first().click();
-  await expect.poll(() => page.title()).not.toBe("pwned");
+  expect(await page.title()).not.toBe("pwned");
   expect(requests.filter((url) => new URL(url).hostname !== new URL(page.url()).hostname)).toEqual([]);
 });
 
-test("a code block has its language's colors and two icons shown while the pointer is over it: Copy, and a toggle for wrapping that says which way it is and is remembered", async ({ page, context }) => {
+test("a code block has its language's colors, a Copy button, and a Wrap toggle that is remembered", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const long = "const greeting = 'hello'; // " + "long ".repeat(60);
   const text = `# Code\n\n\`\`\`ts\n${long}\nexport default greeting;\n\`\`\`\n\n\`\`\`python\ndef f():\n    return 1\n\`\`\`\n\n\`\`\`nosuchlanguage\nplain text\n\`\`\`\n`;
@@ -598,41 +386,19 @@ test("a code block has its language's colors and two icons shown while the point
   await expect(line(page, "plain text").locator("[class^=tok-]")).toHaveCount(0);
   await expect(first).toHaveCSS("font-family", /mono/i);
   // Off the cursor's line a fence isn't painted, and the language is the block's label.
-  await expectShown(lines(page).nth(2), /^\s*ts\s*$/);
+  await expectShown(lines(page).nth(2), /^\s*ts\s*Copy\s*Wrap\s*$/);
 
-  // The icons are the block's, seen while the pointer is over any line of it and not otherwise, and no other block's are.
-  const tools = editor(page).locator(".code-tools");
-  await expect(tools).toHaveCount(3);
-  await page.mouse.move(5, 5);
-  await expect(tools.nth(0)).toHaveCSS("opacity", "0");
-  await line(page, "export default").hover({ position: { x: 60, y: 8 } });
-  await expect(tools.nth(0)).toHaveCSS("opacity", "1");
-  await expect(tools.nth(1)).toHaveCSS("opacity", "0");
-  await expect(tools.nth(0).getByRole("button")).toHaveCount(2);
+  await editor(page).getByRole("button", { name: "Copy" }).first().click();
+  await expect(editor(page).getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${long}\nexport default greeting;`);
 
-  await editor(page).getByRole("button", { name: "Copy code" }).first().click();
-  await expect(editor(page).getByRole("button", { name: "Copied" })).toHaveText("Copied");
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`${long}\nexport default greeting;`);
-  await expect(editor(page).getByRole("button", { name: "Copy code" })).toHaveCount(3);
-
-  // A toggle: pressed while long lines wrap and not while they scroll, and it looks and reads differently in the two.
-  const wrap = editor(page).getByRole("button", { name: "Wrap long lines" }).first();
-  const look = () => wrap.evaluate((el) => `${getComputedStyle(el).backgroundColor} ${getComputedStyle(el).color}`);
+  const wrap = editor(page).getByRole("button", { name: "Wrap" }).first();
   await expect(wrap).toHaveAttribute("aria-pressed", "true");
-  await expect(wrap).toHaveAttribute("title", "Long lines wrap. Press to scroll them instead.");
-  await expect(wrap).toHaveText("");
-  await page.mouse.move(5, 5);
-  const pressed = await look();
-  const turning = await wrap.innerHTML();
   const wrapped = (await first.boundingBox())!.height;
   await wrap.click();
-  await expect(wrap).toHaveAttribute("aria-pressed", "false");
-  await expect(wrap).toHaveAttribute("title", "Long lines scroll. Press to wrap them.");
-  await page.mouse.move(5, 5);
-  expect(await look()).not.toBe(pressed);
-  expect(await wrap.innerHTML(), "its icon is another one").not.toBe(turning);
+  await expect(editor(page).getByRole("button", { name: "Wrap" }).first()).toHaveAttribute("aria-pressed", "false");
   await expect(first).toHaveCSS("white-space", "pre");
-  await expect.poll(async () => (await first.boundingBox())!.height).toBeLessThan(wrapped / 2);
+  expect((await first.boundingBox())!.height).toBeLessThan(wrapped / 2);
   // Every block follows the one toggle, and prose still wraps.
   await expect(line(page, "def f")).toHaveCSS("white-space", "pre");
   await expect(lines(page).nth(0)).not.toHaveCSS("white-space", "pre");
@@ -646,10 +412,10 @@ test("a code block has its language's colors and two icons shown while the point
   // that finds its line redrawn under it is tried again with the whole of that line scrolled to, which is far off to the side.
   await expect(line(page, "export default").locator(".tok-keyword").first()).toHaveText("export");
   await line(page, "export default").click({ position: { x: 60, y: 8 } });
-  await expectShown(lines(page).nth(2), /^\s*ts\s*$/);
+  await expectShown(lines(page).nth(2), /^\s*ts\s*Copy\s*Wrap\s*$/);
   await expect(line(page, "const greeting").locator(".tok-keyword")).toHaveText("const");
   await keys(page, "ArrowUp", "ArrowUp");
-  await expectShown(lines(page).nth(2), /^```ts\s*$/);
+  await expectShown(lines(page).nth(2), /^```ts\s*Copy\s*Wrap\s*$/);
   // Naming another language on the fence colors the code as that language.
   await page.keyboard.press("End");
   await keys(page, "Backspace", "Backspace");
@@ -696,17 +462,16 @@ test("Tab and Shift+Tab indent and outdent a bullet with what is under it, and A
 
 test("a bullet folds what is under it without changing the note, stays folded after a reload, and unfolds when asked", async ({ page }) => {
   const note = await open(page, OUTLINE);
+  const toggle = (text: string) => line(page, text).getByRole("button", { name: /^(Fold|Unfold)$/ });
 
-  // Nothing is drawn beside a bullet that has something under it: its key folds it.
-  await expectShown(line(page, "pack"), /^\s*pack$/);
-  await expect(editor(page).getByRole("button")).toHaveCount(0);
+  await expectShown(line(page, "pack"), /^▾\s*pack$/);
   await expectShown(line(page, "go"), /^\s*go$/);
   await expect(line(page, "go").locator(".bullet-dot")).toHaveCount(1);
-  await fold(page, "pack");
-  await expectShown(line(page, "pack"), /^\s*pack\s*…$/);
+  await toggle("pack").click();
+  await expectShown(line(page, "pack"), /^▸\s*pack\s*…$/);
   await expect(editor(page)).not.toContainText("socks");
   await expect(editor(page)).toContainText("train");
-  await expect.poll(() => read(page, note.id)).toBe(OUTLINE);
+  expect(await read(page, note.id)).toBe(OUTLINE);
 
   // The arrow keys step over what is folded, and typing after it lands after it.
   await clickLine(page, "pack");
@@ -730,13 +495,14 @@ test("a bullet folds what is under it without changing the note, stays folded af
   await expect(editor(page)).toContainText("socks");
   await page.reload();
   await expect(editor(page)).toContainText("socks");
-  await expect.poll(() => read(page, note.id)).toBe(OUTLINE.replace("- book", "- book!"));
+  expect(await read(page, note.id)).toBe(OUTLINE.replace("- book", "- book!"));
 });
 
 test("a folded bullet moves with what is folded under it and stays folded, and nothing folded is deleted or typed over unseen", async ({ page }) => {
   const note = await open(page, OUTLINE);
+  const fold = (text: string) => line(page, text).getByRole("button", { name: "Fold" }).click();
 
-  await fold(page, "pack");
+  await fold("pack");
   await clickLine(page, "pack");
   await page.keyboard.press("Alt+ArrowDown");
   await expect.poll(() => read(page, note.id)).toBe("# Trip\n\n- book\n  - train\n- pack\n  - socks\n  - maps\n- go\n\nAfter.");
@@ -747,14 +513,14 @@ test("a folded bullet moves with what is folded under it and stays folded, and n
   await page.keyboard.press("Home");
   await page.keyboard.press("Shift+ArrowDown");
   await expect(editor(page)).toContainText("socks");
-  await expect(line(page, "pack")).not.toContainText("…");
+  await expect(line(page, "pack").getByRole("button", { name: "Fold" })).toBeVisible();
   await page.keyboard.type("x");
   await expect.poll(() => read(page, note.id)).toMatch(/^# Trip\n\n- book\n  - train\nx/);
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => read(page, note.id)).toBe("# Trip\n\n- book\n  - train\n- pack\n  - socks\n  - maps\n- go\n\nAfter.");
 
   // Deleting a folded bullet's own line, by any key, leaves what was under it and shows it.
-  await fold(page, "pack");
+  await fold("pack");
   await expect(editor(page)).not.toContainText("socks");
   await clickLine(page, "pack");
   await keys(page, "Backspace", "Backspace", "Backspace", "Backspace", "Backspace", "Backspace", "Backspace");
@@ -762,12 +528,13 @@ test("a folded bullet moves with what is folded under it and stays folded, and n
   await expect.poll(() => read(page, note.id)).toBe("# Trip\n\n- book\n  - train\n  - socks\n  - maps\n- go\n\nAfter.");
 
   // The arrow keys go into what is folded, which opens it, and typing at its edge shows what was typed.
-  await fold(page, "book");
+  await clickLine(page, "go");
+  await fold("book");
   await expect(editor(page)).not.toContainText("train");
   await clickLine(page, "book");
   await page.keyboard.press("ArrowRight");
   await expect(editor(page)).toContainText("train");
-  await fold(page, "book");
+  await fold("book");
   await clickLine(page, "go");
   await page.keyboard.press("Home");
   await page.keyboard.press("ArrowLeft");
@@ -781,6 +548,7 @@ test("a line that only looks like a bullet, in code or in a block of math, is no
   const note = await open(page, text);
   await expect(editor(page).locator(".math-block")).toHaveCount(1);
   await expect(editor(page).locator(".bullet-dot")).toHaveCount(2);
+  await expect(editor(page).getByRole("button", { name: "Fold" })).toHaveCount(0);
 
   await line(page, "more code").click();
   await keys(page, "Alt+ArrowUp", "Alt+ArrowDown", "ControlOrMeta+Shift+.");
@@ -790,7 +558,7 @@ test("a line that only looks like a bullet, in code or in a block of math, is no
   await expect(line(page, "- y")).toBeVisible();
   await line(page, "- y").click();
   await keys(page, "ControlOrMeta+Shift+.");
-  await expect(editor(page)).not.toContainText("…");
+  await expect(editor(page).locator(".bullet-toggle")).toHaveCount(0);
   await page.keyboard.type("!");
   await expect.poll(() => read(page, note.id)).toBe(text.replace("- y", "- y!"));
 
@@ -807,7 +575,7 @@ test("Tab on a bullet that has nothing to go under is not taken by the outline",
   await page.keyboard.press("Tab");
   // The browser's own Tab, which leaves the note for the next thing on the page.
   await expect(editor(page)).not.toBeFocused();
-  await expect.poll(() => read(page, note.id)).toBe(OUTLINE);
+  expect(await read(page, note.id)).toBe(OUTLINE);
 });
 
 test("each kind of rendering is its own plugin: turning one off shows that markdown as written and leaves the rest drawn", async ({ page }) => {
@@ -818,7 +586,7 @@ test("each kind of rendering is its own plugin: turning one off shows that markd
     tables: () => editor(page).getByRole("table"),
     math: () => editor(page).locator(".katex"),
     "code-blocks": () => editor(page).getByRole("button", { name: "Copy" }),
-    bullets: () => editor(page).locator(".bullet-dot"),
+    bullets: () => editor(page).getByRole("button", { name: "Fold" }),
   };
   const names = { gfm: "GitHub-flavored markdown", tables: "Tables", math: "LaTeX", "code-blocks": "Code blocks", bullets: "Outline bullets" };
 
@@ -841,7 +609,7 @@ test("each kind of rendering is its own plugin: turning one off shows that markd
   await expect(line(page, "const a")).not.toHaveClass(/code-line/);
   await run(page, "Disable plugin: Outline bullets");
   await expectShown(line(page, "under"), "  - under");
-  await expect.poll(() => read(page, note.id)).toBe(text);
+  expect(await read(page, note.id)).toBe(text);
 });
 
 test("when the math can't be loaded the Plugins page says so and formulas are shown as written", async ({ page }) => {
@@ -872,10 +640,11 @@ test("embeds are drawn beside bullets and tasks, a board after a list still work
 
   await expect(line(page, "steep").getByRole("button", { name: "Timer, 5:00 left" })).toBeVisible();
   await expect(line(page, "steep").getByRole("checkbox")).toBeVisible();
+  await expect(line(page, "steep").getByRole("button", { name: "Fold" })).toBeVisible();
   await expect(line(page, "cup").locator(".katex")).toHaveCount(1);
   await expect(editor(page).getByRole("region", { name: "To do", exact: true }).getByRole("listitem")).toHaveCount(1);
-  // The board's own list is the board's: no dots or checkboxes are drawn into it.
-  await expect(editor(page).locator(".embed-block .bullet-dot")).toHaveCount(0);
+  // The board's own list is the board's: no dots, toggles or checkboxes are drawn into it.
+  await expect(editor(page).locator(".embed-block .bullet-dot, .embed-block .bullet-toggle")).toHaveCount(0);
 
   await line(page, "steep").getByRole("checkbox").click();
   await expect.poll(() => read(page, note.id)).toContain("- [x] steep ::timer{5m} then pour");
@@ -895,20 +664,15 @@ test("embeds are drawn beside bullets and tasks, a board after a list still work
   await expect(page.getByRole("listbox")).toHaveCount(0);
 });
 
-test("in vim mode, j and k go through a table's lines, go through a formula and a code block line by line, and dd on a folded bullet shows what was under it", async ({ page }) => {
+test("in vim mode, j and k pass a table whole, go through a formula and a code block line by line, and dd on a folded bullet shows what was under it", async ({ page }) => {
   const text = "# Vim\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n$$\nx^2\n$$\n\n```js\nlet a;\n```\n\n- pack\n  - socks\n  - maps\n- go\n";
   const note = await open(page, text, { "vim.enabled": true });
   await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
   await editor(page).click();
   await keys(page, "g", "g");
 
-  // Onto the blank line, through the table's three lines, which are shown above it while the cursor is in them, to the blank line after it.
-  const source = editor(page).locator(".cm-line.md-table-source");
+  // Onto the blank line, past the table to the blank line after it, and into the formula.
   await keys(page, "j", "j");
-  await expect(source).toHaveText(["| a | b |", "| - | - |", "| 1 | 2 |"]);
-  await expect(editor(page).getByRole("table")).toBeVisible();
-  await keys(page, "j", "j", "j");
-  await expect(source).toHaveCount(0);
   await expect(editor(page).getByRole("table")).toBeVisible();
   await expect(editor(page).locator(".math-block")).toHaveCount(1);
   await keys(page, "j");
@@ -933,15 +697,11 @@ test("in vim mode, j and k go through a table's lines, go through a formula and 
   await expect(editor(page).locator(".math-block")).toHaveCount(0);
   await keys(page, "k", "k", "k");
   await expect(editor(page).locator(".math-block")).toHaveCount(1);
-  // Up through the table's lines, last to first, to the blank line above it, and on to the title.
-  await keys(page, "k");
-  await expect(source).toHaveCount(3);
-  await keys(page, "k", "k", "k");
-  await expect(source).toHaveCount(0);
-  await keys(page, "k", "x");
+  // Past the table in one step, to the blank line above it, and on to the title.
+  await keys(page, "k", "k", "x");
   await expect.poll(() => read(page, note.id)).toMatch(/^ Vim\n/);
 
-  await fold(page, "pack");
+  await line(page, "pack").getByRole("button", { name: "Fold" }).click();
   await expect(editor(page)).not.toContainText("socks");
   await clickLine(page, "pack");
   await expect(line(page, "pack")).toContainText("…");
@@ -961,8 +721,8 @@ test("a long note draws only what is on screen and stays quick to type in", asyn
 
   await expect(editor(page).locator(".katex").first()).toBeVisible();
   await expect(line(page, "const part = 0").locator(".tok-keyword")).toHaveCount(1);
-  await expect.poll(() => lines(page).count()).toBeLessThan(400);
-  await expect.poll(() => editor(page).locator(".md-chip").count()).toBeLessThan(120);
+  expect(await lines(page).count()).toBeLessThan(400);
+  expect(await editor(page).locator(".md-chip").count()).toBeLessThan(120);
 
   await clickLine(page, "Some bold");
   const started = Date.now();
@@ -979,7 +739,7 @@ test("a long note draws only what is on screen and stays quick to type in", asyn
   await expect.poll(() => read(page, note.id).then((t) => t.endsWith("```\nend") && t.includes("lazy dog. ")), { timeout: 20_000 }).toBe(true);
 });
 
-test("each side of a split draws its own note, a fold and a table edit stay with their side, and focus keeps the drawing", async ({ page }) => {
+test("each side of a split draws its own note, a fold and a table edit stay with their side, and writing mode keeps the drawing", async ({ page }) => {
   const body = (title: string) => `# ${title}\n\n| Name  | Qty |\n| ----- | --: |\n| Pens  | 12  |\n\n- pack\n  - socks ${title}\n\nSo $x^2$.\n`;
   const alpha = await open(page, body("Alpha"));
   const beta = await perform(page, { type: "note.create", text: body("Beta") });
@@ -994,7 +754,7 @@ test("each side of a split draws its own note, a fold and a table edit stay with
   for (const group of [0, 1]) {
     await expect(editor(page, group).getByRole("table")).toBeVisible();
     await expect(editor(page, group).locator(".katex")).toHaveCount(1);
-    await expect(editor(page, group).locator(".bullet-dot")).toHaveCount(2);
+    await expect(editor(page, group).getByRole("button", { name: "Fold" })).toHaveCount(1);
   }
 
   await cell(page, 1, 1, 0).click();
@@ -1003,48 +763,30 @@ test("each side of a split draws its own note, a fold and a table edit stay with
   await page.keyboard.press("Enter");
   await expect.poll(() => read(page, alpha.id)).toContain("| Pens | 99  |\n|      |     |");
   await expect(cell(page, 1, 1, 1)).toHaveText("12");
-  await expect.poll(() => read(page, beta.id)).toBe(body("Beta"));
+  expect(await read(page, beta.id)).toBe(body("Beta"));
 
-  await fold(page, "pack", editor(page, 1));
+  await editor(page, 1).getByRole("button", { name: "Fold" }).click();
   await expect(editor(page, 1)).not.toContainText("socks Beta");
   await expect(editor(page, 0)).toContainText("socks Alpha");
 
-  // In focus the side in front fills the window, drawn as it was, and leaving puts both sides back as they were.
   await editor(page, 1).focus();
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Note text" })).toHaveCount(1);
-  await expect(editor(page).getByRole("table")).toBeVisible();
-  await expect(editor(page).locator(".katex")).toHaveCount(1);
-  await expect(editor(page)).toContainText("Beta");
-  await expect(editor(page)).not.toContainText("socks Beta");
-  await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
   for (const group of [0, 1]) {
     await expect(editor(page, group).getByRole("table")).toBeVisible();
     await expect(editor(page, group).locator(".katex")).toHaveCount(1);
   }
   await expect(editor(page, 1)).not.toContainText("socks Beta");
-  await expect(editor(page, 0)).toContainText("socks Alpha");
 });
 
 test("a member who can't change the note sees it drawn, and no checkbox, cell, or bullet key changes it", async ({ page }) => {
-  // There is no way to be made a viewer of a workspace before #14, so the app is told this member is one, as the embeds' own test does.
-  await page.route("**/api/me", async (route) => {
-    const response = await route.fetch();
-    const me = await response.json();
-    await route.fulfill({ response, json: { ...me, workspaces: me.workspaces.map((w: object) => ({ ...w, role: "viewer" })) } });
-  });
   const writes: string[] = [];
   page.on("request", (request) => request.url().endsWith("/ops") && /"note\.(write|undo|redo)"/.test(request.postData() ?? "") && writes.push(request.postData()!));
   const written = "# Plan\n\n- [ ] sweep\n  - under\n- mop\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nSo $x^2$.\n\n```js\nlet a;\n```\n";
-  await signInAsNewPerson(page, "Vera Viewer");
-  const note = await perform(page, { type: "note.create", text: written });
+  const { note, admin } = await asViewerOfNote(page, written);
   await page.goto(`/note/${note.id}`);
 
+  await expect(page.getByRole("button", { name: "Ada's workspace Viewer" })).toBeVisible();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  // It takes the keyboard, for the keys that change nothing in it: folding a bullet.
-  await expect(editor(page)).toHaveAttribute("tabindex", "0");
   await expect(editor(page).getByRole("table")).toBeVisible();
   await expect(editor(page).locator(".katex")).toHaveCount(1);
   await expect(line(page, "let a").locator(".tok-keyword")).toHaveText("let");
@@ -1060,10 +802,10 @@ test("a member who can't change the note sees it drawn, and no checkbox, cell, o
   await line(page, "mop").click();
   await keys(page, "Tab", "Alt+ArrowUp", "Shift+Tab", "ControlOrMeta+Alt+t");
   await page.keyboard.type("typed");
-  await fold(page, "sweep");
+  await line(page, "sweep").getByRole("button", { name: "Fold" }).click();
   await expect(editor(page)).not.toContainText("under");
   await expect(cell(page, 1, 0)).toHaveText("1");
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(writes).toEqual([]);
-  await expect.poll(() => read(page, note.id)).toBe(written);
+  expect(await read(admin, note.id)).toBe(written);
 });

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { asViewerOfNote, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -30,6 +30,27 @@ async function open(page: Page, text: string) {
   await expect(editor(page)).toContainText("Tea");
   return note;
 }
+
+test("the bottom bar counts the open note's words as they are typed, and is the same height with nothing in it", async ({ page }) => {
+  const note = await open(page, "# Tea\n\nSteep the leaves.\n");
+  const words = bar(page).getByLabel("Word count");
+
+  await expect(words).toHaveText("4 words · 1 min read");
+  await expect(words).toBeInViewport({ ratio: 1 });
+  const [, , , height] = await boxOf(page, ".bar");
+  const main = await boxOf(page, "main");
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("Then pour ::timer{5m} it.");
+  await expect(words).toHaveText("7 words · 1 min read");
+  await expect.poll(() => read(page, note.id)).toContain("Then pour ::timer{5m} it.");
+
+  await page.goto("/history");
+  await expect(bar(page)).toBeVisible();
+  await expect(words).toHaveCount(0);
+  expect((await boxOf(page, ".bar"))[3]).toBe(height);
+  expect((await boxOf(page, "main"))[3]).toBe(main[3]);
+});
 
 test("a timer or stopwatch running in the open note shows in the bottom bar, moves nothing when it appears, and scrolls the note to itself when pressed", async ({ page }) => {
   const filler = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} of the notes.`).join("\n\n");
@@ -81,8 +102,8 @@ test("a quick timer is started from the command palette, runs in the bottom bar 
 
   await page.reload();
   await expect(quick).toHaveText(/^Quick timer 1:[0-5]\d$/);
-  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\nSteep.\n");
-  await expect.poll(() => perform(page, { type: "note.history", id: note.id })).toHaveLength(1);
+  expect(await read(page, note.id)).toBe("# Tea\n\nSteep.\n");
+  expect(await perform(page, { type: "note.history", id: note.id })).toHaveLength(1);
 
   await quick.click();
   await expect(quick).toHaveCount(0);
@@ -104,36 +125,28 @@ test("a quick timer is started from the command palette, runs in the bottom bar 
   await expect(palette(page).getByRole("option")).toHaveText(["Enable plugin: Quick timer"]);
 });
 
-test("in focus the bottom bar and its clocks are out of sight while the clock in the note runs on, and the bar is gone with every plugin that puts something in it off", async ({ page }) => {
+test("the bottom bar is there in writing mode, and gone with every plugin that puts something in it off", async ({ page }) => {
   await open(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
 
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
-  await expect(page.locator(".bar")).toBeHidden();
-  await expect(bar(page)).toHaveCount(0);
-  // The note is the window, down to its foot, where the bar was.
-  await expect.poll(async () => (await page.locator(".note").boundingBox())!.height).toBe(page.viewportSize()!.height);
-  await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveText(/4:[45]\d/);
-  await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:[45]\d$/]);
   await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");
+  await page.keyboard.press("ControlOrMeta+.");
 
   for (const name of ["Note clocks", "Quick timer", "Word count"]) await run(page, `Disable plugin: ${name}`);
-  await expect(page.locator(".bar")).toHaveCount(0);
+  await expect(bar(page)).toHaveCount(0);
   await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("a member who can't change the note still sees the bar's clocks and count, and can run a quick timer of their own", async ({ page }) => {
-  await page.route("**/api/me", async (route) => {
-    const response = await route.fetch();
-    const me = await response.json();
-    await route.fulfill({ response, json: { ...me, workspaces: me.workspaces.map((w: object) => ({ ...w, role: "viewer" })) } });
-  });
   const writes: string[] = [];
   page.on("request", (request) => request.url().endsWith("/ops") && /"note\.write"/.test(request.postData() ?? "") && writes.push(request.postData()!));
-  await open(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
+  const { note } = await asViewerOfNote(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
+  await page.goto(`/note/${note.id}`);
+  await expect(page.getByRole("button", { name: "Ada's workspace Viewer" })).toBeVisible();
+  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
   await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");

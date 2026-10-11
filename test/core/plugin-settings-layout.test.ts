@@ -18,7 +18,7 @@ const DECLARED: readonly Declared[] = [
   { key: "vim.enabled", setting: { type: "boolean", default: false, title: "On" }, group: VIM, active: true, switch: true },
   { key: "vim.screenLines", setting: { type: "boolean", default: false, title: "j and k move by the rows on screen" }, group: VIM, active: false },
   { key: `${KEYBINDING}history.undo`, setting: { type: "chords", default: ["mod+z"], title: "Undo" }, group: KEYS, active: true },
-  { key: `${KEYBINDING}view.toggleFocus`, setting: { type: "chords", default: ["mod+."], title: "Toggle focus" }, group: KEYS, active: true },
+  { key: `${KEYBINDING}view.toggleWritingMode`, setting: { type: "chords", default: ["mod+."], title: "Toggle writing mode" }, group: KEYS, active: true },
   { key: `${KEYBINDING}view.toggleInspector`, setting: { type: "chords", default: [], title: "Toggle inspector" }, group: KEYS, active: true },
 ];
 
@@ -46,7 +46,7 @@ describe("the Settings page's layout", () => {
 
     expect(shortcuts.map((s) => [s.commandId, s.title, s.chords, s.defaults, s.yours, s.problems.length])).toEqual([
       ["history.undo", "Undo", ["mod+z"], ["mod+z"], true, 1],
-      ["view.toggleFocus", "Toggle focus", ["mod+."], ["mod+."], false, 0],
+      ["view.toggleWritingMode", "Toggle writing mode", ["mod+."], ["mod+."], false, 0],
       ["view.toggleInspector", "Toggle inspector", ["mod+shift+i"], [], true, 0],
     ]);
   });
@@ -59,7 +59,7 @@ describe("the Settings page's layout", () => {
     expect(found("texts")).toEqual({ categories: [["Editor", ["core.editorTextSize"]]], shortcuts: [] });
     expect(found("light or")).toEqual({ categories: [["Appearance", ["core.theme"]]], shortcuts: [] });
     expect(found("vim mode")).toEqual({ categories: [["Vim mode", ["vim.screenLines"]]], shortcuts: [] });
-    expect(found("toggle")).toEqual({ categories: [], shortcuts: ["view.toggleFocus", "view.toggleInspector"] });
+    expect(found("toggle")).toEqual({ categories: [], shortcuts: ["view.toggleWritingMode", "view.toggleInspector"] });
     expect(found("history.")).toEqual({ categories: [], shortcuts: ["history.undo"] });
     expect(found("mod+z")).toEqual({ categories: [], shortcuts: ["history.undo"] });
     expect(found("⌘z")).toEqual({ categories: [], shortcuts: ["history.undo"] });
@@ -79,20 +79,20 @@ describe("the Settings page's layout", () => {
     const shortcuts = shortcutsOf(settingsOf({ "keybindings.view.toggleInspector": ["ctrl+z"] }));
     const holders = (chord: string, commandId: string, mac: boolean) => holdersOf(chord, shortcuts, commandId, mac).map((s) => s.commandId);
 
-    expect(holders("mod+z", "view.toggleFocus", true)).toEqual(["history.undo"]);
-    expect(holders("mod+z", "view.toggleFocus", false)).toEqual(["history.undo", "view.toggleInspector"]);
+    expect(holders("mod+z", "view.toggleWritingMode", true)).toEqual(["history.undo"]);
+    expect(holders("mod+z", "view.toggleWritingMode", false)).toEqual(["history.undo", "view.toggleInspector"]);
     expect(holders("mod+z", "history.undo", true)).toEqual([]);
     expect(holders("mod+shift+k", "history.undo", true)).toEqual([]);
   });
 
   it("names the other commands whose keys a sequence begins or goes on from, reading ctrl as mod off a Mac", () => {
-    const shortcuts = shortcutsOf(settingsOf({ "keybindings.view.toggleInspector": ["ctrl+k i"], "keybindings.view.toggleFocus": ["g g"] }));
+    const shortcuts = shortcutsOf(settingsOf({ "keybindings.view.toggleInspector": ["ctrl+k i"], "keybindings.view.toggleWritingMode": ["g g"] }));
     const overlaps = (keys: string, commandId: string, mac: boolean) => overlapsOf(keys, shortcuts, commandId, mac).map((o) => [o.shortcut.commandId, o.keys, o.how]);
 
-    expect(overlaps("g", "history.undo", true)).toEqual([["view.toggleFocus", "g g", "begins"]]);
-    expect(overlaps("g g j", "history.undo", true)).toEqual([["view.toggleFocus", "g g", "follows"]]);
+    expect(overlaps("g", "history.undo", true)).toEqual([["view.toggleWritingMode", "g g", "begins"]]);
+    expect(overlaps("g g j", "history.undo", true)).toEqual([["view.toggleWritingMode", "g g", "follows"]]);
     expect(overlaps("g g", "history.undo", true)).toEqual([]);
-    expect(overlaps("g", "view.toggleFocus", true)).toEqual([]);
+    expect(overlaps("g", "view.toggleWritingMode", true)).toEqual([]);
     expect(overlaps("mod+k", "history.undo", true)).toEqual([]);
     expect(overlaps("mod+k", "history.undo", false)).toEqual([["view.toggleInspector", "ctrl+k i", "begins"]]);
     expect(overlaps("mod+z y", "view.toggleInspector", true)).toEqual([["history.undo", "mod+z", "follows"]]);

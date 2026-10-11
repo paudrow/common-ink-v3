@@ -1,11 +1,10 @@
-import { whoAmI } from "../core/accounts.ts";
+import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
 import { perform } from "../core/operations.ts";
-import { BROKE, OpError, type MeHere, type OpErrorCode } from "../core/protocol.ts";
+import { OpError, type OpErrorCode } from "../core/protocol.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
-import { embedOrigin, embedResponse } from "./frames.ts";
-import { secured } from "./headers.ts";
+import { embedResponse, framing } from "./frames.ts";
 import { redirectFor } from "./hosts.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 
@@ -17,7 +16,19 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   const personId = await sessionPersonId(req, env, url);
   if (!personId) return json({ error: "signed_out" }, 401);
 
-  if (url.pathname === "/api/me" && req.method === "GET") return json({ ...(await whoAmI(env.DB, personId)), setup: { embedSite: embedOrigin(env) !== null } } satisfies MeHere);
+  if (url.pathname === "/api/me" && req.method === "GET") {
+    // Opening the app is arriving: an invite made since the person signed in takes effect here.
+    await arrive(env.DB, personId);
+    return json(await whoAmI(env.DB, personId));
+  }
+
+  // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
+  const lookup = /^\/api\/(notes|invites)\/([a-z0-9]{12})$/.exec(url.pathname);
+  if (lookup && req.method === "GET") {
+    if (lookup[1] === "invites") await arrive(env.DB, personId);
+    const workspaceId = await (lookup[1] === "notes" ? workspaceOfNote : workspaceOfInvite)(env.DB, personId, lookup[2]!);
+    return workspaceId ? json({ workspaceId }) : json({ error: "not_found" }, 404);
+  }
 
   const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})\/ops$/.exec(url.pathname);
   if (opsRoute && req.method === "POST") {
@@ -41,33 +52,18 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   return json({ error: "not_found" }, 404);
 }
 
-/** A fault that is no request's doing is logged, and answered in the shape its client reads: a bare 500 is a page of HTML to a client that asked for JSON. */
-async function answered(what: string, answer: () => Promise<Response>, broke: () => Response): Promise<Response> {
-  try {
-    return await answer();
-  } catch (err) {
-    console.error(`${what} broke`, err);
-    return broke();
-  }
-}
-
-function route(req: Request, env: Env, url: URL): Response | Promise<Response> {
-  const moved = redirectFor(url);
-  if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
-  const embed = embedResponse(url, env);
-  if (embed) return embed;
-  if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
-  if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
-  if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
-  const broke = () => json({ error: "unknown", message: BROKE }, 500);
-  if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(url.pathname, () => handleAgentsApi(req, env, url), broke);
-  if (url.pathname.startsWith("/api/")) return answered(url.pathname, () => handleApi(req, env, url), broke);
-  return env.ASSETS.fetch(req);
-}
-
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    return secured(await route(req, env, url), url, env);
+    const moved = redirectFor(url);
+    if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
+    const embed = embedResponse(url, env);
+    if (embed) return embed;
+    if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
+    if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
+    if (url.pathname === "/mcp") return handleMcp(req, env);
+    if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return handleAgentsApi(req, env, url);
+    if (url.pathname.startsWith("/api/")) return handleApi(req, env, url);
+    return framing(await env.ASSETS.fetch(req), url, env);
   },
 } satisfies ExportedHandler<Env>;

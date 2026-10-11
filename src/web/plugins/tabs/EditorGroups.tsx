@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { arrangement, same, type EditorAction, type EditorLayout, type Group, type Pane, type Side, type Split } from "./editorLayout.ts";
-import { Icon, ResizeHandle, carried, carriesTab, carry, type IconName, type Opened } from "../../plugin-api.ts";
+import { Icon, NOTE_DRAG, ResizeHandle, type IconName, type Opened } from "../../plugin-api.ts";
 import { ContextMenu } from "../lib/Menu.tsx";
 
 /** Where on a group's body a dragged tab is: near one of its edges, which splits the group that way, or in the middle, which adds the tab to it. */
@@ -9,11 +9,24 @@ export type Zone = Side | "middle";
 type Drop = { groupId: string; at: number | Zone };
 type TabMenu = { groupId: string; tab: Opened; x: number; y: number };
 
+/** The drag type that carries a tab that isn't a note's, as JSON. A note's tab is dragged as its note, so it also drops wherever a note does. */
+const TAB_DRAG = "application/x-common-ink-tab";
 /** How much of a group's width or height, from each edge, splits it. The rest is the middle. */
 const EDGE = 0.25;
 /** The least share of a split a pane can be dragged down to. */
 const LEAST = 0.1;
 
+const carriesTab = (e: DragEvent) => e.dataTransfer.types.includes(NOTE_DRAG) || e.dataTransfer.types.includes(TAB_DRAG);
+function carried(e: DragEvent): Opened | null {
+  const noteId = e.dataTransfer.getData(NOTE_DRAG);
+  if (noteId) return { kind: "note", id: noteId };
+  try {
+    const tab = JSON.parse(e.dataTransfer.getData(TAB_DRAG)) as Opened;
+    return tab.kind === "folder" ? { kind: "folder", id: String(tab.id) } : tab.kind === "page" ? { kind: "page", id: String(tab.id), path: String(tab.path) } : null;
+  } catch {
+    return null;
+  }
+}
 const keyOf = (tab: Opened) => `${tab.kind} ${tab.id}`;
 
 function gapAt(bar: HTMLElement, x: number) {
@@ -35,6 +48,9 @@ export function zoneAt({ left, top, width, height }: { left: number; top: number
   return across < EDGE ? "left" : across > 1 - EDGE ? "right" : down < EDGE ? "up" : down > 1 - EDGE ? "down" : "middle";
 }
 
+/** The group at the top right corner of the arrangement, whose tab row carries the window's buttons. */
+const cornerOf = (pane: Pane): string => (typeof pane === "string" ? pane : cornerOf(pane.direction === "row" ? pane.panes.at(-1)! : pane.panes[0]!));
+
 interface Props {
   layout: EditorLayout;
   titleOf: (tab: Opened) => string;
@@ -43,23 +59,11 @@ interface Props {
   render: (group: Group, tab: Opened) => ReactNode;
   /** What a group with nothing open shows. */
   empty: ReactNode;
-  /** The group whose tab in front is to take the cursor. A folder's list or a page has it on its tab. A note's editor takes it for itself once the note is there, and `onCursorPut` is called if the member has gone elsewhere first. */
-  cursorTo: string | null;
-  onCursorPut: () => void;
-  /** Focus: whether the focused group's tab in front fills the window, the keys that toggle it, and the toggle, which a group's own button calls with its id. */
-  focusMode: { on: boolean; keys?: string; toggle: (groupId: string) => void };
+  /** The window's buttons, for the right end of the corner group's tab row. */
+  controls: ReactNode;
 }
 
-/** Opens the menu of the tab in front, at the tab's foot, as a right click on the tab does: the way to the menu from the keyboard. */
-export function showTabMenu() {
-  const selected = '[role="tab"][aria-selected="true"]';
-  const tab = document.querySelector(`.group[data-focused] ${selected}`) ?? document.querySelector(`.group ${selected}`);
-  if (!tab) return;
-  const { left, bottom } = tab.getBoundingClientRect();
-  tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: left, clientY: bottom }));
-}
-
-export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
+export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty, controls }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -85,34 +89,23 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
       removeEventListener("dragend", ended, true);
     };
   }, []);
-  const groups = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const group = layout.groups.find((g) => g.id === cursorTo);
-    if (!group) return;
-    if (group.active?.kind !== "note") {
-      groups.current?.querySelector<HTMLElement>(`[data-group="${group.id}"] [role="tab"][aria-selected="true"]`)?.focus();
-      return onCursorPut();
-    }
-    // A note's editor takes the cursor once the note is there, unless the member has put it somewhere else by then.
-    addEventListener("focusin", onCursorPut, true);
-    return () => removeEventListener("focusin", onCursorPut, true);
-  }, [cursorTo]);
   const root = arrangement(layout);
+  const corner = cornerOf(root);
 
   /** Over a drop target the note can't fall through to the editor beneath, which would paste its link. */
   const over = (e: DragEvent, next: Drop) => {
-    if (!carriesTab(e.dataTransfer)) return;
+    if (!carriesTab(e)) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
     setDrop((d) => (d?.groupId === next.groupId && d.at === next.at ? d : next));
   };
   const dropped = (e: DragEvent, action: (tab: Opened) => EditorAction) => {
-    if (!carriesTab(e.dataTransfer)) return;
+    if (!carriesTab(e)) return;
     e.preventDefault();
     e.stopPropagation();
     setDrop(null);
-    const tab = carried(e.dataTransfer);
+    const tab = carried(e);
     if (tab) dispatch(action(tab));
   };
   const left = (e: DragEvent) => {
@@ -128,12 +121,11 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
         key={group.id}
         className="group"
         data-region
-        data-group={group.id}
         aria-label={`Editor group ${layout.groups.indexOf(group) + 1}`}
         data-focused={(layout.groups.length > 1 && group.id === layout.focusedGroupId) || undefined}
-        data-front={group.id === layout.focusedGroupId || undefined}
       >
-        <div className="tab-row">
+        {(group.tabs.length > 0 || group.id === corner) && (
+          <div className="tab-row">
             {group.tabs.length > 0 && (
               <div
                 role="tablist"
@@ -161,7 +153,11 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
                       tabIndex={0}
                       title={title}
                       draggable
-                      onDragStart={(e) => carry(e.dataTransfer, tab)}
+                      onDragStart={(e) => {
+                        if (tab.kind === "note") e.dataTransfer.setData(NOTE_DRAG, tab.id);
+                        else e.dataTransfer.setData(TAB_DRAG, JSON.stringify(tab));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
                       onClick={activate}
                       onDoubleClick={() => dispatch({ type: "pin", groupId: group.id, tab })}
                       onKeyDown={(e) => {
@@ -199,17 +195,9 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
                 })}
               </div>
             )}
-          <button
-            type="button"
-            className="icon-button focus-button"
-            aria-label="Focus"
-            title={`${focusMode.on ? "Leave focus" : "Focus"}${focusMode.keys ? ` (${focusMode.keys})` : ""}`}
-            aria-pressed={focusMode.on}
-            onClick={() => focusMode.toggle(group.id)}
-          >
-            <Icon name="focus" />
-          </button>
-        </div>
+            {group.id === corner && controls}
+          </div>
+        )}
         <div
           className="group-body"
           onPointerDown={focus}
@@ -218,7 +206,7 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
           onDragLeave={left}
           onDropCapture={(e) => {
             const at = zone(e);
-            dropped(e, (tab) => (at === "middle" ? { type: "add", groupId: group.id, tab } : { type: "split", groupId: group.id, side: at, tab, keep: true }));
+            dropped(e, (tab) => (at === "middle" ? { type: "add", groupId: group.id, tab } : { type: "split", groupId: group.id, side: at, tab }));
           }}
         >
           {group.active ? render(group, group.active) : empty}
@@ -231,7 +219,7 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
   const drawPane = (pane: Pane, path: number[]): ReactNode => (typeof pane === "string" ? drawGroup(layout.groups.find((g) => g.id === pane)!) : <SplitPanes key={path.join(".")} split={pane} path={path} dispatch={dispatch} draw={drawPane} />);
 
   return (
-    <div ref={groups} className="groups" data-focus-mode={focusMode.on || undefined}>
+    <div className="groups">
       {drawPane(root, [])}
       {menu && menuTab && menuGroup && menuAt >= 0 && (
         <ContextMenu

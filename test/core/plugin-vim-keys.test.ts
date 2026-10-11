@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chordOf, onPlatform } from "../../src/web/keybindings.ts";
+import { onPlatform } from "../../src/web/keybindings.ts";
 import { KEYS } from "../../src/web/plugins/vim/keys.ts";
 import { land, toward, type Box } from "../../src/web/plugins/vim/moving.ts";
 
@@ -52,14 +52,6 @@ describe("moving between regions of the window", () => {
     expect(toward(row, 0, "right")).toBe(1);
   });
 
-  it("goes from a panel lying over the page to the part of the page under it, on the side the page reaches past it", () => {
-    // A sidebar, the page, and a panel over the page's right end, beside the bar.
-    const over = [box(0, 0, 200, 700), box(200, 0, 1236, 700), box(980, 0, 1236, 700)];
-    expect(toward(over, 2, "left")).toBe(1);
-    expect(toward(over, 2, "right")).toBe(-1);
-    expect(toward(over, 1, "left")).toBe(0);
-  });
-
   it("stays where it is when nothing is on that side", () => {
     expect(toward(row, 0, "left")).toBe(-1);
     expect(toward(row, 3, "right")).toBe(-1);
@@ -91,12 +83,6 @@ describe("vim's keys outside a note", () => {
       const keys = KEYS.flatMap((k) => k.keys.map((key) => onPlatform(key, mac)));
       expect(keys.filter((key, i) => keys.indexOf(key) !== i), mac ? "on a Mac" : "off a Mac").toEqual([]);
     }
-  });
-
-  it("goes to the search box with / on a keyboard that types it with Shift, as a German one does with Shift and 7", () => {
-    const pressed = chordOf({ key: "/", metaKey: false, ctrlKey: false, altKey: false, shiftKey: true }, true);
-
-    expect(KEYS.find((k) => k.id === "search")!.keys).toContain(pressed);
   });
 
   it("begins no sequence with a key that runs a command by itself, which would never wait for the rest", () => {
