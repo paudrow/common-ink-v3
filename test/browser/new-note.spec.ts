@@ -89,3 +89,23 @@ test("a note with no heading is titled by its first words: in its tab, its addre
   await openAllNotes(page);
   await expect(listedNote(page, "Shopping for the week")).toBeVisible();
 });
+
+test("with vim on, a new note starts in insert mode after the mark, so the title is typed at once there too", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
+  await page.reload();
+  await openAllNotes(page);
+  await page.getByRole("main").getByRole("button", { name: "New note" }).click();
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--INSERT--");
+  await expect(editor(page)).toBeFocused();
+  const id = noteIdIn(page);
+  await page.keyboard.type("Groceries");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+  await expect.poll(async () => (await read(page, id)).text).toBe("# Groceries");
+
+  // A note with words in it opens in normal mode, as before.
+  await page.goto(`/note/${id}`);
+  await expect(page.locator(".cm-line").first()).toHaveText("# Groceries");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+});

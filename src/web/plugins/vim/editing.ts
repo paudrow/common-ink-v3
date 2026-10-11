@@ -1,7 +1,7 @@
 import { Prec, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { Vim, getCM, vim } from "@replit/codemirror-vim";
-import { dismissing } from "../../plugin-api.ts";
+import { TITLE_MARK, dismissing } from "../../plugin-api.ts";
 
 let run: (commandId: string) => boolean = () => false;
 
@@ -39,22 +39,43 @@ for (const [name, prefix] of [["wq", "wq"], ["xit", "x"]] as const) {
   });
 }
 
-const look = EditorView.theme({
-  ".cm-panels": { backgroundColor: "var(--bg)", color: "var(--muted)", zIndex: 1 },
-  ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--line)" },
-  ".cm-vim-panel": { padding: "0.25rem 0", fontFamily: "var(--mono)", fontSize: "0.8rem" },
-  ".cm-vim-panel input": { color: "var(--ink)", fontFamily: "inherit" },
+/**
+ * A note opened with nothing in it but the mark of its title starts in insert mode after the mark,
+ * so the title is typed at once here too. In normal mode the cursor would stand on the mark's space,
+ * and `i` would type the title into the mark.
+ */
+const titleFirst = ViewPlugin.define((view) => {
+  if (view.state.doc.toString() === TITLE_MARK && !view.state.readOnly) {
+    queueMicrotask(() => {
+      const cm = getCM(view);
+      if (cm && !cm.state.vim?.insertMode && view.state.doc.toString() === TITLE_MARK) Vim.handleKey(cm, "A", "mapping");
+    });
+  }
+  return {};
 });
 
+let byRows = false;
+
 /** The editor extension for vim, with `runCommand` as the way it runs the app's commands. */
-export function vimEditing(runCommand: (commandId: string) => boolean): { extension: Extension; jumpsFrom: (focused: HTMLElement) => boolean } {
+export function vimEditing(runCommand: (commandId: string) => boolean): { extension: Extension; jumpsFrom: (focused: HTMLElement) => boolean; moveByRows: (on: boolean) => void } {
   run = runCommand;
   return {
+    /** Whether j and k, and the arrows, move by the rows on screen, as gj and gk do, in normal and visual mode. After an operator they are whole lines still: dj takes two lines. */
+    moveByRows(on) {
+      if (on === byRows) return;
+      byRows = on;
+      for (const [key, rows] of [["j", "gj"], ["k", "gk"], ["<Down>", "gj"], ["<Up>", "gk"]] as const) {
+        for (const context of ["normal", "visual"] as const) {
+          if (on) Vim.noremap(key, rows, context);
+          else Vim.unmap(key, context);
+        }
+      }
+    },
     extension: [
       // Escape closes what is open over the editor before it is vim's.
       Prec.highest(EditorView.domEventHandlers({ keydown: (e) => e.key === "Escape" && dismissing() })),
       vim({ status: true }),
-      look,
+      titleFirst,
     ],
     /** Whether the element is a note's text with vim in a mode where ctrl+o and ctrl+i are jumps: not insert mode, and not its `:` prompt. */
     jumpsFrom(focused) {

@@ -55,7 +55,7 @@ test("vim mode is off until it is turned on in settings, and turning it on or of
   const beta = await perform(page, { type: "note.create", text: "# Beta" });
   await page.goto("/settings");
   const vim = page.getByRole("tabpanel").getByRole("region", { name: "Vim mode", exact: true });
-  await expect(vim.getByRole("checkbox", { name: "On" })).not.toBeChecked();
+  await expect(vim.getByRole("checkbox", { name: "On" }).first()).not.toBeChecked();
   await expect(vim).toContainText("Vim mode is off until you turn it on here.");
 
   await page.goto(`/note/${alpha.id}`);
@@ -76,7 +76,7 @@ test("vim mode is off until it is turned on in settings, and turning it on or of
   await expect(editors(page)).toHaveCount(2);
 
   await run(page, "Go to Settings");
-  await vim.getByRole("checkbox", { name: "On" }).check();
+  await vim.getByRole("checkbox", { name: "On" }).first().check();
   await expect.poll(() => stored(page)).toEqual({ "vim.enabled": true });
   await page.getByRole("tab", { name: "JSON", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Settings JSON" })).toContainText('"vim.enabled": true');
@@ -315,11 +315,11 @@ test("moving through a note in a preview tab leaves it a preview, and an edit ke
   await page.keyboard.type("second");
   await page.keyboard.press("Enter");
   await expect(statusLine(page)).toHaveText("--NORMAL--");
-  expect(await italic(page)).toEqual([true, true]);
+  expect(await italic(page)).toEqual([false, true]);
 
   await page.keyboard.press("x");
   await expect(lines(page).nth(1)).toHaveText("econd line");
-  await expect.poll(() => italic(page)).toEqual([true, false]);
+  await expect.poll(() => italic(page)).toEqual([false, false]);
 });
 
 test("the cursor moves across an embed, which is shown as written while the cursor is on it and drawn again after", async ({ page }) => {

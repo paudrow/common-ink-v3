@@ -12,6 +12,14 @@ export const vim: Plugin = {
   id: "vim",
   name: "Vim mode",
   enabledByDefault: false,
+  settings: {
+    screenLines: {
+      type: "boolean",
+      default: false,
+      title: "j and k move by the rows on screen",
+      description: "Off, j and k move by whole lines, as in vim, however many rows a long line wraps to, and gj and gk move by rows. On, j and k move by rows too, so the cursor can go into a wrapped line.",
+    },
+  },
   activate(host) {
     let jumps = EMPTY;
     let stopped = false;
@@ -34,7 +42,11 @@ export const vim: Plugin = {
       ({ vimEditing }) => {
         if (stopped) return;
         const editing = vimEditing(host.commands.run);
-        host.editorExtensions.register({ id: "vim", extension: editing.extension });
+        // A reading of a note is not an editor: it has no cursor for vim to move, and no mode to show.
+        host.editorExtensions.register({ id: "vim", extension: (editor) => (editor.reading ? [] : editing.extension) });
+        const byRows = () => editing.moveByRows(host.settings.get<boolean>("screenLines"));
+        byRows();
+        host.settings.subscribe(byRows);
         /** In a field, these keys are the field's. In a note they are jumps only where vim would take them for jumps. */
         const when = () => !isField(document.activeElement) || editing.jumpsFrom(document.activeElement);
         host.commands.register({ id: "vim.back", title: "Go back to the note before", keys: ["ctrl+o"], when, run: go(-1) });
