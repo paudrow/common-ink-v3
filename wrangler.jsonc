@@ -15,6 +15,7 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/*", "!/assets/*"]
   },
+  // The database has a full-text table, which `wrangler d1 export` refuses. Its backup is D1 Time Travel.
   "d1_databases": [
     {
       "binding": "DB",
@@ -23,6 +24,9 @@
       "migrations_dir": "migrations"
     }
   ],
+  // Every hour, the Worker removes the notes whose 30 days in Trash are up: `scheduled` in src/worker/index.ts.
+  // A Preview has no timer, so nothing is removed from one's Trash on its own.
+  "triggers": { "crons": ["17 * * * *"] },
   "observability": { "enabled": true },
   // The optional settings are typed in src/worker/env.d.ts.
   "secrets": { "required": ["SESSION_SECRET"] }

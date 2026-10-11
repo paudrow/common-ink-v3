@@ -12,8 +12,6 @@ const look = EditorView.theme({
 export const lineNumbers: Plugin = {
   id: "lineNumbers",
   name: "Line numbers",
-  description: "Each line's number beside it, in every note's editor.",
-  icon: "numbers",
   enabledByDefault: false,
   activate(host) {
     host.editorExtensions.register({ id: "lineNumbers", extension: (editor) => (editor.reading ? [] : [numbered(), look]) });

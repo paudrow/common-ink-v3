@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { connectAgent, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -109,7 +109,7 @@ test("a link's words follow its note's title through a rename here or by someone
   const read = await perform(page, { type: "note.read", id: diary.id });
   expect(read.text).toBe(`# Diary\n\nRead [[${plan.id}]] and [[${plan.id}|what we agreed]].\n\nEnd`);
   expect(read.revision).toBe(1);
-  expect(read.links).toEqual([{ id: plan.id, title: "Plan for summer" }]);
+  expect(read.links).toEqual([{ id: plan.id, title: "Plan for summer", state: "live" }]);
 });
 
 test("an agent writes a link by title, it is stored by id, and reads back with the title beside it", async ({ page }) => {
@@ -120,8 +120,8 @@ test("an agent writes a link by title, it is stored by id, and reads back with t
   const made = await agent.tool<{ id: string; text: string }>("create_note", { text: "# From the agent\n\nSee [[Plan]] and [[plan|the same]]." });
   expect(made.text).toBe(`# From the agent\n\nSee [[${plan.id}]] and [[${plan.id}|the same]].`);
   await expect(agent.tool("create_note", { text: "[[No such note]]" })).rejects.toThrow(/No note is titled "No such note"/);
-  await expect.poll(async () => (await agent.tool<{ links: unknown }>("read_note", { id: made.id })).links).toEqual([{ id: plan.id, title: "Plan" }]);
-  await expect.poll(async () => (await agent.tool<{ title: string }[]>("backlinks", { id: plan.id })).map((n) => n.title)).toEqual(["From the agent"]);
+  expect((await agent.tool<{ links: unknown }>("read_note", { id: made.id })).links).toEqual([{ id: plan.id, title: "Plan", state: "live" }]);
+  expect((await agent.tool<{ title: string }[]>("backlinks", { id: plan.id })).map((n) => n.title)).toEqual(["From the agent"]);
 
   await page.goto(`/note/${made.id}`);
   await expect(drawnLinks(page)).toHaveText(["Plan", "the same"]);
@@ -134,8 +134,7 @@ test("the Backlinks tab lists the notes that link to the open note, follows link
   const trip = await create(page, "# Trip\n\n");
   await create(page, "# Unrelated");
   await page.goto(`/note/${plan.id}`);
-  // Pinned, so it stays while the member writes in the editor.
-  await pinPanel(page, "Backlinks");
+  await page.getByRole("tab", { name: "Backlinks" }).click();
   await expect(backlinks(page)).toHaveText([/^Diary\s*First thoughts on\.\s*Unsorted$/]);
 
   // Written in the other side of a split, with this note still the one the inspector is about.
@@ -151,7 +150,7 @@ test("the Backlinks tab lists the notes that link to the open note, follows link
 
   await backlinks(page).click();
   await expect(page).toHaveURL(/\/note\/diary-/);
-  await expect(page.getByRole("complementary", { name: "Inspector" })).toContainText("No notes link here yet.");
+  await expect(page.getByRole("tabpanel")).toContainText("No notes link here yet.");
 });
 
 test("a click on a drawn link opens its note as any note is opened, ⌘-click opens it in a tab behind, and as written a plain click is for the cursor", async ({ page }) => {
@@ -206,23 +205,17 @@ test("a link to a note that isn't there, or to nothing by a title, says so or st
   await other.close();
   await signInAsNewPerson(page, "Ada Lovelace");
   const diary = await perform(page, { type: "note.create", text: `# Diary\n\nGone [[zzzzzzzzzzzz]], hers [[${secret.id}]], shown [[${secret.id}|as I call it]], typed [[Some title]].`, linkTitles: "keep" });
-  // The note is drawn before its workspace's notes are listed, as on a slow connection: a link waits as "…" and then says what it is.
-  await page.route("**/api/**", async (route) => {
-    if (route.request().postData()?.includes('"note.list"')) await new Promise((r) => setTimeout(r, 1500));
-    await route.fallback();
-  });
   await page.goto(`/note/${diary.id}`);
-  await expect(lines(page).last()).toHaveText("Gone …, hers …, shown as I call it, typed [[Some title]].");
 
   await expect(lines(page).last()).toHaveText("Gone Unavailable note, hers Unavailable note, shown as I call it, typed [[Some title]].");
-  await expect.poll(() => page.content()).not.toContain("Grace's secret");
+  expect(await page.content()).not.toContain("Grace's secret");
   await drawnLinks(page).first().click({ modifiers: ["ControlOrMeta"] });
   await drawnLinks(page).nth(1).click({ modifiers: ["ControlOrMeta"] });
   await page.waitForTimeout(300);
   await expect(page).toHaveURL(new RegExp(`/note/diary-${diary.id}$`));
   expect((await perform(page, { type: "note.read", id: diary.id })).links).toEqual([
-    { id: "zzzzzzzzzzzz", title: null },
-    { id: secret.id, title: null },
+    { id: "zzzzzzzzzzzz", title: null, state: null },
+    { id: secret.id, title: null, state: null },
   ]);
 });
 
@@ -265,10 +258,10 @@ test("in vim, gd on a link opens its note and ctrl+o comes back, and gd on an ad
   await expect.poll(opened).toEqual([["https://example.org/docs", "_blank", "noopener,noreferrer"]]);
   await keys(page, "3", "f", "h", "g", "d");
   await expect.poll(opened).toHaveLength(2);
-  await expect.poll(async () => (await opened())[1]).toEqual(["https://example.org/bare", "_blank", "noopener,noreferrer"]);
+  expect((await opened())[1]).toEqual(["https://example.org/bare", "_blank", "noopener,noreferrer"]);
   await keys(page, "$", "g", "d");
   await page.waitForTimeout(200);
-  await expect.poll(() => opened(), "an address that isn't a web page or a mailto is never opened").toHaveLength(2);
+  expect(await opened(), "an address that isn't a web page or a mailto is never opened").toHaveLength(2);
   await expect(page).toHaveURL(/\/note\/diary-/);
 
   await keys(page, "Shift+G", "g", "d");
@@ -399,10 +392,10 @@ test("what is drawn as a link is what the server records as one: in a nested bul
   await expect(editor(page)).toContainText("indented Plan");
   await expect(editor(page)).toContainText(`fenced ${link}`);
   await expect(editor(page)).toContainText(`inline ${link}`);
-  await expect.poll(async () => (await perform(page, { type: "note.backlinks", id: plan.id })).map((n) => n.title)).toEqual(["Diary"]);
+  expect((await perform(page, { type: "note.backlinks", id: plan.id })).map((n) => n.title)).toEqual(["Diary"]);
   const emptied = await perform(page, { type: "note.write", id: diary.id, baseRevision: 1, text: `# Diary\n\n\`\`\`\nfenced ${link}\n\`\`\`\n\nand \`inline ${link}\` end` });
   expect(emptied.revision).toBe(2);
-  await expect.poll(() => perform(page, { type: "note.backlinks", id: plan.id })).toEqual([]);
+  expect(await perform(page, { type: "note.backlinks", id: plan.id })).toEqual([]);
 });
 
 interface Place {
@@ -486,25 +479,4 @@ test("nothing moves when the cursor comes to a line with links, and only what fo
   await page.keyboard.press("ControlOrMeta+Home");
   await expect(drawnLinks(page)).toHaveText(["Plan for spring", "the trip"]);
   expectUnmoved(await places(page, ALL), before, "after the cursor left");
-});
-
-test("on a line with a bold word and a link, only the one the cursor is on is shown as written", async ({ page }) => {
-  await signInAsNewPerson(page, "Ada Lovelace");
-  const plan = await create(page, "# Plan for spring");
-  const diary = await create(page, `# Diary\n\nA **bold** word, [[${plan.id}]] and an end`);
-  await open(page, diary.id, "Plan for spring");
-  const line = lines(page).nth(2);
-  const drawn = "A bold word, Plan for spring and an end";
-  await expect(line, "the cursor at the line's end shows neither").toHaveText(drawn);
-
-  await page.keyboard.press("Home");
-  await expect(line, "nor at its start").toHaveText(drawn);
-  await keys(page, "ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight");
-  await expect(line, "in the bold word, its marks and not the link's id").toHaveText("A **bold** word, Plan for spring and an end");
-
-  await page.keyboard.press("End");
-  for (let i = 0; i < " and an end".length; i++) await page.keyboard.press("ArrowLeft");
-  await expect(line, "beside the link, both are drawn").toHaveText(drawn);
-  await page.keyboard.press("ArrowLeft");
-  await expect(line, "in the link, its id and not the bold word's marks").toHaveText(`A bold word, [[${plan.id}]] and an end`);
 });

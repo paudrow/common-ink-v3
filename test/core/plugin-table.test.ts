@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actOnCell, addColumn, addRow, CELL_ACTIONS, parseTable, pipedPart, removeColumn, removeRow, serializeTable, setCell } from "../../src/web/plugins/tables/table.ts";
+import { addColumn, addRow, parseTable, pipedPart, removeColumn, removeRow, serializeTable, setCell } from "../../src/web/plugins/tables/table.ts";
 
 const PRETTY = ["| Name  | Qty | Note      |", "| ----- | --: | :-------: |", "| Pens  | 12  | blue      |", "| Paper | 500 | a \\| b    |", "|       |     | **heavy** |"].join("\n");
 
@@ -67,37 +67,5 @@ describe("editing a table", () => {
     expect(removeRow(table, 0)).toBe(table);
     expect(removeColumn(table, 0).rows).toEqual([["b"], ["2"], ["4"]]);
     expect(removeColumn(removeColumn(table, 0), 0).rows).toEqual([["b"], ["2"], ["4"]]);
-  });
-});
-
-describe("what a cell's menu does", () => {
-  const table = parseTable("| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |")!;
-  const rows = (id: (typeof CELL_ACTIONS)[number]["id"], at: readonly [number, number]) => actOnCell(table, at, id);
-
-  it("lists rows before columns, and deleting last", () => {
-    expect(CELL_ACTIONS.map((a) => a.label)).toEqual(["Insert row above", "Insert row below", "Insert column left", "Insert column right", "Delete row", "Delete column"]);
-  });
-
-  it("puts an empty row above or below the cell's row, and the cursor in it, in the cell's column", () => {
-    expect(rows("rowAbove", [2, 1])).toEqual({ table: { ...table, rows: [["A", "B"], ["1", "2"], ["", ""], ["3", "4"]] }, at: [2, 1] });
-    expect(rows("rowBelow", [1, 1])).toEqual({ table: { ...table, rows: [["A", "B"], ["1", "2"], ["", ""], ["3", "4"]] }, at: [2, 1] });
-    expect(rows("rowBelow", [0, 0])?.table.rows).toEqual([["A", "B"], ["", ""], ["1", "2"], ["3", "4"]]);
-  });
-
-  it("puts an empty column left or right of the cell's column, and the cursor in it, in the cell's row", () => {
-    expect(rows("columnLeft", [1, 0])).toEqual({ table: { aligns: [null, null, null], rows: [["", "A", "B"], ["", "1", "2"], ["", "3", "4"]] }, at: [1, 0] });
-    expect(rows("columnRight", [1, 0])).toEqual({ table: { aligns: [null, null, null], rows: [["A", "", "B"], ["1", "", "2"], ["3", "", "4"]] }, at: [1, 1] });
-  });
-
-  it("deletes the cell's row or column, and leaves the cursor where the next one has come", () => {
-    expect(rows("deleteRow", [1, 1])).toEqual({ table: { ...table, rows: [["A", "B"], ["3", "4"]] }, at: [1, 1] });
-    expect(rows("deleteRow", [2, 0])).toEqual({ table: { ...table, rows: [["A", "B"], ["1", "2"]] }, at: [1, 0] });
-    expect(rows("deleteColumn", [2, 1])).toEqual({ table: { aligns: [null], rows: [["A"], ["1"], ["3"]] }, at: [2, 0] });
-  });
-
-  it("has nothing to do above the header, with the header itself, or with the only column", () => {
-    expect(rows("rowAbove", [0, 0])).toBeNull();
-    expect(rows("deleteRow", [0, 1])).toBeNull();
-    expect(actOnCell(parseTable("| A |\n| - |\n| 1 |")!, [1, 0], "deleteColumn")).toBeNull();
   });
 });

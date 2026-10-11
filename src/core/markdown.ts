@@ -54,7 +54,7 @@ export function summarize(text: string): { title: string; snippet: string; openT
     if (todo?.done === false) openTodos++;
     if (RULE.test(line)) continue;
     const titling = heading < 0 ? HEADING.exec(line)?.[1] : undefined;
-    // A todo reads as its words: its importance and due date are options, not prose.
+    // A todo reads as its words: its importance, due date and projects are options, not prose.
     const words = plainText(titling ?? (todo ? todo.words : line));
     if (!words) continue;
     if (titling !== undefined) heading = prose.length;

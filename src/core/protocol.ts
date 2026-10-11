@@ -1,15 +1,14 @@
 import { z } from "zod";
+import type { NoteState } from "./lifecycle.ts";
 import { parseRule } from "./recurrence.ts";
-import { isDay, type LastDone } from "./todos.ts";
+import { isDay, isProjectName, type LastDone } from "./todos.ts";
 
 export const MAX_NOTE_LENGTH = 500_000;
 export const MAX_SETTINGS_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
 const Revision = z.number().int().min(0);
-/** Line endings as a note keeps them and no half of a character pair: what the database and a recorded change would each make of them differs, and the text stored must be the text its changes replay to. */
-const normalized = (text: string) => text.replace(/\r\n?/g, "\n").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
-const NoteText = z.string().max(MAX_NOTE_LENGTH).transform(normalized);
+const NoteText = z.string().max(MAX_NOTE_LENGTH);
 const LabelName = z
   .string()
   .trim()
@@ -19,38 +18,8 @@ const LabelName = z
 const Time = z.number().int().min(0);
 /** Revisions of one note that a change made, so never 0. */
 const Revisions = z.array(Revision.min(1)).min(1).max(500);
-/** What becomes of one conflict of a revert: the later edits kept, the lines as they were before, or the lines given (no text is no lines). */
-const Choice = z.union([z.literal("keep"), z.literal("back"), z.object({ text: NoteText }).strict()]);
-/**
- * How a revert's conflicts are settled: one choice for all of them, or one for each in the order
- * `note.previewRevert` lists them. `at` is the note's revision that preview was worked out at; the
- * revert is refused when the note has changed since.
- */
-const Resolve = z.object({ at: Revision, choices: z.union([z.literal("keep"), z.literal("back"), z.array(Choice).max(1000)]) }).strict();
-export type Resolve = z.output<typeof Resolve>;
 const AuthorRef = z.object({ kind: z.enum(["member", "agent", "plugin"]), id: Id });
 export type AuthorRef = z.output<typeof AuthorRef>;
-/** Whose changes: people's, or agents'. */
-const By = z.enum(["people", "agents"]);
-
-/** As many notes as one request reads the changes of or reverts. A larger selection is sent in parts. */
-export const MAX_NOTES_AT_ONCE = 40;
-const unique = (changes: { noteId: string }[]) => new Set(changes.map((c) => c.noteId)).size === changes.length;
-/** Some changes of one note. */
-const Selected = z.object({ noteId: Id, revisions: Revisions }).strict();
-/**
- * A revert of one note among several: of the chosen changes, of the note to the revision `to`, or
- * of every change of `author` that still stands, as `history.revertAuthor` picks them.
- * Changes already reverted are left out and no reason to refuse. `at` is the note's revision the
- * revert was previewed at: a note that has changed since is skipped and said to be. `choices`
- * settles its conflicts as `resolve` does for one note, and needs `at`.
- */
-const Reverted = z
-  .object({ noteId: Id, revisions: Revisions.optional(), to: Revision.optional(), author: AuthorRef.optional(), at: Revision.optional(), choices: Resolve.shape.choices.optional() })
-  .strict()
-  .refine((r) => [r.revisions, r.to, r.author].filter((given) => given !== undefined).length === 1, "pass either revisions, the changes to revert, or to, the revision to return to, or author, whose changes to revert")
-  .refine((r) => r.choices === undefined || r.at !== undefined, "choices settle the conflicts of a preview: pass at, the revision that preview was of");
-const ManyNotes = <T extends z.ZodType<{ noteId: string }>>(item: T) => z.array(item).min(1).max(MAX_NOTES_AT_ONCE).refine(unique, "name each note once");
 
 /** An email as a person signs in with it: trimmed and in lower case, and otherwise as written. */
 const Email = z
@@ -81,19 +50,27 @@ const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
-/** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done`, `last-fri`, `mar-1` or `1m-times-5`. docs/todos.md has every rule. */
-const Recurrence = z.string().max(1000).refine((rule) => parseRule(rule) !== null, "not a way to repeat, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 or 1m-times-5");
-/** The orders todo.list can list todos in. */
-export const TODO_SORTS = ["due", "priority", "changed", "note", "text"] as const;
-export type TodoSort = (typeof TODO_SORTS)[number];
-
+const ProjectName = z.string().max(100).refine(isProjectName, "not a project's name: a letter, then letters, digits, _ and -");
+/** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done` or `last-fri`. docs/todos.md has every rule. */
+const Recurrence = z.string().max(40).refine((rule) => parseRule(rule) !== null, "not a way to recur, such as 2w, mon,thu, 3d-after-done or last-fri");
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+/**
+ * Whether a listing also covers archived notes, which it leaves out unless asked. Nothing but
+ * trash.list covers a note in Trash.
+ */
+const IncludeArchived = z.boolean().default(false);
+export const MAX_SEARCH_LENGTH = 200;
 
 export const Op = z.discriminatedUnion("type", [
-  /** `updatedSince` leaves out notes whose text hasn't changed since that time. */
-  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional() }),
+  /**
+   * `updatedSince` leaves out notes that haven't changed since that time: neither their text, nor
+   * their state, as by being unarchived or restored. A note that left the listing since, by being
+   * archived or trashed, is not in it to be told of: ask with `includeArchived`, and trash.list.
+   * `tag` lists only the notes with that tag, ignoring case.
+   */
+  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: IncludeArchived }),
   z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles }),
-  /** The note, and for each note its text links to by id, that note's title now. */
+  /** The note, and for each note its text links to by id, that note's title now. A note in Trash is read as any other, and its `state` says where it is. */
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
   z.object({
     type: z.literal("note.write"),
@@ -116,27 +93,51 @@ export const Op = z.discriminatedUnion("type", [
   /** What one change did to its note, as a line diff. */
   z.object({ type: z.literal("note.diff"), id: Id, revision: Revision.min(1) }),
   z.object({ type: z.literal("note.move"), id: Id, folderId: Id }),
+  /**
+   * Archives a note, or with `archived` false brings it back. An archived note keeps its folder, id
+   * and links, opens and is changed as before, and is left out of every listing that isn't asked to
+   * include archived notes. Done twice, it changes nothing more.
+   */
+  z.object({ type: z.literal("note.archive"), id: Id, archived: z.boolean() }),
+  /**
+   * Moves a note to Trash, where it waits 30 days and is then removed with its history. Until then
+   * it is listed only by trash.list, opens to be read, can't be changed, and any link on it opens
+   * nothing. note.restore brings it back.
+   */
+  z.object({ type: z.literal("note.trash"), id: Id }),
+  /**
+   * Brings a note back from Trash to the folder it was in, archived if it was. When that folder was
+   * deleted meanwhile it comes back to Unsorted, and the answer's `folderGone` says so.
+   */
+  z.object({ type: z.literal("note.restore"), id: Id }),
+  /** Removes a note in Trash now, with its history, instead of after its 30 days. Nothing brings it back. */
+  z.object({ type: z.literal("note.purge"), id: Id }),
+  /** The notes in Trash that the asker can see, latest trashed first. */
+  z.object({ type: z.literal("trash.list") }),
+  /** The tags of the notes the asker can see, each with how many of those notes have it. */
+  z.object({ type: z.literal("tag.list"), includeArchived: IncludeArchived }),
+  /**
+   * The notes the asker can see whose text has every word of `query`. A word matches the start of a
+   * word in the note, ignoring case and accents; words in "double quotes" match as a phrase; `#name`
+   * narrows to notes with that tag and `+name` to notes with a todo in that project. Notes whose
+   * title matches come first, then the latest changed. Pass the answer's `next` as `offset` for more.
+   */
+  z.object({
+    type: z.literal("search"),
+    query: z.string().max(MAX_SEARCH_LENGTH),
+    includeArchived: IncludeArchived,
+    limit: z.number().int().min(1).max(50).default(20),
+    offset: z.number().int().min(0).default(0),
+  }),
   /** Names a revision, or takes its name away when `name` is null. */
   z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
   /** Puts the note back to how it was at `revision`, as a new change. */
-  z.object({ type: z.literal("note.revert"), id: Id, revision: Revision, resolve: Resolve.optional() }),
+  z.object({ type: z.literal("note.revert"), id: Id, revision: Revision }),
   /**
    * Reverts the chosen changes and keeps the rest, as one new change. Reverting a change that was
    * itself a revert, an undo, or a redo has what it reverted stand again.
    */
-  z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions, resolve: Resolve.optional() }),
-  /**
-   * What a revert would do, with nothing written: of the chosen changes as `note.revertChanges`
-   * reverts them, of the note to a revision as `note.revert` does, or of one author's changes
-   * to this note as `history.revertAuthor` does. With `resolve`, the diff is of the revert with its
-   * conflicts settled that way.
-   */
-  z
-    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional(), author: AuthorRef.optional(), resolve: Resolve.optional() })
-    .refine(
-      (op) => [op.revisions, op.to, op.author].filter((given) => given !== undefined).length === 1,
-      "pass one of revisions, the changes to revert, to, the revision to return to, or author, whose changes to revert",
-    ),
+  z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions }),
   /** Takes back the author's own latest change that still stands. */
   z.object({ type: z.literal("note.undo"), id: Id }),
   z.object({ type: z.literal("note.redo"), id: Id }),
@@ -145,7 +146,6 @@ export const Op = z.discriminatedUnion("type", [
     type: z.literal("history.summary"),
     noteIds: z.array(Id).min(1).max(200).optional(),
     authors: z.array(AuthorRef).min(1).max(50).optional(),
-    by: By.optional(),
     /** Only changes made at or after this time, and before `to`, are counted. */
     from: Time.optional(),
     to: Time.optional(),
@@ -158,7 +158,6 @@ export const Op = z.discriminatedUnion("type", [
     /** One note, several, or every note in the workspace when left out. */
     noteIds: z.array(Id).min(1).max(200).optional(),
     authors: z.array(AuthorRef).min(1).max(50).optional(),
-    by: By.optional(),
     /** Changes made at or after this time, and before `to`. */
     from: Time.optional(),
     to: Time.optional(),
@@ -172,11 +171,17 @@ export const Op = z.discriminatedUnion("type", [
    * Takes back out every change by one author that still stands, as one new change in each note
    * by whoever asks. It covers a few notes at a time; pass the answer's `next` as `after` for the rest.
    */
-  /** `resolve` settles the conflicts of the notes it names, by note id, as `note.previewRevert` with `author` listed them. A note it leaves out keeps every later edit. */
-  z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional(), resolve: z.record(Id, Resolve).refine((byNote) => Object.keys(byNote).length <= 200, "resolve names at most 200 notes").optional() }),
+  z.object({
+    type: z.literal("history.revertAuthor"),
+    author: AuthorRef,
+    noteIds: z.array(Id).min(1).max(200).optional(),
+    after: Id.optional(),
+    /** Moves each note the revert left with no text to Trash, such as one the author created. */
+    trashEmptied: z.boolean().default(false),
+  }),
   /**
    * Makes what is derived from the notes' text again, for every note in the workspace: which notes
-   * link to which, and the index of todos and tags. Nothing needs it while every write
+   * link to which, and the index of todos, projects and tags. Nothing needs it while every write
    * keeps them, so it is for a record that was changed some other way. It covers so many notes a
    * call: while the answer's `done` is false, ask again. It is the same operation as todos.rebuild.
    */
@@ -185,50 +190,37 @@ export const Op = z.discriminatedUnion("type", [
    * The todos in the notes the asker can see: open ones, or done ones too with `includeCompleted`.
    * Open ones come first, then by due date with those that have none last, then the most important.
    * `dueFrom` and `dueTo` are days, both included, and leave out todos with no due date; `noDue`
-   * lists only those. `importance` lists the priority levels wanted, 0 for None to 3 for High. `tag` matches ignoring
-   * case, and is a tag of the todo's note: one written on the todo's own line, or anywhere else in the
-   * note. `folderId` lists the todos of the notes in that folder and in every folder under it; one the
-   * asker can't see is no folder. Pass the answer's `next` as `offset` for the page after. A field it
-   * doesn't know is refused, so a filter it no longer has, such as a project, is never read as no filter.
-   * `sort` orders the open ones, and the done ones after them, another way: `priority` the highest
-   * first, then by due date; `changed` those whose note changed last first; `note` by their note's
-   * title; `text` by their words, A to Z. Ties go by note and line.
+   * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `project` and `tag`
+   * match ignoring case, and a tag is the note's. Pass the answer's `next` as `offset` for the page after.
    */
   z.object({
     type: z.literal("todo.list"),
-    folderId: Id.optional(),
+    project: z.string().min(1).max(100).optional(),
     tag: z.string().min(1).max(100).optional(),
     dueFrom: Day.optional(),
     dueTo: Day.optional(),
     noDue: z.boolean().optional(),
     importance: z.array(ImportanceLevel).min(1).max(4).optional(),
     includeCompleted: z.boolean().default(false),
+    includeArchived: IncludeArchived,
     noteId: Id.optional(),
-    sort: z.enum(TODO_SORTS).default("due"),
     limit: z.number().int().min(1).max(200).default(100),
     offset: z.number().int().min(0).default(0),
-  }).strict(),
-  /** What todo.list can be narrowed by, besides the folders of folder.list: the tags of the notes that have todos, in notes the asker can see. */
-  z.object({ type: z.literal("todo.filters") }),
+  }),
+  /** What todo.list can be narrowed by: the projects of the todos, and the tags of the notes that have todos, in notes the asker can see. */
+  z.object({ type: z.literal("todo.filters"), includeArchived: IncludeArchived }),
   /**
    * Changes one todo by rewriting its line, as a change to its note by whoever asks. `revision`,
    * `line` and `text` are the todo as todo.list gave it: the line it was on at that revision of its
    * note, and what the line said. The line is followed through every change recorded since, so it is
    * found wherever it has moved to, and no other line is ever taken for it, however alike. Refused as
    * a conflict when the line itself was changed or deleted since. The same call made again changes
-   * nothing more. What is left out stays as written, and only `words` moves a token: the due date and
-   * the rule go after them.
+   * nothing more. What is left out stays as written.
    *
    * `every` sets how it recurs, or with null stops it recurring. Checking off a todo that recurs
    * leaves it open with its next due date and a mark of when it was last done and how many times,
    * and files the checked line on the daily note of whoever asks, or of the member an agent acts
-   * for. `on` is the day that happens on, as it is for note.write. A rule that ends after so many
-   * times has one fewer left, and its last time, or the last before the day it runs until, checks
-   * the todo off for good.
-   *
-   * `skip` moves a recurring todo's due date to its next one with nothing checked off, recorded or
-   * filed. It counts as one of a rule's times. It is refused for a todo that doesn't recur, for the
-   * last time of a rule that ends, and together with `done`.
+   * for. `on` is the day that happens on, as it is for note.write.
    */
   z.object({
     type: z.literal("todo.set"),
@@ -239,12 +231,11 @@ export const Op = z.discriminatedUnion("type", [
     done: z.boolean().optional(),
     importance: ImportanceLevel.optional(),
     due: Day.nullable().optional(),
+    addProject: ProjectName.optional(),
+    removeProject: z.string().min(1).max(100).optional(),
     every: Recurrence.nullable().optional(),
-    skip: z.boolean().optional(),
     on: Day.optional(),
-    /** What the todo says instead: its words and tags, as todo.list's `words`, on one line. */
-    words: z.string().max(MAX_NOTE_LENGTH).regex(/^[^\r\n]*$/, "A todo's words are one line").optional(),
-  }).strict(),
+  }),
   /**
    * Each time a recurring todo was checked off: the day, and who did it, latest first. `revision`,
    * `line` and `text` are the todo as todo.list gave it, and it is found as todo.set finds it. A
@@ -260,18 +251,6 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("daily.open"), on: Day.optional() }),
   /** The same operation as links.rebuild, under the name of the other record it makes again. */
   z.object({ type: z.literal("todos.rebuild") }),
-  /**
-   * What a selection of changes did, note by note: the changes of each note that follow one another
-   * are one run with one diff, from the note before the first of them to the note after the last.
-   */
-  z.object({ type: z.literal("history.diff"), changes: ManyNotes(Selected) }),
-  /** What `history.revert` would do to each note, with nothing written. */
-  z.object({ type: z.literal("history.previewRevert"), changes: ManyNotes(Reverted) }),
-  /**
-   * Reverts changes of several notes, each note as one new change. A note is reverted or skipped
-   * whole and by itself: the answer names each note of both kinds, and why one was skipped.
-   */
-  z.object({ type: z.literal("history.revert"), changes: ManyNotes(Reverted) }),
   z.object({ type: z.literal("folder.list") }),
   z.object({ type: z.literal("folder.create"), name: FolderName, parentId: Id.optional() }),
   z.object({ type: z.literal("folder.rename"), id: Id, name: FolderName }),
@@ -388,6 +367,41 @@ export interface NoteSummary {
   access: GrantAccess;
   /** Whether the note is private: hidden from every member but its owner and whoever the owner let in. */
   private: boolean;
+  /** Where the note is in its life: live, archived, or trashed. */
+  state: NoteState;
+  /** For a note in Trash, when it is removed for good. Null otherwise. */
+  purgesAt: number | null;
+  /** When its state last changed, or null for a note that has only ever been live. */
+  stateAt: number | null;
+}
+
+/** A note in Trash. */
+export interface TrashedNote extends NoteSummary {
+  trashedAt: number;
+  trashedBy: Author;
+}
+
+/** A line of a note that a search matched. */
+export interface SearchMatch {
+  /** Which line of the note, counted from 0. */
+  line: number;
+  /** The line as the note writes it, or the part of a long line around the first match. Markdown, not HTML. */
+  text: string;
+  /** Where in `text` the matches are, each as [from, to]. */
+  marks: [number, number][];
+}
+
+export interface SearchResult {
+  note: NoteSummary;
+  /** The first few lines that matched. Empty when only the note's tag or project did, or the match can't be shown on one line. */
+  matches: SearchMatch[];
+}
+
+export interface ListedTag {
+  /** The tag as a note writes it, without the #. */
+  name: string;
+  /** How many notes the asker can see have it. */
+  notes: number;
 }
 
 export interface Note extends NoteSummary {
@@ -397,8 +411,10 @@ export interface Note extends NoteSummary {
 /** A note that a note's text links to. */
 export interface LinkedNote {
   id: string;
-  /** Null when there is no such note or the one asking can't see it. Nothing tells the two apart. */
+  /** Null when there is no such note or the one asking can't see it. Nothing tells the two apart, and a note removed from Trash is no such note. */
   title: string | null;
+  /** Where the linked note is in its life, so a link can say it is in Trash. Null with a null title. */
+  state: NoteState | null;
 }
 
 export interface ReadNote extends Note {
@@ -421,15 +437,14 @@ export interface ListedTodo {
   importance: 0 | 1 | 2 | 3;
   /** A calendar date, YYYY-MM-DD, or null. */
   due: string | null;
+  projects: string[];
   /** How it recurs, as written after `every:`, or null. */
   every: string | null;
-  /** That rule as a chip says it, such as "every 2 weeks on Mon · 5 left", or null. */
-  recurs: string | null;
   /** When it was last checked off and how many times, for a todo that recurs and has been. */
   lastDone: LastDone | null;
-  /** The tags of the note it is in. The ones written on its own line are those `text` has. */
+  /** The tags of the note it is in. */
   tags: string[];
-  /** The line without its list mark, checkbox, importance and due date. */
+  /** The line without its list mark, checkbox, importance, due date and projects. */
   words: string;
   /** What the one asking may do with its note. With edit, todo.set changes it. */
   access: GrantAccess;
@@ -564,8 +579,6 @@ export interface ChangeEntry {
   /** Lines this change added and removed. */
   added: number;
   removed: number;
-  /** How many of the changes it reverted were themselves reverts, undos or redos: what those took out stands again. */
-  restores: number;
 }
 
 export interface DiffLine {
@@ -586,113 +599,6 @@ export interface Diff {
   removed: number;
   /** Lines left out of `hunks` because the change is long. */
   omitted: number;
-  /** How many lines the text had before. */
-  lines: number;
-}
-
-/** Changes of one note that follow one another, as one: from the note before the first to the note after the last. */
-export interface DiffRun {
-  from: number;
-  to: number;
-  /** How many changes it is. */
-  saves: number;
-  /** Changes of the note between the run before and this one that were not asked for. */
-  skipped: number;
-  firstAt: number;
-  lastAt: number;
-  /** Who made them, in the order they first did. */
-  authors: Author[];
-  /** The label on the revision the run ends at. */
-  label: string | null;
-  added: number;
-  removed: number;
-  /** Null when the answer already holds as many lines as one answer does: ask for this note again, alone. */
-  diff: Diff | null;
-}
-
-export interface NoteDiff {
-  noteId: string;
-  noteTitle: string;
-  /** The note's latest revision. */
-  revision: number;
-  /** Earliest first. */
-  runs: DiffRun[];
-  /** Lines its runs added and removed: what the selection came to, so a line written and then taken out counts for nothing within a run. */
-  added: number;
-  removed: number;
-}
-
-export interface SelectionDiff {
-  /** The note whose selected changes are the latest first. */
-  notes: NoteDiff[];
-}
-
-/** What a revert would do to one note of several. */
-export interface NoteRevertPreview extends RevertPreview {
-  noteId: string;
-  noteTitle: string;
-  /** Changes asked for that were already reverted, so the revert leaves them be. */
-  already: number[];
-  /** Why this note's revert can't be made, when it can't: the rest of the preview is then empty, and the other notes' stand. */
-  refused?: string;
-}
-
-export interface RevertedNote {
-  noteId: string;
-  noteTitle: string;
-  /** The change the revert made: the note's revision now. */
-  revision: number;
-  /** The changes it reverted. */
-  reverted: number[];
-  /** As `Written.unfiled`: there when the revert took completions back out, or put them back. */
-  unfiled?: Written["unfiled"];
-}
-
-export interface SkippedNote {
-  noteId: string;
-  noteTitle: string;
-  /** `changed`: the note is no longer at the revision the revert was previewed at. `nothing`: the revert would change nothing. `refused`: it can't be made, for the reason in `message`. */
-  why: "changed" | "nothing" | "refused";
-  message: string;
-}
-
-export interface RevertedNotes {
-  reverted: RevertedNote[];
-  skipped: SkippedNote[];
-}
-
-export interface RevertPreview {
-  /** The note's revision the preview was worked out at. */
-  revision: number;
-  /** The changes that would be reverted. */
-  revisions: number[];
-  /** From the note's text as it is to its text after the revert, its conflicts settled as asked: every later edit kept when nothing was asked. */
-  diff: Diff;
-  /** Later changes that still stand and edited lines the revert changes. */
-  overlaps: number[];
-  /** Each place those changes edited lines the revert changes, top of the note first. A revert settles each with a choice. */
-  conflicts: RevertConflict[];
-}
-
-/** Lines are without their line ends. */
-export interface RevertConflict {
-  /** The line of the note after the revert, with every later edit kept, that `kept` starts at. Counted from 1. */
-  line: number;
-  /** The lines as they were before the reverted changes, with the later edits to them out too: what "back" leaves. */
-  before: string[];
-  /** The lines as the note has them now. */
-  now: string[];
-  /** What "keep" leaves: the revert, and the later edits kept. */
-  kept: string[];
-  /** The later changes that edited these lines. */
-  later: Array<{ revision: number; author: Author }>;
-  /**
-   * For a revert of chosen changes, where these lines are in the note as each run of those changes
-   * left it, so that the conflict can be shown on the diff of that run: `revision` is the run's
-   * last, `line` is counted from 1 in the note at that revision, and no `lines` is the place
-   * before that line. Runs are the ones `history.diff` answers with for the same changes.
-   */
-  runs: Array<{ revision: number; line: number; lines: number }>;
 }
 
 export interface HistoryEntry extends ChangeEntry {
@@ -733,8 +639,8 @@ export interface HistorySummary {
 export interface AuthorReverted {
   /** Each note that got a new change, and the author's changes it took back out. */
   reverted: { note: NoteSummary & Pick<Written, "unfiled">; revisions: number[] }[];
-  /** The reverted notes left with no text, each under the title it had. There is no deleting a note yet, so they stay. */
-  emptied: { noteId: string; title: string }[];
+  /** The reverted notes left with no text, each under the title it had, and whether it was moved to Trash, as `trashEmptied` asks. */
+  emptied: { noteId: string; title: string; trashed: boolean }[];
   /** Notes that refused the change, such as one it would make too long. They are left as they were. */
   failed: { noteId: string; title: string; message: string }[];
   /** Pass as `after` to cover the notes not reached yet; null when every note was. */
@@ -769,17 +675,26 @@ export interface Results {
   /** `next` is the `offset` of the page after, or null on the last. */
   "todo.list": { todos: ListedTodo[]; next: number | null };
   /** Each name once, ignoring case, as a note writes it. */
-  "todo.filters": { tags: string[] };
+  "todo.filters": { projects: string[]; tags: string[] };
   "todo.set": Written;
   "todo.history": { completions: Completion[] };
   "daily.open": Note;
   "todos.rebuild": Rebuilt;
   "note.history": ChangeEntry[];
   "note.move": Note;
+  "note.archive": Note;
+  "note.trash": Note;
+  /** `folderGone` when the folder it was in was deleted while it was in Trash, so it came back to Unsorted. */
+  "note.restore": Note & { folderGone: boolean };
+  "note.purge": { id: string };
+  "trash.list": TrashedNote[];
+  /** `indexing` is true while some notes are still to be read into the index, as after a deploy: the answer may lack them, and asking again reads more. */
+  "tag.list": { tags: ListedTag[]; indexing: boolean };
+  /** `next` is the `offset` of the page after, or null on the last. `indexing` is as for tag.list. */
+  search: { results: SearchResult[]; next: number | null; indexing: boolean };
   "note.label": { id: string; revision: number; label: string | null };
   "note.revert": Written;
   "note.revertChanges": Written;
-  "note.previewRevert": RevertPreview;
   "note.undo": Written;
   "note.redo": Written;
   "note.diff": Diff;
@@ -787,9 +702,6 @@ export interface Results {
   "history.list": HistoryPage;
   "history.authors": Author[];
   "history.revertAuthor": AuthorReverted;
-  "history.diff": SelectionDiff;
-  "history.previewRevert": NoteRevertPreview[];
-  "history.revert": RevertedNotes;
   /** `unsortedId` is null for a guest, who can't see Unsorted unless it was shared with them. */
   "folder.list": { unsortedId: string | null; folders: ListedFolder[] };
   "folder.create": Folder;
@@ -822,61 +734,29 @@ export const MAX_EXPIRY_DAYS = 365;
 export interface Agent {
   id: string;
   name: string;
+  /** Tells this token from the member's other tokens under the same name, e.g. "laptop". */
+  label: string | null;
   /** The first characters of its token, to tell tokens apart. Not enough to use it. */
   tokenPrefix: string;
   createdAt: number;
-  /** After this the token stops working. Null when it never expires. */
-  expiresAt: number | null;
+  /** After this the token stops working. */
+  expiresAt: number;
   lastUsedAt: number | null;
   revokedAt: number | null;
   /** The one workspace this token can reach, or null for every workspace its member can reach. */
   workspaceId: string | null;
   /** A read-only token can't change anything, whatever its member's role. */
   readOnly: boolean;
-  /**
-   * The folders this token is limited to, in its one workspace: it reaches them, the folders under
-   * them, and the notes in those, and nothing else is there for it. Null for every note its member
-   * can reach. A folder deleted since is still listed, and stands for nothing.
-   */
-  folderIds: string[] | null;
 }
 
-export const MAX_AGENT_FOLDERS = 50;
-/** The folders to limit an agent to. Each stands for itself and the folders under it. */
-const FolderLimit = z.array(Id).min(1, "Name at least one folder, or leave folders out for all notes").max(MAX_AGENT_FOLDERS);
-
-/** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
-export const ExpiresIn = z.union([z.number().int().min(1).max(MAX_EXPIRY_DAYS), z.literal("never")]);
-export type ExpiresIn = z.infer<typeof ExpiresIn>;
-
-/**
- * What a member may ask for when connecting an agent. Each option narrows the token and its default
- * is the widest, so a key this doesn't know is refused: a misspelt `readOnly` or `workspaceId`
- * left out without a word would mint a token that can do more than was asked for.
- */
-export const ConnectOptions = z.strictObject({
-  expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
+/** What a member may ask for when connecting an agent. */
+export const ConnectOptions = z.object({
+  label: z.string().trim().max(MAX_AGENT_NAME).optional(),
+  expiresInDays: z.number().int().min(1).max(MAX_EXPIRY_DAYS).default(DEFAULT_EXPIRY_DAYS),
   workspaceId: Id.optional(),
   readOnly: z.boolean().default(false),
-  /** Limits the agent to these folders of `workspaceId`, which must then be given. Left out, it reaches all notes. */
-  folderIds: FolderLimit.optional(),
 });
 export type ConnectOptions = z.input<typeof ConnectOptions>;
-
-/**
- * What a member changes about an agent they connected: what its token may do, with the token itself
- * unchanged. A field left out stays as it is. `expiresInDays` counts from the edit, a null
- * `workspaceId` lets the token reach every workspace its member can, and a null `folderIds` lets it
- * reach all notes. Folders are those of the token's one workspace, so an edit that moves a limited
- * token to another workspace names its folders there, or null.
- */
-export const AgentEdit = z.strictObject({
-  expiresInDays: ExpiresIn.optional(),
-  workspaceId: Id.nullable().optional(),
-  readOnly: z.boolean().optional(),
-  folderIds: FolderLimit.nullable().optional(),
-});
-export type AgentEdit = z.input<typeof AgentEdit>;
 
 export interface WorkspaceSummary {
   id: string;
@@ -892,21 +772,7 @@ export interface Me {
 /** What an operation answers anyone who isn't in the workspace, whether or not there is one. */
 export const NO_SUCH_WORKSPACE = "No such workspace";
 
-/** How the server the app is on is set up, where the app follows it. Only the server says it. */
-export interface Setup {
-  /** Whether HTML embeds are served from a host of their own (`EMBED_ORIGIN`), apart from the app's site. */
-  embedSite: boolean;
-}
-
-/** What `/api/me` answers: who is signed in, and how the server is set up. */
-export interface MeHere extends Me {
-  setup: Setup;
-}
-
 export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict";
-
-/** What a client is told of a fault that is no request's doing. The fault's own words stay in the server's log: they can name tables and rows. */
-export const BROKE = "Common Ink broke while doing that. Nothing says it was done: try again";
 
 export class OpError extends Error {
   constructor(

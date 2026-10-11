@@ -1,4 +1,5 @@
 import { ALL_NOTES, SHARED_WITH_ME, type NoteSummary } from "../plugin-api.ts";
+import { listable } from "./lib/listable.ts";
 
 export const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -18,15 +19,16 @@ export interface ListView {
   filter: string;
   sort: Sort;
   hasTodos: boolean;
+  showArchived: boolean;
   expanded: Readonly<Record<string, Expanded>>;
 }
 
-export const INITIAL_VIEW: ListView = { filter: "", sort: "recent", hasTodos: false, expanded: {} };
+export const INITIAL_VIEW: ListView = { filter: "", sort: "recent", hasTodos: false, showArchived: false, expanded: {} };
 
 export type ListAction =
   | { type: "filter"; text: string }
   | { type: "sort"; sort: Sort }
-  | { type: "toggle"; option: "hasTodos" }
+  | { type: "toggle"; option: "hasTodos" | "showArchived" }
   /** Expands a collapsed card to its excerpt, and collapses an expanded one. */
   | { type: "expandOrCollapse"; noteId: string }
   | { type: "collapse"; noteId: string }
@@ -58,10 +60,10 @@ export function listReducer(view: ListView, action: ListAction): ListView {
 export const notesIn = (notes: readonly NoteSummary[], folderId: string) =>
   folderId === ALL_NOTES ? notes : notes.filter((n) => n.folderId === (folderId === SHARED_WITH_ME ? null : folderId));
 
-/** The folder's notes as the list is set: narrowed and in order. */
+/** The folder's notes as the list is set: never one in Trash, archived ones when asked for, narrowed and in order. */
 export function listed(inFolder: readonly NoteSummary[], view: ListView): NoteSummary[] {
   const needle = view.filter.trim().toLowerCase();
-  return inFolder
+  return listable(inFolder, view.showArchived)
     .filter((n) => (!view.hasTodos || n.openTodos > 0) && (!needle || `${titleOf(n)}\n${n.snippet}`.toLowerCase().includes(needle)))
     .sort(SORTS.find((s) => s.id === view.sort)!.compare);
 }

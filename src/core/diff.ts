@@ -1,6 +1,6 @@
 import type { ChangeSet } from "@codemirror/state";
 import type { Diff, DiffLine, Hunk } from "./protocol.ts";
-import { changesBetween, toDoc } from "./text.ts";
+import { toDoc } from "./text.ts";
 
 const CONTEXT = 2;
 export const MAX_DIFF_LINES = 200;
@@ -39,7 +39,7 @@ export function lineDiff(before: string, change: ChangeSet): Diff {
   }
   const changed = spans.filter((s) => s.aFrom < s.aTo || s.bFrom < s.bTo);
 
-  const diff: Diff = { hunks: [], added: 0, removed: 0, omitted: 0, lines: before ? a.lines : 0 };
+  const diff: Diff = { hunks: [], added: 0, removed: 0, omitted: 0 };
   let hunk: Hunk | null = null;
   let shownTo = 0;
   let room = MAX_DIFF_LINES;
@@ -65,6 +65,3 @@ export function lineDiff(before: string, change: ChangeSet): Diff {
   diff.hunks = diff.hunks.filter((h) => h.lines.length);
   return diff;
 }
-
-/** What turned `before` into `after`, as a line diff of the two: lines written and taken out again on the way are in neither. */
-export const textDiff = (before: string, after: string): Diff => lineDiff(before, changesBetween(before, after));

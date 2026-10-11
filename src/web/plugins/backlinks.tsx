@@ -28,6 +28,7 @@ function Backlinks({ host, app, note }: ViewProps & { host: PluginHost; note: No
             <a
               href={app.notePath(from.id)}
               className="note-row"
+              data-state={from.state === "archived" ? "archived" : undefined}
               onClick={(e) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
                 e.preventDefault();
@@ -36,7 +37,10 @@ function Backlinks({ host, app, note }: ViewProps & { host: PluginHost; note: No
             >
               <span className="row-title">{from.title || "Untitled"}</span>
               {from.snippet && <span className="row-snippet">{from.snippet}</span>}
-              <span className="row-meta">{app.folders?.pathName(from.folderId)}</span>
+              <span className="row-meta">
+                <span>{app.folders?.pathName(from.folderId)}</span>
+                {from.state === "archived" && <span className="state-label">Archived</span>}
+              </span>
             </a>
           </li>
         ))}
@@ -49,15 +53,7 @@ function Backlinks({ host, app, note }: ViewProps & { host: PluginHost; note: No
 export const backlinks: Plugin = {
   id: "backlinks",
   name: "Backlinks",
-  description: "The notes that link to the open note, in the inspector.",
-  icon: "backlinks",
   activate(host) {
-    host.views.register("inspector", {
-      id: "backlinks",
-      label: "Backlinks",
-      icon: "backlinks",
-      for: ["note"],
-      component: ({ app, about }) => (about.kind === "note" ? <Backlinks key={about.note.id} host={host} app={app} note={about.note} /> : null),
-    });
+    host.views.register("inspector", { id: "backlinks", label: "Backlinks", icon: "backlinks", component: (props) => <Backlinks host={host} {...props} /> });
   },
 };
