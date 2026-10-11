@@ -92,7 +92,7 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "rail", "editor", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "rail", "editor", "inspector", "page", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
 const RESERVED = ["plugins.", "go.", "settings."];

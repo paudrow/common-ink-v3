@@ -1,3 +1,4 @@
+import { IN_STATE, type Covering } from "./lifecycle.ts";
 import type { Role } from "./protocol.ts";
 
 /** What someone may do with a note or a folder. Each level includes the ones before it. */
@@ -131,13 +132,14 @@ export const folderLevel = (sight: Seeing, folderId: string): Level => resolve(f
 export const noteLevel = (sight: Seeing, note: NoteFacts): Level => resolve(noteAsked(sight, note));
 
 /**
- * The one query shape for "which notes may this actor see": a condition on the notes row named
- * `alias`, true for exactly the notes {@link noteLevel} gives view or more. `param` is the
- * placeholder that {@link Sight.bind} is bound to, such as `?2`. Every query that lists notes, or
- * reads anything by way of a note (a change, a link, a count), carries it.
+ * The one query shape for "which notes is this actor shown": a condition on the notes row named
+ * `alias`, true for exactly the notes {@link noteLevel} gives view or more that are in a state
+ * `covering` covers. `param` is the placeholder that {@link Sight.bind} is bound to, such as `?2`.
+ * Every query that lists notes, or reads anything by way of a note (a change, a link, a count),
+ * carries it, and so says which states it means.
  */
-export const SEEN = (alias: string, param: string) =>
-  `(CASE WHEN ${alias}.private_owner IS NOT NULL AND ${alias}.private_owner IS NOT json_extract(${param}, '$.owner')
+export const SEEN = (alias: string, param: string, covering: Covering) =>
+  `(${IN_STATE(alias, covering)} AND CASE WHEN ${alias}.private_owner IS NOT NULL AND ${alias}.private_owner IS NOT json_extract(${param}, '$.owner')
       THEN ${alias}.id IN (SELECT value FROM json_each(${param}, '$.notes'))
       ELSE json_extract(${param}, '$.all') = 1
         OR ${alias}.folder_id IN (SELECT value FROM json_each(${param}, '$.folders'))

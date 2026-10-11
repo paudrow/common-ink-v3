@@ -84,7 +84,7 @@ An inline `#tag` in a note, with no space after the `#`, outside code. It tags t
 _Avoid_: Label, project
 
 **Search**:
-A search of the text of notes a member can see, including todo lines, tags, and projects. Archived and trashed notes are excluded unless included.
+A search of the text of notes a member can see, including todo lines, tags, and projects. Every word typed must be in the note, each matching the start of a word, ignoring case and accents. Words in double quotes match as a phrase, `#name` narrows to notes with that tag, and `+name` to notes with a todo in that project. Notes whose title matches come first, then the latest changed. Archived notes are excluded unless included, and trashed notes always.
 
 **Quick open**:
 A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included.
@@ -157,11 +157,19 @@ _Avoid_: Link on its own, which is a link between notes; public link for both ki
 **Private note**:
 A note hidden from every other member, admins too. Only the member who made a note can make it private, and they are its owner. The owner lets a member in by a grant on the note itself, for no more than that member's role allows, and can give it a share link. Nothing above it reaches it: not a folder's grant and not a folder's share link. Only the owner shares it or stops it being private, whatever their role. As a note becomes private, every grant and share link someone else put on it is taken away, and the owner is told how many. An owner can't leave the workspace while they have private notes. When an admin removes an owner, their private notes stop being private, since nobody else could reach them, and each records whose it was and when. Privacy is a note's, not a folder's. Sharing it with a mentioned member adds that member as an exception. Sharing it with a non-member who has an account creates a grant for that note only. The prompt that offers this can be turned off in the member's settings. A contact with no account is recorded and is not offered a grant.
 
+**State**:
+Where a note or upload is in its life: live, archived, or trashed. It is decided apart from access, and is the same for every member. A note removed from Trash has no state: it is gone.
+_Avoid_: Status, deleted flag
+
 **Archive**:
-A state of a note or upload, stored outside the file, that keeps it and its links and leaves it out of folder listings, search, the dashboard, and the todos view. It keeps its folder and id. A link still opens it. Archive and unarchive are actions on the open note and require edit. It applies to every member.
+A state of a note or upload, stored outside the file, that keeps it and its links and leaves it out of folder listings, search, the dashboard, and the todos view unless archived notes are included. It keeps its folder and id. A link still opens it, and it is edited as any note. Archive and unarchive are actions on the open note and require edit. It applies to every member.
 
 **Trash**:
-Where a deleted note or upload waits for 30 days from the delete. It remembers its folder, and restore puts it back there. A link opens it and shows that it is in Trash. After 30 days the note or upload and its history are removed, and references show that it is gone. Deleting a note does not delete an upload the note references. Restoring requires edit on the folder it returns to.
+Where a deleted note or upload waits for 30 days from the delete. It remembers its folder, and restore puts it back there. A link opens it and shows that it is in Trash. It can be read and not changed, it is in no listing but Trash, and a share link on it opens nothing. Restore returns it as it was, archived if it was, and to Unsorted when its folder was deleted meanwhile. Moving a note to Trash and restoring it need edit on the note, and an agent can do both. Restoring also needs edit on Unsorted when the note's folder was deleted and it returns there. After 30 days the note or upload and its history are removed, and references show that it is gone. Deleting a note does not delete an upload the note references.
+
+**Gone**:
+A note that was removed from Trash, after 30 days or sooner by an admin or the member who made it. Nothing of it is kept, so a link to it reads the same as a link to a note that never existed or that the reader can't see. Only a member, signed in, removes a note before its 30 days. An agent can't.
+_Avoid_: Deleted, purged
 
 ## History
 

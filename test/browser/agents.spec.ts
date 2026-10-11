@@ -154,7 +154,7 @@ test("an agent's entry shows its changes on their own, and reverts them in every
   expect((await perform(page, { type: "history.list" })).changes).toHaveLength(8);
 });
 
-test("reverting an agent names the notes it left empty, which stay until they can be deleted", async ({ page }) => {
+test("reverting an agent names the notes it left empty, and offers to move them to Trash", async ({ page }) => {
   const { claude, trip } = await notesClaudeEdited(page);
   const draft = await claude.tool<Note>("create_note", { text: "# Draft\n\nClaude's own" });
   await page.goto("/agents");
@@ -162,10 +162,15 @@ test("reverting an agent names the notes it left empty, which stay until they ca
   await connected(page).getByRole("button", { name: "Revert Claude's changes" }).click();
   await page.getByRole("group", { name: "Revert Claude's changes" }).getByRole("button", { name: "Revert" }).click();
 
-  await expect(connected(page).getByRole("status")).toHaveText("Took 4 changes by Claude back out of 3 notes. Draft is now empty. It can be deleted once Trash exists.");
+  await expect(connected(page).getByRole("status")).toHaveText("Took 4 changes by Claude back out of 3 notes. Draft is now empty.");
   await expect.poll(() => text(page, draft.id)).toBe("");
   await expect.poll(() => text(page, trip)).toBe("# Trip");
   expect((await perform(page, { type: "note.list" })).map((n) => n.title).sort()).toEqual(["", "Plan", "Trip"]);
+
+  await connected(page).getByRole("button", { name: "Move 1 emptied note to Trash" }).click();
+  await expect(connected(page).getByRole("status")).toHaveText("Moved 1 emptied note to Trash, where it waits 30 days.");
+  expect((await perform(page, { type: "note.list" })).map((n) => n.title).sort()).toEqual(["Plan", "Trip"]);
+  expect((await perform(page, { type: "trash.list" })).map((n) => n.id)).toEqual([draft.id]);
 });
 
 test("reverting an agent that reaches every workspace says the member's other workspaces aren't covered", async ({ page }) => {

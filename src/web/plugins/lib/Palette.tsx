@@ -14,6 +14,8 @@ interface Props {
   items: PaletteItem[];
   /** Shown when nothing matches what was typed. */
   empty: string;
+  /** A switch under the box that widens what is listed, such as to archived notes. The box keeps the keyboard when it is clicked. */
+  toggle?: { label: string; on: boolean; set: (on: boolean) => void };
   onPick: (id: string) => void;
   onClose: () => void;
 }
@@ -21,7 +23,7 @@ interface Props {
 const MOST_SHOWN = 50;
 
 /** A box to type in over a list that narrows to what matches; the command palette and quick open are both one. */
-export function Palette({ label, placeholder, items, empty, onPick, onClose }: Props) {
+export function Palette({ label, placeholder, items, empty, toggle, onPick, onClose }: Props) {
   const ids = useId();
   const ref = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -73,6 +75,22 @@ export function Palette({ label, placeholder, items, empty, onPick, onClose }: P
           }
         }}
       />
+      {toggle && (
+        <div className="palette-tools">
+          <button
+            type="button"
+            className="chip"
+            aria-pressed={toggle.on}
+            onClick={() => {
+              toggle.set(!toggle.on);
+              setAt(0);
+              input.current?.focus();
+            }}
+          >
+            {toggle.label}
+          </button>
+        </div>
+      )}
       <ul id={`${ids}-list`} role="listbox" aria-label={label}>
         {shown.map((item, i) => (
           <li key={item.id} id={optionId(i)} role="option" aria-selected={i === at} onPointerMove={() => setAt(i)} onClick={() => pick(item)}>

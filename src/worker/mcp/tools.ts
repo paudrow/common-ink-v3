@@ -51,6 +51,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "grant.link": SHARING,
   "grant.revoke": SHARING,
   "note.setPrivate": "A private note is hidden from every other member, admins too, and that is not a change in history. The member who made the note decides it, in the app.",
+  "note.purge": "Removing a note from Trash for good takes its history with it, and nothing brings it back: not a revert, not Trash. An agent reads notes other people wrote, so one that was talked into it could destroy them past recovery. An agent moves a note to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
   "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
 };
@@ -78,6 +79,8 @@ const author = {
   additionalProperties: false,
 };
 const noteIds = (description: string) => ({ type: "array", items: { type: "string" }, minItems: 1, description });
+const includeArchived = { type: "boolean", description: "True to cover archived notes too, which are left out otherwise" };
+const LIFE = "A note is live, archived or in Trash, which its state says. An archived note is left out of listings unless includeArchived is true, and is read and changed as any other. A note in Trash is listed only by list_trash, can be read, and can't be changed until restore_note brings it back.";
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
 
 export const TOOLS: Tool[] = [
@@ -90,13 +93,18 @@ export const TOOLS: Tool[] = [
   {
     name: "list_notes",
     description:
-      "The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, or to notes whose text changed since a time.",
-    inputSchema: object({ folderId: folderId("Only notes in this folder, from list_folders"), updatedSince: time("Only notes whose text changed at or after this time") }),
+      `The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, to notes with a tag, or to notes whose text changed since a time. ${LIFE}`,
+    inputSchema: object({
+      folderId: folderId("Only notes in this folder, from list_folders"),
+      updatedSince: time("Only notes whose text or state changed at or after this time. A note trashed since is in list_trash"),
+      tag: { type: "string", description: "Only notes with this tag, without the #, ignoring case" },
+      includeArchived,
+    }),
     op: "note.list",
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title now, or a null title for a note that doesn't exist or that you can't see.",
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. A note in Trash is read as any other, and its state says trashed.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "An earlier revision; default is the latest" } }, ["id"]),
     op: "note.read",
   },
@@ -146,6 +154,7 @@ export const TOOLS: Tool[] = [
       noDue: { type: "boolean", description: "True for only todos with no due date" },
       importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these levels: 0 is normal, 1 to 3 are !, !! and !!!" },
       includeCompleted: { type: "boolean", description: "True to list done todos too" },
+      includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
       limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
       offset: { type: "integer", minimum: 0, description: "The next of the page before" },
@@ -155,7 +164,7 @@ export const TOOLS: Tool[] = [
   {
     name: "todo_filters",
     description: "What list_todos can be narrowed by: the projects of the todos, and the tags of the notes that have todos, in the notes you can see.",
-    inputSchema: object({}),
+    inputSchema: object({ includeArchived }),
     op: "todo.filters",
   },
   {
@@ -205,6 +214,51 @@ export const TOOLS: Tool[] = [
     op: "note.move",
   },
   {
+    name: "search",
+    description:
+      "Find the notes you can see by their text: every word of query must be in the note, each matching the start of a word, ignoring case and accents. Words in \"double quotes\" match as a phrase. #name narrows to notes with that tag, and +name to notes with a todo in that project. Todos, tags and projects are text like any other, so their words are found too. Notes whose title matches come first, then the latest changed. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless includeArchived is true, and notes in Trash always. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.",
+    inputSchema: object(
+      {
+        query: { type: "string", maxLength: 200, description: 'What to find, such as: budget "second quarter" #money +Home' },
+        includeArchived,
+        limit: { type: "integer", minimum: 1, maximum: 50, description: "How many notes; default 20" },
+        offset: { type: "integer", minimum: 0, description: "The next of the page before" },
+      },
+      ["query"],
+    ),
+    op: "search",
+  },
+  {
+    name: "list_tags",
+    description: "The tags of the notes you can see, each with how many of those notes have it. A #tag anywhere in a note tags the note. list_notes with tag lists the notes under one. While indexing is true, some notes are still being read in: ask again.",
+    inputSchema: object({ includeArchived }),
+    op: "tag.list",
+  },
+  {
+    name: "archive_note",
+    description: "Archive a note, or with archived false bring it back. An archived note keeps its folder, id and links, and is left out of listings, search and todos unless they are asked to include archived notes. Needs edit on the note.",
+    inputSchema: object({ id: noteId, archived: { type: "boolean", description: "True to archive, false to unarchive" } }, ["id", "archived"]),
+    op: "note.archive",
+  },
+  {
+    name: "trash_note",
+    description: "Move a note to Trash. It waits there 30 days, listed by list_trash, and is then removed for good with its history. Until then restore_note brings it back as it was. A link shared on it opens nothing while it is there. Needs edit on the note.",
+    inputSchema: object({ id: noteId }, ["id"]),
+    op: "note.trash",
+  },
+  {
+    name: "restore_note",
+    description: "Bring a note back from Trash to the folder it was in, archived if it was. When that folder was deleted meanwhile it comes back to Unsorted and folderGone is true, which also needs edit on Unsorted. Needs edit on the note.",
+    inputSchema: object({ id: noteId }, ["id"]),
+    op: "note.restore",
+  },
+  {
+    name: "list_trash",
+    description: "The notes in Trash that you can see, latest trashed first: each as list_notes gives it, with who trashed it and when, and purgesAt, the time it is removed for good. An agent can't remove one sooner; a member does that in the app.",
+    inputSchema: object({}),
+    op: "trash.list",
+  },
+  {
     name: "list_folders",
     description: "The folders in a workspace: id, name, the folder each is inside (parentId), and how many notes are directly in it. unsortedId is the folder a note goes to when none is named.",
     inputSchema: object({}),
@@ -224,7 +278,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "delete_folder",
-    description: "Delete a folder that has no notes and no folders in it. Needs the admin role.",
+    description: "Delete a folder that has no notes and no folders in it. Archived notes count, and notes in Trash don't: those are restored to Unsorted afterwards. Needs the admin role.",
     inputSchema: object({ id: folderId("The folder id") }, ["id"]),
     op: "folder.delete",
   },
@@ -289,8 +343,16 @@ export const TOOLS: Tool[] = [
   {
     name: "revert_author",
     description:
-      "Take back out every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. A note left with no text, such as one the author created, is named in emptied: it stays, since a note can't be deleted yet. Needs the editor or admin role.",
-    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" } }, ["author"]),
+      "Take back out every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. A note left with no text, such as one the author created, is named in emptied, and with trashEmptied it is moved to Trash, where restore_note finds it. Notes in Trash are not reverted. Needs the editor or admin role.",
+    inputSchema: object(
+      {
+        author: { ...author, description: "Whose changes, from history_authors" },
+        noteIds: noteIds("Only in these notes"),
+        after: { type: "string", description: "The next of the call before" },
+        trashEmptied: { type: "boolean", description: "True to move each note this leaves with no text to Trash" },
+      },
+      ["author"],
+    ),
     op: "history.revertAuthor",
   },
   {

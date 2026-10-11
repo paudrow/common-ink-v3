@@ -15,7 +15,8 @@ type Item = { kind: "note"; id: string; note: NoteRow; folderId: string } | { ki
 async function itemOf(ctx: Context, on: On): Promise<Item> {
   if ((on.noteId === undefined) === (on.folderId === undefined)) throw new OpError("invalid", "Name one note or one folder, as noteId or folderId");
   if (on.noteId !== undefined) {
-    const note = await loadNote(ctx, on.noteId, "view");
+    // Who a note is shared with is decided apart from where it is in its life, so a note in Trash is shared and unshared as any other.
+    const note = await loadNote(ctx, on.noteId, "view", "opens");
     return { kind: "note", id: note.id, note, folderId: note.folder_id };
   }
   const folder = await loadFolder(ctx, on.folderId, "view");
@@ -97,7 +98,7 @@ export async function listGrants(ctx: Context, on: On): Promise<Sharing> {
     // A grant on a note the admin can't see, someone's private note, is that owner's to know of.
     const { results } = await ctx.db
       .prepare(
-        `SELECT ${GRANT_COLUMNS} WHERE g.workspace_id = ?1 AND (g.note_id IS NULL OR ${SEEN("n", "?2")})
+        `SELECT ${GRANT_COLUMNS} WHERE g.workspace_id = ?1 AND (g.note_id IS NULL OR ${SEEN("n", "?2", "any")})
          ORDER BY g.folder_id IS NULL, COALESCE(n.title, f.name) COLLATE NOCASE, COALESCE(g.note_id, g.folder_id), ${GRANT_ORDER}`,
       )
       .bind(ctx.workspaceId, ctx.sight.bind)
@@ -206,7 +207,7 @@ export async function revokeGrant(ctx: Context, id: string): Promise<{ id: strin
 }
 
 export async function setPrivate(ctx: Context, id: string, makePrivate: boolean): Promise<Results["note.setPrivate"]> {
-  const note = await loadNote(ctx, id, "view");
+  const note = await loadNote(ctx, id, "view", "opens");
   const { canSetPrivate } = await noteSharing(ctx, note);
   if ((note.private_owner !== null) === makePrivate) return { id, private: makePrivate, removed: 0 };
   if (!canSetPrivate) throw new OpError("forbidden", makePrivate ? "Only the member who made a note can make it private" : "Only its owner can stop a note being private");

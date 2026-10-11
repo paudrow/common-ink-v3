@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { EditorProps, Plugin } from "../../plugin-api.ts";
+import { lifecycle } from "../lib/lifecycle.ts";
 import { EditorGroups } from "./EditorGroups.tsx";
 import { EMPTY_LAYOUT, editorReducer, focusedNoteId, isEditorLayout, type CloseScope, type EditorAction } from "./editorLayout.ts";
 
@@ -46,10 +47,12 @@ export const tabs: Plugin = {
     for (const { scope, id, title } of CLOSES) host.commands.register({ id, title, run: onTab((tab) => ({ type: "close", scope, ...tab })) });
     host.commands.register({ id: "editor.splitRight", title: "Split editor right", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) });
 
+    const { items } = lifecycle(host);
+
     function Editor({ app, renderNote }: EditorProps) {
       const shown = useSyncExternalStore(subscribe, () => layout);
-      const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
-      const locked = useMemo(() => new Set((app.notes ?? []).filter((n) => n.private).map((n) => n.id)), [app.notes]);
+      // A tab stays open on a note that was moved to Trash, so those are known by name too.
+      const notes = useMemo(() => app.notes && new Map([...app.notes, ...app.trashed].map((n) => [n.id, n])), [app.notes, app.trashed]);
       const home = app.path === "/";
 
       useEffect(() => {
@@ -63,8 +66,9 @@ export const tabs: Plugin = {
       return (
         <EditorGroups
           layout={shown}
-          titleOf={(noteId) => (titles ? titles.get(noteId) || "Untitled" : "")}
-          isPrivate={(noteId) => locked.has(noteId)}
+          titleOf={(noteId) => (notes ? notes.get(noteId)?.title || "Untitled" : "")}
+          isPrivate={(noteId) => notes?.get(noteId)?.private ?? false}
+          noteItems={(noteId) => items(notes?.get(noteId))}
           dispatch={dispatch}
           renderNote={(group, noteId) => renderNote(noteId, { onEdit: () => dispatch({ type: "pin", groupId: group.id, noteId }), corner: group === shown.groups.at(-1) })}
         />

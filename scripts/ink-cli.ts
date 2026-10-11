@@ -12,7 +12,16 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
 
   workspaces                          the workspaces you can reach
   members                             everyone in a workspace, with their role
-  notes [--folder ID] [--since TIME]  the notes in a workspace, in one folder, or changed since a time
+  notes [--folder ID] [--since TIME] [--tag NAME] [--archived true]
+                                      the notes in a workspace, in one folder, with a tag, or changed since a time
+  search QUERY [--archived true] [--limit N] [--offset N]
+                                      the notes whose text has every word; "a phrase", #tag and +project narrow it
+  tags [--archived true]              the tags of the notes you can see, and how many notes have each
+  archive ID                          archive a note: kept, and left out of listings
+  unarchive ID                        bring an archived note back
+  trash ID                            move a note to Trash, where it waits 30 days
+  restore ID                          bring a note back from Trash, to the folder it was in
+  trashed                             the notes in Trash, and when each is removed for good
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
   create [--text TEXT] [--folder ID] [--link-titles keep]
                                       a new note (text from stdin if --text is left out)
@@ -21,9 +30,9 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
   todos [--project NAME] [--tag NAME] [--due-from DAY] [--due-to DAY] [--no-due true] [--importance N,N]
-        [--completed true] [--note ID] [--limit N] [--offset N]
+        [--completed true] [--archived true] [--note ID] [--limit N] [--offset N]
                                       the todos in the notes you can see, open ones unless --completed
-  todo-filters                        the projects and tags that todos can be narrowed by
+  todo-filters [--archived true]      the projects and tags that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none]
         [--add-project NAME] [--remove-project NAME] [--every RULE|none] [--on DAY]
                                       check a todo off or change it; ID, both Ns and LINE are from todos
@@ -45,8 +54,9 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   label ID --revision N [--name NAME] name a revision, or take its name away without --name
   revert ID --revision N              put a note back to a revision, as a new change
   revert ID --changes N,N             take chosen changes back out, as one new change
-  revert-author KIND:ID [--note ID,ID] [--after ID]
-                                      take back out every change an author made that still stands
+  revert-author KIND:ID [--note ID,ID] [--after ID] [--trash-emptied true]
+                                      take back out every change an author made that still stands,
+                                      and with --trash-emptied move the notes that leaves empty to Trash
   reapply ID --changes N,N            put back changes that were taken out
   undo ID                             take back your latest change to a note
   redo ID                             put back what your latest undo took out
@@ -150,7 +160,28 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "notes":
         tool = "list_notes";
-        args = given({ folderId: ["folder"], updatedSince: ["since", time] });
+        args = given({ folderId: ["folder"], updatedSince: ["since", time], tag: ["tag"], includeArchived: ["archived", truth] });
+        break;
+      case "search":
+        tool = "search";
+        args = { query: need("what to find"), ...given({ includeArchived: ["archived", truth], limit: ["limit", integer], offset: ["offset", integer] }) };
+        break;
+      case "tags":
+        tool = "list_tags";
+        args = given({ includeArchived: ["archived", truth] });
+        break;
+      case "archive":
+      case "unarchive":
+        tool = "archive_note";
+        args = { id: needId(), archived: command === "archive" };
+        break;
+      case "trash":
+      case "restore":
+        tool = `${command}_note`;
+        args = { id: needId() };
+        break;
+      case "trashed":
+        tool = "list_trash";
         break;
       case "read":
         tool = "read_note";
@@ -182,6 +213,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           noDue: ["no-due", truth],
           importance: ["importance", integers],
           includeCompleted: ["completed", truth],
+          includeArchived: ["archived", truth],
           noteId: ["note"],
           limit: ["limit", integer],
           offset: ["offset", integer],
@@ -189,6 +221,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "todo-filters":
         tool = "todo_filters";
+        args = given({ includeArchived: ["archived", truth] });
         break;
       case "todo":
         if (!flags.has("revision") || !flags.has("line") || !flags.has("text")) throw new UsageError("todo needs --revision, --line and --text, as todos gave them");
@@ -267,7 +300,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "revert-author":
         tool = "revert_author";
-        args = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids], after: ["after"] }) };
+        args = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids], after: ["after"], trashEmptied: ["trash-emptied", truth] }) };
         break;
       case "reapply":
         if (!flags.has("changes")) throw new UsageError("reapply needs --changes");

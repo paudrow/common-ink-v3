@@ -6,6 +6,8 @@ export type Route = { kind: "home" } | { kind: "note"; id: string } | { kind: "p
 
 export interface Place {
   path: string;
+  /** The address's query as the browser has it, such as `?q=plan`, or empty. */
+  query: string;
   /** What `navigate` was handed for this entry of the browser's history. */
   state: unknown;
   route: Route;
@@ -20,9 +22,9 @@ export function routeOf(pathname: string): Route {
 }
 
 export function useRoute(): [Place, Navigate] {
-  const [at, setAt] = useState({ path: location.pathname, state: history.state as unknown });
+  const [at, setAt] = useState({ path: location.pathname, query: location.search, state: history.state as unknown });
   useEffect(() => {
-    const onPop = () => setAt({ path: location.pathname, state: history.state });
+    const onPop = () => setAt({ path: location.pathname, query: location.search, state: history.state });
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
   }, []);
@@ -31,10 +33,10 @@ export function useRoute(): [Place, Navigate] {
     if (history.state !== null) history.replaceState(null, "", location.href);
   }, [at]);
   const navigate = useCallback<Navigate>((to, { replace, state = null } = {}) => {
-    if (to === location.pathname) return;
+    if (to === location.pathname + location.search) return;
     if (replace) history.replaceState(state, "", to);
     else history.pushState(state, "", to);
-    setAt({ path: to, state });
+    setAt({ path: location.pathname, query: location.search, state });
   }, []);
   return [{ ...at, route: routeOf(at.path) }, navigate];
 }

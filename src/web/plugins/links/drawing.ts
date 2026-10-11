@@ -5,12 +5,9 @@ import { chips, editWithin, unitAtCursor, type Chip } from "../lib/chips.ts";
 import { drawnInView, within } from "../lib/live.ts";
 import { MOD } from "../lib/opening.ts";
 import { noteLinks, noteLinksOn } from "./at.ts";
+import { linkWords, type Linked } from "./words.ts";
 
-/** A linked note's title; null when there is no such note that the member can see; undefined while the notes are still being listed. */
-export type TitleOf = (noteId: string) => string | null | undefined;
-
-const UNAVAILABLE = "Unavailable note";
-const hint = (title: string | null | undefined) => (title === null ? "This note doesn't exist, or you can't see it." : title === undefined ? "" : `${title || "Untitled"}\n${MOD}-click to open`);
+export type NoteOf = (noteId: string) => Linked;
 
 const isLink = (state: EditorState, link: WrittenLink) => state.field(noteLinks).has(link.from);
 
@@ -23,31 +20,37 @@ const modClick = (event: MouseEvent) => event.button === 0 && (event.metaKey || 
  * Draws a link as the words it shows: its display text, or its note's title as it is now. It is
  * shown as written only while the cursor is inside it, since what is written is an id.
  */
-function linkChip(titleOf: TitleOf, open: (noteId: string) => void): Chip<WrittenLink> {
+function linkChip(noteOf: NoteOf, open: (noteId: string) => void): Chip<WrittenLink> {
   return {
     id: "link",
     find: noteLinksOn,
     written: "within",
     inCode: true,
     skip: (state, link) => !isLink(state, link),
-    key: (link) => JSON.stringify([titleOf(link.target)]),
+    key: (link) => {
+      const linked = noteOf(link.target);
+      return JSON.stringify(linked && [linked.title, linked.state]) ?? "";
+    },
     draw(el, link, source) {
-      const title = titleOf(link.target);
-      el.textContent = link.display ?? (title === null ? UNAVAILABLE : title === undefined ? "…" : title || "Untitled");
-      el.title = hint(title);
+      const { text, suffix, hint, gone } = linkWords(noteOf(link.target), link.display, MOD);
+      el.textContent = text;
+      // Words of the line's own size, so the line is as tall with them as without.
+      if (suffix) el.appendChild(document.createElement("span")).append(suffix);
+      el.title = hint;
       el.setAttribute("role", "link");
-      if (title === null) el.classList.add("md-notelink-gone");
+      if (gone) el.classList.add("md-notelink-gone");
+      if (suffix) el.classList.add("md-notelink-trashed");
       el.addEventListener("mousedown", (event) => {
         event.preventDefault();
         if (!modClick(event)) source.edit(link.to - link.from - BEFORE_END);
-        else if (title !== null) open(link.target);
+        else if (!gone) open(link.target);
       });
     },
   };
 }
 
 /** A link shown as written still reads as one, says which note it is, and opens on a ⌘-click. */
-const asWritten = (titleOf: TitleOf) =>
+const asWritten = (noteOf: NoteOf) =>
   drawnInView((view) => {
     const { state } = view;
     const drawn: Range<Decoration>[] = [];
@@ -55,8 +58,8 @@ const asWritten = (titleOf: TitleOf) =>
       const line = state.doc.lineAt(range.head);
       for (const link of noteLinksOn(line.text, line.from)) {
         if (!within(state, link.from, link.to) || !isLink(state, link)) continue;
-        const title = titleOf(link.target);
-        drawn.push(Decoration.mark({ class: title === null ? "md-notelink md-notelink-gone" : "md-notelink", attributes: { title: hint(title), ...(title === null ? {} : { "data-note": link.target }) } }).range(link.from, link.to));
+        const { hint, gone } = linkWords(noteOf(link.target), link.display, MOD);
+        drawn.push(Decoration.mark({ class: gone ? "md-notelink md-notelink-gone" : "md-notelink", attributes: { title: hint, ...(gone ? {} : { "data-note": link.target }) } }).range(link.from, link.to));
       }
     }
     return drawn;
@@ -67,10 +70,12 @@ const look = EditorView.baseTheme({
   ".md-chip-link, .md-notelink": { color: "var(--accent)", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: "2px" },
   ".md-chip-link": { cursor: "pointer" },
   ".md-notelink-gone": { color: "var(--faint)", textDecorationLine: "line-through", textDecorationStyle: "solid" },
+  ".md-notelink-trashed": { color: "var(--muted)" },
+  ".md-notelink-trashed > span": { color: "var(--faint)" },
 });
 
 /** The editor extension that draws links, a way to put the cursor inside the link it is at, and whether it is at one. */
-export function linkDrawing(titleOf: TitleOf, open: (noteId: string) => void): { extension: Extension; edit: (view: EditorView) => void; canEdit: (view: EditorView) => boolean } {
+export function linkDrawing(noteOf: NoteOf, open: (noteId: string) => void): { extension: Extension; edit: (view: EditorView) => void; canEdit: (view: EditorView) => boolean } {
   const following = EditorView.domEventHandlers({
     mousedown(event) {
       const noteId = modClick(event) && event.target instanceof Element ? event.target.closest<HTMLElement>("[data-note]")?.dataset.note : undefined;
@@ -80,6 +85,6 @@ export function linkDrawing(titleOf: TitleOf, open: (noteId: string) => void): {
       return true;
     },
   });
-  const chip = linkChip(titleOf, open);
-  return { extension: [noteLinks, chips(chip), asWritten(titleOf), following, look], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
+  const chip = linkChip(noteOf, open);
+  return { extension: [noteLinks, chips(chip), asWritten(noteOf), following, look], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
 }

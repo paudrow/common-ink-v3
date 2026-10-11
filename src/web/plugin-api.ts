@@ -15,13 +15,16 @@ import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS } from "../core/protocol.ts";
+export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_SEARCH_LENGTH } from "../core/protocol.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+
+/** The lines of a note that aren't in a fenced code block, which is where the core reads todos and tags. */
+export { linesOutsideCode } from "../core/lines.ts";
 
 /** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
 export { WEEKDAYS, describeRule, nextDue, parseRule, writeRule, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
@@ -256,7 +259,9 @@ export interface Slots {
    * A page with its own address, shown in place of the editor. `nav` says where its link goes:
    * with the main links of the sidebar, under More, or in the workspace menu. Each page gets a
    * `go.<id>` command. `order` places its link among the others: lower first, and those with none
-   * after them, in the order of their plugins.
+   * after them, in the order of their plugins. A page is also shown at every address under its
+   * path, such as `/tags/work` for the page at `/tags`, unless another page is at exactly that address:
+   * it reads the rest from `app.path`.
    */
   page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; component: View };
   /**
@@ -265,6 +270,18 @@ export interface Slots {
    * has nothing to show, so nothing above it moves when one appears.
    */
   bar: { id: string; component: View };
+  /**
+   * A word or two about a note in the bar above its text, after its folder, in every editor showing
+   * it: that it is archived, say, with a button that undoes it. The bar keeps its height, so the
+   * note's text doesn't move when a mark comes or goes. One with nothing to say of a note draws nothing.
+   */
+  mark: { id: string; component: ComponentType<ViewProps & { note: NoteSummary }> };
+  /**
+   * A banner between a note's bar and its text, in every editor showing it, for what changes what
+   * the member can do with the note: that it is in Trash. One with nothing to say of a note draws
+   * nothing. When one appears the text moves down by the banner's height and no further.
+   */
+  notice: { id: string; component: ComponentType<ViewProps & { note: NoteSummary }> };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it, and what it hands over is `state`. */
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
 }
@@ -432,6 +449,13 @@ export interface Folders {
   pathName(id: string | null): string;
 }
 
+/** Something the app tells the member in a line at its foot, which goes after a few seconds or when dismissed. */
+export interface Notice {
+  message: string;
+  /** A button beside the message, such as Undo. The notice goes when it is pressed. */
+  action?: { label: string; run: () => void };
+}
+
 export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav">;
 
 /** The app at one moment: what is open, and what can be done about it. */
@@ -449,16 +473,24 @@ export interface App {
   canCreateNote: boolean;
   /** The address the app is at, such as `/history`. */
   path: string;
+  /** The address's query as the browser has it, such as `?q=plan`, or empty. A page reads it with `URLSearchParams`. */
+  query: string;
   /** What `go` was handed for this address, if anything. It is handed over once: Back or a reload finds nothing. */
   pageState: unknown;
   /** The note the address names. Null on a page, and when nothing is open. */
   noteId: string | null;
-  /** That note, once the workspace's notes have loaded and if the member can see it. */
+  /** That note, once the workspace's notes have loaded and if the member can see it. It may be archived, or in Trash. */
   note: NoteSummary | null;
   /** Whether the open note has changes by someone else that the member hasn't been shown. */
   unseen: boolean;
-  /** Every note in the workspace the member can see. Null while they load. */
+  /**
+   * Every note in the workspace the member can see that isn't in Trash: the live ones and the
+   * archived ones, told apart by `state`. A listing leaves the archived ones out unless the member
+   * asked for them. Null while they load.
+   */
   notes: readonly NoteSummary[] | null;
+  /** The notes in Trash that the member can see. No listing but Trash's own shows them; they are here so a tab or a link can say what one is. */
+  trashed: readonly NoteSummary[];
   /** Null while they load. */
   folders: Folders | null;
   /** The folder the note list is showing, {@link SHARED_WITH_ME}, or null for every note. */
@@ -470,8 +502,8 @@ export interface App {
   /** The overlay that is open. */
   overlay: string | null;
 
-  /** Goes to an address. `state` is for the page there, which reads it as `pageState`. */
-  go(path: string, options?: { state?: unknown }): void;
+  /** Goes to an address, which may carry a query. `state` is for the page there, which reads it as `pageState`. `replace` keeps Back from retracing the step. */
+  go(path: string, options?: { state?: unknown; replace?: boolean }): void;
   /** Where a note lives, such as `/note/plan-3k2j5h8d9f0a`. */
   notePath(noteId: string): string;
   /** Opens a note. A preview gives way to the next note previewed. `reveal` turns the note list to the note's folder. `focus` puts the cursor in its editor. */
@@ -482,7 +514,7 @@ export interface App {
   createNote(): Promise<void>;
   selectFolder(folderId: string): void;
   moveNote(noteId: string, folderId: string): Promise<void>;
-  /** Tells the app a note changed, with the note as it is now. */
+  /** Tells the app a note changed, with the note as it is now: its text, its folder, or its state. */
   noteChanged(note: Note): void;
   /** Reads the folders and notes again, after a change the app wasn't told about. */
   refresh(): void;
@@ -490,6 +522,8 @@ export interface App {
   saveNote(noteId: string): void;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
+  /** Tells the member something that just happened, such as that a note was moved to Trash. One notice shows at a time: the next takes its place. */
+  notify(notice: Notice): void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
   toggleOverlay(id: string, state?: unknown): void;
   switchWorkspace(workspaceId: string): void;

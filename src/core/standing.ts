@@ -66,7 +66,8 @@ export const SIGN_IN_FIRST = "Sign in to open this link";
  */
 export async function standingByLink(db: D1Database, token: string, personId: string | null): Promise<Standing> {
   const link = await db
-    .prepare("SELECT workspace_id, note_id, folder_id, access, kind FROM grants WHERE token = ? AND kind IN ('public', 'signed_in')")
+    // A link on a note in Trash opens nothing until the note is restored.
+    .prepare("SELECT workspace_id, note_id, folder_id, access, kind FROM grants WHERE token = ? AND kind IN ('public', 'signed_in') AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = grants.note_id AND n.state = 'trashed')")
     .bind(token)
     .first<GrantRow & { workspace_id: string; kind: "public" | "signed_in" }>();
   if (!link) throw new OpError("not_found", NO_SUCH_LINK);

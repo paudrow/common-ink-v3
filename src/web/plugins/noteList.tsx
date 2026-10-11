@@ -1,5 +1,8 @@
 import { useId, useState } from "react";
 import { Icon, NOTE_DRAG, SHARED_WITH_ME, ago, useNow, type App, type NoteSummary, type Plugin } from "../plugin-api.ts";
+import { lifecycle } from "./lib/lifecycle.ts";
+import { listable } from "./lib/listable.ts";
+import { ContextMenu, type MenuItem } from "./lib/Menu.tsx";
 
 const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -13,8 +16,10 @@ type Sort = (typeof SORTS)[number]["id"];
 
 interface Props {
   heading: string;
-  /** Null while the folder's notes load. */
+  /** The folder's notes, archived ones among them. Null while they load. */
   notes: readonly NoteSummary[] | null;
+  /** What a note's menu offers, opened by a right click on its row. */
+  menuFor: (note: NoteSummary) => MenuItem[];
   openId: string | null;
   pathOf: (noteId: string) => string;
   /** Whether a new note can be made where the list is showing. */
@@ -26,13 +31,17 @@ interface Props {
   onOpen: (note: NoteSummary, keep: boolean) => void;
 }
 
-function NoteList({ heading, notes, openId, pathOf, canCreate, snippets, onNew, onOpen }: Props) {
+function NoteList({ heading, notes: all, menuFor, openId, pathOf, canCreate, snippets, onNew, onOpen }: Props) {
   const ids = useId();
   const now = useNow();
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<Sort>("recent");
   const [hasTodos, setHasTodos] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [menu, setMenu] = useState<{ noteId: string; x: number; y: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const notes = all && listable(all, showArchived);
+  const menuNote = menu && notes?.find((n) => n.id === menu.noteId);
 
   const needle = filter.trim().toLowerCase();
   const shown = (notes ?? [])
@@ -78,6 +87,9 @@ function NoteList({ heading, notes, openId, pathOf, canCreate, snippets, onNew, 
           <button type="button" className="chip" aria-pressed={hasTodos} onClick={() => setHasTodos(!hasTodos)}>
             Has todos
           </button>
+          <button type="button" className="chip" aria-pressed={showArchived} onClick={() => setShowArchived(!showArchived)}>
+            Show archived
+          </button>
         </div>
       </div>
       {error && (
@@ -93,6 +105,7 @@ function NoteList({ heading, notes, openId, pathOf, canCreate, snippets, onNew, 
               <a
                 href={pathOf(note.id)}
                 className="note-row"
+                data-state={note.state === "archived" ? "archived" : undefined}
                 draggable
                 aria-current={note.id === openId ? "page" : undefined}
                 aria-labelledby={`${ids}-${note.id}`}
@@ -106,6 +119,10 @@ function NoteList({ heading, notes, openId, pathOf, canCreate, snippets, onNew, 
                   onOpen(note, false);
                 }}
                 onDoubleClick={() => onOpen(note, true)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ noteId: note.id, x: e.clientX, y: e.clientY });
+                }}
               >
                 <span className="row-title" id={`${ids}-${note.id}`}>
                   {note.private && (
@@ -121,12 +138,14 @@ function NoteList({ heading, notes, openId, pathOf, canCreate, snippets, onNew, 
                     {ago(note.updatedAt, now)} · {note.updatedBy.name}
                   </span>
                   {note.openTodos > 0 && <span>{note.openTodos} open</span>}
+                  {note.state === "archived" && <span className="state-label">Archived</span>}
                 </span>
               </a>
             </li>
           ))}
         </ul>
       </nav>
+      {menu && menuNote && <ContextMenu label={`${titleOf(menuNote)} note`} x={menu.x} y={menu.y} items={menuFor(menuNote)} onClose={() => setMenu(null)} />}
     </section>
   );
 }
@@ -140,6 +159,7 @@ export const noteList: Plugin = {
     snippets: { type: "boolean", default: true, title: "Show snippets", description: "Show the first lines of each note under its title." },
   },
   activate(host) {
+    const { items } = lifecycle(host);
     host.views.register("column", {
       id: "notes",
       popover: true,
@@ -147,6 +167,7 @@ export const noteList: Plugin = {
         <NoteList
           heading={headingOf(app)}
           notes={app.notes && (app.folderId ? app.notes.filter((n) => n.folderId === (app.folderId === SHARED_WITH_ME ? null : app.folderId)) : app.notes)}
+          menuFor={items}
           openId={app.note?.id ?? null}
           pathOf={app.notePath}
           canCreate={app.canCreateNote}

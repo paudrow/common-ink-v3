@@ -1,6 +1,7 @@
 import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
 import { perform, type Visitor } from "../core/operations.ts";
 import { OpError, type OpErrorCode, type OpInput } from "../core/protocol.ts";
+import { purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
@@ -102,5 +103,10 @@ export default {
     const unlisted = new Response(page.body, page);
     for (const [name, value] of Object.entries(UNLISTED)) unlisted.headers.set(name, value);
     return unlisted;
+  },
+  // The one job on a timer: removing the notes whose 30 days in Trash are up. A run that doesn't finish is carried on by the next.
+  async scheduled(controller, env) {
+    const { removed, failed, more } = await purgeTrash(env.DB, controller.scheduledTime);
+    if (removed || failed.length) console.log(`Removed ${removed} notes from Trash${failed.length ? `, and couldn't remove ${failed.length}` : ""}${more ? ", with more waiting" : ""}`);
   },
 } satisfies ExportedHandler<Env>;

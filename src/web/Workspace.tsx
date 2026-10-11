@@ -9,8 +9,9 @@ import { folderTree } from "./folders.ts";
 import { Icon } from "./icons.tsx";
 import { Inspector } from "./Inspector.tsx";
 import { chordFor, chordLabel, chordOf } from "./keybindings.ts";
+import { lastChange, relisted, withChanged } from "./knownNotes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
-import { SHARED_WITH_ME, type App, type Embed, type Folders, type Plugin } from "./plugin-api.ts";
+import { SHARED_WITH_ME, type App, type Embed, type Folders, type Notice, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
@@ -33,7 +34,7 @@ const INSPECTOR_KEY = "ink.inspector";
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 /** Where a page that gives no order is placed: after every page that gives one. */
 const UNPLACED = Number.MAX_SAFE_INTEGER;
-/** How often the notes changed since the last look are listed, so an agent's or another member's change shows up. */
+/** How often the notes changed since the last look are listed, and the ones in Trash, so an agent's or another member's change to a note or to its state shows up. */
 const REFRESH_MS = 5000;
 /**
  * How often every note and folder is listed again. A note that was hidden from the member, or that
@@ -56,25 +57,47 @@ const pathTo = (byId: ReadonlyMap<string, NoteSummary>, id: string) => {
   return note ? notePath(note) : `/note/${id}`;
 };
 
-/**
- * A listing can answer after a save or a new note it was sent before. A note learned since it was
- * sent stays, and one already known at a later revision is kept.
- */
-function newest(listed: NoteSummary[], known: NoteSummary[] | null, learned: ReadonlyMap<string, NoteSummary>) {
-  const byId = new Map([...(known ?? []), ...learned.values()].map((n) => [n.id, n]));
-  const listedIds = new Set(listed.map((n) => n.id));
-  const fresh = listed.map((n) => {
-    const mine = byId.get(n.id);
-    return mine && mine.revision > n.revision ? mine : n;
-  });
-  return [...[...learned.values()].filter((n) => !listedIds.has(n.id)), ...fresh];
-}
+/** How long a notice stays when the member does nothing about it. Long enough to read it and reach its button. */
+const NOTICE_MS = 10_000;
 
 /** Functions that stay the same from one render to the next, each calling the latest one it was handed. */
 function useLatest<T extends Record<string, (...args: never[]) => unknown>>(fns: T): T {
   const latest = useRef(fns);
   latest.current = fns;
   return useState(() => Object.fromEntries(Object.keys(fns).map((name) => [name, (...args: never[]) => latest.current[name]!(...args)])) as T)[0];
+}
+
+/** A notice at the foot of the app. It waits while the pointer or the keyboard is on it, so its button can be reached. */
+function Toast({ notice, onClose }: { notice: Notice; onClose: () => void }) {
+  const [held, hold] = useState(false);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (held) return;
+    const timer = setTimeout(() => close.current(), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice, held]);
+  const { action } = notice;
+  return (
+    <div className="toast" role="group" aria-label="Notice" onPointerEnter={() => hold(true)} onPointerLeave={() => hold(false)} onFocus={() => hold(true)} onBlur={() => hold(false)}>
+      <span>{notice.message}</span>
+      {action && (
+        <button
+          type="button"
+          className="button small"
+          onClick={() => {
+            onClose();
+            action.run();
+          }}
+        >
+          {action.label}
+        </button>
+      )}
+      <button type="button" className="icon-button" aria-label="Dismiss" title="Dismiss" onClick={onClose}>
+        <Icon name="close" />
+      </button>
+    </div>
+  );
 }
 
 interface Props {
@@ -99,8 +122,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const now = useNow();
   const [tree, setTree] = useState<Folders | null>(null);
   const [chosenFolderId, selectFolder] = useState<string | null>(null);
-  /** Every note in the workspace, for the note list, tab titles, and quick open. */
+  /** Every note in the workspace the member can see, in every state: live, archived, and in Trash. */
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
+  /** What the app is telling the member, such as that a note was moved to Trash. Each has its own identity, so a timer set for one never takes the next away. */
+  const [told, tell] = useState<Notice | null>(null);
   const [listVersion, setListVersion] = useState(0);
   const [layout, setLayout] = useState<Layout>(() => (readStored(WRITING_KEY, isBoolean) ? WRITING : BROWSING));
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
@@ -112,13 +137,16 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
 
   const selectedFolderId =
     chosenFolderId === SHARED_WITH_ME
-      ? notes && !notes.some((n) => n.folderId === null)
+      ? notes && !notes.some((n) => n.folderId === null && n.state !== "trashed")
         ? null
         : chosenFolderId
       : tree && chosenFolderId && !tree.byId.has(chosenFolderId)
         ? null
         : chosenFolderId;
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
+  /** The notes a listing may cover, and the ones in Trash, which none does. */
+  const kept = useMemo(() => notes && notes.filter((n) => n.state !== "trashed"), [notes]);
+  const trashed = useMemo(() => (notes ?? []).filter((n) => n.state === "trashed"), [notes]);
   const routeNoteId = route.kind === "note" ? route.id : null;
   const current = (routeNoteId && byId.get(routeNoteId)) || null;
 
@@ -256,12 +284,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   useEffect(() => {
     let live = true;
     const since = (learned.current = new Map());
-    perform(workspaceId, { type: "note.list" }).then((all) => {
+    Promise.all([perform(workspaceId, { type: "note.list", includeArchived: true }), perform(workspaceId, { type: "trash.list" })]).then(([kept, trash]) => {
       if (!live) return;
-      const known = listedNotes.current;
-      const listed = newest(all, known, since);
+      const { notes: listed, gone: lost } = relisted(kept, trash, listedNotes.current, since);
       const there = new Set(listed.map((n) => n.id));
-      const lost = (known ?? []).filter((n) => !there.has(n.id)).map((n) => n.id);
       setGone((was) => {
         const now = [...was, ...lost].filter((id) => !there.has(id));
         return now.length === was.size && !lost.length ? was : new Set(now);
@@ -295,9 +321,12 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     const relist = async () => {
       const known = listedNotes.current;
       if (document.visibilityState !== "visible" || !known) return;
-      const changed = await perform(workspaceId, { type: "note.list", updatedSince: Math.max(0, ...known.map((n) => n.updatedAt)) }).catch(() => []);
-      const later = changed.filter((n) => (known.find((k) => k.id === n.id)?.revision ?? -1) < n.revision);
-      if (later.length) setNotes((all) => all && [...newest(later, all, new Map()), ...all.filter((n) => !later.some((l) => l.id === n.id))]);
+      // A note moved to Trash since is in no listing but Trash's own.
+      const [changed, trash] = await Promise.all([
+        perform(workspaceId, { type: "note.list", includeArchived: true, updatedSince: lastChange(known) }).catch(() => []),
+        perform(workspaceId, { type: "trash.list" }).catch(() => []),
+      ]);
+      setNotes((all) => all && withChanged([...changed, ...trash], all));
     };
     const timer = setInterval(relist, REFRESH_MS);
     document.addEventListener("visibilitychange", relist);
@@ -322,6 +351,19 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       if (location.pathname.startsWith("/note/") && location.pathname.endsWith(note.id)) navigate(notePath(note), { replace: true });
     },
     [navigate, noteIsHere, workspaceId],
+  );
+
+  /** A save was refused because its note is in Trash, which the app hadn't heard. It reads the note, and sends the typing after all if the note is back by then. */
+  const learnTrashed = useCallback(
+    (noteId: string) =>
+      void perform(workspaceId, { type: "note.read", id: noteId }).then(
+        (note) => {
+          remember(note);
+          if (note.state !== "trashed") void saveNow(noteId);
+        },
+        () => {},
+      ),
+    [workspaceId, remember],
   );
 
   const byIdNow = useRef(byId);
@@ -398,7 +440,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
 
   useEffect(() => writeStored(WRITING_KEY, layout.writing), [layout.writing]);
 
-  const go = (path: string, options: { state?: unknown } = {}) => {
+  const go = (path: string, options: { state?: unknown; replace?: boolean } = {}) => {
     navigate(path, options);
     closePopover();
   };
@@ -469,6 +511,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     saveNote: (noteId: string) => void saveNow(noteId),
     markSeen,
     toggleOverlay: (id: string, state?: unknown) => setOverlay((open) => (open?.id === id ? null : { id, state })),
+    notify: (notice: Notice) => tell({ ...notice }),
     switchWorkspace: onSwitch,
     reloadWorkspaces: () => void reloadWorkspaces(),
     signOut: () => void signOut().then(() => location.assign("/")),
@@ -480,11 +523,13 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     canEdit,
     canCreateNote,
     path: place.path,
+    query: place.query,
     pageState: place.state,
     noteId: routeNoteId,
     note: current,
     unseen,
-    notes,
+    notes: kept,
+    trashed,
     folders: tree,
     folderId: selectedFolderId,
     writing: layout.writing,
@@ -494,7 +539,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     ...actions,
   };
   appNow.current = app;
-  const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
+  const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`)) : undefined;
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay?.id);
 
   const editorArea = contributed.views.editor.at(-1);
@@ -523,8 +568,9 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         focus={toFocus === noteId}
         onFocused={() => setToFocus(null)}
         access={note?.access}
+        state={note?.state}
         gone={gone.has(noteId)}
-        onRejected={refresh}
+        onRejected={(why) => (why === "inTrash" ? learnTrashed(noteId) : refresh())}
         embeds={embeds}
         completions={contributed.completions}
         onContributionFailed={host.fail}
@@ -540,11 +586,20 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
                 </span>
               )}
               {note.access === "view" && canEdit && <span className="private-mark">View only</span>}
+              {contributed.views.mark.map((mark) => (
+                <Drawn key={mark.id} host={host} view={mark} note={note} />
+              ))}
               <span>
                 edited {ago(note.updatedAt, now)} by {note.updatedBy.name}
               </span>
             </>
           )
+        }
+        above={
+          note &&
+          contributed.views.notice.map((notice) => (
+            <Drawn key={notice.id} host={host} view={notice} note={note} />
+          ))
         }
         actions={
           corner && (
@@ -665,6 +720,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         </div>
       )}
       {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} state={overlay?.state} />}
+      {/* Always there, so a screen reader is told when a notice arrives in it. */}
+      <div className="toasts" aria-live="polite">
+        {told && <Toast notice={told} onClose={() => tell((now) => (now === told ? null : now))} />}
+      </div>
     </div>
   );
 }

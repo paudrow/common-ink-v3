@@ -107,7 +107,7 @@ test("a link's words follow its note's title through a rename here or by someone
   const read = await perform(page, { type: "note.read", id: diary.id });
   expect(read.text).toBe(`# Diary\n\nRead [[${plan.id}]] and [[${plan.id}|what we agreed]].\n\nEnd`);
   expect(read.revision).toBe(1);
-  expect(read.links).toEqual([{ id: plan.id, title: "Plan for summer" }]);
+  expect(read.links).toEqual([{ id: plan.id, title: "Plan for summer", state: "live" }]);
 });
 
 test("an agent writes a link by title, it is stored by id, and reads back with the title beside it", async ({ page }) => {
@@ -118,7 +118,7 @@ test("an agent writes a link by title, it is stored by id, and reads back with t
   const made = await agent.tool<{ id: string; text: string }>("create_note", { text: "# From the agent\n\nSee [[Plan]] and [[plan|the same]]." });
   expect(made.text).toBe(`# From the agent\n\nSee [[${plan.id}]] and [[${plan.id}|the same]].`);
   await expect(agent.tool("create_note", { text: "[[No such note]]" })).rejects.toThrow(/No note is titled "No such note"/);
-  expect((await agent.tool<{ links: unknown }>("read_note", { id: made.id })).links).toEqual([{ id: plan.id, title: "Plan" }]);
+  expect((await agent.tool<{ links: unknown }>("read_note", { id: made.id })).links).toEqual([{ id: plan.id, title: "Plan", state: "live" }]);
   expect((await agent.tool<{ title: string }[]>("backlinks", { id: plan.id })).map((n) => n.title)).toEqual(["From the agent"]);
 
   await page.goto(`/note/${made.id}`);
@@ -197,8 +197,8 @@ test("a link to a note that isn't there, or to nothing by a title, says so or st
   await page.waitForTimeout(300);
   await expect(page).toHaveURL(new RegExp(`/note/diary-${diary.id}$`));
   expect((await perform(page, { type: "note.read", id: diary.id })).links).toEqual([
-    { id: "zzzzzzzzzzzz", title: null },
-    { id: secret.id, title: null },
+    { id: "zzzzzzzzzzzz", title: null, state: null },
+    { id: secret.id, title: null, state: null },
   ]);
 });
 

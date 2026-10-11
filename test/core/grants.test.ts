@@ -335,7 +335,7 @@ describe("a private note", () => {
       await expect(perform(env.DB, other, { type: "grant.list", noteId: secret.id })).rejects.toMatchObject(NO_NOTE);
       expect(await workspaceOfNote(env.DB, other.personId, secret.id)).toBeNull();
       expect(await perform(env.DB, other, { type: "note.backlinks", id: open.id })).toEqual([]);
-      expect((await read(other, linking.id)).links).toEqual([{ id: secret.id, title: null }]);
+      expect((await read(other, linking.id)).links).toEqual([{ id: secret.id, title: null, state: null }]);
       await expect(note(other, "# New\n\n[[Diary]]")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('No note is titled "Diary"') });
       expect((await perform(env.DB, other, { type: "history.list" })).changes.map((c) => c.noteTitle)).toEqual(["Linking", "Open"]);
       expect((await perform(env.DB, other, { type: "history.authors" })).map((a) => a.name)).toEqual(["Ada Lovelace"]);
@@ -511,7 +511,7 @@ describe("a link", () => {
       "Set-Cookie": null,
     });
     const text = await (await fetchAs(`/api/shared/${token}/notes/${plan.id}`)).text();
-    expect(JSON.parse(text)).toEqual({ id: plan.id, title: "Plan", slug: "plan", folderId: null, updatedAt: expect.any(Number), snippet: expect.any(String), text: `# Plan\n\nsee [[${other.id}]]`, revision: 1, links: [{ id: other.id, title: null }] });
+    expect(JSON.parse(text)).toEqual({ id: plan.id, title: "Plan", slug: "plan", folderId: null, updatedAt: expect.any(Number), snippet: expect.any(String), text: `# Plan\n\nsee [[${other.id}]]`, revision: 1, links: [{ id: other.id, title: null, state: null }] });
     expect(text).not.toMatch(/Ada|Lovelace/);
     expect(text).not.toContain(ada.personId);
 
@@ -574,8 +574,8 @@ describe("a link", () => {
       ],
     });
     expect((await perform(env.DB, visitor, { type: "shared.read", id: start.id })).links).toEqual([
-      { id: leave.id, title: "Leave" },
-      { id: outside.id, title: null },
+      { id: leave.id, title: "Leave", state: "live" },
+      { id: outside.id, title: null, state: null },
     ]);
     await expect(perform(env.DB, visitor, { type: "shared.read", id: outside.id })).rejects.toMatchObject(NO_NOTE);
   });

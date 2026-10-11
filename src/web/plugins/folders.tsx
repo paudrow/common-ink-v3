@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
 import { Icon, NOTE_DRAG, SHARED_WITH_ME, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
 import { useKept } from "./lib/kept.ts";
+import { listable } from "./lib/listable.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "./sharing/Summary.tsx";
 
@@ -304,7 +305,7 @@ export const folders: Plugin = {
             host={host}
             tree={app.folders}
             role={app.workspace.role}
-            loose={(app.notes ?? []).filter((n) => n.folderId === null).length}
+            loose={listable(app.notes ?? [], false).filter((n) => n.folderId === null).length}
             selectedId={app.folderId}
             onSelect={app.selectFolder}
             onChanged={app.refresh}

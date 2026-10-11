@@ -509,7 +509,7 @@ describe("reverting an author", () => {
 
     const { reverted, emptied } = await revertAuthor(ada, claude.ref);
 
-    expect(emptied).toEqual([{ noteId: draft.id, title: "Draft" }]);
+    expect(emptied).toEqual([{ noteId: draft.id, title: "Draft", trashed: false }]);
     expect(reverted.map((r) => r.note.id).sort()).toEqual([id, draft.id, joint.id].sort());
     expect([await read(ada, draft.id), await read(ada, joint.id)]).toEqual(["", "\n\nAda's line"]);
     expect((await revertAuthor(ada, claude.ref)).emptied).toEqual([]);
@@ -529,7 +529,7 @@ describe("reverting an author", () => {
 
     expect(await run(["revert-author", `agent:${claude.ref.id}`], io)).toBe(0);
 
-    expect(said.map((line) => JSON.parse(line).emptied)).toEqual([[{ noteId: draft.id, title: "Draft" }]]);
+    expect(said.map((line) => JSON.parse(line).emptied)).toEqual([[{ noteId: draft.id, title: "Draft", trashed: false }]]);
   });
 
   it("passes over a note that refuses the change, names it, and reverts the notes after it", async () => {

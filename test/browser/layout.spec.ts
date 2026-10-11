@@ -131,7 +131,7 @@ test("More expands and collapses Contacts, Uploads, and History, and a mode not 
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
 
   await modes.getByRole("button", { name: "More" }).click();
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");
@@ -189,15 +189,15 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
   await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
   const panel = inspector.getByRole("tabpanel");
-  await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
+  await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive", "Trash"]);
   await expect(panel.getByRole("definition").first().locator("span")).toHaveText("Projects / Common Ink");
   await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveValue(ink.id);
   await expect(panel.getByRole("definition").nth(1)).toHaveText("Everyone in this workspace · Link offShare");
-  await expect(panel.getByRole("definition").nth(2)).toHaveText("Tags arrive with #21.");
+  await expect(panel.getByRole("definition").nth(2)).toHaveText("No tags. Write #tag in the note to tag it.");
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveValue(new URL(`/note/roadmap-${note.id}`, page.url()).href);
   await panel.getByRole("button", { name: "Copy" }).click();
   await expect(panel.getByRole("button", { name: "Copied" })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Archive" })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Archive" })).toBeEnabled();
 
   await inspector.getByRole("tab", { name: "History" }).click();
   await expect(panel.getByRole("list", { name: "Changes" }).getByRole("listitem")).toHaveAccessibleName("Change 1 by Ada Lovelace");

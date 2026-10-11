@@ -15,9 +15,11 @@ interface Filters {
   /** A level, or "" for any. */
   importance: string;
   completed: boolean;
+  /** Whether todos in archived notes are listed too. */
+  archived: boolean;
 }
 
-const EVERYTHING: Filters = { project: "", tag: "", due: "any", importance: "", completed: false };
+const EVERYTHING: Filters = { project: "", tag: "", due: "any", importance: "", completed: false, archived: false };
 
 const stored = (value: unknown): Filters => {
   const kept = typeof value === "object" && value !== null ? (value as Partial<Record<keyof Filters, unknown>>) : {};
@@ -27,6 +29,7 @@ const stored = (value: unknown): Filters => {
     due: typeof kept.due === "string" && kept.due in DUE_FILTERS ? (kept.due as DueFilter) : "any",
     importance: typeof kept.importance === "string" && /^[0-3]?$/.test(kept.importance) ? kept.importance : "",
     completed: kept.completed === true,
+    archived: kept.archived === true,
   };
 };
 
@@ -38,6 +41,7 @@ const queryOf = (filters: Filters, now: string): Query => ({
   ...(filters.importance && { importance: [Number(filters.importance) as Importance] }),
   ...dueRange(filters.due, now),
   includeCompleted: filters.completed,
+  includeArchived: filters.archived,
 });
 
 const keyOf = (todo: ListedTodo) => `${todo.noteId}/${todo.line}`;
@@ -203,12 +207,12 @@ export function TodosPage({ host, app, onOpen }: Props) {
   // Today is the member's own: the day it is in this browser, looked at again each minute.
   const now = dayOf(new Date(useNow()));
   const query = useMemo(() => queryOf(filters, now), [filters, now]);
-  // The list is read again whenever a note the member can see changes, by anyone.
-  const version = useMemo(() => (app.notes ?? []).map((n) => `${n.id}:${n.revision}`).join(","), [app.notes]);
+  // The list is read again whenever a note the member can see changes, by anyone, or is archived, trashed, or brought back.
+  const version = useMemo(() => (app.notes ?? []).map((n) => `${n.id}:${n.revision}:${n.state}`).join(","), [app.notes]);
 
   useEffect(() => {
     let stale = false;
-    Promise.all([host.perform({ type: "todo.list", ...query }), host.perform({ type: "todo.filters" })]).then(
+    Promise.all([host.perform({ type: "todo.list", ...query }), host.perform({ type: "todo.filters", includeArchived: query.includeArchived })]).then(
       ([listed, narrowing]) => {
         // A list read while changes are on their way doesn't have them yet. It is read again when they have landed.
         if (stale || sending.current.count) return;
@@ -323,6 +327,10 @@ export function TodosPage({ host, app, onOpen }: Props) {
         <label className="todo-completed">
           <input type="checkbox" checked={filters.completed} onChange={(e) => narrow({ completed: e.target.checked })} />
           Include completed
+        </label>
+        <label className="todo-completed">
+          <input type="checkbox" checked={filters.archived} onChange={(e) => narrow({ archived: e.target.checked })} />
+          Include archived
         </label>
       </div>
       {problem && (

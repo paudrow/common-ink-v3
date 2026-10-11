@@ -15,6 +15,8 @@ A member connects an agent in the web app, on the Agents page (`/agents`, from t
 - Disconnecting an agent stops its token at once. Only a SHA-256 hash of a token is stored; the token is shown once, when the agent is connected.
 - A token works only in an `Authorization: Bearer` header. It is not a cookie, so a web page can't use it.
 
+- An agent can archive a note, move it to Trash and restore it, with edit on the note, since each can be taken back. It can't remove a note from Trash for good: that takes the note's history with it and nothing brings it back, so it is for the member, signed in, on the Trash page.
+
 ## Connect and disconnect (signed in, from Common Ink's own origin)
 
     POST   /api/agents        {"name": "Claude"}   ->  201 {"agent": {...}, "token": "cink_..."}
@@ -29,7 +31,7 @@ Optional fields on the POST: `label` (up to 60 characters), `expiresInDays` (def
 
 `POST /mcp` with `Authorization: Bearer cink_...` and `Content-Type: application/json`. Streamable HTTP, stateless: one JSON-RPC message (or a batch) per POST, answered as JSON. No server-sent events, no sessions. Without a valid token the answer is 401.
 
-Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `backlinks`, `rebuild_links`, `list_todos`, `todo_filters`, `set_todo`, `todo_history`, `daily_note`, `rebuild_todos`, `move_note`, `note_history`, for folders `list_folders`, `create_folder`, `rename_folder`, `delete_folder`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `revert_author`, `undo`, `redo`, and `list_members` for who is in the workspace. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace. An argument a tool doesn't take is refused by name, not left out.
+Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `backlinks`, `rebuild_links`, `list_todos`, `todo_filters`, `set_todo`, `todo_history`, `daily_note`, `rebuild_todos`, `move_note`, `note_history`, `search`, `list_tags`, for a note's state `archive_note`, `trash_note`, `restore_note`, `list_trash`, for folders `list_folders`, `create_folder`, `rename_folder`, `delete_folder`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `revert_author`, `undo`, `redo`, and `list_members` for who is in the workspace. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace. An argument a tool doesn't take is refused by name, not left out.
 
 Every operation the web app performs has a tool with the same fields, and every tool has an `ink` command. `test/core/agent-parity.test.ts` reads the operation schema and fails when one is missing; an operation kept from agents on purpose is listed with its reason in `NOT_FOR_AGENTS` (`src/worker/mcp/tools.ts`). Two kinds are kept from agents: reading and writing the member's settings, which shape the member's own app and are checked against a schema only the app has, and every change to a workspace's members and invites (see Rules). The core refuses them to an agent, not only the tools. Connecting and disconnecting agents is not an operation: it needs a member's session, so an agent can't make another token.
 
@@ -41,6 +43,10 @@ A todo is a checkbox line in a note, with its options as tokens on the line: `- 
 
 A todo with `every:` recurs: `every:2w`, `every:mon,thu`, `every:3d-after-done`, `every:last-fri` (`docs/todos.md` has every rule). `set_todo` takes `every` to set or clear it. Checking a recurring todo off, by `set_todo` or by a `write_note` that checks its box, leaves it open with its next due date and files the checked line on the daily note of the agent's member, and the answer's `filed` says the day and the note. Both take `on`, the day it is for the member; left out, it is today in the zone the member's `daily.timeZone` setting names, or in UTC. `todo_history` lists each time a recurring todo was checked off and by whom. `daily_note` finds or makes the member's daily note for a day.
 
+A note is live, archived, or in Trash, and every listing of it says which as `state` (`docs/adr/0005-a-note-has-a-state-beside-its-access.md`). `archive_note` archives and unarchives. An archived note is left out of `list_notes`, `list_todos`, `todo_filters`, `list_tags` and `search` unless `includeArchived` is true, and is read and written as any note. `trash_note` moves a note to Trash, where `list_trash` lists it with `purgesAt`, the time it is removed for good, 30 days on. Until then `read_note` reads it, every change to it is refused as a conflict, and `restore_note` brings it back as it was. `revert_author` with `trashEmptied` moves the notes it left empty to Trash. `list_notes` with `updatedSince` also reports a note whose state changed since, and each note has `stateAt`. A removed note reads as no such note, and a link to it has a null title, exactly as for a note that never existed.
+
+`search` finds notes by their text: every word must be in the note, each matching the start of a word, ignoring case and accents. `"a phrase"` matches in order, `#tag` narrows to notes with that tag, `+project` to notes with a todo in that project. Each result has the note and the first lines that matched, with `marks` saying where in each line. `list_tags` lists the tags of the notes the agent can see with how many notes have each, and `list_notes` with `tag` lists the notes under one.
+
 Most clients take a URL and a header:
 
     claude mcp add --transport http common-ink https://commonink.app/mcp --header "Authorization: Bearer $INK_TOKEN"
@@ -51,6 +57,14 @@ Most clients take a URL and a header:
     npm run ink -- read <id> [--revision N]
     echo "# Title" | npm run ink -- create [--folder <id>]
     echo "# Title\n\nmore" | npm run ink -- write <id> --base <revision> [--link-titles keep]
+    npm run ink -- search 'budget "second quarter" #money +Home' [--archived true] [--limit 20] [--offset 20]
+    npm run ink -- tags [--archived true]
+    npm run ink -- notes --tag money [--archived true]
+    npm run ink -- archive <id>
+    npm run ink -- unarchive <id>
+    npm run ink -- trash <id>
+    npm run ink -- restore <id>
+    npm run ink -- trashed
     npm run ink -- backlinks <id>
     npm run ink -- links-rebuild
     npm run ink -- todos [--project Home] [--tag money] [--due-from 2026-10-01] [--due-to 2026-10-14] [--no-due true] [--importance 2,3] [--completed true] [--note <id>]
@@ -72,7 +86,7 @@ Most clients take a URL and a header:
     npm run ink -- label <id> --revision <n> --name "Draft"
     npm run ink -- revert <id> --revision <n>
     npm run ink -- revert <id> --changes <n>,<n>
-    npm run ink -- revert-author agent:<id> [--note <id>,<id>]
+    npm run ink -- revert-author agent:<id> [--note <id>,<id>] [--trash-emptied true]
     npm run ink -- reapply <id> --changes <n>
     npm run ink -- undo <id>
     npm run ink -- redo <id>

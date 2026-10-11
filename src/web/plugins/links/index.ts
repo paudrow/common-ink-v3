@@ -1,10 +1,12 @@
 import { EditorView, ViewPlugin } from "@codemirror/view";
 import { writtenLink, type Plugin } from "../../plugin-api.ts";
+import { listable } from "../lib/listable.ts";
 import { redraw } from "../lib/live.ts";
 import { matching } from "../lib/match.ts";
 import { openPage } from "../lib/opening.ts";
 import { linkAt } from "./at.ts";
 import { linkDrawing } from "./drawing.ts";
+import type { Linked } from "./words.ts";
 
 const MOST_OFFERED = 50;
 
@@ -18,10 +20,14 @@ export const links: Plugin = {
   name: "Links",
   activate(host) {
     const editors = new Map<string, EditorView>();
-    const notes = () => host.app().notes;
-    const titleOf = (noteId: string) => {
+    /** Every note a link can be to: archived ones, and ones in Trash, which a link still opens. */
+    const notes = () => {
+      const app = host.app();
+      return app.notes && [...app.notes, ...app.trashed];
+    };
+    const noteOf = (noteId: string): Linked => {
       const all = notes();
-      return all ? (all.find((n) => n.id === noteId)?.title ?? null) : undefined;
+      return all ? (all.find((n) => n.id === noteId) ?? null) : undefined;
     };
     const open = (noteId: string) => host.app().openNote(noteId, { preview: true, focus: true });
 
@@ -35,13 +41,14 @@ export const links: Plugin = {
         // What is typed after a `|` is the link's display text, and the list goes on narrowing by what came before it.
         const [title = "", ...rest] = typed.split("|");
         const app = host.app();
-        return matching(app.notes ?? [], title, (n) => n.title)
+        // A listing, so archived notes are left out of it. A link already written to one still opens it.
+        return matching(listable(app.notes ?? [], false), title, (n) => n.title)
           .slice(0, MOST_OFFERED)
           .map((n) => ({ label: n.title || "Untitled", detail: app.folders?.pathName(n.folderId), insert: writtenLink(n.id, rest.join("|").trim()) }));
       },
     });
 
-    const drawing = linkDrawing(titleOf, open);
+    const drawing = linkDrawing(noteOf, open);
     const focused = () => [...editors.values()].find((v) => v.hasFocus);
 
     host.editorExtensions.register({
@@ -58,7 +65,7 @@ export const links: Plugin = {
     // A link is drawn from its note's title, which changes without the linking note changing.
     let titles = "";
     host.onNotes(() => {
-      const now = JSON.stringify((notes() ?? []).map((n) => [n.id, n.title]).sort());
+      const now = JSON.stringify((notes() ?? []).map((n) => [n.id, n.title, n.state]).sort());
       if (now === titles) return;
       titles = now;
       for (const view of editors.values()) view.dispatch({ effects: redraw.of(null) });
@@ -72,7 +79,7 @@ export const links: Plugin = {
         const to = view && linkAt(view.state, view.state.selection.main.head);
         if (!to) return;
         if ("page" in to) openPage(to.page);
-        else if (titleOf(to.note) !== null) open(to.note);
+        else if (noteOf(to.note) !== null) open(to.note);
       },
     });
 

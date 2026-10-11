@@ -1,7 +1,7 @@
 import { useState, type DragEvent, type ReactNode } from "react";
 import type { EditorAction, EditorLayout, Group } from "./editorLayout.ts";
 import { Icon, NOTE_DRAG } from "../../plugin-api.ts";
-import { ContextMenu } from "../lib/Menu.tsx";
+import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 
 /** Where a dragged note would land: a gap between a group's tabs, or half of its editor, which splits it. */
 type Drop = { groupId: string; at: number | "left" | "right" };
@@ -27,11 +27,13 @@ interface Props {
   layout: EditorLayout;
   titleOf: (noteId: string) => string;
   isPrivate: (noteId: string) => boolean;
+  /** What a tab's menu offers about its note, after what it offers about the tab. */
+  noteItems: (noteId: string) => MenuItem[];
   dispatch: (action: EditorAction) => void;
   renderNote: (group: Group, noteId: string) => ReactNode;
 }
 
-export function EditorGroups({ layout, titleOf, isPrivate, dispatch, renderNote }: Props) {
+export function EditorGroups({ layout, titleOf, isPrivate, noteItems, dispatch, renderNote }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -164,6 +166,7 @@ export function EditorGroups({ layout, titleOf, isPrivate, dispatch, renderNote 
             { label: "Close all", action: () => dispatch({ type: "close", scope: "all", ...menuTab }) },
             ...(menuGroup.tabs[menuAt]!.preview ? [{ label: "Keep open", action: () => dispatch({ type: "pin", ...menuTab }) }] : []),
             { label: "Split right", disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "right", ...menuTab }) },
+            ...noteItems(menu.noteId),
           ]}
         />
       )}
