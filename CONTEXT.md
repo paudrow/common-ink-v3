@@ -210,6 +210,18 @@ _Avoid_: Status bar, footer
 **Quick timer**:
 A timer started from the command palette that belongs to no note. It shows in the bottom bar and is kept in the member's browser for that workspace: it runs on through a reload there, and nobody else sees it.
 
+**Below the line**:
+Where an embed keeps what it shows that is more than a word in the line: a video, a post, an HTML embed's frame. Room is kept for it under the line that writes it, whether or not the cursor is on that line, and what fills the room is drawn once and left alone while the rest of the note is written. The room's size is read from the note alone.
+
+**Media embed**:
+An embed that shows something from another site below its line: a YouTube video (`::youtube{address}`) or a social post (`::social{address}`). Nothing is loaded from the other site until the member asks for it. A link embed (`::link{address title}`) is drawn from what the note says alone.
+
+**HTML embed**:
+A block embed (`:::html{}`) whose body is HTML, run below the block when the member presses Run, in a frame with an origin of its own. It can't read the app, the member's session, or anything the browser or the server keeps, can't fetch or send anything, and can't send its frame anywhere. The one way out it has is a WebRTC connection, which browsers give no way to refuse.
+
+**Run**:
+What a member does to start what a frame holds: a video, a post, an HTML embed. Nothing in a frame runs because a note was opened, and an embed that has changed since it was run asks again.
+
 **Embed menu**:
 The list of embeds that opens at the cursor when a member types `/` at the start of a line or after a space. Typing filters it, and picking one writes that embed into the note.
 

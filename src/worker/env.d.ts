@@ -5,6 +5,8 @@ interface InkSettings {
   ALLOWED_EMAILS?: string;
   /** "1" on this machine and in Previews: /auth/dev signs in without Google. */
   DEV_SIGN_IN?: string;
+  /** A host given to HTML embeds alone, such as https://embed.commonink.app. Without one the app's own host serves their document. */
+  EMBED_ORIGIN?: string;
 }
 
 interface Env extends InkSettings {}

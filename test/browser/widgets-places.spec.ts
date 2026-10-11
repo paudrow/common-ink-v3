@@ -163,7 +163,7 @@ test("every embed is in the / menu and every command-started widget is in the co
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/");
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/]);
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^YouTube video/, /^Social post/, /^Link/, /^HTML/]);
   await page.keyboard.press("Escape");
 
   await page.keyboard.press("ControlOrMeta+Shift+P");

@@ -18,6 +18,7 @@ export type * from "../core/protocol.ts";
 export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS } from "../core/protocol.ts";
 
 export { dismissing, useDismiss } from "./dismiss.ts";
+export { sandboxed } from "./htmlFrame.ts";
 export { Icon, type IconName } from "./icons.tsx";
 export { ago, useNow } from "./time.ts";
 
@@ -225,6 +226,8 @@ export interface Embed {
    * while its plugin starts, not later, so a note never shows it as written first.
    */
   render(el: HTMLElement, embed: Embedded): void | (() => void) | Drawn;
+  /** What it keeps below the line that writes it, such as a video. */
+  below?: Below;
 }
 
 /** What an embed can give back from `render`. */
@@ -238,6 +241,37 @@ export interface Drawn {
   /** Stops whatever the embed started. */
   stop?(): void;
 }
+
+/**
+ * Something an embed keeps below its line: a video, a frame, a picture. It is there whether or not
+ * the cursor is on the line, in room kept for it from the first moment, so nothing in the note moves
+ * when it loads or when the cursor comes and goes. It is drawn once, the first time its room is on
+ * screen, in an element that then stays the same element, never made again and never moved in the
+ * page, for as long as the note says the same of the embed: through typing anywhere else, lines
+ * added and removed, another member's changes, and scrolling it far out of sight. So a video keeps
+ * playing while the note is written. Only a change to the embed's own config or body draws it again,
+ * in the same element once that has been emptied.
+ *
+ * A frame drawn here can't take the keyboard from the member. Unless their pointer is on it, a frame
+ * that focuses itself is stopped, and the member is told and can show it again.
+ */
+export interface Below {
+  /**
+   * The room to keep, from what the note says of the embed alone: as wide as the note's column up to
+   * a limit and `ratio` times as wide as tall, or `height` pixels tall. Null for one with nothing to
+   * show, such as a config that can't be read.
+   */
+  box(written: { config: string; body: string }): BelowBox | null;
+  /**
+   * Draws into `el`, which is as large as the room. May return a function that stops whatever it
+   * started. `update` rewrites the embed in the note as {@link Embedded.update} does, which is how
+   * what is only known once it has loaded, such as a picture's size, gets into the note for `box` to
+   * read: the room is worked out from the note alone, and `render` can't change it any other way.
+   */
+  render(el: HTMLElement, embed: Pick<Embedded, "config" | "body" | "readOnly" | "update">): void | (() => void);
+}
+
+export type BelowBox = { ratio: number } | { height: number };
 
 /** What an embed is handed about one place a note writes it. */
 export interface Embedded {

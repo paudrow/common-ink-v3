@@ -1,6 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { EditorState, Facet, RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { keptBelow } from "./below.ts";
 import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "./embedSyntax.ts";
 import type { Drawn, Embed, Embedded } from "./plugin-api.ts";
 
@@ -123,7 +124,7 @@ class EmbedWidget extends WidgetType {
 const widgetFor = (state: EditorState, embed: Embed, written: Written) => new EmbedWidget(embed, written, state.sliceDoc(written.from, written.to), state.readOnly);
 
 /** With the cursor on it, an inline embed is shown as it is written, so it can be changed, as the markup around it is. */
-const cursorOn = (state: EditorState, focused: boolean, { from, to }: Written) => focused && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+const cursorOn = (state: EditorState, focused: boolean, { from, to }: { from: number; to: number }) => focused && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 
 function inlineDrawn(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
@@ -133,7 +134,9 @@ function inlineDrawn(view: EditorView): DecorationSet {
   for (const { from, to } of view.visibleRanges) {
     for (const written of inlineIn(state.sliceDoc(from, to), from)) {
       const embed = byName.get(written.name);
-      if (!embed || embed.block || cursorOn(state, view.hasFocus, written) || /Code/.test(syntaxTree(state).resolveInner(written.from, 1).name)) continue;
+      // One with something kept below it is shown as written with the cursor anywhere on its line, as markdown is: what is below stays.
+      const line = embed?.below && state.doc.lineAt(written.from);
+      if (!embed || embed.block || cursorOn(state, view.hasFocus, line ?? written) || /Code/.test(syntaxTree(state).resolveInner(written.from, 1).name)) continue;
       // A block's body is the block's to draw.
       if (drawnBlocks.some((b) => b.from <= written.from && b.to >= written.to)) continue;
       builder.add(written.from, written.to, Decoration.replace({ widget: widgetFor(state, embed, written) }));
@@ -221,8 +224,9 @@ const steppingOver = EditorState.transactionFilter.of((tr) => {
 
 /**
  * Draws each `::name{config}` and each `:::name{config}` block in a note with the embed registered
- * under that name. A name nobody registered stays as text. Which embeds there are is said with `embedsAre`.
+ * under that name, and keeps what an embed draws below its line. A name nobody registered stays as
+ * text. Which embeds there are is said with `embedsAre`.
  */
-export const embedding: Extension = [blocks, steppingOver, inline];
+export const embedding: Extension = [blocks, steppingOver, inline, keptBelow((state) => ({ embeds: state.facet(registered), blocks: state.field(blocks).all }))];
 
 export const embedsAre = (embeds: readonly Embed[]): Extension => registered.of(embeds);
