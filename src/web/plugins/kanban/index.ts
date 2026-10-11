@@ -1,12 +1,12 @@
 import { createElement } from "react";
 import { SWATCHES, type Drawn, type EmbedOptions, type Embedded, type Plugin, type Swatch } from "../../plugin-api.ts";
 import { openPopover } from "../lib/Popover.tsx";
-import { addCard, cardEnd, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard, type Board } from "./board.ts";
+import { addCard, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard, type Board, type Place } from "./board.ts";
 
 const CARD_DRAG = "application/x-common-ink-card";
 
 /** The card being dragged, and the drawing of the board it was picked up from. A board drawn again since then isn't that one, so the drop does nothing. */
-let dragging: { drawn: object; from: { column: number; card: number } } | null = null;
+let dragging: { drawn: object; from: Place } | null = null;
 
 /** A card being typed into "Add a card" on a board, kept by the board's element so it is still there when a change to the note draws the board again. */
 const drafts = new WeakMap<HTMLElement, { column: number; text: string }>();
@@ -18,6 +18,7 @@ interface Props {
   placeholder?: string;
   title?: string;
   draggable?: boolean;
+  tabIndex?: number;
   data?: Record<string, string>;
 }
 
@@ -28,6 +29,8 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, { data, ...props }: Pr
   el.append(...children);
   return el;
 }
+
+const focusKey = ({ column, card }: Place) => `card:${column}:${card}`;
 
 const named = (colour: Swatch | "") => (colour ? colour[0]!.toUpperCase() + colour.slice(1) : "No colour");
 const COLOURS = (["", ...SWATCHES] as const).map((colour) => ({ value: colour, label: named(colour), swatch: colour }));
@@ -60,19 +63,35 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
     return {};
   }
 
+  /** What the arrow keys stop at in each column, from the top: its cards, then "Add a card". */
+  const stops: HTMLElement[][] = board.columns.map(() => []);
+  /** Moves the focus from the `i`th stop of column `c`: up and down its column and out of the board past either end, and across to a card of the next column where it has one. */
+  const step = (e: KeyboardEvent, c: number, i: number) => {
+    const across = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+    const down = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+    const there = stops[c + across];
+    if (!there) return;
+    e.preventDefault();
+    const cards = there.filter((stop) => stop.matches(".kanban-card"));
+    const onCard = stops[c]![i]!.matches(".kanban-card");
+    if (across) (onCard && cards.length ? cards[Math.min(i, cards.length - 1)] : there.at(-1))?.focus();
+    else if (there[i + down]) there[i + down]!.focus();
+    else embed.leave(down < 0 ? "above" : "below");
+  };
+  const arrow = (e: KeyboardEvent) => e.key.startsWith("Arrow") && !e.altKey && !e.ctrlKey && !e.metaKey;
+
   const columns = board.columns.map((column, c) => {
     const cards = cardsOf(column);
     const list = h("ol", { className: "kanban-cards" });
     list.setAttribute("aria-label", `${column.title} cards`);
     cards.forEach((card, i) => {
       const at = { column: c, card: i };
-      const item = h("li", { className: "kanban-card" }, h("span", { className: "kanban-card-text" }, card.text));
+      const item = h("li", { className: "kanban-card", tabIndex: 0, data: { focus: focusKey(at) } }, h("span", { className: "kanban-card-text" }, card.text));
       if (card.more.trim()) item.append(h("span", { className: "kanban-card-more" }, card.more));
       if (!embed.readOnly) {
         item.draggable = true;
-        item.title = "Drag to move, or press to change its text";
-        // A card is changed as it is written: a press puts the cursor at the end of its line in the board's markdown, which is shown above the board.
-        item.addEventListener("click", () => embed.edit(cardEnd(board, at) ?? undefined));
+        item.title = "Drag to move, or hold Shift and press an arrow key";
+        item.setAttribute("aria-keyshortcuts", "Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown");
       }
       item.addEventListener("dragstart", (e) => {
         dragging = { drawn, from: at };
@@ -84,6 +103,20 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
         dragging = null;
         item.classList.remove("dragging");
       });
+      item.addEventListener("keydown", (e) => {
+        if (!arrow(e) || (e.shiftKey && embed.readOnly)) return;
+        if (!e.shiftKey) return step(e, c, i);
+        const across = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+        const down = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+        const there = board.columns[c + across];
+        if (!there) return;
+        e.preventDefault();
+        const to = { column: c + across, card: Math.max(0, Math.min(i + down, cardsOf(there).length - (across ? 0 : 1))) };
+        // The card is drawn again in its new place, and takes the focus there.
+        item.dataset.focus = focusKey(to);
+        write(moveCard(board, at, to));
+      });
+      stops[c]!.push(item);
       list.append(item);
     });
 
@@ -97,7 +130,7 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
       input.value = "";
       // Taking the field out takes the keyboard from it, which would close it a second time from inside the first.
       closing = true;
-      input.replaceWith(add);
+      swap(input, add);
       closing = false;
     };
     input.addEventListener("input", () => drafts.set(el, { column: c, text: input.value }));
@@ -114,16 +147,23 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
       e.stopPropagation();
     });
     input.addEventListener("blur", () => !closing && input.isConnected && !input.value.trim() && close());
+    /** Swaps the button for the field, or back, in the column and among its stops. */
+    const swap = (from: HTMLElement, to: HTMLElement) => {
+      from.replaceWith(to);
+      stops[c] = stops[c]!.map((stop) => (stop === from ? to : stop));
+    };
     add.addEventListener("click", () => {
-      add.replaceWith(input);
+      swap(add, input);
       input.focus();
     });
+    add.addEventListener("keydown", (e) => arrow(e) && !e.shiftKey && step(e, c, cards.length));
     const draft = drafts.get(el);
     if (draft?.column === c) {
       input.value = draft.text;
       input.setSelectionRange(draft.text.length, draft.text.length);
     }
     const adding = draft?.column === c ? input : add;
+    if (!embed.readOnly) stops[c]!.push(adding);
 
     const colour = h("button", { type: "button", className: "kanban-colour", title: `Colour of ${column.title}`, data: { focus: `colour:${c}`, ...(column.colour && { colour: column.colour }) } });
     colour.setAttribute("aria-label", `Colour of ${column.title}: ${named(column.colour ?? "").toLowerCase()}`);
@@ -174,7 +214,15 @@ function draw(el: HTMLElement, embed: Embedded): Drawn {
   });
 
   el.append(h("div", { className: "kanban" }, h("div", { className: "kanban-columns" }, ...columns)));
-  return {};
+  return {
+    // The cursor comes in at the first column that has anything to stop at: its top from above, its foot from below.
+    enter(from) {
+      const column = stops.find((column) => column.length);
+      const stop = column?.at(from === "above" ? 0 : -1);
+      stop?.focus();
+      return !!stop && document.activeElement === stop;
+    },
+  };
 }
 
 /**
@@ -189,6 +237,6 @@ export const kanban: Plugin = {
   icon: "board",
   screenshots: [{ src: "/plugin-shots/kanban-light.png", dark: "/plugin-shots/kanban-dark.png", alt: "A board in a note: three columns of cards, each with a button to add a card." }],
   activate(host) {
-    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, options, render: draw });
+    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, entered: true, starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, options, render: draw });
   },
 };

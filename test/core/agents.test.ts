@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { signIn, whoAmI } from "../../src/core/accounts.ts";
 import { authenticateAgent, connectAgent, disconnectAgent, hashToken, listAgents, MAX_ACTIVE_AGENTS } from "../../src/core/agents.ts";
@@ -135,14 +135,10 @@ describe("MCP protocol", () => {
       "history_summary",
       "history",
       "history_authors",
-      "history_diff",
-      "preview_reverts",
-      "revert_many",
       "label_revision",
       "revert_note",
       "revert_changes",
       "revert_author",
-      "preview_revert",
       "undo",
       "redo",
     ]);
@@ -325,108 +321,6 @@ describe("/api/agents", () => {
     expect((await fetchAs(`/api/agents/${agent.id}`, { method: "DELETE", headers: { Origin: "https://ink.test" } })).status).toBe(204);
     expect((await call(token, rpc("tools/list"))).status).toBe(401);
     expect((await fetchAs("/api/agents", { method: "POST", headers: sameOrigin, body: JSON.stringify({}) })).status).toBe(400);
-  });
-
-  it("refuses an option it doesn't know, so a misspelt limit never mints a token broader than was asked for", async () => {
-    const { sign } = await import("../../src/worker/session.ts");
-    const ada = await newPerson();
-    const secretEnv = { ...env, SESSION_SECRET: "test-secret" };
-    const as = `__Host-ink_session=${encodeURIComponent(await sign({ personId: ada.personId }, "test-secret", 3600))}`;
-    const post = (body: string) => send(new Request("https://ink.test/api/agents", { method: "POST", headers: { ...sameOrigin, Cookie: as }, body }), secretEnv);
-    const agents = async () => ((await (await send(new Request("https://ink.test/api/agents", { headers: { Cookie: as } }), secretEnv)).json()) as { agents: { readOnly: boolean; workspaceId: string | null }[] }).agents;
-
-    for (const body of [
-      `{"name":"x","readonly":true}`,
-      `{"name":"x","readonly":null}`,
-      `{"name":"x","read_only":true}`,
-      `{"name":"x","workspace":"${ada.workspaceId}"}`,
-      `{"name":"x","workspaceID":"${ada.workspaceId}"}`,
-      `{"name":"x","expiresIn":1}`,
-      `{"name":"x","readOnly":true,"scope":{"readOnly":false}}`,
-      `{"name":"x","readOnly":true,"__proto__":{"readOnly":false}}`,
-      `{"name":"x","readOnly":"true"}`,
-      `{"name":"x","readOnly":1}`,
-      `{"name":"x","workspaceId":""}`,
-      `{"name":"x","workspaceId":["${ada.workspaceId}"]}`,
-      `[{"name":"x"}]`,
-      `"x"`,
-      `null`,
-    ]) {
-      const res = await post(body);
-      expect([body, res.status]).toEqual([body, 400]);
-      expect(((await res.json()) as { error: string }).error).toBe("invalid");
-    }
-    expect((await post(`{"name":"x","readonly":true}`).then((r) => r.json() as Promise<{ message: string }>)).message).toContain("readonly");
-    expect(await agents()).toEqual([]);
-
-    // What it does know still narrows the token, and a null workspace or expiry is one not given.
-    expect((await post(`{"name":"x","readOnly":true,"workspaceId":"${ada.workspaceId}","expiresInDays":1}`)).status).toBe(201);
-    expect((await post(`{"name":"y","workspaceId":null,"expiresInDays":null}`)).status).toBe(201);
-    expect((await agents()).map((a) => [a.readOnly, a.workspaceId]).sort()).toEqual([[false, null], [true, ada.workspaceId]].sort());
-    await expect(connectAgent(env.DB, ada.personId, "z", { readonly: true } as never)).rejects.toMatchObject({ code: "invalid" });
-  });
-});
-
-describe("a fault that is nobody's request", () => {
-  /** The database, except that a query of `table` throws what a database that is down would. */
-  const without = (table: string): Env => ({
-    ...env,
-    SESSION_SECRET: "test-secret",
-    DB: new Proxy(env.DB, {
-      get(db, key) {
-        if (key !== "prepare") return Reflect.get(db, key).bind?.(db) ?? Reflect.get(db, key);
-        return (sql: string) => {
-          if (new RegExp(`\\b${table}\\b`).test(sql)) throw new Error(`D1_ERROR: no such table: ${table} (secret detail)`);
-          return db.prepare(sql);
-        };
-      },
-    }),
-  });
-
-  it("is answered as JSON that says the server broke, to the web app and to an agent, with none of the fault's own words", async () => {
-    const { sign } = await import("../../src/worker/session.ts");
-    const ada = await newPerson();
-    const { token } = await connectAgent(env.DB, ada.personId, "Claude");
-    const as = `__Host-ink_session=${encodeURIComponent(await sign({ personId: ada.personId }, "test-secret", 3600))}`;
-    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const op = await send(
-      new Request(`https://ink.test/api/workspaces/${ada.workspaceId}/ops`, { method: "POST", headers: { Origin: "https://ink.test", "Content-Type": "application/json", Cookie: as }, body: JSON.stringify({ type: "note.list" }) }),
-      without("notes"),
-    );
-    expect(op.status).toBe(500);
-    expect(await op.json()).toEqual({ error: "unknown", message: "Common Ink broke while doing that. Nothing says it was done: try again" });
-
-    const mcp = (e: Env) => send(new Request(URL_, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(rpc("tools/call", { name: "list_notes", arguments: {} }, 7)) }), e);
-    const called = await mcp(without("notes"));
-    expect(called.status).toBe(200);
-    expect(await called.json()).toEqual({ jsonrpc: "2.0", id: 7, error: { code: -32603, message: "Common Ink broke while doing that. Nothing says it was done: try again" } });
-
-    // Before any message is read, there is no id to answer.
-    const refused = await mcp(without("agents"));
-    expect(refused.status).toBe(500);
-    expect(await refused.json()).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Common Ink broke while doing that. Nothing says it was done: try again" } });
-    expect(quiet).toHaveBeenCalledTimes(3);
-    quiet.mockRestore();
-  });
-
-  it("is said by the ink command in a line, whatever came back: nothing, a page that isn't JSON, or an error with no message", async () => {
-    const said: string[] = [];
-    const io = (fetch_: () => Promise<Response>) => ({ env: { INK_TOKEN: "cink_x", INK_URL: "https://ink.test" }, stdin: async () => "", out: (line: string) => said.push(line), fetch: fetch_ as unknown as typeof fetch });
-
-    expect(await run(["notes"], io(async () => Promise.reject(new TypeError("fetch failed"))))).toBe(1);
-    expect(await run(["notes"], io(async () => new Response("<!DOCTYPE html><title>Worker threw exception</title>", { status: 500, statusText: "Internal Server Error" })))).toBe(1);
-    expect(await run(["notes"], io(async () => Response.json({ error: "too_large" }, { status: 413 })))).toBe(1);
-    expect(await run(["notes"], io(async () => Response.json({ error: "unsupported_media_type", message: "Send application/json" }, { status: 415 })))).toBe(1);
-    expect(await run(["notes"], io(async () => Response.json({ jsonrpc: "2.0", id: 1, error: { code: -32603, message: "Common Ink broke" } })))).toBe(1);
-
-    expect(said).toEqual([
-      "ink: Couldn't reach https://ink.test: fetch failed",
-      "ink: https://ink.test answered 500 Internal Server Error, and not with JSON",
-      "ink: https://ink.test answered 413: too_large",
-      "ink: https://ink.test answered 415: Send application/json",
-      "ink: Common Ink broke",
-    ]);
   });
 });
 

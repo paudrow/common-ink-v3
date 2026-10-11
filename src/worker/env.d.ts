@@ -5,8 +5,6 @@ interface InkSettings {
   ALLOWED_EMAILS?: string;
   /** "1" on this machine and in Previews: /auth/dev signs in without Google. */
   DEV_SIGN_IN?: string;
-  /** "1" under Vite's dev server, whose page has an inline script of its own. */
-  DEV_SERVER?: string;
 }
 
 interface Env extends InkSettings {}

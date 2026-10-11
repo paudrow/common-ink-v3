@@ -4,9 +4,8 @@ import { PluginDetails, type PluginsProps } from "./PluginDetails.tsx";
 import { PLUGINS_PATH, listPlugins, matchesPlugin, within } from "./pluginList.ts";
 
 /**
- * Where a member sees every plugin there is, each a card like a note in a folder's list, turns each
- * on and off, and opens one to read what it is. A card's name is its link, laid over the whole card,
- * so a press anywhere on it opens the plugin and the switch, which lies above the link, still switches. It is the only place a plugin is turned on or off, beside the commands that do it. It belongs
+ * Where a member sees every plugin there is, turns each on and off, and opens one to read what it
+ * is. It is the only place a plugin is turned on or off, beside the commands that do it. It belongs
  * to the app, so it is here whatever is turned off, and no plugin can do what it does.
  */
 export function Plugins(props: PluginsProps) {
@@ -45,7 +44,7 @@ export function Plugins(props: PluginsProps) {
         {found.map((plugin) => {
           const { id, name, state } = plugin;
           return (
-            <li key={id} aria-label={name} className="plugin-row plugin-card" data-off={!state.enabled || undefined}>
+            <li key={id} aria-label={name} className="plugin-row" data-off={!state.enabled || undefined}>
               <span className="plugin-icon">
                 <Icon name={plugin.icon} />
               </span>
@@ -54,7 +53,7 @@ export function Plugins(props: PluginsProps) {
                   <a className="plugin-name" {...within(go, `${PLUGINS_PATH}/${encodeURIComponent(id)}`)}>
                     {name}
                   </a>
-                  {state.builtIn && <span className="badge">Built-in</span>}
+                  <span className="badge">Built-in</span>
                 </div>
                 {plugin.description && <p className="plugin-about">{plugin.description}</p>}
                 {state.error && (

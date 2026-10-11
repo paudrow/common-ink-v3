@@ -2,7 +2,6 @@
 // batch) per POST, answered as JSON. An agent signs in with the bearer token its member made for it; it
 // never has a session cookie, so a web page can't make it act. See docs/mcp.md.
 import { authenticateAgent, type ConnectedAgent } from "../../core/agents.ts";
-import { BROKE } from "../../core/protocol.ts";
 import { callTool, toolList } from "./tools.ts";
 
 const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -54,12 +53,7 @@ export async function handleMcp(req: Request, env: Env): Promise<Response> {
   if (batch && messages.length === 0) return json(fail(null, -32600, "An empty batch"), 400);
   const out: unknown[] = [];
   for (const message of messages) {
-    // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
-    const answer = await handleMessage(env, agent, message).catch((err: unknown) => {
-      console.error("An MCP message broke", err);
-      const id = (message as { id?: unknown } | null)?.id;
-      return fail(typeof id === "string" || typeof id === "number" ? id : null, -32603, BROKE);
-    });
+    const answer = await handleMessage(env, agent, message);
     if (answer) out.push(answer);
   }
   if (out.length === 0) return new Response(null, { status: 202, headers: { "Cache-Control": "no-store" } });

@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { Annotation, EditorState, Facet, Prec, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
+import { Annotation, EditorState, Facet, Prec, StateEffect, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { closeOptions, refreshOptions, toggleOptions, type Options } from "./embedOptions.ts";
 import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "./embedSyntax.ts";
@@ -18,7 +18,7 @@ function writtenAt(view: EditorView, el: HTMLElement, block: boolean): Written |
   // For an element that has left the editor, CodeMirror answers with an end of the note, where an embed just like this one may be written.
   if (!view.dom.contains(el)) return undefined;
   const pos = view.posAtDOM(el);
-  if (block) return view.state.field(blocks).all.find((b) => b.to === pos);
+  if (block) return view.state.field(blocks).all.find((b) => b.from === pos);
   const line = view.state.doc.lineAt(pos);
   return inlineIn(line.text, line.from).find((w) => w.from === pos);
 }
@@ -26,14 +26,9 @@ function writtenAt(view: EditorView, el: HTMLElement, block: boolean): Written |
 /** How each options button reads its embed's options now. */
 const optionsOf = new WeakMap<HTMLElement, () => Options | null>();
 
-/** The element an embed draws in, inside the card the host draws around it. */
-const drawingIn = (frame: HTMLElement) => frame.querySelector<HTMLElement>(".embed")!;
-const optionsIn = (frame: HTMLElement) => frame.querySelector<HTMLButtonElement>(".embed-options");
-
 /**
- * An embed's drawing. The element CodeMirror keeps is a frame the host owns, and in it a card: an
- * inline embed's card is the frame itself, with the drawing and then the options button on one row,
- * and a block's card has a head with the embed's title and the options button, and the drawing under it.
+ * An embed's drawing. The element CodeMirror keeps is a frame the host owns: the embed draws in the
+ * frame's first element, and its options button, when it has one, is the frame's second.
  */
 class EmbedWidget extends WidgetType {
   constructor(
@@ -52,22 +47,10 @@ class EmbedWidget extends WidgetType {
   override toDOM(view: EditorView) {
     const { block } = this.written;
     const frame = document.createElement(block ? "div" : "span");
-    frame.className = block ? "embed-frame embed-frame-block" : "embed-frame embed-card";
-    const card = block ? frame.appendChild(document.createElement("div")) : frame;
-    // The title is drawn from this and not written in the card, so an embed adds no words to its line.
-    const titled = block ? card.appendChild(document.createElement("div")) : frame;
-    if (block) {
-      card.className = "embed-card";
-      titled.className = "embed-head";
-    }
-    titled.dataset.title = this.embed.title;
-    const el = card.appendChild(document.createElement(block ? "div" : "span"));
+    frame.className = block ? "embed-frame embed-frame-block" : "embed-frame";
+    const el = frame.appendChild(document.createElement(block ? "div" : "span"));
     el.className = block ? "embed embed-block" : "embed";
     el.dataset.embed = this.embed.name;
-    // A press on the card that is on nothing the embed drew puts the cursor in the embed as written.
-    frame.addEventListener("click", (e) => {
-      if (e.target === frame || e.target === card || e.target === titled) pressed.get(frame)?.();
-    });
     this.draw(frame, el, view, (handed) => this.embed.render(el, handed));
     return frame;
   }
@@ -78,7 +61,7 @@ class EmbedWidget extends WidgetType {
    * again in the same element, and what had focus in it has it again.
    */
   override updateDOM(frame: HTMLElement, view: EditorView) {
-    const el = frame.querySelector<HTMLElement>(".embed");
+    const el = frame.firstElementChild as HTMLElement | null;
     if (!el || el.dataset.embed !== this.embed.name || (el.tagName === "DIV") !== this.written.block) return false;
     const was = live.get(el);
     if (was?.update) {
@@ -108,14 +91,12 @@ class EmbedWidget extends WidgetType {
       const changes = now && rewriteOf(now, next);
       if (changes && changes.length) view.dispatch({ changes, userEvent: "input.embed" });
     };
-    const edit = (at?: number) => {
+    const edit = () => {
       const now = still();
       if (!now) return;
-      const anchor = at === undefined || !now.block ? now.configFrom : now.bodyFrom + Math.max(0, Math.min(at, now.body.length));
       view.focus();
-      view.dispatch({ selection: { anchor }, scrollIntoView: true, annotations: placed.of(true) });
+      view.dispatch({ selection: { anchor: now.block ? now.bodyFrom : now.configFrom }, effects: now.block ? revealing.of(now.from) : [], scrollIntoView: true });
     };
-    pressed.set(frame, () => edit());
     let drawing = true;
     try {
       const drawn = show({
@@ -128,6 +109,13 @@ class EmbedWidget extends WidgetType {
           else rewrite(next);
         },
         edit,
+        leave(to) {
+          const now = still();
+          const anchor = now?.block ? beside(view.state, now, to) : null;
+          if (anchor === null) return;
+          view.focus();
+          view.dispatch({ selection: { anchor }, scrollIntoView: true, annotations: placed.of(true) });
+        },
       });
       live.set(el, typeof drawn === "function" ? { stop: drawn } : (drawn ?? {}));
     } catch (err) {
@@ -139,11 +127,11 @@ class EmbedWidget extends WidgetType {
     } finally {
       drawing = false;
     }
-    this.fitOptions(frame, still, rewrite);
+    this.fitOptions(frame, still, rewrite, edit);
   }
 
-  /** Gives the card its options button, or takes it away, to fit what the note says of the embed now. */
-  private fitOptions(frame: HTMLElement, still: () => Written | undefined, rewrite: (next: { config?: string; body?: string }) => void) {
+  /** Gives the frame its options button, or takes it away, to fit what the note says of the embed now. */
+  private fitOptions(frame: HTMLElement, still: () => Written | undefined, rewrite: (next: { config?: string; body?: string }) => void, edit: () => void) {
     const { embed, written } = this;
     const fieldsOf = (now: Written) => {
       try {
@@ -152,48 +140,50 @@ class EmbedWidget extends WidgetType {
         return [];
       }
     };
-    let button = optionsIn(frame);
-    if (this.readOnly || !fieldsOf(written).length) {
+    let button = frame.querySelector<HTMLButtonElement>(":scope > .embed-options");
+    if (this.readOnly || !(written.block || fieldsOf(written).length)) {
       if (button) closeOptions(button);
       button?.remove();
+      frame.classList.remove("with-options");
       return;
     }
+    frame.classList.add("with-options");
     if (!button) {
-      const made = (button = (frame.querySelector(".embed-head") ?? frame).appendChild(document.createElement("button")));
+      const made = (button = frame.appendChild(document.createElement("button")));
       made.type = "button";
       made.className = "embed-options";
       made.setAttribute("aria-haspopup", "dialog");
       made.setAttribute("aria-expanded", "false");
-      made.addEventListener("click", () => toggleOptions(made, frame.querySelector<HTMLElement>(".embed-card") ?? frame, () => optionsOf.get(made)?.() ?? null));
+      made.addEventListener("click", () => toggleOptions(made, () => optionsOf.get(made)?.() ?? null));
     }
     button.title = `Options for ${embed.title}`;
     button.setAttribute("aria-label", button.title);
-    const optionsFor = (now: Written | undefined): Options | null =>
-      now
-        ? {
-            title: embed.title,
-            fields: fieldsOf(now),
-            set(id, value) {
-              try {
-                const next = embed.options!.set({ config: now.config, body: now.body }, id, value);
-                if (typeof next === "string") return next;
-                rewrite(next);
-              } catch (err) {
-                return err instanceof Error ? err.message : String(err);
-              }
-            },
+    optionsOf.set(button, () => {
+      const now = still();
+      if (!now) return null;
+      return {
+        title: embed.title,
+        fields: fieldsOf(now),
+        edit,
+        set(id, value) {
+          try {
+            const next = embed.options!.set({ config: now.config, body: now.body }, id, value);
+            if (typeof next === "string") return next;
+            rewrite(next);
+          } catch (err) {
+            return err instanceof Error ? err.message : String(err);
           }
-        : null;
-    optionsOf.set(button, () => optionsFor(still()));
-    // What is drawn now is what the note says now. Where it is in the note can't be asked while the note is being drawn.
-    refreshOptions(button, optionsFor(written));
+        },
+      };
+    });
+    refreshOptions(button);
   }
 
   override destroy(frame: HTMLElement) {
-    const el = drawingIn(frame);
+    const el = frame.firstElementChild as HTMLElement;
     live.get(el)?.stop?.();
     live.delete(el);
-    const button = optionsIn(frame);
+    const button = frame.querySelector<HTMLElement>(":scope > .embed-options");
     if (button) closeOptions(button);
   }
 
@@ -203,88 +193,37 @@ class EmbedWidget extends WidgetType {
   }
 }
 
-/** What a press on a frame's own card, off what the embed drew, does now. */
-const pressed = new WeakMap<HTMLElement, () => void>();
-
 const widgetFor = (state: EditorState, embed: Embed, written: Written) => new EmbedWidget(embed, written, state.sliceDoc(written.from, written.to), state.readOnly);
 
-/** On a cursor the host puts in an embed itself, which is where it says and nowhere else. */
-const placed = Annotation.define<true>();
-
-/**
- * Whether the cursor has been put anywhere. A note opens with its cursor at its start, where nobody
- * put it, and nothing is shown as written for that: an embed at the top of a note would open as
- * text, and move under the first press on the note. From the first time the cursor is placed or
- * something is typed, its place counts, whether or not the keyboard is still in the note: a press on
- * an embed's own button takes the keyboard out of the text, and what is shown as written above that
- * embed must not go from under the pointer.
- */
-const used = StateField.define<boolean>({
-  create: () => false,
-  // An embed's own rewrite of its text is no use of the cursor: a press on its button leaves the cursor wherever it was.
-  update: (value, tr) => value || tr.selection !== undefined || (tr.isUserEvent("input") && !tr.isUserEvent("input.embed")) || tr.isUserEvent("delete"),
-});
-
-/** With the cursor on it, an embed is shown as it is written, so it can be changed, as the markup around it is. */
-const cursorOn = (state: EditorState, { from, to }: Pick<Written, "from" | "to">) => state.field(used) && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
-
-/**
- * Room at the top of a line for the embeds on it that are shown as written: the same text, unseen,
- * in the rows it takes at the line's width. The text itself is laid over these rows.
- */
-class SourceRows extends WidgetType {
-  constructor(private readonly rows: string) {
-    super();
-  }
-  override eq(other: SourceRows) {
-    return other.rows === this.rows;
-  }
-  override toDOM() {
-    const el = document.createElement("span");
-    el.className = "embed-source-rows";
-    // Drawn from this and not written in the line, so the line reads as it did.
-    el.dataset.rows = this.rows;
-    return el;
-  }
-  override updateDOM(el: HTMLElement) {
-    el.dataset.rows = this.rows;
-    return true;
-  }
-}
+/** With the cursor on it, an inline embed is shown as it is written, so it can be changed, as the markup around it is. */
+const cursorOn = (state: EditorState, focused: boolean, { from, to }: Written) => focused && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 
 const unseen = Decoration.replace({});
+const asWritten = Decoration.mark({ class: "embed-source" });
 
 /**
- * An inline embed's drawing is a widget of its own before the embed's text, and the text is hidden
- * after it. With the cursor on the embed its text is shown in rows of its own above the line, and
- * the drawing stays the element it was, doing what it was doing, lower by those rows and no more.
- * The rows are made by {@link SourceRows} at the start of the line, and each embed's text is laid
- * over its own, under the rows of the embeds before it on the line, which it is told of.
+ * With the cursor on it an inline embed is shown as written and its drawing is taken out, as markup
+ * is. A `live` embed's drawing is doing something that would be lost that way, so it is a widget of
+ * its own before the embed's text, and the text is hidden after it: with the cursor on it the text is
+ * shown after the drawing, which stays the element it was, where it was, doing what it was doing.
  */
 function inlineDrawn(view: EditorView): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const { state } = view;
   const byName = state.facet(registered);
   const drawnBlocks = state.field(blocks).all.filter((b) => byName.get(b.name)?.block);
-  const shown = new Map<number, string[]>();
   for (const { from, to } of view.visibleRanges) {
     for (const written of inlineIn(state.sliceDoc(from, to), from)) {
       const embed = byName.get(written.name);
       if (!embed || embed.block || /Code/.test(syntaxTree(state).resolveInner(written.from, 1).name)) continue;
       // A block's body is the block's to draw.
       if (drawnBlocks.some((b) => b.from <= written.from && b.to >= written.to)) continue;
-      ranges.push(Decoration.widget({ widget: widgetFor(state, embed, written), side: -1 }).range(written.from));
-      if (!cursorOn(state, written)) {
-        ranges.push(unseen.range(written.from, written.to));
-        continue;
-      }
-      const line = state.doc.lineAt(written.from).from;
-      const above = shown.get(line) ?? [];
-      ranges.push(Decoration.mark({ class: "embed-source", attributes: { "data-above": above.join("\n") } }).range(written.from, written.to));
-      shown.set(line, [...above, state.sliceDoc(written.from, written.to)]);
+      const on = cursorOn(state, view.hasFocus, written);
+      const widget = widgetFor(state, embed, written);
+      if (embed.live) ranges.push(Decoration.widget({ widget, side: -1 }).range(written.from), (on ? asWritten : unseen).range(written.from, written.to));
+      else if (!on) ranges.push(Decoration.replace({ widget }).range(written.from, written.to));
     }
   }
-  for (const [line, rows] of shown) ranges.push(Decoration.line({ class: "embed-sourced" }).range(line), Decoration.widget({ widget: new SourceRows(rows.join("\n")), side: -2 }).range(line));
   return Decoration.set(ranges, true);
 }
 
@@ -295,17 +234,20 @@ const inline = ViewPlugin.fromClass(
       this.decorations = inlineDrawn(view);
     }
     update(update: ViewUpdate) {
-      const changed = update.docChanged || update.viewportChanged || update.selectionSet || update.startState.field(used) !== update.state.field(used);
+      const changed = update.docChanged || update.viewportChanged || update.selectionSet || update.focusChanged;
       if (changed || update.startState.facet(registered) !== update.state.facet(registered) || syntaxTree(update.startState) !== syntaxTree(update.state)) this.decorations = inlineDrawn(update.view);
     }
   },
   { decorations: (plugin) => plugin.decorations },
 );
 
+/** Asks for a block to be shown as written, under its drawing, with the cursor in it. The number is where the block starts. */
+const revealing = StateEffect.define<number>({ map: (from, changes) => changes.mapPos(from) });
+
 interface Blocks {
   /** Every block the note writes, whether or not a plugin draws it. */
   all: readonly Written[];
-  /** Where the block starts whose markdown is shown, because the cursor is in it. */
+  /** Where the block starts whose markdown is shown, because the member asked to edit it and the cursor is still in it. */
   revealed: number | null;
   drawn: DecorationSet;
 }
@@ -313,28 +255,19 @@ interface Blocks {
 const drawnBy = (state: EditorState, all: readonly Written[]) => all.filter((b) => state.facet(registered).get(b.name)?.block);
 
 /**
- * A block's drawing is a widget of its own under the block's lines, and the lines are hidden above
- * it. So the drawing is never taken out to show the markdown: with the cursor in the lines they are
- * shown above it, and it is lower by them and no more.
+ * A block's drawing is a widget of its own above the block's lines, and the lines are hidden under
+ * it. So the drawing is never taken out to show the markdown: the lines are shown or hidden beneath it.
  */
 function blocksDrawn(state: EditorState, all: readonly Written[], revealed: number | null): DecorationSet {
   const byName = state.facet(registered);
-  /** Each of a shown block's lines is marked as written, to be drawn as an inline embed's text is. */
-  const shown = (written: Written) => {
-    const lines: Range<Decoration>[] = [];
-    for (let n = state.doc.lineAt(written.from).number; n <= state.doc.lineAt(written.to).number; n++) lines.push(asWritten.range(state.doc.line(n).from));
-    return lines;
-  };
   return Decoration.set(
     drawnBy(state, all).flatMap((written) => [
-      ...(written.from === revealed ? shown(written) : [Decoration.replace({ block: true }).range(written.from, written.to)]),
-      Decoration.widget({ widget: widgetFor(state, byName.get(written.name)!, written), block: true, side: 1 }).range(written.to),
+      Decoration.widget({ widget: widgetFor(state, byName.get(written.name)!, written), block: true, side: -1 }).range(written.from),
+      ...(written.from === revealed ? [] : [Decoration.replace({ block: true }).range(written.from, written.to)]),
     ]),
     true,
   );
 }
-
-const asWritten = Decoration.line({ class: "embed-source-line" });
 
 /** Decorations that take whole lines can only come from the state, so the blocks are kept here. */
 const blocks: StateField<Blocks> = StateField.define<Blocks>({
@@ -344,16 +277,35 @@ const blocks: StateField<Blocks> = StateField.define<Blocks>({
   },
   update(value, tr) {
     const all = tr.docChanged ? blocksIn(tr.state.doc.toString()) : value.all;
+    const asked = tr.effects.reduce<number | null>((was, e) => (e.is(revealing) ? e.value : was), value.revealed === null ? null : tr.changes.mapPos(value.revealed));
     const { head } = tr.state.selection.main;
-    const revealed = tr.state.field(used) ? (all.find((b) => head >= b.from && head <= b.to)?.from ?? null) : null;
+    // It stays shown for as long as the cursor is in it.
+    const revealed = all.some((b) => b.from === asked && head >= b.from && head <= b.to) ? asked : null;
     if (all === value.all && revealed === value.revealed && tr.startState.facet(registered) === tr.state.facet(registered) && tr.startState.readOnly === tr.state.readOnly) return value;
     return { all, revealed, drawn: blocksDrawn(tr.state, all, revealed) };
   },
   provide: (field) => EditorView.decorations.from(field, (value) => value.drawn),
 });
 
-/** The drawn blocks whose lines are hidden. */
-const hidden = (state: EditorState) => drawnBy(state, state.field(blocks).all).filter((b) => b.from !== state.field(blocks).revealed);
+/**
+ * Where the cursor goes on the far side of `block`: the end of the line above it or the start of the
+ * line below, past any other block whose lines are hidden there. Null where the note has no such line.
+ */
+function beside(state: EditorState, block: Written, to: "above" | "below"): number | null {
+  const drawn = unrevealed(state);
+  for (let at: Written | undefined = block; at; ) {
+    const pos: number = to === "above" ? at.from - 1 : at.to + 1;
+    if (pos < 0 || pos > state.doc.length) return null;
+    at = drawn.find((b) => pos >= b.from && pos <= b.to);
+    if (!at) return pos;
+  }
+  return null;
+}
+
+/** On a cursor the host puts beside a block itself, which is then not sent into the block. */
+const placed = Annotation.define<true>();
+
+const unrevealed = (state: EditorState) => drawnBy(state, state.field(blocks).all).filter((b) => b.from !== state.field(blocks).revealed);
 
 /** Whether `pos` is on the line right above `block` or right below it. */
 function nextTo(state: EditorState, pos: number, block: Written): "above" | "below" | null {
@@ -361,47 +313,37 @@ function nextTo(state: EditorState, pos: number, block: Written): "above" | "bel
   return line.to + 1 === block.from ? "above" : line.from - 1 === block.to ? "below" : null;
 }
 
-/** Where the cursor comes into `block` from the line next to it: its first line from above and its last from below, as far along as it was. */
-function into(state: EditorState, block: Written, from: "above" | "below", pos: number): number {
-  const line = state.doc.lineAt(from === "above" ? block.from : block.to);
-  return Math.min(line.from + pos - state.doc.lineAt(pos).from, line.to);
-}
+/** Asks the drawing of the block starting at `block` to take the keyboard. `over` is where the cursor goes if it doesn't. */
+const entering = StateEffect.define<{ block: number; from: "above" | "below"; over: number | null }>();
 
 /**
- * Whether a move from the line `side` of `block` to `head` is a step of one line that way: `head` is
- * in the block, in a hidden block that follows it with no line between, or on the first line past those.
+ * Keeps the cursor out of a block's hidden lines, where it couldn't be seen and a key would break
+ * the block. A cursor sent into them, by an arrow key or by vim, lands on the far side instead.
+ * Coming from the line next to a block whose drawing takes the keyboard, it stays where it is and
+ * the drawing is asked to. Only `edit` puts the cursor in the lines, which shows them.
  */
-function steps(state: EditorState, block: Written, side: "above" | "below", head: number): boolean {
-  const blocks = hidden(state);
-  let [start, end] = [block.from, block.to];
-  for (let next; side === "above" && (next = blocks.find((b) => b.from === end + 1)); ) end = next.to;
-  for (let next; side === "below" && (next = blocks.find((b) => b.to === start - 1)); ) start = next.from;
-  if (head >= start && head <= end) return true;
-  return side === "above" ? head > end && state.doc.lineAt(head).from === end + 1 : head < start && state.doc.lineAt(head).to === start - 1;
-}
-
-/**
- * A block's hidden lines have no height, so a move by rows goes over them. Vim's j and k take the
- * cursor from the line next to a block to the line on its far side, or to wherever in it vim's own
- * count of lines falls, and say nothing of what they are: such a move goes to the block's nearest
- * line instead, which shows its lines. A key, a press, a search and the like say what they are, and
- * go where they say, and so does a cursor the host places itself.
- */
-const steppingIn = EditorState.transactionFilter.of((tr) => {
-  if (!tr.selection || tr.docChanged || !tr.newSelection.main.empty || tr.annotation(Transaction.userEvent) !== undefined || tr.annotation(placed)) return tr;
+const steppingOver = EditorState.transactionFilter.of((tr) => {
+  if (!tr.selection || tr.docChanged || !tr.newSelection.main.empty || tr.annotation(placed) || tr.effects.some((e) => e.is(revealing))) return tr;
   const state = tr.startState;
   const { head } = tr.newSelection.main;
   const from = state.selection.main.head;
-  for (const block of hidden(state)) {
-    const side = nextTo(state, from, block);
-    if (!side || !steps(state, block, side, head)) continue;
-    const anchor = into(state, block, side, from);
-    return state.doc.lineAt(anchor).from === state.doc.lineAt(head).from ? tr : [tr, { selection: { anchor }, sequential: true }];
-  }
-  return tr;
+  const drawn = unrevealed(state);
+  const hidden = drawn.find((b) => head >= b.from && head <= b.to);
+  // Vim's j and k take the cursor from the line above a block to the line below it by themselves, and back, and say nothing of what they are. A key, a press, a search and the like say, and go where they say.
+  const passed = hidden || tr.annotation(Transaction.userEvent) !== undefined ? undefined : drawn.find((b) => (nextTo(state, from, b) === "above" && state.doc.lineAt(head).from - 1 === b.to) || (nextTo(state, from, b) === "below" && state.doc.lineAt(head).to + 1 === b.from));
+  const block = hidden ?? passed;
+  if (!block) return tr;
+  const side = from <= block.from ? "above" : "below";
+  const over = passed ? head : (beside(state, block, side === "above" ? "below" : "above") ?? beside(state, block, side));
+  if (nextTo(state, from, block) && !tr.isUserEvent("select.pointer") && state.facet(registered).get(block.name)?.entered)
+    return [tr, { selection: state.selection, effects: entering.of({ block: block.from, from: side, over }), sequential: true }];
+  return passed || over === null ? tr : [tr, { selection: { anchor: over }, sequential: true }];
 });
 
-/** The arrow keys go into a block's hidden lines as into any others: Down on the last row of the line above it, and Up on the first row of the line below. */
+/**
+ * The arrow keys go over a block's hidden lines by themselves, so a block that takes the keyboard is
+ * entered here: Down on the last row of the line above it, and Up on the first row of the line below.
+ */
 const arrowsIn = Prec.high(
   keymap.of(
     (["above", "below"] as const).map((side) => ({
@@ -409,23 +351,46 @@ const arrowsIn = Prec.high(
       run(view: EditorView) {
         const { state } = view;
         const { main } = state.selection;
-        const block = main.empty && state.selection.ranges.length === 1 ? hidden(state).find((b) => nextTo(state, main.head, b) === side) : undefined;
-        if (!block) return false;
+        const block = main.empty && state.selection.ranges.length === 1 ? unrevealed(state).find((b) => nextTo(state, main.head, b) === side && state.facet(registered).get(b.name)?.entered) : undefined;
         const line = state.doc.lineAt(main.head);
         const moved = view.moveVertically(main, side === "above").head;
         // On a line that wraps, the key moves within the line until its last row.
-        if (moved >= line.from && moved <= line.to && moved !== main.head) return false;
-        view.dispatch({ selection: { anchor: into(state, block, side, main.head) }, scrollIntoView: true, userEvent: "select" });
+        if (!block || (moved >= line.from && moved <= line.to && moved !== main.head)) return false;
+        view.dispatch({ effects: entering.of({ block: block.from, from: side, over: beside(state, block, side === "above" ? "below" : "above") }) });
         return true;
       },
     })),
   ),
 );
 
+const entry = ViewPlugin.fromClass(
+  class {
+    update(update: ViewUpdate) {
+      for (const tr of update.transactions)
+        for (const effect of tr.effects) {
+          if (!effect.is(entering)) continue;
+          const { block, from, over } = effect.value;
+          // Focus leaves the note here, and the note can't be changed while it is being updated.
+          queueMicrotask(() => {
+            const { view } = update;
+            const frame = [...view.contentDOM.querySelectorAll<HTMLElement>(".embed-frame-block")].find((f) => view.posAtDOM(f) === block);
+            let took = false;
+            try {
+              took = (frame && live.get(frame.firstElementChild as HTMLElement)?.enter?.(from)) === true;
+            } catch {
+              // A drawing that can't take the keyboard is gone over.
+            }
+            if (!took && over !== null) view.dispatch({ selection: { anchor: over }, scrollIntoView: true, annotations: placed.of(true) });
+          });
+        }
+    }
+  },
+);
+
 /**
  * Draws each `::name{config}` and each `:::name{config}` block in a note with the embed registered
  * under that name. A name nobody registered stays as text. Which embeds there are is said with `embedsAre`.
  */
-export const embedding: Extension = [used, blocks, steppingIn, arrowsIn, Prec.lowest(inline)];
+export const embedding: Extension = [blocks, steppingOver, arrowsIn, entry, inline];
 
 export const embedsAre = (embeds: readonly Embed[]): Extension => registered.of(embeds);
