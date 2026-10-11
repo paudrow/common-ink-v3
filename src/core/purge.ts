@@ -15,6 +15,7 @@ const DUE = "EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND state = 'trashed' AND
 export const REMOVALS = [
   `DELETE FROM note_search WHERE rowid = (SELECT id FROM note_search_rows WHERE note_id = ?1) AND ${DUE}`,
   `DELETE FROM note_search_rows WHERE note_id = ?1 AND ${DUE}`,
+  `DELETE FROM todo_projects WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM todos WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM note_tags WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM mentions WHERE note_id = ?1 AND ${DUE}`,
@@ -27,6 +28,7 @@ export const REMOVALS = [
   // A todo completed elsewhere and filed on this note stays completed, filed nowhere.
   `UPDATE completions SET daily_note_id = NULL, daily_revision = NULL, daily_at = NULL WHERE daily_note_id = ?1 AND ${DUE}`,
   `DELETE FROM daily_notes WHERE note_id = ?1 AND ${DUE}`,
+  `DELETE FROM pins WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM grants WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM changes WHERE note_id = ?1 AND ${DUE}`,
   "DELETE FROM notes WHERE id = ?1 AND state = 'trashed' AND (?2 IS NULL OR state_at <= ?2)",
@@ -72,19 +74,7 @@ async function remove(db: D1Database, ids: readonly string[], due: number): Prom
  * is all or nothing, so when one fails its notes are removed one at a time: the note that can't be
  * removed is left whole and named, and the rest go.
  */
-/**
- * Rewrites the search index without what removed rows held. Deleting a row marks its words as gone
- * and leaves them in the index's own pages until those are merged, which this does at once.
- */
-export const forgetRemoved = (db: D1Database) => db.prepare("INSERT INTO note_search (note_search) VALUES ('optimize')").run();
-
 export async function purgeTrash(db: D1Database, now: number, log: (message: string) => void = console.error): Promise<Purged> {
-  const purged = await purgeDue(db, now, log);
-  if (purged.removed) await forgetRemoved(db).catch((err: unknown) => log(`Couldn't merge the search index after removing notes: ${err instanceof Error ? err.message : String(err)}`));
-  return purged;
-}
-
-async function purgeDue(db: D1Database, now: number, log: (message: string) => void): Promise<Purged> {
   const due = now - TRASH_MS;
   const purged: Purged = { removed: 0, failed: [], more: true };
   for (let batch = 0; batch < PURGE_BATCHES; batch++) {

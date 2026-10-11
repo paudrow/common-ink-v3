@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Contact, PluginHost, ViewProps } from "../../plugin-api.ts";
-import { personPath } from "../lib/person.ts";
-import { initialsOf } from "../mentions/fields.ts";
+import { CopyReference } from "../lib/CopyReference.tsx";
 import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
 import { matches } from "./matching.ts";
 
 type Listing = { status: "reading" } | { status: "listed"; contacts: readonly Contact[]; more: boolean } | { status: "failed"; message: string };
 
-/** Contacts: the people in the contacts the member connected, each a card that opens their page, where they are edited. */
+/** Contacts: the people in the contacts the member connected, to look up and to reference from a note. Nothing here changes them. */
 export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
   const [listing, setListing] = useState<Listing>({ status: "reading" });
   const [asked, setAsked] = useState(0);
@@ -55,32 +54,29 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
               {listing.status === "listed" && listing.more ? ". There are more than are listed here." : ""}
             </p>
           )}
-          <ul className="cards contact-cards" aria-label="Contacts">
+          <ul className="contact-list" aria-label="Contacts">
             {found.map((contact) => (
               <li key={`${contact.sourceId} ${contact.id}`} aria-label={contact.name || "No name"}>
-                {/* The card's one action is the person's page, where everything they hold is, to read and to edit. */}
-                <a
-                  className="card contact-card"
-                  href={personPath(contact.name)}
-                  onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                    e.preventDefault();
-                    app.go(personPath(contact.name));
-                  }}
-                >
-                  <span className="contact-avatar" data-initials={initialsOf(contact.name)} aria-hidden="true" />
-                  <span className="contact-what">
-                    <span className="contact-name">{contact.name || "No name"}</span>
-                    {contact.organization && <span className="contact-organization">{contact.organization}</span>}
-                    {(contact.emails.length > 0 || contact.phones.length > 0) && (
-                      <span className="contact-reach">
-                        {[...contact.emails, ...contact.phones].map(({ value: said }) => (
-                          <span key={said}>{said}</span>
-                        ))}
-                      </span>
+                <div className="contact-what">
+                  <span className="contact-name">{contact.name || "No name"}</span>
+                  {contact.organization && <span className="contact-organization">{contact.organization}</span>}
+                  <span className="contact-reach">
+                    {contact.emails.map((email) => (
+                      <a key={email} href={`mailto:${email}`}>
+                        {email}
+                      </a>
+                    ))}
+                    {contact.phones.map((phone) => (
+                      <span key={phone}>{phone}</span>
+                    ))}
+                    {contact.url && /^https?:\/\//.test(contact.url) && (
+                      <a href={contact.url} target="_blank" rel="noopener noreferrer">
+                        Open in {sources?.find((s) => s.id === contact.sourceId)?.provider ?? "its contacts"}
+                      </a>
                     )}
                   </span>
-                </a>
+                </div>
+                <CopyReference host={host} sourceId={contact.sourceId} id={contact.id} />
               </li>
             ))}
           </ul>

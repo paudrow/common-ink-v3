@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseQuery } from "../../src/web/plugin-api.ts";
-import { addDays, dayOf, dueLabel, dueOffers, dueState, savedQuery } from "../../src/web/plugins/todos/dates.ts";
+import { addDays, dayOf, dueLabel, dueOffers, dueRange, dueState } from "../../src/web/plugins/todos/dates.ts";
 
 describe("a due date beside today", () => {
   it("is the day on the member's own clock, not the day in UTC", () => {
@@ -20,17 +19,9 @@ describe("a due date beside today", () => {
     expect(["2026-10-10", "2026-10-11", "2026-10-12"].map((day) => dueState(day, now))).toEqual(["overdue", "today", "later"]);
   });
 
-  it("reads what a browser kept of the page's old filters as the query that says the same, and every such query is one the todos take", () => {
-    expect(savedQuery("due:<today", { tag: "x" })).toBe("due:<today");
-    expect(savedQuery(undefined, undefined)).toBe("");
-    expect(savedQuery(undefined, { folder: "", tag: "", due: "any", importance: "", completed: false, archived: false })).toBe("");
-    const all = savedQuery(undefined, { folder: "abcdefghij12", tag: "Money", due: "week", importance: "2", completed: true, archived: true });
-    expect(all).toBe("folder:abcdefghij12 tag:money due:today..+6d priority:medium (is:open OR is:done) (is:archived OR -is:archived)");
-    for (const due of ["overdue", "today", "week", "none"]) expect(parseQuery(savedQuery(undefined, { due }), "todos").ok, due).toBe(true);
-    expect(parseQuery(all, "todos").ok).toBe(true);
-    // What was never one of its choices is no filter.
-    expect(savedQuery(undefined, { folder: 'x" OR', tag: "a b", due: "soon", importance: "9", completed: "yes", archived: 1 })).toBe("");
-    expect(savedQuery(undefined, "junk")).toBe("");
+  it("turns a filter into the days the server is asked for", () => {
+    const now = "2026-12-28";
+    expect([dueRange("any", now), dueRange("overdue", now), dueRange("today", now), dueRange("week", now), dueRange("none", now)]).toEqual([{}, { dueTo: "2026-12-27" }, { dueFrom: "2026-12-28", dueTo: "2026-12-28" }, { dueFrom: "2026-12-28", dueTo: "2027-01-03" }, { noDue: true }]);
   });
 
   it("offers days to someone typing due:", () => {

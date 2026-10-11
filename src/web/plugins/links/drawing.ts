@@ -33,10 +33,9 @@ function linkChip(noteOf: NoteOf, open: Open): Chip<WrittenLink> {
     written: "within",
     inCode: true,
     skip: (state, link) => !isLink(state, link),
-    // A note not known yet and a note that isn't there are told apart, which JSON would write alike: the first becomes the second when the notes are listed.
     key: (link) => {
       const linked = noteOf(link.target);
-      return linked === undefined ? "waiting" : JSON.stringify(linked && [linked.title, linked.state]);
+      return JSON.stringify(linked && [linked.title, linked.state]) ?? "";
     },
     draw(el, link, source) {
       const { text, suffix, hint, gone } = linkWords(noteOf(link.target), link.display, HOW.drawn);

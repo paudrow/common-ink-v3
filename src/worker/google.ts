@@ -8,23 +8,8 @@ export const SOURCE_SCOPES = {
 export type GoogleSourceId = keyof typeof SOURCE_SCOPES;
 export const isGoogleSource = (id: string): id is GoogleSourceId => Object.hasOwn(SOURCE_SCOPES, id);
 
-/**
- * What lets Common Ink change a data source whose scopes only read it. It reads it too. It is asked
- * for only when the member asks to edit, so nobody agrees to more than they use.
- */
-export const WRITE_SCOPES: Partial<Record<GoogleSourceId, string>> = { "google-contacts": "https://www.googleapis.com/auth/contacts" };
-
-/** Whether what was agreed to lets Common Ink change a data source, beyond reading it. */
-export const writes = (id: GoogleSourceId, scopes: readonly string[]) => WRITE_SCOPES[id] !== undefined && scopes.includes(WRITE_SCOPES[id]);
-
-/** Whether what was agreed to covers a data source: every scope it needs, or the one that changes it as well. */
-export const covers = (id: GoogleSourceId, scopes: readonly string[]) => SOURCE_SCOPES[id].every((scope) => scopes.includes(scope)) || writes(id, scopes);
-
 /** Calendar and contacts, asked for at sign-in so those data sources need no separate setup. */
 export const DATA_SCOPES: readonly string[] = Object.values(SOURCE_SCOPES).flat();
-
-/** Every scope that reaches into a person's data, read or changed. */
-export const REACHING_SCOPES: readonly string[] = [...DATA_SCOPES, ...Object.values(WRITE_SCOPES)];
 
 const GOOGLE_TIMEOUT_MS = 30_000;
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -43,14 +28,14 @@ export interface GoogleConfig {
  * show what is being agreed to: only then does it hand back a refresh token for an account that
  * has agreed before.
  */
-export type Asking = { for: "sign-in"; sources: boolean } | { for: "connect"; email: string; sources: readonly GoogleSourceId[]; edit?: boolean };
+export type Asking = { for: "sign-in"; sources: boolean } | { for: "connect"; email: string; sources: readonly GoogleSourceId[] };
 
 export function authorizeUrl(config: GoogleConfig, redirectUri: string, state: string, challenge: string, asking: Asking): string {
   const params = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: [...SIGN_IN_SCOPES, ...(asking.for === "connect" ? asking.sources.flatMap((id) => [...SOURCE_SCOPES[id], ...(asking.edit && WRITE_SCOPES[id] ? [WRITE_SCOPES[id]] : [])]) : asking.sources ? DATA_SCOPES : [])].join(" "),
+    scope: [...SIGN_IN_SCOPES, ...(asking.for === "connect" ? asking.sources.flatMap((id) => SOURCE_SCOPES[id]) : asking.sources ? DATA_SCOPES : [])].join(" "),
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",

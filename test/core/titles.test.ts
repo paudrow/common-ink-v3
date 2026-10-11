@@ -54,7 +54,7 @@ describe("a title stored by an older rule", () => {
     expect((await perform(env.DB, ada, { type: "note.read", id: plain.id })).title).toBe("Shopping list");
 
     expect(await titles(ada)).toEqual(["Shopping list", "Trip to Oslo"]);
-    expect(await env.DB.prepare("SELECT title, snippet, indexed FROM notes WHERE id = ?").bind(marked.id).first()).toEqual({ title: "Trip to Oslo", snippet: "Pack", indexed: 7 });
+    expect(await env.DB.prepare("SELECT title, snippet, indexed FROM notes WHERE id = ?").bind(marked.id).first()).toEqual({ title: "Trip to Oslo", snippet: "Pack", indexed: 6 });
     expect((await perform(env.DB, ada, { type: "search", query: "trip", limit: 5 })).results.map((r) => r.note.title)).toEqual(["Trip to Oslo"]);
   });
 
@@ -76,9 +76,9 @@ describe("a title stored by an older rule", () => {
     expect(listed.map((n) => n.title).sort()).toEqual(notes.map((n) => n.title).sort());
     expect(listed.every((n) => n.snippet === "body")).toBe(true);
     // Not all of them are stored yet: the rest were read from their text.
-    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM notes WHERE workspace_id = ? AND indexed < 7").bind(ada.workspaceId).first<{ n: number }>())!.n).toBeGreaterThan(0);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM notes WHERE workspace_id = ? AND indexed < 6").bind(ada.workspaceId).first<{ n: number }>())!.n).toBeGreaterThan(0);
     await perform(env.DB, ada, { type: "note.list" });
-    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM notes WHERE workspace_id = ? AND (indexed < 7 OR title = '')").bind(ada.workspaceId).first()).toEqual({ n: 0 });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM notes WHERE workspace_id = ? AND (indexed < 6 OR title = '')").bind(ada.workspaceId).first()).toEqual({ n: 0 });
   });
 
   it("is written by today's rule by the next change to the note, whatever the change", async () => {
@@ -93,7 +93,7 @@ describe("a title stored by an older rule", () => {
   });
 
   it("uses the index kept for notes still to be made", async () => {
-    const plan = await env.DB.prepare("EXPLAIN QUERY PLAN SELECT id, revision, text FROM notes WHERE workspace_id = ? AND indexed < 7 LIMIT 16").bind("w").all<{ detail: string }>();
+    const plan = await env.DB.prepare("EXPLAIN QUERY PLAN SELECT id, revision, text FROM notes WHERE workspace_id = ? AND indexed < 6 LIMIT 16").bind("w").all<{ detail: string }>();
     expect(plan.results.map((r) => r.detail).join(" ")).toContain("notes_to_index");
   });
 });

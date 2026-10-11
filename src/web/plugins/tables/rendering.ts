@@ -1,13 +1,10 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorState, StateField, type Extension } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, WidgetType } from "@codemirror/view";
-import { isReading } from "../../plugin-api.ts";
-import { drawnMath } from "../lib/drawnMath.ts";
-import { drawnInState, placed, writable } from "../lib/live.ts";
+import { EditorState, type Extension } from "@codemirror/state";
+import { Decoration, EditorView, WidgetType } from "@codemirror/view";
+import { drawnInState, writable } from "../lib/live.ts";
 import { replacing } from "../lib/rewrite.ts";
 import { inlineMarkdown } from "./inline.ts";
-import { openMenu } from "./menu.ts";
-import { actOnCell, addColumn, addRow, CELL_ACTIONS, parseTable, pipedPart, serializeTable, setCell, type At, type CellAction, type Table } from "./table.ts";
+import { addColumn, addRow, parseTable, pipedPart, removeColumn, removeRow, serializeTable, setCell, type At, type Table } from "./table.ts";
 
 interface Found {
   from: number;
@@ -16,17 +13,14 @@ interface Found {
   table: Table;
 }
 
-/** What a drawn table is drawn from now. */
+/** What a drawn table is drawn from now, and the cell its buttons act on. */
 interface Drawn {
   text: string;
   table: Table;
+  at: At;
 }
 
 const drawn = new WeakMap<HTMLElement, Drawn>();
-/** How each drawn table does what a cell's menu lists, from one of its cells. */
-const acting = new WeakMap<HTMLElement, (action: CellAction, at: At) => void>();
-/** The cell the member was last in, which a command from the palette acts on. */
-let last: { el: HTMLElement; at: At } | undefined;
 /** Set while a table is being drawn again. A cell taken out then loses the cursor, which is not the member leaving it. */
 let drawing = false;
 
@@ -34,24 +28,8 @@ const keyOf = ([row, column]: At) => `${row},${column}`;
 const cellAt = (el: HTMLElement, at: At) => el.querySelector<HTMLElement>(`[data-focus="${keyOf(at)}"]`);
 
 function show(cell: HTMLElement, text: string) {
-  cell.replaceChildren(inlineMarkdown(text, drawnMath.get()));
+  cell.replaceChildren(inlineMarkdown(text));
 }
-
-/** The cells of this editor's tables, but the one being typed in, are drawn again once formulas can be drawn, and when they no longer can. */
-const followingMath = ViewPlugin.define((view) => ({
-  destroy: drawnMath.subscribe(() => {
-    for (const el of view.dom.querySelectorAll<HTMLElement>(".md-table")) {
-      const now = drawn.get(el);
-      now?.table.rows.forEach((cells, r) =>
-        cells.forEach((text, c) => {
-          const cell = cellAt(el, [r, c]);
-          if (cell && cell !== document.activeElement) show(cell, text);
-        }),
-      );
-    }
-    view.requestMeasure();
-  }),
-}));
 
 /** Each cell is a box inside its `td`, so that while it is typed in it can be held at the size it was drawn. */
 function build(el: HTMLElement, { table }: Drawn) {
@@ -89,7 +67,7 @@ function follows(was: readonly string[], now: readonly (readonly string[])[], at
 /** Draws `next` in the element the table before it had. A table of the same shape keeps its cells, so the one being typed in isn't taken away. */
 function sync(el: HTMLElement, next: Pick<Drawn, "text" | "table">) {
   const was = drawn.get(el)!;
-  const now = { ...next };
+  const now = { ...next, at: was.at };
   drawn.set(el, now);
   const sameShape = was.table.rows.length === next.table.rows.length && was.table.aligns.length === next.table.aligns.length;
   if (!sameShape) {
@@ -97,9 +75,6 @@ function sync(el: HTMLElement, next: Pick<Drawn, "text" | "table">) {
     const typing = el.contains(document.activeElement) ? (document.activeElement as HTMLElement).closest<HTMLElement>("[data-focus]") : null;
     const typed = typing?.textContent ?? "";
     const [row, column] = typing ? (typing.dataset.focus!.split(",").map(Number) as [number, number]) : [0, 0];
-    // Only what the member typed goes with them. A cell they were in and had not changed has nothing to carry: after an
-    // undo that takes its row or column back out, the cell that comes to its place says what the note says.
-    const changed = typing !== null && typed !== was.table.rows[row]?.[column];
     const columnsOf = (table: Table) => table.aligns.map((_, c) => table.rows.map((cells) => cells[c]!));
     const kept: At | undefined = typing ? [follows(was.table.rows[row]!, next.table.rows, row), follows(columnsOf(was.table)[column]!, columnsOf(next.table), column)] : undefined;
     drawing = true;
@@ -112,7 +87,7 @@ function sync(el: HTMLElement, next: Pick<Drawn, "text" | "table">) {
     delete el.dataset.focus;
     const cell = cellAt(el, wanted ? (wanted.split(",").map(Number) as unknown as At) : (kept ?? [-1, -1]));
     cell?.focus();
-    if (cell && !wanted && changed) {
+    if (cell && !wanted) {
       cell.textContent = typed;
       getSelection()?.selectAllChildren(cell);
       getSelection()?.collapseToEnd();
@@ -150,25 +125,21 @@ class TableWidget extends WidgetType {
     const el = document.createElement("div");
     el.className = "md-table";
     if (this.readOnly) el.dataset.readonly = "";
-    // A box that takes the column's width whatever is in it, a frame as wide as the table up to that, and in it the table, which scrolls when it is wider.
-    const frame = el.appendChild(document.createElement("div")).appendChild(document.createElement("div"));
-    frame.className = "md-table-frame";
-    frame.appendChild(document.createElement("div")).append(document.createElement("table"));
-    const state: Drawn = { text: this.text, table: this.table };
+    el.appendChild(document.createElement("div")).append(document.createElement("table"));
+    const state: Drawn = { text: this.text, table: this.table, at: [0, 0] };
     drawn.set(el, state);
     build(el, state);
 
     /** Where the table is in the note, if the note still writes it as it is drawn here. */
     const range = () => {
-      let to: number;
+      let from: number;
       try {
-        to = view.posAtDOM(el);
+        from = view.posAtDOM(el);
       } catch {
         return undefined;
       }
       const { text } = drawn.get(el)!;
-      const from = to - text.length;
-      return from >= 0 && view.state.sliceDoc(from, to) === text ? { from, to } : undefined;
+      return view.state.sliceDoc(from, from + text.length) === text ? { from, to: from + text.length } : undefined;
     };
     /** Writes the table another way in the note, as an edit by the member, and says which cell is to have the cursor after. */
     const write = (next: Table, focus?: At) => {
@@ -187,10 +158,8 @@ class TableWidget extends WidgetType {
       if (!where) return;
       const { doc } = view.state;
       const line = doc.lineAt(after ? where.to : where.from).number + (after ? 1 : -1);
-      if (line >= 1 && line <= doc.lines) view.dispatch({ selection: { anchor: doc.line(line).from }, scrollIntoView: true, annotations: placed.of(true) });
+      if (line >= 1 && line <= doc.lines) view.dispatch({ selection: { anchor: doc.line(line).from }, scrollIntoView: true });
     };
-    /** Opens a cell's menu. A table that can only be read has none. */
-    let menu: ((cell: HTMLElement, point: { x: number; y: number }) => void) | undefined;
     const atOf = (cell: HTMLElement) => cell.dataset.focus!.split(",").map(Number) as unknown as At;
     const typedIn = (cell: HTMLElement) => (cell.textContent ?? "").replace(/\s*\n\s*/g, " ").trim();
     /** The table with what has been typed in `cell`. */
@@ -207,7 +176,7 @@ class TableWidget extends WidgetType {
       const cell = (event.target as HTMLElement).closest<HTMLElement>("[data-focus]");
       if (!cell) return;
       const at = atOf(cell);
-      last = { el, at };
+      drawn.get(el)!.at = at;
       // A cell being typed in shows what the note writes for it, on one line in the box it was drawn in, so its
       // marks make the row no taller and nothing after the table moves. What doesn't fit scrolls sideways.
       const box = cell.getBoundingClientRect();
@@ -248,11 +217,7 @@ class TableWidget extends WidgetType {
         event.preventDefault();
         leave(after);
       };
-      if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
-        event.preventDefault();
-        const box = cell.getBoundingClientRect();
-        menu?.(cell, { x: box.left, y: box.bottom });
-      } else if (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey)) {
+      if (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey)) {
         // Left to the browser, select-all takes the whole note, not the cell.
         event.preventDefault();
         getSelection()?.selectAllChildren(cell);
@@ -270,51 +235,24 @@ class TableWidget extends WidgetType {
     });
 
     if (this.readOnly) return el;
-
-    /** Does what a cell's menu lists from the cell `at`, with whatever is being typed in the table kept. */
-    const act = (action: CellAction, at: At) => {
-      const typing = document.activeElement instanceof HTMLElement && el.contains(document.activeElement) ? document.activeElement.closest<HTMLElement>("[data-focus]") : null;
-      const done = actOnCell(typing ? committed(typing) : drawn.get(el)!.table, at, action);
-      if (done) write(done.table, done.at);
-      else cellAt(el, at)?.focus();
-    };
-    acting.set(el, act);
-    /** The menu of what can be done from `cell`. Closed with nothing picked, it hands the keyboard back to the cell. */
-    const menuFor = (menu = (cell, point) => {
-      const at = atOf(cell);
-      const { table } = drawn.get(el)!;
-      openMenu(
-        "Table",
-        point,
-        CELL_ACTIONS.map(({ id, label }) => ({ label, disabled: !actOnCell(table, at, id), run: () => act(id, at) })),
-        () => cellAt(el, at)?.focus(),
-      );
-    });
-    el.addEventListener("contextmenu", (event) => {
-      const cell = (event.target as HTMLElement).closest("th, td")?.querySelector<HTMLElement>("[data-focus]");
-      if (!cell) return;
-      event.preventDefault();
-      menuFor(cell, { x: event.clientX, y: event.clientY });
-    });
-
-    /** One quiet plus on the table's bottom edge and one on its right edge, each adding at the end. */
-    const plus = (side: "row" | "column", label: string, grown: (table: Table) => { table: Table; at: At }) => {
-      const button = frame.appendChild(document.createElement("button"));
+    const tools = el.appendChild(document.createElement("div"));
+    tools.className = "md-table-tools";
+    const tool = (label: string, run: (table: Table, at: At) => void) => {
+      const button = tools.appendChild(document.createElement("button"));
       button.type = "button";
-      button.className = `md-table-add md-table-add-${side}`;
-      button.setAttribute("aria-label", label);
-      button.title = label;
-      button.textContent = "+";
-      // The cell being typed in keeps the cursor until the table is written, with what was typed in it.
+      button.textContent = label;
+      // The cell being typed in keeps the cursor, and what was typed is in the table the button changes.
       button.addEventListener("mousedown", (event) => event.preventDefault());
       button.addEventListener("click", () => {
+        const { at } = drawn.get(el)!;
         const typing = document.activeElement instanceof HTMLElement && el.contains(document.activeElement) ? document.activeElement.closest<HTMLElement>("[data-focus]") : null;
-        const { table, at } = grown(typing ? committed(typing) : drawn.get(el)!.table);
-        write(table, at);
+        run(typing ? committed(typing) : drawn.get(el)!.table, at);
       });
     };
-    plus("row", "Add a row at the end", (table) => ({ table: addRow(table, table.rows.length - 1), at: [table.rows.length, 0] }));
-    plus("column", "Add a column at the end", (table) => ({ table: addColumn(table, table.aligns.length - 1), at: [0, table.aligns.length] }));
+    tool("Add row", (table, [row]) => write(addRow(table, row), [row + 1, 0]));
+    tool("Add column", (table, [row, column]) => write(addColumn(table, column), [row, column + 1]));
+    tool("Delete row", (table, [row, column]) => write(removeRow(table, row), [Math.min(row, table.rows.length - 2), column]));
+    tool("Delete column", (table, [row, column]) => write(removeColumn(table, column), [row, Math.min(column, table.aligns.length - 2)]));
     return el;
   }
 
@@ -347,111 +285,52 @@ function tablesIn(state: EditorState): Found[] {
 }
 
 /**
- * Whether the cursor has been put anywhere. A note opens with its cursor at its start, where nobody
- * put it, and a table at the top of a note is not shown as written for that.
- */
-const used = StateField.define<boolean>({
-  create: () => false,
-  update: (value, tr) => value || tr.selection !== undefined || tr.isUserEvent("input") || tr.isUserEvent("delete"),
-});
-
-/** Whether the cursor, and all of a selection, is in the table's own lines, which are then shown as written above it. Selecting the whole note shows no table's lines. */
-const cursorIn = (state: EditorState, { from, to }: { from: number; to: number }) => {
-  const { main } = state.selection;
-  return state.field(used) && !isReading(state) && main.from >= from && main.to <= to;
-};
-
-const hiddenLines = Decoration.replace({ block: true });
-const sourceLine = Decoration.line({ class: "md-table-source" });
-
-/**
- * A table is drawn as a table wherever the cursor is, under its own lines, which are out of sight.
- * A click in a cell is typed in the cell, and the lines stay out of sight. The cursor moved into
- * the lines with the keys shows them as written above the table, which stays drawn and follows what
- * is typed in them, so the note is lower by those lines and nothing else moves.
+ * A table is drawn as a table wherever the cursor is, and its cells are typed in where they are
+ * drawn. Its pipes are never shown: a table's lines written out are a different height and width
+ * from the table drawn, so showing them would move everything after it.
  */
 const tables = drawnInState({
   read: tablesIn,
-  draw: (state, found) =>
-    found.flatMap((t) => {
-      const lines = [];
-      if (cursorIn(state, t)) for (let n = state.doc.lineAt(t.from).number; n <= state.doc.lineAt(t.to).number; n++) lines.push(sourceLine.range(state.doc.line(n).from));
-      else lines.push(hiddenLines.range(t.from, t.to));
-      return [...lines, Decoration.widget({ widget: new TableWidget(t.text, t.table, !writable(state)), block: true, side: 1 }).range(t.to)];
-    }),
-  stepsIn: true,
-});
-
-/** The tables whose lines are out of sight. */
-const hidden = (state: EditorState) => state.field(tables.field).found.filter((t) => !cursorIn(state, t));
-
-/**
- * A press of the pointer never goes into a table's unseen lines: one that lands there, in the margin
- * beside the table, puts the cursor on the line after it, or before it when it ends the note.
- */
-const pressedOutside = EditorState.transactionFilter.of((tr) => {
-  if (!tr.selection || tr.docChanged || !tr.isUserEvent("select.pointer") || !tr.newSelection.main.empty) return tr;
-  const { head } = tr.newSelection.main;
-  const table = hidden(tr.startState).find((t) => head >= t.from && head <= t.to);
-  if (!table) return tr;
-  const anchor = table.to < tr.startState.doc.length ? table.to + 1 : table.from > 0 ? table.from - 1 : null;
-  return anchor === null ? tr : [tr, { selection: { anchor }, sequential: true }];
+  draw: (state, found) => found.map((t) => Decoration.replace({ widget: new TableWidget(t.text, t.table, !writable(state)), block: true }).range(t.from, t.to)),
 });
 
 /**
  * A table is one thing to a deletion that reaches into it from outside, as it is to vim's j and k:
  * `dj` from the line above, `3dd`, or a line selection that ends on its header takes the whole
  * table. Without this the rows left behind would be half a table, shown as its pipes. A change
- * inside the table, such as a cell's own edit or its undo, is let through as it is, and so are the
- * table's last lines deleted whole, which is `dd` on one of its lines while they are shown.
+ * inside the table, such as a cell's own edit or its undo, is let through as it is.
  */
 const deletedWhole = EditorState.transactionFilter.of((tr) => {
   if (!tr.docChanged) return tr;
   const { found } = tr.startState.field(tables.field);
-  const { doc } = tr.startState;
   const rest: { from: number; to: number }[] = [];
   tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
     if (inserted.length) return;
     for (const table of found) {
       const end = Math.min(table.to + 1, tr.startState.doc.length);
       if (fromA < table.from && toA > table.from && toA < end) rest.push({ from: toA, to: toA === tr.startState.doc.lineAt(toA).from ? end : table.to });
-      else if (fromA > table.from && fromA <= table.to && toA > table.to) {
-        // Its last lines, whole and nothing past them, are what `dd` takes on a line of a table that is shown: a shorter table is left.
-        const itsLastLines = toA === table.to + 1 && fromA === doc.lineAt(fromA).from;
-        if (!itsLastLines) rest.push({ from: table.from, to: fromA });
-      }
+      else if (fromA > table.from && fromA <= table.to && toA > table.to) rest.push({ from: table.from, to: fromA });
     }
   });
   if (!rest.length) return tr;
   return [tr, { changes: rest.map(({ from, to }) => ({ from: tr.changes.mapPos(from, -1), to: tr.changes.mapPos(to, 1) })), sequential: true }];
 });
 
-/** The cell of the table that ends at `to` to give the keyboard to: its first. */
-function focusCell(view: EditorView, to: number) {
-  const el = [...view.contentDOM.querySelectorAll<HTMLElement>(".md-table")].find((table) => view.posAtDOM(table) === to);
-  const cell = el?.querySelector<HTMLElement>("[data-focus]");
+/** The cell of the table at `from` to give the keyboard to: in its first row, or its last. */
+function focusCell(view: EditorView, from: number, last: boolean) {
+  const el = [...view.contentDOM.querySelectorAll<HTMLElement>(".md-table")].find((table) => view.posAtDOM(table) === from);
+  const cell = el && (last ? [...el.querySelectorAll<HTMLElement>("tr:last-child [data-focus]")][0] : el.querySelector<HTMLElement>("[data-focus]"));
   cell?.focus();
   return !!cell;
 }
 
-/**
- * An arrow key that would pass a table goes into its lines, which shows them: Down from the last row
- * of the line above into its first line, Up from the first row of the line below into its last, as
- * far along as the cursor was.
- */
+/** An arrow key that would pass a table goes into it: down into its header, up into its last row. Vim's j and k pass it whole. */
 const step = (down: boolean) => (view: EditorView) => {
-  const { state } = view;
-  const { main } = state.selection;
-  if (!main.empty || state.selection.ranges.length > 1) return false;
-  const line = state.doc.lineAt(main.head);
-  const into = hidden(state).find((t) => (down ? line.to + 1 === t.from : line.from - 1 === t.to));
-  if (!into) return false;
-  // On a line that wraps, the key moves within the line until its last row.
-  const moved = view.moveVertically(main, down).head;
-  if (moved >= line.from && moved <= line.to && moved !== main.head) return false;
-  const target = state.doc.lineAt(down ? into.from : into.to);
-  view.dispatch({ selection: { anchor: Math.min(target.from + main.head - line.from, target.to) }, scrollIntoView: true, userEvent: "select" });
-  return true;
+  const { main } = view.state.selection;
+  if (!main.empty) return false;
+  const { head } = view.moveVertically(main, down);
+  const into = view.state.field(tables.field).found.find((t) => (down ? main.head < t.from && head >= t.from : main.head > t.to && head <= t.to));
+  return !!into && focusCell(view, into.from, !down);
 };
 
 /** The table nearest after the cursor, or else the last before it, for the command that goes into one. */
@@ -460,15 +339,8 @@ export function editTable(view: EditorView) {
   const { head } = view.state.selection.main;
   const table = found.find((t) => t.to >= head) ?? found[found.length - 1];
   if (!table) return false;
-  view.dispatch({ effects: EditorView.scrollIntoView(table.to, { y: "nearest" }) });
-  return focusCell(view, table.to);
-}
-
-/** Does what a cell's menu lists from the cell the member was last in, if its table is still on the page. */
-export function actOnLastCell(action: CellAction) {
-  const act = last?.el.isConnected ? acting.get(last.el) : undefined;
-  if (act) act(action, last!.at);
-  return !!act;
+  view.dispatch({ effects: EditorView.scrollIntoView(table.from, { y: "nearest" }) });
+  return focusCell(view, table.from, false);
 }
 
 /** Whether the element is a note's text in an editor that draws tables and has one. */
@@ -480,12 +352,8 @@ export const hasTable = (focused: Element | null) => {
 const look = EditorView.baseTheme({
   ".md-table": { padding: "0.4em 0", position: "relative" },
   // No width of its own, then all of the column's: a table wider than the column scrolls in its box and doesn't widen the note.
-  ".md-table > div:first-child": { width: "0", minWidth: "100%" },
-  // Short of the column's edge by half a plus, so the one on a wide table's right edge is all in sight.
-  ".md-table-frame": { position: "relative", width: "fit-content", maxWidth: "calc(100% - 10px)" },
-  ".md-table-frame > div": { overflowX: "auto" },
-  // A word is not broken to make a column narrower: a table too wide for the column scrolls.
-  ".md-table table": { borderCollapse: "collapse", fontSize: "0.95em", overflowWrap: "break-word", wordBreak: "normal" },
+  ".md-table > div:first-child": { overflowX: "auto", width: "0", minWidth: "100%" },
+  ".md-table table": { borderCollapse: "collapse", fontSize: "0.95em" },
   ".md-table th, .md-table td": { border: "1px solid var(--line-strong)", padding: "0.3em 0.7em", minWidth: "3em", verticalAlign: "top" },
   ".md-table th": { backgroundColor: "var(--bg-side)", fontWeight: "600" },
   ".md-table [data-focus]": { outline: "none", minHeight: "1lh" },
@@ -493,43 +361,18 @@ const look = EditorView.baseTheme({
   ".md-cell-typing": { boxSizing: "border-box", whiteSpace: "nowrap", overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none" },
   ".md-table code": { fontFamily: "var(--mono)", fontSize: "0.92em", backgroundColor: "var(--bg-side)", borderRadius: "4px", padding: "0.1em 0.3em" },
   ".md-table .md-link": { color: "var(--accent)", textDecoration: "underline" },
-  // On the table's edges, over what is beside it, so they take no room and showing them moves nothing.
-  ".md-table-add": {
-    position: "absolute",
-    zIndex: "2",
-    display: "grid",
-    placeItems: "center",
-    width: "18px",
-    height: "18px",
-    padding: "0",
-    border: "1px solid var(--line-strong)",
-    borderRadius: "50%",
-    background: "var(--bg-elev)",
-    color: "var(--muted)",
-    font: "500 13px/1 var(--prose)",
-    cursor: "pointer",
-    opacity: "0",
-    pointerEvents: "none",
-    transition: "opacity 0.12s",
-  },
-  ".md-table-add-row": { left: "50%", bottom: "0", transform: "translate(-50%, 50%)" },
-  ".md-table-add-column": { top: "50%", right: "0", transform: "translate(50%, -50%)" },
-  ".md-table:hover .md-table-add, .md-table:focus-within .md-table-add": { opacity: "1", pointerEvents: "auto" },
-  ".md-table-add:hover, .md-table-add:focus-visible": { color: "var(--accent)", borderColor: "var(--accent)", outline: "none" },
-  // The table's own lines, shown above it with the cursor in them: as written, in the face markdown is written in.
-  ".cm-line.md-table-source": { font: "12.5px/1.6 var(--mono)", color: "var(--accent)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
-  // A formula in them is drawn by its own rule, in its own faces.
-  ".cm-line.md-table-source :not(.md-chip-math, .md-chip-math *)": { font: "inherit !important", color: "inherit !important", textDecoration: "none" },
+  // Over what follows the table, so showing them moves nothing.
+  ".md-table-tools": { display: "flex", gap: "0.3em", position: "absolute", top: "100%", marginTop: "-0.25em", zIndex: "2", visibility: "hidden" },
+  ".md-table:hover .md-table-tools, .md-table:focus-within .md-table-tools": { visibility: "visible" },
+  ".md-table-tools button": { font: "inherit", fontSize: "0.72em", padding: "0.15em 0.55em", border: "1px solid var(--line)", borderRadius: "6px", background: "var(--bg-elev)", color: "var(--muted)", cursor: "pointer" },
+  ".md-table-tools button:hover": { color: "var(--ink)", borderColor: "var(--line-strong)" },
 });
 
 export const tableRendering: Extension = [
-  used,
-  followingMath,
   tables.extension,
-  pressedOutside,
   deletedWhole,
-  // The arrow keys pass over a table's unseen lines from side to side, as over one letter.
-  EditorView.atomicRanges.of((view) => Decoration.set(hidden(view.state).map((t) => hiddenLines.range(t.from, t.to)))),
+  // The arrow keys pass over a table from side to side, as over one letter.
+  EditorView.atomicRanges.of((view) => view.state.field(tables.field).drawn),
   // Not a keymap: one added here would put every editor key, Escape among them, ahead of vim's own handling.
   EditorView.domEventHandlers({
     keydown(event, view) {

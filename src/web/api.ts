@@ -1,4 +1,4 @@
-import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type Shared, type Upload } from "../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, type Agent, type ConnectOptions, type Me, type OpErrorCode, type OpInput, type Results, type Shared, type Upload } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -10,40 +10,17 @@ export class ApiError extends Error {
   }
 }
 
-const sessionListeners = new Set<() => void>();
-let signedOut = false;
-const sessionIs = (out: boolean) => {
-  if (out === signedOut) return;
-  signedOut = out;
-  for (const listener of [...sessionListeners]) listener();
-};
-
-/**
- * Whether the server last said this browser is signed out, as it does once a session ends under an
- * open page. Nothing is worth sending again until it is false, which any answered request makes it.
- */
-export const session = {
-  subscribe(listener: () => void) {
-    sessionListeners.add(listener);
-    return () => void sessionListeners.delete(listener);
-  },
-  signedOut: () => signedOut,
-};
-
 /** Browsers cap a keepalive request body at 64 KiB, counted in bytes. */
 const KEEPALIVE_BYTES = 60_000;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, credentials: "same-origin" });
   const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-  // A refusal is an answer to whoever is signed in, as much as a result is. A fault says nothing either way.
-  if (res.status === 401) sessionIs(true);
-  else if (res.status < 500) sessionIs(false);
   if (!res.ok) throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? res.statusText);
   return body as T;
 }
 
-export const getMe = () => request<MeHere>("/api/me");
+export const getMe = () => request<Me>("/api/me");
 
 const refused = new Set<() => void>();
 
@@ -111,16 +88,6 @@ export function sendUpload(workspaceId: string, file: Blob, as: { name: string; 
   });
 }
 
-/** The first `upTo` bytes of an upload, from the address its bytes are asked for, which answers as it answers a picture: by the session, through the same check. */
-export async function readUpload(address: string, upTo: number): Promise<Uint8Array> {
-  const res = await fetch(address, { headers: { Range: `bytes=0-${upTo - 1}` }, credentials: "same-origin", cache: "no-store" });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-    throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? "The file couldn't be read.");
-  }
-  return new Uint8Array(await res.arrayBuffer()).subarray(0, upTo);
-}
-
 /** What a link opens, asked as whoever holds it. Neither asks who that is unless the link is for people signed in. */
 export const openShared = (token: string) => request<Shared>(`/api/shared/${token}`);
 export const readShared = (token: string, noteId: string) => request<Results["shared.read"]>(`/api/shared/${token}/notes/${noteId}`);
@@ -130,10 +97,6 @@ export const listAgents = () => request<{ agents: Agent[] }>("/api/agents").then
 /** The token in the answer is the only time it can be seen. */
 export const connectAgent = (name: string, options: ConnectOptions) =>
   request<{ agent: Agent; token: string }>("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, ...options }) });
-
-/** Changes what an agent may do. Its token stays the one it has. */
-export const editAgent = (id: string, edit: AgentEdit) =>
-  request<{ agent: Agent }>(`/api/agents/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then((r) => r.agent);
 
 export const disconnectAgent = (id: string) => request<unknown>(`/api/agents/${id}`, { method: "DELETE" });
 

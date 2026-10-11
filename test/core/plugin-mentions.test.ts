@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mentionsIn } from "../../src/core/mentions.ts";
 import type { Contact, Member } from "../../src/core/protocol.ts";
-import { changeOf, draftOf, fieldsOf, labelChoices, labelWords, typeOf } from "../../src/web/plugins/mentions/fields.ts";
 import { newlyMentioned, offered, shown, startsWords, type People } from "../../src/web/plugins/mentions/people.ts";
 
 const ADA: Member = { personId: "aaaaaaaaaaaa", name: "Ada Lovelace", role: "admin", email: "ada@example.com" };
@@ -9,7 +8,7 @@ const GRACE: Member = { personId: "gggggggggggg", name: "Grace Hopper", role: "e
 const contact = (name: string, more: Partial<Contact> = {}): Contact => ({ sourceId: "sample-contacts", id: name, name, emails: [], phones: [], organization: null, url: null, ...more });
 const PEOPLE: People = {
   members: new Map([ADA, GRACE].map((m) => [m.personId, m])),
-  contacts: [contact("Ada Lovelace", { emails: [{ value: "ADA@example.com", type: null }] }), contact("Grace Hopper", { emails: [{ value: "grace@navy.example", type: null }] }), contact("Sam Okafor", { organization: "Okafor Plumbing" }), contact("Zoë Álvarez", { emails: [{ value: "zoe@example.com", type: null }] }), contact("  ")],
+  contacts: [contact("Ada Lovelace", { emails: ["ADA@example.com"] }), contact("Grace Hopper", { emails: ["grace@navy.example"] }), contact("Sam Okafor", { organization: "Okafor Plumbing" }), contact("Zoë Álvarez", { emails: ["zoe@example.com"] }), contact("  ")],
 };
 const labels = (typed: string, people = PEOPLE) => offered(typed, people, ADA.personId).map((item) => `${item.label} (${item.detail}, ${item.tone})`);
 
@@ -63,92 +62,5 @@ describe("who a change newly mentions", () => {
     const now = mentionsIn("@[[aaaaaaaaaaaa|Ada]] and @[[Sam Okafor]] and @[[gggggggggggg|Grace]] @[[gggggggggggg]] @[[Lin Wei]] @[[zzzzzzzzzzzz|Gone]]");
     expect(newlyMentioned(before, now, PEOPLE.members)).toEqual([GRACE]);
     expect(newlyMentioned(now, now, PEOPLE.members)).toEqual([]);
-  });
-});
-
-describe("a contact's form", () => {
-  const sam = { sourceId: "s", id: "sam", name: "Sam Okafor", emails: [], phones: [{ value: "+1 555 0142", type: null }], organization: "Okafor Plumbing", url: null, title: "Owner", addresses: [{ value: "12 Water Lane", type: null }], birthday: "--04-21", notes: "Prefers a text", photo: null, urls: [{ value: "https://okafor.example", type: null }], etag: "3" };
-
-  it("changes nothing when nothing is changed, and only what differs when something is", () => {
-    expect(changeOf(sam, draftOf(sam))).toEqual({ change: {} });
-    const draft = { ...draftOf(sam), emails: [{ value: "  sam@okafor.example ", type: null }, { value: "", type: null }], title: " ", birthday: { day: "21", month: "4", year: "1988" }, notes: "Prefers a text\n" };
-    expect(changeOf(sam, draft)).toEqual({ change: { emails: [{ value: "sam@okafor.example", type: null }], title: null, birthday: "1988-04-21" } });
-  });
-
-  it("sends a label changed alone as the whole of its field, each line with its label", () => {
-    const draft = draftOf(sam);
-    expect(changeOf(sam, { ...draft, phones: [{ value: "+1 555 0142", type: "mobile" }], urls: [{ value: "https://okafor.example", type: "Shop" }] })).toEqual({
-      change: { phones: [{ value: "+1 555 0142", type: "mobile" }], urls: [{ value: "https://okafor.example", type: "Shop" }] },
-    });
-  });
-
-  it("says why a draft can't be saved: no name, half a birthday, a day the month doesn't have", () => {
-    expect(changeOf(sam, { ...draftOf(sam), name: "  " })).toEqual({ problem: "A contact needs a name" });
-    expect(changeOf(sam, { ...draftOf(sam), birthday: { day: "21", month: "", year: "" } })).toEqual({ problem: "A birthday needs its day and its month" });
-    expect(changeOf(sam, { ...draftOf(sam), birthday: { day: "29", month: "2", year: "2023" } })).toEqual({ problem: "February 2023 has no day 29" });
-    expect(changeOf(sam, { ...draftOf(sam), birthday: { day: "29", month: "2", year: "" } })).toEqual({ change: { birthday: "--02-29" } });
-    expect(changeOf(sam, { ...draftOf(sam), birthday: { day: "", month: "", year: "" } })).toEqual({ change: { birthday: null } });
-  });
-});
-
-describe("a contact's labels", () => {
-  it("are shown in plain words: Google's own by field, the member's own as written, and the field's name for none", () => {
-    expect(
-      [
-        labelWords("emails", "work"),
-        labelWords("emails", "home"),
-        labelWords("phones", "mobile"),
-        labelWords("phones", "work"),
-        labelWords("phones", "workFax"),
-        labelWords("addresses", "home"),
-        labelWords("urls", "blog"),
-        labelWords("urls", "homePage"),
-        labelWords("emails", "Navy"),
-        labelWords("emails", "constructor"),
-        labelWords("phones", null),
-        labelWords("urls", null),
-      ],
-    ).toEqual(["Work email", "Home email", "Mobile", "Work phone", "Work fax", "Home address", "Blog", "Home page", "Navy", "constructor", "Phone", "Website"]);
-  });
-
-  it("are kept as Google's own where what is typed names one, by its type or its words in any case, as typed otherwise, and none for nothing", () => {
-    expect([typeOf("phones", " MOBILE "), typeOf("emails", "work Email"), typeOf("urls", "homepage"), typeOf("urls", "Home  Page"), typeOf("emails", "  Navy  mail "), typeOf("phones", "Work email"), typeOf("addresses", "  ")]).toEqual([
-      "mobile",
-      "work",
-      "homePage",
-      "homePage",
-      "Navy mail",
-      "Work email",
-      null,
-    ]);
-  });
-
-  it("are offered as none, Google's own for the field, and the line's own where the member wrote one", () => {
-    expect(labelChoices("emails", "Navy").map((c) => [c.type, c.words])).toEqual([
-      [null, "No label"],
-      ["home", "Home email"],
-      ["work", "Work email"],
-      ["other", "Other email"],
-      ["Navy", "Navy"],
-    ]);
-    expect(labelChoices("phones", "mobile").map((c) => c.words)).toEqual(["No label", "Mobile", "Home phone", "Work phone", "Main", "Home fax", "Work fax", "Pager", "Other phone"]);
-  });
-
-  it("head each line of a card, with lines one after another under the same label listed under it once", () => {
-    const card = {
-      sourceId: "s", id: "g", name: "Grace Hopper", organization: null, url: null, title: null, birthday: null, notes: null, photo: null, etag: "1",
-      emails: [{ value: "grace@example.com", type: "work" }, { value: "g@example.com", type: "work" }, { value: "hopper@navy.example", type: "Navy" }, { value: "gh@example.org", type: null }],
-      phones: [{ value: "+1 555 0100", type: "mobile" }],
-      addresses: [{ value: "1 Yard Lane", type: "home" }],
-      urls: [{ value: "https://grace.example", type: "blog" }],
-    };
-    expect(fieldsOf(card).map((f) => [f.label, ...f.values])).toEqual([
-      ["Work email", "grace@example.com", "g@example.com"],
-      ["Navy", "hopper@navy.example"],
-      ["Email", "gh@example.org"],
-      ["Mobile", "+1 555 0100"],
-      ["Home address", "1 Yard Lane"],
-      ["Blog", "https://grace.example"],
-    ]);
   });
 });

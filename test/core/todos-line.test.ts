@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { summarize } from "../../src/core/markdown.ts";
-import * as core from "../../src/core/todos.ts";
 import { completeTodo, isDay, locateTodo, parseTodo, rewriteTodo, tagsIn, todoIndex, todosIn, type Todo, type TodoChange } from "../../src/core/todos.ts";
 
 const read = (line: string) => {
   const todo = parseTodo(line);
-  return todo && { done: todo.done, importance: todo.importance, due: todo.due?.date ?? null, tags: todo.tags.map((t) => t.name), words: todo.words };
+  return todo && { done: todo.done, importance: todo.importance, due: todo.due?.date ?? null, projects: todo.projects.map((p) => p.name), tags: todo.tags.map((t) => t.name), words: todo.words };
 };
 
 describe("a todo's line", () => {
@@ -13,24 +12,15 @@ describe("a todo's line", () => {
     expect(["- [ ] a", "  * [x] b", "\t+ [X] c", "3. [ ] d", "4) [ ]", "- [ ]no space", "[ ] not in a list", "- [] empty", "- [y] other", "> - [ ] quoted"].map((line) => parseTodo(line)?.done ?? null)).toEqual([false, true, true, false, false, null, null, null, null, null]);
   });
 
-  it("reads importance, a due date, and tags from its tokens, and the words left over", () => {
-    expect(read("- [ ] !! Call the bank due:2026-10-14 about #money, then follow up.")).toEqual({
+  it("reads importance, a due date, projects, and tags from its tokens, and the words left over", () => {
+    expect(read("- [ ] !! Call the bank due:2026-10-14 +Home about #money, then +Follow-up.")).toEqual({
       done: false,
       importance: 2,
       due: "2026-10-14",
+      projects: ["Home", "Follow-up"],
       tags: ["money"],
-      words: "Call the bank about #money, then follow up.",
+      words: "Call the bank about #money, then .",
     });
-  });
-
-  it("has no projects: a +Name is words like any other, read and left as written", () => {
-    const line = "- [ ] !! Call the bank due:2026-10-14 +Home about +Follow-up.";
-    expect(read(line)).toEqual({ done: false, importance: 2, due: "2026-10-14", tags: [], words: "Call the bank +Home about +Follow-up." });
-    expect(Object.keys(parseTodo(line)!).sort()).toEqual(["assignees", "box", "done", "due", "every", "importance", "importanceAt", "lastDone", "tags", "words"]);
-    expect(completeTodo(line, "2026-10-11")).toEqual({ line: "- [x] !! Call the bank due:2026-10-14 +Home about +Follow-up.", filed: null });
-    expect(rewriteTodo(line, { importance: 0, due: null })).toBe("- [ ] Call the bank +Home about +Follow-up.");
-    expect(Object.keys(todoIndex(line)).sort()).toEqual(["tags", "todos"]);
-    expect("isProjectName" in core).toBe(false);
   });
 
   it("says where each token is, so it can be drawn and rewritten", () => {
@@ -38,7 +28,7 @@ describe("a todo's line", () => {
     const todo = parseTodo(line, 100)!;
     const at = (span: { from: number; to: number } | null) => span && line.slice(span.from - 100, span.to - 100);
 
-    expect([at(todo.box), at(todo.importanceAt), at(todo.due), todo.tags.map(at)]).toEqual(["[x]", "!!!", "due:2026-01-31", ["#tax"]]);
+    expect([at(todo.box), at(todo.importanceAt), at(todo.due), todo.projects.map(at), todo.tags.map(at)]).toEqual(["[x]", "!!!", "due:2026-01-31", ["+Bills"], ["#tax"]]);
   });
 
   it("takes importance only right after the checkbox, and at most three marks", () => {
@@ -50,17 +40,19 @@ describe("a todo's line", () => {
     expect(["2026-12-31", "2026-13-01", "2026-00-10", "2025-02-29", "26-01-01", "0000-01-01"].map(isDay)).toEqual([true, false, false, false, false, false]);
   });
 
-  it("takes a tag only as #tag with no space", () => {
+  it("takes a project only as +Name standing alone, and a tag as #tag with no space", () => {
+    expect(read("- [ ] 1 + 2, C++ and a+b, +1, + Work, (+Paren) then +Écrire and +x_1")!.projects).toEqual(["Écrire", "x_1"]);
     expect(read("- [ ] # heading-like, #12, a#b, #v2 and #área/sub")!.tags).toEqual(["v2", "área/sub"]);
   });
 
   it("leaves tokens in code, in a link to a note, and in an address as the text they are", () => {
-    expect(read("- [ ] see `+Code due:2026-01-01 #x` and [[abc123def456|+Shown #y]] and [docs](https://e.com/a +Url #frag) #real")).toEqual({
+    expect(read("- [ ] see `+Code due:2026-01-01 #x` and [[abc123def456|+Shown #y]] and [docs](https://e.com/a +Url #frag) +Real")).toEqual({
       done: false,
       importance: 0,
       due: null,
-      tags: ["real"],
-      words: "see `+Code due:2026-01-01 #x` and [[abc123def456|+Shown #y]] and [docs](https://e.com/a +Url #frag) #real",
+      projects: ["Real"],
+      tags: [],
+      words: "see `+Code due:2026-01-01 #x` and [[abc123def456|+Shown #y]] and [docs](https://e.com/a +Url #frag)",
     });
   });
 });
@@ -73,6 +65,7 @@ describe("rewriting a todo's line", () => {
     [{ importance: 3 }, (t) => t.importanceAt!, "!!!"],
     [{ importance: 1 }, (t) => t.importanceAt!, "!"],
     [{ due: "2027-01-02" }, (t) => t.due!, "due:2027-01-02"],
+    [{ removeProject: "home", addProject: "Work" }, (t) => t.projects[0]!, "+Work"],
   ];
 
   it("changes one token and leaves every other character of the line as it was", () => {
@@ -89,6 +82,7 @@ describe("rewriting a todo's line", () => {
       [{ importance: 0 }, { importance: 2 }],
       [{ importance: 3 }, { importance: 2 }],
       [{ due: "2030-12-25" }, { due: "2026-10-14" }],
+      [{ removeProject: "HOME", addProject: "Work" }, { removeProject: "work", addProject: "Home" }],
     ];
     for (const [there, again] of back) expect(rewriteTodo(rewriteTodo(line, there), again), JSON.stringify(there)).toBe(line);
   });
@@ -96,41 +90,23 @@ describe("rewriting a todo's line", () => {
   it("takes a token away with the space before it, and adds one with a space before it", () => {
     expect(rewriteTodo("- [ ] !! a due:2026-10-14 +Home b", { importance: 0 })).toBe("- [ ] a due:2026-10-14 +Home b");
     expect(rewriteTodo("- [ ] !! a due:2026-10-14 +Home b", { due: null })).toBe("- [ ] !! a +Home b");
+    expect(rewriteTodo("- [ ] !! a due:2026-10-14 +Home b +home", { removeProject: "Home" })).toBe("- [ ] !! a due:2026-10-14 b");
     expect(rewriteTodo("- [ ] a", { importance: 1 })).toBe("- [ ] ! a");
-    expect(rewriteTodo("- [ ] a +Home  ", { due: "2026-10-14" })).toBe("- [ ] a +Home due:2026-10-14  ");
+    expect(rewriteTodo("- [ ] a  ", { due: "2026-10-14", addProject: "Home" })).toBe("- [ ] a due:2026-10-14 +Home  ");
     expect(rewriteTodo("- [ ]", { importance: 2, due: "2026-10-14" })).toBe("- [ ] !! due:2026-10-14");
-    expect(rewriteTodo("- [ ] a due:2026-10-14", { importance: 3, due: null })).toBe("- [ ] !!! a");
-  });
-
-  it("says other words with the importance before them and the due date after them, and leaves a line that says them already as it is", () => {
-    expect(rewriteTodo("  - [x] !! a due:2026-10-14 b #c", { words: "new words #d" })).toBe("  - [x] !! new words #d due:2026-10-14");
-    expect(rewriteTodo("- [ ] a", { words: " spaced out " })).toBe("- [ ] spaced out");
-    expect(rewriteTodo("- [ ] a due:2026-10-14", { words: "b", due: null, importance: 1 })).toBe("- [ ] ! b");
-    expect(rewriteTodo("- [ ] a  b due:2026-10-14", { words: "a b" })).toBe("- [ ] a  b due:2026-10-14");
-    expect(() => rewriteTodo("- [ ] a", { words: "a\nb" })).toThrow(RangeError);
-    // Words that write their own importance or due date have it in place of the line's, once.
-    expect(rewriteTodo("- [ ] !! a due:2026-10-14", { words: "!!! b due:2026-01-01" })).toBe("- [ ] !!! b due:2026-01-01");
-    expect(rewriteTodo("- [ ] a due:2026-10-14", { words: "! b" })).toBe("- [ ] ! b due:2026-10-14");
-    // What is in inline code is written as it is typed.
-    expect(rewriteTodo("- [ ] a", { words: "run `x  y`" })).toBe("- [ ] run `x  y`");
-  });
-
-  it("keeps how a todo repeats and when it was last done after new words, unless the words write their own", () => {
-    expect(rewriteTodo("- [ ] ! a due:2026-10-14 every:2w done:2026-10-01x3 #c", { words: "b #c" })).toBe("- [ ] ! b #c due:2026-10-14 every:2w done:2026-10-01x3");
-    expect(rewriteTodo("- [ ] a every:2w", { words: "b every:mon" })).toBe("- [ ] b every:mon");
-    expect(rewriteTodo("- [ ] a every:1d done:2026-10-01x3", { words: "b done:2026-10-13x4" })).toBe("- [ ] b done:2026-10-13x4 every:1d");
-    expect(rewriteTodo("- [ ] a every:2w", { words: "b", every: null })).toBe("- [ ] b");
+    expect(rewriteTodo("- [ ] a due:2026-10-14", { importance: 3, due: null, addProject: "P" })).toBe("- [ ] !!! a +P");
   });
 
   it("writes nothing when the line already says it, and nothing to a line that isn't a todo", () => {
-    const same: TodoChange[] = [{ done: false }, { importance: 2 }, { due: "2026-10-14" }, {}];
+    const same: TodoChange[] = [{ done: false }, { importance: 2 }, { due: "2026-10-14" }, { addProject: "HOME" }, { removeProject: "Other" }, { addProject: "Home", removeProject: "home" }, {}];
     for (const change of same) expect(rewriteTodo(line, change), JSON.stringify(change)).toBe(line);
     expect(rewriteTodo("- [X] kept as written", { done: true })).toBe("- [X] kept as written");
     expect(rewriteTodo("Just words +Home", { done: true, due: "2026-10-14" })).toBe("Just words +Home");
   });
 
-  it("refuses a due date that isn't a day", () => {
+  it("refuses a due date that isn't a day and a project name that isn't one", () => {
     expect(() => rewriteTodo(line, { due: "2026-02-30" })).toThrow(RangeError);
+    expect(() => rewriteTodo(line, { addProject: "two words" })).toThrow(RangeError);
   });
 
   it("checks a todo off as one function", () => {
@@ -151,12 +127,17 @@ describe("a note's todos and tags", () => {
     expect(summarize(note).openTodos).toBe(2);
   });
 
-  it("are indexed with the note's tags, each once ignoring case", () => {
+  it("are indexed with each todo's projects once, ignoring case, and the note's tags", () => {
     expect(todoIndex(note)).toEqual({
       todos: [
         [2, 0, 0, null, "- [ ] one +A"],
         [6, 1, 0, null, "      - [x] deep +a +A"],
         [8, 0, 0, null, "- [ ] one +A"],
+      ],
+      projects: [
+        [2, "a", "A"],
+        [6, "a", "A"],
+        [8, "a", "A"],
       ],
       tags: [
         ["q4", "q4"],

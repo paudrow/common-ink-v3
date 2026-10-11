@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { App, Dispose, OpInput, Plugin, PluginHost, SettingValue } from "../../src/web/plugin-api.ts";
 import { createPluginHost, type Host, type HostOptions } from "../../src/web/pluginHost.ts";
-import { onPlatform } from "../../src/web/keybindings.ts";
-import { html as htmlPlugin } from "../../src/web/plugins/html/index.ts";
-import { todos } from "../../src/web/plugins/todos/index.tsx";
 import { documentOf, editSetting } from "../../src/web/settings.ts";
 
 const View = () => null;
@@ -20,16 +17,15 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
     write(key: string, value: SettingValue | undefined) {
       text = editSetting(text, key, value);
       host.settingsChanged(documentOf(text)!);
-      return true;
     },
     provide: (plugin) => ({
       workspace: { id: "w1", name: "Acme", role: "editor" },
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
-      agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
+      agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
       members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
       sharing: { of: async () => ({}) as never, grant: async () => ({}) as never, link: async () => null, revoke: async () => {}, setPrivate: async () => ({ removed: 0 }), all: async () => [] },
-      uploads: { referred: () => undefined, onReferred: () => () => {}, learn: () => {}, address: (id: string) => `/files/${id}`, tabAddress: () => null, bytes: async (id: string, upTo: number) => new TextEncoder().encode(`${id}:${upTo}`), send: async () => ({ id: "sent" }) as never },
+      uploads: { referred: () => undefined, onReferred: () => () => {}, learn: () => {}, address: (id: string) => `/files/${id}`, send: async () => ({ id: "sent" }) as never },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,
@@ -71,7 +67,7 @@ describe("plugin host", () => {
     const { host, ids } = hostWith([notes, palette]);
     const { views, embeds, keybindings } = host.contributions();
 
-    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.toggle.notes", "plugins.toggle.palette"]);
+    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.notes", "plugins.disable.palette"]);
     expect(keybindings).toEqual({ "mod+n": "note.new", "mod+shift+p": "commands.show", f1: "commands.show" });
     expect(views.column.map((v) => v.id)).toEqual(["list"]);
     expect(views.page.map((v) => [v.id, v.path])).toEqual([["todos", "/todos"]]);
@@ -125,7 +121,7 @@ describe("plugin host", () => {
     const { host, ids, stored } = hostWith([notes, palette]);
 
     host.setEnabled("notes", false);
-    expect(ids()).toEqual(["commands.show", "plugins.toggle.notes", "plugins.toggle.palette"]);
+    expect(ids()).toEqual(["commands.show", "plugins.enable.notes", "plugins.disable.palette"]);
     expect(host.contributions().keybindings).toEqual({ "mod+shift+p": "commands.show", f1: "commands.show" });
     expect(host.contributions().views.column).toEqual([]);
     expect(host.contributions().views.page).toEqual([]);
@@ -138,7 +134,7 @@ describe("plugin host", () => {
     ]);
 
     host.setEnabled("notes", true);
-    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.toggle.notes", "plugins.toggle.palette"]);
+    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.notes", "plugins.disable.palette"]);
     expect(host.contributions().embeds.map((e) => e.name)).toEqual(["timer"]);
     expect(stored()).toEqual({});
   });
@@ -146,92 +142,19 @@ describe("plugin host", () => {
   it("leaves a plugin off that was turned off before, and turns it on from its command", () => {
     const { host, ids } = hostWith([notes, palette], { settings: { "palette.enabled": false } });
 
-    expect(ids()).toEqual(["note.new", "go.todos", "plugins.toggle.notes", "plugins.toggle.palette"]);
+    expect(ids()).toEqual(["note.new", "go.todos", "plugins.disable.notes", "plugins.enable.palette"]);
     expect(host.contributions().commands.at(-1)!.title).toBe("Enable plugin: Command palette");
 
-    host.run("plugins.toggle.palette");
-    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.toggle.notes", "plugins.toggle.palette"]);
-  });
-
-  it("keeps a key given to a plugin's switch through turning it off and on, under one command whose title says which it does", () => {
-    const { host, wrote, stored, problems, ids } = hostWith([notes, palette], { settings: { "keybindings.plugins.toggle.notes": ["mod+shift+9"] } });
-    const key = onPlatform("mod+shift+9", false);
-    const toggle = () => host.contributions().commands.find((c) => c.id === host.contributions().keybindings[key])!;
-
-    expect([toggle().id, toggle().title]).toEqual(["plugins.toggle.notes", "Disable plugin: Notes"]);
-    host.run(toggle().id);
-    wrote(stored());
-    // It used to become another command once the plugin was off, which the key was not bound to and the settings called unknown.
-    expect(ids()).not.toContain("note.new");
-    expect([toggle().id, toggle().title]).toEqual(["plugins.toggle.notes", "Enable plugin: Notes"]);
-    expect(problems()).toEqual([]);
-    host.run(toggle().id);
-    wrote(stored());
-    expect(ids()).toContain("note.new");
-    expect([toggle().id, toggle().title]).toEqual(["plugins.toggle.notes", "Disable plugin: Notes"]);
-    expect(problems()).toEqual([]);
-  });
-
-  it("carries on when a plugin throws as it is told of a change to the settings, or as it is stopped, and holds it against that plugin", () => {
-    const heard: string[] = [];
-    const stopped: string[] = [];
-    const loud: Plugin = {
-      id: "loud",
-      name: "Loud",
-      settings: { size: { type: "integer", default: 1, title: "Size" } },
-      activate(h) {
-        h.settings.subscribe(() => {
-          throw new Error("The listener broke");
-        });
-        h.commands.register({ id: "loud.go", title: "Go", run: () => {} });
-        return () => {
-          throw new Error("The stop broke");
-        };
-      },
-    };
-    const quiet: Plugin = {
-      id: "quiet",
-      name: "Quiet",
-      settings: { size: { type: "integer", default: 1, title: "Size" } },
-      activate(h) {
-        h.settings.subscribe(() => heard.push(`quiet ${h.settings.get<number>("size")}`));
-        return () => stopped.push("quiet");
-      },
-    };
-    const { host, wrote, ids } = hostWith([loud, quiet]);
-    const errorOf = (id: string) => host.contributions().plugins.find((p) => p.id === id)!.error;
-
-    // Either throw used to come out of the change itself, in the middle of the settings being saved, and nothing was saved after it.
-    expect(() => wrote({ "quiet.size": 2 })).not.toThrow();
-    expect(heard).toEqual(["quiet 2"]);
-    expect(errorOf("loud")).toBe("The listener broke");
-
-    expect(() => wrote({ "quiet.size": 2, "loud.enabled": false, "quiet.enabled": false })).not.toThrow();
-    expect(stopped).toEqual(["quiet"]);
-    expect(ids()).not.toContain("loud.go");
-    expect(host.contributions().plugins.map((p) => [p.id, p.enabled])).toEqual([["loud", false], ["quiet", false]]);
-    expect(errorOf("loud")).toBe("The stop broke");
-
-    wrote({});
-    expect(ids()).toContain("loud.go");
-    expect(() => host.dispose()).not.toThrow();
+    host.run("plugins.enable.palette");
+    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.notes", "plugins.disable.palette"]);
   });
 
   it("won't turn off a required plugin, whatever was stored", () => {
     const { host, ids } = hostWith([notes, palette], { required: ["notes"], settings: { "notes.enabled": false } });
 
     host.setEnabled("notes", false);
-    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.toggle.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
-  });
-
-  it("says which plugins came with the app, and no others", () => {
-    const { host } = hostWith([notes, palette], { builtIn: ["notes"] });
-
-    expect(host.contributions().plugins.map((p) => [p.id, p.builtIn])).toEqual([
-      ["notes", true],
-      ["palette", false],
-    ]);
+    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, error: null });
   });
 
   it("leaves out the whole of a plugin that can't start, and says why", () => {
@@ -245,7 +168,7 @@ describe("plugin host", () => {
     };
     const { host, ids } = hostWith([notes, clashing]);
 
-    expect(ids()).toEqual(["note.new", "go.todos", "plugins.toggle.notes", "plugins.toggle.clash"]);
+    expect(ids()).toEqual(["note.new", "go.todos", "plugins.disable.notes", "plugins.disable.clash"]);
     expect(host.contributions().commands[0]!.title).toBe("New note");
     expect(host.contributions().plugins[1]!.error).toBe("There's already a command with the id note.new");
   });
@@ -268,7 +191,7 @@ describe("plugin host", () => {
     first();
     host.run("a.go");
     expect(ran).toEqual(["second"]);
-    expect(ids()).toEqual(["a.go", "plugins.toggle.a"]);
+    expect(ids()).toEqual(["a.go", "plugins.disable.a"]);
   });
 
   it("lists commands for a plugin with each one's first chord as a person reads it", () => {
@@ -276,9 +199,9 @@ describe("plugin host", () => {
     hostWith([notes, palette, { id: "reader", name: "Reader", activate: (h) => void (list = h.commands.list) }]);
 
     expect(list().slice(0, 3)).toEqual([
-      { id: "note.new", title: "New note", shortcut: "⌘N", keys: ["⌘N"], group: undefined },
-      { id: "go.todos", title: "Go to Todos", shortcut: undefined, keys: [], group: undefined },
-      { id: "commands.show", title: "Show all commands", shortcut: "⇧⌘P", keys: ["⇧⌘P", "F1"], group: undefined },
+      { id: "note.new", title: "New note", shortcut: "⌘N" },
+      { id: "go.todos", title: "Go to Todos", shortcut: undefined },
+      { id: "commands.show", title: "Show all commands", shortcut: "⇧⌘P" },
     ]);
   });
 
@@ -331,20 +254,20 @@ describe("plugin host", () => {
       plugins: [counted("a"), counted("b"), counted("c")],
       mac: true,
       settings: { "b.enabled": false },
-      write: () => false,
+      write: () => {},
       provide: () => ({}) as never,
     });
     const ids = () => host.contributions().commands.map((c) => c.id);
 
     expect(events).toEqual([]);
-    expect(ids()).toEqual(["a.go", "c.go", "plugins.toggle.a", "plugins.toggle.b", "plugins.toggle.c"]);
+    expect(ids()).toEqual(["a.go", "c.go", "plugins.disable.a", "plugins.enable.b", "plugins.disable.c"]);
     expect(events).toEqual(["start a", "start c"]);
 
     host.dispose();
     host.dispose();
     expect(events).toEqual(["start a", "start c", "stop a", "stop c"]);
 
-    expect(ids()).toEqual(["a.go", "c.go", "plugins.toggle.a", "plugins.toggle.b", "plugins.toggle.c"]);
+    expect(ids()).toEqual(["a.go", "c.go", "plugins.disable.a", "plugins.enable.b", "plugins.disable.c"]);
     expect(events).toEqual(["start a", "start c", "stop a", "stop c", "start a", "start c"]);
   });
 
@@ -363,7 +286,7 @@ describe("plugin host", () => {
       plugins: [notes, drawing],
       mac: true,
       settings: {},
-      write: (key, value) => (host.settingsChanged(value === undefined ? {} : { [key]: value }), true),
+      write: (key, value) => host.settingsChanged(value === undefined ? {} : { [key]: value }),
       provide: (plugin) => ({ app: () => ({ path: `/as/${plugin.id}` }) as App }) as never,
     });
     const errorOf = (id: string) => host.contributions().plugins.find((p) => p.id === id)!.error;
@@ -417,82 +340,7 @@ describe("plugin host", () => {
     await expect(perform({ type: "settings.read" })).rejects.toThrow("Greedy can't settings.read");
     expect(performed).toEqual([]);
     expect(stored()).toEqual({});
-    expect(Object.keys(asked!.settings).sort()).toEqual(["get", "set", "subscribe"]);
-  });
-
-  it("lets a plugin change only a setting it declares remembered, to a value the setting takes, and no other plugin's", () => {
-    let asked: PluginHost | null = null;
-    let html: PluginHost | null = null;
-    const calendar: Plugin = {
-      id: "calendar",
-      name: "Calendar",
-      settings: {
-        hidden: { type: "list", default: [], maxItems: 2, maxLength: 20, remembered: true, title: "Hidden calendars" },
-        weekends: { type: "boolean", default: true, title: "Highlight weekends" },
-      },
-      activate: (h) => void (asked = h),
-    };
-    const { stored } = hostWith([calendar, { ...htmlPlugin, activate: (h) => void (html = h) }]);
-    expect(asked!.settings.set("hidden", ["cal work", "cal work"])).toBe(true);
-    expect(stored()).toEqual({ "calendar.hidden": ["cal work"] });
-    expect(asked!.settings.get("hidden")).toEqual(["cal work"]);
-    expect(asked!.settings.set("hidden", ["a", "b", "c"]), "more than it takes").toBe(false);
-    expect(asked!.settings.set("hidden", "cal work" as never), "not a list").toBe(false);
-    expect(stored()).toEqual({ "calendar.hidden": ["cal work"] });
-    expect(asked!.settings.set("hidden", []), "the default is taken out").toBe(true);
-    expect(stored()).toEqual({});
-    expect(() => asked!.settings.set("weekends", false)).toThrow("Calendar can't change weekends: a plugin changes only a setting it declares remembered");
-    expect(() => asked!.settings.set("html.run" as never, "automatically")).toThrow("Calendar can't change html.run");
-    expect(() => html!.settings.set("run", "automatically")).toThrow("HTML embeds can't change run");
-    expect(asked!.settings.set("hidden", ["x".repeat(20)]), "within what the setting takes").toBe(true);
-    expect(stored()).toEqual({ "calendar.hidden": ["x".repeat(20)] });
-  });
-
-  it("lets the Todos page keep its order as a remembered setting, one of its sorts, and no other plugin change it", () => {
-    let asked: PluginHost | null = null;
-    let other: PluginHost | null = null;
-    let html: PluginHost | null = null;
-    const { stored } = hostWith([
-      { ...todos, activate: (h) => void (asked = h) },
-      { id: "other", name: "Other", activate: (h) => void (other = h) },
-      { ...htmlPlugin, activate: (h) => void (html = h) },
-    ]);
-    expect(asked!.settings.get("sort")).toBe("due");
-    expect(asked!.settings.set("sort", "priority")).toBe(true);
-    expect(stored()).toEqual({ "todos.sort": "priority" });
-    expect(asked!.settings.get("sort")).toBe("priority");
-    expect(asked!.settings.set("sort", "loudest"), "not one of the sorts").toBe(false);
-    expect(asked!.settings.set("sort", 3 as never), "not a word").toBe(false);
-    expect(stored()).toEqual({ "todos.sort": "priority" });
-    expect(() => asked!.settings.set("sayWhyLeaving", false)).toThrow("Todos can't change sayWhyLeaving: a plugin changes only a setting it declares remembered");
-    expect(() => other!.settings.set("todos.sort" as never, "text")).toThrow("Other can't change todos.sort");
-    expect(() => html!.settings.set("run", "automatically")).toThrow("HTML embeds can't change run");
-    expect(stored()).toEqual({ "todos.sort": "priority" });
-    expect(asked!.settings.set("sort", "due"), "the default is taken out").toBe(true);
-    expect(stored()).toEqual({});
-  });
-
-  it("refuses a remembered setting whose key would be another's: a dotted name, or an id that makes a keybinding's", () => {
-    const handed: Record<string, PluginHost> = {};
-    const remembered = (name: string) => ({ [name]: { type: "list", default: [], maxItems: 5, maxLength: 20, remembered: true, title: name } as const });
-    const { stored, host } = hostWith([
-      { id: "a", name: "A", settings: remembered("b.enabled"), activate: (h) => void (handed.a = h) },
-      { id: "a.b", name: "AB", activate: () => {} },
-      { id: "keybindings", name: "Keys", settings: remembered("palette"), activate: (h) => void (handed.keys = h) },
-      { id: "big", name: "Big", settings: { all: { type: "list", default: [], maxItems: 100, maxLength: 400, remembered: true, title: "All" } }, activate: (h) => void (handed.big = h) },
-    ]);
-    expect(() => handed.a!.settings.set("b.enabled", [])).toThrow("A can't change b.enabled");
-    expect(() => handed.keys!.settings.set("palette", ["mod+j"])).toThrow("Keys can't change palette");
-    expect(handed.big!.settings.set("all", Array.from({ length: 100 }, (_, i) => `${i}`.padEnd(200, "x"))), "over 10,000 characters is not kept").toBe(false);
-    expect(stored()).toEqual({});
-    expect(host.contributions().settings.values["a.b.enabled"]).not.toBe(false);
-  });
-
-  it("answers false, and changes nothing, while the member's settings can't be written", () => {
-    let asked: PluginHost | null = null;
-    const calendar: Plugin = { id: "calendar", name: "Calendar", settings: { hidden: { type: "list", default: [], maxItems: 2, maxLength: 20, remembered: true, title: "Hidden" } }, activate: (h) => void (asked = h) };
-    hostWith([calendar], { write: () => false });
-    expect(asked!.settings.set("hidden", ["x"])).toBe(false);
+    expect(Object.keys(asked!.settings).sort()).toEqual(["get", "subscribe"]);
   });
 
   it("refuses a plugin that asks, as an operation, to change who is in the workspace or read its invites, and lets it list the members", async () => {
@@ -552,13 +400,25 @@ describe("plugin host", () => {
     expect(greedy!.uploads.referred("aaaaaaaaaaaa")).toBeNull();
     expect(greedy!.uploads.address("aaaaaaaaaaaa")).toBe("about:blank");
     await expect(greedy!.uploads.send(new Blob(["x"]), { name: "x.txt" })).rejects.toThrow("Greedy isn't given host.uploads.send: only Common Ink's own plugins are");
-    await expect(greedy!.uploads.bytes("aaaaaaaaaaaa", 100)).rejects.toThrow("Greedy isn't given host.uploads.bytes: only Common Ink's own plugins are");
 
     await own!.perform({ type: "upload.list", includeArchived: true });
     expect(performed).toEqual([["uploads", "upload.list"]]);
     expect(own!.uploads.address("aaaaaaaaaaaa")).toBe("/files/aaaaaaaaaaaa");
     expect(await own!.uploads.send(new Blob(["x"]), { name: "x.txt" })).toEqual({ id: "sent" });
-    expect(new TextDecoder().decode(await own!.uploads.bytes("aaaaaaaaaaaa", 100))).toBe("aaaaaaaaaaaa:100");
+  });
+
+  it("gives a plugin that isn't Common Ink's own neither the member's pins nor how far they have read the changes", async () => {
+    let greedy: PluginHost | null = null;
+    let own: PluginHost | null = null;
+    const dashboard: Plugin = { id: "dashboard", name: "Dashboard", activate: (h) => void (own = h) };
+    const { performed } = hostWith([dashboard, { id: "greedy", name: "Greedy", activate: (h) => void (greedy = h) }], { trusted: [dashboard] });
+    const kept: OpInput[] = [{ type: "pin.list" }, { type: "pin.set", id: "aaaaaaaaaaaa", pinned: true }, { type: "visit.read" }, { type: "visit.mark", until: 1 }];
+
+    for (const op of kept) await expect((greedy!.perform as (op: OpInput) => Promise<unknown>)(op), op.type).rejects.toThrow(`Greedy can't ${op.type}: a member's pins and how far they have read the changes are theirs, and are read and changed only by Common Ink's own plugins`);
+    expect(performed).toEqual([]);
+
+    await own!.perform({ type: "visit.mark", until: 1 });
+    expect(performed).toEqual([["dashboard", "visit.mark"]]);
   });
 
   it("refuses every plugin an upload's bytes and its privacy as operations, which go through host.uploads and host.sharing", async () => {
@@ -592,75 +452,6 @@ describe("plugin host", () => {
     expect(performed).toEqual([]);
     expect(Object.keys(asked!.sharing).sort()).toEqual(["all", "grant", "link", "of", "revoke", "setPrivate"]);
   });
-
-  it("defaults HTML embeds to asking first on a server whose embeds have no host of their own, and to running by themselves where they have, and the member's choice wins either way", () => {
-    for (const [embedSite, fallback, chosen] of [[false, "ask first", "automatically"], [true, "automatically", "ask first"]] as const) {
-      const { host, stored } = hostWith([htmlPlugin], { embedSite });
-      const declared = host.contributions().settings.declared.find((d) => d.key === "html.run")!;
-      expect([embedSite, declared.setting.default, host.contributions().settings.values["html.run"]]).toEqual([embedSite, fallback, fallback]);
-      host.setSetting("html.run", chosen);
-      expect([embedSite, host.contributions().settings.values["html.run"]]).toEqual([embedSite, chosen]);
-      // Choosing what is the default here is kept as the member's choice, so it holds on a server set up the other way.
-      host.setSetting("html.run", fallback);
-      expect([embedSite, stored()]).toEqual([embedSite, { "html.run": fallback }]);
-    }
-    // The default of a setting that gives none for such a server is its own on either.
-    const plain: Plugin = { id: "plain", name: "Plain", settings: { mode: { title: "Mode", type: "string", default: "on" } }, activate() {} };
-    expect(hostWith([plain]).host.contributions().settings.values["plain.mode"]).toBe("on");
-  });
-
-  it("lets the HTML embeds plugin read whether to run HTML by itself, and no plugin change it or another read it", async () => {
-    let html: PluginHost | null = null;
-    let other: PluginHost | null = null;
-    const { host, stored, performed } = hostWith(
-      [
-        { ...htmlPlugin, activate: (h) => void (html = h) },
-        { id: "greedy", name: "Greedy", activate: (h) => void (other = h) },
-      ],
-      { embedSite: true },
-    );
-    expect(host.contributions().settings.values["html.run"]).toBe("automatically");
-    expect(html!.settings.get("run")).toBe("automatically");
-    expect(() => other!.settings.get("run")).toThrow("Greedy declares no setting named run");
-    for (const plugin of [html!, other!]) {
-      await expect((plugin.perform as (op: OpInput) => Promise<unknown>)({ type: "settings.write", text: '{"html.run":"automatically"}', baseRevision: 0 })).rejects.toThrow("a plugin can't read or change the member's settings");
-      await expect((plugin.perform as (op: OpInput) => Promise<unknown>)({ type: "settings.read" })).rejects.toThrow("a plugin can't read or change the member's settings");
-    }
-    // Only the member sets it, and what they set is what the plugin reads.
-    host.setSetting("html.run", "ask first");
-    expect(stored()).toEqual({ "html.run": "ask first" });
-    expect(html!.settings.get("run")).toBe("ask first");
-    // A value it can't read asks first, as does one written in other letters or as something other than words.
-    for (const value of ["whenever", "Ask first", ["ask first"], 1]) {
-      host.setSetting("html.run", "automatically");
-      host.setSetting("html.run", value as SettingValue);
-      expect(html!.settings.get("run"), JSON.stringify(value)).toBe("ask first");
-    }
-    expect(performed).toEqual([]);
-  });
-
-  it("sends a plugin's operation as it was looked at, so one whose type changes as it is read can't reach the member's settings", async () => {
-    let asked: PluginHost | null = null;
-    const { performed } = hostWith([{ id: "sly", name: "Sly", activate: (h) => void (asked = h) }]);
-    let reads = 0;
-    const shifty = { get type() { return reads++ === 0 ? "note.list" : "settings.write"; }, text: "{}", baseRevision: 0 };
-    await (asked!.perform as (op: unknown) => Promise<unknown>)(shifty);
-    expect(performed).toEqual([["sly", "note.list"]]);
-    await expect((asked!.perform as (op: unknown) => Promise<unknown>)({ type: 5 })).rejects.toThrow("a plugin can't read or change the member's settings");
-  });
-
-  it("leaves out a plugin whose id another has, so it never starts and can't read that one's settings", () => {
-    const started: string[] = [];
-    let impostor: PluginHost | null = null;
-    const { host } = hostWith([
-      { ...htmlPlugin, activate: () => void started.push("html") },
-      { id: "html", name: "Impostor", settings: { run: { title: "Run", type: "string", default: "x" } }, activate: (h) => void (started.push("impostor"), (impostor = h)) },
-    ]);
-    host.setSetting("html.run", "ask first");
-    expect(started).toEqual(["html"]);
-    expect(impostor).toBeNull();
-    expect(host.contributions().plugins.map((p) => p.name)).toEqual(["HTML embeds"]);
-  });
 });
 
 const size = { type: "integer", default: 14, minimum: 8, maximum: 32, title: "Text size" } as const;
@@ -684,7 +475,7 @@ describe("settings, as the plugin host assembles and reads them", () => {
       ["keybindings.note.new", "Keybindings", "chords", ["mod+n"]],
       ["keybindings.go.todos", "Keybindings", "chords", []],
       ["keybindings.reader.open", "Keybindings", "chords", ["mod+r"]],
-      ["keybindings.plugins.toggle.reader", "Keybindings", "chords", []],
+      ["keybindings.plugins.disable.reader", "Keybindings", "chords", []],
     ]);
     expect(host.contributions().settings.declared.find((d) => d.key === "reader.size")!.setting).toBe(size);
   });
@@ -758,9 +549,9 @@ describe("settings, as the plugin host assembles and reads them", () => {
     const { ids, wrote } = hostWith([notes, palette]);
 
     wrote({ "notes.enabled": false });
-    expect(ids()).toEqual(["commands.show", "plugins.toggle.notes", "plugins.toggle.palette"]);
+    expect(ids()).toEqual(["commands.show", "plugins.enable.notes", "plugins.disable.palette"]);
     wrote({ "notes.enabled": "no" });
-    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.toggle.notes", "plugins.toggle.palette"]);
+    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.notes", "plugins.disable.palette"]);
   });
 
   it("won't start a plugin that declares the setting that turns it off", () => {
@@ -808,7 +599,7 @@ describe("what is the host's and the required plugins' to have", () => {
   });
 
   it("refuses a plugin a command id that starts as the host's own do, and leaves that plugin out", () => {
-    for (const id of ["go.settings", "go.elsewhere", "plugins.toggle.notes", "settings.open"]) {
+    for (const id of ["go.settings", "go.elsewhere", "plugins.enable.notes", "plugins.disable.notes", "settings.open"]) {
       const ran: string[] = [];
       const impostor: Plugin = {
         id: "impostor",
@@ -822,7 +613,7 @@ describe("what is the host's and the required plugins' to have", () => {
 
       expect(errorOf(host, "impostor"), id).toBe(`Only Common Ink adds a command whose id starts with ${id.split(".")[0]}., and this one is ${id}`);
       expect(ids()).not.toContain("impostor.fine");
-      host.run("plugins.toggle.notes");
+      host.run("plugins.enable.notes");
       expect(ran).toEqual([]);
       expect(ids()).toContain("note.new");
       expect(ids()).toContain("go.settings");
@@ -833,7 +624,7 @@ describe("what is the host's and the required plugins' to have", () => {
     const core: Plugin = { id: "core", name: "Core", activate: (h) => void h.commands.register({ id: "settings.open", title: "Open settings", run: () => {} }) };
     const { host, ids } = hostWith([core, notes], { required: ["core"] });
 
-    expect(ids()).toEqual(["settings.open", "note.new", "go.todos", "plugins.toggle.notes"]);
+    expect(ids()).toEqual(["settings.open", "note.new", "go.todos", "plugins.disable.notes"]);
     expect(errorOf(host, "notes")).toBeNull();
   });
 });
@@ -860,7 +651,7 @@ describe("keybindings, as settings", () => {
     wrote({ "keybindings.note.new": ["shift+MOD+k", "f2"] });
 
     expect(shortcuts(host)).toEqual({ "mod+shift+k": "note.new", f2: "note.new", "mod+shift+p": "commands.show", f1: "commands.show" });
-    expect(list()[0]).toEqual({ id: "note.new", title: "New note", shortcut: "⇧⌘K", keys: ["⇧⌘K", "F2"], group: undefined });
+    expect(list()[0]).toEqual({ id: "note.new", title: "New note", shortcut: "⇧⌘K" });
     expect(problems()).toEqual([]);
   });
 
@@ -871,7 +662,7 @@ describe("keybindings, as settings", () => {
     wrote({ "keybindings.commands.show": [] });
 
     expect(shortcuts(host)).toEqual({ "mod+n": "note.new" });
-    expect(list()[2]).toEqual({ id: "commands.show", title: "Show all commands", shortcut: undefined, keys: [], group: undefined });
+    expect(list()[2]).toEqual({ id: "commands.show", title: "Show all commands", shortcut: undefined });
   });
 
   it("gives a chord to the command the member bound it to, and flags that another command had it", () => {
@@ -953,21 +744,20 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
   it("leaves a plugin off that starts off, until the member turns it on, and keeps only that choice", () => {
     const { host, ids, stored } = hostWith([quiet]);
 
-    expect(ids()).toEqual(["plugins.toggle.quiet"]);
+    expect(ids()).toEqual(["plugins.enable.quiet"]);
     expect(host.contributions().settings.declared[0]).toEqual({
       key: "quiet.enabled",
       setting: { type: "boolean", default: false, title: "On", description: "Quiet is off until you turn it on here." },
       group: { id: "quiet", name: "Quiet" },
       active: true,
-      switch: true,
     });
 
     host.setEnabled("quiet", true);
-    expect(ids()).toEqual(["quiet.go", "plugins.toggle.quiet"]);
+    expect(ids()).toEqual(["quiet.go", "plugins.disable.quiet"]);
     expect(stored()).toEqual({ "quiet.enabled": true });
 
     host.setEnabled("quiet", false);
-    expect(ids()).toEqual(["plugins.toggle.quiet"]);
+    expect(ids()).toEqual(["plugins.enable.quiet"]);
     expect(stored()).toEqual({});
   });
 
@@ -976,7 +766,7 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
 
     wrote({ "quiet.enabled": "yes", "notes.enabled": "no" });
 
-    expect(ids()).toEqual(["note.new", "go.todos", "plugins.toggle.quiet", "plugins.toggle.notes"]);
+    expect(ids()).toEqual(["note.new", "go.todos", "plugins.enable.quiet", "plugins.disable.notes"]);
   });
 
   it("tells a plugin each time the app arrives somewhere, and one turned on later where the app already is", async () => {
@@ -1031,7 +821,7 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
       trusted: [own],
       mac: true,
       settings: {},
-      write: () => false,
+      write: () => {},
       provide: () =>
         ({
           app: () => ({}) as App,
@@ -1053,68 +843,5 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
 
     for (const [, call] of every(hosts.get("Sharing")!)) await call();
     expect(reached).toHaveLength(15);
-  });
-});
-
-describe("what the host says of each plugin", () => {
-  const stateOf = (host: Host, id: string) => host.contributions().plugins.find((p) => p.id === id)!;
-
-  it("passes on a plugin's description, icon and pictures, and says nothing for one that has none", () => {
-    const shown: Plugin = { ...notes, description: "Notes, listed.", icon: "list", screenshots: [{ src: "/shots/notes.png", alt: "The list of notes" }] };
-    const { host } = hostWith([shown, palette]);
-
-    expect(stateOf(host, "notes")).toMatchObject({ description: "Notes, listed.", icon: "list", screenshots: [{ src: "/shots/notes.png", alt: "The list of notes" }] });
-    expect(stateOf(host, "palette")).toMatchObject({ description: null, icon: null, screenshots: [] });
-  });
-
-  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot, its embeds, completions and editor extensions", () => {
-    const editing: Plugin = { id: "editing", name: "Editing", activate: (host) => void host.editorExtensions.register({ id: "editing.keys", extension: {} }) };
-    const { host } = hostWith([notes, palette, editing]);
-
-    expect(stateOf(host, "notes").adds).toEqual({
-      commands: [
-        { id: "note.new", title: "New note" },
-        { id: "go.todos", title: "Go to Todos" },
-      ],
-      views: [
-        { slot: "column", id: "list", label: null },
-        { slot: "page", id: "todos", label: "Todos" },
-      ],
-      embeds: [{ name: "timer", title: "Timer", block: false }],
-      completions: [{ id: "embeds", trigger: "/" }],
-      editorExtensions: [],
-    });
-    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [], completions: [], editorExtensions: [] });
-    expect(stateOf(host, "editing").adds?.editorExtensions).toEqual(["editing.keys"]);
-  });
-
-  it("remembers the whole of what a plugin added once it is turned off, and knows nothing of one that hasn't been on", () => {
-    const quiet: Plugin = { id: "quiet", name: "Quiet", enabledByDefault: false, activate: (host) => void host.commands.register({ id: "quiet.go", title: "Go quietly", run: () => {} }) };
-    const { host, ids } = hostWith([notes, quiet]);
-    // A page that is listening reads the contributions each time one is taken out, as the Plugins page does.
-    host.subscribe(() => void host.contributions());
-    const whole = stateOf(host, "notes").adds;
-    expect(stateOf(host, "quiet").adds).toBeNull();
-
-    host.setEnabled("notes", false);
-    host.setEnabled("quiet", true);
-
-    expect(ids()).toEqual(["quiet.go", "plugins.toggle.notes", "plugins.toggle.quiet"]);
-    expect(stateOf(host, "notes")).toMatchObject({ enabled: false, adds: whole });
-    expect(stateOf(host, "quiet").adds?.commands).toEqual([{ id: "quiet.go", title: "Go quietly" }]);
-  });
-
-  it("marks the setting that turns a plugin on and off as its switch, and no other", () => {
-    const reader: Plugin = { id: "reader", name: "Reader", settings: { wide: { type: "boolean", default: false, title: "Wide" } }, activate: () => {} };
-    const { host } = hostWith([reader, palette]);
-
-    expect(host.contributions().settings.declared.map((d) => [d.key, d.switch ?? false])).toEqual([
-      ["reader.enabled", true],
-      ["reader.wide", false],
-      ["palette.enabled", true],
-      ["keybindings.commands.show", false],
-      ["keybindings.plugins.toggle.reader", false],
-      ["keybindings.plugins.toggle.palette", false],
-    ]);
   });
 });

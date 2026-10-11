@@ -1,17 +1,11 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
-import { embedPolicy, FRAME_ORIGINS } from "../../src/worker/frames.ts";
-import { secured } from "../../src/worker/headers.ts";
+import { embedPolicy, FRAME_ORIGINS, framing } from "../../src/worker/frames.ts";
 
 const get = (url: string) => SELF.fetch(url, { redirect: "manual" });
 const directives = (policy: string) => Object.fromEntries(policy.split("; ").map((d) => [d.split(" ")[0]!, d.split(" ").slice(1).join(" ")]));
-/** What the page at `url` may frame, from the one policy the Worker sends it. */
-const framedAt = (url: string, env: { EMBED_ORIGIN?: string } = {}) => {
-  const policies = secured(new Response("<!doctype html>", { headers: { "Content-Type": "text/html; charset=utf-8" } }), new URL(url), env).headers.get("Content-Security-Policy")!;
-  expect(policies).not.toContain(",");
-  return directives(policies)["frame-src"];
-};
+const page = (type = "text/html; charset=utf-8") => new Response("<!doctype html>", { headers: { "Content-Type": type, ETag: "abc" } });
 const withEmbedHost = (url: string) => worker.fetch(new Request(url) as never, { ...env, EMBED_ORIGIN: "https://embed.commonink.app" });
 
 describe("the document an HTML embed is written into", () => {
@@ -61,28 +55,19 @@ describe("the document an HTML embed is written into", () => {
 });
 
 describe("what the app's page may frame", () => {
-  it("is the embed's document and the sites built-in embeds frame, and nothing else, in the page's one policy", async () => {
-    for (const path of ["/", "/note/plan-3k2j5h8d9f0a", "/settings"]) expect(framedAt(`https://commonink.app${path}`), path).toBe(`https://commonink.app/embed-frame ${FRAME_ORIGINS.join(" ")}`);
-    expect(framedAt("http://localhost:5173/")).toMatch(/^http:\/\/localhost:5173\/embed-frame /);
-    expect(FRAME_ORIGINS.every((origin) => new URL(origin).origin === origin && origin.startsWith("https://"))).toBe(true);
-    const sent = await get("https://commonink.app/note/plan-3k2j5h8d9f0a");
-    expect(directives(sent.headers.get("Content-Security-Policy")!)["frame-src"]).toBe(`https://commonink.app/embed-frame ${FRAME_ORIGINS.join(" ")}`);
-  });
-
-  it("is nothing for what isn't a page", async () => {
-    expect(directives((await get("https://commonink.app/api/me")).headers.get("Content-Security-Policy")!)["frame-src"]).toBeUndefined();
-  });
-});
-
-describe("what the app is told of where HTML embeds are served", () => {
-  it("is in what /api/me answers: a host of their own only where EMBED_ORIGIN names one", async () => {
-    for (const [setUp, embedSite] of [[{}, false], [{ EMBED_ORIGIN: "https://embed.commonink.app" }, true]] as const) {
-      const at = (path: string, init?: RequestInit) => worker.fetch(new Request(`http://localhost${path}`, init) as never, { ...env, DEV_SIGN_IN: "1", SESSION_SECRET: "test-secret", ...setUp });
-      const signedIn = await at("/auth/dev?email=setup@example.com&name=Setup");
-      const cookie = signedIn.headers.get("Set-Cookie")!.split(";")[0]!;
-      const me = (await (await at("/api/me", { headers: { Cookie: cookie } })).json()) as { person: unknown; setup: unknown };
-      expect([me.person, me.setup]).toEqual([expect.objectContaining({ email: "setup@example.com" }), { embedSite, fileSite: false }]);
+  it("is the embed's document and the sites built-in embeds frame, and nothing else", () => {
+    for (const path of ["/", "/note/plan-3k2j5h8d9f0a", "/settings"]) {
+      const res = framing(page(), new URL(`https://commonink.app${path}`), {});
+      expect(res.headers.get("Content-Security-Policy"), path).toBe(`frame-src https://commonink.app/embed-frame ${FRAME_ORIGINS.join(" ")}`);
+      expect(res.headers.get("ETag")).toBe("abc");
     }
+    expect(framing(page(), new URL("http://localhost:5173/"), {}).headers.get("Content-Security-Policy")).toContain("frame-src http://localhost:5173/embed-frame ");
+    expect(FRAME_ORIGINS.every((origin) => new URL(origin).origin === origin && origin.startsWith("https://"))).toBe(true);
+  });
+
+  it("is not said of what isn't a page", async () => {
+    expect(framing(page("text/javascript"), new URL("https://commonink.app/assets/app.js"), {}).headers.get("Content-Security-Policy")).toBeNull();
+    expect((await get("https://commonink.app/api/me")).headers.get("Content-Security-Policy")).toBeNull();
   });
 });
 
@@ -99,7 +84,8 @@ describe("a host given to HTML embeds alone", () => {
   it("is where the app's own host sends the frame, and what the app's page may frame", async () => {
     const sent = await withEmbedHost("https://commonink.app/embed-frame");
     expect([sent.status, sent.headers.get("Location")]).toEqual([302, "https://embed.commonink.app/embed-frame"]);
-    expect(framedAt("https://commonink.app/", { EMBED_ORIGIN: "https://embed.commonink.app" })).toBe(`https://commonink.app/embed-frame https://embed.commonink.app/embed-frame ${FRAME_ORIGINS.join(" ")}`);
+    const framed = framing(page(), new URL("https://commonink.app/"), { EMBED_ORIGIN: "https://embed.commonink.app" });
+    expect(framed.headers.get("Content-Security-Policy")).toBe(`frame-src https://commonink.app/embed-frame https://embed.commonink.app/embed-frame ${FRAME_ORIGINS.join(" ")}`);
   });
 
   it("must be an https address", async () => {

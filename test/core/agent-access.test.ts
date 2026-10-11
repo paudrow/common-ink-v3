@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, and removing a note for good are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
-type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "contact.update" | "contact.photo" | "contact.create">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, and marking changes read are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts and test/core/dashboard.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
+type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "visit.mark">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -54,27 +54,25 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "todo.history": { id: noteId, revision: 2, line: 0, text: "- [ ] not there" },
   "todos.rebuild": {},
   "daily.open": {},
+  "daily.find": {},
+  "pin.list": {},
+  "pin.set": { id: noteId, pinned: true },
+  "visit.read": {},
   "note.history": { id: noteId },
   "note.move": { id: noteId, folderId },
   "note.label": { id: noteId, revision: 1, name: "Start" },
   "note.revert": { id: noteId, revision: 1 },
   "note.revertChanges": { id: noteId, revisions: [2] },
-  "note.previewRevert": { id: noteId, revisions: [2] },
   "note.diff": { id: noteId, revision: 1 },
-  "note.blame": { id: noteId },
   "history.summary": {},
   "note.undo": { id: noteId },
   "note.redo": { id: noteId },
   "history.list": {},
   "history.authors": {},
   "history.revertAuthor": { author: { kind: "agent", id: "aaaaaaaaaaaa" } },
-  "history.diff": { changes: [{ noteId, revisions: [2] }] },
-  "history.previewRevert": { changes: [{ noteId, revisions: [2] }] },
-  "history.revert": { changes: [{ noteId, revisions: [2] }] },
   "folder.list": {},
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
-  "folder.move": { id: folderId, parentId: null },
   "folder.delete": { id: "aaaaaaaaaaaa" },
   "member.list": {},
   "tag.list": {},
@@ -86,20 +84,16 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "source.list": {},
   "event.list": { from: 0, to: 1, timeZone: "UTC" },
   "event.update": { sourceId: "google-calendar", id: "none", etag: "none", title: "No" },
-  "event.create": { sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } },
   "contact.list": {},
-  "person.read": { who: "Sam Okafor" },
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },
   "upload.list": {},
   "upload.read": { id: "aaaaaaaaaaaa" },
   "upload.move": { id: "aaaaaaaaaaaa", folderId },
-  "upload.place": { id: "aaaaaaaaaaaa", noteId },
   "upload.archive": { id: "aaaaaaaaaaaa", archived: false },
   "upload.trash": { id: "aaaaaaaaaaaa" },
   "upload.restore": { id: "aaaaaaaaaaaa" },
   "upload.trashed": {},
-  "record.notes": { sourceId: "google-calendar", id: "none" },
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {
@@ -127,7 +121,6 @@ describe("an agent's access is its member's", () => {
       "note.trash",
       "note.restore",
       "upload.move",
-      "upload.place",
       "upload.archive",
       "upload.trash",
       "upload.restore",
@@ -137,10 +130,8 @@ describe("an agent's access is its member's", () => {
       "note.undo",
       "note.redo",
       "history.revertAuthor",
-      "history.revert",
       "folder.create",
       "folder.rename",
-      "folder.move",
       "folder.delete",
     ],
   };
@@ -197,7 +188,7 @@ describe("an agent's access is its member's", () => {
     const herFolder = await perform(env.DB, grace, { type: "folder.create", name: "Hers" });
     const ops = everyOp(hers.id, herFolder.id);
 
-    for (const type of ["note.read", "note.write", "note.history", "note.move", "note.label", "note.revert", "note.revertChanges", "note.diff", "note.undo", "note.redo", "folder.rename"] as const) {
+    for (const type of ["note.read", "note.write", "note.history", "note.move", "note.label", "note.revert", "note.revertChanges", "note.diff", "note.undo", "note.redo", "folder.rename", "pin.set"] as const) {
       const name = TOOLS.find((t) => t.op === type)!.name;
       expect((await tool(token, name, { workspace, ...ops[type] })).text, name).toMatch(/^not_found: No such (note|folder)$/);
       expect((await tool(token, name, { workspace: grace.workspaceId, ...ops[type] })).text, name).toBe("not_found: No such workspace");

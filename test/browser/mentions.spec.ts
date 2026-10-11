@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, join, me, perform, pinPanel, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, connectAgent, join, me, perform, signInAsNewPerson, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -132,7 +132,7 @@ test("another reader sees a mentioned contact's name in gray, and nothing else o
   expect(heard).toContain("Zoë Álvarez");
   for (const kept of ["zoe@example.com", "Okafor", "Harbor Books", "Lin Wei"]) expect(heard, kept).not.toContain(kept);
   // And being mentioned let nobody in anywhere: the note has no grant, and its history names only who wrote it.
-  await expect.poll(async () => (await perform(page, { type: "grant.list", noteId: note.id }, workspaceId)).grants).toEqual([]);
+  expect((await perform(page, { type: "grant.list", noteId: note.id }, workspaceId)).grants).toEqual([]);
 });
 
 test("mentioning a member in a private note of mine offers to share it, and sharing is a grant the Share dialog shows", async ({ page }) => {
@@ -149,7 +149,7 @@ test("mentioning a member in a private note of mine offers to share it, and shar
   await pick(page, " and @grace", "Grace HopperMember");
   await expect(notice(page)).toContainText("Grace Hopper can't see this private note.");
   // Nothing is shared until I say so.
-  await expect.poll(async () => (await perform(page, { type: "grant.list", noteId: note.id })).grants).toEqual([]);
+  expect((await perform(page, { type: "grant.list", noteId: note.id })).grants).toEqual([]);
   await grace.goto(`/note/${note.id}`);
   await expect(editor(grace)).toHaveCount(0);
 
@@ -161,15 +161,12 @@ test("mentioning a member in a private note of mine offers to share it, and shar
   await expect(mentions(grace)).toHaveText(["@Sam Okafor", "@Ada Lovelace", "@Grace Hopper"]);
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
 
-  // #66's inspector: Info, pinned so it stays, has Share.
-  await pinPanel(page, "Info");
   await page.getByRole("complementary", { name: "Inspector" }).getByRole("button", { name: "Share" }).click();
   await expect(shareDialog(page).getByRole("listitem", { name: "Grace Hopper" })).toContainText("let in to this private note");
 
   // Mentioned again, she can already see it, so nothing is asked.
   await shareDialog(page).getByRole("button", { name: "Close" }).click();
-  // A press on the card sends it away.
-  await notice(page).locator(".toast-text").click();
+  await notice(page).getByRole("button", { name: "Dismiss" }).click();
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("Enter");
@@ -195,12 +192,11 @@ test("the offer to share can be turned off in settings, isn't made for a note th
   const claude = await connectAgent(page, "Claude");
   await claude.tool("write_note", { id: diary.id, baseRevision: diary.revision, text: "# Diary\n\nAsk @[[Grace Hopper]]" });
   await expect(mentions(page)).toHaveText(["@Grace Hopper"]);
-  await expect.poll(() => text(page, diary.id)).toBe(`# Diary\n\nAsk @[[${graceId}|Grace Hopper]]`);
+  expect(await text(page, diary.id)).toBe(`# Diary\n\nAsk @[[${graceId}|Grace Hopper]]`);
   await expect(notice(page)).toHaveCount(0);
-  await expect.poll(async () => (await perform(page, { type: "grant.list", noteId: diary.id })).grants).toEqual([]);
+  expect((await perform(page, { type: "grant.list", noteId: diary.id })).grants).toEqual([]);
 
   await page.goto("/settings");
-  await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Mentions" }).click();
   const toggle = page.getByRole("checkbox", { name: "Offer to share a private note with a member you mention in it" });
   await expect(toggle).toBeChecked();
   await toggle.click();
@@ -213,7 +209,7 @@ test("the offer to share can be turned off in settings, isn't made for a note th
   await expect(notice(page)).toHaveCount(0);
 });
 
-test("a person mentioned on a todo is its assignee, drawn as a chip, and the Todos page lists them, finds them with assignee:, and changes who a todo is assigned to from the chip", async ({ page }) => {
+test("a person mentioned on a todo is its assignee, drawn as a chip, and the Todos page lists, filters and changes who a todo is assigned to", async ({ page }) => {
   const { graceId, grace, workspaceId } = await team(page);
   const note = await perform(page, { type: "note.create", text: `# Plan\n\n- [ ] Book the venue\n- [ ] Call the bank @[[Sam Okafor]]\n- [ ] Send invites @[[Ada Lovelace]]\n\nThanks to @[[Grace Hopper]].` });
   await open(page, note.id, "Plan");
@@ -233,54 +229,33 @@ test("a person mentioned on a todo is its assignee, drawn as a chip, and the Tod
 
   await page.goto("/todos");
   const rows = page.getByRole("list", { name: "Todos" }).getByRole("listitem");
-  const filter = async (on: Page, query: string) => {
-    const bar = on.getByRole("searchbox", { name: "Filter todos" });
-    await bar.fill(query);
-    await bar.press("Enter");
-  };
+  const filter = page.getByRole("group", { name: "Filters" }).getByLabel("Assignee");
   await expect(rows).toHaveText([/Book the venue.*@Grace Hopper/, /Call the bank.*@Sam Okafor/, /Send invites.*@Ada Lovelace/]);
   await expect(rows.first().locator(".todo-assignee")).toHaveCSS("color", await colorOf(page, "--accent"));
   await expect(rows.nth(1).locator(".todo-assignee")).toHaveCSS("color", await colorOf(page, "--muted"));
+  await expect(filter.getByRole("option")).toHaveText(["Anyone", "Assigned to me", "Ada Lovelace", "Grace Hopper", "Sam Okafor"]);
 
-  await filter(page, "assignee:@me");
+  await filter.selectOption({ label: "Assigned to me" });
   await expect(rows).toHaveText([/Send invites/]);
-  await filter(page, 'assignee:"Sam Okafor"');
+  await filter.selectOption({ label: "Sam Okafor" });
   await expect(rows).toHaveText([/Call the bank/]);
-  await filter(page, `assignee:${graceId}`);
-  await expect(rows).toHaveText([/Book the venue/]);
-  await filter(page, 'assigned:"grace hopper"');
+  await filter.selectOption({ label: "Grace Hopper" });
   await expect(rows).toHaveText([/Book the venue/]);
 
   // Grace's own list of what is hers is the same todo.
   await grace.goto(`/note/${note.id}`);
   await expect(editor(grace)).toContainText("Book the venue");
   await grace.getByRole("link", { name: "Todos", exact: true }).click();
-  await filter(grace, "assignee:@me");
+  await grace.getByRole("group", { name: "Filters" }).getByLabel("Assignee").selectOption({ label: "Assigned to me" });
   await expect(grace.getByRole("list", { name: "Todos" }).getByRole("listitem")).toHaveText([/Book the venue/]);
 
-  // An assignee's chip opens who the todo is assigned to, and a press takes it away or adds someone at once.
-  await rows.first().getByRole("button", { name: "Assigned to Grace Hopper" }).click();
-  const who = page.getByRole("dialog", { name: "Assignees of Book the venue" });
-  await expect(who.getByRole("button")).toHaveText([/@Grace Hopper/, "@Ada Lovelace", "@Sam Okafor"]);
-  await who.getByRole("button", { name: "Unassign Grace Hopper" }).click();
-  await expect.poll(() => text(page, note.id, workspaceId)).toContain("- [ ] Book the venue\n");
-  // The list keeps its order: the row no longer matches, and stays where it was, dimmed, until Refresh.
-  await expect(rows.first()).toHaveAttribute("data-gone", "true");
-  await page.locator(".todo-order").getByRole("button", { name: "Refresh" }).click();
+  await rows.first().getByLabel("Assigned to Grace Hopper").selectOption({ label: "Unassign" });
   await expect(rows).toHaveCount(0);
-  await filter(page, 'assignee:"Sam Okafor"');
-  await rows.first().getByRole("button", { name: "Assigned to Sam Okafor" }).click();
-  await page.getByRole("dialog", { name: "Assignees of Call the bank" }).getByRole("button", { name: "Assign to Ada Lovelace" }).click();
-  await expect(rows.first().locator(".todo-assignee")).toHaveText(["@Sam Okafor", "@Ada Lovelace"]);
+  await expect.poll(() => text(page, note.id, workspaceId)).toContain("- [ ] Book the venue\n");
+  await filter.selectOption({ label: "Sam Okafor" });
+  await rows.first().getByLabel("Assign to someone").selectOption({ label: "Ada Lovelace" });
+  await expect(rows.first().locator(".todo-assignee")).toHaveText([/^@Sam Okafor/, /^@Ada Lovelace/]);
   await expect.poll(() => text(page, note.id)).toMatch(/- \[ \] Call the bank @\[\[Sam Okafor\]\] @\[\[[a-z0-9]{12}\|Ada Lovelace\]\]/);
-
-  // A todo with nobody has a quiet Assign chip in its place on the second line, after Priority and before the tags.
-  await filter(page, "venue");
-  await expect(rows.first().locator(".todo-chips .todo-chip")).toHaveClass([/todo-due/, /todo-every/, /todo-importance/, /todo-assign\b/, /todo-add-tag/]);
-  await expect(rows.first().getByRole("button", { name: "Assign: nobody" })).toHaveAttribute("data-unset", "true");
-  await rows.first().getByRole("button", { name: "Assign: nobody" }).click();
-  await page.getByRole("dialog", { name: "Assignees of Book the venue" }).getByRole("button", { name: "Assign to Grace Hopper" }).click();
-  await expect.poll(() => text(page, note.id)).toContain(`- [ ] Book the venue @[[${graceId}|Grace Hopper]]`);
 });
 
 interface Place {
@@ -371,9 +346,8 @@ test("nothing moves when the cursor comes to a line with mentions, a deletion ta
   await page.keyboard.press("ArrowRight");
   await expect(mentions(page)).toHaveCount(4);
 
-  // Shown as written with the cursor inside, the lines stay where they are and as tall, and only what follows on its line moves.
-  await page.keyboard.press("Home");
-  for (let i = 0; i < "Up ".length + 1; i++) await page.keyboard.press("ArrowRight");
+  // A click goes into one too, and shows it as written: the lines stay where they are and as tall, and only what follows on its line moves.
+  await mentions(page).first().click();
   await expect(mentions(page)).toHaveCount(3);
   await expect(editor(page)).toContainText(`@[[${graceId}|Grace Hopper]]`);
   const inside = await placesOf(page, words);
@@ -397,102 +371,5 @@ test("a link's page shows a mentioned member by the name the note writes, in gra
   for (const i of [0, 1, 2]) await expect(mentions(reader).nth(i)).toHaveCSS("color", muted);
   await expect(mentions(reader).first()).toHaveCSS("unicode-bidi", "isolate");
   await expect(mentions(reader).first()).toHaveAttribute("title", "Grace Hopper, mentioned by name");
-  // A click there goes nowhere: a link's page has no person to open.
-  await mentions(reader).first().click();
-  await expect(reader).toHaveURL(new RegExp(`/s/${token}$`));
-  expect(requests.filter((r) => /member\.list|contact\.list|person\.read|\/ops/.test(r))).toEqual([]);
-});
-
-const personPage = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
-
-test("a click on a mention opens that person's page: my contact's details for me alone, their open todos, the lines that mention them, a search among those notes, and one action that starts a note about them", async ({ page }) => {
-  const { grace, graceId, workspaceId } = await team(page);
-  const boiler = await perform(page, { type: "note.create", text: `# Boiler\n\n- [ ] Fix the boiler @[[Sam Okafor]]\n\nSam said the valve is old.` });
-  await perform(page, { type: "note.create", text: `# Plumbing log\n\nCalled @[[Sam Okafor]] about the leak under the sink.` });
-  const secret = await perform(page, { type: "note.create", text: `# Secret\n\nsecret-line about @[[Sam Okafor]]` });
-  await perform(page, { type: "note.setPrivate", id: secret.id, private: true });
-
-  await perform(page, { type: "note.create", text: `# Valves\n\nA catalogue of valves.` });
-  await open(page, boiler.id, "Boiler");
-  const reads = asked(page, "person.read");
-  await mentions(page).first().click();
-  await expect(page).toHaveURL(/\/person\/Sam%20Okafor$/);
-  const sam = personPage(page, "Sam Okafor");
-  await expect(sam.getByRole("heading", { name: "Sam Okafor" })).toBeVisible();
-  await expect(sam.getByRole("region", { name: "Your contact Sam Okafor" })).toContainText("From your contacts. Only you see this.");
-  await expect(sam.locator(".person-field")).toHaveText(["Phone+1 555 0142", "WorkOwner, Okafor Plumbing", "Address12 Water Lane, Springfield", "Birthday21 April", "Websitehttps://okafor-plumbing.example", "NotesFixed the boiler in March. Prefers a text to a call."]);
-  await expect(sam.getByRole("list", { name: "Open todos assigned to Sam Okafor" }).locator(".todo-words")).toHaveText(["Fix the boiler"]);
-  const lines = sam.getByRole("list", { name: "Lines" }).getByRole("listitem");
-  await expect(lines).toHaveText([/^secret-line about @Sam OkaforSecret · today$/, /^Called @Sam Okafor about the leak under the sink\.Plumbing log · today$/, /^Fix the boiler @Sam OkaforBoiler · today$/]);
-  // The page has one action and the search: nothing else to press.
-  await expect(sam.locator("button.primary")).toHaveText(["New note about Sam Okafor"]);
-
-  // One read of the page, which lists my contacts again each time.
-  expect(reads).toHaveLength(1);
-
-  // The inspector is about the notes that mention him: Info counts them, and History is theirs.
-  await pinPanel(page, "Info");
-  const panel = page.getByRole("complementary", { name: "Inspector" });
-  await expect(panel.getByRole("definition").first()).toHaveText("Sam Okafor");
-  await expect(panel.getByRole("definition").nth(1)).toHaveText("3 notes");
-
-  // An OR typed here is still among the notes that mention him: the catalogue mentions nobody.
-  await sam.getByRole("searchbox", { name: "Search the notes that mention Sam Okafor" }).fill("leak OR catalogue");
-  await expect(sam.getByRole("list", { name: "Found" }).getByRole("listitem")).toHaveText([/^Plumbing log/]);
-  // While a search is shown, the inspector is about what it found.
-  await expect(panel.getByRole("definition").first()).toHaveText("Sam Okafor: leak OR catalogue");
-  await expect(panel.getByRole("definition").nth(1)).toHaveText("1 note");
-  await sam.getByRole("searchbox", { name: "Search the notes that mention Sam Okafor" }).fill("");
-  await lines.nth(2).click();
-  await expect(page).toHaveURL(new RegExp(`/note/`));
-  await expect(editor(page)).toContainText("Fix the boiler");
-
-  // Grace sees no detail of my contact, and not my private note or its line; she has no contact of that name.
-  await grace.goto(`/note/${boiler.id}`);
-  await expect(editor(grace)).toContainText("Fix the boiler");
-  await mentions(grace).first().click();
-  const hers = personPage(grace, "Sam Okafor");
-  await expect(hers.getByRole("list", { name: "Lines" }).getByRole("listitem")).toHaveCount(2);
-  await expect(hers).toContainText("Mentioned by name");
-  await expect(hers).not.toContainText(/555|Okafor Plumbing|Water Lane|secret-line|Only you see this/);
-
-  // A member's page is their card, and opened from a mention of them.
-  await perform(page, { type: "note.write", id: boiler.id, baseRevision: 1, text: `# Boiler\n\n- [ ] Fix the boiler @[[Sam Okafor]]\n\nSam said the valve is old. Ask @[[${graceId}|Grace Hopper]].` });
-  await page.goto(`/note/${boiler.id}`);
-  await expect(mentions(page)).toHaveCount(2);
-  await mentions(page).nth(1).click();
-  await expect(page).toHaveURL(new RegExp(`/person/${graceId}$`));
-  await expect(personPage(page, "Grace Hopper")).toContainText(/Member · editor/);
-
-  // The action makes an ordinary note that mentions them, and opens it.
-  await personPage(page, "Grace Hopper").getByRole("button", { name: "New note about Grace Hopper" }).click();
-  await expect(page).toHaveURL(/\/note\//);
-  await expect(editor(page)).toContainText("Grace Hopper");
-  const made = (await perform(page, { type: "note.list" }, workspaceId)).find((note) => note.title === "Grace Hopper")!;
-  expect((await perform(page, { type: "note.read", id: made.id }, workspaceId)).text).toBe(`# Grace Hopper\n\n@[[${graceId}|Grace Hopper]] `);
-});
-
-test("search finds the notes that mention someone with mentions:, and the todos assigned to them with assignee:", async ({ page }) => {
-  const { graceId } = await team(page);
-  await perform(page, { type: "note.create", text: `# Launch\n\nAsk @[[${graceId}|Grace Hopper]] first.` });
-  await perform(page, { type: "note.create", text: `# Venue\n\n- [ ] Book it @[[Sam Okafor]]` });
-  await page.goto("/search");
-  const search = page.getByRole("region", { name: "Search" });
-  const bar = search.getByRole("searchbox", { name: "Search notes" });
-  const titles = search.getByRole("navigation", { name: "Notes" }).getByRole("article").locator(".card-title");
-  await bar.fill('mentions:"Grace Hopper"');
-  await bar.press("Enter");
-  await expect(titles).toHaveText(["Launch"]);
-  await bar.fill(`mention:${graceId} OR mentions:"sam okafor"`);
-  await bar.press("Enter");
-  await expect(titles).toHaveText(["Venue", "Launch"]);
-
-  await page.goto("/todos");
-  const todoBar = page.getByRole("searchbox", { name: "Filter todos" });
-  await todoBar.fill("assignee:Sam");
-  await todoBar.press("Enter");
-  await expect(page.getByRole("list", { name: "Todos" }).getByRole("listitem")).toHaveCount(0);
-  await todoBar.fill('assignee:"Sam Okafor"');
-  await todoBar.press("Enter");
-  await expect(page.getByRole("list", { name: "Todos" }).getByRole("listitem")).toHaveText([/Book it/]);
+  expect(requests.filter((r) => /member\.list|contact\.list|\/ops/.test(r))).toEqual([]);
 });

@@ -34,16 +34,12 @@ const BEFORE_END = 2;
 
 const classOf = (member: boolean) => (member ? "md-mention-member" : "md-mention-other");
 
-/** Opens the page of the person a mention is of, by its target: a member's id, or a name. Null where there is no page to go to, as on a link's page. */
-export type OpenPerson = ((target: string) => void) | null;
-
 /**
  * Draws a mention as `@` and a name: a member's as it is now, in the theme colour, and anyone
  * else's as written, in gray. On a todo it is a chip, as the todo's other options are. It is shown
- * as written only while the cursor is inside it, since what is written holds an id. A click opens
- * the person's page; the keys go into it to change it.
+ * as written only while the cursor is inside it, since what is written holds an id.
  */
-function mentionChip(people: () => People, open: () => OpenPerson): Chip<Drawn> {
+function mentionChip(people: () => People): Chip<Drawn> {
   return {
     id: "mention",
     find: mentionsDrawnOn,
@@ -57,14 +53,9 @@ function mentionChip(people: () => People, open: () => OpenPerson): Chip<Drawn> 
       el.title = mention.assignee ? `Assigned to ${hint}` : hint;
       el.classList.add(classOf(member));
       if (mention.assignee) el.classList.add("md-mention-assignee");
-      const going = open();
-      if (going) el.setAttribute("role", "link");
       el.addEventListener("mousedown", (event) => {
-        if (event.button !== 0) return;
         event.preventDefault();
-        const to = open();
-        if (to) to(mention.target);
-        else source.edit(mention.to - mention.from - BEFORE_END);
+        source.edit(mention.to - mention.from - BEFORE_END);
       });
     },
   };
@@ -96,7 +87,7 @@ const look = EditorView.baseTheme({
 });
 
 /** The editor extension that draws mentions, a way to put the cursor inside the one it is at, and whether it is at one. */
-export function mentionDrawing(people: () => People, open: () => OpenPerson): { extension: Extension; edit: (view: EditorView) => void; canEdit: (view: EditorView) => boolean } {
-  const chip = mentionChip(people, open);
+export function mentionDrawing(people: () => People): { extension: Extension; edit: (view: EditorView) => void; canEdit: (view: EditorView) => boolean } {
+  const chip = mentionChip(people);
   return { extension: [noteMentions, chips(chip), asWritten(people), look], edit: (view) => editWithin(chip, view, BEFORE_END), canEdit: (view) => !!unitAtCursor(chip, view.state) };
 }

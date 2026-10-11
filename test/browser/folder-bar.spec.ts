@@ -52,7 +52,7 @@ test("a folder's tab has the app's search bar with that folder selected, and tak
   await folderRow(page, "Projects").click();
   await expect(listedNotes(page)).toHaveText(["Budget", "Plan"]);
   await expect(scope(page)).toHaveText("Projects");
-  await expect(field(page)).toHaveAttribute("placeholder", 'Search this folder: words, "a phrase", #tag, is:archived');
+  await expect(field(page)).toHaveAttribute("placeholder", 'Search this folder: words, "a phrase", #tag, +project');
   await expect(count(page)).toHaveText("2 notes");
 
   // The folder's own notes are searched, not those of the folders inside it, with the query the Search page takes.
@@ -80,7 +80,7 @@ test("a folder's tab has the app's search bar with that folder selected, and tak
   await expect(tabs(page).filter({ hasText: "All notes" })).toHaveAttribute("aria-selected", "true");
   await expect(scope(page)).toHaveCount(0);
   await expect(field(page)).toHaveValue("heron");
-  await expect(field(page)).toHaveAttribute("placeholder", 'Search all notes: words, "a phrase", #tag, is:archived');
+  await expect(field(page)).toHaveAttribute("placeholder", 'Search all notes: words, "a phrase", #tag, +project');
   await expect(listedNotes(page)).toHaveText(["Loose", "Monday", "Inner", "Budget", "Plan"]);
   await expect(count(page)).toHaveText("5 of 5 notes");
   expect(asked.at(-1)).toMatchObject({ query: "heron" });
@@ -167,12 +167,12 @@ test("a card's Archive is one click or the E key, with Undo, and the card leaves
 
   // It is there on hover and on keyboard focus, and not otherwise.
   await page.mouse.move(5, 5);
-  await expect.poll(() => shownAt(archive)).toBe("0");
+  expect(await shownAt(archive)).toBe("0");
   await noteCard(page, "Budget").hover();
-  await expect.poll(() => shownAt(archive)).toBe("1");
+  expect(await shownAt(archive)).toBe("1");
   await page.mouse.move(5, 5);
   await noteCard(page, "Budget").focus();
-  await expect.poll(() => shownAt(archive)).toBe("1");
+  expect(await shownAt(archive)).toBe("1");
 
   await noteCard(page, "Budget").hover();
   await archive.click();
@@ -239,7 +239,7 @@ test("a viewer's cards have no Archive, and E does nothing for them", async ({ p
   await page.waitForTimeout(500);
   await expect(listedNotes(page)).toHaveText(["Plan"]);
   await expect(notice(page)).toHaveCount(0);
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id }, workspaceId)).state).toBe("live");
+  expect((await perform(page, { type: "note.read", id: note.id }, workspaceId)).state).toBe("live");
   await expect(newInSidebar(page)).toHaveCount(0);
 });
 
@@ -285,8 +285,8 @@ test("one Sort control orders a list and a search, which is by best match until 
 test("New note in the left column makes a note in the folder being looked at, with the cursor in it", async ({ page }) => {
   await withFolders(page);
 
-  // With no folder in front it goes in Unsorted.
-  await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
+  // With no folder in front, as at the Dashboard, it goes in Unsorted.
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
   await expect(newInSidebar(page)).toHaveCount(1);
   await expect(newInSidebar(page)).toHaveAttribute("title", "New note in Unsorted");
   await newInSidebar(page).click();
@@ -335,7 +335,7 @@ test("a guest who can't add notes where they are is shown New note with the reas
   await newInSidebar(grace).click({ force: true });
   await grace.waitForTimeout(500);
   await expect(listedNotes(grace)).toHaveText(["Leave policy"]);
-  await expect.poll(() => perform(grace, { type: "note.list" }, workspaceId)).toHaveLength(1);
+  expect(await perform(grace, { type: "note.list" }, workspaceId)).toHaveLength(1);
 
   await folderRow(grace, "Drafts").click();
   await expect(newInSidebar(grace)).toHaveAttribute("aria-disabled", "false");
@@ -345,35 +345,5 @@ test("a guest who can't add notes where they are is shown New note with the reas
   await expect(folderRow(grace, "Drafts")).toHaveAccessibleDescription("1");
   await folderRow(grace, "Policies").click();
   // It is in the same place whether or not it can be used, so nothing in the column moves between folders.
-  await expect.poll(() => newInSidebar(grace).boundingBox()).toEqual(box);
-});
-
-test("a folder's search bar takes the query language, with Advanced beside it, and searches that folder's own notes", async ({ page }) => {
-  const { projects, budget } = await withFolders(page);
-  const asked = searchesOf(page);
-  await page.goto(`/folder/${projects.id}`);
-  await expect(scope(page)).toHaveText("Projects");
-  await field(page).fill("heron -tag:money");
-  await expect(page.locator(".card-title")).toHaveText(["Plan"]);
-  // The folder's own notes are searched, and a filter narrows inside them: the note of the folder inside it is not listed.
-  await field(page).fill("heron OR has:todo");
-  await expect.poll(async () => (await page.locator(".card-title").allTextContents()).sort()).toEqual(["Budget", "Plan"]);
-  expect(asked.at(-1)).toMatchObject({ query: "heron OR has:todo", folderId: projects.id });
-  // Open, Archived and All still say which notes are listed, and the query can say it too.
-  await perform(page, { type: "note.archive", id: budget.id, archived: true });
-  await expect(page.locator(".card-title")).toHaveText(["Plan"]);
-  await show(page, "All").check();
-  await expect.poll(async () => (await page.locator(".card-title").allTextContents()).sort()).toEqual(["Budget", "Plan"]);
-  await show(page, "Open").check();
-  await field(page).fill("heron is:archived");
-  await expect(page.locator(".card-title")).toHaveText(["Budget"]);
-
-  // The builder is the same one, here, and writes into this folder's bar.
-  await page.getByRole("button", { name: "Advanced" }).click();
-  const builder = page.getByRole("group", { name: "Advanced search" });
-  await expect(builder.getByRole("group", { name: /^Condition / })).toHaveCount(2);
-  await builder.getByRole("group", { name: "Condition 2" }).getByRole("button", { name: "Remove condition 2" }).click();
-  await expect(field(page)).toHaveValue("heron");
-  await expect(page.locator(".card-title")).toHaveText(["Plan"]);
-  await expect(scope(page)).toHaveText("Projects");
+  expect(await newInSidebar(grace).boundingBox()).toEqual(box);
 });

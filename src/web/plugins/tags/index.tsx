@@ -15,8 +15,6 @@ const INDEXING_PAUSE_MS = 1500;
 export const tags: Plugin = {
   id: "tags",
   name: "Tags",
-  description: "A #tag in a note tags it: the sidebar lists every tag, and each has a page of its notes.",
-  icon: "tag",
   activate(host) {
     let listed: readonly ListedTag[] | null = null;
     let indexing = false;
@@ -66,7 +64,7 @@ export const tags: Plugin = {
       else settling = setTimeout(read, SETTLE_MS);
     });
 
-    host.views.register("section", { id: "tags", label: "Tags", icon: "tag", component: ({ app }) => <TagSection app={app} store={store} /> });
+    host.views.register("section", { id: "tags", component: ({ app }) => <TagSection app={app} store={store} /> });
     host.views.register("page", { id: "tags", path: TAGS_PATH, label: "Tags", component: ({ app }) => <TagsPage host={host} app={app} store={store} /> });
     host.editorExtensions.register({ id: "tags", extension: tagDrawing((name) => host.app().go(tagPath(name))) });
 

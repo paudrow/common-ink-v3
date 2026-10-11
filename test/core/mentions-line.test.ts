@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { linksIn } from "../../src/core/links.ts";
 import { summarize } from "../../src/core/markdown.ts";
 import { mentionIndex, mentionsIn, rementioned, writtenMention } from "../../src/core/mentions.ts";
-import { parseTodo, rewriteTodo, tagsOn } from "../../src/core/todos.ts";
+import { parseTodo, rewriteTodo } from "../../src/core/todos.ts";
 
 const ADA = "k3j5h8d9f0a1";
 const found = (text: string) => mentionsIn(text).map((m) => [text.slice(m.from, m.to), m.target, m.label]);
@@ -87,13 +87,14 @@ describe("a todo's assignees", () => {
       [`@[[${ADA}|Ada Lovelace]]`, ADA, "Ada Lovelace"],
       ["@[[Sam Okafor]]", "Sam Okafor", null],
     ]);
-    expect(todo.words).toBe("Call the bank +Home");
+    expect(todo.words).toBe("Call the bank");
     expect(todo.due?.date).toBe("2026-10-14");
+    expect(todo.projects.map((p) => p.name)).toEqual(["Home"]);
   });
 
-  it("holds no token of its own: a name that reads as a due date or a tag is still a name", () => {
-    const todo = parseTodo("- [ ] Ring @[[Sam #home due:2026-10-14]]")!;
-    expect([todo.due, tagsOn("- [ ] Ring @[[Sam #home due:2026-10-14]]"), todo.assignees.map((a) => a.target)]).toEqual([null, [], ["Sam #home due:2026-10-14"]]);
+  it("holds no token of its own: a name that reads as a due date or a project is still a name", () => {
+    const todo = parseTodo("- [ ] Ring @[[Sam +Home due:2026-10-14]]")!;
+    expect([todo.due, todo.projects, todo.assignees.map((a) => a.target)]).toEqual([null, [], ["Sam +Home due:2026-10-14"]]);
   });
 
   it("are assigned at the end of the line, once, and taken away with the space before", () => {
