@@ -1,24 +1,38 @@
 import { syntaxTree } from "@codemirror/language";
-import { Annotation, EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { isReading } from "../../plugin-api.ts";
 
 /**
- * Whether the cursor or a selection is on any of `from` to `to`: inside it or at either edge. What
- * is drawn over that text is then shown as written, so it can be changed. This is the rule for
- * everything drawn in a line: `from` and `to` are the construct's own, a bold word with its marks,
- * a link, a formula, a checkbox, and never the line it is on. So one construct is shown as written
- * at a time and the rest of its line stays drawn. It doesn't ask whether the editor has focus: the
+ * Whether the cursor or a selection is on any of `from` to `to`. What is drawn over that text is
+ * then shown as written, so it can be changed. It doesn't ask whether the editor has focus: the
  * note reads the same whichever side of a split the member is typing in. Never in a reading of a
  * note, where a selection is for copying and there is nothing to change.
  */
 export const touched = (state: EditorState, from: number, to: number) => !isReading(state) && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 
-/** Whether the cursor or a selection is on the line `pos` is in. For what belongs to its whole line: a heading's mark, a code block's fence. */
+/**
+ * Whether the member is working inside `from` to `to`: a cursor past its first character and before
+ * its last, or a selection of part of it and nothing outside it. A selection that covers all of it,
+ * as selecting a paragraph does, is not.
+ */
+export const within = (state: EditorState, from: number, to: number) =>
+  state.selection.ranges.some((r) => (r.empty ? r.from > from && r.to < to : r.from >= from && r.to <= to && r.to - r.from < to - from));
+
+/** Whether the cursor or a selection is on the line `pos` is in. */
 export function lineTouched(state: EditorState, pos: number) {
   const line = state.doc.lineAt(pos);
   return touched(state, line.from, line.to);
 }
+
+let readings = 0;
+
+/**
+ * What a plugin keeps an editor by. The note's editor is kept by the note's id, so it is found by
+ * it. A reading of the note gets a key of its own: it is drawn again with the editors, and never
+ * taken for the note's editor.
+ */
+export const editorKey = ({ noteId, reading }: { noteId: string; reading?: boolean }) => (reading ? `${noteId} reading ${++readings}` : noteId);
 
 /** Whether `pos` is in code, where nothing is drawn. */
 export const inCode = (state: EditorState, pos: number) => /Code/.test(syntaxTree(state).resolveInner(pos, 1).name);
@@ -38,9 +52,6 @@ export const ghost = Decoration.mark({ class: "md-ghost" });
 // Not `visibility: hidden`: Chrome won't put the caret in hidden text, and on giving the editor focus again it
 // puts it at the first place it will, which CodeMirror only knows for a reset when that is the note's very start.
 export const ghostLook = EditorView.baseTheme({ ".md-ghost": { opacity: "0" } });
-
-/** On a cursor a drawing puts somewhere itself, such as on the line after a table from its last row. It goes where it says, and is no step of a key. */
-export const placed = Annotation.define<true>();
 
 /** Dispatched to an editor to have what is drawn in it drawn again, when what it is drawn from isn't in the editor's state. */
 export const redraw = StateEffect.define<null>();
@@ -87,10 +98,10 @@ export function drawnInState<T extends readonly { from: number; to: number }[]>(
   /**
    * With `stepsIn`, a key that would step from the line before something drawn to the line after it,
    * or back, steps into it instead, which shows it as written. So the arrow keys and vim's j and k
-   * go through a block of math line by line. A click goes where it was made, and so does a cursor that is `placed`.
+   * go through a block of math line by line. A click goes where it was made.
    */
   const steppingIn = EditorState.transactionFilter.of((tr) => {
-    if (!tr.selection || tr.docChanged || tr.isUserEvent("select.pointer") || tr.annotation(placed)) return tr;
+    if (!tr.selection || tr.docChanged || tr.isUserEvent("select.pointer")) return tr;
     const [was, now] = [tr.startState.selection.main, tr.selection.main];
     const { found, drawn } = tr.startState.field(field);
     if (!was.empty || !now.empty || !drawn.size) return tr;
@@ -108,13 +119,12 @@ export function drawnInState<T extends readonly { from: number; to: number }[]>(
 
 /**
  * Calls `seen` the first time text on screen in any editor passes `has`, and never again. It is how
- * a plugin whose drawing is heavy waits to load it until a note has something for it to draw. Text
- * drawn as something else on screen, such as a table's lines, is on screen.
+ * a plugin whose drawing is heavy waits to load it until a note has something for it to draw.
  */
 export function whenSeen(has: (text: string) => boolean, seen: () => void): Extension {
   let done = false;
   const look = (view: EditorView) => {
-    if (done || !has(view.state.sliceDoc(view.viewport.from, view.viewport.to))) return;
+    if (done || !view.visibleRanges.some(({ from, to }) => has(view.state.sliceDoc(from, to)))) return;
     done = true;
     seen();
   };

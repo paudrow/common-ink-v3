@@ -7,7 +7,7 @@ import { z } from "zod";
  */
 export type Opened = { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "page"; id: string; path: string };
 
-/** A note, a folder's list or a page open in a group. The window has at most one preview tab, which the next thing opened as a preview takes the place of. */
+/** A note, a folder's list or a page open in a group. A group has at most one preview tab, which the next thing opened as a preview takes the place of. */
 export type Tab = Opened & { preview: boolean };
 
 export interface Group {
@@ -94,7 +94,7 @@ export function keptLayout(v: unknown): EditorLayout {
         focusedGroupId: old.data.focusedGroupId,
       }
     : v;
-  return isEditorLayout(now) ? arranged(onePreview(now), arrangement(now)) : EMPTY_LAYOUT;
+  return isEditorLayout(now) ? arranged({ ...now, groups: now.groups.map(onePreview) }, arrangement(now)) : EMPTY_LAYOUT;
 }
 
 /** How the groups are laid out, said in full where the layout leaves it unsaid. */
@@ -156,17 +156,14 @@ function beside(pane: Pane, id: string, added: string, side: Side): Pane {
 }
 
 /**
- * A layout as it is allowed to be, from one kept when each group could have a preview, or one of
- * each kind: the preview is the focused group's, or else the first group's that has one, and in
- * that group the tab showing, or else the one opened last. Any other is a kept tab, and none closes.
+ * A group as it is allowed to be, from one kept when it could have a preview of each kind: the
+ * preview is the tab showing, or else the one opened last, and any other is a kept tab.
  */
-function onePreview(layout: EditorLayout): EditorLayout {
-  const previewIn = (group: Group) => {
-    const previews = group.tabs.filter((t) => t.preview);
-    return previews.find((t) => same(t, group.active)) ?? previews.at(-1);
-  };
-  const stays = [layout.groups.find((g) => g.id === layout.focusedGroupId)!, ...layout.groups].map(previewIn).find((t) => t);
-  return { ...layout, groups: layout.groups.map((g) => (g.tabs.some((t) => t.preview && t !== stays) ? { ...g, tabs: g.tabs.map((t) => (t.preview && t !== stays ? { ...t, preview: false } : t)) } : g)) };
+function onePreview(group: Group): Group {
+  const previews = group.tabs.filter((t) => t.preview);
+  if (previews.length < 2) return group;
+  const stays = previews.find((t) => same(t, group.active)) ?? previews.at(-1)!;
+  return { ...group, tabs: group.tabs.map((t) => (t.preview && t !== stays ? { ...t, preview: false } : t)) };
 }
 
 export const focused = (layout: EditorLayout) => layout.groups.find((g) => g.id === layout.focusedGroupId)!.active;
@@ -189,18 +186,12 @@ export type EditorAction =
   | { type: "close"; scope: CloseScope; groupId: string; tab: Opened }
   | { type: "activate"; groupId: string; tab: Opened }
   | { type: "focus"; groupId: string }
-  /**
-   * Moves the tab into a new group beside `groupId`. A tab that is moved is what it was, a preview
-   * or kept, unless `keep` says the member meant it to stay, as dragging it there does. A tab
-   * that is new is kept.
-   */
-  | { type: "split"; groupId: string; side: Side; tab: Opened; keep?: boolean }
+  /** Moves the tab into a new group beside `groupId`. */
+  | { type: "split"; groupId: string; side: Side; tab: Opened }
   /** `index` is the gap between tabs the tab was dropped in, counting from 0 at the far left. */
   | { type: "drop"; groupId: string; index: number; tab: Opened }
   /** Adds the tab to the end of a group's, as dropping it on the middle of the group does. */
   | { type: "add"; groupId: string; tab: Opened }
-  /** Moves the tab from `groupId` to the group after or before it, round from the last to the first, as dropping it on the middle of that group does. */
-  | { type: "send"; groupId: string; tab: Opened; to: "next" | "previous" }
   /** Gives the panes of one split new shares of it. `path` is the way to the split from the outermost one: which pane, then which pane of that. */
   | { type: "resize"; path: number[]; sizes: number[] };
 
@@ -216,10 +207,10 @@ const withGroup = (layout: EditorLayout, id: string, change: (group: Group) => G
 const placeForNew = (group: Group) => (group.active?.kind === "note" && indexOf(group, group.active) + 1) || group.tabs.length;
 
 /**
- * The window has one preview, and the next thing previewed takes its place, whatever either is of
- * and whichever group it is in: the reducer's `open` picks that group. Nothing else
- * about a tab changes by being opened from: a note previewed from a previewed list takes the list's
- * place, and the list is a kept tab only once the member keeps it.
+ * A group has one preview, and the next thing previewed takes its place, whatever either is of.
+ * The one exception keeps a member's place: a note previewed while a previewed list is showing was
+ * opened from that list, so the list becomes a kept tab, as a note does when it is edited, and the
+ * note is the preview. Notes looked through from the list then replace one another beside it.
  */
 function open(group: Group, tab: Opened, preview: boolean): Group {
   const existing = indexOf(group, tab);
@@ -229,7 +220,9 @@ function open(group: Group, tab: Opened, preview: boolean): Group {
     return { ...group, tabs, active: tab };
   }
   const previewed = preview ? tabs.findIndex((t) => t.preview) : -1;
-  if (previewed >= 0) tabs[previewed] = { ...tab, preview };
+  const fromList = previewed >= 0 && tab.kind === "note" && tabs[previewed]!.kind === "folder" && same(tabs[previewed]!, group.active);
+  if (fromList) tabs[previewed] = { ...tabs[previewed]!, preview: false };
+  if (previewed >= 0 && !fromList) tabs[previewed] = { ...tab, preview };
   else tabs.splice(placeForNew(group), 0, { ...tab, preview });
   return { ...group, tabs, active: tab };
 }
@@ -275,9 +268,7 @@ export function editorReducer(layout: EditorLayout, action: EditorAction): Edito
     case "open": {
       const holder = layout.groups.find((g) => has(g, tab!))?.id;
       if (action.background) return holder ? editorReducer(layout, { type: "pin", groupId: holder, tab: tab! }) : withGroup(layout, layout.focusedGroupId, (g) => openBehind(g, tab!));
-      // A new preview is the window's only one, and goes where the preview is, in whichever group: closing that one to open in another would close a group that held nothing else.
-      const previewed = action.preview ? layout.groups.find((g) => g.tabs.some((t) => t.preview))?.id : undefined;
-      const groupId = holder ?? previewed ?? layout.focusedGroupId;
+      const groupId = holder ?? layout.focusedGroupId;
       return { ...withGroup(layout, groupId, (g) => open(g, tab!, action.preview)), focusedGroupId: groupId };
     }
     case "pin": {
@@ -293,17 +284,11 @@ export function editorReducer(layout: EditorLayout, action: EditorAction): Edito
       return layout.focusedGroupId === action.groupId ? layout : { ...layout, focusedGroupId: action.groupId };
     case "split": {
       const id = String(Math.max(...layout.groups.map((g) => Number(g.id))) + 1);
-      const preview = !action.keep && layout.groups.some((g) => g.tabs.some((t) => t.preview && same(t, tab)));
-      const groups = [...lift(layout, tab!).groups, { id, tabs: [{ ...tab!, preview }], active: tab }];
+      const groups = [...lift(layout, tab!).groups, { id, tabs: [{ ...tab!, preview: false }], active: tab }];
       return dropEmpty(arranged({ groups, focusedGroupId: id }, beside(arrangement(layout), action.groupId, id, action.side)));
     }
     case "add":
       return editorReducer(layout, { type: "drop", groupId: action.groupId, index: layout.groups.find((g) => g.id === action.groupId)?.tabs.length ?? 0, tab: tab! });
-    case "send": {
-      const count = layout.groups.length;
-      const to = layout.groups[(layout.groups.findIndex((g) => g.id === action.groupId) + (action.to === "next" ? 1 : count - 1)) % count]!;
-      return count > 1 ? editorReducer(layout, { type: "add", groupId: to.id, tab: tab! }) : layout;
-    }
     case "resize": {
       const sized = (pane: Pane, path: number[]): Pane => {
         if (typeof pane === "string") return pane;

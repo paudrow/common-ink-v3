@@ -1,5 +1,5 @@
-import { EditorState, Prec, type Extension } from "@codemirror/state";
-import { EditorView, RectangleMarker, ViewPlugin, drawSelection, layer } from "@codemirror/view";
+import { Prec, type Extension } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { Vim, getCM, vim } from "@replit/codemirror-vim";
 import { TITLE_MARK, dismissing } from "../../plugin-api.ts";
 
@@ -28,6 +28,10 @@ Vim.defineEx("redo", "red", () => void run("history.redo"));
 // Ctrl+I is Tab to vim, and the editor's own answer to it is another key's off a Mac.
 Vim.defineAction("typeTab", (cm) => cm.replaceSelection("\t"));
 Vim.mapCommand("<C-i>", "action", "typeTab", {}, { context: "insert" });
+
+// A link is the nearest thing a note has to a definition, so gd follows the one under the cursor: to its note, or to its page in a new tab.
+Vim.defineAction("followLink", () => void run("links.follow"));
+Vim.mapCommand("gd", "action", "followLink", {}, { context: "normal" });
 
 // A note's tabs are vim's tab pages. In a note g begins many of vim's own keys, so these two are vim's to map and not the window's.
 Vim.defineAction("nextTab", () => void run("vim.tab.next"));
@@ -62,38 +66,6 @@ const titleFirst = ViewPlugin.define((view) => {
 
 let byRows = false;
 
-/**
- * In visual line mode every line selected is painted from its left edge to its right, a code block's across the whole block.
- * The editor's own painting runs the first line from where its text starts and the last to where its text ends, which in a
- * code block is short of the block's edges on both sides.
- */
-const wholeLines = layer({
-  above: false,
-  class: "cm-selectionLayer",
-  markers(view) {
-    if (!getCM(view)?.state.vim?.visualLine) return [];
-    const scroller = view.scrollDOM.getBoundingClientRect();
-    const [left, top] = [scroller.left - view.scrollDOM.scrollLeft, scroller.top - view.scrollDOM.scrollTop];
-    const painted: RectangleMarker[] = [];
-    for (const range of view.state.selection.ranges) {
-      for (const seen of view.visibleRanges) {
-        for (let pos = Math.max(range.from, seen.from); pos <= Math.min(range.to, seen.to); ) {
-          const line = view.state.doc.lineAt(pos);
-          const { node } = view.domAtPos(line.from);
-          const el = (node instanceof HTMLElement ? node : node.parentElement)?.closest(".cm-line");
-          if (el) {
-            const box = el.getBoundingClientRect();
-            painted.push(new RectangleMarker("cm-selectionBackground", box.left - left, box.top - top, box.width, box.height));
-          }
-          pos = line.to + 1;
-        }
-      }
-    }
-    return painted;
-  },
-  update: (update) => update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged,
-});
-
 /** The editor extension for vim, with `runCommand` as the way it runs the app's commands. */
 export function vimEditing(runCommand: (commandId: string) => boolean): { extension: Extension; jumpsFrom: (focused: HTMLElement) => boolean; toNormal: (focused: HTMLElement) => void; moveByRows: (on: boolean) => void } {
   run = runCommand;
@@ -113,13 +85,6 @@ export function vimEditing(runCommand: (commandId: string) => boolean): { extens
       // Escape closes what is open over the editor before it is vim's.
       Prec.highest(EditorView.domEventHandlers({ keydown: (e) => e.key === "Escape" && dismissing() })),
       vim({ status: true }),
-      // Vim's library hides the browser's own selection in its modes and leaves the drawing of one to the editor.
-      // Without this nothing selected in visual mode is painted anywhere.
-      drawSelection(),
-      wholeLines,
-      // Visual block mode is a selection on each of its lines, which an editor keeps only when told it may. A click still makes one.
-      EditorState.allowMultipleSelections.of(true),
-      EditorView.clickAddsSelectionRange.of(() => false),
       titleFirst,
     ],
     /** Leaves insert or visual mode in the note whose text the element is, as Escape does. */

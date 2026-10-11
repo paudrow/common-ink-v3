@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { chordLabel, chordOf, onPlatform, pressing, readKeys, typed } from "./keybindings.ts";
+import { chordLabel, chordOf, onPlatform, readKeys, typed } from "./keybindings.ts";
 import { holdersOf, overlapsOf, type Shortcut } from "./settingsLayout.ts";
 
 interface Props {
@@ -61,39 +61,34 @@ export function KeyboardShortcuts({ shortcuts, all, mac, onSet }: Props) {
                 ))}
               </th>
               <td className="shortcut-keys">
-                <div className="shortcut-chords" title={s.chords.map((chord) => chordLabel(chord, mac)).join(", ") || undefined}>
-                  {s.chords.length === 0 && <span className="shortcut-none">No key</span>}
-                  {s.chords.map((chord) => {
-                    const label = chordLabel(chord, mac);
-                    return (
-                      <kbd key={chord}>
-                        {label}
-                        <button type="button" aria-label={`Remove ${label} from ${s.title}`} title="Remove this key" onClick={() => onSet(s.key, s.chords.filter((kept) => kept !== chord))}>
-                          ×
-                        </button>
-                      </kbd>
-                    );
-                  })}
-                </div>
+                {s.chords.length === 0 && <span className="shortcut-none">No key</span>}
+                {s.chords.map((chord) => {
+                  const label = chordLabel(chord, mac);
+                  return (
+                    <kbd key={chord}>
+                      {label}
+                      <button type="button" aria-label={`Remove ${label} from ${s.title}`} title="Remove this key" onClick={() => onSet(s.key, s.chords.filter((kept) => kept !== chord))}>
+                        ×
+                      </button>
+                    </kbd>
+                  );
+                })}
               </td>
               <td className="shortcut-from">{s.yours ? "Yours" : "Default"}</td>
               <td className="shortcut-actions">
-                {/* Each button has a place of its own, kept when another is not there, so none moves as a key is added or taken away. */}
-                <div className="shortcut-buttons">
-                  <button type="button" className="button small" data-row-open aria-label={`Record a key for ${s.title}`} onClick={() => record(s.commandId, false)}>
-                    Record
+                <button type="button" className="button small" data-row-open aria-label={`Record a key for ${s.title}`} onClick={() => record(s.commandId, false)}>
+                  Record
+                </button>
+                {s.chords.length > 0 && (
+                  <button type="button" className="button small" aria-label={`Add another key for ${s.title}`} title="Add another key" onClick={() => record(s.commandId, true)}>
+                    Add
                   </button>
-                  {s.chords.length > 0 && (
-                    <button type="button" className="button small" data-does="add" aria-label={`Add another key for ${s.title}`} title="Add another key" onClick={() => record(s.commandId, true)}>
-                      Add
-                    </button>
-                  )}
-                  {s.yours && (
-                    <button type="button" className="button small" data-does="reset" aria-label={`Reset ${s.title}`} title="Back to the default" onClick={() => onSet(s.key, undefined)}>
-                      Reset
-                    </button>
-                  )}
-                </div>
+                )}
+                {s.yours && (
+                  <button type="button" className="button small" aria-label={`Reset ${s.title}`} title="Back to the default" onClick={() => onSet(s.key, undefined)}>
+                    Reset
+                  </button>
+                )}
               </td>
             </tr>
           ))}
@@ -117,8 +112,6 @@ export function KeyboardShortcuts({ shortcuts, all, mac, onSet }: Props) {
 }
 
 const MODIFIER_KEYS = ["Shift", "Control", "Alt", "Meta"];
-/** What each key presses when it has focus, which the key is then left to. */
-const PRESSES = { enter: "button or link", space: "button or checkbox" };
 
 interface RecorderProps {
   shortcut: Shortcut;
@@ -146,7 +139,6 @@ function Recorder({ shortcut, add, all, mac, onSave, onClose }: RecorderProps) {
   const overlaps = chord ? overlapsOf(chord, all, shortcut.commandId, mac) : [];
   const has = chord !== null && shortcut.chords.some((held) => onPlatform(held, mac) === onPlatform(chord, mac));
   const names = holders.map((h) => h.title).join(" and ");
-  const press = chord === null ? null : pressing(chord);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (MODIFIER_KEYS.includes(e.key)) return;
@@ -160,26 +152,10 @@ function Recorder({ shortcut, add, all, mac, onSave, onClose }: RecorderProps) {
     setPressed([...pressed, chordOf(e, mac)]);
   };
 
-  /** Keys pressed anywhere in the dialog but the box that writes them down: Escape closes it, and Tab goes round inside it. */
-  const onDialogKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      return onClose();
-    }
-    if (e.key !== "Tab") return;
-    const stops = [...e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]')];
-    const [from, to] = e.shiftKey ? [stops[0], stops.at(-1)] : [stops.at(-1), stops[0]];
-    if (document.activeElement !== from && e.currentTarget !== document.activeElement) return;
-    e.preventDefault();
-    to?.focus();
-  };
-
   return (
     <div className="recorder-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       {/* The app leaves a key pressed in here alone: it is one to write down, not one to run. */}
-      {/* It can hold focus itself, so a press on its words leaves the keyboard in it. */}
-      <div role="dialog" aria-modal="true" aria-label={`${add ? "Add another key for" : "Record a key for"} ${shortcut.title}`} className="recorder" data-records-keys tabIndex={-1} onKeyDown={onDialogKey}>
+      <div role="dialog" aria-modal="true" aria-label={`${add ? "Add another key for" : "Record a key for"} ${shortcut.title}`} className="recorder" data-records-keys>
         <p className="recorder-for">
           {add ? "Another key for" : "A key for"} <strong>{shortcut.title}</strong>
         </p>
@@ -202,15 +178,7 @@ function Recorder({ shortcut, add, all, mac, onSave, onClose }: RecorderProps) {
                 : `${label} begins with ${chordLabel(o.keys, mac)}, the key for ${o.shortcut.title}. Where both can run, ${label} never would.`}
             </p>
           ))}
-          {chord !== null &&
-            typed(chord) &&
-            (press ? (
-              <p>
-                {label} begins with a key that types, and that presses a {PRESSES[press]} in focus. So it runs only where nothing is being typed and focus is on no such control.
-              </p>
-            ) : (
-              <p>{label} begins with a key that types, so it runs only where nothing is being typed.</p>
-            ))}
+          {chord !== null && typed(chord) && <p>{label} begins with a key that types, so it runs only where nothing is being typed.</p>}
           {pressed.length === 0 ? <p>Press Enter to save and Escape to cancel.</p> : <p>Press another key to make a sequence of them, pressed one after another.</p>}
         </div>
         <div className="agent-actions">

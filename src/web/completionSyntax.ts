@@ -3,28 +3,17 @@ import type { CompletionItem } from "./plugin-api.ts";
 /**
  * What has been typed after `trigger`, given the line up to the cursor, or null when the cursor
  * isn't after one that opens a list. A trigger opens a list only at the start of a line or after
- * a space, so the `/` of a URL, a path, a date, or a fraction opens nothing.
+ * a space, so the `/` of a URL, a path, a date, or a fraction opens nothing. With `anywhere`, it
+ * opens after anything.
  */
-export function typedAfter(before: string, trigger: string, spaces = false): string | null {
+export function typedAfter(before: string, trigger: string, { spaces = false, anywhere = false }: { spaces?: boolean; anywhere?: boolean } = {}): string | null {
   for (let at = before.lastIndexOf(trigger); at >= 0; at = at === 0 ? -1 : before.lastIndexOf(trigger, at - 1)) {
     const typed = before.slice(at + trigger.length);
     if (!spaces && /\s/.test(typed)) return null;
     if (typed.startsWith(" ") || typed.includes(trigger)) continue;
-    if (at === 0 || /\s/.test(before[at - 1]!)) return typed;
+    if (anywhere || at === 0 || /\s/.test(before[at - 1]!)) return typed;
   }
   return null;
-}
-
-/** Blank space, a quote's `>`, and a list item's mark and task box: what may come before a trigger at the start of a line. */
-const LEAD = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?$/;
-
-/**
- * Whether the trigger `typedAfter` found starts its line, given the line up to the cursor and what
- * was typed after the trigger. For a prose trigger only there does Enter pick from the list: after
- * other words, a `/` and what follows it are as likely the member's own words.
- */
-export function startsLine(before: string, typed: string, trigger: string): boolean {
-  return LEAD.test(before.slice(0, before.length - typed.length - trigger.length));
 }
 
 export interface Placing {
