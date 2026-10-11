@@ -216,10 +216,42 @@ interface Recording {
   reverts?: Reverts;
 }
 
-const insertChange = (ctx: Context, noteId: string, revision: number, baseRevision: number, changes: ChangeSet, { writeId, reverts }: Recording = {}) =>
-  ctx.db
-    .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, write_id, reverts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(noteId, revision, baseRevision, ctx.actor.kind, authorId(ctx.actor), JSON.stringify(changes.toJSON()), ctx.now, writeId ?? null, reverts ? JSON.stringify(reverts) : null);
+/** Records `changes` to a note whose text was `before`, with the lines it added and removed counted. */
+function insertChange(ctx: Context, noteId: string, revision: number, baseRevision: number, before: string, changes: ChangeSet, { writeId, reverts }: Recording = {}) {
+  const { added, removed } = lineDiff(before, changes);
+  return ctx.db
+    .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, write_id, reverts, added, removed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(noteId, revision, baseRevision, ctx.actor.kind, authorId(ctx.actor), JSON.stringify(changes.toJSON()), ctx.now, writeId ?? null, reverts ? JSON.stringify(reverts) : null, added, removed);
+}
+
+/**
+ * Counts the lines of every change written before changes were counted as they are written, in the
+ * notes named. Each such note is replayed once, and never again.
+ */
+async function countLines(ctx: Context, noteIds: readonly string[]): Promise<void> {
+  if (!noteIds.length) return;
+  const { results } = await ctx.db
+    .prepare(
+      `SELECT note_id, revision, diff, added FROM changes
+       WHERE note_id IN (SELECT DISTINCT c.note_id FROM changes c WHERE c.note_id IN (SELECT value FROM json_each(?)) AND c.added IS NULL)
+       ORDER BY note_id, revision`,
+    )
+    .bind(JSON.stringify(noteIds))
+    .all<{ note_id: string; revision: number; diff: string; added: number | null }>();
+  const counts: D1PreparedStatement[] = [];
+  for (const rows of Map.groupBy(results, (r) => r.note_id).values()) {
+    let text = "";
+    for (const row of rows) {
+      const changes = ChangeSet.fromJSON(JSON.parse(row.diff));
+      if (row.added === null) {
+        const { added, removed } = lineDiff(text, changes);
+        counts.push(ctx.db.prepare("UPDATE changes SET added = ?, removed = ? WHERE note_id = ? AND revision = ? AND added IS NULL").bind(added, removed, row.note_id, row.revision));
+      }
+      text = applyChanges(changes, text);
+    }
+  }
+  if (counts.length) await ctx.db.batch(counts);
+}
 
 /** Records `changes` as the next revision of `row`. Null when another write took that revision first. */
 async function record(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision: number, recording?: Recording): Promise<NoteRow | null> {
@@ -229,7 +261,7 @@ async function record(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevisi
   const next: NoteRow = { ...row, revision, ...written(ctx, text) };
   try {
     await ctx.db.batch([
-      insertChange(ctx, row.id, revision, baseRevision, changes, recording),
+      insertChange(ctx, row.id, revision, baseRevision, row.text, changes, recording),
       ctx.db
         .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ? WHERE id = ? AND revision = ?")
         .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, row.id, row.revision),
@@ -261,9 +293,11 @@ interface ChangeRow {
   created_at: number;
   reverts: string | null;
   label: string | null;
+  added: number | null;
+  removed: number | null;
 }
 
-const CHANGE_COLUMNS = `c.note_id, c.revision, c.base_revision, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner, c.created_at, c.reverts, l.name AS label
+const CHANGE_COLUMNS = `c.note_id, c.revision, c.base_revision, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner, c.created_at, c.reverts, c.added, c.removed, l.name AS label
   FROM changes c
   LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
   LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
@@ -280,6 +314,8 @@ const toEntry = (r: ChangeRow, reverted: ReadonlyMap<number, number>): ChangeEnt
   label: r.label,
   reverts: revertsOf(r.reverts),
   revertedBy: reverted.get(r.revision) ?? null,
+  added: r.added ?? 0,
+  removed: r.removed ?? 0,
 });
 
 /** A note's change as moving through history reads it. */
@@ -303,8 +339,6 @@ const toRecorded = (r: RecordedRow): Recorded => ({
   author: { kind: r.author_kind, id: r.author_id },
   changes: ChangeSet.fromJSON(JSON.parse(r.diff)),
 });
-
-const list = (revisions: number[]) => (revisions.length === 1 ? `change ${revisions[0]}` : `changes ${revisions.slice(0, -1).join(", ")} and ${revisions.at(-1)}`);
 
 /**
  * Records one change that takes other changes back out of a note. `choose` names them from the note's
@@ -358,7 +392,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(id, ctx.actor.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind);
-      await intoFolder(ctx.db.batch(op.text ? [insertNote, insertChange(ctx, id, 1, 0, changesBetween("", op.text))] : [insertNote]));
+      await intoFolder(ctx.db.batch(op.text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", op.text))] : [insertNote]));
       return toNote(row);
     },
   },
@@ -401,9 +435,20 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       await loadNote(ctx, op.id);
+      await countLines(ctx, [op.id]);
       const { results } = await ctx.db.prepare(`SELECT ${CHANGE_COLUMNS} WHERE c.note_id = ? ORDER BY c.revision`).bind(op.id).all<ChangeRow>();
       const reverted = revertedBy(results.map(stepOf));
       return results.map((r) => toEntry(r, reverted));
+    },
+  },
+
+  "note.diff": {
+    needs: "view",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id);
+      if (op.revision > row.revision) throw new OpError("not_found", `The note has no change ${op.revision}`);
+      const { text, since } = await replay(ctx, row.id, op.revision - 1, op.revision);
+      return lineDiff(text, since);
     },
   },
 
@@ -448,25 +493,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       takeBack(ctx, op.id, (history, reverted) => {
         const revisions = chosen(op.revisions, history);
         const gone = revisions.find((r) => reverted.has(r));
-        if (gone !== undefined) throw new OpError("invalid", `Change ${gone} was already taken back out, by change ${reverted.get(gone)}`);
+        if (gone !== undefined) throw new OpError("invalid", `Change ${gone} was already reverted, by change ${reverted.get(gone)}. Revert change ${reverted.get(gone)} to have it again`);
         return { how: "revert", revisions };
-      }),
-  },
-
-  "note.reapplyChanges": {
-    needs: "edit",
-    run: (ctx, op) =>
-      takeBack(ctx, op.id, (history, reverted) => {
-        const revisions = chosen(op.revisions, history);
-        const standing = revisions.find((r) => !reverted.has(r));
-        if (standing !== undefined) throw new OpError("invalid", `Change ${standing} wasn't taken back out, so there's nothing to put back`);
-        // A change that took several out together can only be taken back whole.
-        const reverters = [...new Set(revisions.map((r) => reverted.get(r)!))].sort((a, b) => a - b);
-        for (const reverter of reverters) {
-          const together = history[reverter - 1]!.reverts!.revisions.filter((r) => reverted.get(r) === reverter);
-          if (together.some((r) => !revisions.includes(r))) throw new OpError("invalid", `Change ${reverter} took ${list(together)} out together, so put them back together`);
-        }
-        return { how: "revert", revisions: reverters };
       }),
   },
 
@@ -490,38 +518,116 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       }),
   },
 
-  "history.list": {
+  "history.summary": {
     needs: "view",
     async run(ctx, op) {
-      const { results } = await ctx.db
-        .prepare(
-          `SELECT n.title, ${CHANGE_COLUMNS}
-           JOIN notes n ON n.id = c.note_id
-           WHERE n.workspace_id = ?1
+      const narrowed = `n.workspace_id = ?1
              AND (?2 IS NULL OR c.note_id IN (SELECT value FROM json_each(?2)))
              AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
              AND (?4 IS NULL OR c.created_at >= ?4)
-             AND (?5 IS NULL OR c.created_at < ?5)
-             AND (?6 IS NULL OR (c.created_at, c.note_id, c.revision) < (?6, ?7, ?8))
-           ORDER BY c.created_at DESC, c.note_id DESC, c.revision DESC
-           LIMIT ?9`,
+             AND (?5 IS NULL OR c.created_at < ?5)`;
+      const binds = [ctx.actor.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.authors ? JSON.stringify(op.authors) : null, op.from ?? null, op.to ?? null];
+      interface Row {
+        note_id: string;
+        title: string;
+        changes: number;
+        added: number;
+        removed: number;
+        first_at: number;
+        last_at: number;
+        uncounted: number;
+      }
+      const read = () =>
+        ctx.db
+          .prepare(
+            `SELECT c.note_id, n.title, COUNT(*) AS changes, COALESCE(SUM(c.added), 0) AS added, COALESCE(SUM(c.removed), 0) AS removed,
+               MIN(c.created_at) AS first_at, MAX(c.created_at) AS last_at, MAX(c.added IS NULL) AS uncounted
+             FROM changes c JOIN notes n ON n.id = c.note_id
+             WHERE ${narrowed}
+             GROUP BY c.note_id
+             HAVING ?6 IS NULL OR last_at < ?6 OR (last_at = ?6 AND c.note_id < ?7)
+             ORDER BY last_at DESC, c.note_id DESC
+             LIMIT ?8`,
+          )
+          .bind(...binds, op.before?.lastAt ?? null, op.before?.noteId ?? null, op.limit + 1)
+          .all<Row>();
+      let { results } = await read();
+      const uncounted = results.filter((r) => r.uncounted).map((r) => r.note_id);
+      if (uncounted.length) {
+        await countLines(ctx, uncounted);
+        ({ results } = await read());
+      }
+      const page = results.slice(0, op.limit);
+      const last = results.length > op.limit ? page.at(-1)! : null;
+      const { results: wrote } = await ctx.db
+        .prepare(
+          `SELECT c.note_id, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner
+           FROM changes c
+           JOIN notes n ON n.id = c.note_id
+           LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
+           LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
+           WHERE ${narrowed} AND c.note_id IN (SELECT value FROM json_each(?6))
+           GROUP BY c.note_id, c.author_kind, c.author_id
+           ORDER BY MAX(c.created_at) DESC, c.author_id`,
         )
-        .bind(
-          ctx.actor.workspaceId,
-          op.noteIds ? JSON.stringify(op.noteIds) : null,
-          op.authors ? JSON.stringify(op.authors) : null,
-          op.from ?? null,
-          op.to ?? null,
-          op.before?.createdAt ?? null,
-          op.before?.noteId ?? null,
-          op.before?.revision ?? null,
-          op.limit + 1,
-        )
-        .all<ChangeRow & { title: string }>();
+        .bind(...binds, JSON.stringify(page.map((r) => r.note_id)))
+        .all<Pick<ChangeRow, "note_id" | "author_kind" | "author_id" | "name" | "agent_owner">>();
+      const authors = Map.groupBy(wrote, (r) => r.note_id);
+      return {
+        notes: page.map((r) => ({
+          noteId: r.note_id,
+          noteTitle: r.title,
+          changes: r.changes,
+          added: r.added,
+          removed: r.removed,
+          firstAt: r.first_at,
+          lastAt: r.last_at,
+          authors: (authors.get(r.note_id) ?? []).map((w) => authorOf(w.author_kind, w.author_id, w.name, w.agent_owner)),
+        })),
+        next: last && { lastAt: last.last_at, noteId: last.note_id },
+      };
+    },
+  },
+
+  "history.list": {
+    needs: "view",
+    async run(ctx, op) {
+      const read = () =>
+        ctx.db
+          .prepare(
+            `SELECT n.title, ${CHANGE_COLUMNS}
+             JOIN notes n ON n.id = c.note_id
+             WHERE n.workspace_id = ?1
+               AND (?2 IS NULL OR c.note_id IN (SELECT value FROM json_each(?2)))
+               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
+               AND (?4 IS NULL OR c.created_at >= ?4)
+               AND (?5 IS NULL OR c.created_at < ?5)
+               AND (?6 IS NULL OR (c.created_at, c.note_id, c.revision) < (?6, ?7, ?8))
+             ORDER BY c.created_at DESC, c.note_id DESC, c.revision DESC
+             LIMIT ?9`,
+          )
+          .bind(
+            ctx.actor.workspaceId,
+            op.noteIds ? JSON.stringify(op.noteIds) : null,
+            op.authors ? JSON.stringify(op.authors) : null,
+            op.from ?? null,
+            op.to ?? null,
+            op.before?.createdAt ?? null,
+            op.before?.noteId ?? null,
+            op.before?.revision ?? null,
+            op.limit + 1,
+          )
+          .all<ChangeRow & { title: string }>();
+      let { results } = await read();
+      const uncounted = [...new Set(results.filter((r) => r.added === null).map((r) => r.note_id))];
+      if (uncounted.length) {
+        await countLines(ctx, uncounted);
+        ({ results } = await read());
+      }
       const page = results.slice(0, op.limit);
       const last = results.length > op.limit ? page.at(-1)! : null;
 
-      // A change's diff needs the text before it, and whether it still stands needs every later change.
+      // Whether a change still stands needs every later change, and its diff needs the text before it.
       const { results: recorded } = await ctx.db
         .prepare(`SELECT note_id, revision, reverts${op.diffs ? ", diff" : ""} FROM changes WHERE note_id IN (SELECT value FROM json_each(?)) ORDER BY note_id, revision`)
         .bind(JSON.stringify([...new Set(page.map((r) => r.note_id))]))
@@ -561,30 +667,6 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .bind(ctx.actor.workspaceId)
         .all<Pick<ChangeRow, "author_kind" | "author_id" | "name" | "agent_owner">>();
       return results.map((r) => authorOf(r.author_kind, r.author_id, r.name, r.agent_owner));
-    },
-  },
-
-  "history.activity": {
-    needs: "view",
-    async run(ctx, op) {
-      let day: (time: number) => string;
-      try {
-        day = dayIn(op.timeZone);
-      } catch {
-        throw new OpError("invalid", `There's no time zone named ${op.timeZone}`);
-      }
-      const author = op.author ?? { kind: ctx.actor.kind, id: authorId(ctx.actor) };
-      const { results } = await ctx.db
-        .prepare(
-          `SELECT c.created_at FROM changes c JOIN notes n ON n.id = c.note_id
-           WHERE n.workspace_id = ?1 AND c.author_kind = ?2 AND c.author_id = ?3 AND (?4 IS NULL OR c.created_at >= ?4) AND (?5 IS NULL OR c.created_at < ?5)
-           ORDER BY c.created_at`,
-        )
-        .bind(ctx.actor.workspaceId, author.kind, author.id, op.from ?? null, op.to ?? null)
-        .all<{ created_at: number }>();
-      const counts = new Map<string, number>();
-      for (const { created_at } of results) counts.set(day(created_at), (counts.get(day(created_at)) ?? 0) + 1);
-      return { timeZone: op.timeZone, days: [...counts].map(([date, count]) => ({ date, count })) };
     },
   },
 

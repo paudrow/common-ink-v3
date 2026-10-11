@@ -154,19 +154,15 @@ An author that is not a person. A member connects it. It acts with that member's
 _Avoid_: Bot
 
 **History**:
-The ordered record of every change in a workspace. Undo, redo, revert, and applying a selection move through it. Each is recorded as a new change that names the changes it took back out, so nothing is erased and a change either still stands or was taken back out. The diff of the open note and the workspace history are this same record.
+The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as the notes that changed, each with the lines its changes added and removed, then a note's changes, then one change's diff. The diff of the open note and the workspace history are this same record.
 _Avoid_: Log, timeline, versions
 
-**Activity**:
-A view of history showing how many changes a member authored on each day, in that member's timezone. An agent's changes belong to the agent.
-_Avoid_: Contributions, streak
-
 **Revert**:
-Putting a note back to how it was at a revision, as a new change. Applying a selection takes only the chosen changes back out, or puts back ones that were taken out, and keeps the rest.
-_Avoid_: Restore, rollback
+A new change that takes the effect of earlier changes out of a note and keeps every other change. Reverting a note to a revision reverts every change after it. A revert is a change like any other, so reverting it has the changes it reverted stand again, and that is the only way to have them again.
+_Avoid_: Restore, rollback, put back, reapply, take back out
 
 **Undo**:
-Taking back the author's own latest change to a note that still stands. Redo puts back what their latest undo took out, until they edit again. Another author's changes are kept.
+Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
 
 **Unseen change**:
 A change to a note by anyone but the member, their own agent included, made since the member last looked at that note's history.

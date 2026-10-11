@@ -49,7 +49,7 @@ export interface Recorded extends Step {
 /**
  * The change that `reverts` records: it leaves the note holding the edits that still stand once it is
  * recorded, and nothing else. Every change that took others out is left out with the edits that are
- * gone, so the text follows the record however often a change has been taken out and put back.
+ * gone, so the text follows the record however often a change was reverted and that revert reverted.
  */
 export function takeBackOut(history: readonly Recorded[], reverts: Reverts): ChangeSet {
   const gone = revertedBy([...history, { revision: history.length + 1, reverts }]);

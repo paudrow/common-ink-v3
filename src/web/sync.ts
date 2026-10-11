@@ -28,7 +28,7 @@ export const committed = (noteId: string) => Promise.all([...unsaved].filter((sy
 /** The sync of each note open in an editor. A note has at most one tab, so at most one sync. */
 const open = new Map<string, NoteSync>();
 
-type HistoryOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.reapplyChanges" | "note.undo" | "note.redo" }>;
+type HistoryOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.undo" | "note.redo" }>;
 
 /** Moves a note through its history. What's typed is saved first, and the note's editor takes the result if it's open. */
 export async function moveThroughHistory(workspaceId: string, op: HistoryOp): Promise<Note> {

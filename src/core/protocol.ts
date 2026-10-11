@@ -38,18 +38,33 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
   }),
   z.object({ type: z.literal("note.history"), id: Id }),
+  /** What one change did to its note, as a line diff. */
+  z.object({ type: z.literal("note.diff"), id: Id, revision: Revision.min(1) }),
   z.object({ type: z.literal("note.move"), id: Id, folderId: Id }),
   /** Names a revision, or takes its name away when `name` is null. */
   z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
   /** Puts the note back to how it was at `revision`, as a new change. */
   z.object({ type: z.literal("note.revert"), id: Id, revision: Revision }),
-  /** Takes the chosen changes back out and keeps the rest, as one new change. */
+  /**
+   * Reverts the chosen changes and keeps the rest, as one new change. Reverting a change that was
+   * itself a revert, an undo, or a redo has what it reverted stand again.
+   */
   z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions }),
-  /** Puts back chosen changes that were taken out, as one new change. */
-  z.object({ type: z.literal("note.reapplyChanges"), id: Id, revisions: Revisions }),
   /** Takes back the author's own latest change that still stands. */
   z.object({ type: z.literal("note.undo"), id: Id }),
   z.object({ type: z.literal("note.redo"), id: Id }),
+  /** The notes that changed, latest change first, each with how many changes it had and the lines they added and removed. */
+  z.object({
+    type: z.literal("history.summary"),
+    noteIds: z.array(Id).min(1).max(200).optional(),
+    authors: z.array(AuthorRef).min(1).max(50).optional(),
+    /** Only changes made at or after this time, and before `to`, are counted. */
+    from: Time.optional(),
+    to: Time.optional(),
+    /** The `next` of the page before this one. */
+    before: z.object({ lastAt: Time, noteId: Id }).optional(),
+    limit: z.number().int().min(1).max(100).default(30),
+  }),
   z.object({
     type: z.literal("history.list"),
     /** One note, several, or every note in the workspace when left out. */
@@ -64,15 +79,6 @@ export const Op = z.discriminatedUnion("type", [
     diffs: z.boolean().default(true),
   }),
   z.object({ type: z.literal("history.authors") }),
-  z.object({
-    type: z.literal("history.activity"),
-    /** The IANA zone whose days the changes are counted in, such as "America/Chicago". */
-    timeZone: z.string().min(1).max(64),
-    /** Whose changes to count; the one asking when left out. */
-    author: AuthorRef.optional(),
-    from: Time.optional(),
-    to: Time.optional(),
-  }),
   z.object({ type: z.literal("folder.list") }),
   z.object({ type: z.literal("folder.create"), name: FolderName, parentId: Id.optional() }),
   z.object({ type: z.literal("folder.rename"), id: Id, name: FolderName }),
@@ -118,7 +124,7 @@ export type Author =
   /** A connected agent, named as its member named it; `onBehalfOf` is that member. */
   | { kind: "agent"; agentId: string; name: string; onBehalfOf: string };
 
-/** The changes a change took back out. `to` is the revision a revert put the note back to. */
+/** The changes a change reverted. `to` is the revision a revert put the note back to. */
 export interface Reverts {
   how: "undo" | "redo" | "revert";
   revisions: number[];
@@ -134,8 +140,11 @@ export interface ChangeEntry {
   label: string | null;
   /** Null for an edit. */
   reverts: Reverts | null;
-  /** The later change that took this one back out and still stands. */
+  /** The later change that reverted this one and still stands. */
   revertedBy: number | null;
+  /** Lines this change added and removed. */
+  added: number;
+  removed: number;
 }
 
 export interface DiffLine {
@@ -172,10 +181,25 @@ export interface HistoryPage {
   next: { createdAt: number; noteId: string; revision: number } | null;
 }
 
-export interface Activity {
-  timeZone: string;
-  /** Days with a change, oldest first, each as YYYY-MM-DD in `timeZone`. */
-  days: { date: string; count: number }[];
+/** A note's changes, counted: all of them, or the ones a listing was narrowed to. */
+export interface ChangedNote {
+  noteId: string;
+  noteTitle: string;
+  changes: number;
+  /** Lines the changes added and removed, each change counted on its own. */
+  added: number;
+  removed: number;
+  firstAt: number;
+  lastAt: number;
+  /** Who made them, whoever changed the note latest first. */
+  authors: Author[];
+}
+
+export interface HistorySummary {
+  /** Latest change first. */
+  notes: ChangedNote[];
+  /** Pass as `before` for the next page; null on the last. */
+  next: { lastAt: number; noteId: string } | null;
 }
 
 export interface Results {
@@ -188,12 +212,12 @@ export interface Results {
   "note.label": { id: string; revision: number; label: string | null };
   "note.revert": Note;
   "note.revertChanges": Note;
-  "note.reapplyChanges": Note;
   "note.undo": Note;
   "note.redo": Note;
+  "note.diff": Diff;
+  "history.summary": HistorySummary;
   "history.list": HistoryPage;
   "history.authors": Author[];
-  "history.activity": Activity;
   "folder.list": { unsortedId: string; folders: ListedFolder[] };
   "folder.create": Folder;
   "folder.rename": Folder;

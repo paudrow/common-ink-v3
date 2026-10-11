@@ -97,14 +97,34 @@ export const TOOLS: Tool[] = [
   {
     name: "note_history",
     description:
-      "A note's recorded changes, oldest first: revision, the revision it was based on, who made it (a member, or an agent by name), when, its label, the changes it took back out (reverts) and the later change that took it back out (revertedBy).",
+      "A note's recorded changes, oldest first: revision, the revision it was based on, who made it (a member, or an agent by name), when, its label, the lines it added and removed, the changes it reverted (reverts) and the later change that reverted it (revertedBy).",
     inputSchema: object({ id: { type: "string", description: "The note id" } }, ["id"]),
     op: (a) => ({ type: "note.history", ...Args.history.parse(a) }),
   },
   {
+    name: "change_diff",
+    description: "What one change did to its note, as a line diff: hunks of added, removed and unchanged lines, with the lines it added and removed counted.",
+    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 1, description: "The change, by the revision it made" } }, ["id", "revision"]),
+    op: as("note.diff"),
+  },
+  {
+    name: "history_summary",
+    description:
+      "The notes that changed, latest change first, each with how many changes it had, the lines they added and removed, when the first and last were made, and who made them. Start here, then read one note's changes with history and one change with change_diff. Narrow it by noteIds, authors (from history_authors) and a time range, which then count only the changes that match. Pass the answer's next as before for the page after.",
+    inputSchema: object({
+      noteIds: { type: "array", items: { type: "string" }, minItems: 1, description: "Only these notes" },
+      authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
+      from: time("Changes made at or after this time"),
+      to: time("Changes made before this time"),
+      before: { type: "object", description: "The next of the page before" },
+      limit: { type: "integer", minimum: 1, maximum: 100, description: "How many notes; default 30" },
+    }),
+    op: as("history.summary"),
+  },
+  {
     name: "history",
     description:
-      "Changes across the workspace, newest first, each with its note, author and a line diff. Narrow it by noteIds (one note, several, or all when left out), authors (from history_authors) and a time range. Pass the answer's next as before for the page after.",
+      "Changes across the workspace, newest first, each with its note, author, the lines it added and removed, and a line diff. Narrow it by noteIds (one note, several, or all when left out), authors (from history_authors) and a time range. Pass the answer's next as before for the page after.",
     inputSchema: object({
       noteIds: { type: "array", items: { type: "string" }, minItems: 1, description: "Only these notes" },
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
@@ -123,12 +143,6 @@ export const TOOLS: Tool[] = [
     op: as("history.authors"),
   },
   {
-    name: "activity",
-    description: "How many changes an author made on each day, counted in a time zone. Counts your own changes unless you name another author. An agent's changes are the agent's, not its member's.",
-    inputSchema: object({ timeZone: { type: "string", description: 'An IANA zone, such as "America/Chicago"' }, author, from: time("From this time"), to: time("Before this time") }, ["timeZone"]),
-    op: as("history.activity"),
-  },
-  {
     name: "label_revision",
     description: "Name one revision of a note, so it can be found and reverted to. A null name takes the label away. Needs the editor or admin role.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 1 }, name: { type: ["string", "null"], maxLength: 60 } }, ["id", "revision", "name"]),
@@ -142,15 +156,10 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "revert_changes",
-    description: "Take chosen changes back out of a note and keep every other change, recorded as one new change. Needs the editor or admin role.",
+    description:
+      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Needs the editor or admin role.",
     inputSchema: object({ id: noteId, revisions }, ["id", "revisions"]),
     op: as("note.revertChanges"),
-  },
-  {
-    name: "reapply_changes",
-    description: "Put back chosen changes that were taken out of a note, recorded as one new change. Changes that one change took out together go back together. Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revisions }, ["id", "revisions"]),
-    op: as("note.reapplyChanges"),
   },
   {
     name: "undo",
@@ -160,7 +169,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "redo",
-    description: "Put back what your latest undo on a note took out, as a new change. Needs the editor or admin role.",
+    description: "Revert your latest undo on a note, as a new change, so what it undid stands again. Needs the editor or admin role.",
     inputSchema: object({ id: noteId }, ["id"]),
     op: as("note.redo"),
   },

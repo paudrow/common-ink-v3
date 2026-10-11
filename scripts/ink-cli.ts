@@ -16,17 +16,17 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   create [--text TEXT]                a new note (text from stdin if --text is left out)
   write ID --base N [--text TEXT]     replace a note's text (from stdin if --text is left out)
   history ID                          a note's changes and who made them
+  diff ID --change N                  what one change did to its note, as a line diff
+  changed [--note ID,ID] [--author KIND:ID] [--from TIME] [--to TIME] [--limit N]
+                                      the notes that changed, latest first, with the lines added and removed in each
   changes [--note ID,ID] [--author KIND:ID] [--from TIME] [--to TIME]
                                       changes across the workspace, newest first, with diffs
   authors                             everyone who has changed a note
-  activity [--timezone ZONE] [--author KIND:ID]
-                                      changes an author made on each day (yours if no author)
   label ID --revision N [--name NAME] name a revision, or take its name away without --name
   revert ID --revision N              put a note back to a revision, as a new change
-  revert ID --changes N,N             take chosen changes back out, as one new change
-  reapply ID --changes N,N            put back changes that were taken out
+  revert ID --changes N,N             revert chosen changes, as one new change; revert a revert to have its changes again
   undo ID                             take back your latest change to a note
-  redo ID                             put back what your latest undo took out
+  redo ID                             revert your latest undo, so what it undid stands again
 
 TIME is anything a date parses, such as 2026-10-09 or 2026-10-09T14:00:00Z.
 
@@ -107,24 +107,24 @@ export async function run(argv: string[], io: Io): Promise<number> {
         tool = "note_history";
         args = { id: needId() };
         break;
+      case "diff":
+        if (!flags.has("change")) throw new UsageError("diff needs --change");
+        tool = "change_diff";
+        args = { id: needId(), revision: integer("--change", flags.get("change")!) };
+        break;
+      case "changed":
       case "changes":
-        tool = "history";
+        tool = command === "changed" ? "history_summary" : "history";
         args = {
           ...(flags.has("note") ? { noteIds: flags.get("note")!.split(",") } : {}),
           ...(flags.has("author") ? { authors: [authorRef(flags.get("author")!)] } : {}),
           ...(flags.has("from") ? { from: time("--from", flags.get("from")!) } : {}),
           ...(flags.has("to") ? { to: time("--to", flags.get("to")!) } : {}),
+          ...(command === "changed" && flags.has("limit") ? { limit: integer("--limit", flags.get("limit")!) } : {}),
         };
         break;
       case "authors":
         tool = "history_authors";
-        break;
-      case "activity":
-        tool = "activity";
-        args = {
-          timeZone: flags.get("timezone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-          ...(flags.has("author") ? { author: authorRef(flags.get("author")!) } : {}),
-        };
         break;
       case "label":
         if (!flags.has("revision")) throw new UsageError("label needs --revision");
@@ -132,14 +132,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
         args = { id: needId(), revision: integer("--revision", flags.get("revision")!), name: flags.get("name") ?? null };
         break;
       case "revert":
-        if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to take those out");
+        if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to revert those");
         tool = flags.has("revision") ? "revert_note" : "revert_changes";
         args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
-        break;
-      case "reapply":
-        if (!flags.has("changes")) throw new UsageError("reapply needs --changes");
-        tool = "reapply_changes";
-        args = { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
         break;
       case "undo":
       case "redo":

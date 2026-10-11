@@ -1,27 +1,33 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { Author, AuthorRef, Diff, HistoryEntry, HistoryPage, Note, NoteSummary, OpInput } from "../core/protocol.ts";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import type { Author, AuthorRef, ChangedNote, Diff, HistoryEntry, HistoryPage, HistorySummary, Note, NoteSummary, OpInput } from "../core/protocol.ts";
 import { perform } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
 import { moveThroughHistory } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
-type Query = Omit<Extract<OpInput, { type: "history.list" }>, "type" | "before">;
+/** What narrows history: to some notes, some authors, a span of time. */
+type Filters = Omit<Extract<OpInput, { type: "history.summary" }>, "type" | "before" | "limit">;
+
+const NOTES_A_PAGE = 30;
+const CHANGES_A_PAGE = 30;
+/** As many as one request answers with, so a list that grew is read again whole up to here. */
+const MOST_A_PAGE = 100;
 
 const refOf = (author: Author): AuthorRef => (author.kind === "agent" ? { kind: "agent", id: author.agentId } : { kind: "member", id: author.personId });
 const authorKey = (author: Author) => `${author.kind}:${refOf(author).id}`;
-const changeKey = (change: HistoryEntry) => `${change.noteId}/${change.revision}`;
 const titleOf = (title: string) => title || "Untitled";
 const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
-const listed = (revisions: number[]) => (revisions.length === 1 ? `change ${revisions[0]}` : `changes ${revisions.slice(0, -1).join(", ")} and ${revisions.at(-1)}`);
+const nameOf = (author: Author) => (author.kind === "agent" ? `${author.name} (agent)` : author.name);
 
-/** What a change did when it wasn't an edit. */
-function taken(change: HistoryEntry): string | null {
-  const { reverts } = change;
-  if (!reverts) return null;
-  if (reverts.to !== undefined) return `Reverted to revision ${reverts.to}`;
-  if (reverts.how === "redo") return `Redid what ${listed(reverts.revisions)} undid`;
-  return `${reverts.how === "undo" ? "Undid" : "Reverted"} ${listed(reverts.revisions)}`;
+function Stat({ added, removed }: { added: number; removed: number }) {
+  return (
+    <span className="change-stat">
+      <span className="added">+{added}</span> <span className="removed">−{removed}</span>
+    </span>
+  );
 }
+
+const MARK = { add: "+", del: "−", same: "" } as const;
 
 function DiffView({ diff }: { diff: Diff }) {
   if (!diff.hunks.length) return <p className="diff-none">No text changed.</p>;
@@ -33,10 +39,13 @@ function DiffView({ diff }: { diff: Diff }) {
             @@ −{hunk.oldStart} +{hunk.newStart} @@
           </div>
           {hunk.lines.map((line, i) => {
-            const Line = line.kind === "add" ? "ins" : line.kind === "del" ? "del" : "span";
+            const Line = line.kind === "add" ? "ins" : line.kind === "del" ? "del" : "div";
             return (
               <Line key={i} className="diff-line">
-                {line.text || " "}
+                <span className="diff-mark" aria-hidden="true">
+                  {MARK[line.kind]}
+                </span>
+                <span className="diff-text">{line.text || " "}</span>
               </Line>
             );
           })}
@@ -47,40 +56,95 @@ function DiffView({ diff }: { diff: Diff }) {
   );
 }
 
-interface ChangesProps {
+/** One change's diff, read when the change is opened. */
+function ChangeDiff({ workspaceId, noteId, revision }: { workspaceId: string; noteId: string; revision: number }) {
+  const [diff, setDiff] = useState<Diff | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    perform(workspaceId, { type: "note.diff", id: noteId, revision }).then(
+      (read) => live && setDiff(read),
+      (err: Error) => live && setError(err.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, noteId, revision]);
+  if (error) return <p role="alert" className="error">{error}</p>;
+  return diff && <DiffView diff={diff} />;
+}
+
+/** The changes a sentence names, each one a way to it. More than a few are only counted. */
+function Named({ revisions, onShow }: { revisions: number[]; onShow: (revision: number) => void }) {
+  if (revisions.length > 3) return <>{revisions.length} changes</>;
+  return (
+    <>
+      {revisions.length === 1 ? "change " : "changes "}
+      {revisions.map((revision, i) => (
+        <Fragment key={revision}>
+          {i > 0 && (i === revisions.length - 1 ? " and " : ", ")}
+          <button type="button" className="link change-ref" aria-label={`Change ${revision}`} onClick={() => onShow(revision)}>
+            {revision}
+          </button>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/** What a change did when it wasn't an edit, in the words a member reads. */
+function whatItDid(change: HistoryEntry, onShow: (revision: number) => void): ReactNode {
+  const { reverts } = change;
+  if (!reverts) return null;
+  if (reverts.to !== undefined) return `Reverts the note to revision ${reverts.to}`;
+  const named = <Named revisions={reverts.revisions} onShow={onShow} />;
+  if (reverts.how === "undo") return <>Undoes {named}</>;
+  if (reverts.how === "redo") return <>Redoes what {named} undid</>;
+  return <>Reverts {named}</>;
+}
+
+interface NoteChangesProps {
   workspaceId: string;
-  query: Query;
-  /** Changes when the notes do, so the list is read again. */
+  noteId: string;
+  /** The note as a change names it, " to Plan", where notes are listed together. Empty where there is one note. */
+  where: string;
+  filters: Filters;
+  /** Changes when the note does, so its changes are read again. */
   version: number;
-  /** Whether each change names its note, as it must when the list spans notes. */
-  showNote: boolean;
+  /** Whether the member may change the note, and so revert and label its changes. */
   canEdit: boolean;
-  /** A note's latest revision, when known. */
-  head: (noteId: string) => number | undefined;
-  empty: string;
-  /** A note this list reverted or put changes back into. The caller answers with a new `version`. */
+  /** The note's latest revision, when known. */
+  head: number | undefined;
+  /** A note a revert changed. The caller answers with a new `version`. */
   onChanged: (note: Note) => void;
-  onOpenNote?: (noteId: string) => void;
   onLoaded?: (changes: HistoryEntry[]) => void;
 }
 
-/** A list of changes with their diffs, where a revision can be labeled or reverted to and a selection applied. */
-function Changes({ workspaceId, query, version, showNote, canEdit, head, empty, onChanged, onOpenNote, onLoaded }: ChangesProps) {
+/** One note's changes, newest first and each closed: opening one shows its diff. A change can be reverted, labeled, or the note reverted to it. */
+function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, head, onChanged, onLoaded }: NoteChangesProps) {
   const now = useNow();
+  const list = useRef<HTMLOListElement>(null);
   const [changes, setChanges] = useState<HistoryEntry[] | null>(null);
   const [next, setNext] = useState<HistoryPage["next"]>(null);
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [labeling, setLabeling] = useState<string | null>(null);
+  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+  const [labeling, setLabeling] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reloads, reload] = useState(0);
   const loaded = useRef(onLoaded);
   loaded.current = onLoaded;
-  const asked = JSON.stringify(query);
+  const shown = useRef(0);
+  shown.current = changes?.length ?? 0;
+  const asked = JSON.stringify({ ...filters, noteIds: [noteId] });
+
+  const read = useCallback(
+    (page: { before?: NonNullable<HistoryPage["next"]>; limit: number }) => perform(workspaceId, { type: "history.list", ...(JSON.parse(asked) as Filters), diffs: false, ...page }),
+    [workspaceId, asked],
+  );
 
   useEffect(() => {
     let live = true;
-    perform(workspaceId, { type: "history.list", ...(JSON.parse(asked) as Query) }).then(
+    read({ limit: Math.min(MOST_A_PAGE, Math.max(CHANGES_A_PAGE, shown.current)) }).then(
       (page) => {
         if (!live) return;
         setChanges(page.changes);
@@ -92,160 +156,182 @@ function Changes({ workspaceId, query, version, showNote, canEdit, head, empty, 
     return () => {
       live = false;
     };
-  }, [workspaceId, asked, version, reloads]);
+  }, [read, version, reloads]);
 
-  useEffect(() => setSelected(new Set()), [asked]);
-
-  const more = async () => {
-    if (!next) return;
-    const page = await perform(workspaceId, { type: "history.list", ...query, before: next });
-    setChanges((shown) => [...(shown ?? []), ...page.changes]);
-    setNext(page.next);
+  const toggle = (revision: number) => {
+    const opened = new Set(open);
+    if (!opened.delete(revision)) opened.add(revision);
+    setOpen(opened);
   };
 
-  /** Runs history operations one note at a time, and says which notes they couldn't change. */
-  const act = async (ops: Parameters<typeof moveThroughHistory>[1][]) => {
+  /** Brings a change into view, reading older changes until it is among them. */
+  const show = async (revision: number) => {
+    let [all, before] = [changes ?? [], next];
+    while (before && all.at(-1)!.revision > revision) {
+      const page = await read({ before, limit: MOST_A_PAGE });
+      [all, before] = [[...all, ...page.changes], page.next];
+    }
+    setChanges(all);
+    setNext(before);
+    requestAnimationFrame(() => {
+      const row = list.current?.querySelector<HTMLElement>(`[data-revision="${revision}"] .change-toggle`);
+      row?.scrollIntoView({ block: "nearest" });
+      row?.focus();
+    });
+  };
+
+  const act = async (op: Extract<OpInput, { type: "note.revert" | "note.revertChanges" }>) => {
     setBusy(true);
     setError(null);
-    const failed: string[] = [];
-    for (const op of ops) {
-      try {
-        onChanged(await moveThroughHistory(workspaceId, op));
-      } catch (err) {
-        failed.push((err as Error).message);
-      }
+    try {
+      onChanged(await moveThroughHistory(workspaceId, op));
+    } catch (err) {
+      setError((err as Error).message);
     }
     setBusy(false);
-    setSelected(new Set());
-    setError(failed.join(" ") || null);
   };
 
   const label = async (change: HistoryEntry, name: string) => {
     setLabeling(null);
     setError(null);
     try {
-      await perform(workspaceId, { type: "note.label", id: change.noteId, revision: change.revision, name: name.trim() || null });
+      await perform(workspaceId, { type: "note.label", id: noteId, revision: change.revision, name: name.trim() || null });
       reload((n) => n + 1);
     } catch (err) {
       setError((err as Error).message);
     }
   };
 
-  const picked = (changes ?? []).filter((c) => selected.has(changeKey(c)));
-  const standing = picked.filter((c) => c.revertedBy === null);
-  /** The picked changes as one operation per note. */
-  const perNote = (type: "note.revertChanges" | "note.reapplyChanges") =>
-    [...Map.groupBy(picked, (c) => c.noteId)].map(([id, mine]) => ({ type, id, revisions: mine.map((c) => c.revision) }));
-
   if (!changes) return error ? <p role="alert" className="error">{error}</p> : null;
   return (
-    <div className="changes">
+    <div className="note-changes">
       {error && <p role="alert" className="error">{error}</p>}
-      {canEdit && picked.length > 0 && (
-        <div className="selection" role="group" aria-label="Selected changes">
-          <span>{count(picked.length, "change")} selected</span>
-          <button type="button" className="button small" disabled={busy || standing.length !== picked.length} onClick={() => act(perNote("note.revertChanges"))}>
-            Revert selected
-          </button>
-          <button type="button" className="button small" disabled={busy || standing.length !== 0} onClick={() => act(perNote("note.reapplyChanges"))}>
-            Put back selected
-          </button>
-          <button type="button" className="link" onClick={() => setSelected(new Set())}>
-            Clear
-          </button>
-          {standing.length > 0 && standing.length < picked.length && <span className="selection-hint">Pick changes that still stand, or ones taken back out, not both.</span>}
-        </div>
-      )}
-      {!changes.length && <p className="empty">{empty}</p>}
-      <ol className="change-list" aria-label="Changes">
+      <ol className="change-list" aria-label={`Changes${where}`} ref={list}>
         {changes.map((change) => {
-          const key = changeKey(change);
-          const what = taken(change);
-          const where = showNote ? ` to ${titleOf(change.noteTitle)}` : "";
+          const { revision } = change;
+          const did = whatItDid(change, show);
+          const isOpen = open.has(revision);
           return (
-            <li key={key} className="change" data-reverted={change.revertedBy !== null || undefined} aria-label={`Change ${change.revision}${where} by ${change.author.name}`}>
-              <div className="change-head">
-                {canEdit && (
-                  <input
-                    type="checkbox"
-                    aria-label={`Select change ${change.revision}${where}`}
-                    checked={selected.has(key)}
-                    onChange={(e) => {
-                      const nextPicked = new Set(selected);
-                      if (e.target.checked) nextPicked.add(key);
-                      else nextPicked.delete(key);
-                      setSelected(nextPicked);
-                    }}
-                  />
-                )}
+            <li key={revision} className="change" data-revision={revision} aria-label={`Change ${revision}${where} by ${change.author.name}`}>
+              <button type="button" className="change-toggle" aria-expanded={isOpen} onClick={() => toggle(revision)}>
+                <span className="caret" aria-hidden="true" />
                 <span className="change-author">{change.author.name}</span>
                 {change.author.kind === "agent" && <span className="badge">agent</span>}
                 <time dateTime={new Date(change.createdAt).toISOString()} title={new Date(change.createdAt).toLocaleString()}>
                   {ago(change.createdAt, now)}
                 </time>
-                {change.diff && (
-                  <span className="change-stat">
-                    <span className="added">+{change.diff.added}</span> <span className="removed">−{change.diff.removed}</span>
+                <Stat added={change.added} removed={change.removed} />
+              </button>
+              <div className="change-meta">
+                <span>Change {revision}</span>
+                {change.label && <span className="label-chip">{change.label}</span>}
+                {did && <span className="change-note">{did}</span>}
+                {change.revertedBy !== null && (
+                  <span className="change-note">
+                    Reverted by <Named revisions={[change.revertedBy]} onShow={show} />
                   </span>
                 )}
-              </div>
-              <div className="change-meta">
-                {showNote && (
-                  <button type="button" className="link" onClick={() => onOpenNote?.(change.noteId)}>
-                    {titleOf(change.noteTitle)}
+                {canEdit && change.revertedBy === null && (
+                  <button type="button" className="link change-revert" disabled={busy} aria-label={`Revert change ${revision}${where}`} onClick={() => act({ type: "note.revertChanges", id: noteId, revisions: [revision] })}>
+                    Revert
                   </button>
                 )}
-                <span>revision {change.revision}</span>
-                {change.label && <span className="label-chip">{change.label}</span>}
               </div>
-              {what && <p className="change-note">{what}</p>}
-              {change.revertedBy !== null && <p className="change-note">Taken back out by change {change.revertedBy}</p>}
-              {change.diff && <DiffView diff={change.diff} />}
-              {canEdit &&
-                (labeling === key ? (
-                  <form
-                    className="change-actions"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void label(change, new FormData(e.currentTarget).get("name") as string);
-                    }}
-                  >
-                    <input
-                      name="name"
-                      autoFocus
-                      maxLength={60}
-                      aria-label={`Label for revision ${change.revision}`}
-                      placeholder="Name this revision"
-                      defaultValue={change.label ?? ""}
-                      onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setLabeling(null))}
-                    />
-                    <button type="submit" className="button small">
-                      Save
-                    </button>
-                  </form>
-                ) : (
-                  <div className="change-actions">
-                    <button type="button" className="link" onClick={() => setLabeling(key)}>
-                      {change.label ? "Rename label" : "Label"}
-                    </button>
-                    {head(change.noteId) !== change.revision && (
-                      <button type="button" className="link" disabled={busy} onClick={() => act([{ type: "note.revert", id: change.noteId, revision: change.revision }])}>
-                        Revert note to here
-                      </button>
-                    )}
-                  </div>
-                ))}
+              {isOpen && (
+                <div className="change-body">
+                  <ChangeDiff workspaceId={workspaceId} noteId={noteId} revision={revision} />
+                  {canEdit &&
+                    (labeling === revision ? (
+                      <form
+                        className="change-actions"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void label(change, new FormData(e.currentTarget).get("name") as string);
+                        }}
+                      >
+                        <input
+                          name="name"
+                          autoFocus
+                          maxLength={60}
+                          aria-label={`Label for revision ${revision}`}
+                          placeholder="Name this revision"
+                          defaultValue={change.label ?? ""}
+                          onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setLabeling(null))}
+                        />
+                        <button type="submit" className="button small">
+                          Save
+                        </button>
+                      </form>
+                    ) : (
+                      <div className="change-actions">
+                        <button type="button" className="link" onClick={() => setLabeling(revision)}>
+                          {change.label ? "Rename label" : "Label"}
+                        </button>
+                        {head !== revision && (
+                          <button type="button" className="link" disabled={busy} onClick={() => act({ type: "note.revert", id: noteId, revision })}>
+                            Revert note to here
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              )}
             </li>
           );
         })}
       </ol>
       {next && (
-        <button type="button" className="button small" onClick={more}>
+        <button
+          type="button"
+          className="button small"
+          onClick={async () => {
+            const page = await read({ before: next, limit: CHANGES_A_PAGE });
+            setChanges([...changes, ...page.changes]);
+            setNext(page.next);
+          }}
+        >
           Show older changes
         </button>
       )}
     </div>
   );
+}
+
+/** Who changed a note and over what time, as one line. */
+function Span({ note, now }: { note: ChangedNote; now: number }) {
+  const [first, last] = [ago(note.firstAt, now), ago(note.lastAt, now)];
+  return (
+    <span className="changed-note-meta">
+      {count(note.changes, "change")} · {note.authors.map(nameOf).join(", ")} · {first === last ? last : `${first} to ${last}`}
+    </span>
+  );
+}
+
+/** The notes that changed, read a page at a time and again whenever `version` does. */
+function useSummary(workspaceId: string, filters: Filters, version: number) {
+  const [summary, setSummary] = useState<HistorySummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const shown = useRef(0);
+  shown.current = summary?.notes.length ?? 0;
+  const asked = JSON.stringify(filters);
+
+  useEffect(() => {
+    let live = true;
+    perform(workspaceId, { type: "history.summary", ...(JSON.parse(asked) as Filters), limit: Math.min(MOST_A_PAGE, Math.max(NOTES_A_PAGE, shown.current)) }).then(
+      (read) => live && (setSummary(read), setError(null)),
+      (err: Error) => live && setError(err.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, asked, version]);
+
+  const more = async () => {
+    if (!summary?.next) return;
+    const page = await perform(workspaceId, { type: "history.summary", ...filters, before: summary.next, limit: NOTES_A_PAGE });
+    setSummary({ notes: [...summary.notes, ...page.notes], next: page.next });
+  };
+  return { summary, error, more };
 }
 
 interface NoteHistoryProps {
@@ -259,96 +345,122 @@ interface NoteHistoryProps {
   onSeen: (noteId: string, revision: number) => void;
 }
 
-/** The open note's changes, for the inspector. */
+const NO_FILTERS: Filters = {};
+
+/** The open note's history, for the inspector: what its changes come to, then each change, closed. */
 export function NoteHistory({ workspaceId, noteId, revision, canEdit, onChanged, onSeen }: NoteHistoryProps) {
-  const query = useMemo(() => ({ noteIds: [noteId] }), [noteId]);
+  const now = useNow();
+  const filters = useMemo<Filters>(() => ({ noteIds: [noteId] }), [noteId]);
+  const { summary, error } = useSummary(workspaceId, filters, revision);
+  const note = summary?.notes.find((n) => n.noteId === noteId);
   return (
-    <Changes
-      workspaceId={workspaceId}
-      query={query}
-      version={revision}
-      showNote={false}
-      canEdit={canEdit}
-      head={() => revision}
-      empty="Nothing has been written in this note yet."
-      onChanged={onChanged}
-      onLoaded={(changes) => onSeen(noteId, changes[0]?.revision ?? 0)}
-    />
+    <div className="changes">
+      {error && <p role="alert" className="error">{error}</p>}
+      {summary && !note && <p className="empty">Nothing has been written in this note yet.</p>}
+      {note && (
+        <p className="changed-note-total" aria-label="All changes to this note">
+          <Stat added={note.added} removed={note.removed} />
+          <Span note={note} now={now} />
+        </p>
+      )}
+      <NoteChanges
+        key={noteId}
+        workspaceId={workspaceId}
+        noteId={noteId}
+        where=""
+        filters={NO_FILTERS}
+        version={revision}
+        canEdit={canEdit}
+        head={revision}
+        onChanged={onChanged}
+        onLoaded={(changes) => onSeen(noteId, changes[0]?.revision ?? 0)}
+      />
+    </div>
   );
 }
 
-const WEEKS = 53;
-const DAY_MS = 86_400_000;
-const dateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const dayStart = (key: string) => new Date(`${key}T00:00:00`);
-const longDate = (key: string) => dayStart(key).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-const level = (n: number) => (n === 0 ? 0 : n < 3 ? 1 : n < 6 ? 2 : n < 10 ? 3 : 4);
-
-interface ActivityProps {
+interface ChangedNotesProps {
   workspaceId: string;
-  author: AuthorRef;
-  /** Who the author is, as a sentence names them: "you", or a name. */
-  who: string;
+  filters: Filters;
   version: number;
-  pickedDay: string | null;
-  onPickDay: (day: string | null) => void;
+  canEdit: boolean;
+  head: (noteId: string) => number | undefined;
+  empty: string;
+  onChanged: (note: Note) => void;
+  onOpenNote: (noteId: string) => void;
 }
 
-/** How many changes one author made on each day of the last year, in this browser's time zone. */
-function Activity({ workspaceId, author, who, version, pickedDay, onPickDay }: ActivityProps) {
-  const [counts, setCounts] = useState<ReadonlyMap<string, number> | null>(null);
-  const today = dateKey(new Date());
-  const weeks = useMemo(() => {
-    const end = dayStart(today);
-    const first = new Date(end.getFullYear(), end.getMonth(), end.getDate() - end.getDay() - (WEEKS - 1) * 7);
-    const days: string[] = [];
-    for (const d = first; d <= end; d.setDate(d.getDate() + 1)) days.push(dateKey(d));
-    return Array.from({ length: WEEKS }, (_, w) => days.slice(w * 7, w * 7 + 7));
-  }, [today]);
-  const from = dayStart(weeks[0]![0]!).getTime();
+/** The notes that changed, one closed row each: opening a note lists its changes. */
+function ChangedNotes({ workspaceId, filters, version, canEdit, head, empty, onChanged, onOpenNote }: ChangedNotesProps) {
+  const now = useNow();
+  const ids = useId();
+  const { summary, error, more } = useSummary(workspaceId, filters, version);
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
 
-  useEffect(() => {
-    let live = true;
-    perform(workspaceId, { type: "history.activity", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, author, from }).then(
-      (activity) => live && setCounts(new Map(activity.days.map((d) => [d.date, d.count]))),
-    );
-    return () => {
-      live = false;
-    };
-  }, [workspaceId, author.kind, author.id, from, version]);
-
-  const total = [...(counts?.values() ?? [])].reduce((sum, n) => sum + n, 0);
+  if (!summary) return error ? <p role="alert" className="error">{error}</p> : null;
   return (
-    <section className="activity" aria-label="Activity">
-      <p className="activity-total">{counts ? `${count(total, "change")} by ${who} in the last year` : " "}</p>
-      <div className="activity-grid">
-        {weeks.map((week) => (
-          <div key={week[0]} className="activity-week">
-            {week.map((day) => {
-              const n = counts?.get(day) ?? 0;
-              return (
-                <button
-                  key={day}
-                  type="button"
-                  className="activity-day"
-                  data-level={level(n)}
-                  tabIndex={day === (pickedDay ?? today) ? 0 : -1}
-                  aria-label={`${count(n, "change")} on ${longDate(day)}`}
-                  title={`${count(n, "change")} on ${longDate(day)}`}
-                  aria-pressed={day === pickedDay}
-                  onClick={() => onPickDay(day === pickedDay ? null : day)}
-                />
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    </section>
+    <div className="changes">
+      {error && <p role="alert" className="error">{error}</p>}
+      {!summary.notes.length && <p className="empty">{empty}</p>}
+      <ul className="changed-notes" aria-label="Notes that changed">
+        {summary.notes.map((note) => {
+          const isOpen = open.has(note.noteId);
+          const panel = `${ids}-${note.noteId}`;
+          return (
+            <li key={note.noteId} className="changed-note" aria-label={titleOf(note.noteTitle)}>
+              <button
+                type="button"
+                className="changed-note-toggle"
+                aria-expanded={isOpen}
+                aria-controls={panel}
+                onClick={() => {
+                  const opened = new Set(open);
+                  if (!opened.delete(note.noteId)) opened.add(note.noteId);
+                  setOpen(opened);
+                }}
+              >
+                <span className="caret" aria-hidden="true" />
+                <Stat added={note.added} removed={note.removed} />
+                <span className="changed-note-title">{titleOf(note.noteTitle)}</span>
+              </button>
+              <div className="changed-note-about">
+                <Span note={note} now={now} />
+                <button type="button" className="link" onClick={() => onOpenNote(note.noteId)}>
+                  Open note
+                </button>
+              </div>
+              <div id={panel} hidden={!isOpen}>
+                {isOpen && (
+                  <NoteChanges
+                    workspaceId={workspaceId}
+                    noteId={note.noteId}
+                    where={` to ${titleOf(note.noteTitle)}`}
+                    filters={filters}
+                    version={head(note.noteId) ?? note.changes}
+                    canEdit={canEdit}
+                    head={head(note.noteId)}
+                    onChanged={onChanged}
+                  />
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {summary.next && (
+        <button type="button" className="button small" onClick={more}>
+          Show more notes
+        </button>
+      )}
+    </div>
   );
 }
+
+const DAY_MS = 86_400_000;
+const dayStart = (key: string) => new Date(`${key}T00:00:00`);
 
 interface NoteScopeProps {
-  notes: NoteSummary[];
+  notes: readonly NoteSummary[];
   picked: string[];
   onPick: (noteIds: string[]) => void;
 }
@@ -393,16 +505,15 @@ function NoteScope({ notes, picked, onPick }: NoteScopeProps) {
 
 interface HistoryModeProps {
   workspaceId: string;
-  personId: string;
   /** Every note in the workspace, for scoping history to some of them. */
-  notes: NoteSummary[];
+  notes: readonly NoteSummary[];
   canEdit: boolean;
   onOpenNote: (noteId: string) => void;
   onChanged: (note: Note) => void;
 }
 
-/** The workspace's history: every change, filtered by author, date, and notes, with the member's activity above it. */
-export function HistoryMode({ workspaceId, personId, notes, canEdit, onOpenNote, onChanged }: HistoryModeProps) {
+/** The workspace's history: the notes that changed, filtered by author, date, and notes. */
+export function HistoryMode({ workspaceId, notes, canEdit, onOpenNote, onChanged }: HistoryModeProps) {
   const [authors, setAuthors] = useState<Author[]>([]);
   const [byAuthors, setByAuthors] = useState<string[]>([]);
   const [noteIds, setNoteIds] = useState<string[]>([]);
@@ -420,7 +531,7 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, onOpenNote,
   }, [workspaceId, version]);
 
   const chosen = authors.filter((a) => byAuthors.includes(authorKey(a)));
-  const query = useMemo<Query>(
+  const filters = useMemo<Filters>(
     () => ({
       ...(noteIds.length ? { noteIds } : {}),
       ...(chosen.length ? { authors: chosen.map(refOf) } : {}),
@@ -429,25 +540,12 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, onOpenNote,
     }),
     [noteIds, byAuthors, authors, from, to],
   );
-  const me: AuthorRef = { kind: "member", id: personId };
   const one = chosen.length === 1 ? chosen[0]! : null;
-  const pickedDay = from && from === to ? from : null;
   const filtered = noteIds.length > 0 || chosen.length > 0 || from !== "" || to !== "";
 
   return (
     <section className="history-mode" aria-label="History">
       <h1>History</h1>
-      <Activity
-        workspaceId={workspaceId}
-        author={one ? refOf(one) : me}
-        who={!one || authorKey(one) === authorKey({ kind: "member", personId, name: "" }) ? "you" : one.name}
-        version={version}
-        pickedDay={pickedDay}
-        onPickDay={(day) => {
-          setFrom(day ?? "");
-          setTo(day ?? "");
-        }}
-      />
       <div className="history-filters" role="group" aria-label="Filters">
         <div className="chips" role="group" aria-label="Authors">
           {authors.map((a) => {
@@ -482,11 +580,10 @@ export function HistoryMode({ workspaceId, personId, notes, canEdit, onOpenNote,
           </button>
         )}
       </div>
-      <Changes
+      <ChangedNotes
         workspaceId={workspaceId}
-        query={query}
+        filters={filters}
         version={version}
-        showNote
         canEdit={canEdit}
         head={(noteId) => heads.get(noteId)}
         empty={filtered ? "No changes match these filters." : "Nothing has been written in this workspace yet."}

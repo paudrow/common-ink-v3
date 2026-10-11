@@ -150,6 +150,173 @@ describe("workspace history", () => {
   });
 });
 
+/** The database, counting the rows each read returns, and failing any statement `breaks` picks out. */
+function watched(breaks: (sql: string, args: unknown[]) => boolean = () => false) {
+  const seen = { rows: 0 };
+  const real = new Map<object, { statement: D1PreparedStatement; check: () => void }>();
+  const wrap = (statement: D1PreparedStatement, sql: string, args: unknown[]): D1PreparedStatement => {
+    const check = () => {
+      if (breaks(sql, args)) throw new Error("D1_ERROR: internal error at statement 3: SQLITE_BUSY");
+    };
+    const wrapped = {
+      bind: (...values: unknown[]) => wrap(statement.bind(...values), sql, values),
+      all: async () => {
+        check();
+        const answer = await statement.all();
+        seen.rows += answer.results.length;
+        return answer;
+      },
+      first: async () => (check(), statement.first()),
+      run: async () => (check(), statement.run()),
+    } as unknown as D1PreparedStatement;
+    real.set(wrapped, { statement, check });
+    return wrapped;
+  };
+  const db = {
+    prepare: (sql: string) => wrap(env.DB.prepare(sql), sql, []),
+    batch: async (statements: D1PreparedStatement[]) => {
+      for (const s of statements) real.get(s)!.check();
+      return env.DB.batch(statements.map((s) => real.get(s)!.statement));
+    },
+  } as unknown as D1Database;
+  return { db, seen };
+}
+
+describe("the summary of history", () => {
+  /** Two notes: Plan, which Ada made, her agent added to, and she then cut a line from; and Trip, which Grace made. */
+  async function twoNotes() {
+    const ada = await newMember("Ada Lovelace");
+    const grace = await addMember(ada, "editor", "Grace Hopper");
+    const claude = await agentOf(ada);
+    const plan = await perform(env.DB, ada, { type: "note.create", text: "# Plan\n\nOne\nTwo" }, T0);
+    await perform(env.DB, claude.actor, { type: "note.write", id: plan.id, baseRevision: 1, text: "# Plan\n\nOne\nTwo\nThree\nFour" }, T0 + HOUR);
+    await perform(env.DB, ada, { type: "note.write", id: plan.id, baseRevision: 2, text: "# Plan\n\nOne\nTwo!\nFour" }, T0 + 3 * HOUR);
+    const trip = await perform(env.DB, grace, { type: "note.create", text: "# Trip" }, T0 + 2 * HOUR);
+    return { ada, grace, claude, plan: plan.id, trip: trip.id };
+  }
+
+  it("names each note that changed once, latest change first, with its changes counted, the lines they added and removed, when, and who", async () => {
+    const { ada, claude, plan, trip } = await twoNotes();
+
+    const { notes, next } = await perform(env.DB, ada, { type: "history.summary" });
+
+    expect(next).toBeNull();
+    expect(notes).toEqual([
+      {
+        noteId: plan,
+        noteTitle: "Plan",
+        changes: 3,
+        added: 7,
+        removed: 2,
+        firstAt: T0,
+        lastAt: T0 + 3 * HOUR,
+        authors: [
+          { kind: "member", personId: ada.personId, name: "Ada Lovelace" },
+          { kind: "agent", agentId: claude.ref.id, name: "Claude", onBehalfOf: ada.personId },
+        ],
+      },
+      { noteId: trip, noteTitle: "Trip", changes: 1, added: 1, removed: 0, firstAt: T0 + 2 * HOUR, lastAt: T0 + 2 * HOUR, authors: [expect.objectContaining({ name: "Grace Hopper" })] },
+    ]);
+  });
+
+  it("counts only the changes a filter keeps: by author, by time, and by note", async () => {
+    const { ada, claude, plan, trip } = await twoNotes();
+    const summed = async (args: Omit<Extract<OpInput, { type: "history.summary" }>, "type" | "limit">) =>
+      (await perform(env.DB, ada, { type: "history.summary", ...args })).notes.map((n) => [n.noteTitle, n.changes, n.added, n.removed, n.authors.map((a) => a.name)]);
+
+    expect(await summed({ authors: [claude.ref] })).toEqual([["Plan", 1, 2, 0, ["Claude"]]]);
+    expect(await summed({ authors: [memberRef(ada)] })).toEqual([["Plan", 2, 5, 2, ["Ada Lovelace"]]]);
+    expect(await summed({ from: T0 + HOUR, to: T0 + 3 * HOUR })).toEqual([["Trip", 1, 1, 0, ["Grace Hopper"]], ["Plan", 1, 2, 0, ["Claude"]]]);
+    expect(await summed({ noteIds: [trip] })).toEqual([["Trip", 1, 1, 0, ["Grace Hopper"]]]);
+    expect(await summed({ noteIds: [plan], authors: [{ kind: "member", id: claude.ref.id }] })).toEqual([]);
+  });
+
+  it("comes a page of notes at a time", async () => {
+    const ada = await newMember();
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) ids.push((await perform(env.DB, ada, { type: "note.create", text: `# Note ${i}` }, T0 + i)).id);
+
+    const first = await perform(env.DB, ada, { type: "history.summary", limit: 2 });
+    const second = await perform(env.DB, ada, { type: "history.summary", limit: 2, before: first.next! });
+    const third = await perform(env.DB, ada, { type: "history.summary", limit: 2, before: second.next! });
+    expect([first, second, third].map((page) => page.notes.map((n) => n.noteTitle))).toEqual([["Note 4", "Note 3"], ["Note 2", "Note 1"], ["Note 0"]]);
+    expect(third.next).toBeNull();
+  });
+
+  it("says the lines each change added and removed in a listing without diffs, and in a note's history", async () => {
+    const { ada, plan } = await twoNotes();
+
+    const { changes } = await perform(env.DB, ada, { type: "history.list", noteIds: [plan], diffs: false });
+
+    expect(changes.map((c) => [c.revision, c.added, c.removed, c.diff])).toEqual([[3, 1, 2, null], [2, 2, 0, null], [1, 4, 0, null]]);
+    expect((await history(ada, plan)).map((c) => [c.added, c.removed])).toEqual([[4, 0], [2, 0], [1, 2]]);
+  });
+
+  it("counts a change written before lines were counted the first time its note is read, and keeps the count", async () => {
+    const { ada, plan, trip } = await twoNotes();
+    await env.DB.prepare("UPDATE changes SET added = NULL, removed = NULL WHERE note_id IN (?, ?)").bind(plan, trip).run();
+    const stored = async () => (await env.DB.prepare("SELECT added, removed FROM changes WHERE note_id = ? ORDER BY revision").bind(plan).all()).results;
+
+    expect((await perform(env.DB, ada, { type: "history.summary" })).notes.map((n) => [n.noteTitle, n.added, n.removed])).toEqual([["Plan", 7, 2], ["Trip", 1, 0]]);
+    expect(await stored()).toEqual([{ added: 4, removed: 0 }, { added: 2, removed: 0 }, { added: 1, removed: 2 }]);
+
+    await env.DB.prepare("UPDATE changes SET added = NULL, removed = NULL WHERE note_id = ? AND revision = 2").bind(plan).run();
+    expect((await perform(env.DB, ada, { type: "history.list", noteIds: [plan], diffs: false })).changes.map((c) => [c.added, c.removed])).toEqual([[1, 2], [2, 0], [4, 0]]);
+    expect(await stored()).toEqual([{ added: 4, removed: 0 }, { added: 2, removed: 0 }, { added: 1, removed: 2 }]);
+  });
+
+  it("reads no more to open on a workspace with thousands of changes than on one with a few", async () => {
+    const rowsToOpen = async (perNote: number) => {
+      const ada = await newMember();
+      const ids: string[] = [];
+      for (let i = 0; i < 40; i++) ids.push((await perform(env.DB, ada, { type: "note.create", text: `# Note ${i}` }, T0 + i)).id);
+      const insert = env.DB.prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, added, removed) VALUES (?, ?, ?, 'member', ?, '[8]', ?, 1, 1)");
+      for (const id of ids) await env.DB.batch(Array.from({ length: perNote }, (_, r) => insert.bind(id, r + 2, r + 1, ada.personId, T0 + 100 + r)));
+      const { db, seen } = watched();
+      const started = performance.now();
+      const { notes, next } = await perform(db, ada, { type: "history.summary" });
+      const took = performance.now() - started;
+      expect(notes).toHaveLength(30);
+      expect(notes[0]).toMatchObject({ changes: perNote + 1, added: perNote + 1, removed: perNote });
+      expect(next).not.toBeNull();
+      return { rows: seen.rows, took };
+    };
+
+    const few = await rowsToOpen(2);
+    const many = await rowsToOpen(100);
+
+    expect(many.rows).toBe(few.rows);
+    // 4040 changes. It is a second at the very worst on a loaded machine, where replaying them took several.
+    expect(many.took).toBeLessThan(1000);
+    console.info(`history.summary over 4040 changes: ${many.took.toFixed(1)} ms, ${many.rows} rows read`);
+  }, 60_000);
+});
+
+describe("the diff of one change", () => {
+  it("is what that change did to the note, read only when asked for", async () => {
+    const { ada, claude, id } = await sharedNote();
+
+    const diff = await perform(env.DB, claude.actor, { type: "note.diff", id, revision: 3 });
+
+    expect(diff).toEqual({
+      hunks: [{ oldStart: 2, newStart: 2, lines: [{ kind: "same", text: "" }, { kind: "same", text: "Ada's step" }, { kind: "add", text: "" }, { kind: "add", text: "Claude's step" }] }],
+      added: 2,
+      removed: 0,
+      omitted: 0,
+    });
+    expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 1 })).toMatchObject({ added: 1, removed: 0 });
+  });
+
+  it("refuses a change the note doesn't have, and a note in another workspace", async () => {
+    const { ada, id } = await sharedNote();
+    const mallory = await newMember("Mallory");
+
+    await expect(perform(env.DB, ada, { type: "note.diff", id, revision: 5 })).rejects.toMatchObject({ code: "not_found", message: "The note has no change 5" });
+    await expect(perform(env.DB, ada, { type: "note.diff", id, revision: 0 })).rejects.toMatchObject({ code: "invalid" });
+    await expect(perform(env.DB, mallory, { type: "note.diff", id, revision: 1 })).rejects.toMatchObject({ code: "not_found", message: "No such note" });
+  });
+});
+
 describe("a label", () => {
   it("names one revision, shows in history, and can be renamed and taken away", async () => {
     const { ada, id } = await sharedNote();
@@ -211,8 +378,8 @@ describe("reverting a note to a revision", () => {
   });
 });
 
-describe("applying a selection of changes", () => {
-  it("takes an agent's change back out and keeps the changes made after it", async () => {
+describe("reverting changes", () => {
+  it("reverts an agent's change as a new change and keeps the changes made after it", async () => {
     const { ada, claude, id } = await sharedNote();
     const theirs = (await perform(env.DB, ada, { type: "history.list", authors: [claude.ref] })).changes.map((c) => c.revision);
 
@@ -224,7 +391,7 @@ describe("applying a selection of changes", () => {
     expect(entries[4]!.reverts).toEqual({ how: "revert", revisions: [3] });
   });
 
-  it("takes several out as one change", async () => {
+  it("reverts several as one change", async () => {
     const { ada, id } = await sharedNote();
 
     const without = await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [4, 2, 4] });
@@ -233,37 +400,56 @@ describe("applying a selection of changes", () => {
     expect((await history(ada, id)).at(-1)!.reverts).toEqual({ how: "revert", revisions: [2, 4] });
   });
 
-  it("refuses a change the note doesn't have, and one that was already taken out", async () => {
+  it("refuses a change the note doesn't have, and one that was already reverted, naming the change to revert instead", async () => {
     const { ada, id } = await sharedNote();
     await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] });
 
-    await expect(perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] })).rejects.toMatchObject({ code: "invalid", message: "Change 3 was already taken back out, by change 5" });
+    await expect(perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] })).rejects.toMatchObject({ code: "invalid", message: "Change 3 was already reverted, by change 5. Revert change 5 to have it again" });
     await expect(perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [9] })).rejects.toMatchObject({ code: "not_found" });
     await expect(perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [] })).rejects.toMatchObject({ code: "invalid" });
     expect(await history(ada, id)).toHaveLength(5);
   });
 
-  it("puts a taken-out change back, as another new change", async () => {
+  it("has a reverted change stand again when the revert is reverted, as another new change", async () => {
     const { ada, id } = await sharedNote();
     await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] });
 
-    const back = await perform(env.DB, ada, { type: "note.reapplyChanges", id, revisions: [3] });
+    const back = await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [5] });
 
     expect(back).toMatchObject({ revision: 6, text: "# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word" });
-    expect((await history(ada, id)).map((c) => c.revertedBy)).toEqual([null, null, null, null, 6, null]);
+    const entries = await history(ada, id);
+    expect(entries.map((c) => c.revertedBy)).toEqual([null, null, null, null, 6, null]);
+    expect(entries[5]!.reverts).toEqual({ how: "revert", revisions: [5] });
   });
 
-  it("takes a change out again after it was taken out and put back, and puts it back again", async () => {
+  it("reverts a revert of a revert, and the one after that, with the note's text right each time", async () => {
+    const { ada, id } = await sharedNote();
+    const [withIt, without] = ["# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word", "# Plan\n\nAda's step\n\nAda's last word"];
+    const texts = [(await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] })).text];
+    for (const revision of [5, 6, 7, 8]) texts.push((await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [revision] })).text);
+
+    expect(texts).toEqual([without, withIt, without, withIt, without]);
+    const entries = await history(ada, id);
+    // The last revert stands, so the one before it doesn't, so the one before that does, back to change 3.
+    expect(entries.map((c) => c.revertedBy)).toEqual([null, null, 5, null, null, 7, null, 9, null]);
+    // Each one changed the text: none is a change that changed nothing.
+    expect(entries.slice(4).map((c) => [c.added, c.removed])).toEqual([[0, 2], [2, 0], [0, 2], [2, 0], [0, 2]]);
+    expect((await perform(env.DB, ada, { type: "note.diff", id, revision: 9 })).hunks.flatMap((h) => h.lines.filter((l) => l.kind !== "same").map((l) => l.text))).toEqual(["Claude's step", ""]);
+  });
+
+  it("reverts a change again once it stands again, and keeps an edit made between", async () => {
     const { ada, id } = await sharedNote();
     await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] });
-    await perform(env.DB, ada, { type: "note.reapplyChanges", id, revisions: [3] });
+    await write(ada, id, "# Plan\n\nAda's step\n\nAda's last word\n\nP.S.");
+    await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [5] });
 
-    expect(await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] })).toMatchObject({ revision: 7, text: "# Plan\n\nAda's step\n\nAda's last word" });
-    expect((await history(ada, id)).map((c) => c.revertedBy)).toEqual([null, null, 7, null, 6, null, null]);
-    expect(await perform(env.DB, ada, { type: "note.reapplyChanges", id, revisions: [3] })).toMatchObject({ revision: 8, text: "# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word" });
+    expect(await read(ada, id)).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word\n\nP.S.");
+    expect(await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] })).toMatchObject({ revision: 8, text: "# Plan\n\nAda's step\n\nAda's last word\n\nP.S." });
+    expect((await history(ada, id)).map((c) => c.revertedBy)).toEqual([null, null, 8, null, 7, null, null, null]);
+    await expect(perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [5] })).rejects.toMatchObject({ code: "invalid", message: "Change 5 was already reverted, by change 7. Revert change 7 to have it again" });
   });
 
-  it("takes out a change its author undid and redid", async () => {
+  it("reverts a change its author undid and redid", async () => {
     const ada = await newMember();
     const grace = await addMember(ada, "editor");
     const note = await perform(env.DB, ada, { type: "note.create", text: "one" });
@@ -274,13 +460,22 @@ describe("applying a selection of changes", () => {
     expect(await perform(env.DB, grace, { type: "note.revertChanges", id: note.id, revisions: [2] })).toMatchObject({ revision: 5, text: "one" });
   });
 
-  it("puts back together what one change took out together, and nothing that still stands", async () => {
+  it("reverts a revert of the note to a revision, which has every change it reverted stand again", async () => {
     const { ada, id } = await sharedNote();
     await perform(env.DB, ada, { type: "note.revert", id, revision: 2 });
 
-    await expect(perform(env.DB, ada, { type: "note.reapplyChanges", id, revisions: [3] })).rejects.toMatchObject({ code: "invalid", message: "Change 5 took changes 3 and 4 out together, so put them back together" });
-    await expect(perform(env.DB, ada, { type: "note.reapplyChanges", id, revisions: [2] })).rejects.toMatchObject({ code: "invalid" });
-    expect(await perform(env.DB, ada, { type: "note.reapplyChanges", id, revisions: [3, 4] })).toMatchObject({ revision: 6, text: "# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word" });
+    expect(await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [5] })).toMatchObject({ revision: 6, text: "# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word" });
+    expect((await history(ada, id)).map((c) => c.revertedBy)).toEqual([null, null, null, null, 6, null]);
+  });
+
+  it("reverts an undo, which has the change it undid stand again", async () => {
+    const ada = await newMember();
+    const grace = await addMember(ada, "editor");
+    const note = await perform(env.DB, ada, { type: "note.create", text: "one" });
+    await write(ada, note.id, "one two");
+    await perform(env.DB, ada, { type: "note.undo", id: note.id });
+
+    expect(await perform(env.DB, grace, { type: "note.revertChanges", id: note.id, revisions: [3] })).toMatchObject({ revision: 4, text: "one two" });
   });
 });
 
@@ -337,64 +532,17 @@ describe("undo and redo", () => {
   });
 });
 
-describe("activity", () => {
-  it("counts the changes an author made on each day in the zone asked for", async () => {
-    const ada = await newMember();
-    const note = await perform(env.DB, ada, { type: "note.create", text: "0" }, Date.UTC(2026, 2, 1, 3));
-    await write(ada, note.id, "1", Date.UTC(2026, 2, 1, 7));
-    await write(ada, note.id, "2", Date.UTC(2026, 2, 1, 23));
-    await write(ada, note.id, "3", Date.UTC(2026, 2, 3, 12));
-    const days = async (timeZone: string) => (await perform(env.DB, ada, { type: "history.activity", timeZone })).days;
-
-    expect(await days("UTC")).toEqual([
-      { date: "2026-03-01", count: 3 },
-      { date: "2026-03-03", count: 1 },
-    ]);
-    expect(await days("America/Los_Angeles")).toEqual([
-      { date: "2026-02-28", count: 2 },
-      { date: "2026-03-01", count: 1 },
-      { date: "2026-03-03", count: 1 },
-    ]);
-    expect(await days("Pacific/Auckland")).toEqual([
-      { date: "2026-03-01", count: 2 },
-      { date: "2026-03-02", count: 1 },
-      { date: "2026-03-04", count: 1 },
-    ]);
-  });
-
-  it("counts an agent's changes for the agent, not for its member, and another author's when asked", async () => {
-    const { ada, claude } = await sharedNote();
-    const total = async (actor: Actor, author?: { kind: "agent"; id: string }) =>
-      (await perform(env.DB, actor, { type: "history.activity", timeZone: "UTC", author })).days.reduce((sum, day) => sum + day.count, 0);
-
-    expect(await total(ada)).toBe(3);
-    expect(await total(claude.actor)).toBe(1);
-    expect(await total(ada, claude.ref)).toBe(1);
-  });
-
-  it("is bounded by a time range, and refuses a zone that doesn't exist", async () => {
-    const ada = await newMember();
-    await perform(env.DB, ada, { type: "note.create", text: "0" }, T0);
-    await perform(env.DB, ada, { type: "note.create", text: "1" }, T0 + 48 * HOUR);
-
-    expect((await perform(env.DB, ada, { type: "history.activity", timeZone: "UTC", from: T0 + HOUR })).days).toEqual([{ date: "2026-03-03", count: 1 }]);
-    expect((await perform(env.DB, ada, { type: "history.activity", timeZone: "UTC", to: T0 + HOUR })).days).toEqual([{ date: "2026-03-01", count: 1 }]);
-    await expect(perform(env.DB, ada, { type: "history.activity", timeZone: "Mars/Olympus" })).rejects.toMatchObject({ code: "invalid", message: "There's no time zone named Mars/Olympus" });
-  });
-});
-
 describe("who may move through history", () => {
   const writes = (id: string): OpInput[] => [
     { type: "note.label", id, revision: 1, name: "Start" },
     { type: "note.revert", id, revision: 1 },
     { type: "note.revertChanges", id, revisions: [2] },
-    { type: "note.reapplyChanges", id, revisions: [2] },
     { type: "note.undo", id },
     { type: "note.redo", id },
   ];
-  const reads = (id: string): OpInput[] => [{ type: "history.list", noteIds: [id] }, { type: "history.authors" }, { type: "history.activity", timeZone: "UTC" }, { type: "note.history", id }];
+  const reads = (id: string): OpInput[] => [{ type: "history.list", noteIds: [id] }, { type: "history.authors" }, { type: "note.history", id }, { type: "history.summary" }, { type: "note.diff", id, revision: 2 }];
 
-  it("a viewer reads history and can't label, revert, apply, undo, or redo", async () => {
+  it("a viewer reads history and can't label, revert, undo, or redo", async () => {
     const { ada, id } = await sharedNote();
     const viewer = await addMember(ada, "viewer");
 
@@ -434,11 +582,12 @@ describe("history for an agent", () => {
     expect((await tool(claude.token, "history", { authors: [claude.ref] })).json().changes.map((c: HistoryEntry) => c.revision)).toEqual([3]);
     expect((await tool(claude.token, "label_revision", { id, revision: 2, name: "Before me" })).json()).toEqual({ id, revision: 2, label: "Before me" });
     expect((await tool(claude.token, "revert_changes", { id, revisions: [3] })).json().text).toBe("# Plan\n\nAda's step\n\nAda's last word");
-    expect((await tool(claude.token, "reapply_changes", { id, revisions: [3] })).json().revision).toBe(6);
+    expect((await tool(claude.token, "revert_changes", { id, revisions: [5] })).json()).toMatchObject({ revision: 6, text: "# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word" });
+    expect((await tool(claude.token, "history_summary", { authors: [claude.ref] })).json().notes).toMatchObject([{ noteId: id, noteTitle: "Plan", changes: 3, added: 4, removed: 2, authors: [{ kind: "agent", name: "Claude" }] }]);
+    expect((await tool(claude.token, "change_diff", { id, revision: 5 })).json()).toMatchObject({ added: 0, removed: 2 });
     expect((await tool(claude.token, "undo", { id })).json().revision).toBe(7);
     expect((await tool(claude.token, "redo", { id })).json().revision).toBe(8);
     expect((await tool(claude.token, "revert_note", { id, revision: 2 })).json().text).toBe("# Plan\n\nAda's step");
-    expect((await tool(claude.token, "activity", { timeZone: "UTC" })).json().days.reduce((n: number, d: { count: number }) => n + d.count, 0)).toBe(6);
     expect(await tool(claude.token, "revert_changes", { id, revisions: "3" })).toMatchObject({ isError: true });
 
     expect((await history(ada, id)).slice(4).map((c) => c.author.name)).toEqual(Array(5).fill("Claude"));
@@ -460,12 +609,14 @@ describe("history for an agent", () => {
 
     expect(await run(["changes", "--note", `${id},bbbbbbbbbbbb`, "--author", "agent:cccccccccccc", "--from", "2026-03-01T00:00:00Z", "--to", "2026-03-02T00:00:00Z"], io)).toBe(0);
     expect(await run(["authors"], io)).toBe(0);
-    expect(await run(["activity", "--timezone", "America/Chicago"], io)).toBe(0);
     expect(await run(["label", id, "--revision", "2", "--name", "Draft"], io)).toBe(0);
     expect(await run(["label", id, "--revision", "2"], io)).toBe(0);
     expect(await run(["revert", id, "--revision", "2"], io)).toBe(0);
     expect(await run(["revert", id, "--changes", "3,4"], io)).toBe(0);
-    expect(await run(["reapply", id, "--changes", "3"], io)).toBe(0);
+    expect(await run(["reapply", id, "--changes", "3"], io)).toBe(2);
+    expect(await run(["diff", id, "--change", "3"], io)).toBe(0);
+    expect(await run(["diff", id], io)).toBe(2);
+    expect(await run(["changed", "--note", id, "--author", "agent:cccccccccccc", "--limit", "5"], io)).toBe(0);
     expect(await run(["undo", id], io)).toBe(0);
     expect(await run(["redo", id], io)).toBe(0);
     expect(await run(["revert", id], io)).toBe(2);
@@ -474,12 +625,12 @@ describe("history for an agent", () => {
     expect(seen).toEqual([
       ["history", { noteIds: [id, "bbbbbbbbbbbb"], authors: [{ kind: "agent", id: "cccccccccccc" }], from: Date.UTC(2026, 2, 1), to: Date.UTC(2026, 2, 2) }],
       ["history_authors", {}],
-      ["activity", { timeZone: "America/Chicago" }],
       ["label_revision", { id, revision: 2, name: "Draft" }],
       ["label_revision", { id, revision: 2, name: null }],
       ["revert_note", { id, revision: 2 }],
       ["revert_changes", { id, revisions: [3, 4] }],
-      ["reapply_changes", { id, revisions: [3] }],
+      ["change_diff", { id, revision: 3 }],
+      ["history_summary", { noteIds: [id], authors: [{ kind: "agent", id: "cccccccccccc" }], limit: 5 }],
       ["undo", { id }],
       ["redo", { id }],
     ]);

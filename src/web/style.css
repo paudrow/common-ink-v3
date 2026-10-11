@@ -1475,72 +1475,151 @@ button.link:hover {
   text-align: left;
 }
 
-.selection {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  background: var(--bg-elev);
-  font-size: 12px;
-}
-
-.selection-hint {
-  flex-basis: 100%;
-  color: var(--muted);
-}
-
-.change-meta button.link {
-  color: var(--ink);
-  font-weight: 600;
-}
-
+.changed-notes,
 .change-list {
   display: flex;
   flex-direction: column;
-  gap: 14px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.changed-note,
 .change {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
+  padding: 8px 0;
 }
 
+.changed-note + .changed-note,
 .change + .change {
-  padding-top: 14px;
   border-top: 1px solid var(--line);
 }
 
-.change-head,
+.changed-note-toggle,
+.change-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changed-note-toggle:hover .changed-note-title,
+.change-toggle:hover .change-author {
+  text-decoration: underline;
+}
+
+.caret {
+  flex: none;
+  align-self: center;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-right-width: 0;
+  border-left: 6px solid var(--muted);
+  transition: transform 0.1s;
+}
+
+[aria-expanded="true"] > .caret {
+  transform: rotate(90deg);
+}
+
+.changed-note-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changed-note-toggle .change-stat {
+  flex: none;
+  min-width: 9ch;
+  margin-left: 0;
+}
+
+.changed-note-about,
+.changed-note-total,
+.change-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.changed-note-about,
 .change-meta,
+.change-body {
+  padding-left: 14px;
+}
+
+.changed-note-about button.link,
+.change-meta button.link,
+.change-actions button.link {
+  text-decoration: underline;
+}
+
+.changed-note-total .change-stat {
+  margin-left: 0;
+}
+
+.changed-note .note-changes {
+  padding: 4px 0 0 14px;
+}
+
+.note-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.note-changes > .button {
+  align-self: flex-start;
+}
+
+.change-author {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-toggle .badge,
+.change-toggle time {
+  flex: none;
+}
+
+.change-revert {
+  margin-left: auto;
+}
+
+.change-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
 .change-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
-}
-
-.change-head input {
-  margin: 0;
-}
-
-.change-author {
-  font-weight: 600;
-}
-
-.change[data-reverted] .change-author {
-  color: var(--muted);
-  text-decoration: line-through;
 }
 
 .badge,
@@ -1562,8 +1641,6 @@ button.link:hover {
 }
 
 .change time,
-.change-meta,
-.change-note,
 .change-actions {
   color: var(--muted);
   font-size: 12px;
@@ -1583,15 +1660,6 @@ button.link:hover {
   color: var(--danger);
 }
 
-.change-note {
-  margin: 0;
-  font-style: italic;
-}
-
-.change-actions button.link {
-  text-decoration: underline;
-}
-
 .change-actions input {
   flex: 1;
   min-width: 0;
@@ -1605,7 +1673,7 @@ button.link:hover {
 }
 
 .diff {
-  overflow-x: auto;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg-elev);
@@ -1620,12 +1688,13 @@ button.link:hover {
   color: var(--faint);
 }
 
+/* The marker is a cell of its line's own row, so it scrolls with the line and sits on the first row when the text wraps. */
 .diff-line {
-  display: block;
-  padding: 0 8px 0 20px;
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr);
+  align-items: start;
+  padding: 0 8px 0 4px;
   text-decoration: none;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 ins.diff-line {
@@ -1636,16 +1705,15 @@ del.diff-line {
   background: var(--removed-soft);
 }
 
-ins.diff-line::before,
-del.diff-line::before {
-  position: absolute;
-  margin-left: -13px;
+.diff-mark {
   color: var(--muted);
-  content: "+";
+  text-align: center;
+  user-select: none;
 }
 
-del.diff-line::before {
-  content: "−";
+.diff-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .diff-none {
@@ -1729,51 +1797,3 @@ del.diff-line::before {
   white-space: nowrap;
 }
 
-.activity-total {
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.activity-grid {
-  display: flex;
-  gap: 2px;
-  overflow-x: auto;
-}
-
-.activity-week {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.activity-day {
-  width: 10px;
-  height: 10px;
-  padding: 0;
-  border: 0;
-  border-radius: 2px;
-  background: var(--hover);
-  cursor: pointer;
-}
-
-.activity-day[data-level="1"] {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-.activity-day[data-level="2"] {
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-
-.activity-day[data-level="3"] {
-  background: color-mix(in srgb, var(--accent) 80%, transparent);
-}
-
-.activity-day[data-level="4"] {
-  background: var(--accent);
-}
-
-.activity-day[aria-pressed="true"] {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
-}
