@@ -36,8 +36,7 @@ export function embedPolicy({ network, ancestors }: { network: boolean; ancestor
 const DOCUMENT = `<!doctype html>
 <meta charset="utf-8">
 <title>HTML embed</title>
-<meta name="color-scheme" content="light dark">
-<style>html, body { height: 100%; margin: 0; } iframe { display: block; width: 100%; height: 100%; border: 0; }</style>
+<style>html, body { height: 100%; margin: 0; background: #fff; } iframe { display: block; width: 100%; height: 100%; border: 0; }</style>
 <script>
 if (parent !== window) {
   addEventListener("message", function take(event) {
@@ -47,7 +46,6 @@ if (parent !== window) {
     frame.setAttribute("sandbox", "allow-scripts");
     frame.title = "HTML embed";
     frame.srcdoc = event.data.html;
-    frame.addEventListener("load", function () { parent.postMessage({ embedFrame: "drawn" }, "*"); }, { once: true });
     document.body.append(frame);
   });
   parent.postMessage({ embedFrame: "ready" }, "*");
@@ -68,7 +66,7 @@ const embedFrame = (ancestors: string) =>
   });
 
 /** The address of a host given to HTML embeds alone, when `EMBED_ORIGIN` names one. */
-export function embedOrigin(env: { EMBED_ORIGIN?: string }): string | null {
+function embedOrigin(env: { EMBED_ORIGIN?: string }): string | null {
   if (!env.EMBED_ORIGIN) return null;
   const url = new URL(env.EMBED_ORIGIN);
   if (url.protocol !== "https:" && !/(^|\.)localhost$/.test(url.hostname)) throw new Error("EMBED_ORIGIN must be an https address");
@@ -85,4 +83,14 @@ export function embedResponse(url: URL, env: { EMBED_ORIGIN?: string }): Respons
   if (origin && url.origin === origin) return url.pathname === EMBED_FRAME_PATH ? embedFrame("*") : new Response("Not found", { status: 404 });
   if (url.pathname !== EMBED_FRAME_PATH) return null;
   return origin ? new Response(null, { status: 302, headers: { Location: origin + EMBED_FRAME_PATH } }) : embedFrame("'self'");
+}
+
+/** The app's page with what it may frame: the HTML embed's document and the sites in `FRAME_ORIGINS`. */
+export function framing(page: Response, url: URL, env: { EMBED_ORIGIN?: string }): Response {
+  if (!page.headers.get("Content-Type")?.startsWith("text/html")) return page;
+  const origin = embedOrigin(env);
+  const framed = [url.origin + EMBED_FRAME_PATH, ...(origin ? [origin + EMBED_FRAME_PATH] : []), ...FRAME_ORIGINS];
+  const res = new Response(page.body, page);
+  res.headers.append("Content-Security-Policy", `frame-src ${framed.join(" ")}`);
+  return res;
 }

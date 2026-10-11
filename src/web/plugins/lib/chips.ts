@@ -1,6 +1,6 @@
 import { Annotation, EditorSelection, EditorState, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
-import { drawnInView, inCode, touched, within, writable } from "./live.ts";
+import { drawnInView, inCode, lineTouched, within, writable } from "./live.ts";
 import { replacing } from "./rewrite.ts";
 
 /** Where a token is in the note. */
@@ -19,6 +19,12 @@ export interface Source {
    * writes the way it was drawn from does nothing.
    */
   rewrite(text: string): void;
+  /**
+   * Writes the token's line another way: `next` is handed the line as it reads and answers how it
+   * should. For a change that reaches past the token, as taking a token away takes the space before
+   * it. In every other way it is `rewrite`.
+   */
+  rewriteLine(next: (line: string) => string): void;
   /** Puts the cursor in the token, which shows it as written: after it, or `offset` characters into it. */
   edit(offset?: number): void;
 }
@@ -26,7 +32,7 @@ export interface Source {
 /**
  * A kind of token drawn as a chip: a todo's checkbox, a formula, and later a link or a mention.
  * The note's text stays what it was. The chip is only how the token is shown while the cursor is
- * off the token, and what it changes it changes by rewriting the token.
+ * on another line, and what it changes it changes by rewriting the token.
  */
 export interface Chip<T extends Token> {
   /** Names the chip's element (`md-chip-<id>`) and its edits (`input.<id>`). */
@@ -37,7 +43,7 @@ export interface Chip<T extends Token> {
   draw(el: HTMLElement, token: T, source: Source): void;
   /**
    * Whether the chip is exactly as wide as the token it stands for, so nothing on the line moves when
-   * the cursor comes to it and the token is shown. The chip is then drawn over the token's own width. Give
+   * the cursor comes and the token is shown. The chip is then drawn over the token's own width. Give
    * it to a chip at the start of a line, such as a checkbox.
    */
   keepsWidth?: boolean;
@@ -48,15 +54,15 @@ export interface Chip<T extends Token> {
    */
   key?(token: T): string;
   /**
-   * When the token is shown as written: with the cursor on the token or at its edge, or `within`, only
-   * with the cursor inside the token itself or a selection of part of it. For a token nobody reads as written, such as
+   * When the token is shown as written: with the cursor anywhere on its line, or `within`, only with
+   * the cursor inside the token itself or a selection of part of it. For a token nobody reads as written, such as
    * a link's id: the rest of its line stays drawn while the member types on it, and nothing on the
    * line moves until the cursor goes into the token. A drawn token is one thing to a deletion and to
    * a selection: a deletion that reaches into it takes all of it, and a selection that would end
    * inside it takes it whole. A cursor alone goes into it as into any text, by an arrow key or a
    * motion of vim's, which shows it as written, and out again the same way.
    */
-  written?: "within";
+  written?: "line" | "within";
   /** Whether tokens in what the editor reads as code are drawn too, for a chip whose `skip` leaves code out by its own reading. */
   inCode?: boolean;
   /** Tokens to leave as written, besides those in code. */
@@ -108,6 +114,13 @@ export class ChipWidget<T extends Token> extends WidgetType {
           const changes = token && replacing(written, text, token.from);
           if (changes) view.dispatch({ changes, userEvent: `input.${chip.id}` });
         },
+        rewriteLine(next) {
+          const token = writable(view.state) ? now() : undefined;
+          if (!token) return;
+          const line = view.state.doc.lineAt(token.from);
+          const changes = replacing(line.text, next(line.text), line.from);
+          if (changes) view.dispatch({ changes, userEvent: `input.${chip.id}` });
+        },
         edit(offset) {
           const token = now();
           if (!token) return;
@@ -141,7 +154,7 @@ export function chips<T extends Token>(chip: Chip<T>): Extension {
     for (const { from, to } of view.visibleRanges) {
       for (let line = state.doc.lineAt(from); ; line = state.doc.line(line.number + 1)) {
         for (const token of chip.find(line.text, line.from)) {
-          const shown = chip.written === "within" ? within(state, token.from, token.to) : touched(state, token.from, token.to);
+          const shown = chip.written === "within" ? within(state, token.from, token.to) : lineTouched(state, token.from);
           if (shown || !drawable(chip, state, token)) continue;
           made.push(Decoration.replace({ widget: new ChipWidget(chip, token, state.sliceDoc(token.from, token.to), !writable(state)) }).range(token.from, token.to));
         }

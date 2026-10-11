@@ -1,25 +1,9 @@
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+import { linesOutsideCode } from "./lines.ts";
+import { parseTodo } from "./todos.ts";
+
 const HEADING = /^ {0,3}#[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
-const OPEN_TODO = /^\s*(?:[-*+]|\d+[.)])\s+\[ \](?:\s|$)/;
 const SNIPPET_LENGTH = 160;
-
-/**
- * Each line of a note that isn't in a fenced code block or a fence, with where it starts. Indented
- * lines are not taken for code: a bullet nested three deep is indented as far as a code block is.
- */
-export function* linesOutsideCode(text: string): Generator<{ line: string; from: number }> {
-  let fence: string | null = null;
-  let from = 0;
-  for (const line of text.split("\n")) {
-    const marker = FENCE.exec(line)?.[1]?.[0];
-    if (marker) {
-      if (!fence) fence = marker;
-      else if (marker === fence) fence = null;
-    } else if (!fence) yield { line, from };
-    from += line.length + 1;
-  }
-}
 
 const TITLE_LENGTH = 80;
 
@@ -58,18 +42,20 @@ function clip(text: string, length: number): string {
  * The title is the words of the first `#` heading outside code blocks that has any. A note with no
  * such heading is titled by its first line of words, cut to a title's length, and a line that is
  * only a web address is passed over for one that says something. The title is "" for a note with no
- * words at all. The snippet is the prose besides the title, and open todos count unchecked list
- * checkboxes.
+ * words at all. The snippet is the prose besides the title, a todo by its words alone, and open
+ * todos count the todos not yet done.
  */
 export function summarize(text: string): { title: string; snippet: string; openTodos: number } {
   let openTodos = 0;
   let heading = -1;
   const prose: string[] = [];
   for (const { line } of linesOutsideCode(text)) {
-    if (OPEN_TODO.test(line)) openTodos++;
+    const todo = parseTodo(line);
+    if (todo?.done === false) openTodos++;
     if (RULE.test(line)) continue;
     const titling = heading < 0 ? HEADING.exec(line)?.[1] : undefined;
-    const words = plainText(titling ?? line);
+    // A todo reads as its words: its importance, due date and projects are options, not prose.
+    const words = plainText(titling ?? (todo ? todo.words : line));
     if (!words) continue;
     if (titling !== undefined) heading = prose.length;
     prose.push(words);

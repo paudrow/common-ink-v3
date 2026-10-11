@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { category, group, json, openOptions, setPlugin, typeJson } from "./settings-helpers.ts";
-import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -59,7 +59,7 @@ test("a change made in a second window, in the same gesture that brings it to th
   await expect(snippets(other)).not.toBeChecked();
   await category(other, "Appearance");
   await expect(themeBox(other)).toHaveValue("dark");
-  await expect.poll(() => theme(other)).toBe("dark");
+  expect(await theme(other)).toBe("dark");
   await context.close();
 });
 
@@ -74,7 +74,7 @@ test("a change still waiting when the page goes away is saved over the older wri
   await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "note-list.snippets": false });
   await page.waitForTimeout(2000);
 
-  await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "note-list.snippets": false });
+  expect(await stored(page)).toEqual({ "core.theme": "dark", "note-list.snippets": false });
   await page.unroute("**/ops");
   await page.reload();
   await expect(snippets(page)).not.toBeChecked();
@@ -95,7 +95,7 @@ test("when the settings can't be read the workspace opens with the defaults, say
   const banner = page.getByRole("alert").filter({ hasText: "Your settings couldn't be loaded" });
   await expect(banner).toContainText("the defaults are in use and changes to them aren't kept. (The database is away)");
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeVisible();
-  await expect.poll(() => theme(page)).toBeNull();
+  expect(await theme(page)).toBeNull();
   await text(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" Still writing.");
@@ -108,14 +108,14 @@ test("when the settings can't be read the workspace opens with the defaults, say
   await expect(page.getByRole("status")).toHaveText("Your settings couldn't be loaded, so nothing can be changed here");
   await expect(themeBox(page)).toBeDisabled();
   down = false;
-  await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "sidebar.enabled": false });
+  expect(await stored(page)).toEqual({ "core.theme": "dark", "sidebar.enabled": false });
 
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(banner).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toHaveCount(0);
   await expect(themeBox(page)).toHaveValue("dark");
   await expect(themeBox(page)).toBeEnabled();
-  await expect.poll(() => theme(page)).toBe("dark");
+  expect(await theme(page)).toBe("dark");
 });
 
 test("slow settings don't hold the workspace back for long: it opens with the defaults, and they apply when they arrive", async ({ page }) => {
@@ -128,34 +128,10 @@ test("slow settings don't hold the workspace back for long: it opens with the de
   const banner = page.getByRole("status").filter({ hasText: "Loading your settings. The defaults are in use until they arrive." });
   await expect(banner).toBeVisible({ timeout: 3500 });
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeVisible();
-  await expect.poll(() => theme(page)).toBeNull();
+  expect(await theme(page)).toBeNull();
 
   await expect(banner).toHaveCount(0);
-  await expect.poll(() => theme(page)).toBe("dark");
-});
-
-test("JSON typed before slow settings arrive is not kept as a draft that would write over them", async ({ page }) => {
-  await openSettings(page);
-  await perform(page, { type: "settings.write", text: '{"core.theme":"dark","note-list.snippets":false}', baseRevision: 0 });
-  await slow(page, "settings.read", 4000);
-
-  await page.goto("/settings/json");
-  await expect(json(page)).toBeVisible({ timeout: 3500 });
-  await expect(page.locator(".settings-head").getByRole("status")).toHaveText("Loading your settings…");
-  // Nothing can be changed yet, so nothing typed now is taken: it used to be held and, a key later, written over what was stored.
-  await json(page).click();
-  await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.insertText('{"core.editorTextSize": 120}');
-  await expect(json(page)).toHaveText("{}");
-
-  await expect(json(page)).toContainText("core.theme");
-  await expect(problems(page)).toHaveCount(0);
-  await expect(page.locator(".settings-head").getByRole("status")).toHaveText("Saved");
-  await json(page).click();
-  await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.press("Space");
-  await page.waitForTimeout(500);
-  expect(await stored(page)).toEqual({ "core.theme": "dark", "note-list.snippets": false });
+  expect(await theme(page)).toBe("dark");
 });
 
 test("a plugin that names a command or a page as the app's own are named is left out, and Settings and Plugins stay where they are", async ({ page }) => {
@@ -168,7 +144,7 @@ test("a plugin that names a command or a page as the app's own are named is left
     (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
       command("go.settings"),
       command("go.plugins"),
-      command("plugins.toggle.sidebar"),
+      command("plugins.enable.sidebar"),
       { id: "squat-page", name: "Squatter of the page", activate: (host: Handed) => host.views.register("page", { id: "mine", path: "/settings", label: "Mine", component: () => "Not the settings" }) },
     ];
   });
@@ -186,7 +162,7 @@ test("a plugin that names a command or a page as the app's own are named is left
   const row = (name: string) => page.getByRole("list", { name: "Plugins" }).getByRole("listitem").filter({ hasText: name });
   await expect(row("Squatter of go.settings")).toContainText("Only Common Ink adds a command whose id starts with go., and this one is go.settings");
   await expect(row("Squatter of go.plugins")).toContainText("this one is go.plugins");
-  await expect(row("Squatter of plugins.toggle.sidebar")).toContainText("starts with plugins., and this one is plugins.toggle.sidebar");
+  await expect(row("Squatter of plugins.enable.sidebar")).toContainText("starts with plugins., and this one is plugins.enable.sidebar");
   await expect(row("Squatter of the page")).toContainText("There's already a page at /settings");
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
@@ -195,12 +171,11 @@ test("a plugin that names a command or a page as the app's own are named is left
 test("a key that types is a keybinding only where nothing is being typed, so Enter in a note stays Enter", async ({ page }) => {
   const note = await openSettings(page);
 
-  await typeJson(page, '{"keybindings.note.new": ["enter"], "keybindings.view.toggleFocus": ["backspace"], "keybindings.view.toggleInspector": ["f6"]}');
-  await expect.poll(() => stored(page)).toEqual({ "keybindings.note.new": ["enter"], "keybindings.view.toggleFocus": ["backspace"], "keybindings.view.toggleInspector": ["f6"] });
+  await typeJson(page, '{"keybindings.note.new": ["enter"], "keybindings.view.toggleWritingMode": ["backspace"], "keybindings.view.toggleInspector": ["f6"]}');
+  await expect.poll(() => stored(page)).toEqual({ "keybindings.note.new": ["enter"], "keybindings.view.toggleWritingMode": ["backspace"], "keybindings.view.toggleInspector": ["f6"] });
   await expect(problems(page)).toHaveCount(0);
 
   await page.goto(`/note/${note.id}`);
-  await pinPanel(page, "Info");
   await text(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("Enter");
@@ -208,8 +183,8 @@ test("a key that types is a keybinding only where nothing is being typed, so Ent
   await page.keyboard.press("Backspace");
   await expect(text(page)).toContainText("The first lines of Alpha.x");
   await expect(page).toHaveURL(new RegExp(`${note.id}$`));
-  await expect(page.locator(".app")).not.toHaveAttribute("data-focus-mode");
-  await expect.poll(async () => (await perform(page, { type: "note.list" })).map((n) => n.title)).toEqual(["Alpha"]);
+  await expect(page.locator(".app")).not.toHaveAttribute("data-writing");
+  expect((await perform(page, { type: "note.list" })).map((n) => n.title)).toEqual(["Alpha"]);
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await expect(inspector).toBeVisible();
@@ -219,9 +194,9 @@ test("a key that types is a keybinding only where nothing is being typed, so Ent
   // Out of the note's text the same keys are the commands'.
   await page.evaluate(() => (document.activeElement as HTMLElement).blur());
   await page.keyboard.press("Backspace");
-  await expect(page.locator(".app")).toHaveAttribute("data-focus-mode", "true");
+  await expect(page.locator(".app")).toHaveAttribute("data-writing", "true");
   await page.keyboard.press("Backspace");
-  await expect(page.locator(".app")).not.toHaveAttribute("data-focus-mode");
+  await expect(page.locator(".app")).not.toHaveAttribute("data-writing");
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await perform(page, { type: "note.list" })).length).toBe(2);
 });
@@ -237,15 +212,15 @@ test("settings the server refuses are put back as they were, with its reason and
 
   await expect(page.getByRole("status")).toHaveText("Not saved, and put back as it was: Settings can be at most 100000 characters");
   await expect(json(page)).toContainText('"core.theme": "dark"');
-  await expect.poll(() => theme(page)).toBe("dark");
+  expect(await theme(page)).toBe("dark");
   await page.waitForTimeout(3500);
   expect(writes).toHaveLength(1);
-  await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark" });
+  expect(await stored(page)).toEqual({ "core.theme": "dark" });
 
   await perform(page, { type: "settings.write", text: '{"core.theme":"light"}', baseRevision: 1 });
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByRole("status")).toHaveText("Saved");
-  await expect.poll(() => theme(page)).toBe("light");
+  expect(await theme(page)).toBe("light");
 });
 
 test("giving undo's key to another command says that undo is left with none", async ({ page }) => {

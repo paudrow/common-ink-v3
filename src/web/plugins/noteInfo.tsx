@@ -1,23 +1,7 @@
 import { useRef, useState } from "react";
-import { ago, useNow, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../plugin-api.ts";
+import type { NoteSummary, Plugin, PluginHost, ViewProps } from "../plugin-api.ts";
 import { Soon } from "./lib/Soon.tsx";
 import { SharingSummary } from "./sharing/Summary.tsx";
-
-/** A set of notes: a folder's, under "Folder", or the ones a page is showing, under "Showing". */
-function NotesInfo({ heading, name, notes }: { heading: string; name: string; notes: readonly NoteSummary[] }) {
-  const now = useNow();
-  const last = notes.reduce<NoteSummary | null>((latest, n) => (latest && latest.updatedAt >= n.updatedAt ? latest : n), null);
-  return (
-    <dl className="info">
-      <dt>{heading}</dt>
-      <dd>{name}</dd>
-      <dt>Notes</dt>
-      <dd>{notes.length === 1 ? "1 note" : `${notes.length} notes`}</dd>
-      <dt>Last changed</dt>
-      <dd>{last ? `${ago(last.updatedAt, now)} by ${last.updatedBy.name}` : "Nothing in it yet"}</dd>
-    </dl>
-  );
-}
 
 function Info({ host, app, note }: ViewProps & { host: PluginHost; note: NoteSummary }) {
   const tree = app.folders;
@@ -95,16 +79,9 @@ function Info({ host, app, note }: ViewProps & { host: PluginHost; note: NoteSum
 export const noteInfo: Plugin = {
   id: "note-info",
   name: "Note info",
-  description: "The details of the note, the folder or the notes in front, in the inspector.",
+  description: "The open note's details, in the inspector.",
   icon: "info",
   activate(host) {
-    host.views.register("inspector", {
-      id: "info",
-      label: "Info",
-      icon: "info",
-      for: ["note", "folder", "notes"],
-      component: ({ app, about }) =>
-        about.kind === "note" ? <Info key={about.note.id} host={host} app={app} note={about.note} /> : <NotesInfo heading={about.kind === "folder" ? "Folder" : "Showing"} name={about.kind === "folder" ? about.name : about.label} notes={about.notes} />,
-    });
+    host.views.register("inspector", { id: "info", label: "Info", icon: "info", component: (props) => <Info host={host} {...props} /> });
   },
 };

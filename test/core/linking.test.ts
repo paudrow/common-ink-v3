@@ -201,7 +201,7 @@ describe("backlinks", () => {
     expect(await backlinks(viewer, plan.id)).toEqual(["Diary"]);
   });
 
-  it("are made again from the notes' text, a page at a time, by an admin", async () => {
+  it("are made again from the notes' text by an admin", async () => {
     const ada = await newMember();
     const editor = await addMember(ada, "editor");
     const plan = await create(ada, "# Plan");
@@ -210,10 +210,8 @@ describe("backlinks", () => {
     for (let i = 0; i < 45; i++) await create(ada, `# Note ${i}`);
 
     await expect(perform(env.DB, editor, { type: "links.rebuild" })).rejects.toMatchObject({ code: "forbidden" });
-    const first = await perform(env.DB, ada, { type: "links.rebuild" });
-    const rest = await perform(env.DB, ada, { type: "links.rebuild", after: first.next! });
+    expect(await perform(env.DB, ada, { type: "links.rebuild" })).toEqual({ done: true });
 
-    expect([first.notes, rest.notes, rest.next]).toEqual([40, 7, null]);
     expect(await backlinks(ada, plan.id)).toEqual(["Diary"]);
     expect(await recorded(plan.id)).toEqual([]);
   });
