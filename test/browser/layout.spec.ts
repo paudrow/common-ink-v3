@@ -181,20 +181,22 @@ test("a folder's list filters on title and snippet, sorts, and narrows to notes 
   await expect(listedNotes(page)).toHaveText(["Banana", "Cherry"]);
   await page.getByRole("button", { name: "Has todos" }).click();
 
-  await page.getByRole("searchbox", { name: "Filter notes" }).fill("RED");
+  // What is typed is searched for in the folder's notes, by the server, and found in a note's text as in its title.
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("RED");
   await expect(listedNotes(page)).toHaveText(["Apple"]);
-  await page.getByRole("searchbox", { name: "Filter notes" }).fill("cherry");
+  await expect(noteCard(page, "Apple").locator("mark")).toHaveText(["Red"]);
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("cherry");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
-  await page.getByRole("searchbox", { name: "Filter notes" }).fill("kiwi");
-  await expect(page.getByText("No notes match.")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("kiwi");
+  await expect(page.getByText("No notes match “kiwi” in Fruit.")).toBeVisible();
 
   // The list is as it was left when its tab is come back to, and All notes says which folder each note is in.
-  await page.getByRole("searchbox", { name: "Filter notes" }).fill("cherry");
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("cherry");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
   await openAllNotes(page);
   await expect(noteCard(page, "Cherry").locator(".card-details")).toHaveText("FruitAda Lovelacejust now2 open");
   await folder(page, "Fruit").click();
-  await expect(page.getByRole("searchbox", { name: "Filter notes" })).toHaveValue("cherry");
+  await expect(page.getByRole("searchbox", { name: "Search notes" })).toHaveValue("cherry");
   await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue("title");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
 });

@@ -1,11 +1,13 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { perform, type Actor } from "../../src/core/operations.ts";
+import type { OpInput } from "../../src/core/protocol.ts";
 import { matchOf, matchesIn, parseQuery } from "../../src/core/search.ts";
+import { whoAmI } from "../../src/core/accounts.ts";
 import { addMember, newMember } from "./members.ts";
 
 const create = (by: Actor, text: string, now?: number) => perform(env.DB, by, { type: "note.create", text }, now);
-const found = async (by: Actor, query: string, more: { includeArchived?: boolean } = {}) => (await perform(env.DB, by, { type: "search", query, ...more })).results.map((r) => r.note.title);
+const found = async (by: Actor, query: string, more: Omit<Partial<Extract<OpInput, { type: "search" }>>, "type" | "query"> = {}) => (await perform(env.DB, by, { type: "search", query, ...more })).results.map((r) => r.note.title);
 
 describe("a search as typed", () => {
   it("reads words, quoted phrases, tags and projects, and nothing else", () => {
@@ -73,6 +75,63 @@ describe("search", () => {
 
     expect(await found(ada, "plan")).toEqual(["The plan", "Plan for the garden", "Garden", "Shopping"]);
     expect(await found(ada, "garden plan")).toEqual(["Plan for the garden", "The plan", "Garden", "Shopping"]);
+  });
+
+  it("narrows to one folder's own notes, and a folder the asker can't see is no such folder", async () => {
+    const ada = await newMember();
+    const projects = await perform(env.DB, ada, { type: "folder.create", name: "Projects" });
+    const inside = await perform(env.DB, ada, { type: "folder.create", name: "Inside", parentId: projects.id });
+    const inFolder = (folderId: string, text: string, now: number) => perform(env.DB, ada, { type: "note.create", folderId, text }, now);
+    await create(ada, "# Loose heron\n\nheron", 1000);
+    await inFolder(projects.id, "# Project heron\n\nheron #bird", 2000);
+    const secret = await inFolder(projects.id, "# Secret heron\n\nheron heron", 3000);
+    await inFolder(inside.id, "# Inner heron\n\nheron", 4000);
+    await perform(env.DB, ada, { type: "note.setPrivate", id: secret.id, private: true });
+    const eve = await addMember(ada, "editor", "Eve");
+
+    expect(await found(ada, "heron")).toEqual(["Inner heron", "Secret heron", "Project heron", "Loose heron"]);
+    expect(await found(ada, "heron", { folderId: projects.id })).toEqual(["Secret heron", "Project heron"]);
+    expect(await found(ada, "#bird", { folderId: projects.id })).toEqual(["Project heron"]);
+    expect(await found(ada, "#bird", { folderId: inside.id })).toEqual([]);
+    // Someone who can't see a note in the folder is told nothing of it: not in the results, and not in whether there are more.
+    expect(await perform(env.DB, eve, { type: "search", query: "heron", folderId: projects.id, limit: 1 })).toMatchObject({ results: [{ note: { title: "Project heron" } }], next: null });
+
+    const guest = await newMember("Gus");
+    const shared = await perform(env.DB, ada, { type: "note.create", folderId: inside.id, text: "# Shared heron\n\nheron" }, 5000);
+    await perform(env.DB, ada, { type: "grant.set", noteId: shared.id, email: (await whoAmI(env.DB, guest.personId)).person.email, access: "view" });
+    const asGuest: Actor = { ...guest, workspaceId: ada.workspaceId };
+    expect(await found(asGuest, "heron")).toEqual(["Shared heron"]);
+    // The note was shared and its folder wasn't, so to the guest there is no such folder, whatever is asked of it.
+    for (const query of ["heron", ""]) await expect(perform(env.DB, asGuest, { type: "search", query, folderId: inside.id })).rejects.toMatchObject({ code: "not_found", message: "No such folder" });
+    await expect(perform(env.DB, ada, { type: "search", query: "heron", folderId: "nosuchfolder" })).rejects.toMatchObject({ code: "not_found", message: "No such folder" });
+  });
+
+  it("answers in the order asked for, narrows to notes with an open todo, and to archived notes alone", async () => {
+    const ada = await newMember();
+    await create(ada, "# Beta\n\nfinch\n- [ ] feed", 1000);
+    const alpha = await create(ada, "# alpha\n\nfinch", 2000);
+    await create(ada, "# Finch\n\nbirds\n- [x] done", 3000);
+    const old = await create(ada, "# Old\n\nfinch\n- [ ] count", 4000);
+    await perform(env.DB, ada, { type: "note.write", id: alpha.id, baseRevision: 1, text: "# alpha\n\nfinch again" }, 9000);
+    await perform(env.DB, ada, { type: "note.archive", id: old.id, archived: true }, 9500);
+
+    expect(await found(ada, "finch")).toEqual(["Finch", "alpha", "Beta"]);
+    expect(await found(ada, "finch", { sort: "match" })).toEqual(["Finch", "alpha", "Beta"]);
+    expect(await found(ada, "finch", { sort: "recent" })).toEqual(["alpha", "Finch", "Beta"]);
+    expect(await found(ada, "finch", { sort: "created" })).toEqual(["Finch", "alpha", "Beta"]);
+    expect(await found(ada, "finch", { sort: "title" })).toEqual(["alpha", "Beta", "Finch"]);
+    expect(await found(ada, "finch", { sort: "title", includeArchived: true })).toEqual(["alpha", "Beta", "Finch", "Old"]);
+    expect(await found(ada, "finch", { includeArchived: "only" })).toEqual(["Old"]);
+    expect(await found(ada, "finch", { hasTodos: true })).toEqual(["Beta"]);
+    expect(await found(ada, "finch", { hasTodos: true, includeArchived: true, sort: "created" })).toEqual(["Old", "Beta"]);
+    // Pages follow the order asked for.
+    const first = await perform(env.DB, ada, { type: "search", query: "finch", sort: "title", limit: 2 });
+    expect(first.results.map((r) => r.note.title)).toEqual(["alpha", "Beta"]);
+    expect((await perform(env.DB, ada, { type: "search", query: "finch", sort: "title", limit: 2, offset: first.next! })).results.map((r) => r.note.title)).toEqual(["Finch"]);
+
+    expect((await perform(env.DB, ada, { type: "note.list", includeArchived: "only" })).map((n) => n.title)).toEqual(["Old"]);
+    expect((await perform(env.DB, ada, { type: "note.list", includeArchived: true })).map((n) => n.title)).toEqual(["alpha", "Old", "Finch", "Beta"]);
+    expect((await perform(env.DB, ada, { type: "note.list" })).map((n) => n.title)).toEqual(["alpha", "Finch", "Beta"]);
   });
 
   it("is never thrown by what is typed", async () => {

@@ -69,6 +69,8 @@ const PATHS = {
       <path d="M5.5 7V5.25a2.5 2.5 0 0 1 5 0V7" />
     </>
   ),
+  archive: <path d="M2.5 3.5h11v3h-11zM3.5 6.5v6h9v-6M6.5 9h3" />,
+  unarchive: <path d="M2.5 3.5h11v3h-11zM3.5 6.5v6h9v-6M8 11.5v-3M6.5 9.75 8 8.25l1.5 1.5" />,
   trash: <path d="M3 4.5h10M6.5 4.5v-2h3v2M4.5 4.5l.5 8.5a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1l.5-8.5M6.75 7v4M9.25 7v4" />,
   share: (
     <>

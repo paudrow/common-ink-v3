@@ -80,6 +80,7 @@ const author = {
 };
 const noteIds = (description: string) => ({ type: "array", items: { type: "string" }, minItems: 1, description });
 const includeArchived = { type: "boolean", description: "True to cover archived notes too, which are left out otherwise" };
+const archivedToo = { enum: [true, false, "only"], description: 'True to cover archived notes too, which are left out otherwise, or "only" for the archived notes alone' };
 const LIFE = "A note is live, archived or in Trash, which its state says. An archived note is left out of listings unless includeArchived is true, and is read and changed as any other. A note in Trash is listed only by list_trash, can be read, and can't be changed until restore_note brings it back.";
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
 
@@ -98,7 +99,7 @@ export const TOOLS: Tool[] = [
       folderId: folderId("Only notes in this folder, from list_folders"),
       updatedSince: time("Only notes whose text or state changed at or after this time. A note trashed since is in list_trash"),
       tag: { type: "string", description: "Only notes with this tag, without the #, ignoring case" },
-      includeArchived,
+      includeArchived: archivedToo,
     }),
     op: "note.list",
   },
@@ -216,11 +217,14 @@ export const TOOLS: Tool[] = [
   {
     name: "search",
     description:
-      "Find the notes you can see by their text: every word of query must be in the note, each matching the start of a word, ignoring case and accents. Words in \"double quotes\" match as a phrase. #name narrows to notes with that tag, and +name to notes with a todo in that project. Todos, tags and projects are text like any other, so their words are found too. Notes whose title matches come first, then the latest changed. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless includeArchived is true, and notes in Trash always. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.",
+      "Find the notes you can see by their text: every word of query must be in the note, each matching the start of a word, ignoring case and accents. Words in \"double quotes\" match as a phrase. #name narrows to notes with that tag, and +name to notes with a todo in that project. Todos, tags and projects are text like any other, so their words are found too. Notes whose title matches come first, then the latest changed, unless sort asks for another order. folderId narrows to the notes in one folder, not those of the folders inside it, and hasTodos to notes with an open todo. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless includeArchived is true, or \"only\" for them alone, and notes in Trash always. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.",
     inputSchema: object(
       {
         query: { type: "string", maxLength: 200, description: 'What to find, such as: budget "second quarter" #money +Home' },
-        includeArchived,
+        folderId: folderId("Only notes in this folder, from list_folders"),
+        includeArchived: archivedToo,
+        hasTodos: { type: "boolean", description: "True for only the notes with an open todo" },
+        sort: { enum: ["match", "recent", "created", "title"], description: "match, the default: title matches first, then the latest changed. recent: the latest changed. created: the latest made. title: by title" },
         limit: { type: "integer", minimum: 1, maximum: 50, description: "How many notes; default 20" },
         offset: { type: "integer", minimum: 0, description: "The next of the page before" },
       },

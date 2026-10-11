@@ -4,7 +4,7 @@ import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { IN_TRASH, type Covering, type NoteState, type Trashed } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
-import { Op, OpError, type OpInput, type OpType } from "../../src/core/protocol.ts";
+import { Op, OpError, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
 import { NOT_FOR_AGENTS } from "../../src/worker/mcp/tools.ts";
 import { addMember, newMember } from "./members.ts";
 
@@ -28,7 +28,7 @@ type FolderName = (typeof FOLDERS)[number];
 const FOLDER_OF: Record<NoteName, FolderName> = { open: "Open", team: "Team", deep: "Deep", lone: "Open", secret: "Team", vpriv: "Open", arch: "Open", bin: "Team" };
 /** `arch` is archived and `bin` is in Trash. Every other note is live. */
 const STATE_OF: Record<NoteName, NoteState> = { open: "live", team: "live", deep: "live", lone: "live", secret: "live", vpriv: "live", arch: "archived", bin: "trashed" };
-const COVERED: Record<Covering, readonly NoteState[]> = { live: ["live"], kept: ["live", "archived"], trashed: ["trashed"], any: ["live", "archived", "trashed"] };
+const COVERED: Record<Covering, readonly NoteState[]> = { live: ["live"], archived: ["archived"], kept: ["live", "archived"], trashed: ["trashed"], any: ["live", "archived", "trashed"] };
 
 /**
  * Each actor, what they may do with each note (open team deep lone secret vpriv arch bin) and each folder (Open Team Deep), and whether they may
@@ -174,8 +174,9 @@ type Plan<K extends OpType> =
   /**
    * Lists across the workspace: asked by everyone, and checked for anything of what they can't see. `covers` is the states of the notes
    * it lists as asked here, and with `archived` it takes `includeArchived`, which is asked too and covers archived notes as well.
+   * With `only` it also takes `includeArchived: "only"`, which is asked too and covers the archived notes alone.
    */
-  | { on: "everything"; covers: Covering; archived?: true; args: (w: World) => Args<K> }
+  | { on: "everything"; covers: Covering; archived?: true; only?: true; args: (w: World) => Args<K> }
   /** Decided by who is asking alone. `who` says which roles are let in; a guest never is. */
   | { on: "workspace"; who: readonly ("admin" | "editor" | "viewer" | "guest")[]; args: (w: World) => Args<K> }
   /** For whoever holds a link, and refused to everyone else. */
@@ -186,7 +187,7 @@ const MEMBERS = ["admin", "editor", "viewer"] as const;
 const ADMINS = ["admin"] as const;
 
 const PLANS: { [K in OpType]: Plan<K> } = {
-  "note.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
+  "note.list": { on: "everything", covers: "live", archived: true, only: true, args: () => ({}) },
   "note.create": { on: "folder", needs: "E", args: (folderId) => ({ folderId, text: "# Made" }) },
   "note.read": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.write": { on: "note", needs: "E", trashed: "refused", args: (id, w, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, text: note === "secret" ? textOf("secret", `[[${w.notes.open}]] more`) : textOf(note) }) },
@@ -200,7 +201,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.restore": { on: "note", needs: "E", trashed: "opens", args: (id) => ({ id }) },
   "trash.list": { on: "everything", covers: "trashed", args: () => ({}) },
   "tag.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
-  search: { on: "everything", covers: "live", archived: true, args: () => ({ query: "body", limit: 50 }) },
+  search: { on: "everything", covers: "live", archived: true, only: true, args: () => ({ query: "body", limit: 50 }) },
   "note.label": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revision: 1, name: "Start" }) },
   "note.revert": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
   "note.revertChanges": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revisions: [99] }) },
@@ -352,6 +353,10 @@ describe("every operation, by every actor", () => {
               await run(`${type} with archived`, type, { ...plan.args(w), includeArchived: true }, "done");
               listings.push({ key: `${type} with archived`, covers: "kept", said: JSON.stringify(answers.at(-1)) });
             }
+            if (plan.only) {
+              const onlyArchived = await run(`${type} with archived only`, type, { ...plan.args(w), includeArchived: "only" }, "done");
+              if (onlyArchived !== undefined) listings.push({ key: `${type} with archived only`, covers: "archived", said: JSON.stringify(onlyArchived) });
+            }
           } else if (plan.on === "workspace") {
             let allowed = (plan.who as readonly string[]).includes(role);
             if (type === "history.revertAuthor" && role === "guest") allowed = ACTORS[name].notes.includes("E");
@@ -375,6 +380,18 @@ describe("every operation, by every actor", () => {
         expect((await perform(env.DB, actor, { type: "history.summary", authors: [{ kind: "agent", id: w.secretAgent.id }] })).notes.map((n) => [n.noteId, n.changes])).toEqual(levelOf(name, "secret") === "-" ? [] : [[w.notes.secret, 1]]);
         await run("history.revertAuthor narrowed", "history.revertAuthor", { author: { kind: "agent", id: "aaaaaaaaaaaa" }, noteIds: every }, role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")) ? "forbidden" : "done");
         await run("note.list in a hidden folder", "note.list", { folderId: w.folders.Open }, "done");
+        // A search narrowed to a folder: one the actor can't see is no such folder, and one they can answers with only what they see in it, in the states asked for.
+        for (const folder of FOLDERS) {
+          const inFolder = (note: NoteName) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-";
+          for (const [words, includeArchived, covers] of [["", false, "live"], [" with archived", true, "kept"], [" with archived only", "only", "archived"]] as const) {
+            const key = `search in ${folder}${words}`;
+            const found = (await run(key, "search", { query: "body", limit: 50, folderId: w.folders[folder], includeArchived }, folderLevelOf(name, folder) === "-" ? NO_FOLDER : "done")) as Results["search"] | undefined;
+            if (found === undefined) continue;
+            listings.push({ key, covers, said: JSON.stringify(found) });
+            expect(found.results.map((r) => r.note.id).sort(), key).toEqual(NOTES.filter((note) => inFolder(note) && COVERED[covers].includes(STATE_OF[note])).map((note) => w.notes[note]).sort());
+            expect(found.next, key).toBeNull();
+          }
+        }
         // Every grant in the workspace is an admin's to see, and nobody else's.
         await run("grant.list of the workspace", "grant.list", {}, role === "admin" ? "done" : "forbidden");
         expect(got).toEqual(expected);
@@ -393,7 +410,7 @@ describe("every operation, by every actor", () => {
         // And each one that names notes names every note it covers, so an include that did nothing would fail here.
         const NAMES: readonly string[] = ["note.list", "todo.list", "todo.filters", "tag.list", "search", "trash.list", "history.summary", "history.list"];
         const lacking = listings
-          .filter(({ key }) => NAMES.includes(key.replace(" with archived", "")))
+          .filter(({ key }) => NAMES.includes(key.replace(/ with archived( only)?$/, "")))
           .flatMap(({ key, covers, said }) => seen.filter((note) => COVERED[covers].includes(STATE_OF[note]) && !w.marks[note].some((mark) => said.includes(mark))).map((note) => `${key}: ${note}`));
         expect(lacking).toEqual([]);
       });

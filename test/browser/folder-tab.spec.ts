@@ -158,7 +158,7 @@ test("a folder's tab splits and moves between groups like a note's", async ({ pa
   // With the list in front the inspector stays, about the note that was in front before, so nothing moves under the pointer.
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const listBox = await group(1).boundingBox();
-  await group(1).getByRole("searchbox", { name: "Filter notes" }).click();
+  await group(1).getByRole("searchbox", { name: "Search notes" }).click();
   await expect(page).toHaveURL(/\/folder\/[a-z0-9]{12}$/);
   await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveValue(/\/note\/plan-[a-z0-9]{12}$/);
   expect(await group(1).boundingBox()).toEqual(listBox);
@@ -339,8 +339,22 @@ test("a card's title and details stay where they are when it expands, shows the 
     for (const scrolledBy of [0, 90]) {
       await page.setViewportSize({ width, height: 900 });
       await list.evaluate((el, top) => (el.scrollTop = top), scrolledBy);
+      await page.mouse.move(2, 2);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       const atRest = await placed(page, long.id);
       expect(atRest.scrolled, `${width}px`).toBe(scrolledBy);
+
+      // The pointer over the card, and then the keyboard on it, bring up what can be done with it. Nothing else of the card moves.
+      const archive = card.getByRole("button", { name: "Archive B long note", exact: true });
+      expect(await archive.evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
+      await card.hover({ position: { x: 300, y: 60 } });
+      await expect.poll(() => archive.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+      expect(await placed(page, long.id), `hovered at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
+      await page.mouse.move(2, 2);
+      await card.focus();
+      await expect.poll(() => archive.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+      expect(await placed(page, long.id), `focused at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
       await card.getByRole("button", { name: "Expand B long note" }).click();
       await expect(card.locator(".cm-line").first()).toHaveText("# B long note");
@@ -426,7 +440,7 @@ test("with the note list off a folder's notes are listed by title, and with tabs
   await expect(tabs(page)).toHaveText(["Projects"]);
   const plain = page.getByRole("region", { name: "Projects" });
   await expect(plain.getByRole("link")).toHaveText(["Plan"]);
-  await expect(page.getByRole("searchbox", { name: "Filter notes" })).toHaveCount(0);
+  await expect(page.getByRole("searchbox", { name: "Search notes" })).toHaveCount(0);
   await plain.getByRole("link", { name: "Plan" }).click();
   await expect(tabs(page)).toHaveText(["Projects", "Plan"]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Plan");

@@ -1575,29 +1575,45 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   search: {
     needs: "view",
     async run(ctx, op) {
+      if (op.folderId !== undefined) await loadFolder(ctx, op.folderId, "view");
       const query = parseQuery(op.query);
       if (isEmpty(query)) return { results: [], next: null, indexing: false };
       const indexing = !(await mend(ctx));
       const worded = query.terms.length > 0;
+      const covering = listing(op.includeArchived);
+      const titleFirst = worded && op.sort === "match";
+      const order = { match: "n.updated_at DESC", recent: "n.updated_at DESC", created: "n.created_at DESC", title: "CASE WHEN n.title = '' THEN 'Untitled' ELSE n.title END COLLATE NOCASE" }[op.sort];
       // What a note the asker isn't shown matches is joined away before anything is counted, ordered or read. The
-      // order is the title's match and then the time of the last change, both of the note itself: a rank worked
+      // order asked for is of the note itself, as the title's match and then the time of the last change are: a rank worked
       // out across every note would move with the notes that are hidden. The match names the workspace, so the
       // index is walked for this workspace's notes and no other's.
       const { results: found } = await ctx.db
         .prepare(
           `SELECT n.id FROM notes n ${worded ? "JOIN note_search_rows r ON r.note_id = n.id JOIN note_search s ON s.rowid = r.id" : ""}
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))}
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)}
              ${worded ? "AND s.note_search MATCH ?3" : "AND ?3 IS NULL"}
              AND NOT EXISTS (SELECT 1 FROM json_each(?5) j WHERE NOT EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = j.value))
              AND NOT EXISTS (SELECT 1 FROM json_each(?6) j WHERE NOT EXISTS (SELECT 1 FROM todo_projects p WHERE p.note_id = n.id AND p.project = j.value))
-           ORDER BY ${worded ? "EXISTS (SELECT 1 FROM note_search t WHERE t.rowid = r.id AND t.note_search MATCH ?4) DESC," : "?4 IS NULL,"} n.updated_at DESC, n.id
+             AND (?9 IS NULL OR n.folder_id = ?9) AND (?10 = 0 OR n.open_todos > 0)
+           ORDER BY ${titleFirst ? "EXISTS (SELECT 1 FROM note_search t WHERE t.rowid = r.id AND t.note_search MATCH ?4) DESC," : "?4 IS NULL,"} ${order}, n.id
            LIMIT ?7 OFFSET ?8`,
         )
-        .bind(ctx.workspaceId, ctx.sight.bind, worded ? matchOf(ctx.workspaceId, query.terms) : null, worded ? titleMatchOf(ctx.workspaceId, query.terms) : null, JSON.stringify(query.tags), JSON.stringify(query.projects), op.limit + 1, op.offset)
+        .bind(
+          ctx.workspaceId,
+          ctx.sight.bind,
+          worded ? matchOf(ctx.workspaceId, query.terms) : null,
+          titleFirst ? titleMatchOf(ctx.workspaceId, query.terms) : null,
+          JSON.stringify(query.tags),
+          JSON.stringify(query.projects),
+          op.limit + 1,
+          op.offset,
+          op.folderId ?? null,
+          op.hasTodos ? 1 : 0,
+        )
         .all<{ id: string }>();
       const page = found.slice(0, op.limit).map((r) => r.id);
       const { results: rows } = await ctx.db
-        .prepare(`SELECT n.text, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?3)) AND ${SEEN("n", "?2", listing(op.includeArchived))}`)
+        .prepare(`SELECT n.text, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?3)) AND ${SEEN("n", "?2", covering)}`)
         .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(page))
         .all<SummaryRow & { text: string }>();
       const byId = new Map(rows.map((row) => [row.id, row]));

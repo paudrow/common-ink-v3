@@ -28,7 +28,12 @@ export function lifecycle(host: PluginHost) {
   const restore = (noteId: string) =>
     restoring(noteId).then(({ folderGone }) => host.app().notify({ message: restoredMessage(folderGone) }), failed);
 
-  const setArchived = (noteId: string, archived: boolean) => host.perform({ type: "note.archive", id: noteId, archived }).then(took, failed);
+  /** Archiving says so with a way back, since the note leaves most listings as it is archived. */
+  const setArchived = (noteId: string, archived: boolean): Promise<void> =>
+    host.perform({ type: "note.archive", id: noteId, archived }).then((note) => {
+      took(note);
+      if (archived) host.app().notify({ message: "Archived", action: { label: "Undo", run: () => void setArchived(noteId, false) } });
+    }, failed);
 
   const trash = (noteId: string) =>
     host.perform({ type: "note.trash", id: noteId }).then((note) => {

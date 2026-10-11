@@ -16,7 +16,7 @@ const COMMANDS: Record<string, string[][]> = {
   list_workspaces: [["workspaces"]],
   list_members: [["members"]],
   list_notes: [["notes", "--folder", ID, "--since", "2026-10-01", "--tag", "money", "--archived", "true"]],
-  search: [["search", "budget #money", "--archived", "true", "--limit", "5", "--offset", "5"]],
+  search: [["search", "budget #money", "--folder", ID, "--archived", "only", "--has-todos", "true", "--sort", "title", "--limit", "5", "--offset", "5"]],
   list_tags: [["tags", "--archived", "true"]],
   archive_note: [["archive", ID], ["unarchive", ID]],
   trash_note: [["trash", ID]],

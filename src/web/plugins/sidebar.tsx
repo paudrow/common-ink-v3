@@ -40,7 +40,7 @@ function NewNote({ app }: ViewProps) {
       aria-disabled={!!refused}
       title={refused ?? `New note in ${where}`}
       onClick={() => {
-        if (!refused) app.createNote().catch(() => {});
+        if (!refused) app.createNote().catch((err: Error) => app.notify({ message: err.message }));
       }}
     >
       <Icon name="plus" />

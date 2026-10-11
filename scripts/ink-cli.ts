@@ -12,9 +12,9 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
 
   workspaces                          the workspaces you can reach
   members                             everyone in a workspace, with their role
-  notes [--folder ID] [--since TIME] [--tag NAME] [--archived true]
+  notes [--folder ID] [--since TIME] [--tag NAME] [--archived true|only]
                                       the notes in a workspace, in one folder, with a tag, or changed since a time
-  search QUERY [--archived true] [--limit N] [--offset N]
+  search QUERY [--folder ID] [--archived true|only] [--has-todos true] [--sort match|recent|created|title] [--limit N] [--offset N]
                                       the notes whose text has every word; "a phrase", #tag and +project narrow it
   tags [--archived true]              the tags of the notes you can see, and how many notes have each
   archive ID                          archive a note: kept, and left out of listings
@@ -148,6 +148,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const ids = (_: string, value: string) => value.split(",");
     const author = (_: string, value: string) => authorRef(value);
     const truth = (_: string, value: string) => value !== "false";
+    const archivedToo = (_: string, value: string) => (value === "only" ? "only" : value !== "false");
 
     let tool: string;
     let args: Record<string, unknown> = {};
@@ -160,11 +161,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "notes":
         tool = "list_notes";
-        args = given({ folderId: ["folder"], updatedSince: ["since", time], tag: ["tag"], includeArchived: ["archived", truth] });
+        args = given({ folderId: ["folder"], updatedSince: ["since", time], tag: ["tag"], includeArchived: ["archived", archivedToo] });
         break;
       case "search":
         tool = "search";
-        args = { query: need("what to find"), ...given({ includeArchived: ["archived", truth], limit: ["limit", integer], offset: ["offset", integer] }) };
+        args = { query: need("what to find"), ...given({ folderId: ["folder"], includeArchived: ["archived", archivedToo], hasTodos: ["has-todos", truth], sort: ["sort"], limit: ["limit", integer], offset: ["offset", integer] }) };
         break;
       case "tags":
         tool = "list_tags";

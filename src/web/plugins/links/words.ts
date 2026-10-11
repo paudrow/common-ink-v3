@@ -14,16 +14,16 @@ export interface LinkWords {
   text: string;
   /** Said after it, more quietly: that the note is in Trash. */
   suffix: string;
-  /** What hovering it says. `mod` is the key that makes a click follow it. */
+  /** What hovering it says. `how` is how a click follows it, such as "Click to open". */
   hint: string;
   gone: boolean;
 }
 
 const SAID: Record<NoteSummary["state"], string> = { live: "", archived: "Archived. ", trashed: "In Trash. " };
 
-export function linkWords(linked: Linked, display: string | null, mod: string): LinkWords {
+export function linkWords(linked: Linked, display: string | null, how: string): LinkWords {
   if (linked === null) return { text: display ?? UNAVAILABLE, suffix: "", hint: "This note doesn't exist, or you can't see it.", gone: true };
   if (linked === undefined) return { text: display ?? "…", suffix: "", hint: "", gone: false };
   const title = linked.title || "Untitled";
-  return { text: display ?? title, suffix: linked.state === "trashed" ? " (in Trash)" : "", hint: `${title}\n${SAID[linked.state]}${mod}-click to open`, gone: false };
+  return { text: display ?? title, suffix: linked.state === "trashed" ? " (in Trash)" : "", hint: `${title}\n${SAID[linked.state]}${how}`, gone: false };
 }

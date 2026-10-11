@@ -428,7 +428,7 @@ test("undo takes back what was typed a moment ago without a word to the server, 
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(sent).toEqual([]);
 
-  const filter = page.getByRole("searchbox", { name: "Filter notes" });
+  const filter = page.getByRole("searchbox", { name: "Search notes" });
   await filter.fill("ke");
   await page.keyboard.press("ControlOrMeta+z");
   await expect(editorLines(page)).toHaveText(["kept"]);

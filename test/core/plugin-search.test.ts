@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { NoteSummary, SearchResult } from "../../src/core/protocol.ts";
 import { pieces } from "../../src/web/plugins/search/marks.ts";
-import { IDLE, addressOf, againLimit, askOf, reduce, type Ask, type Event, type Search } from "../../src/web/plugins/search/request.ts";
+import { IDLE, addressOf, againLimit, reduce, viewOf, type Addressed, type Ask, type Event, type Search } from "../../src/web/plugins/search/request.ts";
 
 const result = (id: string): SearchResult => ({ note: { id } as NoteSummary, matches: [] });
 const ids = (state: Search) => (state.status === "listed" ? state.results.map((r) => r.note.id) : null);
 const after = (...events: Event[]) => events.reduce(reduce, IDLE);
-const PLAN: Ask = { query: "plan", includeArchived: false };
-const PLANS: Ask = { query: "plans", includeArchived: false };
+const PLAN: Ask = { query: "plan", includeArchived: false, hasTodos: false, sort: "match" };
+const PLANS: Ask = { ...PLAN, query: "plans" };
 
 describe("a matched line cut into pieces", () => {
   it("is its marked runs and the runs between them, in order", () => {
@@ -44,7 +44,7 @@ describe("a matched line cut into pieces", () => {
 describe("the search request", () => {
   it("lists what the server answered for the search that is asked", () => {
     const state = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a"), result("b")], next: 20, indexing: false });
-    expect(state).toMatchObject({ status: "listed", ask: PLAN, next: 20, more: "ready", at: 0 });
+    expect(state).toMatchObject({ status: "listed", ask: PLAN, next: 20, more: "ready" });
     expect(ids(state)).toEqual(["a", "b"]);
   });
 
@@ -62,21 +62,24 @@ describe("the search request", () => {
     expect(early).toEqual({ status: "searching", ask: PLANS, before: null });
   });
 
-  it("tells a search that includes archived notes from one that doesn't", () => {
-    const withArchived = { ...PLAN, includeArchived: true };
-    const state = after({ type: "asked", ask: PLAN }, { type: "asked", ask: withArchived }, { type: "answered", ask: PLAN, offset: 0, results: [result("live")], next: null, indexing: false });
-    expect(state).toEqual({ status: "searching", ask: withArchived, before: null });
+  it("tells apart searches that differ in the folder, the states covered, the order, or whether only notes with todos are wanted", () => {
+    const others: Ask[] = [{ ...PLAN, includeArchived: true }, { ...PLAN, includeArchived: "only" }, { ...PLAN, folderId: "f" }, { ...PLAN, sort: "title" }, { ...PLAN, hasTodos: true }];
+    for (const other of others) {
+      const state = after({ type: "asked", ask: PLAN }, { type: "asked", ask: other }, { type: "answered", ask: PLAN, offset: 0, results: [result("live")], next: null, indexing: false });
+      expect(state).toEqual({ status: "searching", ask: other, before: null });
+    }
+    const again = after({ type: "asked", ask: { ...PLAN, folderId: "f" } }, { type: "asked", ask: { ...PLAN, folderId: "f" } });
+    expect(again).toEqual({ status: "searching", ask: { ...PLAN, folderId: "f" }, before: null });
   });
 
-  it("keeps what was listed on show, and nothing selected, while the next search is on its way", () => {
+  it("keeps what was listed on show while the next search is on its way", () => {
     const state = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: null, indexing: false }, { type: "asked", ask: PLANS });
     expect(state.status).toBe("searching");
     expect(state.status === "searching" && state.before?.map((r) => r.note.id)).toEqual(["a"]);
-    expect(reduce(state, { type: "moved", by: 1 })).toBe(state);
   });
 
   it("is idle with nothing typed, and an answer on its way then changes nothing", () => {
-    const state = after({ type: "asked", ask: PLAN }, { type: "asked", ask: { query: "", includeArchived: true } }, { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: null, indexing: false });
+    const state = after({ type: "asked", ask: PLAN }, { type: "asked", ask: { ...PLAN, query: "", includeArchived: true } }, { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: null, indexing: false });
     expect(state).toEqual({ status: "idle" });
   });
 
@@ -124,17 +127,6 @@ describe("the search request", () => {
     expect(ids(whole)).toEqual(["b", "a"]);
   });
 
-  it("keeps the selection on its note when the search is answered again, and on the first result when that note is no longer there", () => {
-    const partial = after(
-      { type: "asked", ask: PLAN },
-      { type: "answered", ask: PLAN, offset: 0, results: [result("a"), result("b")], next: null, indexing: true },
-      { type: "moved", by: 1 },
-    );
-
-    expect(reduce(partial, { type: "reanswered", ask: PLAN, results: [result("c"), result("a"), result("b")], next: null, indexing: true })).toMatchObject({ at: 2, indexing: true });
-    expect(reduce(partial, { type: "reanswered", ask: PLAN, results: [result("c"), result("a")], next: null, indexing: false })).toMatchObject({ at: 0 });
-  });
-
   it("never lets a search answered again replace a newer search, or come between a next page and its answer", () => {
     const partial = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a")], next: 1, indexing: true });
     const again: Event = { type: "reanswered", ask: PLAN, results: [result("old")], next: null, indexing: false };
@@ -169,33 +161,29 @@ describe("the search request", () => {
   it("asks again for as many results as are listed, a page at least and no more than one answer holds", () => {
     expect([0, 3, 20, 35, 50, 80].map(againLimit)).toEqual([20, 20, 20, 35, 50, 50]);
   });
-
-  it("moves the selection through the results and around the ends, and to the one pointed at", () => {
-    const listed = after({ type: "asked", ask: PLAN }, { type: "answered", ask: PLAN, offset: 0, results: [result("a"), result("b"), result("c")], next: null, indexing: false });
-    const at = (state: Search) => (state.status === "listed" ? state.at : null);
-    expect(at(reduce(listed, { type: "moved", by: 1 }))).toBe(1);
-    expect(at(reduce(listed, { type: "moved", by: -1 }))).toBe(2);
-    expect(at(reduce(reduce(listed, { type: "moved", by: -1 }), { type: "moved", by: 1 }))).toBe(0);
-    expect(at(reduce(listed, { type: "pointed", at: 2 }))).toBe(2);
-    expect(reduce(listed, { type: "pointed", at: 3 })).toBe(listed);
-  });
 });
 
 describe("a search's address", () => {
-  it("carries what was typed and whether archived notes are included, and reads back the same", () => {
-    expect(addressOf({ query: '"call the bank" #money +Home', includeArchived: false })).toBe("/search?q=%22call+the+bank%22+%23money+%2BHome");
-    expect(askOf("?q=%22call+the+bank%22+%23money+%2BHome")).toEqual({ query: '"call the bank" #money +Home', includeArchived: false });
-    expect(addressOf({ query: " plan ", includeArchived: true })).toBe("/search?q=plan&archived=1");
-    expect(askOf("?q=plan&archived=1")).toEqual({ query: "plan", includeArchived: true });
+  const PLAIN: Addressed = { query: "", show: "open", sort: null, hasTodos: false };
+
+  it("carries what was typed, which notes are shown, the order and whether only notes with todos are wanted, and reads back the same", () => {
+    expect(addressOf({ ...PLAIN, query: '"call the bank" #money +Home' })).toBe("/search?q=%22call+the+bank%22+%23money+%2BHome");
+    expect(viewOf("?q=%22call+the+bank%22+%23money+%2BHome")).toEqual({ ...PLAIN, query: '"call the bank" #money +Home' });
+    expect(addressOf({ ...PLAIN, query: " plan ", show: "all" })).toBe("/search?q=plan&archived=1");
+    expect(viewOf("?q=plan&archived=1")).toEqual({ ...PLAIN, query: "plan", show: "all" });
+    const set: Addressed = { query: "plan", show: "archived", sort: "title", hasTodos: true };
+    expect(addressOf(set)).toBe("/search?q=plan&archived=only&sort=title&todos=1");
+    expect(viewOf("?q=plan&archived=only&sort=title&todos=1")).toEqual(set);
   });
 
-  it("is the page's own with nothing typed", () => {
-    expect(addressOf({ query: "  ", includeArchived: false })).toBe("/search");
-    expect(askOf("")).toEqual({ query: "", includeArchived: false });
-    expect(askOf("?archived=1")).toEqual({ query: "", includeArchived: true });
+  it("is the page's own with nothing typed, and reads what it doesn't know as nothing said", () => {
+    expect(addressOf({ ...PLAIN, query: "  " })).toBe("/search");
+    expect(viewOf("")).toEqual(PLAIN);
+    expect(viewOf("?archived=1")).toEqual({ ...PLAIN, show: "all" });
+    expect(viewOf("?archived=yes&sort=match&todos=true")).toEqual(PLAIN);
   });
 
   it("cuts a query longer than a search may be", () => {
-    expect(askOf(`?q=${"a".repeat(500)}`).query).toBe("a".repeat(200));
+    expect(viewOf(`?q=${"a".repeat(500)}`).query).toBe("a".repeat(200));
   });
 });

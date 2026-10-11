@@ -59,6 +59,11 @@ const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.lit
  * trash.list covers a note in Trash.
  */
 const IncludeArchived = z.boolean().default(false);
+/** For a listing of notes that can also be asked for the archived ones alone, with `"only"`. */
+const Archived = z.union([z.boolean(), z.literal("only")]).default(false);
+/** The orders a search answers in. `match` is notes whose title matches first, then the latest changed. */
+export const SEARCH_SORTS = ["match", "recent", "created", "title"] as const;
+export type SearchSort = (typeof SEARCH_SORTS)[number];
 export const MAX_SEARCH_LENGTH = 200;
 
 export const Op = z.discriminatedUnion("type", [
@@ -66,9 +71,10 @@ export const Op = z.discriminatedUnion("type", [
    * `updatedSince` leaves out notes that haven't changed since that time: neither their text, nor
    * their state, as by being unarchived or restored. A note that left the listing since, by being
    * archived or trashed, is not in it to be told of: ask with `includeArchived`, and trash.list.
-   * `tag` lists only the notes with that tag, ignoring case.
+   * `tag` lists only the notes with that tag, ignoring case. `includeArchived: "only"` lists the
+   * archived notes and no live one.
    */
-  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: IncludeArchived }),
+  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived }),
   z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles }),
   /** The note, and for each note its text links to by id, that note's title now. A note in Trash is read as any other, and its `state` says where it is. */
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
@@ -120,12 +126,19 @@ export const Op = z.discriminatedUnion("type", [
    * The notes the asker can see whose text has every word of `query`. A word matches the start of a
    * word in the note, ignoring case and accents; words in "double quotes" match as a phrase; `#name`
    * narrows to notes with that tag and `+name` to notes with a todo in that project. Notes whose
-   * title matches come first, then the latest changed. Pass the answer's `next` as `offset` for more.
+   * title matches come first, then the latest changed, unless `sort` asks for another order: the
+   * latest changed, the latest made, or by title. `folderId` narrows to the notes in one folder,
+   * not those of the folders inside it: a folder the asker can't see is no such folder.
+   * `hasTodos` narrows to notes with an open todo, and `includeArchived: "only"` to archived notes.
+   * Pass the answer's `next` as `offset` for more.
    */
   z.object({
     type: z.literal("search"),
     query: z.string().max(MAX_SEARCH_LENGTH),
-    includeArchived: IncludeArchived,
+    folderId: Id.optional(),
+    includeArchived: Archived,
+    hasTodos: z.boolean().default(false),
+    sort: z.enum(SEARCH_SORTS).default("match"),
     limit: z.number().int().min(1).max(50).default(20),
     offset: z.number().int().min(0).default(0),
   }),

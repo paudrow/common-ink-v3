@@ -70,6 +70,8 @@ test("archive is one action on the open note, which stays editable and says it i
   await expect(bar(page)).toContainText("Archived");
   await expect.poll(() => stateOf(page, note.id)).toBe("archived");
   expect(await top()).toBe(before);
+  // Kept, so its tab is still there once a list is opened: a list from the tree takes a preview's place.
+  await tab(page, "Old plan").dblclick();
   await listShows(page, []);
   await tab(page, "Old plan").click();
 
@@ -123,7 +125,7 @@ test("an archived note leaves the note list and Todos, and comes back when archi
   await expect(listedNotes(page)).toHaveText(["Kept"]);
   await expect.poll(() => stateOf(page, old.id)).toBe("archived");
 
-  await page.getByRole("button", { name: "Show archived" }).click();
+  await page.getByRole("radio", { name: "All", exact: true }).check();
   await expect(listedNotes(page)).toHaveText(["Old", "Kept"]);
   await expect(noteCard(page, "Old")).toContainText("Archived");
   await expect(noteCard(page, "Kept")).not.toContainText("Archived");
@@ -146,7 +148,7 @@ test("a link to an archived note opens it, and the backlink from an archived not
   await openNote(page, diary);
 
   await expect(lines(page).last()).toHaveText("See Old plan for more.");
-  await editor(page).getByRole("link").click({ modifiers: ["ControlOrMeta"] });
+  await editor(page).getByRole("link").click();
 
   await expect(page).toHaveURL(new RegExp(`${old.id}$`));
   await expect(bar(page)).toContainText("Archived");
@@ -164,6 +166,8 @@ test("a note moved to Trash leaves the list at once, and Undo brings it back", a
   const note = await create(page, "# Scrap\n\nnot needed");
   await openNote(page, note);
   await openInfo(page);
+  // Kept, so its tab is still there once a list is opened: a list from the tree takes a preview's place.
+  await tab(page, "Scrap").dblclick();
   await listShows(page, ["Scrap"]);
   await tab(page, "Scrap").click();
 
@@ -313,7 +317,7 @@ test("a note someone else archives, trashes, and restores shows each state in a 
   const note = await create(page, "# Shared plan\n\nsteady");
   await page.goto("/");
   await openAllNotes(page);
-  await page.getByRole("button", { name: "Show archived" }).click();
+  await page.getByRole("radio", { name: "All", exact: true }).check();
   await expect(noteCard(page, "Shared plan")).toBeVisible();
   await expect(noteCard(page, "Shared plan")).not.toContainText("Archived");
 
@@ -377,7 +381,7 @@ test("delete forever asks first and names the note, and then a link to it reads 
   expect([written.x, written.height]).toEqual([drawn.x, drawn.height]);
   await lines(page).first().click();
 
-  await editor(page).getByRole("link").click({ modifiers: ["ControlOrMeta"] });
+  await editor(page).getByRole("link").click();
   await expect(page).toHaveURL(new RegExp(`${doomed.id}$`));
   await expect(banner(page)).toBeVisible();
 

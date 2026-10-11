@@ -19,6 +19,14 @@ The default folder. A note created with no folder in front is placed here.
 The notes in one folder, shown in the editor area as cards: each a title, a line of details, and the note's first lines. A folder's list is of the folder's own notes, not those of the folders inside it.
 _Avoid_: List column, feed
 
+**Search bar**:
+What heads every folder's list, and the Search page, which is the same list of every note: a field with the folder it searches shown in it, the choice of Open, Archived or All, and the order. With nothing typed the list is the folder's notes. With something typed it is what the server's search finds among them, each card with the lines that matched.
+_Avoid_: Filter box
+
+**Open, Archived, All**:
+Which notes a list or a search is of, by where each is in its life: the live ones, the archived ones alone, or both. Never one in Trash.
+_Avoid_: Show archived, include archived (for a list of notes)
+
 **All notes**:
 The list of every note the member can see, whatever folder it is in. It is the first row of the folder tree.
 

@@ -133,9 +133,9 @@ describe("how long a note has left in Trash", () => {
 
 describe("what a link reads as", () => {
   it("is the note's title, and says a note in Trash is there", () => {
-    expect(linkWords({ title: "Plan", state: "live" }, null, "Ctrl")).toEqual({ text: "Plan", suffix: "", hint: "Plan\nCtrl-click to open", gone: false });
-    expect(linkWords({ title: "Plan", state: "archived" }, null, "Ctrl")).toEqual({ text: "Plan", suffix: "", hint: "Plan\nArchived. Ctrl-click to open", gone: false });
-    expect(linkWords({ title: "Plan", state: "trashed" }, null, "⌘")).toEqual({ text: "Plan", suffix: " (in Trash)", hint: "Plan\nIn Trash. ⌘-click to open", gone: false });
+    expect(linkWords({ title: "Plan", state: "live" }, null, "Ctrl-click to open")).toEqual({ text: "Plan", suffix: "", hint: "Plan\nCtrl-click to open", gone: false });
+    expect(linkWords({ title: "Plan", state: "archived" }, null, "Ctrl-click to open")).toEqual({ text: "Plan", suffix: "", hint: "Plan\nArchived. Ctrl-click to open", gone: false });
+    expect(linkWords({ title: "Plan", state: "trashed" }, null, "Click to open")).toEqual({ text: "Plan", suffix: " (in Trash)", hint: "Plan\nIn Trash. Click to open", gone: false });
     expect(linkWords({ title: "", state: "live" }, null, "Ctrl").text).toBe("Untitled");
   });
 

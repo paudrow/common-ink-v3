@@ -21,17 +21,18 @@ export const TRASH_MS = TRASH_DAYS * 86_400_000;
 export const purgesAt = (trashedAt: number) => trashedAt + TRASH_MS;
 
 /** The states a query over notes covers. Every such query names one, so none covers Trash by leaving it unsaid. */
-export type Covering = "live" | "kept" | "trashed" | "any";
+export type Covering = "live" | "archived" | "kept" | "trashed" | "any";
 
 const COVERS: Record<Covering, readonly NoteState[]> = {
   live: ["live"],
+  archived: ["archived"],
   kept: ["live", "archived"],
   trashed: ["trashed"],
   any: NOTE_STATES,
 };
 
-/** What a listing covers: live notes, and archived ones too when they were asked for. Never Trash. */
-export const listing = (includeArchived: boolean): Covering => (includeArchived ? "kept" : "live");
+/** What a listing covers: live notes, archived ones too when they were asked for, or with `"only"` the archived ones alone. Never Trash. */
+export const listing = (includeArchived: boolean | "only"): Covering => (includeArchived === "only" ? "archived" : includeArchived ? "kept" : "live");
 
 /** A condition on the notes row named `alias`, true for the notes in a state `covering` covers. */
 export const IN_STATE = (alias: string, covering: Covering) => `${alias}.state IN (${COVERS[covering].map((state) => `'${state}'`).join(", ")})`;
