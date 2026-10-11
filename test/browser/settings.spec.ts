@@ -121,7 +121,7 @@ test("a value the schema refuses and a key it doesn't know are flagged in the JS
 
   await expect(problems(page)).toHaveText([
     "core.editorTextSize Expected 200 or less, not 500. The default is used.",
-    'keybindings.view.toggleWritingMode "cmd" in "cmd+y" isn\'t a modifier. Use mod, alt, or shift, then one key. The default is used.',
+    'keybindings.view.toggleWritingMode "cmd" in "cmd+y" isn\'t a modifier. Use mod, ctrl, alt, or shift, then one key. The default is used.',
     "core.theem There's no setting by this name. It may belong to a plugin that isn't installed.",
   ]);
   await expect(page.locator(".settings-json .cm-lintRange-error")).toHaveText(["500", '["cmd+y"]']);

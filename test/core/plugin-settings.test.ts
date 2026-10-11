@@ -62,15 +62,16 @@ describe("a chord", () => {
     expect(readChord("mod+enter")).toEqual({ chord: "mod+enter" });
     expect(readChord("alt+arrowup")).toEqual({ chord: "alt+arrowup" });
     expect(readChord("mod+,")).toEqual({ chord: "mod+," });
+    expect(readChord("Ctrl+O")).toEqual({ chord: "ctrl+o" });
   });
 
   it("is refused with what is wrong with it", () => {
     expect(readChord("")).toEqual({ reason: '"" has no key after its modifiers' });
     expect(readChord("mod+shift")).toEqual({ reason: '"mod+shift" has no key after its modifiers' });
-    expect(readChord("ctrl+k")).toEqual({ reason: '"ctrl" in "ctrl+k" isn\'t a modifier. Use mod, alt, or shift, then one key' });
+    expect(readChord("cmd+k")).toEqual({ reason: '"cmd" in "cmd+k" isn\'t a modifier. Use mod, ctrl, alt, or shift, then one key' });
     expect(readChord("mod+mod+k")).toEqual({ reason: '"mod+mod+k" names a modifier twice' });
     for (const typed of ["k", "shift+k", "enter", "backspace", "tab", "delete", "arrowup", "shift+enter", "f", "f100"]) {
-      expect(readChord(typed), typed).toEqual({ reason: `"${typed}" would run while typing. Add mod or alt, which only Escape and the F keys go without` });
+      expect(readChord(typed), typed).toEqual({ reason: `"${typed}" would run while typing. Add mod, ctrl, or alt, which only Escape and the F keys go without` });
     }
     expect(readChord("mod+k l")).toEqual({ reason: '"mod+k l" isn\'t one key. Join a chord with +, such as mod+shift+k' });
   });

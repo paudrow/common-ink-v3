@@ -28,6 +28,9 @@ export const committed = (noteId: string) => Promise.all([...unsaved].filter((sy
 /** The sync of each note open in an editor. A note has at most one tab, so at most one sync. */
 const open = new Map<string, NoteSync>();
 
+/** Sends what's typed in a note now, without waiting for a pause. */
+export const saveNow = (noteId: string) => open.get(noteId)?.commit();
+
 type HistoryOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.reapplyChanges" | "note.undo" | "note.redo" }>;
 
 /** Moves a note through its history. What's typed is saved first, and the note's editor takes the result if it's open. */

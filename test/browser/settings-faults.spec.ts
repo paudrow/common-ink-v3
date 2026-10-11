@@ -173,8 +173,8 @@ test("a key that types can't be a keybinding without mod or alt, so Enter in a n
 
   await typeJson(page, '{"keybindings.note.new": ["enter"], "keybindings.view.toggleWritingMode": ["backspace"], "keybindings.view.toggleInspector": ["f6"]}');
   await expect(problems(page)).toHaveText([
-    'keybindings.note.new "enter" would run while typing. Add mod or alt, which only Escape and the F keys go without. The default is used.',
-    'keybindings.view.toggleWritingMode "backspace" would run while typing. Add mod or alt, which only Escape and the F keys go without. The default is used.',
+    'keybindings.note.new "enter" would run while typing. Add mod, ctrl, or alt, which only Escape and the F keys go without. The default is used.',
+    'keybindings.view.toggleWritingMode "backspace" would run while typing. Add mod, ctrl, or alt, which only Escape and the F keys go without. The default is used.',
   ]);
 
   await page.goto(`/note/${note.id}`);

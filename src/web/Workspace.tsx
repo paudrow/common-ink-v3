@@ -4,6 +4,7 @@ import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, connectAgent, disconnectAgent, listAgents, perform, signOut } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
 import { Drawn } from "./Drawn.tsx";
+import { usable } from "./editorExtensions.ts";
 import { folderTree } from "./folders.ts";
 import { Icon } from "./icons.tsx";
 import { Inspector } from "./Inspector.tsx";
@@ -18,7 +19,7 @@ import { documentOf } from "./settings.ts";
 import { Settings } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
-import { performInSync, undoOrRedo } from "./sync.ts";
+import { performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
 type Popover = { side: "left" } | { side: "right"; tab: string };
@@ -35,7 +36,9 @@ const REFRESH_MS = 5000;
 
 const isAnything = (_: unknown): _ is unknown => true;
 const isRevisions = (v: unknown): v is Record<string, number> => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number");
-const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+/** A note's editor is not one: undo there is the app's, through the note's history. */
+const inField = (el: EventTarget | null) =>
+  el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable && !el.closest(".note"));
 
 const popoverKey = (p: Popover | null) => (p ? (p.side === "left" ? "left" : p.tab) : null);
 
@@ -100,7 +103,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
 
   const appNow = useRef<App>(null!);
   /** What the app's own commands do, as of the latest render. */
-  const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; toggleWriting: () => void; toggleInspector: () => void }>(null!);
+  const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleWriting: () => void; toggleInspector: () => void }>(null!);
   const [host] = useState(() => {
     let created: Host;
     const PluginsPage = () => <Plugins plugins={useSyncExternalStore(created.subscribe, created.contributions).plugins} onToggle={created.setEnabled} />;
@@ -116,6 +119,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         if (canEdit) {
           h.commands.register({ id: "note.new", title: "New note", run: () => h.app().createNote() });
           h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], leaveToFields: true, run: () => inner.current.step("note.undo") });
+          h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], run: () => inner.current.save() });
           h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], leaveToFields: true, run: () => inner.current.step("note.redo") });
         }
         h.commands.register({ id: "view.toggleWritingMode", title: "Toggle writing mode", keys: ["mod+."], run: () => inner.current.toggleWriting() });
@@ -186,6 +190,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       }),
     [host, guarded, contributed.embeds],
   );
+  /** The editor extensions that can go to editors. A value CodeMirror won't take is left out and held against its plugin, where it would have stopped every editor. */
+  const { taken: extensions, refused } = useMemo(() => usable(contributed.editorExtensions), [contributed.editorExtensions]);
+  useEffect(() => {
+    for (const [added, err] of refused) host.fail(added, err);
+  }, [host, refused]);
   const theme = contributed.settings.values["core.theme"] as string;
   useEffect(() => {
     if (theme === "system") delete document.documentElement.dataset.theme;
@@ -318,8 +327,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     closePopover();
   };
 
-  const openNote = (noteId: string, options: { preview?: boolean; reveal?: boolean } = {}) => {
+  /** The note whose editor is to take the cursor once it is there. */
+  const [toFocus, setToFocus] = useState<string | null>(null);
+  const openNote = (noteId: string, options: { preview?: boolean; reveal?: boolean; focus?: boolean } = {}) => {
     if (options.reveal) reveal(noteId);
+    setToFocus(options.focus ? noteId : null);
     const area = host.contributions().views.editor.at(-1);
     if (area?.open) area.open(noteId, { preview: options.preview ?? false });
     else showNote(noteId);
@@ -352,18 +364,20 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       (err: Error) => setStuck({ noteId: routeNoteId, message: err instanceof ApiError ? err.message : `Couldn't ${type === "note.undo" ? "undo" : "redo"}. Common Ink can't be reached.` }),
     );
   };
-  inner.current = { step, toggleWriting, toggleInspector };
+  inner.current = { step, save: () => routeNoteId && void saveNow(routeNoteId), toggleWriting, toggleInspector };
 
   useEffect(() => {
+    // A keybinding is the app's before it is an editor's: CodeMirror leaves alone a key press that was already taken.
     const onKey = (e: KeyboardEvent) => {
       const { keybindings, commands } = host.contributions();
-      const commandId = keybindings[chordOf(e)];
-      if (!commandId || (inField(e.target) && commands.find((c) => c.id === commandId)?.leaveToFields)) return;
-      if (host.run(commandId)) e.preventDefault();
+      const command = commands.find((c) => c.id === keybindings[chordOf(e, MAC)]);
+      if (!command || (inField(e.target) && command.leaveToFields) || command.when?.() === false) return;
+      if (host.run(command.id)) e.preventDefault();
     };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
+    addEventListener("keydown", onKey, true);
+    return () => removeEventListener("keydown", onKey, true);
   }, [host]);
+  useEffect(() => host.navigated(), [host, place.path]);
 
   const actions = useLatest({
     go,
@@ -426,7 +440,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
           onEdit?.();
         }}
         notice={stuck?.noteId === noteId ? stuck.message : null}
+        focus={toFocus === noteId}
+        onFocused={() => setToFocus(null)}
         embeds={embeds}
+        extensions={extensions}
+        onExtensionRefused={host.fail}
         meta={
           note && (
             <>

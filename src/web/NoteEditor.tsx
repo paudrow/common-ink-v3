@@ -2,17 +2,21 @@ import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
+import { forEditor } from "./editorExtensions.ts";
 import { embedding } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
-import type { Embed } from "./plugin-api.ts";
+import type { EditorExtension, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
   rejected: "Couldn't save this version. Edit the note to try again.",
 };
+
+const typingIn = (el: Element | null) =>
+  el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable);
 
 interface Props {
   workspaceId: string;
@@ -25,13 +29,20 @@ interface Props {
   onEdit: () => void;
   /** Something the member should know about this note, such as an undo that failed. Shown in place of the save state. */
   notice: string | null;
+  /** Whether the editor is to take the cursor, now or once the note has loaded. `onFocused` is called when it has. */
+  focus: boolean;
+  onFocused: () => void;
   /** What plugins have registered to draw inside a note. */
   embeds: readonly Embed[];
+  /** What plugins have added to every note's editor. One given as a function is made here, for this note. */
+  extensions: readonly EditorExtension[];
+  /** Called for an extension this editor had to leave out, with why. */
+  onExtensionRefused: (extension: EditorExtension, error: unknown) => void;
   meta: ReactNode;
   actions: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, embeds, meta, actions }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, embeds, extensions: contributed, onExtensionRefused, meta, actions }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const syncRef = useRef<NoteSync | null>(null);
   const edited = useRef(onEdit);
@@ -40,6 +51,11 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const [embedded] = useState(() => new Compartment());
   const embedsNow = useRef(embeds);
   embedsNow.current = embeds;
+  const [added] = useState(() => new Compartment());
+  const mine = useMemo(() => forEditor({ noteId }), [noteId]);
+  const { extensions, refused } = useMemo(() => mine(contributed), [mine, contributed]);
+  const now = useRef({ focus, onFocused, extensions });
+  now.current = { focus, onFocused, extensions };
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [missing, setMissing] = useState(false);
 
@@ -58,6 +74,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
           state: EditorState.create({
             doc: note.text,
             extensions: [
+              // Before the editor's own keys, so a plugin's keys are tried first.
+              added.of(now.current.extensions),
               // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
               history(),
               keymap.of(defaultKeymap),
@@ -75,7 +93,9 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
           }),
         });
         sync.attach(view);
-        if (!note.text) view.focus();
+        // A note that took a while to load doesn't take the cursor from a field the member has since gone to.
+        if (!note.text || (now.current.focus && !typingIn(document.activeElement))) view.focus();
+        if (now.current.focus) now.current.onFocused();
       },
       (err) => {
         if (!cancelled && err instanceof ApiError && err.code === "not_found") setMissing(true);
@@ -88,7 +108,21 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       void sync?.close();
       view?.destroy();
     };
-  }, [workspaceId, noteId, onLoaded, onSaved, embedded]);
+  }, [workspaceId, noteId, onLoaded, onSaved, embedded, added]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: added.reconfigure(extensions) });
+  }, [extensions, added]);
+
+  useEffect(() => {
+    for (const [extension, err] of refused) onExtensionRefused(extension, err);
+  }, [refused, onExtensionRefused]);
+
+  useEffect(() => {
+    if (!focus || !viewRef.current) return;
+    viewRef.current.focus();
+    now.current.onFocused();
+  }, [focus]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: embedded.reconfigure(embedding(embeds)) });
