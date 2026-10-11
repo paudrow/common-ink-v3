@@ -91,7 +91,7 @@ test("markdown is drawn where it is written, a line shows its marks while the cu
   await expect.poll(() => read(page, note.id)).toBe(text.replace("---", "----"));
 });
 
-test("a link opens in a new tab on ⌘ or Ctrl-click, only for a web or mail address, and a plain click puts the cursor in it", async ({ page }) => {
+test("a drawn link opens in a new tab on a click, only for a web or mail address, and on the cursor's line a plain click is for the cursor and ⌘ or Ctrl-click opens it", async ({ page }) => {
   await open(page, "# Links\n\nSee [the docs](https://example.com/docs) or [this](javascript:alert(1)) or https://example.org/bare today.\n");
   await page.evaluate(() => {
     (window as unknown as { opened: unknown[][] }).opened = [];
@@ -99,7 +99,9 @@ test("a link opens in a new tab on ⌘ or Ctrl-click, only for a web or mail add
   });
   const opened = () => page.evaluate(() => (window as unknown as { opened: unknown[][] }).opened);
 
-  await editor(page).getByText("the docs").click({ modifiers: ["ControlOrMeta"] });
+  // Drawn, with the cursor on another line: a plain click follows the link, and the cursor stays where it was.
+  await expect(editor(page).locator(".md-link").first()).toHaveAttribute("title", "https://example.com/docs\nClick to open");
+  await editor(page).getByText("the docs").click();
   await editor(page).getByText("https://example.org/bare").click({ modifiers: ["ControlOrMeta"] });
   expect(await opened()).toEqual([
     ["https://example.com/docs", "_blank", "noopener,noreferrer"],
@@ -107,12 +109,19 @@ test("a link opens in a new tab on ⌘ or Ctrl-click, only for a web or mail add
   ]);
   await expectShown(lines(page).nth(2), "See the docs or this or https://example.org/bare today.");
 
-  // A link to anything else is never opened: the click is a click in the text.
-  await editor(page).getByText("this", { exact: true }).click({ modifiers: ["ControlOrMeta"] });
-  await page.keyboard.press("ControlOrMeta+End");
-  await editor(page).getByText("the docs").click();
+  // A link to anything else is never opened: the click is a click in the text, which shows the line as written.
+  await editor(page).getByText("this", { exact: true }).click();
   await expect(lines(page).nth(2)).toContainText("[the docs](https://example.com/docs)");
   expect((await opened()).length).toBe(2);
+
+  // On the cursor's line a plain click is for the cursor, and ⌘ or Ctrl-click opens the link.
+  await editor(page).getByText("the docs").click();
+  await page.keyboard.type("!");
+  await expect(lines(page).nth(2)).toContainText("](https://example.com/docs)");
+  await expect(lines(page).nth(2)).toContainText("!");
+  expect((await opened()).length).toBe(2);
+  await editor(page).getByText("https://example.org/bare").click({ modifiers: ["ControlOrMeta"] });
+  expect((await opened())[2]).toEqual(["https://example.org/bare", "_blank", "noopener,noreferrer"]);
 });
 
 test("a task's checkbox writes [x] and [ ] into the note as the member's change, and is undone like typing", async ({ page }) => {

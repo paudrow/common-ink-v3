@@ -1,13 +1,15 @@
 import { syntaxTree } from "@codemirror/language";
 import { EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { isReading } from "../../plugin-api.ts";
 
 /**
  * Whether the cursor or a selection is on any of `from` to `to`. What is drawn over that text is
  * then shown as written, so it can be changed. It doesn't ask whether the editor has focus: the
- * note reads the same whichever side of a split the member is typing in.
+ * note reads the same whichever side of a split the member is typing in. Never in a reading of a
+ * note, where a selection is for copying and there is nothing to change.
  */
-export const touched = (state: EditorState, from: number, to: number) => state.selection.ranges.some((r) => r.from <= to && r.to >= from);
+export const touched = (state: EditorState, from: number, to: number) => !isReading(state) && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 
 /** Whether the cursor or a selection is on the line `pos` is in. */
 export function lineTouched(state: EditorState, pos: number) {

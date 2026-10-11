@@ -45,18 +45,16 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
         (note) => {
           if (!live || !el.current) return;
           setFailed(false);
-          // The line the cursor is on is shown as written, and a reader has no cursor to show. It is kept on an empty last line, where there is nothing to show either way.
-          const text = note.text.endsWith("\n") ? note.text : `${note.text}\n`;
+          const { text } = note;
           const view = viewRef.current;
           if (view) {
-            if (view.state.doc.toString() !== text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: text.length }, filter: false });
+            if (view.state.doc.toString() !== text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: 0 }, filter: false });
             return;
           }
           viewRef.current = new EditorView({
             parent: el.current,
             state: EditorState.create({
               doc: text,
-              selection: { anchor: text.length },
               extensions: [
                 reading,
                 added.of(now.current.extensions),
