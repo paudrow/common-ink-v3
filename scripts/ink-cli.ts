@@ -16,6 +16,19 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   create [--text TEXT]                a new note (text from stdin if --text is left out)
   write ID --base N [--text TEXT]     replace a note's text (from stdin if --text is left out)
   history ID                          a note's changes and who made them
+  changes [--note ID,ID] [--author KIND:ID] [--from TIME] [--to TIME]
+                                      changes across the workspace, newest first, with diffs
+  authors                             everyone who has changed a note
+  activity [--timezone ZONE] [--author KIND:ID]
+                                      changes an author made on each day (yours if no author)
+  label ID --revision N [--name NAME] name a revision, or take its name away without --name
+  revert ID --revision N              put a note back to a revision, as a new change
+  revert ID --changes N,N             take chosen changes back out, as one new change
+  reapply ID --changes N,N            put back changes that were taken out
+  undo ID                             take back your latest change to a note
+  redo ID                             put back what your latest undo took out
+
+TIME is anything a date parses, such as 2026-10-09 or 2026-10-09T14:00:00Z.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
 
@@ -40,6 +53,20 @@ const integer = (name: string, value: string): number => {
   if (!/^\d+$/.test(value)) throw new UsageError(`${name} must be a whole number`);
   return Number(value);
 };
+
+const integers = (name: string, value: string) => value.split(",").map((part) => integer(name, part));
+
+const time = (name: string, value: string): number => {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) throw new UsageError(`${name} must be a date or a time`);
+  return parsed;
+};
+
+function authorRef(value: string): { kind: string; id: string } {
+  const [kind, id] = value.split(":");
+  if (!kind || !id) throw new UsageError("--author is KIND:ID, such as agent:abc123def456");
+  return { kind, id };
+}
 
 /** Runs one command. Returns the process exit code. */
 export async function run(argv: string[], io: Io): Promise<number> {
@@ -78,6 +105,45 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "history":
         tool = "note_history";
+        args = { id: needId() };
+        break;
+      case "changes":
+        tool = "history";
+        args = {
+          ...(flags.has("note") ? { noteIds: flags.get("note")!.split(",") } : {}),
+          ...(flags.has("author") ? { authors: [authorRef(flags.get("author")!)] } : {}),
+          ...(flags.has("from") ? { from: time("--from", flags.get("from")!) } : {}),
+          ...(flags.has("to") ? { to: time("--to", flags.get("to")!) } : {}),
+        };
+        break;
+      case "authors":
+        tool = "history_authors";
+        break;
+      case "activity":
+        tool = "activity";
+        args = {
+          timeZone: flags.get("timezone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(flags.has("author") ? { author: authorRef(flags.get("author")!) } : {}),
+        };
+        break;
+      case "label":
+        if (!flags.has("revision")) throw new UsageError("label needs --revision");
+        tool = "label_revision";
+        args = { id: needId(), revision: integer("--revision", flags.get("revision")!), name: flags.get("name") ?? null };
+        break;
+      case "revert":
+        if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to take those out");
+        tool = flags.has("revision") ? "revert_note" : "revert_changes";
+        args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+        break;
+      case "reapply":
+        if (!flags.has("changes")) throw new UsageError("reapply needs --changes");
+        tool = "reapply_changes";
+        args = { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+        break;
+      case "undo":
+      case "redo":
+        tool = command;
         args = { id: needId() };
         break;
       default:

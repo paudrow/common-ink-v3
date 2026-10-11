@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
-import { perform } from "./api.ts";
+import { ApiError, perform } from "./api.ts";
 import { createCommands, type Command } from "./commands.ts";
 import { useDismiss } from "./dismiss.ts";
 import { EditorGroups } from "./EditorGroups.tsx";
 import { EMPTY_LAYOUT, editorReducer, focusedNoteId, isEditorLayout, type CloseScope, type EditorAction, type EditorLayout, type Group } from "./editorLayout.ts";
 import { folderTree, pathName, type FolderTree as Tree } from "./folders.ts";
 import { FolderTree } from "./FolderTree.tsx";
+import { HistoryMode } from "./History.tsx";
 import { Icon } from "./icons.tsx";
-import { INSPECTOR_TABS, Inspector, InspectorPanel, type InspectorTab } from "./Inspector.tsx";
-import { KEYBINDINGS, chordFor, chordLabel, chordOf } from "./keybindings.ts";
+import { INSPECTOR_TABS, Inspector, InspectorPanel, UNSEEN, type InspectorTab } from "./Inspector.tsx";
+import { FIELD_COMMANDS, KEYBINDINGS, chordFor, chordLabel, chordOf } from "./keybindings.ts";
 import { MODES, modePath, type ModeId } from "./modes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { NoteList } from "./NoteList.tsx";
@@ -19,6 +20,7 @@ import type { Navigate, Route } from "./router.ts";
 import { ModeLink, Sidebar } from "./Sidebar.tsx";
 import { Soon } from "./Soon.tsx";
 import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
+import { undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
 type Popover = { side: "left" } | { side: "right"; tab: InspectorTab };
@@ -30,6 +32,11 @@ const WRITING: Layout = { writing: true, popover: null };
 const WRITING_KEY = "ink.writing";
 const INSPECTOR_KEY = "ink.inspector";
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+/** How often the notes changed since the last look are listed, so an agent's or another member's change shows up. */
+const REFRESH_MS = 5000;
+
+const isRevisions = (v: unknown): v is Record<string, number> => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number");
+const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 
 const popoverKey = (p: Popover | null) => (p ? (p.side === "left" ? "left" : p.tab) : null);
 
@@ -89,6 +96,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const [editor, setEditor] = useStored(`ink.editor.${workspaceId}`, isEditorLayout, EMPTY_LAYOUT);
   const [commands] = useState(createCommands);
   const [palette, setPalette] = useState<"commands" | "notes" | null>(null);
+  /** An undo or redo that didn't happen, and why, shown on its note until the member's next step. */
+  const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
 
   const selectedFolderId = tree && chosenFolderId && !tree.byId.has(chosenFolderId) ? null : chosenFolderId;
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
@@ -113,6 +122,24 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     void loadFolders();
     setListVersion((v) => v + 1);
   }, [loadFolders]);
+
+  const listedNotes = useRef(notes);
+  listedNotes.current = notes;
+  useEffect(() => {
+    const relist = async () => {
+      const known = listedNotes.current;
+      if (document.visibilityState !== "visible" || !known) return;
+      const changed = await perform(workspaceId, { type: "note.list", updatedSince: Math.max(0, ...known.map((n) => n.updatedAt)) }).catch(() => []);
+      const later = changed.filter((n) => (known.find((k) => k.id === n.id)?.revision ?? -1) < n.revision);
+      if (later.length) setNotes((all) => all && [...newest(later, all, new Map()), ...all.filter((n) => !later.some((l) => l.id === n.id))]);
+    };
+    const timer = setInterval(relist, REFRESH_MS);
+    document.addEventListener("visibilitychange", relist);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", relist);
+    };
+  }, [workspaceId]);
 
   const remember = useCallback(
     (note: Note) => {
@@ -163,6 +190,32 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     if (route.kind === "home" && id) navigate(pathTo(shown.current.byId, id), { replace: true });
   }, [route.kind, navigate]);
 
+  /** The latest revision of each note the member has been shown the changes up to. It is kept in this browser. */
+  const [seen, setSeen] = useStored(`ink.seen.${workspaceId}.${me.person.id}`, isRevisions, {});
+  const markSeen = useCallback((noteId: string, revision: number) => setSeen((s) => ((s[noteId] ?? 0) >= revision ? s : { ...s, [noteId]: revision })), [setSeen]);
+  /** The open note's latest change by anyone but the member, such as their agent. */
+  const [others, setOthers] = useState<{ noteId: string; revision: number } | null>(null);
+  const currentId = current?.id;
+  const currentRevision = current?.revision;
+  const byMe = current?.updatedBy.kind === "member" && current.updatedBy.personId === me.person.id;
+  const checked = useRef<{ noteId: string; revision: number } | null>(null);
+  useEffect(() => {
+    if (!currentId || currentRevision === undefined) return;
+    const last = checked.current;
+    checked.current = { noteId: currentId, revision: currentRevision };
+    // The member's own next change can't be someone else's, so there is nothing new to look for.
+    if (last?.noteId === currentId && currentRevision === last.revision + 1 && byMe) return;
+    let live = true;
+    perform(workspaceId, { type: "history.list", noteIds: [currentId], diffs: false, limit: 100 }).then(({ changes }) => {
+      const theirs = changes.find((c) => c.author.kind !== "member" || c.author.personId !== me.person.id);
+      if (live) setOthers({ noteId: currentId, revision: theirs?.revision ?? 0 });
+    });
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, currentId, currentRevision, me.person.id]);
+  const unseen = !!current && others?.noteId === current.id && others.revision > (seen[current.id] ?? 0);
+
   const closePopover = useCallback(() => setLayout((l) => (l.writing ? WRITING : l)), []);
   const toggleWriting = useCallback(() => setLayout((l) => (l.writing ? BROWSING : WRITING)), []);
   const togglePopover = (p: Popover) => setLayout((l) => (l.writing ? { writing: true, popover: popoverKey(l.popover) === popoverKey(p) ? null : p } : l));
@@ -198,16 +251,33 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     [workspaceId, refresh],
   );
 
-  const latest = useRef({ createNote, toggleInspector, go });
-  latest.current = { createNote, toggleInspector, go };
+  const latest = useRef({ createNote, toggleInspector, go, routeNoteId });
+  latest.current = { createNote, toggleInspector, go, routeNoteId };
   useEffect(() => {
     const show = (which: "commands" | "notes") => () => setPalette((p) => (p === which ? null : which));
     const onTab = (action: (tab: { groupId: string; noteId: string }) => EditorAction) => () => {
       const noteId = focusedNoteId(shown.current.editor);
       if (noteId) dispatch(action({ groupId: shown.current.editor.focusedGroupId, noteId }));
     };
+    const step = (type: "note.undo" | "note.redo") => () => {
+      const id = latest.current.routeNoteId;
+      if (!id) return;
+      undoOrRedo(workspaceId, { type, id }).then(
+        (note) => {
+          setStuck(null);
+          if (note) remember(note);
+        },
+        (err: Error) => setStuck({ noteId: id, message: err instanceof ApiError ? err.message : `Couldn't ${type === "note.undo" ? "undo" : "redo"}. Common Ink can't be reached.` }),
+      );
+    };
     const all: Command[] = [
-      ...(canEdit ? [{ id: "note.new", title: "New note", run: () => void latest.current.createNote() }] : []),
+      ...(canEdit
+        ? [
+            { id: "note.new", title: "New note", run: () => void latest.current.createNote() },
+            { id: "history.undo", title: "Undo", run: step("note.undo") },
+            { id: "history.redo", title: "Redo", run: step("note.redo") },
+          ]
+        : []),
       { id: "notes.quickOpen", title: "Go to note…", run: show("notes") },
       { id: "commands.show", title: "Show all commands", run: show("commands") },
       { id: "view.toggleWritingMode", title: "Toggle writing mode", run: toggleWriting },
@@ -219,12 +289,13 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     ];
     const unregister = all.map((command) => commands.register(command));
     return () => unregister.forEach((off) => off());
-  }, [commands, canEdit, dispatch, toggleWriting]);
+  }, [commands, canEdit, dispatch, toggleWriting, workspaceId, remember]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const commandId = KEYBINDINGS[chordOf(e)];
-      if (commandId && commands.run(commandId)) e.preventDefault();
+      if (!commandId || (FIELD_COMMANDS.has(commandId) && inField(e.target))) return;
+      if (commands.run(commandId)) e.preventDefault();
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
@@ -254,7 +325,17 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       onOpen={(note, keep) => openNote(note.id, !keep)}
     />
   );
-  const panelProps = current && tree && { note: current, tree, canEdit, onMove: (id: string, folderId: string) => moveNote(id, folderId).then(() => selectFolder(folderId)) };
+  const panelProps = current &&
+    tree && {
+      workspaceId,
+      note: current,
+      tree,
+      canEdit,
+      onMove: (id: string, folderId: string) => moveNote(id, folderId).then(() => selectFolder(folderId)),
+      unseen,
+      onSeen: markSeen,
+      onChanged: remember,
+    };
   const activeMode = route.kind === "mode" ? route.mode : null;
 
   const renderNote = (group: Group, noteId: string) => {
@@ -266,7 +347,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
         noteId={noteId}
         onLoaded={remember}
         onSaved={remember}
-        onEdit={() => dispatch({ type: "pin", groupId: group.id, noteId })}
+        revision={note?.revision}
+        onEdit={() => {
+          if (stuck) setStuck(null);
+          dispatch({ type: "pin", groupId: group.id, noteId });
+        }}
+        notice={stuck?.noteId === noteId ? stuck.message : null}
         meta={
           note && (
             <>
@@ -331,7 +417,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       )}
 
       <main className="main" aria-label="Editor">
-        {route.kind === "mode" && <ModeView mode={route.mode} />}
+        {route.kind === "mode" &&
+          (route.mode === "history" ? (
+            <HistoryMode workspaceId={workspaceId} personId={me.person.id} notes={notes ?? []} canEdit={canEdit} onOpenNote={(id) => openNote(id, false)} onChanged={remember} />
+          ) : (
+            <ModeView mode={route.mode} />
+          ))}
         {route.kind === "missing" && <p className="notice">There's nothing at this address.</p>}
         {(route.kind === "note" || route.kind === "home") && <EditorGroups layout={editor} titleOf={titleOf} dispatch={dispatch} renderNote={renderNote} />}
       </main>
@@ -346,10 +437,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
               aria-label={tab.label}
               title={tab.label}
               aria-pressed={popoverKey(popover) === tab.id}
+              aria-description={tab.id === "history" && unseen ? UNSEEN : undefined}
               disabled={!panelProps}
               onClick={() => togglePopover({ side: "right", tab: tab.id })}
             >
               <Icon name={tab.icon} />
+              {tab.id === "history" && unseen && <span className="unseen-dot" />}
             </button>
           ))}
         </nav>

@@ -27,7 +27,9 @@ Optional fields on the POST: `label` (up to 60 characters), `expiresInDays` (def
 
 `POST /mcp` with `Authorization: Bearer cink_...` and `Content-Type: application/json`. Streamable HTTP, stateless: one JSON-RPC message (or a batch) per POST, answered as JSON. No server-sent events, no sessions. Without a valid token the answer is 401.
 
-Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `note_history`. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace.
+Tools: `list_workspaces`, `list_notes`, `read_note`, `create_note`, `write_note`, `note_history`, and for history `history`, `history_authors`, `activity`, `label_revision`, `revert_note`, `revert_changes`, `reapply_changes`, `undo`, `redo`. Each takes an optional `workspace` id, which can be left out when the member belongs to only one workspace.
+
+History tools never rewrite the record. A revert, an undo, or a redo is a new change under the agent's name that names the changes it took back out (`reverts`), and each change it took out names it (`revertedBy`). `history` filters by `authors`, so an agent's changes can be listed on their own and passed to `revert_changes`. A read-only token can list history and is refused the rest.
 
 Most clients take a URL and a header:
 
@@ -40,6 +42,15 @@ Most clients take a URL and a header:
     echo "# Title" | npm run ink -- create
     echo "# Title\n\nmore" | npm run ink -- write <id> --base <revision>
     npm run ink -- history <id>
+    npm run ink -- changes [--note <id>,<id>] [--author agent:<id>] [--from 2026-10-01] [--to 2026-10-08]
+    npm run ink -- authors
+    npm run ink -- activity [--timezone America/Chicago]
+    npm run ink -- label <id> --revision <n> --name "Draft"
+    npm run ink -- revert <id> --revision <n>
+    npm run ink -- revert <id> --changes <n>,<n>
+    npm run ink -- reapply <id> --changes <n>
+    npm run ink -- undo <id>
+    npm run ink -- redo <id>
     npm run ink -- workspaces
 
 Add `--workspace <id>` when the member is in more than one workspace.

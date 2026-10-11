@@ -1,7 +1,8 @@
 import { useId, useRef, useState } from "react";
-import type { NoteSummary } from "../core/protocol.ts";
+import type { Note, NoteSummary } from "../core/protocol.ts";
 import { notePath } from "../core/slug.ts";
 import { pathName, type FolderTree } from "./folders.ts";
+import { NoteHistory } from "./History.tsx";
 import type { IconName } from "./icons.tsx";
 import { Soon } from "./Soon.tsx";
 
@@ -14,11 +15,19 @@ export const INSPECTOR_TABS = [
 export type InspectorTab = (typeof INSPECTOR_TABS)[number]["id"];
 
 export interface PanelProps {
+  workspaceId: string;
   note: NoteSummary;
   tree: FolderTree;
   canEdit: boolean;
   onMove: (noteId: string, folderId: string) => Promise<void>;
+  /** Whether the note has changes by someone else that the member hasn't been shown. */
+  unseen: boolean;
+  onSeen: (noteId: string, revision: number) => void;
+  /** The note after History reverted it or applied a selection of its changes. */
+  onChanged: (note: Note) => void;
 }
+
+export const UNSEEN = "Changes you haven't seen";
 
 export function Inspector(props: PanelProps) {
   const ids = useId();
@@ -34,9 +43,11 @@ export function Inspector(props: PanelProps) {
             id={`${ids}-${t.id}`}
             aria-selected={tab === t.id}
             aria-controls={`${ids}-panel`}
+            aria-description={t.id === "history" && props.unseen ? UNSEEN : undefined}
             onClick={() => setTab(t.id)}
           >
             {t.label}
+            {t.id === "history" && props.unseen && <span className="unseen-dot" />}
           </button>
         ))}
       </div>
@@ -50,7 +61,16 @@ export function Inspector(props: PanelProps) {
 export function InspectorPanel({ tab, ...props }: PanelProps & { tab: InspectorTab }) {
   switch (tab) {
     case "history":
-      return <Soon issue={5}>Who changed this note and how arrives with</Soon>;
+      return (
+        <NoteHistory
+          workspaceId={props.workspaceId}
+          noteId={props.note.id}
+          revision={props.note.revision}
+          canEdit={props.canEdit}
+          onChanged={props.onChanged}
+          onSeen={props.onSeen}
+        />
+      );
     case "backlinks":
       return <Soon issue={13}>Notes that link here arrive with</Soon>;
     case "info":

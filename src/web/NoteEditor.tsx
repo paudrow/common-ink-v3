@@ -1,4 +1,4 @@
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
@@ -17,14 +17,19 @@ interface Props {
   noteId: string;
   onLoaded: (note: Note) => void;
   onSaved: (note: Note) => void;
-  /** Called on each change typed, pasted, or undone, not on merges from the server. */
+  /** The note's latest revision as the workspace knows it. A later one than the editor has is read in. */
+  revision: number | undefined;
+  /** Called on each change typed or pasted, not on changes from the server. */
   onEdit: () => void;
+  /** Something the member should know about this note, such as an undo that failed. Shown in place of the save state. */
+  notice: string | null;
   meta: ReactNode;
   actions: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, meta, actions }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, meta, actions }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const syncRef = useRef<NoteSync | null>(null);
   const edited = useRef(onEdit);
   edited.current = onEdit;
   const [saveState, setSaveState] = useState<SaveState>("saved");
@@ -39,14 +44,15 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, met
       (note) => {
         if (cancelled || !host.current) return;
         onLoaded(note);
-        sync = new NoteSync(workspaceId, note, onSaved, setSaveState);
+        sync = syncRef.current = new NoteSync(workspaceId, note, onSaved, setSaveState);
         view = new EditorView({
           parent: host.current,
           state: EditorState.create({
             doc: note.text,
             extensions: [
+              // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
               history(),
-              keymap.of([...defaultKeymap, ...historyKeymap]),
+              keymap.of(defaultKeymap),
               markdown(),
               noteHighlighting,
               EditorView.lineWrapping,
@@ -69,10 +75,15 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, met
 
     return () => {
       cancelled = true;
+      syncRef.current = null;
       void sync?.close();
       view?.destroy();
     };
   }, [workspaceId, noteId, onLoaded, onSaved]);
+
+  useEffect(() => {
+    if (revision !== undefined) void syncRef.current?.pull(revision).catch(() => {});
+  }, [revision]);
 
   if (missing) return <p className="notice">This note doesn't exist, or you can't see it.</p>;
   return (
@@ -80,7 +91,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, met
       <header className="note-bar">
         <div className="note-meta">{meta}</div>
         <div className="save-state" role="status">
-          {SAVE_LABEL[saveState]}
+          {notice ?? SAVE_LABEL[saveState]}
         </div>
         {actions}
       </header>
