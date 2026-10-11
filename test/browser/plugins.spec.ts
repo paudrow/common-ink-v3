@@ -204,7 +204,8 @@ test("a stopwatch written in a note is drawn in it and runs, and is plain text a
 
   const watch = text(page).getByRole("button", { name: /^Stopwatch/ });
   await expect(watch).toHaveText(["0:00"]);
-  await expect(text(page)).toContainText("Time me 0:00 here, not `::stopwatch{}` there, nor ::sundial{}.");
+  // Code's backticks are hidden off the cursor's line, so the one in code reads as its own text.
+  await expect(text(page)).toContainText("Time me 0:00 here, not ::stopwatch{} there, nor ::sundial{}.");
   await watch.click();
   await expect(watch).toHaveText("0:01");
   await expect(watch).toHaveAttribute("aria-pressed", "true");

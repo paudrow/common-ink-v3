@@ -1,5 +1,5 @@
 import { defaultKeymap, history } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -95,7 +95,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
               history(),
               keymap.of(defaultKeymap),
-              markdown(),
+              // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
+              markdown({ base: markdownLanguage }),
               noteHighlighting,
               embedding,
               embedded.of(embedsAre(embedsNow.current)),

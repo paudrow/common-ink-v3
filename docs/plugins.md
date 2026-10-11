@@ -183,9 +183,72 @@ Plugins' extensions come before the editor's own, in the order of the plugins, s
 
 A plugin whose editing is heavy loads it when it starts, as Vim mode does with `import("./editing.ts")`, and registers the extension when the import settles unless it was turned off meanwhile. If the import fails it calls `host.report(error)`, which shows the reason against the plugin on the Plugins page.
 
-One limit, for #11 to weigh:
+One limit:
 
-- Only the check when an extension is added, or made for an editor, reaches the Plugins page. An extension that throws later, while an editor is running, is CodeMirror's to log, and nothing holds it against its plugin.
+- Only the check when an extension is added, or made for an editor, reaches the Plugins page. An extension that throws later, while an editor is running, is CodeMirror's to log, and nothing holds it against its plugin. The markdown plugins report what they know can fail: a part of them that couldn't be loaded.
+
+Don't add a `keymap.of(...)` for a key or two. CodeMirror runs all keymaps from one handler, placed where the first keymap is, and a plugin's extension comes before vim's. A keymap in a plugin therefore puts every editor key, Escape among them, ahead of vim, and insert mode stops ending. Register a command with `keys` and `when`, as the outline bullets do, or handle the one key in `EditorView.domEventHandlers`, as tables do for the arrow keys.
+
+## Drawing markdown in a note
+
+A note has one surface, its editor. Markdown is drawn there, in place of its source, and a line is shown as written while the cursor is on it. Five built-in plugins do it, each of which can be turned off alone: `gfm` (emphasis, headings, links, quotes, rules, inline code, task checkboxes), `tables`, `math`, `code-blocks`, and `bullets`. The editor parses GitHub-flavored markdown whether or not they are on, so each reads the same parse.
+
+Three rules hold for all of them, and for anything drawn later:
+
+- The note's text is never changed by drawing it. What a drawing changes, it changes with an ordinary edit dispatched to its editor (`userEvent: "input.<what>"`), so it is saved, synced, in History as the member's, and undone like typing. Ask `writable(state)` first: a member who can only read gets no way to write.
+- Only what is on screen is drawn. `drawnInView` in `plugins/lib/live.ts` redraws from `view.visibleRanges`. Blocks that replace whole lines must come from the state, with `drawnInState`, and must find themselves cheaply.
+- Nothing moves when a line goes between drawn and written. The first letter of the line stays where it is, the line keeps its height, and the lines after it stay put. `test/browser/markdown-layout.spec.ts` measures it.
+
+How each kind of mark keeps the third rule:
+
+| What | Drawn | With the cursor on its line |
+| --- | --- | --- |
+| A heading's `#`s | hang in the left margin, not painted | painted, in the same place |
+| `>`, `---`, a code fence | kept in the line, not painted (`ghost`) | painted |
+| A bullet's `-` | kept in the line, a dot painted over it | painted |
+| `[ ]` of a task | a checkbox exactly as wide as the three characters (`keepsWidth`) | the characters |
+| `**`, `` ` ``, `~~`, a link's address, a formula in a line | taken out of the line | put back: the rest of that line moves along by their width |
+| A block of math | the formula, in the room its lines take when written, wrapped rows and blank lines counted | its lines, the last padded to the formula's height |
+| A table | a table, always | still a table: a cell is typed in where it is drawn, held at the size it was drawn while it shows its source |
+| A code block | code, always | the same: only a fence line changes, as above |
+
+One case moves, and is left that way on purpose: the marks inside a line are taken out when it is drawn, so a paragraph that fills its rows can need more rows with its marks put back, and the lines after it move down by those rows while the cursor is on it. Measured on a three-sentence paragraph with bold, code and a link in each: 2 rows (47px) in a 720px column, 5 rows (118px) in a 314px one. Showing the line as written and moving nothing can't both hold there. The layout test asserts what is kept: the paragraph starts where it did, grows by whole rows, and everything after it moves by exactly that.
+
+A formula's drawn height is kept in the plugin's storage, so a block of math has its room before KaTeX has loaded. The first time a formula is ever drawn in a browser, the lines after it move down once if it is taller than its lines. They never move up.
+
+A table is one thing to the keyboard. The arrow keys go into its cells, vim's `j` and `k` pass it whole, and a deletion that reaches into it from outside (`3dd` from the line above) takes all of it. A line of plain words directly under a table, which GitHub reads as one more row, stays a line of text under the drawn table, so words typed after a table don't vanish into it.
+
+A fold never hides an edit. It opens when the cursor lands in it, when a selection reaches into it, and when anything in it changes. Deleting a folded bullet's line leaves what was under it, shown.
+
+### Chips
+
+A token that is drawn as something else and edits its own source is a chip (`plugins/lib/chips.ts`). The checkbox and the formula are chips, and a link, a mention, and a todo's options will be:
+
+```ts
+const checkbox: Chip<Checkbox> = {
+  id: "task",
+  find: (line, offset) => checkboxIn(line, offset), // the tokens on one line, with where they are
+  keepsWidth: true,                                 // as wide as its source, for a chip at the start of a line
+  draw(el, token, source) {
+    const box = el.appendChild(document.createElement("input"));
+    box.type = "checkbox";
+    box.checked = token.checked;
+    box.disabled = source.readOnly;
+    box.addEventListener("change", () => source.rewrite(box.checked ? "[x]" : "[ ]"));
+  },
+};
+host.editorExtensions.register({ id: "gfm.tasks", extension: chips(checkbox) });
+```
+
+A chip is drawn again when the note writes its token another way. One that also shows something from outside the note, such as a linked note's title or today's date, gives `key(token)`, a string of what it read: the chip is drawn again when that changes. To have it asked when nothing in the note changed, dispatch `redraw` (from `plugins/lib/live.ts`) to the editor.
+
+`chips` draws the tokens on screen, leaves the ones in code and on the cursor's line as written, and hands `draw` a `source`: `rewrite(text)` writes the token another way, as the member's edit, and does nothing when the note no longer writes the token as it was drawn; `edit()` puts the cursor on it. Draw with elements and `textContent` only. Nothing from a note is ever set as HTML: HTML in a note stays text, and KaTeX is run with `trust` off (`plugins/math/options.ts`), so a formula can't make a link or load an image.
+
+The task checkbox in `plugins/gfm/tasks.ts` is all the todos plugin (#18) needs to take over: it registers a chip with the same `find` and takes `gfm.tasks` out.
+
+### What is loaded when
+
+KaTeX and its faces are fetched the first time a note on screen has something that reads as a formula (a price such as `$5` does not), and the code colors the first time one has a fence, each language when a block first names it (`whenSeen` in `plugins/lib/live.ts`). A note with neither loads neither. When one can't be fetched the plugin calls `host.report`, and the note shows that markdown as written.
 
 ## Keybindings
 

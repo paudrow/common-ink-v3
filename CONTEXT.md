@@ -100,6 +100,20 @@ The list of commands, narrowed by typing.
 **Vim mode**:
 A built-in plugin, off until the member turns it on in settings, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's.
 
+**Drawn** and **as written**:
+The two ways a note's editor shows markdown. Drawn is what the markdown means: bold words, a table, a formula, a checkbox. As written is its source, with every mark. A line is shown as written while the cursor is on it, and nothing moves when it changes from one to the other. A table is always drawn, and its cells are typed in where they are.
+_Avoid_: Preview, rendered view, source mode
+
+**Chip**:
+A token in a note drawn as something that can be clicked, which changes the note only by rewriting that token: a task's checkbox, a formula, a todo's options.
+
+**Outline bullets**:
+A built-in plugin that makes a list an outline: a bullet is indented, outdented, and moved among its siblings with what is under it.
+
+**Fold**:
+A bullet shown without what is under it. A fold is how one editor in one browser shows the note. It is never in the note's text, and other members don't see it.
+_Avoid_: Collapse
+
 **Jumplist**:
 The notes a member has been to since Vim mode started in this browser, in order, and which one they are at. `ctrl+o` and `ctrl+i` step back and forward along it, across tabs and editor groups. Going to a note after stepping back drops what was ahead.
 _Avoid_: History, which is the record of changes
