@@ -10,7 +10,7 @@
  * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, ConnectOptions, ListedFolder, Note, NoteSummary, OpInput, Results, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, ConnectOptions, Invite, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, WorkspaceSummary } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
@@ -63,8 +63,11 @@ export type Setting = { title: string; description?: string } & (
 
 export type SettingValue = boolean | string | number | readonly string[];
 
-/** The operations a plugin can perform: all but the member's settings. */
-export type PluginOp = Exclude<OpInput, { type: `settings.${string}` }>;
+/** The operations `host.perform` won't take: the member's settings, and every change to who is in the workspace, which goes through `host.members`. */
+export type KeptFromPerform = `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave";
+
+/** The operations a plugin can perform. */
+export type PluginOp = Exclude<OpInput, { type: KeptFromPerform }>;
 
 /** Takes one contribution back out. */
 export type Dispose = () => void;
@@ -109,7 +112,7 @@ export interface PluginHost {
   /**
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
    * is saved before an operation that moves a note through its history, and the editors take the result.
-   * A settings operation is refused.
+   * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
   /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
@@ -125,7 +128,20 @@ export interface PluginHost {
     connect(name: string, options: ConnectOptions): Promise<{ agent: Agent; token: string }>;
     disconnect(id: string): Promise<void>;
   };
-  /** JSON this plugin keeps in this browser for this workspace. Other plugins can't see it. */
+  /**
+   * Who is in the workspace, changed as the member. The server lets only an admin invite, set a role,
+   * remove, and see or revoke invites, and lets anyone leave. Listing members is `perform`'s `member.list`.
+   */
+  readonly members: {
+    invite(email: string, as: Role): Promise<Results["member.invite"]>;
+    setRole(memberId: string, as: Role): Promise<Member>;
+    remove(memberId: string): Promise<void>;
+    /** Takes the member themself out of the workspace. */
+    leave(): Promise<void>;
+    invites(): Promise<Invite[]>;
+    revoke(inviteId: string): Promise<void>;
+  };
+  /** JSON this plugin keeps in this browser for this workspace and this member. Other plugins can't see it. */
   readonly storage: {
     get(key: string): unknown;
     set(key: string, value: unknown): void;
@@ -417,5 +433,7 @@ export interface App {
   markSeen(noteId: string, revision: number): void;
   toggleOverlay(id: string): void;
   switchWorkspace(workspaceId: string): void;
+  /** Reads again which workspaces the member is in and their role in each, after a change to members that may be to the member themself. */
+  reloadWorkspaces(): void;
   signOut(): void;
 }

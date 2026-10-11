@@ -20,6 +20,15 @@ const Revisions = z.array(Revision.min(1)).min(1).max(500);
 const AuthorRef = z.object({ kind: z.enum(["member", "agent", "plugin"]), id: Id });
 export type AuthorRef = z.output<typeof AuthorRef>;
 
+/** An email as a person signs in with it: trimmed and in lower case, and otherwise as written. */
+const Email = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(254)
+  .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "not an email address");
+const RoleName = z.enum(["admin", "editor", "viewer"]);
+
 const FolderName = z
   .string()
   .trim()
@@ -121,12 +130,48 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
     supersedes: z.string().min(1).max(64).optional(),
   }),
+  /** Everyone in the workspace, by name and role. Any member may ask. Only an admin is told emails, and no agent is. */
+  z.object({ type: z.literal("member.list") }),
+  /**
+   * Offers `as`, a role, to whoever signs in with `email`. They become a member the next time they
+   * sign in or open Common Ink. Inviting an email again changes the role offered, and inviting
+   * someone who is already a member changes their role.
+   */
+  z.object({ type: z.literal("member.invite"), email: Email, as: RoleName }),
+  /** Gives the member `memberId`, a person's id from member.list, the role `as`. */
+  z.object({ type: z.literal("member.setRole"), memberId: Id, as: RoleName }),
+  /** Takes a member out of the workspace. What they wrote stays, under their name. */
+  z.object({ type: z.literal("member.remove"), memberId: Id }),
+  /** Takes whoever asks out of the workspace. */
+  z.object({ type: z.literal("member.leave") }),
+  /** The invites nobody has taken up yet. */
+  z.object({ type: z.literal("invite.list") }),
+  /** Takes back an invite nobody has taken up. */
+  z.object({ type: z.literal("invite.revoke"), id: Id }),
 ]);
 export type Op = z.output<typeof Op>;
 export type OpInput = z.input<typeof Op>;
 export type OpType = Op["type"];
 
-export type Role = "admin" | "editor" | "viewer";
+export type Role = z.output<typeof RoleName>;
+
+export interface Member {
+  personId: string;
+  name: string;
+  role: Role;
+  /** Told to an admin of the workspace, signed in, and to nobody else: not an editor, a viewer, or anyone's agent. */
+  email?: string;
+}
+
+/** An invite nobody has taken up yet. */
+export interface Invite {
+  /** What the link an admin shares ends in: `/invite/<id>`. It lets in only the person with `email`. */
+  id: string;
+  email: string;
+  role: Role;
+  invitedBy: { personId: string; name: string };
+  createdAt: number;
+}
 
 export interface NoteSummary {
   id: string;
@@ -280,6 +325,14 @@ export interface Results {
   "folder.delete": { id: string };
   "settings.read": StoredSettings;
   "settings.write": StoredSettings;
+  "member.list": Member[];
+  /** `member` when the email was already a member's, whose role this changed. Otherwise `invite`. */
+  "member.invite": { member: Member; invite: null } | { member: null; invite: Invite };
+  "member.setRole": Member;
+  "member.remove": { memberId: string };
+  "member.leave": { memberId: string };
+  "invite.list": Invite[];
+  "invite.revoke": { id: string };
 }
 
 export const MAX_AGENT_NAME = 60;
@@ -323,6 +376,9 @@ export interface Me {
   person: { id: string; email: string; name: string };
   workspaces: WorkspaceSummary[];
 }
+
+/** What an operation answers anyone who isn't in the workspace, whether or not there is one. */
+export const NO_SUCH_WORKSPACE = "No such workspace";
 
 export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict";
 

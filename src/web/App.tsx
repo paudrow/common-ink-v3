@@ -1,22 +1,46 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Me } from "../core/protocol.ts";
-import { ApiError, getMe, perform } from "./api.ts";
-import { useRoute } from "./router.ts";
+import { ApiError, getMe, onRefused, perform, signOut, workspaceOfInvite, workspaceOfNote } from "./api.ts";
+import { showing, targetOf, type Target } from "./leads.ts";
+import { useRoute, type Place } from "./router.ts";
 import { createSettingsStore, type SettingsStore } from "./settingsStore.ts";
 import { isString, useStored } from "./stored.ts";
 import { Workspace } from "./Workspace.tsx";
 
 type Session = { kind: "loading" } | { kind: "signed-out" } | { kind: "signed-in"; me: Me } | { kind: "error"; message: string };
 
+const same = (a: Me, b: Me) => JSON.stringify(a) === JSON.stringify(b);
+
 export function App() {
   const [session, setSession] = useState<Session>({ kind: "loading" });
-  useEffect(() => {
-    getMe().then(
-      (me) => setSession({ kind: "signed-in", me }),
-      (err) =>
-        setSession(err instanceof ApiError && err.status === 401 ? { kind: "signed-out" } : { kind: "error", message: String(err.message ?? err) }),
-    );
+  const reading = useRef<Promise<void> | null>(null);
+  /** Reads who the person is and which workspaces they are in. A reading that fails leaves a signed-in person as they were. */
+  const load = useCallback(() => {
+    reading.current ??= getMe()
+      .then(
+        (me) => setSession((was) => (was.kind === "signed-in" && same(was.me, me) ? was : { kind: "signed-in", me })),
+        (err) =>
+          setSession((was) => {
+            if (err instanceof ApiError && err.status === 401) return { kind: "signed-out" };
+            return was.kind === "signed-in" ? was : { kind: "error", message: String(err.message ?? err) };
+          }),
+      )
+      .finally(() => (reading.current = null));
+    return reading.current;
   }, []);
+  useEffect(() => {
+    void load();
+    // A role changed or a member removed by an admin shows the next time the member comes back, or is refused something.
+    const again = () => document.visibilityState === "visible" && void load();
+    addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    const stop = onRefused(() => void load());
+    return () => {
+      removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+      stop();
+    };
+  }, [load]);
 
   switch (session.kind) {
     case "loading":
@@ -26,7 +50,7 @@ export function App() {
     case "signed-out":
       return <SignIn />;
     case "signed-in":
-      return session.me.workspaces.length ? <SignedIn me={session.me} /> : <p className="notice">You aren't in a workspace.</p>;
+      return session.me.workspaces.length ? <SignedIn me={session.me} reload={load} /> : <p className="notice">You aren't in a workspace.</p>;
   }
 }
 
@@ -44,20 +68,100 @@ function SignIn() {
   );
 }
 
+/** What an invite's link shows anyone it doesn't let in. It says nothing of the invite, not even whether there is one. */
+function NotInvited({ email, onContinue }: { email: string; onContinue: () => void }) {
+  return (
+    <main className="sign-in">
+      <img src="/favicon.svg" alt="" width={56} height={56} />
+      <h1>This invite doesn't let you in</h1>
+      <p>
+        You are signed in as {email}. An invite lets in only the email it was made for, and only until it is taken back. If it was made for another email of yours, sign out and sign in with that
+        one. Otherwise ask whoever sent the link to invite {email}.
+      </p>
+      <button type="button" className="button primary" onClick={onContinue}>
+        Go to my notes
+      </button>
+      <button type="button" className="link" onClick={() => void signOut().then(() => location.assign(location.pathname))}>
+        Sign out
+      </button>
+    </main>
+  );
+}
+
 /** How long the workspace waits for the member's settings before it is drawn with the defaults. */
 const SETTINGS_WAIT_MS = 1500;
 
-function SignedIn({ me }: { me: Me }) {
+function SignedIn({ me, reload }: { me: Me; reload: () => Promise<void> }) {
   const [place, navigate] = useRoute();
   const [chosenId, choose] = useStored("ink.workspace", isString, me.workspaces[0]!.id);
-  const workspace = me.workspaces.find((w) => w.id === chosenId) ?? me.workspaces[0]!;
+  const { found, noteIsHere } = useFound(me, targetOf(place), chosenId);
+  const shown = showing(place, found, me.workspaces, chosenId);
+  const workspaceId = shown.kind === "asking" || shown.kind === "not-invited" ? null : shown.workspace.id;
+  useEffect(() => {
+    if (workspaceId) choose(workspaceId);
+    if (shown.kind === "joined") navigate("/", { replace: true });
+  }, [workspaceId, shown.kind, choose, navigate]);
+  /** The last address whose workspace was known, which stays up while the next one's is asked for. */
+  const settled = useRef<Extract<typeof shown, { kind: "workspace" }> | null>(null);
+  if (shown.kind === "workspace") settled.current = shown;
+
+  if (shown.kind === "not-invited") return <NotInvited email={me.person.email} onContinue={() => navigate("/", { replace: true })} />;
+  const showingNow = settled.current;
+  if (shown.kind === "joined" || !showingNow) return null;
+  return <InWorkspace me={me} at={showingNow} navigate={navigate} choose={choose} noteIsHere={noteIsHere} reload={reload} />;
+}
+
+/**
+ * Where the addresses that name a note or an invite lead, asked of the server once each. What it is
+ * told is good while the person's workspaces stay the same.
+ */
+function useFound(me: Me, target: Target | null, chosenId: string) {
+  const memberships = me.workspaces.map((w) => w.id).join();
+  const kept = useRef({ memberships, found: new Map<string, string | null>() });
+  if (kept.current.memberships !== memberships) kept.current = { memberships, found: new Map() };
+  const { found } = kept.current;
+  const [, redraw] = useState(0);
+  const key = target?.key;
+  const unknown = target && !found.has(target.key) ? target : null;
+  useEffect(() => {
+    if (!unknown) return;
+    let live = true;
+    (unknown.kind === "note" ? workspaceOfNote : workspaceOfInvite)(unknown.id)
+      // With no answer, the chosen workspace is left to show what it can.
+      .catch(() => (unknown.kind === "note" ? chosenId : null))
+      .then((workspaceId) => {
+        if (!live) return;
+        found.set(unknown.key, workspaceId);
+        redraw((n) => n + 1);
+      });
+    return () => {
+      live = false;
+    };
+    // Asked once for each address: `unknown` is a new object on every render.
+  }, [key, found]);
+  /** A note the workspace has just listed, loaded, or made is known without asking. It is recorded at once, so going to it next waits for nothing. */
+  const noteIsHere = useCallback((noteId: string, workspaceId: string) => void kept.current.found.set(noteId, workspaceId), []);
+  return { found, noteIsHere };
+}
+
+interface InWorkspaceProps {
+  me: Me;
+  at: { workspace: Me["workspaces"][number]; place: Place };
+  navigate: ReturnType<typeof useRoute>[1];
+  choose: (workspaceId: string) => void;
+  noteIsHere: (noteId: string, workspaceId: string) => void;
+  reload: () => Promise<void>;
+}
+
+function InWorkspace({ me, at: { workspace, place }, navigate, choose, noteIsHere, reload }: InWorkspaceProps) {
   const { store, status, waited } = useSettings(workspace.id);
   // Drawing before the settings are read would flash the plugins that are off and the wrong theme, so it waits a little.
   if (status.kind === "loading" && !waited) return null;
   return (
     <>
       <Workspace
-        key={workspace.id}
+        // A role is what the app is drawn from, so a member whose role changed gets the app again.
+        key={`${workspace.id} ${workspace.role}`}
         me={me}
         workspace={workspace}
         settings={store}
@@ -67,6 +171,8 @@ function SignedIn({ me }: { me: Me }) {
           choose(id);
           navigate("/");
         }}
+        noteIsHere={noteIsHere}
+        reloadWorkspaces={reload}
       />
       {status.kind === "loading" && (
         <p role="status" className="settings-banner">

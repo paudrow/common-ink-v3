@@ -5,7 +5,9 @@ import { dayIn, redoTarget, revertOfAuthor, revertedBy, takeBackOut, undoTarget 
 import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
+import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, type Asking } from "./membership.ts";
 import {
+  NO_SUCH_WORKSPACE,
   MAX_NOTE_LENGTH,
   MAX_SETTINGS_LENGTH,
   Op,
@@ -44,6 +46,8 @@ interface Context {
   db: D1Database;
   actor: Actor;
   author: Author;
+  /** The role of the member acting, or of the member an agent acts for. */
+  role: Role;
   now: number;
 }
 
@@ -68,12 +72,12 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor, i
   const op = parsed.data;
   const handler = HANDLERS[op.type] as Handler<OpType>;
 
-  if (actor.kind === "agent" && actor.scope?.pinnedWorkspaceId && actor.scope.pinnedWorkspaceId !== actor.workspaceId) throw new OpError("not_found", "No such workspace");
+  if (actor.kind === "agent" && actor.scope?.pinnedWorkspaceId && actor.scope.pinnedWorkspaceId !== actor.workspaceId) throw new OpError("not_found", NO_SUCH_WORKSPACE);
   const member = await db
     .prepare("SELECT m.role, p.name, a.name AS agent_name FROM members m JOIN people p ON p.id = m.person_id LEFT JOIN agents a ON a.id = ? WHERE m.workspace_id = ? AND m.person_id = ?")
     .bind(actor.kind === "agent" ? actor.agentId : null, actor.workspaceId, actor.personId)
     .first<{ role: Role; name: string; agent_name: string | null }>();
-  if (!member) throw new OpError("not_found", "No such workspace");
+  if (!member) throw new OpError("not_found", NO_SUCH_WORKSPACE);
   if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
   if (actor.kind === "agent" && actor.scope?.readOnly && handler.needs !== "view") throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if (!ALLOWS[member.role].has(handler.needs)) throw new OpError("forbidden", `A ${member.role} can't ${op.type}`);
@@ -82,7 +86,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor, i
     actor.kind === "agent"
       ? { kind: "agent", agentId: actor.agentId, name: member.agent_name ?? "An agent", onBehalfOf: actor.personId }
       : { kind: "member", personId: actor.personId, name: member.name };
-  return handler.run({ db, actor, author, now }, op as never) as Promise<Results[T["type"]]>;
+  return handler.run({ db, actor, author, role: member.role, now }, op as never) as Promise<Results[T["type"]]>;
 }
 
 interface SummaryRow {
@@ -417,6 +421,8 @@ function isJsonObject(text: string) {
     return false;
   }
 }
+
+const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.actor.workspaceId, personId: ctx.actor.personId, now: ctx.now });
 
 const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.list": {
@@ -828,4 +834,15 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       return { text: op.text, revision: row.revision, updatedAt: ctx.now };
     },
   },
+
+  "member.list": { needs: "view", run: (ctx) => listMembers(ctx.db, ctx.actor.workspaceId, { emails: ctx.actor.kind === "member" && ctx.role === "admin" }) },
+
+  // Who is in a workspace is not in history, so it can't be reverted the way a note can. Only the member changes it: see NOT_FOR_AGENTS.
+  "member.invite": { needs: "manage", by: "member", run: (ctx, op) => invite(asking(ctx), op.email, op.as) },
+  "member.setRole": { needs: "manage", by: "member", run: (ctx, op) => setRole(asking(ctx), op.memberId, op.as) },
+  "member.remove": { needs: "manage", by: "member", run: (ctx, op) => removeMember(asking(ctx), op.memberId) },
+  // A viewer can leave too, so this needs no more than belonging to the workspace.
+  "member.leave": { needs: "view", by: "member", run: (ctx) => leave(asking(ctx)) },
+  "invite.list": { needs: "manage", by: "member", run: (ctx) => listInvites(ctx.db, ctx.actor.workspaceId) },
+  "invite.revoke": { needs: "manage", by: "member", run: (ctx, op) => revokeInvite(asking(ctx), op.id) },
 };

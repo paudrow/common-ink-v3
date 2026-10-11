@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { asViewerOfNote, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -141,14 +141,12 @@ test("the bottom bar is there in writing mode, and gone with every plugin that p
 });
 
 test("a member who can't change the note still sees the bar's clocks and count, and can run a quick timer of their own", async ({ page }) => {
-  await page.route("**/api/me", async (route) => {
-    const response = await route.fetch();
-    const me = await response.json();
-    await route.fulfill({ response, json: { ...me, workspaces: me.workspaces.map((w: object) => ({ ...w, role: "viewer" })) } });
-  });
   const writes: string[] = [];
   page.on("request", (request) => request.url().endsWith("/ops") && /"note\.write"/.test(request.postData() ?? "") && writes.push(request.postData()!));
-  await open(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
+  const { note } = await asViewerOfNote(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
+  await page.goto(`/note/${note.id}`);
+  await expect(page.getByRole("button", { name: "Ada's workspace Viewer" })).toBeVisible();
+  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
   await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");

@@ -2322,3 +2322,36 @@ del.diff-line::before {
 .said.failed {
   color: var(--danger);
 }
+
+.members .agent-head {
+  flex-wrap: nowrap;
+}
+
+.members .agent-head .agent-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-role {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.member-role select {
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.members .said {
+  margin: 0;
+}

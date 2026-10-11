@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { signIn, whoAmI } from "../../src/core/accounts.ts";
-import type { Actor } from "../../src/core/operations.ts";
+import { perform, type Actor } from "../../src/core/operations.ts";
 import type { Role } from "../../src/core/protocol.ts";
 
 /** A new person, acting in the workspace they got on first sign-in, where they are admin. */
@@ -11,9 +11,10 @@ export async function newMember(name = "Ada Lovelace"): Promise<Actor> {
   return { kind: "member", personId, workspaceId: workspace!.id };
 }
 
-/** A new person with `role` in `admin`'s workspace. */
+/** A new person with `role` in `admin`'s workspace, who got there the way anyone does: invited, then signing in. */
 export async function addMember(admin: Actor, role: Role, name = "Grace Hopper"): Promise<Actor> {
-  const { personId } = await newMember(name);
-  await env.DB.prepare("INSERT INTO members (workspace_id, person_id, role) VALUES (?, ?, ?)").bind(admin.workspaceId, personId, role).run();
+  const email = `${crypto.randomUUID()}@example.com`;
+  await perform(env.DB, admin, { type: "member.invite", email, as: role });
+  const { personId } = await signIn(env.DB, { email, name });
   return { kind: "member", personId, workspaceId: admin.workspaceId };
 }

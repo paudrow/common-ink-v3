@@ -23,6 +23,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
       agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
+      members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,
@@ -338,6 +339,25 @@ describe("plugin host", () => {
     expect(performed).toEqual([]);
     expect(stored()).toEqual({});
     expect(Object.keys(asked!.settings).sort()).toEqual(["get", "subscribe"]);
+  });
+
+  it("refuses a plugin that asks, as an operation, to change who is in the workspace or read its invites, and lets it list the members", async () => {
+    let asked: PluginHost | null = null;
+    const { performed } = hostWith([{ id: "greedy", name: "Greedy", activate: (h) => void (asked = h) }]);
+    const perform = asked!.perform as (op: OpInput) => Promise<unknown>;
+    const kept: OpInput[] = [
+      { type: "member.invite", email: "mallory@example.com", as: "admin" },
+      { type: "member.setRole", memberId: "aaaaaaaaaaaa", as: "admin" },
+      { type: "member.remove", memberId: "aaaaaaaaaaaa" },
+      { type: "member.leave" },
+      { type: "invite.list" },
+      { type: "invite.revoke", id: "aaaaaaaaaaaa" },
+    ];
+
+    for (const op of kept) await expect(perform(op), op.type).rejects.toThrow(`Greedy can't ${op.type}: who is in a workspace is changed through host.members, by a plugin that is given it`);
+    expect(performed).toEqual([]);
+    await perform({ type: "member.list" });
+    expect(performed).toEqual([["greedy", "member.list"]]);
   });
 });
 

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent, disconnectAgent } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import type { OpInput, OpType, Role } from "../../src/core/protocol.ts";
@@ -24,8 +25,6 @@ const tool = async (token: string, name: string, args: Record<string, unknown> =
   return { status: 200, text: result.content[0]!.text, isError: !!result.isError };
 };
 
-const setRole = (member: Actor, role: Role) => env.DB.prepare("UPDATE members SET role = ? WHERE workspace_id = ? AND person_id = ?").bind(role, member.workspaceId, member.personId).run();
-const remove = (member: Actor) => env.DB.prepare("DELETE FROM members WHERE workspace_id = ? AND person_id = ?").bind(member.workspaceId, member.personId).run();
 
 /** Ada's workspace with a note and a folder in it, and a member with `role` who connected an agent. */
 async function team(role: Role) {
@@ -38,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings are kept from agents, which test/core/settings.test.ts checks. */
-type ToolOp = Exclude<OpType, "settings.read" | "settings.write">;
+/** The operations an agent has a tool for. Settings and changes to members are kept from agents, which test/core/settings.test.ts and test/core/members.test.ts check. */
+type ToolOp = Exclude<OpType, `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -65,6 +64,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
   "folder.delete": { id: "aaaaaaaaaaaa" },
+  "member.list": {},
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {
@@ -117,7 +117,8 @@ describe("an agent's access is its member's", () => {
   }
 
   it("follows a change of role on its next call: an editor made a viewer, then an editor again", async () => {
-    const { member, token, noteId, workspace } = await team("editor");
+    const { ada, member, token, noteId, workspace } = await team("editor");
+    const setRole = (to: Actor, as: Role) => perform(env.DB, ada, { type: "member.setRole", memberId: to.personId, as });
     const write = (text: string) => tool(token, "write_note", { workspace, id: noteId, baseRevision: 2, text });
 
     expect(await write("# Plan\n\nStep\n\nAs an editor")).toMatchObject({ isError: false });
@@ -131,7 +132,7 @@ describe("an agent's access is its member's", () => {
   it("ends with the member's: once the member is removed, every tool answers that there is no such workspace", async () => {
     const { ada, member, token, noteId, folderId, workspace } = await team("admin");
     const ops = everyOp(noteId, folderId);
-    await remove(member);
+    await perform(env.DB, ada, { type: "member.remove", memberId: member.personId });
 
     for (const type of Object.keys(ops) as ToolOp[]) {
       const name = TOOLS.find((t) => t.op === type)!.name;
@@ -172,6 +173,24 @@ describe("an agent's access is its member's", () => {
     expect(await tool(token, "read_note", { workspace, id: noteId })).toMatchObject({ status: 401 });
     expect(await tool(token, "write_note", { workspace, id: noteId, baseRevision: 2, text: "# Late" })).toMatchObject({ status: 401 });
     expect((await perform(env.DB, member, { type: "note.read", id: noteId })).revision).toBe(2);
+  });
+
+  it("sees who is in a workspace, within its token's reach, and has no tool that changes that", async () => {
+    const { ada, member, workspace } = await team("admin");
+    const everyone = [`Ada Lovelace: admin`, `Grace Hopper: admin`];
+    const names = (answer: { text: string }) => (JSON.parse(answer.text) as { name: string; role: Role }[]).map((m) => `${m.name}: ${m.role}`);
+    const own = (await whoAmI(env.DB, member.personId)).workspaces.find((w) => w.id !== workspace)!.id;
+    const reader = await connectAgent(env.DB, member.personId, "Reader", { readOnly: true });
+    const pinned = await connectAgent(env.DB, member.personId, "Pinned", { workspaceId: own });
+
+    expect(names(await tool(reader.token, "list_members", { workspace }))).toEqual(everyone);
+    expect((await tool(reader.token, "list_members", { workspace })).text, "an admin's agent is told no email").not.toContain("@");
+    expect(await tool(pinned.token, "list_members", { workspace })).toMatchObject({ isError: true, text: "not_found: No such workspace" });
+    expect(names(await tool(pinned.token, "list_members"))).toEqual(["Grace Hopper: admin"]);
+    expect(TOOLS.filter((t) => /member|invite|leave/.test(t.name)).map((t) => t.name)).toEqual(["list_members"]);
+
+    await perform(env.DB, ada, { type: "member.remove", memberId: member.personId });
+    expect(await tool(reader.token, "list_members", { workspace })).toMatchObject({ isError: true, text: "not_found: No such workspace" });
   });
 
   it("is only at /mcp: a token is no session, so it can't perform operations as a member or connect another agent", async () => {

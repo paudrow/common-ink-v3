@@ -1,6 +1,6 @@
 # Plugins
 
-Most of the web app is plugins. The core is the workspace's data, the editor for one note, writing mode, the inspector's frame, and the plugin host. The sidebar, folder tree, note list, tabs and splits, command palette, quick open, History, Agents, and the rest are built-in plugins in `src/web/plugins/`.
+Most of the web app is plugins. The core is the workspace's data, the editor for one note, writing mode, the inspector's frame, and the plugin host. The sidebar, folder tree, note list, tabs and splits, command palette, quick open, History, Agents, Members, and the rest are built-in plugins in `src/web/plugins/`.
 
 The plugin API is one module, `src/web/plugin-api.ts`. Its doc comments are the reference. A plugin imports that module and nothing else from the app. `test/core/plugin-boundary.test.ts` fails when a file under `src/web/plugins/` breaks that rule.
 
@@ -64,10 +64,11 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 - `host.onNotes(listener)` calls the listener each time the notes the member can see change: one made, renamed, moved, or changed by anyone. `host.app().notes` then holds them as they are. It is how something drawn from another note's title, such as a link, knows to draw itself again.
 - `host.report(error)` says on the Plugins page that the plugin is on and something it is for didn't work.
 - `host.app()` is the app as it is now: the open note, the notes and folders, and what can be done about them. A view is handed the same thing as its `app` prop.
-- `host.perform(op)` performs a workspace operation as the member. The operations are the ones in `src/core/protocol.ts`, except the two on settings.
+- `host.perform(op)` performs a workspace operation as the member. The operations are the ones in `src/core/protocol.ts`, except the two on settings. It also refuses every operation that changes who is in the workspace or reads its invites; `member.list` goes through, and tells an admin the members' emails and anyone else their names and roles alone.
 - `host.settings` reads the plugin's own options.
-- `host.storage` keeps JSON for this plugin, in this browser, for this workspace.
+- `host.storage` keeps JSON for this plugin, in this browser, for this workspace and this member.
 - `host.agents` lists, connects, and disconnects the member's agents.
+- `host.members` invites by email, sets a member's role, removes a member, leaves, and lists and revokes invites, as the member. The server lets only an admin do all but leave. It is a capability of its own, apart from `host.perform`, so that it can be given to the Members plugin and to no other. After a change that may be to the member themself, `app.reloadWorkspaces()` has the app read again which workspaces they are in and their role in each. A change of role draws the app again from the start, since a plugin is handed the role when it starts.
 
 A plugin does not call `fetch` or read `localStorage`. The host is where a third-party plugin's permissions will be checked, so a plugin that goes around it can't be trusted later.
 
@@ -339,6 +340,7 @@ The built-in plugins are trusted, and the host gives them more than an untrusted
 
 - `host.perform` runs as the member with the member's whole access, and the server records the member, not the plugin, as the author.
 - `host.agents.connect` mints a token that acts as the member.
+- `host.members` changes who is in the workspace as the member: under an admin it can invite a stranger as admin or remove the other admins, which no agent is given (`NOT_FOR_AGENTS`) and history can't revert. Every plugin is handed it today, as every plugin is handed `host.agents`. Only the Members plugin should be, and `host.members.invites()` and an admin's `member.list` also carry emails.
 - `host.commands.run` runs any command, including `plugins.disable.<another plugin>`. That command writes the member's settings, so it is a way around the refusal in `host.perform`. The palette needs it to run what the member picks.
 - `Embed.render` is handed a real element inside the note, so it can reach the rest of the page from there. So is `Below.render`, which can also rewrite the embed with `update`. The HTML embed is the pattern for an untrusted one: only a `sandboxed` frame, and nothing drawn by the plugin's own code.
 - A `sandboxed` frame can open a WebRTC peer connection once the member runs it, which no header stops. Until a browser offers a way, an untrusted embed has that one way out, and what it is handed must be chosen with that in mind.
@@ -346,4 +348,4 @@ The built-in plugins are trusted, and the host gives them more than an untrusted
 - A completion's `items` is told what the member types after its trigger, and what an item inserts is written into the note as the member.
 - An editor extension runs inside the editor with the note's text, every key typed, and the page. It must also be built from the app's own copy of `@codemirror/state`, which a plugin loaded from elsewhere doesn't have.
 - `host.storage` is the browser's localStorage under a prefix, which any script on the page can read.
-- A view is handed `app`, which carries the member's email, every note's title and first lines, `signOut`, and `switchWorkspace`. Each view is drawn with the `app` its own plugin is given (`provide` in `Workspace.tsx`), so that is the one place to narrow it.
+- A view is handed `app`, which carries the member's email, every note's title and first lines, `signOut`, `switchWorkspace`, and `reloadWorkspaces`. Each view is drawn with the `app` its own plugin is given (`provide` in `Workspace.tsx`), so that is the one place to narrow it.

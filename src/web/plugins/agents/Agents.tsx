@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, ago, useNow, type Agent, type PluginHost, type WorkspaceSummary } from "../../plugin-api.ts";
+import { Copyable } from "../lib/Copyable.tsx";
 import { RevertAuthor } from "../lib/RevertAuthor.tsx";
 
 const DAY_MS = 86_400_000;
@@ -17,32 +18,6 @@ interface Props {
   onShowChanges?: (agentId: string) => void;
   /** Called once an agent's changes were reverted, so the notes are read again. */
   onReverted: () => void;
-}
-
-function Copyable({ label, value }: { label: string; value: string }) {
-  const field = useRef<HTMLTextAreaElement>(null);
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    field.current?.select();
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch {
-      // A page served over plain http has no clipboard to write to, and can still copy what's selected.
-      document.execCommand("copy");
-    }
-    setCopied(true);
-  };
-  return (
-    <label className="copyable">
-      <span>{label}</span>
-      <span className="copyable-row">
-        <textarea ref={field} readOnly value={value} rows={value.split("\n").length} wrap="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()} />
-        <button type="button" className="button small" aria-label={`Copy ${label}`} onClick={copy}>
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </span>
-    </label>
-  );
 }
 
 /** A new agent's token, shown this once, with what to paste to use it. */

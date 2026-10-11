@@ -5,7 +5,7 @@ A hosted workspace where people and their agents read and edit markdown notes, w
 ## Content
 
 **Workspace**:
-The only container a person signs into. It holds notes, folders, and uploads. A person can belong to more than one.
+The only container a person signs into. It holds notes, folders, and uploads. A person can belong to more than one: the one made for them when they first sign in, and each one they are invited to. The app shows one at a time. A note's address names no workspace, so the note decides which one is shown.
 _Avoid_: Space, vault, project
 
 **Folder**:
@@ -125,7 +125,11 @@ _Avoid_: History, which is the record of changes
 ## Access
 
 **Member**:
-A person invited into a workspace, with the role admin, editor, or viewer. An admin can do what an editor can, and also manages members, plugins, and grants. A private note is hidden from admins too.
+A person in a workspace, with the role admin, editor, or viewer. A viewer reads. An editor also changes notes and folders. An admin can do what an editor can, and also manages members, plugins, and grants. A private note is hidden from admins too. Any member can see who the members are, and can leave. A workspace always has an admin, so its only admin can't leave, be removed, or be given another role. A member who is removed or leaves reaches nothing in the workspace from then on, and neither do their agents. What they wrote stays, under their name.
+
+**Invite**:
+An admin's offer of a role in a workspace to an email. Whoever signs in with that email is a member from then on, and from the next time they open Common Ink if they were signed in already. Until then the admin can revoke it. A workspace has one invite for an email, and inviting it again changes the role offered. The email is matched as the person's sign-in gives it, ignoring case and nothing else. The admin is given a link to send, since Common Ink sends no email. The link lets in only the invited email, so it is safe wherever it ends up. An invite does not let anyone sign in who otherwise couldn't.
+_Avoid_: Invitation, request
 
 **Grant**:
 Access to one note or one folder. A grant that names a non-member gives them view or edit on that note or folder only. Edit includes changing those notes, seeing their history, and creating notes in a granted folder. View includes reading those notes and their history. On a member, a grant only narrows what their role already allows. A grant on a folder covers its notes and nested folders. A grant on a note or child folder inside it wins for that note or subtree. A public link names nobody. A signed-in link is a public link that requires a Common Ink account. An editor can create a grant on a note or folder they can edit.

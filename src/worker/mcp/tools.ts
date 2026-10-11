@@ -1,6 +1,6 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { perform, type Actor } from "../../core/operations.ts";
-import { OpError, type OpInput, type OpType } from "../../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, OpError, type OpInput, type OpType } from "../../core/protocol.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 
 /** What a tool call comes back with: text for the agent, and whether it failed. */
@@ -27,6 +27,9 @@ interface Tool {
   op?: OpType;
 }
 
+const MEMBERS =
+  "Who is in a workspace decides who can read and change everything in it, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could invite a stranger as admin or remove the other admins. Only the member, signed in, changes who is in a workspace.";
+
 /**
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
  * tool below, and test/core/agent-parity.test.ts fails when one has neither.
@@ -34,6 +37,12 @@ interface Tool {
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
   "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
+  "member.invite": MEMBERS,
+  "member.setRole": MEMBERS,
+  "member.remove": MEMBERS,
+  "member.leave": "Leaving ends the member's own access and their agents' with it, and only an admin can undo it. The member does that themself.",
+  "invite.list": "Invites name people who are not in the workspace yet, by email, and are only of use for managing them, which an agent can't do.",
+  "invite.revoke": MEMBERS,
 };
 
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -217,6 +226,12 @@ export const TOOLS: Tool[] = [
     inputSchema: object({ id: noteId }, ["id"]),
     op: "note.redo",
   },
+  {
+    name: "list_members",
+    description: "Everyone in the workspace: person id, name and role (admin, editor or viewer), and no email, which only an admin is shown in the app. Members are the authors history names by person id. An agent can't invite, remove, or change anyone's role; a member does that in the app, on the Members page.",
+    inputSchema: object({}),
+    op: "member.list",
+  },
 ];
 
 export const toolList = () => TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
@@ -241,7 +256,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (me.workspaces.length !== 1) throw new OpError("invalid", `Pass workspace: you can reach ${me.workspaces.length} (${me.workspaces.map((w) => w.id).join(", ")})`);
       workspaceId = me.workspaces[0]!.id;
     } else {
-      if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", "No such workspace");
+      if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
     const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly } };

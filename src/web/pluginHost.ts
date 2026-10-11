@@ -36,7 +36,7 @@ export interface MemberSettings {
 }
 
 /** What the app gives each plugin beyond registering: its reach into the workspace, bound to that plugin. */
-export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "storage">;
+export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "storage">;
 
 export interface HostOptions {
   /** Every installed plugin, in the order their contributions are shown. */
@@ -92,6 +92,13 @@ const SLOTS = ["column", "section", "rail", "editor", "inspector", "page", "bar"
 const RESERVED = ["plugins.", "go.", "settings."];
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
+
+/** Why `host.perform` won't take an operation, or null when it will. The type `KeptFromPerform` says the same to a plugin written in TypeScript. */
+function keptFromPerform(type: string): string | null {
+  if (type.startsWith("settings.")) return "a plugin can't read or change the member's settings";
+  if (type.startsWith("invite.") || (type.startsWith("member.") && type !== "member.list")) return "who is in a workspace is changed through host.members, by a plugin that is given it";
+  return null;
+}
 
 export function createPluginHost({ plugins, required = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
@@ -159,8 +166,12 @@ export function createPluginHost({ plugins, required = [], settings, write, mac,
     return {
       plugin: { id: plugin.id, name: plugin.name },
       ...provided,
-      // Settings are the member's. This is the one way a plugin reaches the server, so it is where a plugin is refused.
-      perform: (op) => ((op as OpInput).type.startsWith("settings.") ? Promise.reject(new Error(`${plugin.name} can't ${(op as OpInput).type}: a plugin can't read or change the member's settings`)) : provided.perform(op)),
+      // This is the one way a plugin performs an operation of its own choosing, so it is where a plugin is refused.
+      perform(op) {
+        const { type } = op as OpInput;
+        const why = keptFromPerform(type);
+        return why ? Promise.reject(new Error(`${plugin.name} can't ${type}: ${why}`)) : provided.perform(op);
+      },
       settings: {
         get<T extends SettingValue>(name: string) {
           if (!plugin.settings || !Object.hasOwn(plugin.settings, name)) throw new Error(`${plugin.name} declares no setting named ${name}`);

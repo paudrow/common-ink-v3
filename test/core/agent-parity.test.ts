@@ -14,6 +14,7 @@ const argumentsOf = (tool: (typeof TOOLS)[number]) => Object.keys((tool.inputSch
 /** For each tool, `ink` commands that between them set every argument the tool takes. */
 const COMMANDS: Record<string, string[][]> = {
   list_workspaces: [["workspaces"]],
+  list_members: [["members"]],
   list_notes: [["notes", "--folder", ID, "--since", "2026-10-01"]],
   read_note: [["read", ID, "--revision", "1"]],
   create_note: [["create", "--text", "# Hi", "--folder", ID, "--link-titles", "keep"]],

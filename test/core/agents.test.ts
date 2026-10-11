@@ -143,6 +143,7 @@ describe("MCP protocol", () => {
       "revert_author",
       "undo",
       "redo",
+      "list_members",
     ]);
     for (const t of list.result.tools) expect(t.inputSchema.type).toBe("object");
   });

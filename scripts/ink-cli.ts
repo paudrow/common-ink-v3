@@ -11,6 +11,7 @@ export interface Io {
 export const USAGE = `Usage: ink [--workspace ID] <command>
 
   workspaces                          the workspaces you can reach
+  members                             everyone in a workspace, with their role
   notes [--folder ID] [--since TIME]  the notes in a workspace, in one folder, or changed since a time
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
   create [--text TEXT] [--folder ID] [--link-titles keep]
@@ -125,6 +126,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
     switch (command) {
       case "workspaces":
         tool = "list_workspaces";
+        break;
+      case "members":
+        tool = "list_members";
         break;
       case "notes":
         tool = "list_notes";

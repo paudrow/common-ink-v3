@@ -50,7 +50,17 @@ function WorkspaceMenu({ app }: ViewProps) {
   useDismiss(open ? close : null, ref);
   return (
     <div className="workspace-menu" ref={ref}>
-      <button type="button" className="workspace-button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button
+        type="button"
+        className="workspace-button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => {
+          // A workspace the member was invited to since the app loaded is in the list by the time they look for it.
+          if (!open) app.reloadWorkspaces();
+          setOpen(!open);
+        }}
+      >
         <img src="/favicon.svg" alt="" width={20} height={20} />
         <span className="workspace-text">
           <span className="workspace-name">{workspace.name}</span>
