@@ -44,31 +44,18 @@ const PATHS = {
     </>
   ),
   more: <path d="M4 8h.01M8 8h.01M12 8h.01" strokeWidth="2.25" />,
-  agent: (
-    <>
-      <rect x="3" y="5.5" width="10" height="7.5" rx="2" />
-      <path d="M8 5.5V3M6 9h.01M10 9h.01" />
-    </>
-  ),
-  back: <path d="M9.5 3.5 5 8l4.5 4.5" />,
   folders: <path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />,
   plus: <path d="M8 3.5v9M3.5 8h9" />,
   edit: <path d="M9.75 3.75 12.25 6.25M3 13l.6-2.85 7.4-7.4a1.2 1.2 0 0 1 1.7 0l.55.55a1.2 1.2 0 0 1 0 1.7l-7.4 7.4z" />,
   close: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,
   chevron: <path d="m6 4.5 3.5 3.5L6 11.5" />,
-  sidebar: (
-    <>
-      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-      <path d="M6 3v10" />
-    </>
-  ),
   inspector: (
     <>
       <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
       <path d="M10 3v10" />
     </>
   ),
-  focus: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
+  writing: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
   plugin: <path d="M6.5 3.5a1.5 1.5 0 0 1 3 0v1h2.5a1 1 0 0 1 1 1V8h-1a1.5 1.5 0 0 0 0 3h1v1.5a1 1 0 0 1-1 1H9.5v-1a1.5 1.5 0 0 0-3 0v1H4a1 1 0 0 1-1-1V10h1a1.5 1.5 0 0 0 0-3H3V5.5a1 1 0 0 1 1-1h2.5z" />,
   settings: (
     <>
@@ -131,6 +118,18 @@ const PATHS = {
     </>
   ),
   command: <path d="m3.5 5.5 3 2.5-3 2.5M8.5 11h4" />,
+  sidebar: (
+    <>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+      <path d="M6 3v10" />
+    </>
+  ),
+  agent: (
+    <>
+      <rect x="3" y="5.5" width="10" height="7.5" rx="2" />
+      <path d="M8 5.5V3M6.25 9v.01M9.75 9v.01M1.5 8.5v2M14.5 8.5v2" />
+    </>
+  ),
   members: (
     <>
       <circle cx="6" cy="6" r="2.25" />

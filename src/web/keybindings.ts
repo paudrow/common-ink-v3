@@ -6,12 +6,33 @@ interface Pressed {
   shiftKey: boolean;
 }
 
-const MODIFIERS = ["mod", "alt", "shift"];
+const MODIFIERS = ["mod", "ctrl", "alt", "shift"];
 /** The keys whose own character is what keys are written with: a chord is joined with + and a sequence is spaced. */
 const NAMED: Record<string, string> = { " ": "space", "+": "plus" };
 
-/** A key press written the way a command writes its keys: modifiers in the order mod, alt, shift, then the key. `mod` is ⌘ or Ctrl. */
-export const chordOf = (e: Pressed) => [(e.metaKey || e.ctrlKey) && "mod", e.altKey && "alt", e.shiftKey && "shift", NAMED[e.key] ?? e.key.toLowerCase()].filter(Boolean).join("+");
+/**
+ * A key press written the way a command writes its keys: modifiers in the order mod, ctrl, alt,
+ * shift, then the key. `mod` is ⌘ on a Mac and Ctrl elsewhere. `ctrl` is the Control key, which
+ * only a Mac tells apart from `mod`. Off a Mac the Windows key is `meta`, which no chord has.
+ */
+export const chordOf = (e: Pressed, mac: boolean) =>
+  [(mac ? e.metaKey : e.ctrlKey) && "mod", mac ? e.ctrlKey && "ctrl" : e.metaKey && "meta", e.altKey && "alt", e.shiftKey && "shift", NAMED[e.key] ?? e.key.toLowerCase()].filter(Boolean).join("+");
+
+/**
+ * A command's keys as this platform's key presses are written: off a Mac, `ctrl` is `mod`. Keys may
+ * be several chords pressed one after another, written with spaces between them, such as `g g`.
+ */
+export function onPlatform(keys: string, mac: boolean) {
+  if (mac) return keys;
+  return keys
+    .split(" ")
+    .map((chord) => {
+      const parts = chord.split("+").map((part) => (part === "ctrl" ? "mod" : part));
+      const key = parts.pop()!;
+      return [...MODIFIERS.filter((m) => parts.includes(m)), key].join("+");
+    })
+    .join(" ");
+}
 
 /** A key that is held with another and is no press of its own. */
 export const isModifier = (key: string) => key === "Shift" || key === "Control" || key === "Alt" || key === "Meta";
@@ -32,22 +53,14 @@ export function advance(pending: string, chord: string, ready: readonly string[]
 }
 
 /**
- * Whether a press of these keys would otherwise type: the chord they begin with has no mod or alt
- * in it and is neither Escape nor an F key. Such keys are left to whatever is being typed in.
+ * Whether a press of these keys would otherwise type: the chord they begin with has no mod, ctrl or
+ * alt in it and is neither Escape nor an F key. Such keys are left to whatever is being typed in,
+ * unless their command says for itself when it runs.
  */
 export function typed(keys: string) {
   const parts = keys.split(" ")[0]!.split("+");
   const key = parts.pop()!;
   return !parts.some((part) => part !== "shift") && key !== "escape" && !/^f\d{1,2}$/.test(key);
-}
-
-/**
- * The key these keys begin with when it is one a control in focus acts on itself, alone or with
- * Shift: Enter presses a button and follows a link, and Space presses a button and ticks a checkbox.
- */
-export function pressing(keys: string): "enter" | "space" | null {
-  const key = keys.split(" ")[0]!.replace(/^shift\+/, "");
-  return key === "enter" || key === "space" ? key : null;
 }
 
 /**
@@ -63,7 +76,7 @@ export function readKeys(text: string): { keys: string } | { reason: string } {
     const parts = chord.split("+");
     const key = parts.pop()!;
     const stray = parts.find((part) => !MODIFIERS.includes(part));
-    if (stray !== undefined) return { reason: `"${stray}" in "${text}" isn't a modifier. Use mod, alt, or shift, then one key` };
+    if (stray !== undefined) return { reason: `"${stray}" in "${text}" isn't a modifier. Use mod, ctrl, alt, or shift, then one key` };
     if (!key || MODIFIERS.includes(key)) return { reason: `${within} has no key after its modifiers` };
     if (new Set(parts).size < parts.length) return { reason: `${within} names a modifier twice` };
     chords.push([...MODIFIERS.filter((m) => parts.includes(m)), key].join("+"));
@@ -121,12 +134,12 @@ export function bind(commands: readonly Bindable[]) {
 
 export const chordFor = (commandId: string, bindings: Readonly<Record<string, string>>) => Object.keys(bindings).find((chord) => bindings[chord] === commandId);
 
-const SYMBOLS: Record<string, string> = { mod: "⌘", alt: "⌥", shift: "⇧" };
+const SYMBOLS: Record<string, string> = { mod: "⌘", ctrl: "⌃", alt: "⌥", shift: "⇧" };
 const WORDS: Record<string, string> = { mod: "Ctrl", alt: "Alt", shift: "Shift" };
 
 /** A command's keys as a person reads them: `⇧⌘P` on a Mac, `Ctrl+Shift+P` elsewhere, and `G G` for one chord after another. */
 export function chordLabel(keys: string, mac: boolean) {
-  return keys
+  return onPlatform(keys, mac)
     .split(" ")
     .map((chord) => {
       const parts = chord.split("+");

@@ -1,11 +1,12 @@
 import { markdown } from "@codemirror/lang-markdown";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { perform } from "./api.ts";
+import { forEditor } from "./editorExtensions.ts";
 import { embedding } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
-import type { Embed } from "./plugin-api.ts";
+import type { EditorExtension, Embed } from "./plugin-api.ts";
 import { committed } from "./sync.ts";
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
   /** The note's latest revision as the workspace knows it. A later one than was read is read in. */
   revision: number | undefined;
   embeds: readonly Embed[];
+  extensions: readonly EditorExtension[];
 }
 
 /**
@@ -22,12 +24,15 @@ interface Props {
  * written, and what is only for editing, such as vim, is left out of it. Its text is selected and
  * copied as a page's is. It is as tall as its text and scrolls with whatever it is in.
  */
-export function NoteReader({ workspaceId, noteId, revision, embeds }: Props) {
+export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: contributed }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [embedded] = useState(() => new Compartment());
-  const now = useRef({ embeds });
-  now.current = { embeds };
+  const [added] = useState(() => new Compartment());
+  const mine = useMemo(() => forEditor({ noteId, reading: true }), [noteId]);
+  const extensions = useMemo(() => mine(contributed).extensions, [mine, contributed]);
+  const now = useRef({ embeds, extensions });
+  now.current = { embeds, extensions };
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -51,6 +56,7 @@ export function NoteReader({ workspaceId, noteId, revision, embeds }: Props) {
               extensions: [
                 EditorState.readOnly.of(true),
                 EditorView.editable.of(false),
+                added.of(now.current.extensions),
                 markdown(),
                 noteHighlighting,
                 embedded.of(embedding(now.current.embeds)),
@@ -65,7 +71,7 @@ export function NoteReader({ workspaceId, noteId, revision, embeds }: Props) {
     return () => {
       live = false;
     };
-  }, [workspaceId, noteId, revision, embedded]);
+  }, [workspaceId, noteId, revision, embedded, added]);
 
   useEffect(
     () => () => {
@@ -74,6 +80,10 @@ export function NoteReader({ workspaceId, noteId, revision, embeds }: Props) {
     },
     [],
   );
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: added.reconfigure(extensions) });
+  }, [extensions, added]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: embedded.reconfigure(embedding(embeds)) });

@@ -1,15 +1,15 @@
 import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
-import { EditorView, keymap, placeholder } from "@codemirror/view";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { EditorView, keymap, panels, placeholder } from "@codemirror/view";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
+import { forEditor } from "./editorExtensions.ts";
 import { embedding } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
-import type { Embed } from "./plugin-api.ts";
+import type { EditorExtension, Embed } from "./plugin-api.ts";
 import { TITLE_MARK } from "./titleMark.ts";
-import { openNote } from "./openNotes.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
@@ -52,11 +52,16 @@ interface Props {
   onFocused: () => void;
   /** What plugins have registered to draw inside a note. */
   embeds: readonly Embed[];
+  /** What plugins have added to every note's editor. One given as a function is made here, for this note. */
+  extensions: readonly EditorExtension[];
+  /** Called for an extension this editor had to leave out, with why. */
+  onExtensionRefused: (extension: EditorExtension, error: unknown) => void;
   meta: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, embeds, meta }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, embeds, extensions: contributed, onExtensionRefused, meta,  }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const foot = useRef<HTMLDivElement>(null);
   const syncRef = useRef<NoteSync | null>(null);
   const edited = useRef(onEdit);
   edited.current = onEdit;
@@ -64,8 +69,11 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const [embedded] = useState(() => new Compartment());
   const embedsNow = useRef(embeds);
   embedsNow.current = embeds;
-  const now = useRef({ focus, onFocused });
-  now.current = { focus, onFocused };
+  const [added] = useState(() => new Compartment());
+  const mine = useMemo(() => forEditor({ noteId }), [noteId]);
+  const { extensions, refused } = useMemo(() => mine(contributed), [mine, contributed]);
+  const now = useRef({ focus, onFocused, extensions });
+  now.current = { focus, onFocused, extensions };
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [missing, setMissing] = useState(false);
 
@@ -88,6 +96,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
             doc: text,
             selection: { anchor: fresh ? text.length : 0 },
             extensions: [
+              // Before the editor's own keys, so a plugin's keys are tried first.
+              added.of(now.current.extensions),
               // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
               history(),
               titleMarkOnce,
@@ -96,10 +106,11 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               noteHighlighting,
               embedded.of(embedding(embedsNow.current)),
               EditorView.lineWrapping,
+              // What an extension keeps under the text, such as vim's mode, is kept at the foot of the pane and not under the last line.
+              panels({ bottomContainer: foot.current ?? undefined }),
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
               sync.extension,
-              openNote(noteId),
               EditorView.updateListener.of((u) => {
                 if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();
               }),
@@ -122,7 +133,15 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       void sync?.close();
       view?.destroy();
     };
-  }, [workspaceId, noteId, onLoaded, onSaved, embedded]);
+  }, [workspaceId, noteId, onLoaded, onSaved, embedded, added]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: added.reconfigure(extensions) });
+  }, [extensions, added]);
+
+  useEffect(() => {
+    for (const [extension, err] of refused) onExtensionRefused(extension, err);
+  }, [refused, onExtensionRefused]);
 
   useEffect(() => {
     if (!focus || !viewRef.current) return;
@@ -138,6 +157,19 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
     if (revision !== undefined) void syncRef.current?.pull(revision).catch(() => {});
   }, [revision]);
 
+  /** A click in the room under the text puts the cursor at the note's end, as a click under the last line of a page does. */
+  const toEnd = (event: MouseEvent<HTMLDivElement>) => {
+    const view = viewRef.current;
+    if (!view || event.button !== 0 || (event.target !== event.currentTarget && event.target !== host.current)) return;
+    if (event.clientY <= view.contentDOM.getBoundingClientRect().bottom) return;
+    // A press on the pane's own scrollbar is for scrolling.
+    const pane = event.currentTarget;
+    if (event.clientX >= pane.getBoundingClientRect().left + pane.clientLeft + pane.clientWidth) return;
+    event.preventDefault();
+    view.dispatch({ selection: { anchor: view.state.doc.length }, userEvent: "select.pointer" });
+    view.focus();
+  };
+
   if (missing) return <p className="notice">This note doesn't exist, or you can't see it.</p>;
   return (
     <section className="note" data-save-state={saveState}>
@@ -147,9 +179,10 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
           {notice ?? SAVE_LABEL[saveState]}
         </div>
       </header>
-      <div className="note-scroll">
+      <div className="note-scroll" onMouseDown={toEnd}>
         <div className="editor" ref={host} />
       </div>
+      <div className="note-foot" ref={foot} />
     </section>
   );
 }

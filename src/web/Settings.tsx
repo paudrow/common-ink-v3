@@ -5,14 +5,31 @@ import { forceLinting, lintGutter, linter, type Diagnostic } from "@codemirror/l
 import { Annotation, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { chordLabel } from "./keybindings.ts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts.tsx";
-import { SettingRow } from "./SettingRow.tsx";
+import type { Setting, SettingValue } from "./plugin-api.ts";
 import type { Host, MemberSettings } from "./pluginHost.ts";
-import { documentOf, type Problem } from "./settings.ts";
+import { documentOf, readSetting, type Declared, type Problem } from "./settings.ts";
 import { KEYBOARD, UNKNOWN, filterLayout, layoutOf } from "./settingsLayout.ts";
-import { statusLabel, type SettingsStore } from "./settingsStore.ts";
+import type { SettingsStatus, SettingsStore } from "./settingsStore.ts";
 
+const statusLabel = (status: SettingsStatus) => {
+  switch (status.kind) {
+    case "loading":
+      return "Loading your settings…";
+    case "unread":
+      return "Your settings couldn't be loaded, so nothing can be changed here";
+    case "saved":
+      return "Saved";
+    case "saving":
+      return "Saving…";
+    case "retrying":
+      return "Couldn't save. Retrying…";
+    case "refused":
+      return `Not saved, and put back as it was: ${status.message}`;
+  }
+};
 const NOT_JSON = "Settings are one JSON object, such as {}.";
 
 interface Props {
@@ -47,18 +64,6 @@ export function Settings({ host, store, mac, path, go }: Props) {
     else setDraft(next);
   };
 
-  const problemList = ((draft !== null && !unread) || settings.problems.length > 0) && (
-    <ul aria-label="Problems" className="settings-problems">
-      {draft !== null && !unread && <li>The JSON can't be read. {NOT_JSON} Your settings stay as they were until it can.</li>}
-      {(draft === null || unread) &&
-        settings.problems.map((p, i) => (
-          <li key={i} data-kind={p.kind}>
-            <code>{p.key}</code> {p.reason}
-          </li>
-        ))}
-    </ul>
-  );
-
   return (
     <section className="mode-view settings">
       <div className="settings-head">
@@ -71,17 +76,31 @@ export function Settings({ host, store, mac, path, go }: Props) {
         </button>
       </div>
       <p className="soon">Yours alone, in this workspace. Only what you change from a default is kept.</p>
-      {/* Above the JSON, where each is underlined. Under the options, where each is said at its own row too, so one that comes or goes with a change moves nothing above it. */}
-      {asJson && problemList}
+      {((draft !== null && !unread) || settings.problems.length > 0) && (
+        <ul aria-label="Problems" className="settings-problems">
+          {draft !== null && !unread && <li>The JSON can't be read. {NOT_JSON} Your settings stay as they were until it can.</li>}
+          {(draft === null || unread) &&
+            settings.problems.map((p, i) => (
+              <li key={i} data-kind={p.kind}>
+                <code>{p.key}</code> {p.reason}
+              </li>
+            ))}
+        </ul>
+      )}
       {asJson ? (
         <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} onChange={typed} />
       ) : (
         <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} />
       )}
-      {!asJson && problemList}
     </section>
   );
 }
+
+const describe = (setting: Setting, value: SettingValue, mac: boolean) => {
+  if (setting.type === "boolean") return value ? "on" : "off";
+  if (setting.type === "chords") return (value as readonly string[]).map((chord) => chordLabel(chord, mac)).join(", ") || "no key";
+  return String(value);
+};
 
 interface OptionsProps {
   settings: MemberSettings;
@@ -223,7 +242,7 @@ function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
                 </h2>
                 {category.rows.some((d) => !d.active) && <p className="soon">{category.name} is off, so its options change nothing until it is turned on on the Plugins page.</p>}
                 {category.rows.map((d) => (
-                  <SettingRow
+                  <Row
                     key={d.key}
                     declared={d}
                     value={settings.values[d.key]!}
@@ -262,6 +281,89 @@ function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
         </fieldset>
       </div>
     </>
+  );
+}
+
+interface RowProps {
+  declared: Declared;
+  value: SettingValue;
+  /** Whether the member's document has this key, valid or not. */
+  modified: boolean;
+  problems: readonly Problem[];
+  mac: boolean;
+  onSet: (value: SettingValue | undefined) => void;
+}
+
+function Row({ declared: { key, setting, active }, value, modified, problems, mac, onSet }: RowProps) {
+  const id = useId();
+  const [refused, setRefused] = useState<string | null>(null);
+  const set = (next: unknown) => {
+    const read = readSetting(setting, next);
+    setRefused("reason" in read ? read.reason : null);
+    if ("value" in read) onSet(read.value);
+  };
+  const control = { id, "aria-invalid": refused !== null || problems.some((p) => p.kind === "invalid") || undefined, "aria-describedby": `${id}-about` };
+
+  return (
+    <div className="setting" data-row data-modified={modified || undefined} data-inactive={!active || undefined}>
+      <div className="setting-head">
+        <label htmlFor={id}>{setting.title}</label>
+        <code>{key}</code>
+      </div>
+      {setting.description && <p className="setting-about">{setting.description}</p>}
+      <div className="setting-control">
+        {setting.type === "boolean" ? (
+          <input type="checkbox" {...control} checked={value as boolean} onChange={(e) => set(e.target.checked)} />
+        ) : setting.type === "string" && setting.enum ? (
+          <select {...control} value={value as string} onChange={(e) => set(e.target.value)}>
+            {setting.enum.map((option) => (
+              <option key={option}>{option}</option>
+            ))}
+          </select>
+        ) : (
+          <Typed key={JSON.stringify(value)} control={control} setting={setting} value={value} onSet={set} />
+        )}
+        <span id={`${id}-about`} className="setting-default">
+          {setting.type === "chords" && `${describe(setting, value, mac)}. `}Default: {describe(setting, setting.default, mac)}
+        </span>
+        {modified && (
+          <button type="button" className="button small" aria-label={`Reset ${setting.title}`} onClick={() => (setRefused(null), onSet(undefined))}>
+            Reset
+          </button>
+        )}
+      </div>
+      {refused && <p className="error">{refused}. Nothing was changed.</p>}
+      {problems.map((p, i) => (
+        <p key={i} className="error">
+          {p.reason}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** A setting that is typed: it is set when the member presses Enter or leaves the field, not on each key. */
+function Typed({ control, setting, value, onSet }: { control: object; setting: Setting; value: SettingValue; onSet: (value: unknown) => void }) {
+  const written = setting.type === "chords" ? (value as readonly string[]).join(", ") : String(value);
+  const [typed, setTyped] = useState(written);
+  const numeric = setting.type === "number" || setting.type === "integer";
+  const commit = () => {
+    if (typed === written) return;
+    if (setting.type === "chords") onSet(typed.split(",").map((chord) => chord.trim()).filter(Boolean));
+    else onSet(numeric ? (typed.trim() === "" ? null : Number(typed)) : typed);
+  };
+  return (
+    <input
+      {...control}
+      type={numeric ? "number" : "text"}
+      min={numeric ? setting.minimum : undefined}
+      max={numeric ? setting.maximum : undefined}
+      placeholder={setting.type === "chords" ? "mod+shift+k" : undefined}
+      value={typed}
+      onChange={(e) => setTyped(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && commit()}
+    />
   );
 }
 

@@ -124,7 +124,6 @@ test("leaving a note while its save is on the way keeps the other writer's chang
   await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page).toHaveURL(/\/note\/untitled-[a-z0-9]{12}$/);
   await expect(page).not.toHaveURL(new RegExp(id));
-  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Info" }).click();
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" })).toHaveValue(new RegExp(`${noteIdIn(page)}$`));
 
   await openAllNotes(page);

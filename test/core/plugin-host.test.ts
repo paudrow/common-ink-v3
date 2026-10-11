@@ -22,7 +22,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       workspace: { id: "w1", name: "Acme", role: "editor" },
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
-      agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
+      agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,
@@ -126,16 +126,7 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
-  });
-
-  it("says which plugins came with the app, and no others", () => {
-    const { host } = hostWith([notes, palette], { builtIn: ["notes"] });
-
-    expect(host.contributions().plugins.map((p) => [p.id, p.builtIn])).toEqual([
-      ["notes", true],
-      ["palette", false],
-    ]);
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
   });
 
   it("leaves out the whole of a plugin that can't start, and says why", () => {
@@ -374,7 +365,7 @@ describe("settings, as the plugin host assembles and reads them", () => {
     expect([values["reader.size"], values["reader.face"], values["keybindings.reader.open"]]).toEqual([14, "sans", ["mod+r"]]);
     expect(problems()).toEqual([
       { key: "reader.size", kind: "invalid", reason: "Expected 32 or less, not 99. The default is used." },
-      { key: "keybindings.reader.open", kind: "invalid", reason: '"cmd" in "cmd+r" isn\'t a modifier. Use mod, alt, or shift, then one key. The default is used.' },
+      { key: "keybindings.reader.open", kind: "invalid", reason: '"cmd" in "cmd+r" isn\'t a modifier. Use mod, ctrl, alt, or shift, then one key. The default is used.' },
       { key: "reader.colour", kind: "unknown", reason: "There's no setting by this name. It may belong to a plugin that isn't installed." },
       { key: "keybindings.gone.command", kind: "unknown", reason: 'There\'s no command "gone.command". It may belong to a plugin that is off.' },
     ]);
@@ -561,6 +552,113 @@ describe("keybindings, as settings", () => {
   });
 });
 
+describe("what a plugin adds to the editor, and hears of the app", () => {
+  const marks = { id: "marks", extension: [] };
+  const marking: Plugin = { id: "marking", name: "Marking", activate: (host) => void host.editorExtensions.register(marks) };
+
+  it("lists an editor extension while its plugin is on, in the order of the plugins", () => {
+    const first = { id: "first", extension: [] };
+    const { host } = hostWith([{ id: "early", name: "Early", activate: (h) => void h.editorExtensions.register(first) }, marking]);
+
+    expect(host.contributions().editorExtensions).toEqual([first, marks]);
+    host.setEnabled("early", false);
+    expect(host.contributions().editorExtensions).toEqual([marks]);
+    host.setEnabled("marking", false);
+    expect(host.contributions().editorExtensions).toEqual([]);
+  });
+
+  it("holds an editor extension that couldn't be used against the plugin that added it", () => {
+    const { host } = hostWith([notes, marking]);
+
+    host.fail(marks, new Error("Unrecognized extension value"));
+
+    expect(host.contributions().plugins.map((p) => [p.id, p.error])).toEqual([
+      ["notes", null],
+      ["marking", "Unrecognized extension value"],
+    ]);
+  });
+
+  it("shows what a plugin reports against it until it is turned off, and drops a report from one that has stopped", () => {
+    let report: PluginHost["report"] = () => {};
+    const loading: Plugin = { id: "loading", name: "Loading", activate: (host) => void (report = host.report) };
+    const { host } = hostWith([notes, loading]);
+    const errors = () => host.contributions().plugins.map((p) => [p.id, p.error]);
+
+    report(new Error("Its editing couldn't be loaded"));
+    report(new Error("Its editing couldn't be loaded"));
+    expect(errors()).toEqual([
+      ["notes", null],
+      ["loading", "Its editing couldn't be loaded"],
+    ]);
+
+    const stale = report;
+    host.setEnabled("loading", false);
+    host.setEnabled("loading", true);
+    stale(new Error("Late"));
+    expect(errors()).toEqual([
+      ["notes", null],
+      ["loading", null],
+    ]);
+  });
+
+  const quiet: Plugin = { id: "quiet", name: "Quiet", enabledByDefault: false, activate: (host) => void host.commands.register({ id: "quiet.go", title: "Go quietly", run: () => {} }) };
+
+  it("leaves a plugin off that starts off, until the member turns it on, and keeps only that choice", () => {
+    const { host, ids, stored } = hostWith([quiet]);
+
+    expect(ids()).toEqual(["plugins.enable.quiet"]);
+    expect(host.contributions().settings.declared[0]).toEqual({
+      key: "quiet.enabled",
+      setting: { type: "boolean", default: false, title: "On", description: "Quiet is off until you turn it on here." },
+      group: { id: "quiet", name: "Quiet" },
+      active: true,
+      switch: true,
+    });
+
+    host.setEnabled("quiet", true);
+    expect(ids()).toEqual(["quiet.go", "plugins.disable.quiet"]);
+    expect(stored()).toEqual({ "quiet.enabled": true });
+
+    host.setEnabled("quiet", false);
+    expect(ids()).toEqual(["plugins.enable.quiet"]);
+    expect(stored()).toEqual({});
+  });
+
+  it("reads a switch that isn't true or false as the plugin's default", () => {
+    const { ids, wrote } = hostWith([quiet, notes]);
+
+    wrote({ "quiet.enabled": "yes", "notes.enabled": "no" });
+
+    expect(ids()).toEqual(["note.new", "go.todos", "plugins.enable.quiet", "plugins.disable.notes"]);
+  });
+
+  it("tells a plugin each time the app arrives somewhere, and one turned on later where the app already is", async () => {
+    const heard: string[] = [];
+    const listening = (id: string): Plugin => ({ id, name: id, activate: (host) => void host.onNavigate(() => heard.push(id)) });
+    const { host } = hostWith([listening("early"), listening("late")], { settings: { "late.enabled": false } });
+
+    host.navigated();
+    host.navigated();
+    expect(heard).toEqual(["early", "early"]);
+
+    host.setEnabled("late", true);
+    await Promise.resolve();
+    expect(heard).toEqual(["early", "early", "late"]);
+
+    host.setEnabled("early", false);
+    host.navigated();
+    expect(heard).toEqual(["early", "early", "late", "late"]);
+  });
+
+  it("binds a ctrl chord to the Control key on a Mac, and to the same key as mod elsewhere", () => {
+    const jumping: Plugin = { id: "jumping", name: "Jumping", activate: (host) => void host.commands.register({ id: "jump.back", title: "Back", keys: ["ctrl+o"], run: () => {} }) };
+    const opening: Plugin = { id: "opening", name: "Opening", activate: (host) => void host.commands.register({ id: "file.open", title: "Open", keys: ["mod+o"], run: () => {} }) };
+
+    expect(hostWith([jumping, opening], { mac: true }).host.contributions().keybindings).toEqual({ "ctrl+o": "jump.back", "mod+o": "file.open" });
+    expect(hostWith([jumping, opening], { mac: false }).host.contributions().keybindings).toEqual({ "mod+o": "jump.back" });
+  });
+});
+
 describe("what the host says of each plugin", () => {
   const stateOf = (host: Host, id: string) => host.contributions().plugins.find((p) => p.id === id)!;
 
@@ -572,8 +670,9 @@ describe("what the host says of each plugin", () => {
     expect(stateOf(host, "palette")).toMatchObject({ description: null, icon: null, screenshots: [] });
   });
 
-  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot and its embeds", () => {
-    const { host } = hostWith([notes, palette]);
+  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot, its embeds and editor extensions", () => {
+    const editing: Plugin = { id: "editing", name: "Editing", activate: (host) => void host.editorExtensions.register({ id: "editing.keys", extension: {} }) };
+    const { host } = hostWith([notes, palette, editing]);
 
     expect(stateOf(host, "notes").adds).toEqual({
       commands: [
@@ -585,13 +684,15 @@ describe("what the host says of each plugin", () => {
         { slot: "page", id: "todos", label: "Todos" },
       ],
       embeds: [{ name: "timer", title: "Timer" }],
+      editorExtensions: [],
     });
-    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [] });
+    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [], editorExtensions: [] });
+    expect(stateOf(host, "editing").adds?.editorExtensions).toEqual(["editing.keys"]);
   });
 
   it("remembers the whole of what a plugin added once it is turned off, and knows nothing of one that hasn't been on", () => {
-    const quiet: Plugin = { id: "quiet", name: "Quiet", activate: (host) => void host.commands.register({ id: "quiet.go", title: "Go quietly", run: () => {} }) };
-    const { host, ids } = hostWith([notes, quiet], { settings: { "quiet.enabled": false } });
+    const quiet: Plugin = { id: "quiet", name: "Quiet", enabledByDefault: false, activate: (host) => void host.commands.register({ id: "quiet.go", title: "Go quietly", run: () => {} }) };
+    const { host, ids } = hostWith([notes, quiet]);
     // A page that is listening reads the contributions each time one is taken out, as the Plugins page does.
     host.subscribe(() => void host.contributions());
     const whole = stateOf(host, "notes").adds;
