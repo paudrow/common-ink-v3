@@ -10,7 +10,7 @@
  * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, ConnectOptions, Invite, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
@@ -63,8 +63,27 @@ export type Setting = { title: string; description?: string } & (
 
 export type SettingValue = boolean | string | number | readonly string[];
 
-/** The operations `host.perform` won't take: the member's settings, and every change to who is in the workspace, which goes through `host.members`. */
-export type KeptFromPerform = `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave";
+/**
+ * The operations `host.perform` won't take: the member's settings, every change to who is in the
+ * workspace, which goes through `host.members`, who a note or folder is shared with, which goes
+ * through `host.sharing`, and what a link's holder asks, which nobody signed in does.
+ */
+export type KeptFromPerform =
+  | `settings.${string}`
+  | `invite.${string}`
+  | "member.invite"
+  | "member.setRole"
+  | "member.remove"
+  | "member.leave"
+  | `grant.${string}`
+  | "note.setPrivate"
+  | `shared.${string}`;
+
+/** What a grant is on: one note or one folder. */
+export type SharedItem = { noteId: string } | { folderId: string };
+
+/** What the note list is showing in place of a folder when it shows the notes shared with a guest whose folders they can't see. */
+export const SHARED_WITH_ME = "shared-with-me";
 
 /** The operations a plugin can perform. */
 export type PluginOp = Exclude<OpInput, { type: KeptFromPerform }>;
@@ -112,7 +131,8 @@ export interface PluginHost {
   /**
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
    * is saved before an operation that moves a note through its history, and the editors take the result.
-   * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites.
+   * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites,
+   * and one that reads or changes who a note or folder is shared with.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
   /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
@@ -140,6 +160,24 @@ export interface PluginHost {
     leave(): Promise<void>;
     invites(): Promise<Invite[]>;
     revoke(inviteId: string): Promise<void>;
+  };
+  /**
+   * Who a note or a folder is shared with, read and changed as the member. The server lets a member
+   * who can change the item share it, lets only a note's maker make it private, and lets only an
+   * admin list every grant. A guest can ask `of` and nothing else.
+   */
+  readonly sharing: {
+    /** How one note or folder is shared: its grants, those on the folders above it, and for a note whether it is private. */
+    of(on: SharedItem): Promise<Sharing>;
+    /** Gives whoever signs in with `email` view or edit, or changes what they have. */
+    grant(on: SharedItem, email: string, access: GrantAccess): Promise<Grant>;
+    /** Sets who the item's link opens for, or takes the link away with null. The address is `/s/<token>`. */
+    link(on: SharedItem, kind: LinkKind | null): Promise<Grant | null>;
+    revoke(grantId: string): Promise<void>;
+    /** `removed` is how many grants and links other people had put on the note, which go as it becomes private. */
+    setPrivate(noteId: string, isPrivate: boolean): Promise<{ removed: number }>;
+    /** Every grant in the workspace, for an admin. */
+    all(): Promise<Grant[]>;
   };
   /** JSON this plugin keeps in this browser for this workspace and this member. Other plugins can't see it. */
   readonly storage: {
@@ -214,8 +252,8 @@ export interface Slots {
    * has nothing to show, so nothing above it moves when one appears.
    */
   bar: { id: string; component: View };
-  /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it. */
-  overlay: { id: string; component: ComponentType<ViewProps & { close: () => void }> };
+  /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it, and what it hands over is `state`. */
+  overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
 }
 
 export interface EditorProps extends ViewProps {
@@ -370,14 +408,15 @@ export interface EditorContext {
 
 /** A workspace's folders, indexed for drawing the tree and naming a folder's path. */
 export interface Folders {
-  unsortedId: string;
+  /** Null for a guest who wasn't given Unsorted. */
+  unsortedId: string | null;
   byId: ReadonlyMap<string, ListedFolder>;
   /** Children in display order; at the top level, Unsorted comes first. */
   childrenOf(parentId: string | null): readonly ListedFolder[];
   /** The folder and its ancestors, outermost first. */
   pathOf(id: string): ListedFolder[];
-  /** The names along `pathOf`, such as `Projects / Roadmap`. */
-  pathName(id: string): string;
+  /** The names along `pathOf`, such as `Projects / Roadmap`. For null, the folder of a note whose folder the guest can't see, "Shared with me". */
+  pathName(id: string | null): string;
 }
 
 export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav">;
@@ -388,8 +427,13 @@ export interface App {
   workspace: WorkspaceSummary;
   /** Every workspace the member is in. */
   workspaces: readonly WorkspaceSummary[];
-  /** Whether the member's role lets them change notes and folders. */
+  /**
+   * Whether the member may change something in this workspace: a member who isn't a viewer, or a
+   * guest. Whether they may change one note is that note's `access`.
+   */
   canEdit: boolean;
+  /** Whether a new note can be made where the note list is showing. */
+  canCreateNote: boolean;
   /** The address the app is at, such as `/history`. */
   path: string;
   /** What `go` was handed for this address, if anything. It is handed over once: Back or a reload finds nothing. */
@@ -404,7 +448,7 @@ export interface App {
   notes: readonly NoteSummary[] | null;
   /** Null while they load. */
   folders: Folders | null;
-  /** The folder the note list is showing, or null for every note. */
+  /** The folder the note list is showing, {@link SHARED_WITH_ME}, or null for every note. */
   folderId: string | null;
   writing: boolean;
   pages: readonly PageInfo[];
@@ -421,8 +465,8 @@ export interface App {
   openNote(noteId: string, options?: { preview?: boolean; reveal?: boolean; focus?: boolean }): void;
   /** For the editor area: puts a note at the app's address, or nothing. `replace` keeps Back from retracing the step. */
   showNote(noteId: string | null, options?: { replace?: boolean }): void;
-  /** Creates a note in the folder the note list is showing, and opens it. */
-  createNote(): void;
+  /** Creates a note in the folder the note list is showing, and opens it. Refused with the server's reason where the member can't. */
+  createNote(): Promise<void>;
   selectFolder(folderId: string): void;
   moveNote(noteId: string, folderId: string): Promise<void>;
   /** Tells the app a note changed, with the note as it is now. */
@@ -431,7 +475,8 @@ export interface App {
   refresh(): void;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
-  toggleOverlay(id: string): void;
+  /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
+  toggleOverlay(id: string, state?: unknown): void;
   switchWorkspace(workspaceId: string): void;
   /** Reads again which workspaces the member is in and their role in each, after a change to members that may be to the member themself. */
   reloadWorkspaces(): void;

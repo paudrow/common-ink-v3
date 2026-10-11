@@ -30,6 +30,9 @@ interface Tool {
 const MEMBERS =
   "Who is in a workspace decides who can read and change everything in it, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could invite a stranger as admin or remove the other admins. Only the member, signed in, changes who is in a workspace.";
 
+const SHARING =
+  "Who a note or a folder is shared with decides who can read it, up to anyone on the internet for a public link, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could publish a note or hand a folder to a stranger. Only the member, signed in, shares.";
+
 /**
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
  * tool below, and test/core/agent-parity.test.ts fails when one has neither.
@@ -43,6 +46,13 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "member.leave": "Leaving ends the member's own access and their agents' with it, and only an admin can undo it. The member does that themself.",
   "invite.list": "Invites name people who are not in the workspace yet, by email, and are only of use for managing them, which an agent can't do.",
   "invite.revoke": MEMBERS,
+  "grant.list": "How a note is shared names people outside the workspace by email, and is only of use for sharing it, which an agent can't do. What the agent itself may do with a note is in every listing of it, as access.",
+  "grant.set": SHARING,
+  "grant.link": SHARING,
+  "grant.revoke": SHARING,
+  "note.setPrivate": "A private note is hidden from every other member, admins too, and that is not a change in history. The member who made the note decides it, in the app.",
+  "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
+  "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
 };
 
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -70,12 +80,14 @@ const time = (description: string) => ({ type: "integer", minimum: 0, descriptio
 export const TOOLS: Tool[] = [
   {
     name: "list_workspaces",
-    description: "The workspaces you can reach, each with your role in it (admin, editor or viewer). You act with your member's role.",
+    description:
+      "The workspaces you can reach, each with your member's role in it: admin, editor or viewer, or guest where they aren't a member and were given some notes or folders. You act with your member's role and grants, and no more.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "list_notes",
-    description: "The notes in a workspace, newest change first: id, title, folder, revision and when it last changed. Narrow it to one folder, or to notes whose text changed since a time.",
+    description:
+      "The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, or to notes whose text changed since a time.",
     inputSchema: object({ folderId: folderId("Only notes in this folder, from list_folders"), updatedSince: time("Only notes whose text changed at or after this time") }),
     op: "note.list",
   },
@@ -115,7 +127,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "rebuild_links",
-    description: "Make the record behind backlinks again from the notes' text. Every write keeps that record, so this is only for a record that was changed some other way. It covers 40 notes a call: while the answer's next isn't null, call again with it as after. Needs the admin role.",
+    description: "Make the record behind backlinks again from the text of the notes you can see. Every write keeps that record, so this is only for a record that was changed some other way. It covers 40 notes a call: while the answer's next isn't null, call again with it as after. Needs the admin role.",
     inputSchema: object({ after: { type: "string", description: "The next of the call before" } }),
     op: "links.rebuild",
   },

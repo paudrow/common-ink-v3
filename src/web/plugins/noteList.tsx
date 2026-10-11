@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { Icon, NOTE_DRAG, ago, useNow, type NoteSummary, type Plugin } from "../plugin-api.ts";
+import { Icon, NOTE_DRAG, SHARED_WITH_ME, ago, useNow, type App, type NoteSummary, type Plugin } from "../plugin-api.ts";
 
 const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -17,20 +17,22 @@ interface Props {
   notes: readonly NoteSummary[] | null;
   openId: string | null;
   pathOf: (noteId: string) => string;
-  canEdit: boolean;
+  /** Whether a new note can be made where the list is showing. */
+  canCreate: boolean;
   /** Whether each note's first lines are shown under its title. */
   snippets: boolean;
-  onNew: () => void;
+  onNew: () => Promise<void>;
   /** A single click opens a preview; a double click keeps the note open. */
   onOpen: (note: NoteSummary, keep: boolean) => void;
 }
 
-function NoteList({ heading, notes, openId, pathOf, canEdit, snippets, onNew, onOpen }: Props) {
+function NoteList({ heading, notes, openId, pathOf, canCreate, snippets, onNew, onOpen }: Props) {
   const ids = useId();
   const now = useNow();
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<Sort>("recent");
   const [hasTodos, setHasTodos] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const needle = filter.trim().toLowerCase();
   const shown = (notes ?? [])
@@ -41,8 +43,17 @@ function NoteList({ heading, notes, openId, pathOf, canEdit, snippets, onNew, on
     <section className="note-list" aria-labelledby={`${ids}-heading`}>
       <header className="list-head">
         <h2 id={`${ids}-heading`}>{heading}</h2>
-        {canEdit && (
-          <button type="button" className="icon-button" aria-label="New note" title="New note" onClick={onNew}>
+        {canCreate && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="New note"
+            title="New note"
+            onClick={() => {
+              setError(null);
+              onNew().catch((err: Error) => setError(err.message));
+            }}
+          >
             <Icon name="plus" />
           </button>
         )}
@@ -69,6 +80,11 @@ function NoteList({ heading, notes, openId, pathOf, canEdit, snippets, onNew, on
           </button>
         </div>
       </div>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
       <nav aria-label="Notes" className="list-body">
         {notes && !shown.length && <p className="empty">{notes.length ? "No notes match." : "No notes in this folder."}</p>}
         <ul>
@@ -92,6 +108,11 @@ function NoteList({ heading, notes, openId, pathOf, canEdit, snippets, onNew, on
                 onDoubleClick={() => onOpen(note, true)}
               >
                 <span className="row-title" id={`${ids}-${note.id}`}>
+                  {note.private && (
+                    <span className="private-mark" title="Private">
+                      <Icon name="lock" />
+                    </span>
+                  )}
                   {titleOf(note)}
                 </span>
                 {snippets && note.snippet && <span className="row-snippet">{note.snippet}</span>}
@@ -110,6 +131,8 @@ function NoteList({ heading, notes, openId, pathOf, canEdit, snippets, onNew, on
   );
 }
 
+const headingOf = (app: App) => (app.folderId === SHARED_WITH_ME ? "Shared with me" : app.folderId && app.folders ? (app.folders.byId.get(app.folderId)?.name ?? "") : "All notes");
+
 export const noteList: Plugin = {
   id: "note-list",
   name: "Note list",
@@ -122,11 +145,11 @@ export const noteList: Plugin = {
       popover: true,
       component: ({ app }) => (
         <NoteList
-          heading={app.folderId && app.folders ? (app.folders.byId.get(app.folderId)?.name ?? "") : "All notes"}
-          notes={app.notes && (app.folderId ? app.notes.filter((n) => n.folderId === app.folderId) : app.notes)}
+          heading={headingOf(app)}
+          notes={app.notes && (app.folderId ? app.notes.filter((n) => n.folderId === (app.folderId === SHARED_WITH_ME ? null : app.folderId)) : app.notes)}
           openId={app.note?.id ?? null}
           pathOf={app.notePath}
-          canEdit={app.canEdit}
+          canCreate={app.canCreateNote}
           snippets={host.settings.get<boolean>("snippets")}
           onNew={app.createNote}
           onOpen={(note, keep) => app.openNote(note.id, { preview: !keep })}

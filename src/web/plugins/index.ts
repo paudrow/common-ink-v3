@@ -20,6 +20,7 @@ import { noteInfo } from "./noteInfo.tsx";
 import { noteList } from "./noteList.tsx";
 import { quickOpen } from "./quickOpen.tsx";
 import { quickTimer } from "./quickTimer.tsx";
+import { sharing } from "./sharing/index.tsx";
 import { sidebar } from "./sidebar.tsx";
 import { stopwatch } from "./stopwatch.ts";
 import { tables } from "./tables/index.ts";
@@ -29,4 +30,4 @@ import { vim } from "./vim/index.ts";
 import { wordCount } from "./wordCount.tsx";
 
 /** The plugins that come with the app, in the order their contributions are shown. Each is on until a member turns it off, except one that says it starts off. */
-export const BUILT_INS: readonly Plugin[] = [sidebar, folders, noteList, tabs, quickOpen, commandPalette, comingSoon, history, agents, members, backlinks, noteInfo, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, wordCount, media, html, gfm, links, tables, math, codeBlocks, bullets, vim];
+export const BUILT_INS: readonly Plugin[] = [sidebar, folders, noteList, tabs, quickOpen, commandPalette, comingSoon, history, agents, members, sharing, backlinks, noteInfo, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, wordCount, media, html, gfm, links, tables, math, codeBlocks, bullets, vim];

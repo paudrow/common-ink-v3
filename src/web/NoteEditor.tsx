@@ -3,7 +3,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Note } from "../core/protocol.ts";
+import type { GrantAccess, Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { completing } from "./completing.ts";
@@ -34,8 +34,16 @@ interface Props {
   /** Whether the editor is to take the cursor, now or once the note has loaded. `onFocused` is called when it has. */
   focus: boolean;
   onFocused: () => void;
-  /** Whether the member can change the note. When they can't, nothing in the editor does: not typing, not an embed, not a plugin's keys. */
-  canEdit: boolean;
+  /**
+   * What the member may do with the note, as the workspace's listing has it. Until that is known it
+   * is what the note itself said when it was read. With view, nothing in the editor changes the
+   * note: not typing, not an embed, not a plugin's keys.
+   */
+  access: GrantAccess | undefined;
+  /** Whether the note has since been hidden from the member, or is gone. Its text is then no longer shown. */
+  gone: boolean;
+  /** Called when the server won't take what was typed, which may mean the member's access changed. */
+  onRejected: () => void;
   /** What plugins have registered to draw inside a note. */
   embeds: readonly Embed[];
   /** The lists plugins offer at the cursor, such as the embed menu. */
@@ -50,7 +58,7 @@ interface Props {
   actions: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, canEdit, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta, actions }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta, actions }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const syncRef = useRef<NoteSync | null>(null);
   const edited = useRef(onEdit);
@@ -69,12 +77,15 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const mine = useMemo(() => forEditor({ noteId }), [noteId]);
   const { extensions, refused } = useMemo(() => mine(contributed), [mine, contributed]);
   const [locked] = useState(() => new Compartment());
-  const now = useRef({ focus, onFocused, extensions, canEdit });
-  now.current = { focus, onFocused, extensions, canEdit };
+  const [read, setRead] = useState<GrantAccess | undefined>(undefined);
+  const canEdit = (access ?? read) === "edit";
+  const now = useRef({ focus, onFocused, extensions, access, onRejected });
+  now.current = { focus, onFocused, extensions, access, onRejected };
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [missing, setMissing] = useState(false);
 
   useEffect(() => {
+    if (gone) return;
     let view: EditorView | null = null;
     let sync: NoteSync | null = null;
     let cancelled = false;
@@ -83,13 +94,17 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       (note) => {
         if (cancelled || !host.current) return;
         onLoaded(note);
-        sync = syncRef.current = new NoteSync(workspaceId, note, onSaved, setSaveState);
+        setRead(note.access);
+        sync = syncRef.current = new NoteSync(workspaceId, note, onSaved, (state) => {
+          setSaveState(state);
+          if (state === "rejected") now.current.onRejected();
+        });
         view = viewRef.current = new EditorView({
           parent: host.current,
           state: EditorState.create({
             doc: note.text,
             extensions: [
-              locked.of(now.current.canEdit ? [] : readOnly),
+              locked.of((now.current.access ?? note.access) === "edit" ? [] : readOnly),
               // Before the editor's own keys, so a plugin's keys are tried first.
               added.of(now.current.extensions),
               // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
@@ -127,7 +142,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       void sync?.close();
       view?.destroy();
     };
-  }, [workspaceId, noteId, onLoaded, onSaved, embedded, completed, added, locked]);
+  }, [workspaceId, noteId, gone, onLoaded, onSaved, embedded, completed, added, locked]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: locked.reconfigure(canEdit ? [] : readOnly) });
@@ -159,7 +174,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
     if (revision !== undefined) void syncRef.current?.pull(revision).catch(() => {});
   }, [revision]);
 
-  if (missing) return <p className="notice">This note doesn't exist, or you can't see it.</p>;
+  if (missing || gone) return <p className="notice">This note doesn't exist, or you can't see it.</p>;
   return (
     <section className="note" data-save-state={saveState}>
       <header className="note-bar">

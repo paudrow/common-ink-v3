@@ -1,4 +1,4 @@
-import { NO_SUCH_WORKSPACE, type Agent, type ConnectOptions, type Me, type OpErrorCode, type OpInput, type Results } from "../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, type Agent, type ConnectOptions, type Me, type OpErrorCode, type OpInput, type Results, type Shared } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -59,6 +59,10 @@ export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<
   });
   return answer;
 }
+
+/** What a link opens, asked as whoever holds it. Neither asks who that is unless the link is for people signed in. */
+export const openShared = (token: string) => request<Shared>(`/api/shared/${token}`);
+export const readShared = (token: string, noteId: string) => request<Results["shared.read"]>(`/api/shared/${token}/notes/${noteId}`);
 
 export const listAgents = () => request<{ agents: Agent[] }>("/api/agents").then((r) => r.agents);
 

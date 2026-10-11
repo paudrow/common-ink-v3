@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
-import type { NoteSummary, Plugin, ViewProps } from "../plugin-api.ts";
+import type { NoteSummary, Plugin, PluginHost, ViewProps } from "../plugin-api.ts";
 import { Soon } from "./lib/Soon.tsx";
+import { SharingSummary } from "./sharing/Summary.tsx";
 
-function Info({ app, note }: ViewProps & { note: NoteSummary }) {
+function Info({ host, app, note }: ViewProps & { host: PluginHost; note: NoteSummary }) {
   const tree = app.folders;
   const url = `${location.origin}${app.notePath(note.id)}`;
   const urlField = useRef<HTMLInputElement>(null);
@@ -30,27 +31,28 @@ function Info({ app, note }: ViewProps & { note: NoteSummary }) {
       <dt>Folder</dt>
       <dd>
         <span>{tree.pathName(note.folderId)}</span>
-        <select
-          aria-label="Move to"
-          value={note.folderId}
-          disabled={!app.canEdit}
-          onChange={(e) => {
-            setError(null);
-            move(e.target.value).catch((err: Error) => setError(err.message));
-          }}
-        >
-          {targets.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
+        {note.folderId !== null && (
+          <select
+            aria-label="Move to"
+            value={note.folderId}
+            disabled={note.access !== "edit"}
+            onChange={(e) => {
+              setError(null);
+              move(e.target.value).catch((err: Error) => setError(err.message));
+            }}
+          >
+            {targets.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        )}
         {error && <span role="alert" className="error">{error}</span>}
       </dd>
       <dt>Sharing</dt>
       <dd>
-        <span>Everyone in this workspace</span>
-        <Soon issue={15}>Sharing with people and links arrives with</Soon>
+        <SharingSummary host={host} app={app} note={note} />
       </dd>
       <dt>Tags</dt>
       <dd>
@@ -78,6 +80,6 @@ export const noteInfo: Plugin = {
   id: "note-info",
   name: "Note info",
   activate(host) {
-    host.views.register("inspector", { id: "info", label: "Info", icon: "info", component: Info });
+    host.views.register("inspector", { id: "info", label: "Info", icon: "info", component: (props) => <Info host={host} {...props} /> });
   },
 };

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
-import { Icon, NOTE_DRAG, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Role } from "../plugin-api.ts";
+import { Icon, NOTE_DRAG, SHARED_WITH_ME, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
 import { useKept } from "./lib/kept.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
+import { SHARE_COMMAND, SHARE_OVERLAY } from "./sharing/Summary.tsx";
 
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((id) => typeof id === "string");
 
@@ -13,14 +14,18 @@ const indent = (depth: number) => ({ "--depth": depth }) as CSSProperties;
 interface Props {
   host: PluginHost;
   tree: Tree;
-  role: Role;
+  role: Standing;
+  /** How many notes were shared with a guest who can't see the folders they are in. They get a row of their own. */
+  loose: number;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onChanged: () => void;
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
+  /** Opens the Share dialog for a folder. Left out when there is none to open. */
+  onShare?: (folderId: string) => void;
 }
 
-function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveNote }: Props) {
+function FolderTree({ host, tree, role, loose, selectedId, onSelect, onChanged, onMoveNote, onShare }: Props) {
   const ids = useId();
   const [expandedList, setExpanded] = useKept(host.storage, "expanded", isStrings, []);
   const expanded = new Set(expandedList);
@@ -30,12 +35,28 @@ function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveN
   const [error, setError] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const canEdit = role !== "viewer";
+  /** A guest has no place at the top of the workspace to put a folder. */
+  const member = role !== "guest";
+  /** The folder the server said the member may share, asked when its menu opens. */
+  const [shareable, setShareable] = useState<string | null>(null);
+  const menuFolderId = menu?.folder.id;
+  useEffect(() => {
+    if (!menuFolderId || !onShare) return;
+    let live = true;
+    host.sharing.of({ folderId: menuFolderId }).then(
+      (sharing) => live && sharing.canShare && setShareable(menuFolderId),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [host, menuFolderId, !onShare]);
 
   const expand = (id: string) => setExpanded((list) => (list.includes(id) ? list : [...list, id]));
   const collapse = (id: string) => setExpanded((list) => list.filter((x) => x !== id));
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId || selectedId === SHARED_WITH_ME) return;
     const ancestors = tree.pathOf(selectedId)
       .slice(0, -1)
       .map((f) => f.id);
@@ -110,7 +131,7 @@ function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveN
               choose();
             }}
             onContextMenu={(e) => {
-              if (!canEdit) return;
+              if (folder.access !== "edit") return;
               e.preventDefault();
               setMenu({ folder, x: e.clientX, y: e.clientY });
             }}
@@ -152,7 +173,7 @@ function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveN
             <span className="count" id={`${ids}-${folder.id}-count`}>
               {folder.noteCount}
             </span>
-            {canEdit && (
+            {folder.access === "edit" && (
               <button
                 type="button"
                 className="row-actions"
@@ -183,7 +204,7 @@ function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveN
     <div className="folders">
       <div className="section-head">
         <span id={`${ids}-label`}>Folders</span>
-        {canEdit && (
+        {canEdit && member && (
           <button type="button" className="icon-button" aria-label="New folder" title="New folder" onClick={() => startCreate(null)}>
             <Icon name="plus" />
           </button>
@@ -191,6 +212,27 @@ function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveN
       </div>
       <div role="tree" aria-labelledby={`${ids}-label`} className="tree">
         {rows}
+        {loose > 0 && (
+          <div
+            role="treeitem"
+            className="folder-row"
+            style={indent(1)}
+            aria-level={1}
+            aria-selected={selectedId === SHARED_WITH_ME}
+            aria-label="Shared with me"
+            tabIndex={selectedId === SHARED_WITH_ME ? 0 : -1}
+            onClick={() => onSelect(SHARED_WITH_ME)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              onSelect(SHARED_WITH_ME);
+            }}
+          >
+            <span className="chevron" />
+            <span className="folder-name">Shared with me</span>
+            <span className="count">{loose}</span>
+          </div>
+        )}
       </div>
       {error && (
         <p role="alert" className="error">
@@ -205,6 +247,7 @@ function FolderTree({ host, tree, role, selectedId, onSelect, onChanged, onMoveN
           onClose={closeMenu}
           items={[
             { label: "New folder inside", action: () => startCreate(menu.folder.id) },
+            ...(onShare && shareable === menu.folder.id ? [{ label: "Share", action: () => onShare(menu.folder.id) }] : []),
             ...(menu.folder.id === tree.unsortedId
               ? []
               : [
@@ -257,7 +300,17 @@ export const folders: Plugin = {
       id: "folders",
       component: ({ app }) =>
         app.folders && (
-          <FolderTree host={host} tree={app.folders} role={app.workspace.role} selectedId={app.folderId} onSelect={app.selectFolder} onChanged={app.refresh} onMoveNote={app.moveNote} />
+          <FolderTree
+            host={host}
+            tree={app.folders}
+            role={app.workspace.role}
+            loose={(app.notes ?? []).filter((n) => n.folderId === null).length}
+            selectedId={app.folderId}
+            onSelect={app.selectFolder}
+            onChanged={app.refresh}
+            onMoveNote={app.moveNote}
+            onShare={host.commands.list().some((c) => c.id === SHARE_COMMAND) ? (folderId) => app.toggleOverlay(SHARE_OVERLAY, { folderId }) : undefined}
+          />
         ),
     });
   },

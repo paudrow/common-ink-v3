@@ -29,7 +29,7 @@ export const history: Plugin = {
       label: "History",
       icon: "history",
       badge: (app) => (app.unseen ? "Changes you haven't seen" : null),
-      component: ({ app, note }) => <NoteHistory host={host} noteId={note.id} revision={note.revision} canEdit={app.canEdit} onChanged={app.noteChanged} onSeen={app.markSeen} />,
+      component: ({ app, note }) => <NoteHistory host={host} noteId={note.id} revision={note.revision} canEdit={note.access === "edit"} onChanged={app.noteChanged} onSeen={app.markSeen} />,
     });
   },
 };

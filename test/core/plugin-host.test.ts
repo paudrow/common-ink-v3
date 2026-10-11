@@ -24,6 +24,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
       agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
       members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
+      sharing: { of: async () => ({}) as never, grant: async () => ({}) as never, link: async () => null, revoke: async () => {}, setPrivate: async () => ({ removed: 0 }), all: async () => [] },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,
@@ -358,6 +359,26 @@ describe("plugin host", () => {
     expect(performed).toEqual([]);
     await perform({ type: "member.list" });
     expect(performed).toEqual([["greedy", "member.list"]]);
+  });
+
+  it("refuses a plugin that asks, as an operation, who something is shared with, to change that, or what a link opens", async () => {
+    let asked: PluginHost | null = null;
+    const { performed } = hostWith([{ id: "greedy", name: "Greedy", activate: (h) => void (asked = h) }]);
+    const perform = asked!.perform as (op: OpInput) => Promise<unknown>;
+    const sharing: OpInput[] = [
+      { type: "grant.list" },
+      { type: "grant.list", noteId: "aaaaaaaaaaaa" },
+      { type: "grant.set", noteId: "aaaaaaaaaaaa", email: "mallory@example.com", access: "edit" },
+      { type: "grant.link", folderId: "aaaaaaaaaaaa", link: "public" },
+      { type: "grant.revoke", id: "aaaaaaaaaaaa" },
+      { type: "note.setPrivate", id: "aaaaaaaaaaaa", private: false },
+    ];
+    const visitors: OpInput[] = [{ type: "shared.open" }, { type: "shared.read", id: "aaaaaaaaaaaa" }];
+
+    for (const op of sharing) await expect(perform(op), op.type).rejects.toThrow(`Greedy can't ${op.type}: who a note or folder is shared with is read and changed through host.sharing, by a plugin that is given it`);
+    for (const op of visitors) await expect(perform(op), op.type).rejects.toThrow(`Greedy can't ${op.type}: only whoever holds a link asks what it opens`);
+    expect(performed).toEqual([]);
+    expect(Object.keys(asked!.sharing).sort()).toEqual(["all", "grant", "link", "of", "revoke", "setPrivate"]);
   });
 });
 
@@ -700,5 +721,43 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
 
     expect(hostWith([jumping, opening], { mac: true }).host.contributions().keybindings).toEqual({ "ctrl+o": "jump.back", "mod+o": "file.open" });
     expect(hostWith([jumping, opening], { mac: false }).host.contributions().keybindings).toEqual({ "mod+o": "jump.back" });
+  });
+
+  it("gives a plugin that isn't Common Ink's own none of agents, members and sharing, whatever id it claims, and gives its own all three", async () => {
+    const reached: string[] = [];
+    const reaching = (name: string) => async () => void reached.push(name);
+    const hosts = new Map<string, PluginHost>();
+    const plugin = (id: string, name: string): Plugin => ({ id, name, activate: (h) => void hosts.set(name, h) });
+    const own = plugin("sharing", "Sharing");
+    // The same id as a built-in doesn't make it one: the host knows its own plugins by the values it was handed.
+    const impostor = plugin("members", "Impostor");
+    const theirs = plugin("theirs", "Theirs");
+    createPluginHost({
+      plugins: [own, impostor, theirs],
+      trusted: [own],
+      mac: true,
+      settings: {},
+      write: () => {},
+      provide: () =>
+        ({
+          app: () => ({}) as App,
+          perform: reaching("perform"),
+          agents: { list: reaching("agents.list"), connect: reaching("agents.connect"), disconnect: reaching("agents.disconnect") },
+          members: { invite: reaching("members.invite"), setRole: reaching("members.setRole"), remove: reaching("members.remove"), leave: reaching("members.leave"), invites: reaching("members.invites"), revoke: reaching("members.revoke") },
+          sharing: { of: reaching("sharing.of"), grant: reaching("sharing.grant"), link: reaching("sharing.link"), revoke: reaching("sharing.revoke"), setPrivate: reaching("sharing.setPrivate"), all: reaching("sharing.all") },
+          storage: { get: () => undefined, set: () => {} },
+        }) as never,
+    }).contributions();
+    const every = (h: PluginHost) =>
+      (["agents", "members", "sharing"] as const).flatMap((capability) => Object.entries(h[capability]).map(([method, call]) => [`${capability}.${method}`, call as () => Promise<unknown>] as const));
+
+    for (const who of ["Impostor", "Theirs"]) {
+      for (const [name, call] of every(hosts.get(who)!)) await expect(call(), `${who} ${name}`).rejects.toThrow(`${who} isn't given host.${name}: only Common Ink's own plugins are`);
+    }
+    expect(reached).toEqual([]);
+    expect(every(hosts.get("Theirs")!).map(([name]) => name)).toHaveLength(15);
+
+    for (const [, call] of every(hosts.get("Sharing")!)) await call();
+    expect(reached).toHaveLength(15);
   });
 });

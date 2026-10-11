@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { newId } from "./ids.ts";
+import { standingIn } from "./standing.ts";
 import { NO_SUCH_WORKSPACE, ConnectOptions, MAX_AGENT_NAME, OpError, type Agent } from "./protocol.ts";
 
 export const TOKEN_PREFIX = "cink_";
@@ -63,8 +64,7 @@ export async function connectAgent(db: D1Database, personId: string, rawName: st
   const active = await db.prepare("SELECT COUNT(*) AS n FROM agents WHERE person_id = ? AND revoked_at IS NULL AND expires_at > ?").bind(personId, now).first<{ n: number }>();
   if ((active?.n ?? 0) >= MAX_ACTIVE_AGENTS) throw new OpError("invalid", `You can have ${MAX_ACTIVE_AGENTS} agents connected; disconnect one first`);
   if (options.workspaceId) {
-    const member = await db.prepare("SELECT 1 FROM members WHERE workspace_id = ? AND person_id = ?").bind(options.workspaceId, personId).first();
-    if (!member) throw new OpError("not_found", NO_SUCH_WORKSPACE);
+    if (!(await standingIn(db, personId, options.workspaceId))) throw new OpError("not_found", NO_SUCH_WORKSPACE);
   }
   const token = TOKEN_PREFIX + b64url(crypto.getRandomValues(new Uint8Array(32)));
   const id = newId();

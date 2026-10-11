@@ -2355,3 +2355,272 @@ del.diff-line::before {
 .members .said {
   margin: 0;
 }
+
+/* Sharing */
+
+.private-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+}
+
+.private-mark svg {
+  width: 12px;
+  height: 12px;
+}
+
+.row-title .private-mark {
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+.share-dialog {
+  position: absolute;
+  top: 10vh;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, calc(100% - 32px));
+  max-height: 78vh;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.share-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.share-head h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+}
+
+.share-body p,
+.share-body h3 {
+  margin: 0;
+}
+
+.share-body h3 {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.share-body .hint,
+.share-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.share-body .error {
+  text-align: left;
+}
+
+.share-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.share-section .check,
+.share-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.share-add {
+  display: flex;
+  gap: 6px;
+}
+
+.share-add input {
+  flex: 1;
+}
+
+.share-dialog input[type="email"],
+.share-dialog select,
+.share-dialog .copyable textarea {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.share-dialog .copyable textarea {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.share-list,
+.grant-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-row,
+.grant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+.share-row:first-child {
+  border-top: 0;
+}
+
+.share-who {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.share-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sharing .agent-name {
+  color: inherit;
+}
+
+/* The page a link opens */
+
+.shared {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.shared *,
+.shared *::before,
+.shared *::after {
+  box-sizing: border-box;
+}
+
+.shared-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.shared-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.shared-title {
+  flex: 1;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-head .badge {
+  margin-left: auto;
+}
+
+.shared-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.shared-list {
+  flex: none;
+  width: 260px;
+  padding: 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--bg-side);
+}
+
+.shared-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shared-list ul ul {
+  padding-left: 10px;
+}
+
+.shared-folder {
+  display: block;
+  padding: 10px 8px 2px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.shared-main {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .shared-body {
+    flex-direction: column;
+  }
+
+  .shared-list {
+    width: auto;
+    max-height: 35vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

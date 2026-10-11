@@ -140,7 +140,8 @@ export function Members({ host, app }: { host: PluginHost; app: App }) {
         {asked?.kind === "remove" && asked.member.personId === member.personId && (
           <span className="confirm" role="group" aria-label={`Remove ${member.name}`}>
             <span>
-              {member.name} and their agents lose {workspace.name} at once. What they wrote stays, under their name.
+              {member.name} and their agents lose {workspace.name} at once. What they wrote stays, under their name. Their private notes stop being private, and everyone in {workspace.name} can
+              then see them as ordinary notes.
             </span>
             <button type="button" className="button small primary" autoFocus onClick={() => void remove(member)}>
               Remove

@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
-import { Icon, useDismiss, type PageInfo, type Plugin, type Role, type ViewProps } from "../plugin-api.ts";
+import { Icon, useDismiss, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
+const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
 function Sidebar({ app }: ViewProps) {
   const [more, setMore] = useState(false);

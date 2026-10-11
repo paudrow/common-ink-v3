@@ -4,7 +4,8 @@ A member connects an agent in the web app, on the Agents page (`/agents`, from t
 
 ## Rules
 
-- An agent acts with its member's role in each workspace, and no further. A viewer's agent can read and cannot write.
+- An agent acts with its person's access in each workspace, and no further: their role where they are a member, narrowed by any grant that names them, and where they are a guest only what was granted. A viewer's agent can read and cannot write. A note its person can't see, such as another member's private note, is no note to the agent: it is in no listing, count, backlink, link title or history, and asking for it by id answers `not_found: No such note`, the same as for an id that was never a note's. Every listing of a note carries `access`, `edit` or `view`: what the agent may do with it.
+- An agent can't share. Granting a note or a folder to someone, making or removing a link, making a note private, and reading who a note is shared with are for the member, signed in, in the Share dialog. A link can put a note before the whole internet, and none of this is a change in history that could be reverted.
 - Its changes are recorded with the agent as author (`author_kind = 'agent'`, `author_id` = the agent's id), under the name the member gave it, so they can be told apart from the member's own.
 - A member who loses access to a workspace takes their agents' access with them: every call checks the member's membership at the time. Removing a member, or their leaving, ends it on the agent's next call, and a change of role changes what the agent can do on its next call.
 - An agent can see who is in a workspace (`list_members`: each member's person id, name, and role, and never an email, whatever its member's role) and can't change it. Inviting, changing a role, removing a member, leaving, and listing or revoking invites are for the member, signed in, on the Members page. Who is in a workspace decides who can read and change everything in it, that isn't a change in history that could be reverted, and an agent reads notes other people wrote, so one that was talked into it could invite a stranger as admin. The core refuses these to an agent whatever its member's role, not only the tools.
@@ -64,7 +65,7 @@ Most clients take a URL and a header:
     npm run ink -- reapply <id> --changes <n>
     npm run ink -- undo <id>
     npm run ink -- redo <id>
-    npm run ink -- workspaces
+    npm run ink -- workspaces                 # role is admin, editor, viewer, or guest
     npm run ink -- members
 
 Add `--workspace <id>` when the member is in more than one workspace.

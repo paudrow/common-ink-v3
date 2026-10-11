@@ -32,7 +32,23 @@ const orphaned = ({ db, workspaceId, now }: Asking, by: { id: string } | { email
     )
     .bind(workspaceId, "id" in by ? by.id : by.email, now);
 
+/*
+ * What goes with a member who is no longer one, in the batch that took them out. Each does nothing
+ * while they still are one.
+ *
+ * Their grants go: a grant on a member only narrowed their role, and left behind it would let them
+ * back in as a guest. Their private notes stop being private, since nobody else could ever reach
+ * them, and each keeps whose it was, when, and who took the member out.
+ */
+const gone = (member: string) => `NOT EXISTS (SELECT 1 FROM members m WHERE m.workspace_id = ?1 AND m.person_id = ${member})`;
+const ungranted = ({ db, workspaceId }: Asking, memberId: string) => db.prepare(`DELETE FROM grants WHERE workspace_id = ?1 AND person_id = ?2 AND ${gone("?2")}`).bind(workspaceId, memberId);
+const released = ({ db, workspaceId, personId, now }: Asking, memberId: string) =>
+  db
+    .prepare(`UPDATE notes SET private_owner = NULL, released_from = ?3, released_by = ?2, released_at = ?4 WHERE workspace_id = ?1 AND private_owner = ?3 AND ${gone("?3")}`)
+    .bind(workspaceId, personId, memberId, now);
+
 const LAST_ADMIN = "A workspace needs an admin. Make someone else an admin first.";
+const OWNS_PRIVATE = "You have private notes here, which nobody else can reach. Stop them being private first, so they aren't left with nobody.";
 
 /** Why a statement that changes a member changed nothing. */
 async function refusal({ db, workspaceId, personId }: Asking, doing: string, memberId: string, needs: "admin" | "member" = "admin"): Promise<OpError> {
@@ -44,6 +60,7 @@ async function refusal({ db, workspaceId, personId }: Asking, doing: string, mem
   if (!asking) return new OpError("not_found", NO_SUCH_WORKSPACE);
   if (needs === "admin" && asking.role !== "admin") return new OpError("forbidden", `A ${asking.role} can't ${doing}`);
   if (!results.some((r) => r.person_id === memberId)) return new OpError("not_found", "No such member");
+  if (needs === "member" && (await db.prepare("SELECT 1 FROM notes WHERE workspace_id = ? AND private_owner = ?").bind(workspaceId, personId).first())) return new OpError("invalid", OWNS_PRIVATE);
   return new OpError("invalid", LAST_ADMIN);
 }
 
@@ -76,17 +93,28 @@ export async function removeMember(asking: Asking, memberId: string): Promise<{ 
   const [removed] = await db.batch([
     db.prepare(`DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?3 AND ${STILL_ADMIN} AND (role <> 'admin' OR ${ANOTHER_ADMIN})`).bind(workspaceId, personId, memberId),
     orphaned(asking, { id: memberId }),
+    ungranted(asking, memberId),
+    released(asking, memberId),
   ]);
   if (!removed!.meta.changes) throw await refusal(asking, "member.remove", memberId);
   return { memberId };
 }
 
-/** Anyone may leave, except the workspace's only admin. */
+/**
+ * Anyone may leave, except the workspace's only admin, and except while they have private notes:
+ * those are theirs to hand to the workspace, by stopping them being private, before they go.
+ */
 export async function leave(asking: Asking): Promise<{ memberId: string }> {
   const { db, workspaceId, personId } = asking;
   const [left] = await db.batch([
-    db.prepare(`DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?2 AND (role <> 'admin' OR ${anotherAdminThan("?2")})`).bind(workspaceId, personId),
+    db
+      .prepare(
+        `DELETE FROM members WHERE workspace_id = ?1 AND person_id = ?2 AND (role <> 'admin' OR ${anotherAdminThan("?2")})
+           AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.workspace_id = ?1 AND n.private_owner = ?2)`,
+      )
+      .bind(workspaceId, personId),
     orphaned(asking, { id: personId }),
+    ungranted(asking, personId),
   ]);
   if (!left!.meta.changes) throw await refusal(asking, "member.leave", personId, "member");
   return { memberId: personId };

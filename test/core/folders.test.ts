@@ -12,9 +12,9 @@ describe("folders", () => {
     const { unsortedId, folders } = await perform(env.DB, ada, { type: "folder.list" });
 
     expect(folders).toEqual([
-      { id: projects.id, name: "projects", parentId: work.id, noteCount: 0 },
-      { id: unsortedId, name: "Unsorted", parentId: null, noteCount: 0 },
-      { id: work.id, name: "Work", parentId: null, noteCount: 0 },
+      { id: projects.id, name: "projects", parentId: work.id, noteCount: 0, access: "edit" },
+      { id: unsortedId, name: "Unsorted", parentId: null, noteCount: 0, access: "edit" },
+      { id: work.id, name: "Work", parentId: null, noteCount: 0, access: "edit" },
     ]);
   });
 
@@ -63,7 +63,7 @@ describe("folders", () => {
 
     expect(renamed).toEqual({ id: work.id, name: "Office", parentId: null });
     expect((await perform(env.DB, ada, { type: "folder.list" })).folders.map((f) => f.name)).toEqual(["Office", "Unsorted"]);
-    await expect(perform(env.DB, ada, { type: "folder.rename", id: unsortedId, name: "Inbox" })).rejects.toMatchObject({ code: "invalid" });
+    await expect(perform(env.DB, ada, { type: "folder.rename", id: unsortedId!, name: "Inbox" })).rejects.toMatchObject({ code: "invalid" });
   });
 
   it("have names unique among their siblings, ignoring case", async () => {
@@ -106,7 +106,7 @@ describe("folders", () => {
     const theirs = await perform(env.DB, grace, { type: "folder.create", name: "Theirs" });
     const { unsortedId } = await perform(env.DB, ada, { type: "folder.list" });
 
-    await expect(perform(env.DB, ada, { type: "folder.delete", id: unsortedId })).rejects.toMatchObject({ code: "invalid", message: "Unsorted can't be deleted" });
+    await expect(perform(env.DB, ada, { type: "folder.delete", id: unsortedId! })).rejects.toMatchObject({ code: "invalid", message: "Unsorted can't be deleted" });
     await expect(perform(env.DB, ada, { type: "folder.delete", id: theirs.id })).rejects.toMatchObject({ code: "not_found", message: "No such folder" });
     expect((await perform(env.DB, grace, { type: "folder.list" })).folders.map((f) => f.name)).toEqual(["Theirs", "Unsorted"]);
   });
@@ -133,7 +133,7 @@ describe("folders", () => {
     const { unsortedId } = await perform(env.DB, ada, { type: "folder.list" });
 
     const inWork = await perform(env.DB, ada, { type: "note.list", folderId: work.id });
-    const inUnsorted = await perform(env.DB, ada, { type: "note.list", folderId: unsortedId });
+    const inUnsorted = await perform(env.DB, ada, { type: "note.list", folderId: unsortedId! });
     const everywhere = await perform(env.DB, ada, { type: "note.list" });
 
     expect(inWork.map((n) => n.title)).toEqual(["Plan"]);
@@ -153,7 +153,7 @@ describe("folders", () => {
 
     expect(moved).toEqual({ ...note, folderId: work.id });
     expect((await perform(env.DB, ada, { type: "note.list", folderId: work.id })).map((n) => [n.id, n.updatedAt])).toEqual([[note.id, 1000]]);
-    expect(await perform(env.DB, ada, { type: "note.list", folderId: note.folderId })).toEqual([]);
+    expect(await perform(env.DB, ada, { type: "note.list", folderId: note.folderId! })).toEqual([]);
     expect((await perform(env.DB, ada, { type: "note.history", id: note.id })).map((c) => c.revision)).toEqual([1]);
   });
 

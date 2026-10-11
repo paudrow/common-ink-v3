@@ -10,9 +10,9 @@ export function folderTree({ unsortedId, folders }: Results["folder.list"]): Fol
     children.set(folder.parentId, siblings);
   }
   const byId = new Map(folders.map((f) => [f.id, f]));
-  const pathOf = (id: string) => {
+  const pathOf = (id: string | null) => {
     const path: ListedFolder[] = [];
-    for (let folder = byId.get(id); folder; folder = folder.parentId ? byId.get(folder.parentId) : undefined) path.unshift(folder);
+    for (let folder = id ? byId.get(id) : undefined; folder; folder = folder.parentId ? byId.get(folder.parentId) : undefined) path.unshift(folder);
     return path;
   };
   return {
@@ -21,8 +21,10 @@ export function folderTree({ unsortedId, folders }: Results["folder.list"]): Fol
     childrenOf: (id) => children.get(id) ?? [],
     pathOf,
     pathName: (id) =>
-      pathOf(id)
-        .map((f) => f.name)
-        .join(" / "),
+      id === null
+        ? "Shared with me"
+        : pathOf(id)
+            .map((f) => f.name)
+            .join(" / "),
   };
 }

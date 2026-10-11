@@ -26,11 +26,12 @@ function sideAt(body: HTMLElement, x: number) {
 interface Props {
   layout: EditorLayout;
   titleOf: (noteId: string) => string;
+  isPrivate: (noteId: string) => boolean;
   dispatch: (action: EditorAction) => void;
   renderNote: (group: Group, noteId: string) => ReactNode;
 }
 
-export function EditorGroups({ layout, titleOf, dispatch, renderNote }: Props) {
+export function EditorGroups({ layout, titleOf, isPrivate, dispatch, renderNote }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -112,6 +113,11 @@ export function EditorGroups({ layout, titleOf, dispatch, renderNote }: Props) {
                       onMouseDown={(e) => e.button === 1 && e.preventDefault()}
                       onAuxClick={(e) => e.button === 1 && close()}
                     >
+                      {isPrivate(noteId) && (
+                        <span className="private-mark" title="Private">
+                          <Icon name="lock" />
+                        </span>
+                      )}
                       <span className="tab-title">{title}</span>
                       <button
                         type="button"

@@ -52,7 +52,8 @@ interface ChangesProps {
   version: number;
   /** Whether each change names its note, as it must when the list spans notes. */
   showNote: boolean;
-  canEdit: boolean;
+  /** Whether the member may change a note, and so revert, put back, and label its changes. */
+  canEdit: (noteId: string) => boolean;
   /** A note's latest revision, when known. */
   head: (noteId: string) => number | undefined;
   empty: string;
@@ -139,7 +140,7 @@ function Changes({ host, query, version, showNote, canEdit, head, empty, onChang
   return (
     <div className="changes">
       {error && <p role="alert" className="error">{error}</p>}
-      {canEdit && picked.length > 0 && (
+      {picked.length > 0 && (
         <div className="selection" role="group" aria-label="Selected changes">
           <span>{count(picked.length, "change")} selected</span>
           <button type="button" className="button small" disabled={busy || standing.length !== picked.length} onClick={() => act(perNote("note.revertChanges"))}>
@@ -163,7 +164,7 @@ function Changes({ host, query, version, showNote, canEdit, head, empty, onChang
           return (
             <li key={key} className="change" data-reverted={change.revertedBy !== null || undefined} aria-label={`Change ${change.revision}${where} by ${change.author.name}`}>
               <div className="change-head">
-                {canEdit && (
+                {canEdit(change.noteId) && (
                   <input
                     type="checkbox"
                     aria-label={`Select change ${change.revision}${where}`}
@@ -199,7 +200,7 @@ function Changes({ host, query, version, showNote, canEdit, head, empty, onChang
               {what && <p className="change-note">{what}</p>}
               {change.revertedBy !== null && <p className="change-note">Taken back out by change {change.revertedBy}</p>}
               {change.diff && <DiffView diff={change.diff} />}
-              {canEdit &&
+              {canEdit(change.noteId) &&
                 (labeling === key ? (
                   <form
                     className="change-actions"
@@ -266,7 +267,7 @@ export function NoteHistory({ host, noteId, revision, canEdit, onChanged, onSeen
       query={query}
       version={revision}
       showNote={false}
-      canEdit={canEdit}
+      canEdit={() => canEdit}
       head={() => revision}
       empty="Nothing has been written in this note yet."
       onChanged={onChanged}
@@ -411,6 +412,7 @@ export function HistoryMode({ host, personId, notes, canEdit, showAuthor, onOpen
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const heads = useMemo(() => new Map(notes.map((n) => [n.id, n.revision])), [notes]);
+  const editable = useMemo(() => new Set(notes.filter((n) => n.access === "edit").map((n) => n.id)), [notes]);
   const version = useMemo(() => notes.reduce((sum, n) => sum + n.revision, 0), [notes]);
 
   useEffect(() => {
@@ -502,7 +504,7 @@ export function HistoryMode({ host, personId, notes, canEdit, showAuthor, onOpen
         query={query}
         version={version}
         showNote
-        canEdit={canEdit}
+        canEdit={(noteId) => editable.has(noteId)}
         head={(noteId) => heads.get(noteId)}
         empty={filtered ? "No changes match these filters." : "Nothing has been written in this workspace yet."}
         onChanged={onChanged}

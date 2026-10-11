@@ -63,6 +63,12 @@ export async function asViewerOfNote(page: Page, text: string, name = "Vera View
   return { note, admin, workspaceId };
 }
 
+/** A browser with no cookies at all, as someone who was only sent a link has. */
+export async function visitor(page: Page): Promise<Page> {
+  const context = await page.context().browser()!.newContext({ baseURL: test.info().project.use.baseURL });
+  return context.newPage();
+}
+
 export const noteIdIn = (page: Page) => /([a-z0-9]{12})$/.exec(new URL(page.url()).pathname)![1]!;
 
 /** A way to call the MCP tools as the agent `token` belongs to. `status` is what /mcp answers a call with. */

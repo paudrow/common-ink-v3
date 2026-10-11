@@ -55,6 +55,18 @@ const PATHS = {
     </>
   ),
   writing: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
+  lock: (
+    <>
+      <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
+      <path d="M5.5 7V5.25a2.5 2.5 0 0 1 5 0V7" />
+    </>
+  ),
+  share: (
+    <>
+      <circle cx="6" cy="5.75" r="2.25" />
+      <path d="M2 13c.4-2.2 1.9-3.4 4-3.4s3.6 1.2 4 3.4M12 4.5v4M10 6.5h4" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof PATHS;

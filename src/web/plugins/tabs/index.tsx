@@ -49,6 +49,7 @@ export const tabs: Plugin = {
     function Editor({ app, renderNote }: EditorProps) {
       const shown = useSyncExternalStore(subscribe, () => layout);
       const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
+      const locked = useMemo(() => new Set((app.notes ?? []).filter((n) => n.private).map((n) => n.id)), [app.notes]);
       const home = app.path === "/";
 
       useEffect(() => {
@@ -63,6 +64,7 @@ export const tabs: Plugin = {
         <EditorGroups
           layout={shown}
           titleOf={(noteId) => (titles ? titles.get(noteId) || "Untitled" : "")}
+          isPrivate={(noteId) => locked.has(noteId)}
           dispatch={dispatch}
           renderNote={(group, noteId) => renderNote(noteId, { onEdit: () => dispatch({ type: "pin", groupId: group.id, noteId }), corner: group === shown.groups.at(-1) })}
         />

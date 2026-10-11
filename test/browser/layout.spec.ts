@@ -192,7 +192,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
   await expect(panel.getByRole("definition").first().locator("span")).toHaveText("Projects / Common Ink");
   await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveValue(ink.id);
-  await expect(panel.getByRole("definition").nth(1)).toHaveText("Everyone in this workspaceSharing with people and links arrives with #15.");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("Everyone in this workspace · Link offShare");
   await expect(panel.getByRole("definition").nth(2)).toHaveText("Tags arrive with #21.");
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveValue(new URL(`/note/roadmap-${note.id}`, page.url()).href);
   await panel.getByRole("button", { name: "Copy" }).click();
@@ -254,7 +254,7 @@ test("a rail opens its panel over the note without moving it, and opening a note
 
   await page.getByRole("button", { name: "Info", exact: true }).click();
   const info = page.getByRole("dialog", { name: "Info" });
-  await expect(info.getByRole("combobox", { name: "Move to" })).toHaveValue(first.folderId);
+  await expect(info.getByRole("combobox", { name: "Move to" })).toHaveValue(first.folderId!);
   expect(await text.boundingBox()).toEqual(before);
   await text.click();
   await expect(info).toHaveCount(0);
