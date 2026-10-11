@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { folderTitle, type EditorProps, type Opened, type Plugin } from "../../plugin-api.ts";
-import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
+import { EditorGroups } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction } from "./editorLayout.ts";
 
 /** Whether the tab in front is this one and, for a page, at this address. */
@@ -29,31 +29,18 @@ export const tabs: Plugin = {
 
     /**
      * The app's address names the focused group's active tab, so every change to the layout goes
-     * through here. Back retraces every open and close. Moving between tabs already open is one
-     * step however many moves it took, and never takes the place of an open.
+     * through here. Moving between tabs already open isn't a step Back should retrace, so only an
+     * open or a close adds to the browser's history.
      */
-    /** The group whose tab in front is to take the cursor once it is drawn. */
-    let cursorTo: string | null = null;
-    const cursorPut = () => {
-      if (cursorTo === null) return;
-      cursorTo = null;
-      for (const listener of [...listeners]) listener();
-    };
     const dispatch = (action: EditorAction) => {
       const next = editorReducer(layout, action);
-      if ((action.type === "split" || action.type === "send") && next !== layout) {
-        // A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
-        host.app().setFocus(false);
-        // It is drawn anew where it went, and what had the cursor in it is gone, so the cursor is put in it there.
-        cursorTo = next.focusedGroupId;
-      }
       if (next !== layout) {
         layout = next;
         host.storage.set("layout", layout);
         for (const listener of [...listeners]) listener();
       }
       // Dragging the edge of a split goes nowhere.
-      if (action.type !== "resize") host.app().show(focused(layout), { move: action.type === "focus" || action.type === "activate" });
+      if (action.type !== "resize") host.app().show(focused(layout), { replace: action.type === "focus" || action.type === "activate" });
     };
     const onTab = (action: (at: { groupId: string; tab: Opened }) => EditorAction) => () => {
       const tab = focused(layout);
@@ -64,14 +51,11 @@ export const tabs: Plugin = {
     for (const { scope, id, title } of CLOSES) host.commands.register({ id, title, run: onTab((tab) => ({ type: "close", scope, ...tab })) });
     host.commands.register({ id: "editor.splitRight", title: "Split editor right", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) });
     host.commands.register({ id: "editor.splitDown", title: "Split editor down", run: onTab((tab) => ({ type: "split", side: "down", ...tab })) });
-    host.commands.register({ id: "tab.moveToNextGroup", title: "Move tab to next group", run: onTab((tab) => ({ type: "send", to: "next", ...tab })) });
-    host.commands.register({ id: "tab.moveToPreviousGroup", title: "Move tab to previous group", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) });
-    host.commands.register({ id: "tab.menu", title: "Show tab menu", run: showTabMenu });
 
-    function Editor({ app, renderNote, renderFolder, renderPage, empty }: EditorProps) {
+    function Editor({ app, renderNote, renderFolder, renderPage, empty, controls }: EditorProps) {
       const shown = useSyncExternalStore(subscribe, () => layout);
-      const cursorGroup = useSyncExternalStore(subscribe, () => cursorTo);
       const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
+      const locked = useMemo(() => new Set((app.notes ?? []).filter((n) => n.private).map((n) => n.id)), [app.notes]);
       const home = app.path === "/";
 
       useEffect(() => {
@@ -91,35 +75,15 @@ export const tabs: Plugin = {
           layout={shown}
           titleOf={titleOf}
           iconOf={(tab) => (tab.kind === "folder" ? "folders" : tab.kind === "page" ? pages.get(tab.id)?.icon : undefined)}
+          isPrivate={(tab) => tab.kind === "note" && locked.has(tab.id)}
           dispatch={dispatch}
-          render={(group, tab) =>
-            tab.kind === "folder"
-              ? renderFolder(tab.id)
-              : tab.kind === "page"
-                ? renderPage(tab.id, tab.path)
-                : renderNote(tab.id, { onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }), focus: group.id === cursorGroup, onFocused: cursorPut })
-          }
+          render={(group, tab) => (tab.kind === "folder" ? renderFolder(tab.id) : tab.kind === "page" ? renderPage(tab.id, tab.path) : renderNote(tab.id, { onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }) }))}
           empty={empty}
-          cursorTo={cursorGroup}
-          onCursorPut={cursorPut}
-          focusMode={{
-            on: app.focus,
-            keys: host.commands.list().find((c) => c.id === "view.toggleFocus")?.shortcut,
-            // Asked for on a group, focus turns to that group first, so what fills the window is its tab in front.
-            toggle: (groupId) => {
-              if (groupId !== layout.focusedGroupId) dispatch({ type: "focus", groupId });
-              app.setFocus(!app.focus);
-            },
-          }}
+          controls={controls}
         />
       );
     }
 
-    host.views.register("editor", {
-      id: "tabs",
-      component: Editor,
-      open: (tab, { preview, background }) => dispatch({ type: "open", tab, preview, background }),
-      split: (tab, side) => dispatch({ type: "split", groupId: layout.focusedGroupId, side, tab, keep: true }),
-    });
+    host.views.register("editor", { id: "tabs", component: Editor, open: (tab, { preview, background }) => dispatch({ type: "open", tab, preview, background }) });
   },
 };

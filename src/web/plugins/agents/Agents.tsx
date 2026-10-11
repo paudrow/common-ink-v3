@@ -1,59 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, ago, useNow, type Agent, type AgentEdit, type ExpiresIn, type PluginHost, type WorkspaceSummary } from "../../plugin-api.ts";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, ago, useNow, type Agent, type PluginHost, type WorkspaceSummary } from "../../plugin-api.ts";
 import { Copyable } from "../lib/Copyable.tsx";
-import { asksOfAuthor, useReverts } from "../lib/RevertDialog.tsx";
+import { RevertAuthor } from "../lib/RevertAuthor.tsx";
 
 const DAY_MS = 86_400_000;
 const EXPIRIES = [30, DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS];
-
-/**
- * What an agent may do, as a form's fields: the same when it is connected and when it is edited.
- * `agent` is the one being edited, whose expiry stays as it is unless another is picked.
- */
-function Permissions({ workspaces, agent, ends }: { workspaces: readonly WorkspaceSummary[]; agent?: Agent; ends?: string }) {
-  return (
-    <>
-      <label>
-        <span>Reaches</span>
-        <select name="workspace" defaultValue={agent?.workspaceId ?? ""}>
-          <option value="">Every workspace I'm in</option>
-          {agent?.workspaceId && !workspaces.some((w) => w.id === agent.workspaceId) && <option value={agent.workspaceId}>As it is: only a workspace you have left</option>}
-          {workspaces.map((w) => (
-            <option key={w.id} value={w.id}>
-              Only {w.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        <span>Expires</span>
-        <select name="expires" defaultValue={agent ? "" : DEFAULT_EXPIRY_DAYS}>
-          {agent && <option value="">As it is: {ends}</option>}
-          {EXPIRIES.map((days) => (
-            <option key={days} value={days}>
-              In {days} days
-            </option>
-          ))}
-          {agent?.expiresAt !== null && <option value="never">Never</option>}
-        </select>
-      </label>
-      <label className="check">
-        <input type="checkbox" name="readOnly" defaultChecked={agent?.readOnly} />
-        <span>Read only: it can read and can't change anything</span>
-      </label>
-    </>
-  );
-}
-
-/** The fields of `Permissions` as the form holds them. An expiry left as it is is left out. */
-function permissionsOf(data: FormData): { workspaceId: string | null; expiresInDays?: ExpiresIn; readOnly: boolean } {
-  const expires = data.get("expires") as string;
-  return {
-    workspaceId: (data.get("workspace") as string) || null,
-    ...(expires && { expiresInDays: expires === "never" ? "never" : Number(expires) }),
-    readOnly: data.has("readOnly"),
-  };
-}
 
 interface Props {
   host: PluginHost;
@@ -64,8 +15,8 @@ interface Props {
   /** Changes when the workspace's notes do, so which agents have changed one is read again. */
   version: number;
   /** Left out when there is nowhere to show them. */
-  onShowChanges?: (agent: Agent) => void;
-  /** Called once an agent's changes were reverted, or that was undone, so the notes are read again. */
+  onShowChanges?: (agentId: string) => void;
+  /** Called once an agent's changes were reverted, so the notes are read again. */
   onReverted: () => void;
 }
 
@@ -102,19 +53,14 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
   const [wrote, setWrote] = useState<ReadonlySet<string>>(new Set());
   const [fresh, setFresh] = useState<{ agent: Agent; token: string } | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canEdit = workspace.role !== "viewer";
-  /** The agent whose changes are being read for a revert. */
-  const [reading, setReading] = useState<string | null>(null);
-  const reverts = useReverts({ host, version, found: "in History", onChanged: onReverted });
 
   const load = useCallback(() => host.agents.list().then(setAgents, (err: Error) => setError(err.message)), [host]);
   useEffect(() => {
     void load();
     let live = true;
-    // Left unknown when it can't be read: the agents are still listed, without the way to revert what one wrote.
-    host.perform({ type: "history.authors" }).then((authors) => live && setWrote(new Set(authors.flatMap((a) => (a.kind === "agent" ? [a.agentId] : [])))), () => {});
+    host.perform({ type: "history.authors" }).then((authors) => live && setWrote(new Set(authors.flatMap((a) => (a.kind === "agent" ? [a.agentId] : [])))));
     return () => {
       live = false;
     };
@@ -126,28 +72,15 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
     const data = new FormData(form);
     setError(null);
     try {
-      const { workspaceId, ...options } = permissionsOf(data);
-      setFresh(await host.agents.connect(data.get("name") as string, { ...options, workspaceId: workspaceId ?? undefined }));
+      setFresh(
+        await host.agents.connect(data.get("name") as string, {
+          label: (data.get("label") as string) || undefined,
+          workspaceId: (data.get("workspace") as string) || undefined,
+          expiresInDays: Number(data.get("expires")),
+          readOnly: data.has("readOnly"),
+        }),
+      );
       form.reset();
-      await load();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const edit = async (e: FormEvent<HTMLFormElement>, agent: Agent) => {
-    e.preventDefault();
-    setError(null);
-    try {
-      // Only what was changed is sent, so saving leaves alone what the form merely showed.
-      const { workspaceId, expiresInDays, readOnly } = permissionsOf(new FormData(e.currentTarget));
-      const edit: AgentEdit = {
-        ...(workspaceId !== agent.workspaceId && { workspaceId }),
-        ...(expiresInDays !== undefined && { expiresInDays }),
-        ...(readOnly !== agent.readOnly && { readOnly }),
-      };
-      await host.agents.edit(agent.id, edit);
-      setEditing(null);
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -166,38 +99,20 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
     }
   };
 
-  const revert = async (agent: Agent) => {
-    // Not `disabled` meanwhile, so the button keeps the focus the dialog gives back when it closes.
-    if (reading !== null) return;
-    setError(null);
-    setReading(agent.id);
-    try {
-      const { asks, cut } = await asksOfAuthor(host, { kind: "agent", id: agent.id });
-      const beyond = [
-        cut && `${agent.name} changed more notes than one revert covers: these are the ones it changed last. History reaches the others.`,
-        agent.workspaceId === null && workspaces.length > 1 && `Your other workspaces aren't covered. Switch to each one to revert ${agent.name}'s changes there.`,
-      ].filter(Boolean);
-      reverts.ask(asks, beyond.join(" ") || undefined);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-    setReading(null);
-  };
-
   const reach = (agent: Agent) => (agent.workspaceId ? `only ${workspaces.find((w) => w.id === agent.workspaceId)?.name ?? "a workspace you have left"}` : "every workspace you're in");
   const ends = (agent: Agent) => {
     if (agent.revokedAt !== null) return `disconnected ${ago(agent.revokedAt, now)}`;
-    if (agent.expiresAt === null) return "never expires";
     if (agent.expiresAt <= now) return `expired ${ago(agent.expiresAt, now)}`;
     const days = Math.round((agent.expiresAt - now) / DAY_MS);
     return days < 1 ? "expires today" : `expires in ${days} ${days === 1 ? "day" : "days"}`;
   };
-  const connected = (agent: Agent) => agent.revokedAt === null && (agent.expiresAt === null || agent.expiresAt > now);
+  const connected = (agent: Agent) => agent.revokedAt === null && agent.expiresAt > now;
 
   const row = (agent: Agent) => (
-    <li key={agent.id} className="agent" aria-label={agent.name}>
+    <li key={agent.id} className="agent" aria-label={agent.label ? `${agent.name}, ${agent.label}` : agent.name}>
       <div className="agent-head">
         <span className="agent-name">{agent.name}</span>
+        {agent.label && <span className="badge">{agent.label}</span>}
         {agent.readOnly && <span className="badge">read only</span>}
       </div>
       <p className="agent-meta">
@@ -207,30 +122,23 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
         {wrote.has(agent.id) ? (
           <>
             {onShowChanges && (
-              <button type="button" className="button small" onClick={() => onShowChanges(agent)}>
+              <button type="button" className="button small" onClick={() => onShowChanges(agent.id)}>
                 See its changes
               </button>
             )}
             {canEdit && (
-              <button type="button" className="button small" aria-disabled={reading !== null} onClick={() => void revert(agent)}>
-                Revert {agent.name}'s changes…
-              </button>
+              <RevertAuthor
+                host={host}
+                author={{ kind: "agent", id: agent.id }}
+                name={agent.name}
+                where={`in ${workspace.name}`}
+                beyond={agent.workspaceId === null && workspaces.length > 1 ? `Your other workspaces aren't covered. Switch to each one to revert ${agent.name}'s changes there.` : undefined}
+                onReverted={onReverted}
+              />
             )}
           </>
         ) : (
           <span className="hint">No changes in {workspace.name}</span>
-        )}
-        {agent.revokedAt === null && editing !== agent.id && (
-          <button
-            type="button"
-            className="button small"
-            onClick={() => {
-              setError(null);
-              setEditing(agent.id);
-            }}
-          >
-            Edit
-          </button>
         )}
         {connected(agent) &&
           (disconnecting === agent.id ? (
@@ -249,20 +157,6 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
             </button>
           ))}
       </div>
-      {editing === agent.id && (
-        <form className="connect agent-edit" aria-label={`Edit ${agent.name}`} onSubmit={(e) => edit(e, agent)}>
-          <Permissions workspaces={workspaces} agent={agent} ends={ends(agent)} />
-          <p className="hint">{agent.name} keeps its token. What you change holds from its next call.</p>
-          <div className="agent-actions">
-            <button type="submit" className="button small primary">
-              Save
-            </button>
-            <button type="button" className="link" onClick={() => setEditing(null)}>
-              Cancel
-            </button>
-          </div>
-        </form>
-      )}
     </li>
   );
 
@@ -281,7 +175,35 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
           <span>Name</span>
           <input name="name" required maxLength={MAX_AGENT_NAME} placeholder="Claude" autoComplete="off" />
         </label>
-        <Permissions workspaces={workspaces} />
+        <label>
+          <span>Label</span>
+          <input name="label" maxLength={MAX_AGENT_NAME} placeholder="Optional, such as laptop" autoComplete="off" />
+        </label>
+        <label>
+          <span>Reaches</span>
+          <select name="workspace" defaultValue="">
+            <option value="">Every workspace I'm in</option>
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                Only {w.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Expires in</span>
+          <select name="expires" defaultValue={DEFAULT_EXPIRY_DAYS}>
+            {EXPIRIES.map((days) => (
+              <option key={days} value={days}>
+                {days} days
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="check">
+          <input type="checkbox" name="readOnly" />
+          <span>Read only: it can read and can't change anything</span>
+        </label>
         <button type="submit" className="button primary">
           Connect
         </button>
@@ -307,7 +229,6 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
           </ul>
         </>
       )}
-      {reverts.shown}
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { ALL_NOTES, Icon, NOTE_DRAG, ago, folderTitle, useNow, type App, type FolderProps, type NoteSummary, type Plugin } from "../plugin-api.ts";
+import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, ago, folderTitle, useNow, type App, type FolderProps, type NoteSummary, type Plugin } from "../plugin-api.ts";
 import { INITIAL_VIEW, SORTS, listReducer, listed, notesIn, titleOf, type ListAction, type ListView, type Sort } from "./noteListView.ts";
 
 /** How far below the top of the list a card's head is put when its note is collapsed from further down. */
@@ -47,9 +47,10 @@ function CardBody({ whole, children, foot }: { whole: boolean; children: ReactNo
   );
 }
 
-/** Where a new note made from a folder's list goes, or null where the member can't make one. */
+/** Where a new note made from a folder's list goes, or null where the member can't make one there. */
 function folderForNew(app: App, folderId: string) {
-  return app.canEdit ? ((folderId === ALL_NOTES ? app.folders?.unsortedId : folderId) ?? null) : null;
+  const target = folderId === ALL_NOTES ? app.folders?.unsortedId : folderId === SHARED_WITH_ME ? null : folderId;
+  return target && app.folders?.byId.get(target)?.access === "edit" ? target : null;
 }
 
 function FolderList({ app, folderId, readNote, snippets, kept }: Props) {
@@ -57,6 +58,7 @@ function FolderList({ app, folderId, readNote, snippets, kept }: Props) {
   const now = useNow();
   const [view, setView] = useState(kept.view);
   const act = (action: ListAction) => setView((v) => (kept.view = listReducer(v, action)));
+  const [error, setError] = useState<string | null>(null);
   /** The card the arrow keys last came to, which is the one Tab comes back to. */
   const [atId, setAtId] = useState<string | null>(null);
   const scroller = useRef<HTMLElement>(null);
@@ -156,7 +158,14 @@ function FolderList({ app, folderId, readNote, snippets, kept }: Props) {
             {count} {count === 1 ? "note" : "notes"}
           </span>
           {newIn && (
-            <button type="button" className="button primary" onClick={() => app.createNote(newIn)}>
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => {
+                setError(null);
+                app.createNote(newIn).catch((err: Error) => setError(err.message));
+              }}
+            >
               <Icon name="plus" />
               New note
             </button>
@@ -185,6 +194,11 @@ function FolderList({ app, folderId, readNote, snippets, kept }: Props) {
             </select>
           </label>
         </div>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
         <nav aria-label="Notes">
           {!notes.length && <p className="empty">{count ? "No notes match." : "No notes in this folder."}</p>}
           <ul className="cards" data-list>
@@ -236,6 +250,11 @@ function FolderList({ app, folderId, readNote, snippets, kept }: Props) {
                             open(note, "behind");
                           }}
                         >
+                          {note.private && (
+                            <span className="private-mark" title="Private">
+                              <Icon name="lock" />
+                            </span>
+                          )}
                           {name}
                         </a>
                         <button

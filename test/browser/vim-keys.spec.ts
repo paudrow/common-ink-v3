@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -85,25 +85,10 @@ test("the folder tree moves with j, k, gg and G, opens with l and Enter, and h c
   await expectSelected(item("Work"), "Work, collapsed");
 });
 
-/** Makes a note of each text, in order, in one visit to the page: a note at a time through `perform` is two requests each, which a slow deployment turns into the whole of a test's time. */
-async function createNotes(page: Page, texts: string[]) {
-  await page.evaluate(async (texts) => {
-    const me = (await (await fetch("/api/me")).json()) as { workspaces: { id: string }[] };
-    for (const text of texts) {
-      const res = await fetch(`/api/workspaces/${me.workspaces[0]!.id}/ops`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "note.create", text }),
-      });
-      if (!res.ok) throw new Error(`note.create answered ${res.status}`);
-    }
-  }, texts);
-}
-
 test("a folder's notes move with j, k, gg, G and half pages; / goes to the search box and Escape back; Enter opens the note with its text in normal mode", async ({ page }) => {
   await signIn(page);
   const titles = Array.from({ length: 30 }, (_, n) => `Note ${String(n).padStart(2, "0")}`);
-  await createNotes(page, titles.map((title) => `# ${title}\n\nplum`));
+  for (const title of titles) await perform(page, { type: "note.create", text: `# ${title}\n\nplum` });
   await open(page, "/folder/all");
   const cards = page.locator(".cards > li");
   await expect(cards).toHaveCount(30);
@@ -121,9 +106,9 @@ test("a folder's notes move with j, k, gg, G and half pages; / goes to the searc
   expect(half).toBeLessThan(29);
   await expectSelected(cards.nth(half), "the note half a page down");
   await page.keyboard.press("Control+d");
-  await expect.poll(() => at()).toBe(Math.min(29, half * 2));
+  expect(await at()).toBe(Math.min(29, half * 2));
   await page.keyboard.press("Control+u");
-  await expect.poll(() => at()).toBe(Math.min(29, half * 2) - half);
+  expect(await at()).toBe(Math.min(29, half * 2) - half);
   await page.keyboard.press("Shift+G");
   await expectSelected(cards.nth(29), "the last note");
   await keys(page, "g", "g");
@@ -162,6 +147,15 @@ interface Listed {
 }
 
 const LISTS: Listed[] = [
+  {
+    name: "History's changes",
+    path: "/history",
+    list: (page) => page.getByRole("list", { name: "Notes that changed" }),
+    opened: async (page) => {
+      await expect(page).toHaveURL(/\/note\//);
+      await expect(editor(page)).toBeFocused();
+    },
+  },
   {
     name: "the Plugins list",
     path: "/plugins",
@@ -208,68 +202,23 @@ for (const listed of LISTS) {
   });
 }
 
-test("History's list of changes keeps its own keys with vim mode on: j goes to the list, and there j, k, x and Enter are History's, and gg, G and the half pages reach it as its own", async ({ page }) => {
+test("History's list of notes to show moves with Ctrl-j from its field, and with j once in it", async ({ page }) => {
   await signIn(page);
   for (let n = 0; n < 4; n++) await perform(page, { type: "note.create", text: `# Plum ${n}` });
   await open(page, "/history");
-  const list = page.getByRole("listbox", { name: "Changes" });
-  const changes = list.getByRole("option");
-  await expect(changes).toHaveCount(4);
-  const cursor = () => list.evaluate((el) => [...el.querySelectorAll('[role="option"]')].findIndex((o) => o.id === el.getAttribute("aria-activedescendant")));
-  const shown = page.locator(".hist-main .hist-file");
-
-  // No change is selected as the page opens. j from the page goes to the list, not onto a row of it.
-  await expect(page.locator(".hist-hint")).toBeVisible();
-  await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
+  await page.getByRole("button", { name: "All notes" }).click();
+  const menu = page.getByRole("group", { name: "Notes to show" });
+  await expect(menu.getByRole("searchbox")).toBeFocused();
+  await page.keyboard.press("Control+j");
+  const all = menu.locator("ul > li");
+  await expectSelected(all.nth(0), "the first note");
   await page.keyboard.press("j");
-  await expect(list).toBeFocused();
-  await expect(page.locator("[data-vim-at]"), "no row is marked as vim's").toHaveCount(0);
-  await expect.poll(cursor).toBe(-1);
-  await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
-
-  // From here the keys are History's: j goes to the first change, j and k move its cursor and show that change, and x ticks one more.
-  await page.keyboard.press("j");
-  await expect.poll(cursor).toBe(0);
-  await expect(changes.nth(0)).toHaveAttribute("aria-selected", "true");
-  await expect(shown).toContainText("Plum 3");
-  await page.keyboard.press("j");
-  await expect.poll(cursor).toBe(1);
-  await expect(changes.nth(1)).toHaveAttribute("aria-selected", "true");
-  await expect(changes.nth(0)).toHaveAttribute("aria-selected", "false");
-  await expect(shown).toHaveCount(1);
-  await expect(shown).toContainText("Plum 2");
-  await keys(page, "j", "k", "k");
-  await expect.poll(cursor).toBe(0);
-  await expect(shown).toContainText("Plum 3");
-  await keys(page, "j", "j", "x");
-  await expect.poll(cursor).toBe(2);
-  await expect(changes.nth(2)).toHaveAttribute("aria-selected", "false");
-  await page.keyboard.press("x");
-  await expect(changes.nth(2)).toHaveAttribute("aria-selected", "true");
-  await expect(list).toBeFocused();
-  // G, gg and the half pages are History's too: vim sends them to the list as End, Home, Page Down and Page Up.
+  await expectSelected(all.nth(1), "the second note");
   await page.keyboard.press("Shift+G");
-  await expect.poll(cursor).toBe(3);
-  await expect(changes.nth(3)).toHaveAttribute("aria-selected", "true");
-  await keys(page, "g", "g");
-  await expect.poll(cursor).toBe(0);
-  await expect(shown).toContainText("Plum 3");
-  await page.keyboard.press("Control+d");
-  await expect.poll(cursor).toBe(3);
-  await page.keyboard.press("Control+u");
-  await expect.poll(cursor).toBe(0);
-  await expect(list).toBeFocused();
-  await expect(page.locator("[data-vim-at]"), "no row is marked as vim's").toHaveCount(0);
-  // A g that begins nothing here takes no key from the list: the j after it is the list's.
-  await keys(page, "g", "j");
-  await expect.poll(cursor).toBe(1);
-  await keys(page, "j", "g");
-  await expect.poll(cursor).toBe(2);
-
-  // Enter is History's too: it opens the change's note, which vim has in normal mode.
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/note\//);
-  await expect(editor(page)).toContainText("Plum 1");
+  await expectSelected(all.nth(3), "the last note");
+  // Escape is still the menu's, which closes.
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
 });
 
 test("in Settings, Enter on a setting goes to its field and Escape comes back to the row; / is the search box; and vim's keys are among the keyboard shortcuts while vim mode is on", async ({ page }) => {
@@ -298,12 +247,11 @@ test("in Settings, Enter on a setting goes to its field and Escape comes back to
   await expect(shown("Vim: last row of a list")).toHaveText([MAC ? /^⇧G/ : /^Shift\+G/]);
   await expect(shown("Vim: half a page down a list")).toHaveText([MAC ? /^⌃D/ : /^Ctrl\+D/]);
   await expect(shown("Vim: open the selected row")).toHaveText([/^ENTER/, /^L/]);
-  await expect(shown("Vim: expand or collapse the selected row")).toHaveText([/^Z A/]);
   await expect(shown("Vim: go to the region on the left")).toHaveText([MAC ? /^⌃W H/ : /^Ctrl\+W H/]);
   await expect(shown("Vim: next tab")).toHaveText([/^G T/]);
   await expect(shown("Vim: next row, from a field")).toHaveText(MAC ? [/^⌃J/, /^⌃N/] : [/^Ctrl\+J/, /^Ctrl\+N/]);
-  await expect(all).toHaveCount(19);
-  await expect(shortcuts.locator("tbody tr")).toHaveCount(19);
+  await expect(all).toHaveCount(18);
+  await expect(shortcuts.locator("tbody tr")).toHaveCount(18);
 
   // Escape leaves the search box for the list, on its first row, and the keys go on through the shortcuts.
   await page.keyboard.press("Escape");
@@ -336,8 +284,8 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
   await expect.poll(stored).toEqual({ "vim.enabled": true, "keybindings.vim.list.first": ["g n"] });
   await expect(page.getByRole("list", { name: "Problems" })).toHaveCount(0);
 
-  await open(page, "/folder/all");
-  const changed = page.locator(".cards > li");
+  await open(page, "/history");
+  const changed = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
   await expect(changed).toHaveCount(4);
   await keys(page, "j", "Shift+G");
   await expectSelected(changed.nth(3), "the last note");
@@ -348,7 +296,7 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
 
   // In the JSON a vim key may be one letter, and one that begins another's sequence is flagged and still runs.
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true, "keybindings.vim.list.down": ["n"], "keybindings.vim.list.last": ["g"] }), baseRevision: 2 });
-  await open(page, "/folder/all");
+  await open(page, "/history");
   await expect(changed).toHaveCount(4);
   await keys(page, "n", "n");
   await expectSelected(changed.nth(1), "the second note, with n");
@@ -365,17 +313,17 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
 test("with vim mode off, none of vim's keys do anything and none are listed", async ({ page }) => {
   await signIn(page, {});
   for (let n = 0; n < 3; n++) await perform(page, { type: "note.create", text: `# Plum ${n}\n\n- [ ] pick plum ${n}\n` });
-  await page.goto("/folder/all");
-  const all = page.locator(".cards > li");
+  await page.goto("/history");
+  const all = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
   await expect(all).toHaveCount(3);
   await keys(page, "j", "Shift+G", "g", "g", "Control+d", "/", "Control+w", "h", "g", "t");
-  await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
-  await expect.poll(() => page.evaluate(() => "vimKeys" in document.documentElement.dataset)).toBe(false);
-  await all.nth(0).locator(".card").focus();
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  expect(await page.evaluate(() => "vimKeys" in document.documentElement.dataset)).toBe(false);
+  await all.nth(0).getByRole("button").first().focus();
   await keys(page, "j", "l");
-  await expect(all.nth(0).locator(".card")).toBeFocused();
-  await expect(page).toHaveURL(/\/folder\/all/);
-  await expect.poll(() => all.nth(0).evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
+  await expect(all.nth(0).getByRole("button").first()).toBeFocused();
+  await expect(page).toHaveURL(/\/history/);
+  expect(await all.nth(0).evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
 
   await page.goto("/settings/keyboard");
   await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Undo/ })).toBeVisible();
@@ -457,7 +405,7 @@ test("Ctrl-w h and l move between the sidebar, the sides of a split and the insp
   await expect(editor(page, 1)).toContainText("right words");
   const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await pinPanel(page, "Info");
+  if (!(await inspector.isVisible())) await run("Toggle inspector");
   await expect(inspector).toBeVisible();
   const focusIn = (region: Locator) => expect.poll(() => region.evaluate((el) => el.contains(document.activeElement))).toBe(true);
 
@@ -505,83 +453,12 @@ test("Ctrl-w h and l move between the sidebar, the sides of a split and the insp
   expect(right.id).not.toBe(left.id);
 });
 
-test("Ctrl-w j and k move between the sides of a split down, and in focus the keys stay in the one tab that is seen", async ({ page }) => {
-  await signIn(page);
-  const upper = await perform(page, { type: "note.create", text: "# Upper\n\nupper words" });
-  await perform(page, { type: "note.create", text: "# Lower\n\nlower words" });
-  const run = async (command: string) => {
-    await page.keyboard.press("ControlOrMeta+Shift+P");
-    await page.getByRole("combobox", { name: "Commands" }).fill(command);
-    await page.keyboard.press("Enter");
-  };
-  await open(page, `/note/${upper.id}`);
-  await expect(statusLine(page)).toHaveText("--NORMAL--");
-  await run("Keep tab open");
-  await page.keyboard.press("ControlOrMeta+p");
-  await page.getByRole("combobox", { name: "Go to note" }).fill("Lower");
-  await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText("Lower");
-  await page.keyboard.press("Enter");
-  await expect(editor(page)).toContainText("lower words");
-  await run("Split editor down");
-  await expect(editor(page, 1)).toContainText("lower words");
-  const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await pinPanel(page, "Info");
-  await expect(inspector).toBeVisible();
-
-  await editor(page, 1).click();
-  await keys(page, "Control+w", "k");
-  await expect(editor(page, 0)).toBeFocused();
-  // Nothing is above the upper side, so the keys stay where they are.
-  await keys(page, "Control+w", "k");
-  await expect(editor(page, 0)).toBeFocused();
-  await keys(page, "Control+w", "j");
-  await expect(editor(page, 1)).toBeFocused();
-  await keys(page, "Control+w", "h");
-  await expect(page.getByRole("tree").getByRole("treeitem", { name: "Unsorted" })).toBeFocused();
-  // Both sides are as near the sidebar and share as much of its edge: the upper one, which comes first, is the one gone to.
-  await keys(page, "Control+w", "l");
-  await expect(editor(page, 0)).toBeFocused();
-  await keys(page, "Control+w", "j");
-  await expect(editor(page, 1)).toBeFocused();
-
-  // In focus the sidebar, the inspector and the other side keep their places out of sight, and no key goes to them.
-  await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
-  const only = page.getByRole("textbox", { name: "Note text" });
-  await expect(only).toHaveCount(1);
-  await expect(only).toContainText("lower words");
-  for (const side of ["h", "j", "k", "l"]) {
-    await keys(page, "Control+w", side);
-    await expect(only, `Ctrl-w ${side} in focus`).toBeFocused();
-    await expect(page.locator("[data-vim-at]"), `Ctrl-w ${side} marks no row`).toHaveCount(0);
-  }
-  await keys(page, "Shift+G", "$", "x");
-  await expect(only.locator(".cm-line").last()).toHaveText("lower word");
-  // With focus on nothing, the keys still find only what is seen.
-  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
-  await keys(page, "Control+w", "h");
-  await expect(page.locator("[data-vim-at]")).toHaveCount(0);
-  await keys(page, "j");
-  await expect(page.locator("[data-vim-at]")).toHaveCount(0);
-  await expect(statusLine(page, 1)).toHaveText("--NORMAL--");
-
-  // Out of focus the keys reach the other side again.
-  await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
-  await keys(page, "Control+w", "k");
-  await expect(editor(page, 0)).toBeFocused();
-  await keys(page, "Control+w", "l");
-  await expect.poll(() => inspector.evaluate((el) => el.contains(document.activeElement))).toBe(true);
-});
-
 test("gt from a note to a folder's tab puts the keys on the list's rows, and Enter there opens the next note in normal mode", async ({ page }) => {
   await signIn(page);
   for (const title of ["Plum one", "Plum two", "Plum three"]) await perform(page, { type: "note.create", text: `# ${title}\n\nwords` });
   await open(page, "/folder/all");
   const cards = page.locator(".cards > li");
   await expect(cards).toHaveCount(3);
-  // A note opened from a previewed list takes the list's place, so the list is kept first.
-  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "All notes" }).dblclick();
   const first = await cards.nth(0).locator(".card-title").innerText();
   await keys(page, "j", "Enter");
   await expect(editor(page)).toBeFocused();
@@ -614,8 +491,8 @@ test("the selected row is marked in light and in dark", async ({ page }) => {
   for (const theme of ["light", "dark"]) {
     await signIn(page, { "vim.enabled": true, "core.theme": theme });
     for (let n = 0; n < 3; n++) await perform(page, { type: "note.create", text: `# Plum ${n}\n\n- [ ] pick plum ${n}\n` });
-    await open(page, "/folder/all");
-    const all = page.locator(".cards > li");
+    await open(page, "/history");
+    const all = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
     await expect(all).toHaveCount(3);
     await keys(page, "j", "j");
     await expectSelected(all.nth(1), `the second note, in ${theme}`);
@@ -623,12 +500,12 @@ test("the selected row is marked in light and in dark", async ({ page }) => {
     expect(colors.width).toBe("2px");
     expect(colors.other, "only the selected row is marked").toBe("none");
     // Held with Control a key is no sign to the browser that keys are in use, so the mark is the app's own.
-    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await all.nth(0).click({ position: { x: 2, y: 2 } });
     await keys(page, "Control+d", "Control+d");
     await expectSelected(all.nth(2), `the last note, in ${theme}`);
     expect(colors.accent).toBe(theme === "light" ? "#5b5bd6" : "#8f8ff0");
     expect(colors.outline).toBe(theme === "light" ? "rgb(91, 91, 214)" : "rgb(143, 143, 240)");
-    await page.screenshot({ path: test.info().outputPath(`list-${theme}.png`) });
+    await page.screenshot({ path: test.info().outputPath(`history-${theme}.png`) });
   }
 });
 
@@ -652,108 +529,4 @@ test("vim mode leaves the app's own keys alone: Escape still cancels a folder's 
   await cards.first().focus();
   await page.keyboard.press("ArrowDown");
   await expect(cards.nth(1)).toBeFocused();
-});
-
-test("a sequence begun on a row and given up takes no key from a note: a press, a move of focus or a second's wait ends it", async ({ page }) => {
-  await signIn(page);
-  await perform(page, { type: "folder.create", name: "Zebra" });
-  const note = await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
-  await open(page, `/note/${note.id}`);
-  const item = (name: string) => page.getByRole("tree").getByRole("treeitem", { name, exact: true });
-  await expect(editor(page)).toContainText("words");
-  await expect(statusLine(page)).toHaveText("--NORMAL--");
-
-  // g on a folder's row waits for a second g. A press in the note ends the wait, so the next key is the note's.
-  await item("All notes").focus();
-  await page.keyboard.press("g");
-  await editor(page).click();
-  await page.keyboard.press("Shift+A");
-  await expect(statusLine(page)).toHaveText("--INSERT--");
-  await page.keyboard.press("Escape");
-
-  // So does focus going there with no press.
-  await item("All notes").focus();
-  await page.keyboard.press("g");
-  await editor(page).focus();
-  await page.keyboard.press("Shift+A");
-  await expect(statusLine(page)).toHaveText("--INSERT--");
-  await page.keyboard.press("Escape");
-
-  // And so does time: a g long after a g is a first g again, and the one after it goes to the first row.
-  await item("Zebra").focus();
-  await page.keyboard.press("g");
-  await page.waitForTimeout(1800);
-  await page.keyboard.press("g");
-  await expect(item("Zebra")).toBeFocused();
-  await page.keyboard.press("g");
-  await expectSelected(item("All notes"), "the first row");
-});
-
-test("a letter typed in a note right after a sequence was given up elsewhere arrives in its text", async ({ page }) => {
-  await signIn(page, { "keybindings.notes.all": ["g a"] });
-  const note = await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
-  await open(page, `/note/${note.id}`, false);
-  await expect(editor(page)).toContainText("words");
-  await page.getByRole("tree").getByRole("treeitem", { name: "All notes", exact: true }).focus();
-  await page.keyboard.press("g");
-  await editor(page).click();
-  await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type("xa");
-  await expect(editor(page).locator(".cm-line").last()).toHaveText("wordsxa");
-  await expect(page).toHaveURL(new RegExp(`${note.id}$`));
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plum\n\nwordsxa");
-});
-
-test("za expands and collapses the selected row: a note's card in a folder's list, and a folder in the tree", async ({ page }) => {
-  await signIn(page);
-  const work = await perform(page, { type: "folder.create", name: "Work" });
-  await perform(page, { type: "folder.create", name: "Plans", parentId: work.id });
-  await perform(page, { type: "note.create", text: "# Plum\n\nwords of the plum" });
-  await open(page, "/folder/all");
-  const cards = page.locator(".cards > li");
-  await expect(cards).toHaveCount(1);
-  const chevron = cards.getByRole("button", { name: /^(Expand|Collapse) Plum$/ });
-  await page.keyboard.press("j");
-  await expectSelected(cards.nth(0), "the card");
-  await keys(page, "z", "a");
-  await expect(chevron).toHaveAttribute("aria-expanded", "true");
-  await expect(cards.nth(0).locator(".cm-content")).toContainText("words of the plum");
-  await expectSelected(cards.nth(0), "the card, expanded");
-  await keys(page, "z", "a");
-  await expect(chevron).toHaveAttribute("aria-expanded", "false");
-  await expect(page).toHaveURL(/\/folder\/all$/);
-
-  const item = (name: string) => page.getByRole("tree").getByRole("treeitem", { name, exact: true });
-  await item("Work").focus();
-  await expect(item("Work")).toHaveAttribute("aria-expanded", "false");
-  await keys(page, "z", "a");
-  await expect(item("Work")).toHaveAttribute("aria-expanded", "true");
-  await expect(item("Plans")).toBeVisible();
-  await keys(page, "z", "a");
-  await expect(item("Work")).toHaveAttribute("aria-expanded", "false");
-});
-
-test("inside what an embed draws in a note, vim's list, search and tab keys do nothing: focus there is the embed's, and so are the keys", async ({ page }) => {
-  await signIn(page);
-  await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
-  const note = await perform(page, { type: "note.create", text: "# Plan\n\nabove\n:::kanban{}\n## To do\n- write\n- review\n\n## Doing\n- build\n:::\nbelow\n" });
-  await open(page, "/folder/all");
-  await page.locator(".cards > li").first().waitFor();
-  // A note opened from a previewed list takes the list's place, so the list is kept first.
-  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "All notes" }).dblclick();
-  await page.goto(`/note/${note.id}`);
-  await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
-  await expect(page.getByRole("tablist", { name: "Open notes" }).getByRole("tab")).toHaveCount(2);
-  // A board's column is a named list of cards, which outside a note vim's keys would move through and open.
-  const cards = page.locator(".cm-content .embed").getByRole("list", { name: "To do cards" }).getByRole("listitem");
-  await expect(cards).toHaveText(["write", "review"]);
-  // The pointer puts focus on one of the board's own buttons, which is in the same column as the list.
-  const colour = page.locator(".cm-content .embed").getByRole("button", { name: "Colour of To do: no colour" });
-  await colour.focus();
-  for (const press of [["Shift+G"], ["g", "g"], ["Control+d"], ["/"], ["g", "t"], ["j"], ["k"]]) {
-    await keys(page, ...press);
-    await expect(colour, `${press.join(" ")} leaves focus where it was`).toBeFocused();
-    await expect(page.locator("[data-vim-at]"), `${press.join(" ")} selects no row`).toHaveCount(0);
-    await expect(page).toHaveURL(new RegExp(`${note.id}$`));
-  }
 });

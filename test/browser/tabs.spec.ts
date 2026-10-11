@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { listedNote, noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 /** Opens a note from the list of every note as a preview, which is what a click on its title does. */
 async function preview(page: Page, title: string) {
@@ -29,15 +29,14 @@ async function withNotes(page: Page, ...titles: string[]) {
 test("a single click opens a note in an italic preview tab, and the next single click replaces it", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta");
 
-  // The list is a preview, and the note opened from it takes its place: one italic tab throughout.
   await preview(page, "Alpha");
-  await expect(tabs(page)).toHaveText(["Alpha"]);
-  await expect.poll(() => italic(page)).toEqual([true]);
+  await expect(tabs(page)).toHaveText(["All notes", "Alpha"]);
+  expect(await italic(page)).toEqual([false, true]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
 
   await preview(page, "Beta");
-  await expect(tabs(page)).toHaveText(["Beta"]);
-  await expect.poll(() => italic(page)).toEqual([true]);
+  await expect(tabs(page)).toHaveText(["All notes", "Beta"]);
+  expect(await italic(page)).toEqual([false, true]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Beta");
   await expect(page).toHaveURL(/\/note\/beta-[a-z0-9]{12}$/);
 });
@@ -47,18 +46,18 @@ test("a note's pencil keeps it in its own tab, and so does double-clicking its t
 
   await keep(page, "Alpha");
   await preview(page, "Beta");
-  await expect(tabs(page)).toHaveText(["Beta", "Alpha"]);
-  await expect.poll(() => italic(page)).toEqual([true, false]);
+  await expect(tabs(page)).toHaveText(["All notes", "Alpha", "Beta"]);
+  expect(await italic(page)).toEqual([false, false, true]);
 
   await tab(page, "Beta").dblclick();
-  await expect.poll(() => italic(page)).toEqual([false, false]);
+  expect(await italic(page)).toEqual([false, false, false]);
 
   await preview(page, "Gamma");
-  await expect(tabs(page)).toHaveText(["Beta", "Gamma", "Alpha"]);
-  await expect.poll(() => italic(page)).toEqual([false, true, false]);
+  await expect(tabs(page)).toHaveText(["All notes", "Alpha", "Beta", "Gamma"]);
+  expect(await italic(page)).toEqual([false, false, false, true]);
   await page.getByRole("textbox", { name: "Note text" }).click();
   await page.keyboard.type(" more");
-  await expect.poll(() => italic(page)).toEqual([false, false, false]);
+  await expect.poll(() => italic(page)).toEqual([false, false, false, false]);
 
   await tab(page, "Alpha").click();
   await expect(tab(page, "Alpha")).toHaveAttribute("aria-selected", "true");
@@ -72,14 +71,13 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   const noteUrl = page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" });
   await keep(page, "Alpha");
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
-  await pinPanel(page, "Info");
 
   const { width } = (await group(1).boundingBox())!;
   await openAllNotes(page);
   await noteCard(page, "Beta").dragTo(group(1), { targetPosition: { x: width * 0.8, y: 130 } });
   await expect(tabs(page, 0)).toHaveText(["All notes", "Alpha"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
-  await expect.poll(() => italic(page, 1)).toEqual([false]);
+  expect(await italic(page, 1)).toEqual([false]);
   await expect(group(2).locator(".cm-line")).toHaveText(["# Beta", "", "About Beta."]);
   await expect(page).toHaveURL(new RegExp(`/note/beta-${beta!.id}$`));
   await expect(noteUrl).toHaveValue(new RegExp(`${beta!.id}$`));
@@ -101,7 +99,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   await tab(page, "All notes").click();
   await noteCard(page, "Gamma").dragTo(tabBar(page, 1));
   await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
-  await expect.poll(() => italic(page, 1)).toEqual([false, false]);
+  expect(await italic(page, 1)).toEqual([false, false]);
   await expect(group(2).locator(".cm-line").first()).toHaveText("# Gamma");
 
   await page.reload();
@@ -159,14 +157,13 @@ test("a tab's menu closes the others, those to its left, those to its right, or 
 test("⇧⌘P lists the commands, narrows them as you type, and runs the one chosen", async ({ page }) => {
   await withNotes(page, "Alpha");
   await preview(page, "Alpha");
-  await pinPanel(page, "Info");
   const text = page.getByRole("textbox", { name: "Note text" });
   await text.click();
   const palette = page.getByRole("dialog", { name: "Commands" });
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await expect(palette.getByRole("combobox")).toBeFocused();
-  for (const title of ["New note", "Go to note…", "Open All notes", "Toggle focus", "Toggle inspector", "Close other tabs", "Go to Dashboard"]) {
+  for (const title of ["New note", "Go to note…", "Open All notes", "Toggle writing mode", "Toggle inspector", "Close other tabs", "Go to Dashboard"]) {
     await expect(palette.getByRole("option", { name: title })).toBeVisible();
   }
   await page.keyboard.press("Escape");
@@ -174,16 +171,14 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
   await expect(text).toBeFocused();
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("toggle focus");
-  await expect(palette.getByRole("option")).toHaveText([/^Toggle focus/]);
+  await page.keyboard.type("writ");
+  await expect(palette.getByRole("option")).toHaveText([/^Toggle writing mode/]);
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("navigation")).toHaveCount(0);
-  await expect(page.getByRole("complementary")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("toggle focus");
+  await page.keyboard.type("writing");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("navigation", { name: "Left rail" })).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
@@ -195,7 +190,7 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await palette.getByRole("option", { name: "New note" }).click();
-  await expect(tabs(page)).toHaveText(["Alpha", "Untitled"]);
+  await expect(tabs(page)).toHaveText(["All notes", "Alpha", "Untitled"]);
   await expect(text).toBeFocused();
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
@@ -218,7 +213,7 @@ test("⌘P finds notes by title, best match first, and opens the one chosen in i
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
   await expect(tabs(page)).toHaveText(["Trip planning"]);
-  await expect.poll(() => italic(page)).toEqual([false]);
+  expect(await italic(page)).toEqual([false]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Trip planning");
   await expect(page).toHaveURL(/\/note\/trip-planning-[a-z0-9]{12}$/);
 
@@ -330,9 +325,9 @@ test("a tab splits down from its menu and from the command, inside a split to th
 
   await page.reload();
   await expect(tabs(page, 2)).toHaveText(["Gamma"]);
-  await expect.poll(() => boxOf(group(page, 1))).toEqual(a);
-  await expect.poll(() => boxOf(group(page, 2))).toEqual(b);
-  await expect.poll(() => boxOf(group(page, 3))).toEqual(c);
+  expect(await boxOf(group(page, 1))).toEqual(a);
+  expect(await boxOf(group(page, 2))).toEqual(b);
+  expect(await boxOf(group(page, 3))).toEqual(c);
   expect((await storedLayout(page)).split).toEqual({ direction: "column", panes: [{ direction: "row", panes: ["1", "3"], sizes: [1, 1] }, "2"], sizes: [1, 1] });
 
   await group(page, 1).getByRole("textbox", { name: "Note text" }).click();
@@ -366,7 +361,7 @@ test("a layout kept before a group could be split down opens as it was, side by 
 
   await expect(tabs(page, 0)).toHaveText(["Alpha"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
-  await expect.poll(() => italic(page, 1)).toEqual([true]);
+  expect(await italic(page, 1)).toEqual([true]);
   const [left, right] = [await boxOf(group(page, 1)), await boxOf(group(page, 2))];
   expect(right.y).toBe(left.y);
   expect(right.x).toBeGreaterThan(left.x);
@@ -454,7 +449,7 @@ test("the edge between two halves of a split is dragged, moved with the arrow ke
 
   await page.reload();
   await expect(group(page, 2)).toBeVisible();
-  await expect.poll(() => boxOf(group(page, 1))).toEqual(dragged);
+  expect(await boxOf(group(page, 1))).toEqual(dragged);
 
   await edge.focus();
   await page.keyboard.press("ArrowLeft");
@@ -478,9 +473,9 @@ test("the edge between two halves of a split is dragged, moved with the arrow ke
   const before = await boxOf(group(page, 1));
   await level.focus();
   await page.keyboard.press("ArrowDown");
-  await expect.poll(async () => (await boxOf(group(page, 1))).height).toBeGreaterThan(before.height);
+  expect((await boxOf(group(page, 1))).height).toBeGreaterThan(before.height);
   await page.keyboard.press("Enter");
-  await expect.poll(async () => Math.abs((await boxOf(group(page, 1))).height - before.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs((await boxOf(group(page, 1))).height - before.height)).toBeLessThanOrEqual(1);
 });
 
 const PAGES = [
@@ -512,7 +507,7 @@ test("every page opens in a tab at its own address, and is drawn there", async (
     await expect(group(page, 1).getByText("There's nothing at this address.")).toHaveCount(0);
   }
   // Each took the place of the one before, as a preview does: every page looked at left one tab.
-  await expect.poll(() => italic(page)).toEqual([true]);
+  expect(await italic(page)).toEqual([true]);
 });
 
 test("a page's tab is a preview until it is kept, is focused and not opened twice, sits in a split, and comes back after a reload", async ({ page }) => {
@@ -521,17 +516,17 @@ test("a page's tab is a preview until it is kept, is focused and not opened twic
 
   await nav.getByRole("link", { name: "Search" }).click();
   await expect(tabs(page)).toHaveText(["Search"]);
-  await expect.poll(() => italic(page)).toEqual([true]);
+  expect(await italic(page)).toEqual([true]);
   await expect(page).toHaveURL(/\/search$/);
   await nav.getByRole("link", { name: "Todos" }).click();
   await expect(tabs(page)).toHaveText(["Todos"]);
   await expect(page.getByRole("heading", { name: "Todos", level: 1 })).toBeVisible();
 
   await tab(page, "Todos").dblclick();
-  await expect.poll(() => italic(page)).toEqual([false]);
+  expect(await italic(page)).toEqual([false]);
   await nav.getByRole("link", { name: "Search" }).click();
   await expect(tabs(page)).toHaveText(["Todos", "Search"]);
-  await expect.poll(() => italic(page)).toEqual([false, true]);
+  expect(await italic(page)).toEqual([false, true]);
 
   await tab(page, "Todos").click();
   await expect(page).toHaveURL(/\/todos$/);
@@ -607,8 +602,7 @@ test("Settings and Plugins each keep to one tab through every category and plugi
   await expect(page).toHaveURL(/\/plugins\/vim$/);
   await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
   await expect(page.getByRole("heading", { name: "Vim mode", level: 1 })).toBeVisible();
-  // More opened itself on arriving at a page under it.
-  await expect(more.getByRole("button", { name: "Less" })).toBeVisible();
+  await more.getByRole("button", { name: "More" }).click();
   await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
   await tab(page, "Plugins").dblclick();
 
@@ -687,129 +681,4 @@ test("a page a plugin adds opens in a tab, with the plugin doing nothing for it"
   await tab(page, "Alpha").click();
   await tab(page, "Fixture page").click();
   await expect(page).toHaveURL(/\/fixture\/deeper$/);
-});
-
-test("a page that only leads somewhere else leaves the editor of a note open beside it as it was: the same one, not one made again", async ({ page }) => {
-  await page.addInitScript(() => {
-    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
-      {
-        id: "fixture",
-        name: "Fixture",
-        activate(host: { views: { register(slot: string, view: unknown): void } }) {
-          host.views.register("page", {
-            id: "fixture-onward",
-            path: "/onward",
-            label: "Onward",
-            nav: "primary",
-            transient: true,
-            component: ({ app }: { app: { show(tab: unknown): void } }) => {
-              setTimeout(() => app.show({ kind: "note", id: (window as unknown as { onwardTo: string }).onwardTo }), 400);
-              return "On the way";
-            },
-          });
-        },
-      },
-    ];
-  });
-  const [, , gamma] = await withNotes(page, "Alpha", "Beta", "Gamma");
-  await page.evaluate((id) => ((window as unknown as { onwardTo: string }).onwardTo = id), gamma!.id);
-  await keep(page, "Alpha");
-  await keep(page, "Beta");
-  // With the italic list closed there is no italic tab, so what the page leads to opens in the pane in front, beside Alpha's.
-  await tab(page, "All notes").click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Close", exact: true }).click();
-  await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("Split editor right");
-  await page.keyboard.press("Enter");
-  await expect(tabs(page, 1)).toHaveText(["Beta"]);
-  const alpha = page.getByRole("region", { name: "Editor group 1" }).locator(".cm-editor");
-  await expect(alpha.locator(".cm-line").first()).toContainText("Alpha");
-  await alpha.evaluate((el) => ((el as HTMLElement & { wasThere?: boolean }).wasThere = true));
-
-  await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Onward" }).click();
-  await expect(page.getByRole("main").getByText("On the way")).toBeVisible();
-  await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
-  await expect(page).toHaveURL(/\/note\/gamma-/);
-  await expect(page.getByRole("main").getByText("On the way")).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "Onward" })).toHaveCount(0);
-  expect(await alpha.evaluate((el) => (el as HTMLElement & { wasThere?: boolean }).wasThere)).toBe(true);
-});
-
-test("a key sequence begun and given up takes no key from a note: a press elsewhere, a move of focus or a wait ends it", async ({ page }) => {
-  await page.addInitScript(() => {
-    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
-      {
-        id: "fixture",
-        name: "Fixture",
-        activate(host: { commands: { register(command: unknown): void } }) {
-          host.commands.register({ id: "fixture.count", title: "Count", keys: ["g a"], run: () => void (document.body.dataset.ran = String(Number(document.body.dataset.ran ?? 0) + 1)) });
-        },
-      },
-    ];
-  });
-  await signInAsNewPerson(page, "Ada Lovelace");
-  const note = await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
-  await page.goto(`/note/${note.id}`);
-  const editor = page.getByRole("textbox", { name: "Note text" });
-  const row = page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "All notes", exact: true });
-  const ran = () => page.evaluate(() => document.body.dataset.ran ?? "0");
-  await expect(editor).toContainText("words");
-
-  // The sequence runs its command where nothing is typed.
-  await row.focus();
-  await page.keyboard.press("g");
-  await page.keyboard.press("a");
-  await expect.poll(ran).toBe("1");
-
-  // g waits for the rest. A press in the note ends the wait, so what is typed next arrives in its text.
-  await row.focus();
-  await page.keyboard.press("g");
-  await editor.click();
-  await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type("xa");
-  await expect(editor.locator(".cm-line").last()).toHaveText("wordsxa");
-
-  // So does focus going there with no press.
-  await row.focus();
-  await page.keyboard.press("g");
-  await editor.focus();
-  await page.keyboard.type("y");
-  await expect(editor.locator(".cm-line").last()).toHaveText("wordsxay");
-
-  // And so does time: an a long after the g finishes nothing.
-  await row.focus();
-  await page.keyboard.press("g");
-  await page.waitForTimeout(1800);
-  await page.keyboard.press("a");
-  expect(await ran()).toBe("1");
-  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plum\n\nwordsxay");
-});
-
-
-test("a page whose plugin is turned off while it is in front leaves the other tabs where they were", async ({ page }) => {
-  await withNotes(page, "Alpha", "Beta");
-  await keep(page, "Alpha");
-  await keep(page, "Beta");
-  await page.goto("/history");
-  await expect(page.getByRole("heading", { name: "History", level: 1 })).toBeVisible();
-  await expect(tabs(page)).toHaveCount(3);
-  await expect(tab(page, "History")).toHaveAttribute("aria-selected", "true");
-
-  await perform(page, { type: "settings.write", text: JSON.stringify({ "history.enabled": false }), baseRevision: 0 });
-  await page.reload();
-
-  // It used to take the whole editor area: no tab row, and the open notes out of sight.
-  await expect(page.getByRole("main", { name: "Editor" }).getByText("There's nothing at this address.")).toBeVisible();
-  await expect(tabs(page)).toHaveCount(3);
-  await expect(tab(page, "Page")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();
-  await tab(page, "Alpha").click();
-  await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
-  await expect(page).toHaveURL(/\/note\/alpha-[a-z0-9]{12}$/);
-
-  // An address nothing was ever at says so in a tab too, beside the ones that are open.
-  await page.goto("/nowhere/at/all");
-  await expect(page.getByRole("main", { name: "Editor" }).getByText("There's nothing at this address.")).toBeVisible();
-  await expect(tab(page, "Alpha")).toBeVisible();
-  await expect(tab(page, "Beta")).toBeVisible();
 });

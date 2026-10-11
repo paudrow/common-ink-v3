@@ -1,4 +1,4 @@
-import { ALL_NOTES, type NoteSummary } from "../plugin-api.ts";
+import { ALL_NOTES, SHARED_WITH_ME, type NoteSummary } from "../plugin-api.ts";
 
 export const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -56,7 +56,7 @@ export function listReducer(view: ListView, action: ListAction): ListView {
 
 /** The notes a folder's list is of, out of every note the member can see: the folder's own, not those of the folders inside it. */
 export const notesIn = (notes: readonly NoteSummary[], folderId: string) =>
-  folderId === ALL_NOTES ? notes : notes.filter((n) => n.folderId === folderId);
+  folderId === ALL_NOTES ? notes : notes.filter((n) => n.folderId === (folderId === SHARED_WITH_ME ? null : folderId));
 
 /** The folder's notes as the list is set: narrowed and in order. */
 export function listed(inFolder: readonly NoteSummary[], view: ListView): NoteSummary[] {

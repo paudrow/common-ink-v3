@@ -29,21 +29,6 @@ describe("notes", () => {
     expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).revision).toBe(2);
   });
 
-  it("takes ten writers to one note at once, and a writer it can't fit in is told to send again, not that the server broke", async () => {
-    const ada = await newMember();
-    for (const writers of [10, 40]) {
-      const note = await perform(env.DB, ada, { type: "note.create", text: "start" });
-      const answers = await Promise.allSettled(Array.from({ length: writers }, (_, i) => perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `start\nline ${i}.` })));
-
-      const refused = answers.flatMap((a) => (a.status === "rejected" ? [a.reason as unknown] : []));
-      for (const reason of refused) expect(reason).toMatchObject({ name: "OpError", code: "conflict" });
-      if (writers === 10) expect(refused).toEqual([]);
-      const { text, revision } = await perform(env.DB, ada, { type: "note.read", id: note.id });
-      expect(revision).toBe(1 + writers - refused.length);
-      answers.forEach((a, i) => expect([i, text.includes(`line ${i}.`)]).toEqual([i, a.status === "fulfilled"]));
-    }
-  });
-
   it("lists only the notes changed at or after a time when asked to", async () => {
     const ada = await newMember();
     await perform(env.DB, ada, { type: "note.create", text: "# Old" }, 1000);
@@ -115,33 +100,6 @@ describe("notes", () => {
     expect(merged.text).toBe("mine too\n\ntheirs");
   });
 
-  it("keeps a history that works for a note created with Windows line endings or half a character pair", async () => {
-    const ada = await newMember();
-    for (const [given, kept] of [
-      ["# Plan\r\n\r\n- [ ] one\r\n- [ ] two\rthree", "# Plan\n\n- [ ] one\n- [ ] two\nthree"],
-      ["# Plan \uD83D\n\n- [ ] one \uDE00", "# Plan �\n\n- [ ] one �"],
-      ["# Plan 😀\r\n", "# Plan 😀\n"],
-    ] as const) {
-      const note = await perform(env.DB, ada, { type: "note.create", text: given });
-      expect(note.text).toBe(kept);
-      expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe(kept);
-
-      const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `${given}\r\n- [ ] more \uDC00` });
-      expect(written.text).toBe(`${kept}\n- [ ] more �`);
-      expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe(written.text);
-      expect((await perform(env.DB, ada, { type: "note.read", id: note.id, revision: 1 })).text).toBe(kept);
-      expect((await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `intro\r\n${given}` })).text).toBe(`intro\n${written.text}`);
-
-      expect((await perform(env.DB, ada, { type: "note.undo", id: note.id })).text).toBe(written.text);
-      expect((await perform(env.DB, ada, { type: "note.redo", id: note.id })).text).toBe(`intro\n${written.text}`);
-      expect((await perform(env.DB, ada, { type: "note.revertChanges", id: note.id, revisions: [2] })).text).toBe(`intro\n${kept}`);
-      expect((await perform(env.DB, ada, { type: "note.revert", id: note.id, revision: 1 })).text).toBe(kept);
-      expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe(kept);
-      expect(await perform(env.DB, ada, { type: "note.history", id: note.id })).toHaveLength(7);
-      expect((await perform(env.DB, ada, { type: "history.list", noteIds: [note.id] })).changes).toHaveLength(7);
-    }
-  });
-
   it("records a retried write once, even after newer changes", async () => {
     const ada = await newMember();
     const note = await perform(env.DB, ada, { type: "note.create", text: "hello" });
@@ -187,6 +145,8 @@ describe("notes", () => {
       updatedBy: { kind: "member", personId: ada.personId, name: "Ada Lovelace" },
       snippet: "book a room",
       openTodos: 1,
+      access: "edit",
+      private: false,
     });
     expect(written).toEqual({
       ...created,

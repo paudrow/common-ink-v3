@@ -30,6 +30,9 @@ interface Tool {
 const MEMBERS =
   "Who is in a workspace decides who can read and change everything in it, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could invite a stranger as admin or remove the other admins. Only the member, signed in, changes who is in a workspace.";
 
+const SHARING =
+  "Who a note or a folder is shared with decides who can read it, up to anyone on the internet for a public link, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could publish a note or hand a folder to a stranger. Only the member, signed in, shares.";
+
 /**
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
  * tool below, and test/core/agent-parity.test.ts fails when one has neither.
@@ -43,6 +46,13 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "member.leave": "Leaving ends the member's own access and their agents' with it, and only an admin can undo it. The member does that themself.",
   "invite.list": "Invites name people who are not in the workspace yet, by email, and are only of use for managing them, which an agent can't do.",
   "invite.revoke": MEMBERS,
+  "grant.list": "How a note is shared names people outside the workspace by email, and is only of use for sharing it, which an agent can't do. What the agent itself may do with a note is in every listing of it, as access.",
+  "grant.set": SHARING,
+  "grant.link": SHARING,
+  "grant.revoke": SHARING,
+  "note.setPrivate": "A private note is hidden from every other member, admins too, and that is not a change in history. The member who made the note decides it, in the app.",
+  "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
+  "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
 };
 
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -58,31 +68,6 @@ const LINKS = "A link to another note is [[id]] or [[id|display text]] with the 
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
 const revisions = { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, description: "The revisions of the changes, from note_history or history" };
-const choice = {
-  anyOf: [
-    { type: "string", enum: ["keep", "back"] },
-    { type: "object", properties: { text: { type: "string", description: "The lines to have there, typed out; an empty string for no lines" } }, required: ["text"], additionalProperties: false },
-  ],
-};
-const choices = { anyOf: [{ type: "string", enum: ["keep", "back"] }, { type: "array", items: choice }] };
-const resolve = {
-  type: "object",
-  description:
-    'How to settle the conflicts preview_revert lists: places where later changes edited lines this revert changes. "keep" keeps the later edits (what a revert does when this is left out), "back" returns the lines to how they were before the reverted changes and drops the later edits to them, and { text } puts the lines given there. Pass one choice for all of them, or a list with one for each conflict in the order preview_revert lists them.',
-  properties: {
-    at: { type: "integer", minimum: 0, description: "The revision preview_revert answered with. The revert is refused when the note has changed since: preview again" },
-    choices,
-  },
-  required: ["at", "choices"],
-  additionalProperties: false,
-};
-const resolveByNote = {
-  type: "object",
-  description:
-    "How to settle the conflicts of the notes named here, by note id: for each, what preview_revert with author listed, settled as resolve settles them there. A note left out keeps every later edit. A note that has changed since its preview is left as it was and named in failed.",
-  additionalProperties: resolve,
-  maxProperties: 200,
-};
 const author = {
   type: "object",
   properties: { kind: { type: "string", enum: ["member", "agent", "plugin"] }, id: { type: "string" } },
@@ -90,36 +75,19 @@ const author = {
   additionalProperties: false,
 };
 const noteIds = (description: string) => ({ type: "array", items: { type: "string" }, minItems: 1, description });
-const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
-const selected = (item: Record<string, unknown>, required: string[], description: string) => ({
-  type: "array",
-  minItems: 1,
-  maxItems: 40,
-  description,
-  items: { type: "object", properties: { noteId, ...item }, required: ["noteId", ...required], additionalProperties: false },
-});
-const reverted = selected(
-  {
-    revisions,
-    to: { type: "integer", minimum: 0, description: "Instead of revisions: the revision to return the note to" },
-    author: { ...author, description: "Instead of revisions: the member or agent whose changes to this note that still stand are reverted, as revert_author picks them" },
-    at: { type: "integer", minimum: 0, description: "The note's revision that preview_reverts answered with. The note is skipped when it has changed since" },
-    choices: { ...choices, description: "How to settle this note's conflicts, as resolve.choices of revert_changes does. Needs at" },
-  },
-  [],
-  "The notes to revert, each named once: up to 40, each with revisions (its changes to revert), to (the revision to return to) or author (whose changes to revert)",
-);
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
 
 export const TOOLS: Tool[] = [
   {
     name: "list_workspaces",
-    description: "The workspaces you can reach, each with your role in it (admin, editor or viewer). You act with your member's role.",
+    description:
+      "The workspaces you can reach, each with your member's role in it: admin, editor or viewer, or guest where they aren't a member and were given some notes or folders. You act with your member's role and grants, and no more.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "list_notes",
-    description: "The notes in a workspace, newest change first: id, title, folder, revision and when it last changed. Narrow it to one folder, or to notes whose text changed since a time.",
+    description:
+      "The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, or to notes whose text changed since a time.",
     inputSchema: object({ folderId: folderId("Only notes in this folder, from list_folders"), updatedSince: time("Only notes whose text changed at or after this time") }),
     op: "note.list",
   },
@@ -159,7 +127,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "rebuild_links",
-    description: "Make the record behind backlinks again from the notes' text. Every write keeps that record, so this is only for a record that was changed some other way. It covers 40 notes a call: while the answer's next isn't null, call again with it as after. Needs the admin role.",
+    description: "Make the record behind backlinks again from the text of the notes you can see. Every write keeps that record, so this is only for a record that was changed some other way. It covers 40 notes a call: while the answer's next isn't null, call again with it as after. Needs the admin role.",
     inputSchema: object({ after: { type: "string", description: "The next of the call before" } }),
     op: "links.rebuild",
   },
@@ -213,7 +181,6 @@ export const TOOLS: Tool[] = [
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
-      by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),
       before: { type: "object", description: "The next of the page before" },
@@ -228,7 +195,6 @@ export const TOOLS: Tool[] = [
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
-      by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),
       before: { type: "object", description: "The next of the page before" },
@@ -244,27 +210,6 @@ export const TOOLS: Tool[] = [
     op: "history.authors",
   },
   {
-    name: "history_diff",
-    description:
-      "What a selection of changes did, note by note, across up to 40 notes. A note's selected changes that follow one another are one run with one line diff, from the note before the first of them to the note after the last, so a line written and taken out again within a run shows in neither. A change left out in between starts a new run, which says how many were skipped. Each run has its revisions (from, to), how many changes it is (saves), who made them, when, and the lines it added and removed. An answer holds about 2000 diff lines: a run past them has diff null, and asking for its note alone returns it. A run's diff shows at most 200 lines and counts the rest in omitted.",
-    inputSchema: object({ changes: selected({ revisions }, ["revisions"], "The selection: each note once, with the revisions of its changes") }, ["changes"]),
-    op: "history.diff",
-  },
-  {
-    name: "preview_reverts",
-    description:
-      "What revert_many would do to each note, with nothing written: for each, the note's revision it was worked out at (pass it back as at), the changes that would be reverted (revisions), the ones left out because something already reverted them (already), the diff from the note as it is to the note after, and its conflicts as preview_revert lists them. A change selected together with the change that reverted it stays reverted and that revert goes too. An empty diff means the note would not change.",
-    inputSchema: object({ changes: reverted }, ["changes"]),
-    op: "history.previewRevert",
-  },
-  {
-    name: "revert_many",
-    description:
-      "Revert changes of up to 40 notes at once, each note as one new change under your agent's name. Each note is reverted or skipped whole, by itself: the answer lists reverted (each with the revision the revert made and the changes it reverted) and skipped (each with why: changed, when the note is no longer at the revision passed as at; nothing, when the revert would change nothing; refused, with the reason). Call preview_reverts first and pass each note's revision back as at. To undo a revert, revert the revision it made, with at set to that revision: the note is skipped if it has been changed since. Needs the editor or admin role.",
-    inputSchema: object({ changes: reverted }, ["changes"]),
-    op: "history.revert",
-  },
-  {
     name: "label_revision",
     description: "Name one revision of a note, so it can be found and reverted to. A null name takes the label away. Needs the editor or admin role.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 1 }, name: { type: ["string", "null"], maxLength: 60 } }, ["id", "revision", "name"]),
@@ -272,31 +217,23 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "revert_note",
-    description:
-      "Put a note back to how it was at a revision. This is recorded as a new change under your agent's name; nothing is erased. Call preview_revert first; if it lists conflicts, pass resolve to settle them. Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision to return to" }, resolve }, ["id", "revision"]),
+    description: "Put a note back to how it was at a revision. This is recorded as a new change under your agent's name; nothing is erased. Needs the editor or admin role.",
+    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision to return to" } }, ["id", "revision"]),
     op: "note.revert",
   },
   {
     name: "revert_changes",
     description:
-      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Call preview_revert first; if it lists conflicts, pass resolve to settle them, or the later edits are kept. Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revisions, resolve }, ["id", "revisions"]),
+      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Needs the editor or admin role.",
+    inputSchema: object({ id: noteId, revisions }, ["id", "revisions"]),
     op: "note.revertChanges",
   },
   {
     name: "revert_author",
     description:
-      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. To settle a note's conflicts, preview_revert it with author first and pass resolve; without it the later edits are kept. A note left with no text, such as one the author created, is named in emptied: it stays, since a note can't be deleted yet. Needs the editor or admin role.",
-    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" }, resolve: resolveByNote }, ["author"]),
+      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. A note left with no text, such as one the author created, is named in emptied: it stays, since a note can't be deleted yet. Needs the editor or admin role.",
+    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" } }, ["author"]),
     op: "history.revertAuthor",
-  },
-  {
-    name: "preview_revert",
-    description:
-      "What a revert would do to a note, with nothing written. Pass one of: revisions to preview revert_changes of those changes, to to preview revert_note to that revision, or author to preview what revert_author would do to this note. Returns the note's revision it was worked out at, the changes that would be reverted (revisions), the diff from the note as it is to the note after (diff), overlaps: later changes that still stand and edited the same lines, and conflicts: each place they did, top of the note first, with the lines as they were before the reverted changes (before), as they are now (now), as the revert leaves them with the later edits kept (kept), the line of the result kept starts at (line), and the later changes that edited them with their authors (later). Settle each conflict with resolve on the revert; pass the same resolve here to see the diff of the revert settled that way. A read-only token can use it.",
-    inputSchema: object({ id: noteId, revisions, to: { type: "integer", minimum: 0, description: "The revision to return to" }, author: { ...author, description: "Whose changes, from history_authors" }, resolve }, ["id"]),
-    op: "note.previewRevert",
   },
   {
     name: "undo",

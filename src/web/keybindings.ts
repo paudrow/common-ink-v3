@@ -64,15 +64,6 @@ export function typed(keys: string) {
 }
 
 /**
- * The key these keys begin with when it is one a control in focus acts on itself, alone or with
- * Shift: Enter presses a button and follows a link, and Space presses a button and ticks a checkbox.
- */
-export function pressing(keys: string): "enter" | "space" | null {
-  const key = keys.split(" ")[0]!.replace(/^shift\+/, "");
-  return key === "enter" || key === "space" ? key : null;
-}
-
-/**
  * A command's keys as a member wrote them, put the way `chordOf` writes key presses, or why they
  * aren't keys. They are what the app runs a command on: one chord, with or without a modifier, or
  * several pressed one after another, written with spaces between them.

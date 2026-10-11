@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ApiError } from "../../src/web/api.ts";
 import { createSettingsStore, type SettingsServer } from "../../src/web/settingsStore.ts";
 
@@ -169,49 +169,6 @@ describe("the settings store", () => {
     expect(remote.stored()).toEqual({ a: 1, b: 2 });
     expect(remote.control.reads).toBe(1);
     expect(store.status()).toEqual({ kind: "saved" });
-  });
-
-  it("stops sending once the session has ended, keeps the change, and saves it on the refresh after signing in", async () => {
-    vi.useFakeTimers();
-    try {
-      const remote = server();
-      const store = createSettingsStore(remote.api);
-      await store.load();
-      remote.control.down = new ApiError(401, "signed_out", "Unauthorized");
-      let asked = 0;
-      const write = remote.api.write;
-      remote.api.write = (...args) => (asked++, write(...args));
-
-      expect(store.set("a", 1)).toBe(true);
-      await vi.advanceTimersByTimeAsync(30_000);
-
-      expect(store.status()).toEqual({ kind: "signedOut" });
-      expect(asked).toBe(1);
-      expect(JSON.parse(store.text())).toEqual({ a: 1 });
-      // Still signed out: asking again changes nothing.
-      await store.refresh();
-      expect(store.status()).toEqual({ kind: "signedOut" });
-
-      remote.control.down = null;
-      await store.refresh();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(remote.stored()).toEqual({ a: 1 });
-      expect(store.status()).toEqual({ kind: "saved" });
-
-      // A change taken back while signed out leaves nothing to send, and nothing to say once signed in.
-      remote.control.down = new ApiError(401, "signed_out", "Unauthorized");
-      store.set("b", 2);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(store.status()).toEqual({ kind: "signedOut" });
-      store.set("b", undefined);
-      remote.control.down = null;
-      await store.refresh();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(store.status()).toEqual({ kind: "saved" });
-      expect(remote.stored()).toEqual({ a: 1 });
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("takes a change made elsewhere on refresh, with what isn't saved here put back over it", async () => {
