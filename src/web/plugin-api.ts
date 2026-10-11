@@ -17,6 +17,9 @@ import type { IconName } from "./icons.tsx";
 export type * from "../core/protocol.ts";
 export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS } from "../core/protocol.ts";
 
+/** How a note writes a link to another note, which is the same for a plugin as for an agent. */
+export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
+
 export { dismissing, useDismiss } from "./dismiss.ts";
 export { sandboxed } from "./htmlFrame.ts";
 export { Icon, type IconName } from "./icons.tsx";
@@ -99,6 +102,8 @@ export interface PluginHost {
   report(error: unknown): void;
   /** Calls `listener` each time the app arrives at an address, and once for the address it is at when the plugin starts later than the app. */
   onNavigate(listener: () => void): Dispose;
+  /** Calls `listener` each time the notes the member can see change: one made, renamed, moved, or changed by anyone. `app().notes` then holds them as they are. */
+  onNotes(listener: () => void): Dispose;
   /** The app as it is now. A view is handed this as `app`; a command reads it when it runs. It isn't there yet during `activate`. */
   app(): App;
   /**
@@ -301,7 +306,7 @@ export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts">;
 /**
  * A list offered at the cursor while the member types after a trigger, such as the embed menu on
  * `/`. It opens where the trigger starts a line or follows a space, and not inside code, so a `/`
- * in a path or a date opens nothing. Completions whose triggers both fit share one list, each
+ * in a path or a date opens nothing. One with `anywhere` opens wherever its trigger is typed. Completions whose triggers both fit share one list, each
  * one's items in the order of their plugins.
  */
 export interface Completion {
@@ -310,6 +315,8 @@ export interface Completion {
   trigger: string;
   /** Whether what is typed after the trigger may hold spaces, as a note's title does. Without it a space closes the list. */
   spaces?: boolean;
+  /** Whether the trigger opens the list anywhere outside code, such as right after a bracket or a word. For a trigger nobody types by accident, as `[[` is. */
+  anywhere?: boolean;
   /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
   items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
 }

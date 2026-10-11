@@ -662,6 +662,18 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
     expect(heard).toEqual(["early", "early", "late", "late"]);
   });
 
+  it("tells a plugin each time the notes change, until it is turned off", () => {
+    const heard: string[] = [];
+    const listening = (id: string): Plugin => ({ id, name: id, activate: (host) => void host.onNotes(() => heard.push(id)) });
+    const { host } = hostWith([listening("links"), listening("other")]);
+
+    host.notesChanged();
+    host.setEnabled("other", false);
+    host.notesChanged();
+
+    expect(heard).toEqual(["links", "other", "links"]);
+  });
+
   it("binds a ctrl chord to the Control key on a Mac, and to the same key as mod elsewhere", () => {
     const jumping: Plugin = { id: "jumping", name: "Jumping", activate: (host) => void host.commands.register({ id: "jump.back", title: "Back", keys: ["ctrl+o"], run: () => {} }) };
     const opening: Plugin = { id: "opening", name: "Opening", activate: (host) => void host.commands.register({ id: "file.open", title: "Open", keys: ["mod+o"], run: () => {} }) };

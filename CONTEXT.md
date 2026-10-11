@@ -20,7 +20,11 @@ A markdown file in a workspace, identified by a stable id. Its title is the firs
 _Avoid_: Document, page
 
 **Link**:
-A reference from one note to another by the target note's id. The visible text follows the target's title unless the link sets its own display text.
+A reference from one note to another by the target note's id, written `[[id]]` or `[[id|display text]]`. The visible text follows the target's title unless the link sets its own display text. The note's text holds the id and never the title, so renaming a note changes no other note. It is shown as written only while the cursor is inside it, and is otherwise one thing: the cursor passes it in a step and a deletion takes all of it. A link to a note that doesn't exist, or that the reader can't see, reads as unavailable either way. A link written by title, `[[Title]]`, links nothing until the write that introduces it resolves it to an id. See `docs/adr/0001-links-stored-by-id.md`.
+_Avoid_: Wikilink, reference
+
+**Backlink**:
+A note whose text links to the open note. The inspector's Backlinks tab lists the ones the member can see.
 
 **Todo**:
 A markdown checkbox line in a note. Its due date, recurrence, importance, project, and assignees are written on that line and shown as chips. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. Checking off a recurring todo leaves the open line and appends the checked line to the daily note of the member who checked it off. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, with a control to include completed ones.

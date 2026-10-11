@@ -9,6 +9,14 @@ import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate
  */
 export const touched = (state: EditorState, from: number, to: number) => state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 
+/**
+ * Whether the member is working inside `from` to `to`: a cursor past its first character and before
+ * its last, or a selection of part of it and nothing outside it. A selection that covers all of it,
+ * as selecting a paragraph does, is not.
+ */
+export const within = (state: EditorState, from: number, to: number) =>
+  state.selection.ranges.some((r) => (r.empty ? r.from > from && r.to < to : r.from >= from && r.to <= to && r.to - r.from < to - from));
+
 /** Whether the cursor or a selection is on the line `pos` is in. */
 export function lineTouched(state: EditorState, pos: number) {
   const line = state.doc.lineAt(pos);

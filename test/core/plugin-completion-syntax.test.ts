@@ -21,10 +21,18 @@ describe("what was typed after a trigger", () => {
   it("ends at a space, unless the completion takes spaces", () => {
     expect(typedAfter("/timer now", "/")).toBeNull();
     expect(typedAfter("a / b", "/")).toBeNull();
-    expect(typedAfter("see [[Road map", "[[", true)).toBe("Road map");
+    expect(typedAfter("see [[Road map", "[[", { spaces: true })).toBe("Road map");
     expect(typedAfter("see [[Road map", "[[")).toBeNull();
-    expect(typedAfter("see [[ Road", "[[", true)).toBeNull();
-    expect(typedAfter("[[a]] and [[b", "[[", true)).toBe("b");
+    expect(typedAfter("see [[ Road", "[[", { spaces: true })).toBeNull();
+    expect(typedAfter("[[a]] and [[b", "[[", { spaces: true })).toBe("b");
+  });
+
+  it("is read after anything when the completion opens anywhere", () => {
+    for (const before of ["([[Ro", "\"[[Ro", "word[[Ro", "**[[Ro"]) {
+      expect([before, typedAfter(before, "[[", { spaces: true, anywhere: true })]).toEqual([before, "Ro"]);
+      expect([before, typedAfter(before, "[[", { spaces: true })]).toEqual([before, null]);
+    }
+    expect(typedAfter("and/or", "/")).toBeNull();
   });
 });
 

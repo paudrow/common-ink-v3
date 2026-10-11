@@ -202,7 +202,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await inspector.getByRole("tab", { name: "History" }).click();
   await expect(panel.getByRole("list", { name: "Changes" }).getByRole("listitem")).toHaveAccessibleName("Change 1 by Ada Lovelace");
   await inspector.getByRole("tab", { name: "Backlinks" }).click();
-  await expect(panel).toHaveText("Notes that link here arrive with #13.");
+  await expect(panel).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
 
   await inspector.getByRole("tab", { name: "Info" }).click();
   await panel.getByRole("combobox", { name: "Move to" }).selectOption({ label: "Projects" });

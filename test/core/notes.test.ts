@@ -131,7 +131,7 @@ describe("notes", () => {
     const note = await perform(env.DB, ada, { type: "note.create", text: "# Plan\n\n- [ ] book a room" }, 1000);
 
     const [created] = await perform(env.DB, ada, { type: "note.list" });
-    await perform(env.DB, grace, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\n- [x] book a room\n- [ ] send [[invites]]" }, 2000);
+    await perform(env.DB, grace, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\n- [x] book a room\n- [ ] send [[invites]]", linkTitles: "keep" }, 2000);
     const [written] = await perform(env.DB, ada, { type: "note.list" });
 
     expect(created).toEqual({
@@ -157,6 +157,7 @@ describe("notes", () => {
     expect(await perform(env.DB, ada, { type: "note.read", id: note.id })).toEqual({
       ...written,
       text: "# Plan\n\n- [x] book a room\n- [ ] send [[invites]]",
+      links: [],
     });
   });
 

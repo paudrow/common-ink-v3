@@ -3,14 +3,15 @@ import type { CompletionItem } from "./plugin-api.ts";
 /**
  * What has been typed after `trigger`, given the line up to the cursor, or null when the cursor
  * isn't after one that opens a list. A trigger opens a list only at the start of a line or after
- * a space, so the `/` of a URL, a path, a date, or a fraction opens nothing.
+ * a space, so the `/` of a URL, a path, a date, or a fraction opens nothing. With `anywhere`, it
+ * opens after anything.
  */
-export function typedAfter(before: string, trigger: string, spaces = false): string | null {
+export function typedAfter(before: string, trigger: string, { spaces = false, anywhere = false }: { spaces?: boolean; anywhere?: boolean } = {}): string | null {
   for (let at = before.lastIndexOf(trigger); at >= 0; at = at === 0 ? -1 : before.lastIndexOf(trigger, at - 1)) {
     const typed = before.slice(at + trigger.length);
     if (!spaces && /\s/.test(typed)) return null;
     if (typed.startsWith(" ") || typed.includes(trigger)) continue;
-    if (at === 0 || /\s/.test(before[at - 1]!)) return typed;
+    if (anywhere || at === 0 || /\s/.test(before[at - 1]!)) return typed;
   }
   return null;
 }

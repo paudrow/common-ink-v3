@@ -2,6 +2,7 @@ import { syntaxTree } from "@codemirror/language";
 import type { Extension, Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { drawnInView, ghost, ghostLook, lineTouched } from "../lib/live.ts";
+import { MOD, openPage, opens } from "../lib/opening.ts";
 
 const hidden = Decoration.replace({});
 const code = Decoration.mark({ class: "md-code" });
@@ -12,10 +13,7 @@ const hang = Decoration.mark({ class: "md-hang" });
 /** Marks inside a line that say how the text beside them reads, and nothing else. */
 const MARKS = new Set(["EmphasisMark", "StrikethroughMark", "SubscriptMark", "SuperscriptMark"]);
 
-/** Where a link may go when it is opened. Anything else in a note stays text. */
-export const opens = (url: string) => /^(https?:\/\/|mailto:)/i.test(url);
-
-const link = (url: string) => Decoration.mark({ class: "md-link", attributes: opens(url) ? { "data-href": url, title: `${url}\n${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}-click to open` } : {} });
+const link = (url: string) => Decoration.mark({ class: "md-link", attributes: opens(url) ? { "data-href": url, title: `${url}\n${MOD}-click to open` } : {} });
 
 /**
  * Draws markdown where it is written, and shows a line as written while the cursor is on it. HTML
@@ -84,7 +82,7 @@ const following = EditorView.domEventHandlers({
   mousedown(event) {
     const href = (event.metaKey || event.ctrlKey) && event.target instanceof Element ? event.target.closest<HTMLElement>("[data-href]")?.dataset.href : undefined;
     if (!href || !opens(href)) return false;
-    window.open(href, "_blank", "noopener,noreferrer");
+    openPage(href);
     event.preventDefault();
     return true;
   },

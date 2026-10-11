@@ -29,6 +29,10 @@ Vim.defineEx("redo", "red", () => void run("history.redo"));
 Vim.defineAction("typeTab", (cm) => cm.replaceSelection("\t"));
 Vim.mapCommand("<C-i>", "action", "typeTab", {}, { context: "insert" });
 
+// A link is the nearest thing a note has to a definition, so gd follows the one under the cursor: to its note, or to its page in a new tab.
+Vim.defineAction("followLink", () => void run("links.follow"));
+Vim.mapCommand("gd", "action", "followLink", {}, { context: "normal" });
+
 // A note saves itself, so :w sends what's typed now, and :q closes the tab.
 Vim.defineEx("write", "w", () => void run("note.save"));
 Vim.defineEx("quit", "q", () => void run("tab.close"));

@@ -33,9 +33,10 @@ async function op<T>(body: object): Promise<T> {
   return json as T;
 }
 
+// The walkthrough is stored as written: where it shows how a link is typed, that is text, not a link to resolve.
 type Summary = { id: string; title: string; slug: string; revision: number };
 const existing = (await op<Summary[]>({ type: "note.list" })).find((n) => n.title === "Try in this PR");
 const note = existing
-  ? await op<Summary>({ type: "note.write", id: existing.id, baseRevision: existing.revision, text })
-  : await op<Summary>({ type: "note.create", text });
+  ? await op<Summary>({ type: "note.write", id: existing.id, baseRevision: existing.revision, text, linkTitles: "keep" })
+  : await op<Summary>({ type: "note.create", text, linkTitles: "keep" });
 console.log(`${url}/note/${note.slug}-${note.id}`);

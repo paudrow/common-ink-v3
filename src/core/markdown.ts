@@ -4,16 +4,20 @@ const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const OPEN_TODO = /^\s*(?:[-*+]|\d+[.)])\s+\[ \](?:\s|$)/;
 const SNIPPET_LENGTH = 160;
 
-function* linesOutsideCode(text: string): Generator<string> {
+/**
+ * Each line of a note that isn't in a fenced code block or a fence, with where it starts. Indented
+ * lines are not taken for code: a bullet nested three deep is indented as far as a code block is.
+ */
+export function* linesOutsideCode(text: string): Generator<{ line: string; from: number }> {
   let fence: string | null = null;
+  let from = 0;
   for (const line of text.split("\n")) {
     const marker = FENCE.exec(line)?.[1]?.[0];
     if (marker) {
       if (!fence) fence = marker;
       else if (marker === fence) fence = null;
-      continue;
-    }
-    if (!fence) yield line;
+    } else if (!fence) yield { line, from };
+    from += line.length + 1;
   }
 }
 
@@ -23,6 +27,8 @@ const plainText = (line: string) =>
     .replace(/^#{1,6}(?:\s+|$)/, "")
     .replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\](?:\s+|$))?/, "")
     .replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1")
+    // A link with no words of its own shows its note's title, which isn't this note's to keep.
+    .replace(/\s*\[\[[a-z0-9]{12}\]\]/g, "")
     .replace(/\[\[([^\]]*)\]\]/g, "$1")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/`|\*|~~/g, "")
@@ -42,7 +48,7 @@ export function summarize(text: string): { title: string; snippet: string; openT
   let title = "";
   let openTodos = 0;
   const prose: string[] = [];
-  for (const line of linesOutsideCode(text)) {
+  for (const { line } of linesOutsideCode(text)) {
     if (OPEN_TODO.test(line)) openTodos++;
     const heading = !title && HEADING.exec(line)?.[1]?.trim();
     if (heading) title = heading;
