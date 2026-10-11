@@ -1,12 +1,12 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
 import { noteHighlighting } from "./highlight.ts";
-import { NoteSync, type SaveState } from "./sync.ts";
+import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
   rejected: "Couldn't save this version. Edit the note to try again.",
@@ -17,12 +17,16 @@ interface Props {
   noteId: string;
   onLoaded: (note: Note) => void;
   onSaved: (note: Note) => void;
+  /** Called on each change typed, pasted, or undone, not on merges from the server. */
+  onEdit: () => void;
   meta: ReactNode;
   actions: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta, actions }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, onEdit, meta, actions }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const edited = useRef(onEdit);
+  edited.current = onEdit;
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [missing, setMissing] = useState(false);
 
@@ -31,7 +35,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta, actio
     let sync: NoteSync | null = null;
     let cancelled = false;
 
-    perform(workspaceId, { type: "note.read", id: noteId }).then(
+    committed(noteId).then(() => perform(workspaceId, { type: "note.read", id: noteId })).then(
       (note) => {
         if (cancelled || !host.current) return;
         onLoaded(note);
@@ -49,6 +53,9 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta, actio
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
               sync.extension,
+              EditorView.updateListener.of((u) => {
+                if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();
+              }),
             ],
           }),
         });

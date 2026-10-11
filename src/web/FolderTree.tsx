@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
 import type { ListedFolder, OpInput, Role } from "../core/protocol.ts";
 import { perform } from "./api.ts";
-import { useDismiss } from "./dismiss.ts";
 import { pathOf, type FolderTree as Tree } from "./folders.ts";
 import { Icon } from "./icons.tsx";
+import { ContextMenu } from "./Menu.tsx";
 import { NOTE_DRAG } from "./NoteList.tsx";
 import { isStrings, useStored } from "./stored.ts";
 
@@ -200,17 +200,26 @@ export function FolderTree({ workspaceId, tree, role, selectedId, onSelect, onCh
         </p>
       )}
       {menu && (
-        <FolderMenu
-          menu={menu}
-          canDelete={role === "admin"}
-          unsorted={menu.folder.id === tree.unsortedId}
+        <ContextMenu
+          label={`${menu.folder.name} actions`}
+          x={menu.x}
+          y={menu.y}
           onClose={closeMenu}
-          onNewInside={() => startCreate(menu.folder.id)}
-          onRename={() => {
-            setError(null);
-            setEditing({ kind: "rename", id: menu.folder.id });
-          }}
-          onDelete={() => run({ type: "folder.delete", id: menu.folder.id })}
+          items={[
+            { label: "New folder inside", action: () => startCreate(menu.folder.id) },
+            ...(menu.folder.id === tree.unsortedId
+              ? []
+              : [
+                  {
+                    label: "Rename",
+                    action: () => {
+                      setError(null);
+                      setEditing({ kind: "rename", id: menu.folder.id });
+                    },
+                  },
+                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.folder.id }) }] : []),
+                ]),
+          ]}
         />
       )}
     </div>
@@ -239,40 +248,5 @@ function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit:
         }
       }}
     />
-  );
-}
-
-interface MenuProps {
-  menu: Menu;
-  canDelete: boolean;
-  unsorted: boolean;
-  onClose: () => void;
-  onNewInside: () => void;
-  onRename: () => void;
-  onDelete: () => void;
-}
-
-function FolderMenu({ menu, canDelete, unsorted, onClose, onNewInside, onRename, onDelete }: MenuProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  useDismiss(onClose, ref);
-  useEffect(() => ref.current?.querySelector("button")?.focus(), []);
-  const item = (label: string, action: () => void) => (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={() => {
-        onClose();
-        action();
-      }}
-    >
-      {label}
-    </button>
-  );
-  return (
-    <div ref={ref} role="menu" aria-label={`${menu.folder.name} actions`} className="menu" style={{ left: menu.x, top: menu.y }}>
-      {item("New folder inside", onNewInside)}
-      {!unsorted && item("Rename", onRename)}
-      {!unsorted && canDelete && item("Delete", onDelete)}
-    </div>
   );
 }

@@ -46,6 +46,7 @@ const PATHS = {
   more: <path d="M4 8h.01M8 8h.01M12 8h.01" strokeWidth="2.25" />,
   folders: <path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />,
   plus: <path d="M8 3.5v9M3.5 8h9" />,
+  close: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,
   chevron: <path d="m6 4.5 3.5 3.5L6 11.5" />,
   inspector: (
     <>

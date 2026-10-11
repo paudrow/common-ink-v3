@@ -23,7 +23,8 @@ interface Props {
   openId: string | null;
   canEdit: boolean;
   onNew: () => void;
-  onOpen: (note: NoteSummary) => void;
+  /** A single click opens a preview; a double click keeps the note open. */
+  onOpen: (note: NoteSummary, keep: boolean) => void;
 }
 
 export function NoteList({ heading, notes, openId, canEdit, onNew, onOpen }: Props) {
@@ -88,8 +89,9 @@ export function NoteList({ heading, notes, openId, canEdit, onNew, onOpen }: Pro
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
                   e.preventDefault();
-                  onOpen(note);
+                  onOpen(note, false);
                 }}
+                onDoubleClick={() => onOpen(note, true)}
               >
                 <span className="row-title" id={`${ids}-${note.id}`}>
                   {titleOf(note)}

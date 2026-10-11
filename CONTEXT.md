@@ -71,6 +71,25 @@ A search of the text of notes a member can see, including todo lines, tags, and 
 **Quick open**:
 A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included.
 
+## Editor
+
+**Tab**:
+A note open in the editor. A note has at most one tab.
+
+**Preview tab**:
+The tab a single click opens, shown in italics. The next note opened with a single click takes its place. Double-clicking the note or its tab, or editing the note, keeps the tab.
+
+**Editor group**:
+A column of the editor with its own tabs, one of them showing. Groups sit side by side, and one is focused. The inspector and the URL follow the focused group's showing note.
+_Avoid_: Pane, split
+
+**Command**:
+A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.
+_Avoid_: Action
+
+**Command palette**:
+The list of commands, narrowed by typing.
+
 ## Access
 
 **Member**:
