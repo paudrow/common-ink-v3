@@ -158,6 +158,8 @@ describe("listing todos", () => {
       importance: 1,
       due: null,
       projects: ["home"],
+      every: null,
+      lastDone: null,
       tags: ["work", "garden"],
       words: "Water plants #garden",
       access: "edit",

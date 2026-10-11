@@ -1,6 +1,7 @@
 import { ChangeSet, MapMode } from "@codemirror/state";
 import { z } from "zod";
 import { SEEN, SEEN_FOLDER, allows, folderLevel, noteLevel, type GrantLevel, type Sight } from "./access.ts";
+import { dailySettings, dailyText, dayFor, filedOn, type DailySettings } from "./daily.ts";
 import { lineDiff } from "./diff.ts";
 import { dayIn, redoTarget, revertOfAuthor, revertedBy, takeBackOut, undoTarget } from "./history.ts";
 import { newId } from "./ids.ts";
@@ -27,12 +28,13 @@ import {
   type Reverts,
   type Role,
   type SharedNote,
+  type Written,
 } from "./protocol.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
-import { changeTodo, nameKey, parseTodo, todoIndex, todosIn } from "./todos.ts";
+import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, todoIndex, todosIn, type Completed } from "./todos.ts";
 
 /** Who is performing an operation, and where. */
 export type Actor =
@@ -435,7 +437,8 @@ const REVERT_AUTHOR_NOTES = 10;
 const MEND_NOTES = 20;
 /** As many batches as one request makes, so a workspace of any size is mended over a few. */
 const MEND_BATCHES = 20;
-const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: changes\./.test(err.message);
+/** A write that lost to another: its revision of a note, a member's daily note for a day, or a folder's name was taken first. */
+const isTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: (?:changes\.|daily_notes\.|index 'folders_by_name')/.test(err.message);
 
 /** What a change records beyond its diff. */
 interface Recording {
@@ -448,28 +451,303 @@ const insertChange = (ctx: Context, noteId: string, revision: number, baseRevisi
     .prepare("INSERT INTO changes (note_id, revision, base_revision, author_kind, author_id, diff, created_at, write_id, reverts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(noteId, revision, baseRevision, ctx.author.kind, authorId(ctx), JSON.stringify(changes.toJSON()), ctx.now, writeId ?? null, reverts ? JSON.stringify(reverts) : null);
 
-/** Records `changes` as the next revision of `row`. Null when another write took that revision first. */
-async function record(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision: number, recording?: Recording): Promise<NoteRow | null> {
+/** The note as recording `changes` as its next revision leaves it, and the statements that do. */
+function recording(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision: number, recorded?: Recording): { next: NoteRow; statements: D1PreparedStatement[] } {
   const revision = row.revision + 1;
   const text = applyChanges(changes, row.text);
   if (text.length > MAX_NOTE_LENGTH) throw new OpError("invalid", `With the other changes merged in, the note would be over ${MAX_NOTE_LENGTH} characters`);
   const next: NoteRow = { ...row, revision, indexed: MADE, ...written(ctx, text) };
   // A note never indexed has all of it made now, whatever this change touched.
   const was = row.indexed < MADE ? {} : { was: row.text };
-  try {
-    await ctx.db.batch([
-      insertChange(ctx, row.id, revision, baseRevision, changes, recording),
+  return {
+    next,
+    statements: [
+      insertChange(ctx, row.id, revision, baseRevision, changes, recorded),
       ctx.db
         .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, indexed = ? WHERE id = ? AND revision = ?")
         .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, MADE, row.id, row.revision),
       ...linking(ctx, row.id, text, was),
       ...indexing(ctx, row.id, text, was),
-    ]);
+    ],
+  };
+}
+
+/** Runs the statements as one batch: all of them or none. False when another write took what one of them needed first. */
+async function landed(ctx: Context, statements: D1PreparedStatement[]): Promise<boolean> {
+  try {
+    await ctx.db.batch(statements);
+    return true;
   } catch (err) {
-    if (isChangeTaken(err)) return null;
+    if (isTaken(err)) return false;
     throw err;
   }
-  return next;
+}
+
+/**
+ * The todo that was listed as line `at.line` reading `at.text` at `at.revision` of its note, where it
+ * is now: the line the caller was shown, followed through each change recorded since. What a line
+ * says never decides which line it is, since another todo may say the same. Undefined when the line
+ * is gone. It may read otherwise than it did, which is the caller's to look at.
+ */
+async function listedTodo(ctx: Context, row: NoteRow, at: { revision: number; line: number; text: string }) {
+  if (at.revision > row.revision) throw new OpError("invalid", `The note has no revision ${at.revision}`);
+  const then = at.revision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, at.revision, row.revision);
+  const listed = todosIn(then.text).find((todo) => todo.line === at.line && todo.text === at.text);
+  const now = !listed ? null : then.since ? then.since.mapPos(listed.from, 1, MapMode.TrackAfter) : listed.from;
+  return now === null ? undefined : todosIn(row.text).find((t) => t.from <= now && now <= t.from + t.text.length);
+}
+
+/** Records `changes` as the next revision of `row`. Null when another write took that revision first. */
+async function record(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision: number, recorded?: Recording): Promise<NoteRow | null> {
+  const { next, statements } = recording(ctx, row, changes, baseRevision, recorded);
+  return (await landed(ctx, statements)) ? next : null;
+}
+
+/** Whoever is completing a todo, as filing it needs them: their settings for daily notes, and the day it is for them. */
+interface Completing {
+  settings: DailySettings;
+  day: string;
+}
+
+/** `on` is the day as the one asking said it. With none, it is today where their settings say they are. */
+async function completing(ctx: Context, on: string | undefined): Promise<Completing> {
+  const row = await ctx.db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(ctx.workspaceId, ctx.personId).first<{ text: string }>();
+  const settings = dailySettings(row?.text);
+  return { settings, day: on ?? dayFor(settings, ctx.now) };
+}
+
+const NOTE_BY_ID = `SELECT n.text, n.created_by, n.indexed, ${SUMMARY_COLUMNS} WHERE n.id = ?`;
+
+/**
+ * The daily note for `day` of the member acting, or of the member an agent acts for, that can still
+ * be used: the one place that says which note that is. `stale` is the note the day is kept for when
+ * that note can no longer be used, which a new daily note then takes the place of. Every note can
+ * be used today. A lifecycle that takes one out of use, such as Trash, says so here and nowhere else.
+ */
+async function usableDaily(ctx: Context, day: string): Promise<{ note: NoteRow | null; stale: string | null }> {
+  const kept = await ctx.db.prepare("SELECT note_id FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ?").bind(ctx.workspaceId, ctx.personId, day).first<{ note_id: string }>();
+  if (!kept) return { note: null, stale: null };
+  const note = await ctx.db.prepare(NOTE_BY_ID).bind(kept.note_id).first<NoteRow>();
+  return note ? { note, stale: null } : { note: null, stale: kept.note_id };
+}
+
+/** The folder at the top of the workspace that the member's settings name for daily notes, ignoring case, when there is one. */
+const dailyFolder = (ctx: Context, settings: DailySettings) =>
+  ctx.db.prepare("SELECT id FROM folders WHERE workspace_id = ? AND parent_id IS NULL AND name = ? COLLATE NOCASE").bind(ctx.workspaceId, settings.folder).first<{ id: string }>();
+
+/**
+ * A new daily note for `day` holding `text`, and the statements that make it, in `folder` or in a
+ * folder made with it when there is none. Null when the member can't make a note there. The row in
+ * `daily_notes` is what makes it theirs for that day, and what refuses a second one. It takes the
+ * place of `stale`, a daily note of that day that can no longer be used.
+ */
+function newDaily(ctx: Context, { settings, day }: Completing, text: string, folder: { id: string } | null, stale: string | null): { row: NoteRow; statements: D1PreparedStatement[] } | null {
+  if (folder ? !allows(folderLevel(ctx.sight, folder.id), "edit") : !ctx.role || ctx.role === "viewer") return null;
+  const folderId = folder?.id ?? newId();
+  const id = newId();
+  const row: NoteRow = { id, folder_id: folderId, revision: 1, created_at: ctx.now, created_by: ctx.personId, private_owner: settings.private ? ctx.personId : null, indexed: MADE, ...written(ctx, text) };
+  return {
+    row,
+    statements: [
+      ...(folder ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) VALUES (?, ?, NULL, ?)").bind(folderId, ctx.workspaceId, settings.folder)]),
+      ctx.db
+        .prepare(
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, private_owner, indexed)
+           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, row.private_owner, row.indexed),
+      insertChange(ctx, id, 1, 0, changesBetween("", text)),
+      ...(stale ? [ctx.db.prepare("DELETE FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ? AND note_id = ?").bind(ctx.workspaceId, ctx.personId, day, stale)] : []),
+      ctx.db.prepare("INSERT INTO daily_notes (workspace_id, person_id, day, note_id) VALUES (?, ?, ?, ?)").bind(ctx.workspaceId, ctx.personId, day, id),
+      ...linking(ctx, id, text, { was: "" }),
+      ...indexing(ctx, id, text, { was: "" }),
+    ],
+  };
+}
+
+/**
+ * Whether a todo's words may be copied from its note onto a daily note. They may when the daily note
+ * is private to the one completing and shared with nobody, who could read the todo. They may when
+ * neither note is private and nothing narrows or widens who reads either: no grant and no link on
+ * either note or on any folder above them. Otherwise someone who reads the daily note might not be
+ * let to read the todo, and what is filed is the link back alone.
+ */
+async function wordsMayBeFiled(ctx: Context, source: NoteRow, daily: { id: string | null; folderId: string | null; privateOwner: string | null }): Promise<boolean> {
+  if (daily.privateOwner !== null) {
+    if (daily.privateOwner !== ctx.personId) return false;
+    return daily.id === null || !(await ctx.db.prepare("SELECT 1 FROM grants WHERE note_id = ? LIMIT 1").bind(daily.id).first());
+  }
+  if (source.private_owner !== null) return false;
+  const shared = await ctx.db
+    .prepare(
+      `WITH RECURSIVE up (id) AS (SELECT value FROM json_each(?1) UNION SELECT f.parent_id FROM folders f JOIN up ON f.id = up.id WHERE f.parent_id IS NOT NULL)
+       SELECT 1 FROM grants g WHERE g.note_id IN (SELECT value FROM json_each(?2)) OR g.folder_id IN (SELECT id FROM up) LIMIT 1`,
+    )
+    .bind(JSON.stringify([source.folder_id, daily.folderId].filter((id) => id !== null)), JSON.stringify([source.id, daily.id].filter((id) => id !== null)))
+    .first();
+  return !shared;
+}
+
+/**
+ * Records a change that checked off recurring todos, and files each on the daily note of whoever
+ * made it, as one batch: the change to the todos' note, the change to the daily note or the making
+ * of it, and the record of each completion all happen or none does. A filed line links back to the
+ * note it came from. Someone who can't have a daily note here, a guest or a member who can't write
+ * in their daily folder, completes the todo all the same and files nothing. Null when another write
+ * got in first, to be run again.
+ */
+async function recordCompleting(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision: number, filed: readonly { line: string; at: number }[], mine: Completing, recorded?: Recording): Promise<Written | null> {
+  const daily = ctx.role ? await usableDaily(ctx, mine.day) : undefined;
+  const folder = daily && !daily.note ? await dailyFolder(ctx, mine.settings) : null;
+  const words = !daily || daily.note?.id === row.id || (await wordsMayBeFiled(ctx, row, daily.note ? { id: daily.note.id, folderId: daily.note.folder_id, privateOwner: daily.note.private_owner } : { id: null, folderId: folder?.id ?? null, privateOwner: mine.settings.private ? ctx.personId : null }));
+  const lines = filed.map((f) => (words ? `${f.line} [[${row.id}]]` : `- [x] [[${row.id}]]`));
+  const statements: D1PreparedStatement[] = [];
+  /** The daily note the lines go on, the revision that puts them there, and where the first starts. */
+  let on: { id: string; revision: number | null; at: number } | null = null;
+  if (daily?.note?.id === row.id) {
+    // The todo is on the daily note it is filed on, which gets the one change. Taking that change back takes the line with it.
+    const text = applyChanges(changes, row.text);
+    changes = changes.compose(changesBetween(text, filedOn(text, lines)));
+    on = { id: row.id, revision: null, at: 0 };
+  } else if (daily?.note) {
+    if (noteLevel(ctx.sight, daily.note) === "edit") {
+      const text = filedOn(daily.note.text, lines);
+      statements.push(...recording(ctx, daily.note, changesBetween(daily.note.text, text), daily.note.revision).statements);
+      on = { id: daily.note.id, revision: daily.note.revision + 1, at: text.length - filedOn("", lines).length };
+    }
+  } else if (daily) {
+    const made = newDaily(ctx, mine, dailyText(mine.day, lines), folder, daily.stale);
+    if (made) {
+      statements.push(...made.statements);
+      on = { id: made.row.id, revision: 1, at: dailyText(mine.day).length };
+    }
+  }
+  const source = recording(ctx, row, changes, baseRevision, recorded);
+  let at = on?.at ?? 0;
+  const completions = filed.map((f, i) => {
+    const insert = ctx.db
+      .prepare("INSERT INTO completions (note_id, revision, at, person_id, author_kind, author_id, done_on, daily_note_id, daily_revision, daily_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(row.id, source.next.revision, f.at, ctx.personId, ctx.author.kind, authorId(ctx), mine.day, on?.id ?? null, on?.revision ?? null, on?.revision == null ? null : at, ctx.now);
+    at += lines[i]!.length + 1;
+    return insert;
+  });
+  if (!(await landed(ctx, [...source.statements, ...statements, ...completions]))) return null;
+  return { ...toNote(ctx, source.next), filed: { on: mine.day, dailyNoteId: on?.id ?? null, todos: filed.length } };
+}
+
+/** A completion with where the line it completed starts in the note as it is now. */
+interface Followed<C> {
+  completion: C;
+  at: number;
+}
+
+interface CompletionRow {
+  revision: number;
+  at: number;
+  done_on: string;
+  daily_note_id: string | null;
+  created_at: number;
+  author_kind: string;
+  author_id: string;
+  name: string | null;
+  agent_owner: string | null;
+}
+
+/**
+ * Each completion of a todo in the note that still stands, with where its line starts now: the place
+ * it was recorded at, followed through every change to the note since. A todo has no id, so this is
+ * what says which completions are one todo's.
+ */
+async function completionsNow(ctx: Context, noteId: string): Promise<Followed<CompletionRow>[]> {
+  const [done, later] = await ctx.db.batch<Record<string, unknown>>([
+    ctx.db
+      .prepare(
+        `SELECT c.revision, c.at, c.done_on, c.daily_note_id, c.created_at, c.author_kind, c.author_id, COALESCE(p.name, a.name) AS name, a.person_id AS agent_owner
+         FROM completions c
+         LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
+         LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
+         WHERE c.note_id = ?1 ORDER BY c.revision, c.at`,
+      )
+      .bind(noteId),
+    ctx.db.prepare("SELECT revision, diff, reverts FROM changes WHERE note_id = ?1 AND revision >= (SELECT MIN(revision) FROM completions WHERE note_id = ?1) ORDER BY revision").bind(noteId),
+  ]);
+  const completions = done!.results as unknown as CompletionRow[];
+  const changes = later!.results as unknown as { revision: number; diff: string; reverts: string | null }[];
+  const undone = revertedBy(changes.map(stepOf));
+  const following: Followed<CompletionRow>[] = [];
+  let next = 0;
+  for (const change of changes) {
+    const moved = ChangeSet.fromJSON(JSON.parse(change.diff));
+    for (const follow of following) follow.at = moved.mapPos(follow.at, 1);
+    for (; next < completions.length && completions[next]!.revision === change.revision; next++) following.push({ completion: completions[next]!, at: completions[next]!.at });
+  }
+  return following.filter(({ completion }) => !undone.has(completion.revision));
+}
+
+/** Whether a note's change at `revision` has been taken back out and not put back. */
+async function takenBack(ctx: Context, noteId: string, revision: number): Promise<boolean> {
+  const { results } = await ctx.db.prepare("SELECT revision, reverts FROM changes WHERE note_id = ? AND revision >= ? ORDER BY revision").bind(noteId, revision).all<{ revision: number; reverts: string | null }>();
+  return revertedBy(results.map(stepOf)).has(revision);
+}
+
+/** What taking completions back did to the lines they filed. */
+interface Refiling {
+  statements: D1PreparedStatement[];
+  unfiled?: NonNullable<Written["unfiled"]>;
+}
+
+/**
+ * What a change that takes others back out, or puts them back, does to the daily notes: a completion
+ * taken out has its filed line taken off the daily note, and one put back has it filed again unless
+ * it is still there. The line is found by following the place it was filed at through the daily
+ * note's changes since, never by what it says. One that was edited or deleted since is left as the
+ * member has it. The statements go in the batch that records the change itself. The daily note is
+ * the completer's, and is changed whether or not the one taking the change back can see it: they are
+ * told of it only when they can.
+ */
+async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[], reverts: Reverts): Promise<Refiling> {
+  const { results } = await ctx.db
+    .prepare("SELECT revision, at, daily_note_id, daily_revision, daily_at FROM completions WHERE note_id = ?1 AND daily_note_id <> ?1 AND daily_revision IS NOT NULL ORDER BY revision, at")
+    .bind(row.id)
+    .all<{ revision: number; at: number; daily_note_id: string; daily_revision: number; daily_at: number }>();
+  if (!results.length) return { statements: [] };
+  const [before, after] = [revertedBy(history), revertedBy([...history, { revision: history.length + 1, reverts }])];
+  const moved = results.filter((c) => before.has(c.revision) !== after.has(c.revision));
+  const refiled: Refiling = { statements: [], unfiled: { removed: 0, left: 0, dailyNoteIds: [] } };
+  for (const [dailyId, completions] of Map.groupBy(moved, (c) => c.daily_note_id)) {
+    const daily = await ctx.db.prepare(NOTE_BY_ID).bind(dailyId).first<NoteRow>();
+    if (!daily) continue;
+    const removals: { from: number; to: number }[] = [];
+    const additions: { completion: (typeof completions)[number]; line: string }[] = [];
+    let touched = false;
+    for (const completion of completions) {
+      const then = await replay(ctx, daily.id, completion.daily_revision, daily.revision);
+      const line = then.text.slice(completion.daily_at).split("\n", 1)[0]!;
+      const now = then.since.mapPos(completion.daily_at, 1, MapMode.TrackAfter);
+      const stands = now !== null && (now === 0 || daily.text[now - 1] === "\n") && daily.text.slice(now).split("\n", 1)[0] === line;
+      if (after.has(completion.revision)) {
+        if (stands) removals.push({ from: now, to: Math.min(daily.text.length, now + line.length + 1) });
+        // Reverting an author takes the daily note's change that filed the line back out too, before this or after: either way the line is off.
+        const off = stands || (await takenBack(ctx, daily.id, completion.daily_revision));
+        refiled.unfiled![off ? "removed" : "left"]++;
+        if (off && !stands) touched = true;
+      } else if (!stands) additions.push({ completion, line });
+    }
+    if (touched && noteLevel(ctx.sight, daily) !== "none") refiled.unfiled!.dailyNoteIds.push(daily.id);
+    if (!removals.length && !additions.length) continue;
+    const end = daily.text.length;
+    const filedAgain = additions.length ? `${end === 0 || daily.text.endsWith("\n") || removals.some((r) => r.to === end) ? "" : "\n"}${additions.map((a) => `${a.line}\n`).join("")}` : "";
+    const changes = ChangeSet.of([...removals, ...(filedAgain ? [{ from: end, insert: filedAgain }] : [])], end);
+    const { next, statements } = recording(ctx, daily, changes, daily.revision);
+    refiled.statements.push(...statements);
+    let at = next.text.length - additions.reduce((length, a) => length + a.line.length + 1, 0);
+    for (const { completion, line } of additions) {
+      refiled.statements.push(ctx.db.prepare("UPDATE completions SET daily_revision = ?, daily_at = ? WHERE note_id = ? AND revision = ? AND at = ?").bind(next.revision, at, row.id, completion.revision, completion.at));
+      at += line.length + 1;
+    }
+    if (!touched && noteLevel(ctx.sight, daily) !== "none") refiled.unfiled!.dailyNoteIds.push(daily.id);
+  }
+  return refiled.statements.length || refiled.unfiled!.left || refiled.unfiled!.removed ? refiled : { statements: [] };
 }
 
 /** Runs a write again from the note as it now stands, each time another write took its revision. */
@@ -541,8 +819,8 @@ const list = (revisions: number[]) => (revisions.length === 1 ? `change ${revisi
  * Records one change that takes other changes back out of a note. `choose` names them from the note's
  * changes so far, or returns null to leave the note as it is.
  */
-function takeBack(ctx: Context, id: string, choose: (history: Recorded[], reverted: Map<number, number>) => Reverts | null): Promise<Note> {
-  return settle(async () => {
+function takeBack(ctx: Context, id: string, choose: (history: Recorded[], reverted: Map<number, number>) => Reverts | null): Promise<Written> {
+  return settle(async (): Promise<Written | null> => {
     const row = await loadNote(ctx, id, "edit");
     const { results } = await ctx.db
       .prepare("SELECT revision, author_kind, author_id, diff, reverts FROM changes WHERE note_id = ? AND revision <= ? ORDER BY revision")
@@ -551,9 +829,10 @@ function takeBack(ctx: Context, id: string, choose: (history: Recorded[], revert
     const history = results.map(toRecorded);
     const reverts = choose(history, revertedBy(history));
     if (!reverts) return toNote(ctx, row);
-    const changes = takeBackOut(history, reverts);
-    const next = await record(ctx, row, changes, row.revision, { reverts });
-    return next && toNote(ctx, next);
+    const { next, statements } = recording(ctx, row, takeBackOut(history, reverts), row.revision, { reverts });
+    const refiled = await refiling(ctx, row, history, reverts);
+    if (!(await landed(ctx, [...statements, ...refiled.statements]))) return null;
+    return { ...toNote(ctx, next), ...(refiled.unfiled && { unfiled: refiled.unfiled }) };
   });
 }
 
@@ -679,6 +958,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             importance: r.importance,
             due: r.due,
             projects: todo?.projects.map((p) => p.name) ?? [],
+            every: todo?.every?.written ?? null,
+            lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
             tags: JSON.parse(r.tags) as string[],
             words: todo?.words ?? r.text,
             access: noteLevel(ctx.sight, { id: r.note_id, folder_id: r.folder_id, private_owner: r.private_owner }) === "edit" ? "edit" : "view",
@@ -711,28 +992,60 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "todo.set": {
     needs: "edit",
     run: (ctx, op) =>
-      settle(async () => {
+      settle(async (): Promise<Written | null> => {
         const row = await loadNote(ctx, op.id, "edit");
-        if (op.revision > row.revision) throw new OpError("invalid", `The note has no revision ${op.revision}`);
-        const { id: _, type: __, revision, line, text: listedAs, ...change } = op;
-        let wanted: string;
+        const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, ...change } = op;
+        const mine = change.done ? await completing(ctx, on) : null;
+        let wanted: Completed;
         try {
-          wanted = changeTodo(listedAs, change);
+          wanted = changeTodo(listedAs, change, mine?.day ?? "");
         } catch (err) {
           throw err instanceof RangeError ? new OpError("invalid", err.message) : err;
         }
-        // The todo is the line the caller was shown, followed through each change recorded since. What a
-        // line says never decides which line it is: another todo may say the same.
-        const then = revision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, revision, row.revision);
-        const listed = todosIn(then.text).find((todo) => todo.line === line && todo.text === listedAs);
-        const at = !listed ? null : then.since ? then.since.mapPos(listed.from, 1, MapMode.TrackAfter) : listed.from;
-        const todo = at === null ? undefined : todosIn(row.text).find((t) => t.from <= at && at <= t.from + t.text.length);
-        // Asked again after it was done, as a call that failed on its way back is: the line already says so.
-        if (todo && todo.text !== listedAs && todo.text === wanted) return toNote(ctx, row);
+        const todo = await listedTodo(ctx, row, op);
+        // Asked again after it was done, as a double click or a call that failed on its way back is: the
+        // line already says so. A recurring todo's line says so too, with the due date this call moved it to.
+        if (todo && todo.text !== listedAs && todo.text === wanted.line) return toNote(ctx, row);
         if (!todo || todo.text !== listedAs) throw new OpError("conflict", "This todo was changed since it was listed. List the todos again.");
-        if (wanted === listedAs) return toNote(ctx, row);
-        const next = await record(ctx, row, changesBetween(row.text, row.text.slice(0, todo.from) + wanted + row.text.slice(todo.from + todo.text.length)), row.revision);
+        if (wanted.line === listedAs) return toNote(ctx, row);
+        const changes = changesBetween(row.text, row.text.slice(0, todo.from) + wanted.line + row.text.slice(todo.from + todo.text.length));
+        if (wanted.filed) return recordCompleting(ctx, row, changes, row.revision, [{ line: wanted.filed, at: todo.from }], mine!);
+        const next = await record(ctx, row, changes, row.revision);
         return next && toNote(ctx, next);
+      }),
+  },
+
+  "todo.history": {
+    needs: "view",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "view");
+      const todo = await listedTodo(ctx, row, op);
+      if (!todo) throw new OpError("conflict", "This todo was changed since it was listed. List the todos again.");
+      const mine = (await completionsNow(ctx, row.id)).filter(({ at }) => at === todo.from).map((f) => f.completion);
+      const dailies = [...new Set(mine.flatMap((c) => (c.daily_note_id ? [c.daily_note_id] : [])))];
+      const seen = new Set(dailies.length ? (await seenAmong(ctx, IDS_IN, JSON.stringify(dailies))).map((r) => r.id) : []);
+      return {
+        completions: mine
+          .map((c) => ({ on: c.done_on, at: c.created_at, by: authorOf(c.author_kind, c.author_id, c.name, c.agent_owner), dailyNoteId: c.daily_note_id && seen.has(c.daily_note_id) ? c.daily_note_id : null }))
+          .reverse(),
+      };
+    },
+  },
+
+  "daily.open": {
+    needs: "edit",
+    members: true,
+    run: (ctx, op) =>
+      settle(async () => {
+        const mine = await completing(ctx, op.on);
+        const daily = await usableDaily(ctx, mine.day);
+        if (daily.note) {
+          if (noteLevel(ctx.sight, daily.note) === "none") throw new OpError("not_found", NO_SUCH_NOTE);
+          return toNote(ctx, daily.note);
+        }
+        const made = newDaily(ctx, mine, dailyText(mine.day), await dailyFolder(ctx, mine.settings), daily.stale);
+        if (!made) throw new OpError("forbidden", `You can't make notes in "${mine.settings.folder}", the folder your settings name for daily notes`);
+        return (await landed(ctx, made.statements)) ? toNote(ctx, made.row) : null;
       }),
   },
 
@@ -741,7 +1054,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.write": {
     needs: "edit",
     run: (ctx, op) =>
-      settle(async () => {
+      settle(async (): Promise<Written | null> => {
         const row = await loadNote(ctx, op.id, "edit");
         if (op.writeId) {
           const recorded = await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(row.id, op.writeId).first();
@@ -753,6 +1066,21 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         // At a tie, the stale write's insertion goes first: it stays next to the text it was typed after.
         const changes = base.since ? changed.map(base.since, true) : changed;
         if (changes.empty) return toNote(ctx, row);
+        // A write that checks a recurring todo's box completes it, as todo.set does, whoever wrote it and however.
+        const merged = applyChanges(changes, row.text);
+        const checked = checkedOff(row.text, changes);
+        if (checked.length) {
+          const mine = await completing(ctx, op.on);
+          // A todo completed since the writer read the note is not completed again by a check made on what they read, as this same write sent twice would.
+          const since = op.baseRevision === row.revision ? [] : (await completionsNow(ctx, row.id)).filter((f) => f.completion.revision > op.baseRevision).map((f) => changes.mapPos(f.at, 1));
+          const rolled = rolledForward(merged, checked, mine.day, (todo) => since.some((at) => todo.from <= at && at <= todo.from + todo.text.length));
+          // Read again as the smallest edit, which leaves the box as it was: the same write sent again then checks it again, and is seen to.
+          const completed = changesBetween(row.text, rolled.text);
+          if (completed.empty) return toNote(ctx, row);
+          if (rolled.filed.length) return recordCompleting(ctx, row, completed, op.baseRevision, rolled.filed, mine, { writeId: op.writeId });
+          const next = await record(ctx, row, completed, op.baseRevision, { writeId: op.writeId });
+          return next && toNote(ctx, next);
+        }
         const next = await record(ctx, row, changes, op.baseRevision, { writeId: op.writeId });
         return next && toNote(ctx, next);
       }),

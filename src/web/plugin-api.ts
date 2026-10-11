@@ -21,12 +21,21 @@ export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS } from "../core/pr
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, todosIn, type Importance, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+
+/** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
+export { WEEKDAYS, describeRule, nextDue, parseRule, writeRule, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
+
+/** The settings a daily note is made by, which the daily plugin declares under exactly these keys and the server reads. */
+export { DAILY_SETTINGS } from "../core/daily.ts";
+
+/** One time a recurring todo was checked off, as `todo.history` answers it. The protocol calls it `Completion`, which here is a list offered at the cursor. */
+export type TodoCompletion = Results["todo.history"]["completions"][number];
 
 export { dismissing, useDismiss } from "./dismiss.ts";
 export { sandboxed } from "./htmlFrame.ts";
 export { Icon, type IconName } from "./icons.tsx";
-export { ago, useNow } from "./time.ts";
+export { ago, dayOf, today, useNow } from "./time.ts";
 
 /** The drag type that carries a note's id, so a note dragged out of one plugin's view can be dropped on another's. */
 export const NOTE_DRAG = "application/x-common-ink-note";
@@ -477,6 +486,8 @@ export interface App {
   noteChanged(note: Note): void;
   /** Reads the folders and notes again, after a change the app wasn't told about. */
   refresh(): void;
+  /** Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a change that must reach the server as it is, before anything else is typed. */
+  saveNote(noteId: string): void;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */

@@ -130,6 +130,8 @@ describe("MCP protocol", () => {
       "list_todos",
       "todo_filters",
       "set_todo",
+      "todo_history",
+      "daily_note",
       "rebuild_todos",
       "move_note",
       "list_folders",

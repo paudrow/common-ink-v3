@@ -2743,7 +2743,8 @@ del.diff-line::before {
 }
 
 .todo-chip > input,
-.todo-chip > select {
+.todo-chip > select,
+.todo-chip > button {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2774,6 +2775,7 @@ del.diff-line::before {
 
 .todo-importance[data-level="0"],
 .todo-due[data-due="none"],
+.todo-every:not([data-set]),
 .todo-add {
   background: none;
   color: var(--faint);
@@ -2807,4 +2809,220 @@ del.diff-line::before {
   font: inherit;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* A panel opened from a chip, laid over the app. It is placed by its opener, under its chip. */
+.chip-popover {
+  position: fixed;
+  z-index: 40;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rule-form button,
+.rule-form input,
+.rule-form select {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+}
+
+.rule-form button {
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.rule-form button:hover:enabled,
+.rule-form button:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.rule-form button:focus-visible,
+.completions button:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.rule-form button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rule-form button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.rule-simple {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rule-form .rule-simple button {
+  border-color: transparent;
+  text-align: left;
+}
+
+.rule-days {
+  display: flex;
+  gap: 3px;
+}
+
+.rule-days button {
+  flex: 1;
+  padding: 3px 0;
+}
+
+.rule-form .rule-more {
+  align-self: flex-start;
+  border-color: transparent;
+  padding-left: 0;
+  color: var(--muted);
+}
+
+.rule-more::before {
+  content: "▸ ";
+}
+
+.rule-more[aria-expanded="true"]::before {
+  content: "▾ ";
+}
+
+.rule-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rule-advanced label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.rule-advanced input[type="radio"] {
+  margin: 0 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.rule-advanced input[type="number"] {
+  width: 3.6em;
+  padding: 2px 4px;
+}
+
+.rule-advanced select {
+  padding: 2px 2px;
+}
+
+.rule-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.rule-says {
+  flex: 1;
+  color: var(--muted);
+}
+
+.rule-form button.primary:enabled {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.completions {
+  min-width: 13rem;
+}
+
+.completions h2 {
+  margin: 2px 6px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  outline: none;
+}
+
+.completions ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.completions li > * {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+.completions li > button {
+  cursor: pointer;
+}
+
+.completions li > button:hover,
+.completions li > button:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.completion-by {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+
+.completions-note {
+  max-width: 18rem;
+  margin: 6px 6px 2px;
+  color: var(--muted);
+  font-size: 12px;
+  outline: none;
+}
+
+.daily-opening {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2.5rem 2rem;
+}
+
+.daily-opening h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.daily-opening p {
+  color: var(--muted);
 }

@@ -128,17 +128,17 @@ test("a folder is renamed in place", async ({ page }) => {
 test("More expands and collapses Contacts, Uploads, and History, and a mode not built yet names what builds it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const modes = page.getByRole("navigation", { name: "Modes" });
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
 
   await modes.getByRole("button", { name: "More" }).click();
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");
   await expect(editorPane(page)).toContainText("Nothing has been written in this workspace yet.");
 
   await modes.getByRole("button", { name: "More" }).click();
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
   await modes.getByRole("link", { name: "Calendar" }).click();
   await expect(editorPane(page)).toHaveText("CalendarCalendar arrives with #17.");
 });

@@ -110,7 +110,7 @@ describe("rewriting a todo's line", () => {
   });
 
   it("checks a todo off as one function", () => {
-    expect(completeTodo("- [ ] ! water +Garden")).toBe("- [x] ! water +Garden");
+    expect(completeTodo("- [ ] ! water +Garden", "2026-10-11")).toEqual({ line: "- [x] ! water +Garden", filed: null });
   });
 });
 

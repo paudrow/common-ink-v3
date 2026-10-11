@@ -188,11 +188,11 @@ test("turning History off takes its page, its link, and its inspector tab away",
   await run(page, "Disable plugin: History");
   await expect(inspector.getByRole("tab")).toHaveText(["Backlinks", "Info"]);
   await page.getByRole("button", { name: "More" }).click();
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads"]);
 
   await run(page, "Enable plugin: History");
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History"]);
 });
 
 test("a stopwatch written in a note is drawn in it and runs, and is plain text again with its plugin off", async ({ page }) => {

@@ -16,7 +16,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
   create [--text TEXT] [--folder ID] [--link-titles keep]
                                       a new note (text from stdin if --text is left out)
-  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles keep]
+  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles keep] [--on DAY]
                                       replace a note's text (from stdin if --text is left out)
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
@@ -25,8 +25,11 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       the todos in the notes you can see, open ones unless --completed
   todo-filters                        the projects and tags that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none]
-        [--add-project NAME] [--remove-project NAME]
+        [--add-project NAME] [--remove-project NAME] [--every RULE|none] [--on DAY]
                                       check a todo off or change it; ID, both Ns and LINE are from todos
+  todo-history ID --revision N --line N --text LINE
+                                      each time a recurring todo was checked off, and by whom
+  daily [--on DAY]                    your daily note for a day, made if it isn't there
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
   folders                             the folders in a workspace
@@ -57,6 +60,9 @@ leaves such text as it is.
 
 A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14 +Home
 DAY is a calendar date, YYYY-MM-DD. Importance is 0 for normal and 1 to 3 for !, !! and !!!.
+RULE is how a todo recurs, written every:RULE on its line: 2w (d, w, m or y), mon,thu, 3d-after-done,
+3rd-day, last-day, 2nd-tue, last-fri. Checking off a todo that recurs leaves it open with
+its next due date and files the checked line on your daily note for --on, or for today when left out.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
 
@@ -157,7 +163,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "write":
         if (!flags.has("base")) throw new UsageError("write needs --base, the revision you read");
         tool = "write_note";
-        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"] }) };
+        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], on: ["on"] }) };
         break;
       case "backlinks":
         tool = "backlinks";
@@ -192,8 +198,17 @@ export async function run(argv: string[], io: Io): Promise<number> {
           revision: integer("--revision", flags.get("revision")!),
           line: integer("--line", flags.get("line")!),
           text: flags.get("text")!,
-          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], addProject: ["add-project"], removeProject: ["remove-project"] }),
+          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], addProject: ["add-project"], removeProject: ["remove-project"], every: ["every", (_, value) => (value === "none" ? null : value)], on: ["on"] }),
         };
+        break;
+      case "todo-history":
+        if (!flags.has("revision") || !flags.has("line") || !flags.has("text")) throw new UsageError("todo-history needs --revision, --line and --text, as todos gave them");
+        tool = "todo_history";
+        args = { id: needId(), revision: integer("--revision", flags.get("revision")!), line: integer("--line", flags.get("line")!), text: flags.get("text")! };
+        break;
+      case "daily":
+        tool = "daily_note";
+        args = given({ on: ["on"] });
         break;
       case "todos-rebuild":
         tool = "rebuild_todos";

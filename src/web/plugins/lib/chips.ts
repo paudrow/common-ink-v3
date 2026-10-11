@@ -27,6 +27,12 @@ export interface Source {
   rewriteLine(next: (line: string) => string): void;
   /** Puts the cursor in the token, which shows it as written: after it, or `offset` characters into it. */
   edit(offset?: number): void;
+  /**
+   * The token's line as the note has it now: which line of the note it is, counted from 0, and how it
+   * reads. It is what an operation that finds a todo by its line is handed. Undefined once the note
+   * no longer writes the token as it was drawn.
+   */
+  line(): { index: number; text: string } | undefined;
 }
 
 /**
@@ -125,6 +131,12 @@ export class ChipWidget<T extends Token> extends WidgetType {
           if (!token) return;
           view.focus();
           view.dispatch({ selection: { anchor: offset === undefined ? token.to : token.from + offset }, scrollIntoView: true, annotations: entering.of(true) });
+        },
+        line() {
+          const token = now();
+          if (!token) return undefined;
+          const line = view.state.doc.lineAt(token.from);
+          return { index: line.number - 1, text: line.text };
         },
       });
     } catch {

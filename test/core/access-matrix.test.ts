@@ -174,7 +174,9 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "todo.list": { on: "everything", args: () => ({ includeCompleted: true }) },
   "todo.filters": { on: "everything", args: () => ({}) },
   "todo.set": { on: "note", needs: "E", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note), importance: 0 }) },
+  "todo.history": { on: "note", needs: "V", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note) }) },
   "todos.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
+  "daily.open": { on: "workspace", who: ["admin", "editor"], args: () => ({ on: "2026-10-11" }) },
   "folder.list": { on: "everything", args: () => ({}) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
@@ -220,7 +222,7 @@ const enough = (level: Level, needs: "V" | "E") => level === "E" || (level === "
 const sharesNote = (name: ActorName, note: NoteName) => OWNER[note] === name || (ACTORS[name].shares && levelOf(name, note) === "E");
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && folderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "links.rebuild", "todos.rebuild", "folder.delete"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open"];
 const AGENTS = ["their agent", "their read-only agent", "their agent pinned to this workspace"] as const;
 
 /** `not_found` for a note that was never there, which is what one the actor can't see must be answered with. */

@@ -3,6 +3,7 @@ import { locateTodo, type ListedTodo, type Plugin } from "../../plugin-api.ts";
 import { redraw } from "../lib/live.ts";
 import { todoChips } from "./chips.ts";
 import { dueOffers, today } from "./dates.ts";
+import { everyOffers } from "./recurrence.ts";
 import { TodosPage } from "./Todos.tsx";
 
 const MINUTE_MS = 60_000;
@@ -10,8 +11,8 @@ const MINUTE_MS = 60_000;
 const SETTLE_MS = 3000;
 
 /**
- * Todos. A checkbox line anywhere in a note is one, and its importance, due date and projects are
- * tokens on the line, drawn as chips that rewrite their token when changed. The Todos page lists
+ * Todos. A checkbox line anywhere in a note is one, and its importance, due date, recurrence and
+ * projects are tokens on the line, drawn as chips that rewrite their token when changed. The Todos page lists
  * them across the notes the member can see, and changes one by rewriting its line in its note.
  */
 export const todos: Plugin = {
@@ -50,7 +51,7 @@ export const todos: Plugin = {
     host.editorExtensions.register({
       id: "todos",
       extension: ({ noteId }) => [
-        todoChips(() => projects),
+        todoChips({ host, noteId, projects: () => projects }),
         ViewPlugin.define((view) => {
           editors.set(noteId, view);
           if (!read) readProjects();
@@ -65,6 +66,12 @@ export const todos: Plugin = {
       id: "todos.due",
       trigger: "due:",
       items: (typed) => dueOffers(typed, today()).map(({ label, day }) => ({ label, detail: day, insert: `due:${day}` })),
+    });
+
+    host.completions.register({
+      id: "todos.every",
+      trigger: "every:",
+      items: (typed) => everyOffers(typed).map(({ label, every }) => ({ label, detail: every, insert: `every:${every}` })),
     });
 
     // A project chip offers the projects there are, which change with any note.

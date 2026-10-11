@@ -393,7 +393,7 @@ test("removing a member says what happens to their private notes, and a member w
   await bob.getByRole("menuitem", { name: "Members" }).click();
   await members(bob).getByRole("button", { name: "Leave" }).click();
   await members(bob).getByRole("button", { name: "Leave Ada's workspace" }).click();
-  await expect(members(bob).getByRole("alert")).toContainText("You have private notes here");
+  await expect(members(bob).getByRole("alert")).toContainText("You have a private note here besides your daily notes");
   expect((await me(bob)).workspaces.map((w) => w.name)).toContain("Ada's workspace");
 
   await page.goto("/members");

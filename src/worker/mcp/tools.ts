@@ -66,7 +66,7 @@ const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
 const TODOS =
-  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, due:YYYY-MM-DD for the day it is due, and +Name for a project. A #tag anywhere in a note tags the note.";
+  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, due:YYYY-MM-DD for the day it is due, and +Name for a project. every:RULE makes it recur: 2w (every 2 weeks, in d, w, m or y), mon,thu, 3d-after-done, 3rd-day or last-day of the month, 2nd-tue or last-fri of the month. done:YYYY-MM-DDxN is when a recurring todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note.";
 const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
@@ -109,7 +109,7 @@ export const TOOLS: Tool[] = [
   {
     name: "write_note",
     description:
-      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} Checking the box of a recurring todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         id: noteId,
@@ -117,6 +117,7 @@ export const TOOLS: Tool[] = [
         text: { type: "string", description: "The note's full new markdown" },
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
+        on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "baseRevision", "text"],
     ),
@@ -160,7 +161,7 @@ export const TOOLS: Tool[] = [
   {
     name: "set_todo",
     description:
-      "Check a todo off, or change its importance, due date or project, by rewriting its line in its note. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Check a todo off, or change its importance, due date, project or how it recurs, by rewriting its line in its note. Checking off a todo that recurs leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         id: noteId,
@@ -172,10 +173,24 @@ export const TOOLS: Tool[] = [
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
         addProject: { type: "string", description: "A project to put it in, without the +. With removeProject, it takes that one's place on the line." },
         removeProject: { type: "string", description: "A project to take it out of, without the +" },
+        every: { type: ["string", "null"], description: "How it recurs, as written after every:, such as 2w, mon,thu, 3d-after-done or last-fri, or null to stop it recurring" },
+        on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "revision", "line", "text"],
     ),
     op: "todo.set",
+  },
+  {
+    name: "todo_history",
+    description: "Each time a recurring todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. Pass id, revision, line and text as list_todos gave them.",
+    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision of the note, from list_todos" }, line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" }, text: { type: "string", description: "The todo's line as written, from list_todos" } }, ["id", "revision", "line", "text"]),
+    op: "todo.history",
+  },
+  {
+    name: "daily_note",
+    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings name. A member has one for each day, and it is where a recurring todo they or you check off is filed. Needs the editor or admin role.",
+    inputSchema: object({ on: day("The day. Left out, it is today in the time zone your member's settings name, or in UTC") }),
+    op: "daily.open",
   },
   {
     name: "rebuild_todos",

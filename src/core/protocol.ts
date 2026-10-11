@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { isDay, isProjectName } from "./todos.ts";
+import { parseRule } from "./recurrence.ts";
+import { isDay, isProjectName, type LastDone } from "./todos.ts";
 
 export const MAX_NOTE_LENGTH = 500_000;
 export const MAX_SETTINGS_LENGTH = 100_000;
@@ -51,6 +52,8 @@ const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
 const ProjectName = z.string().max(100).refine(isProjectName, "not a project's name: a letter, then letters, digits, _ and -");
+/** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done` or `last-fri`. docs/todos.md has every rule. */
+const Recurrence = z.string().max(40).refine((rule) => parseRule(rule) !== null, "not a way to recur, such as 2w, mon,thu, 3d-after-done or last-fri");
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 
 export const Op = z.discriminatedUnion("type", [
@@ -67,6 +70,12 @@ export const Op = z.discriminatedUnion("type", [
     /** Chosen by the writer; a write sent again with the same id is recorded once. */
     writeId: z.string().min(1).max(64).optional(),
     linkTitles: LinkTitles,
+    /**
+     * The day it is for the writer, which counts when the write checks off a recurring todo: the todo
+     * is completed on that day, as todo.set does it. Left out, it is today in the time zone the
+     * member's settings name, or in UTC when they name none.
+     */
+    on: Day.optional(),
   }),
   /** The notes whose text links to this one, latest change first. */
   z.object({ type: z.literal("note.backlinks"), id: Id }),
@@ -150,6 +159,11 @@ export const Op = z.discriminatedUnion("type", [
    * found wherever it has moved to, and no other line is ever taken for it, however alike. Refused as
    * a conflict when the line itself was changed or deleted since. The same call made again changes
    * nothing more. What is left out stays as written.
+   *
+   * `every` sets how it recurs, or with null stops it recurring. Checking off a todo that recurs
+   * leaves it open with its next due date and a mark of when it was last done and how many times,
+   * and files the checked line on the daily note of whoever asks, or of the member an agent acts
+   * for. `on` is the day that happens on, as it is for note.write.
    */
   z.object({
     type: z.literal("todo.set"),
@@ -162,7 +176,22 @@ export const Op = z.discriminatedUnion("type", [
     due: Day.nullable().optional(),
     addProject: ProjectName.optional(),
     removeProject: z.string().min(1).max(100).optional(),
+    every: Recurrence.nullable().optional(),
+    on: Day.optional(),
   }),
+  /**
+   * Each time a recurring todo was checked off: the day, and who did it, latest first. `revision`,
+   * `line` and `text` are the todo as todo.list gave it, and it is found as todo.set finds it. A
+   * completion that was undone is left out, and so is one made before the todo's line was cut out
+   * of its note and put back.
+   */
+  z.object({ type: z.literal("todo.history"), id: Id, revision: Revision, line: z.number().int().min(0), text: z.string().max(MAX_NOTE_LENGTH) }),
+  /**
+   * The daily note of whoever asks, or of the member an agent acts for, for the day `on`: found, or
+   * made with the date as its heading, in the folder their settings name, which is made too if it
+   * isn't there. Left out, `on` is today in the time zone their settings name, or in UTC.
+   */
+  z.object({ type: z.literal("daily.open"), on: Day.optional() }),
   /** The same operation as links.rebuild, under the name of the other record it makes again. */
   z.object({ type: z.literal("todos.rebuild") }),
   z.object({ type: z.literal("folder.list") }),
@@ -315,12 +344,46 @@ export interface ListedTodo {
   /** A calendar date, YYYY-MM-DD, or null. */
   due: string | null;
   projects: string[];
+  /** How it recurs, as written after `every:`, or null. */
+  every: string | null;
+  /** When it was last checked off and how many times, for a todo that recurs and has been. */
+  lastDone: LastDone | null;
   /** The tags of the note it is in. */
   tags: string[];
   /** The line without its list mark, checkbox, importance, due date and projects. */
   words: string;
   /** What the one asking may do with its note. With edit, todo.set changes it. */
   access: GrantAccess;
+}
+
+/** What a change that checked off recurring todos filed, and where. */
+export interface Filed {
+  /** The day the todos were completed on. */
+  on: string;
+  /** The daily note the checked lines went on. Null when the one completing can't have one here: a guest, or a member who can't write in their daily folder. */
+  dailyNoteId: string | null;
+  todos: number;
+}
+
+/** A note after a change to its text. `filed` is there when the change checked off a recurring todo. */
+export interface Written extends Note {
+  filed?: Filed;
+  /**
+   * There when the change took completions back out, or put them back: how many filed lines were
+   * taken off daily notes, how many were left because the line had been edited or deleted since, and
+   * the daily notes that changed, those the one asking can see.
+   */
+  unfiled?: { removed: number; left: number; dailyNoteIds: string[] };
+}
+
+/** One time a recurring todo was checked off. */
+export interface Completion {
+  /** The day it was done, as whoever did it said it was. */
+  on: string;
+  at: number;
+  by: Author;
+  /** The daily note it was filed on, when the one asking can see it. */
+  dailyNoteId: string | null;
 }
 
 export interface Folder {
@@ -463,7 +526,7 @@ export interface Activity {
 
 export interface AuthorReverted {
   /** Each note that got a new change, and the author's changes it took back out. */
-  reverted: { note: NoteSummary; revisions: number[] }[];
+  reverted: { note: NoteSummary & Pick<Written, "unfiled">; revisions: number[] }[];
   /** The reverted notes left with no text, each under the title it had. There is no deleting a note yet, so they stay. */
   emptied: { noteId: string; title: string }[];
   /** Notes that refused the change, such as one it would make too long. They are left as they were. */
@@ -494,23 +557,25 @@ export interface Results {
   "note.list": NoteSummary[];
   "note.create": Note;
   "note.read": ReadNote;
-  "note.write": Note;
+  "note.write": Written;
   "note.backlinks": NoteSummary[];
   "links.rebuild": Rebuilt;
   /** `next` is the `offset` of the page after, or null on the last. */
   "todo.list": { todos: ListedTodo[]; next: number | null };
   /** Each name once, ignoring case, as a note writes it. */
   "todo.filters": { projects: string[]; tags: string[] };
-  "todo.set": Note;
+  "todo.set": Written;
+  "todo.history": { completions: Completion[] };
+  "daily.open": Note;
   "todos.rebuild": Rebuilt;
   "note.history": ChangeEntry[];
   "note.move": Note;
   "note.label": { id: string; revision: number; label: string | null };
-  "note.revert": Note;
-  "note.revertChanges": Note;
-  "note.reapplyChanges": Note;
-  "note.undo": Note;
-  "note.redo": Note;
+  "note.revert": Written;
+  "note.revertChanges": Written;
+  "note.reapplyChanges": Written;
+  "note.undo": Written;
+  "note.redo": Written;
   "history.list": HistoryPage;
   "history.authors": Author[];
   "history.revertAuthor": AuthorReverted;

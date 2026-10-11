@@ -19,7 +19,7 @@ import { documentOf } from "./settings.ts";
 import { Settings } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
-import { performInSync, saveNow, undoOrRedo } from "./sync.ts";
+import { onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
 type Popover = { side: "left" } | { side: "right"; tab: string };
@@ -278,6 +278,9 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     setListVersion((v) => v + 1);
   }, [loadFolders]);
 
+  // A recurring todo checked off anywhere in the app is filed on a daily note, which may be new, in a folder that may be new.
+  useEffect(() => onFiled(refresh), [refresh]);
+
   useEffect(() => {
     const again = () => document.visibilityState === "visible" && refresh();
     const timer = setInterval(again, REFRESH_ALL_MS);
@@ -463,6 +466,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     moveNote,
     noteChanged: remember,
     refresh,
+    saveNote: (noteId: string) => void saveNow(noteId),
     markSeen,
     toggleOverlay: (id: string, state?: unknown) => setOverlay((open) => (open?.id === id ? null : { id, state })),
     switchWorkspace: onSwitch,

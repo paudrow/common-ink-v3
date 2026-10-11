@@ -308,7 +308,7 @@ test("clicking a todo opens its note with the cursor on its line, and the editor
 
   await row(page, "Water plants").getByRole("checkbox").check();
   await expect.poll(() => read(page, home.id)).toBe(`${HOME.replace("- [ ] ! Water", "- [x] ! Water")}Typed last.`);
-  await row(page, "Call the bank").getByRole("button").click();
+  await row(page, "Call the bank").getByRole("button", { name: /Call the bank/ }).click();
 
   await expect(page).toHaveURL(new RegExp(`${home.id}$`));
   await expect.poll(() => cursorLine(page)).toBe("- [ ] !! Call the bank due:2026-10-14 +Home");

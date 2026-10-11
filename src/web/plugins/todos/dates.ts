@@ -3,14 +3,12 @@
  * is: the browser's own time zone. The server is only ever handed days, never asked what today is.
  */
 
-const pad = (n: number) => String(n).padStart(2, "0");
+import { dayOf, today } from "../../plugin-api.ts";
+
+export { dayOf, today };
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-/** The day it is at `time`, where the member is. */
-export const dayOf = (time: Date) => `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}`;
-
-export const today = () => dayOf(new Date());
 
 const utc = (day: string) => {
   const [year, month, date] = day.split("-").map(Number);
