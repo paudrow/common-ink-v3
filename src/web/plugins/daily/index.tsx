@@ -50,8 +50,6 @@ const named = (key: string) => key.slice("daily.".length);
 export const daily: Plugin = {
   id: "daily",
   name: "Daily notes",
-  description: "A note for each day, made when first needed, where checked-off todos are filed.",
-  icon: "today",
   settings: {
     [named(folder.key)]: {
       type: "string",
@@ -75,7 +73,7 @@ export const daily: Plugin = {
     },
   },
   activate(host) {
-    host.views.register("page", { id: "today", path: PATH, label: "Today", icon: "today", nav: "primary", order: 35, transient: true, component: ({ app }) => <Today host={host} app={app} /> });
-    host.commands.register({ id: "daily.today", title: "Open today's daily note", group: "Navigation", run: () => host.app().go(PATH) });
+    host.views.register("page", { id: "today", path: PATH, label: "Today", icon: "today", nav: "primary", order: 35, component: ({ app }) => <Today host={host} app={app} /> });
+    host.commands.register({ id: "daily.today", title: "Open today's daily note", run: () => host.app().go(PATH) });
   },
 };

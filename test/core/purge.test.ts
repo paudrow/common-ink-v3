@@ -10,13 +10,13 @@ const T0 = Date.UTC(2026, 9, 11);
 
 /**
  * A note with something in every table that keeps anything by a note's id: changes, a label, links
- * out and in, todos, a tag, search text, a grant and a link, a completion, and a daily
+ * out and in, todos, a project, a tag, search text, a grant and a link, a completion, and a daily
  * note that a completion elsewhere was filed on. `word` is in its text and nowhere else.
  */
 async function doomed(ada: Actor, word: string) {
   const other = await perform(env.DB, ada, { type: "note.create", text: "# Other\n\n- [ ] elsewhere every:1d" });
   const daily = await perform(env.DB, ada, { type: "daily.open", on: "2026-10-11" });
-  await perform(env.DB, ada, { type: "note.write", id: daily.id, baseRevision: daily.revision, text: `${daily.text}\n${word} [[${other.id}]]\n- [ ] ${word}-todo every:1d #${word}tag\n` });
+  await perform(env.DB, ada, { type: "note.write", id: daily.id, baseRevision: daily.revision, text: `${daily.text}\n${word} [[${other.id}]]\n- [ ] ${word}-todo every:1d +${word}proj #${word}tag\n` });
   await perform(env.DB, ada, { type: "note.label", id: daily.id, revision: 1, name: `${word}-label` });
   await perform(env.DB, ada, { type: "todo.set", id: other.id, revision: 1, line: 2, text: "- [ ] elsewhere every:1d", done: true, on: "2026-10-11" });
   const now = await perform(env.DB, ada, { type: "note.read", id: daily.id });
@@ -56,7 +56,7 @@ describe("removing notes from Trash", () => {
     const note = await doomed(ada, "xyzzyplugh");
     const before = await remains(note.id, "xyzzyplugh");
     // The check below means something only if the note was in every one of these to begin with.
-    expect(before).toEqual(expect.arrayContaining(["notes.id", "notes.text", "changes.note_id", "changes.diff", "labels.note_id", "links.source_id", "todos.note_id", "note_tags.note_id", "note_search_rows.note_id", "note_search_content.c2", "grants.note_id", "completions.note_id", "completions.daily_note_id", "daily_notes.note_id"]));
+    expect(before).toEqual(expect.arrayContaining(["notes.id", "notes.text", "changes.note_id", "changes.diff", "labels.note_id", "links.source_id", "todos.note_id", "todo_projects.note_id", "note_tags.note_id", "note_search_rows.note_id", "note_search_content.c2", "grants.note_id", "completions.note_id", "completions.daily_note_id", "daily_notes.note_id"]));
     await perform(env.DB, ada, { type: "note.trash", id: note.id }, T0);
 
     expect(await purgeTrash(env.DB, T0 + TRASH_MS - 1)).toEqual({ removed: 0, failed: [], more: false });
@@ -189,22 +189,4 @@ describe("removing notes from Trash", () => {
     expect((await perform(env.DB, ada, { type: "trash.list" })).map((n) => n.title)).toEqual(["Waiting"]);
     await expect(perform(env.DB, ada, { type: "note.read", id: due.id })).rejects.toMatchObject({ code: "not_found" });
   });
-
-  it("leaves no word of a removed note in the search index's own pages, removed by the clock or by a member", async () => {
-    const ada = await newMember();
-    const held = async (word: string) => (await env.DB.prepare("SELECT COUNT(*) AS n FROM note_search_data WHERE instr(block, CAST(?1 AS BLOB)) > 0").bind(word).first<{ n: number }>())!.n;
-    const doomed = await perform(env.DB, ada, { type: "note.create", text: "# Doomed\n\nxyzzyplughword" }, 1000);
-    const shredded = await perform(env.DB, ada, { type: "note.create", text: "# Shredded\n\nqwertyfrobword" }, 1000);
-    await perform(env.DB, ada, { type: "note.create", text: "# Kept\n\nstayingword" }, 1000);
-    await perform(env.DB, ada, { type: "note.trash", id: doomed.id }, 2000);
-    await perform(env.DB, ada, { type: "note.trash", id: shredded.id }, 2000);
-    expect(await held("xyzzyplughword")).toBeGreaterThan(0);
-
-    await perform(env.DB, ada, { type: "note.purge", id: shredded.id }, 3000);
-    expect(await held("qwertyfrobword")).toBe(0);
-    expect((await purgeTrash(env.DB, 2000 + TRASH_MS)).removed).toBe(1);
-    expect(await held("xyzzyplughword")).toBe(0);
-    expect((await perform(env.DB, ada, { type: "search", query: "stayingword" })).results.map((r) => r.note.title)).toEqual(["Kept"]);
-  });
-
 });

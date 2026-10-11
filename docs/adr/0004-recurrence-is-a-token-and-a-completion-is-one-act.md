@@ -32,14 +32,6 @@ Issue #20 asks for todos that recur, set through a chip, with a chip that says w
 
 **The day is the completer's.** The app sends `on`, today in the browser's zone. With none, as an agent may leave it, the server uses the zone the member's `daily.timeZone` setting names, or UTC.
 
-**Amended 2026-10-13: the grammar is wider, still one token and one spelling a rule.** The maintainer asked for version 1's rules along with its editor. The token now also writes every Nth week on chosen days (`2w-mon,thu`), several days or weekdays of a month (`1st-day,15th-day`, `1st-tue,3rd-tue`), every Nth month of those (`3m-last-fri`), a date or a weekday of a month every year (`mar-1`, `1st-mon-mar`, `2y-mar-1`), and an end (`-until-2026-12-31`, `-times-5`). Every spelling read before reads as the same rule. `Rule` is one shape in place of four kinds: a unit and a count, what it picks out of each period, where it counts from, and its end. One spelling still: every one is written with no number, a list has one order, and an end comes last. The days of a week alone were read in any order before this and still are.
-
-**The end is in the token, not a token of its own.** Version 1 wrote `until:` and `times:` beside `rec:`. Here a rule with its end is one construct: one chip in the editor, shown as written only while the cursor is on it, and one `every` value in a listing, in `todo.set`, on the command line and in an agent's call. Two more tokens would be two more chips on a line for one thing a member reads as one ("every month · 5 left"), and a count left on a line whose rule was taken away. The cost is that a completion rewrites the rule's token to count down, as it already rewrites the due date and the `done:` mark. The count is what is left, counting the one due now, so `-times-1` is the last and no line ever says none. The last time checks the todo off for good and leaves its tokens as written, so opening it again finds the rule it had.
-
-**A skip is a change, not a completion.** `todo.set` with `skip` moves the due date as checking the todo off would and writes no `done:` mark, no row in `completions` and nothing on a daily note. It is refused where there is no later occurrence to move to.
-
-**Not taken from version 1:** `RRULE:` spellings, a day of the year (`day-50`), rules typed in words ("every other week"), and the menu of a task's fields. The first two are ways to say twice what the token says once or what nobody asked for, and the last two are features of their own.
-
 ## Considered
 
 - **`every:` in words, such as `every:2 weeks` or `every:monday`.** A token can't hold a space, and whole words give each rule several spellings.
@@ -51,7 +43,7 @@ Issue #20 asks for todos that recur, set through a chip, with a chip that says w
 
 ## Consequences
 
-- `every:1m` on the 31st drifts to the 28th after February, since the line holds only the latest due date. `every:last-day` and `every:31st-day` don't, and the editor of a rule says so and offers the last day when a rule lands past the 28th.
+- `every:1m` on the 31st drifts to the 28th after February, since the line holds only the latest due date. `every:last-day` and `every:31st-day` don't.
 - Taking back a completion made by someone else changes that person's daily note, which may be private to them, as a change by whoever took it back. They are told only of daily notes they can see.
 - Reverting an agent's changes takes out the heading of a daily note the agent's completion made, since that change was the agent's. The note is still the member's daily note for the day.
 - The server reads three of a member's settings (`daily.folder`, `daily.private`, `daily.timeZone`) to act for them. It still tells an agent none of them.

@@ -1,25 +1,9 @@
 import { useRef, useState } from "react";
-import { ago, tagsIn, useNow, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../plugin-api.ts";
+import { tagsIn, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../plugin-api.ts";
 import { lifecycle } from "./lib/lifecycle.ts";
 import { openNotes, type OpenNotes } from "./lib/openNotes.ts";
 import { tagPath } from "./tags/path.ts";
 import { SharingSummary } from "./sharing/Summary.tsx";
-
-/** A set of notes: a folder's, under "Folder", or the ones a page is showing, under "Showing". */
-function NotesInfo({ heading, name, notes }: { heading: string; name: string; notes: readonly NoteSummary[] }) {
-  const now = useNow();
-  const last = notes.reduce<NoteSummary | null>((latest, n) => (latest && latest.updatedAt >= n.updatedAt ? latest : n), null);
-  return (
-    <dl className="info">
-      <dt>{heading}</dt>
-      <dd>{name}</dd>
-      <dt>Notes</dt>
-      <dd>{notes.length === 1 ? "1 note" : `${notes.length} notes`}</dd>
-      <dt>Last changed</dt>
-      <dd>{last ? `${ago(last.updatedAt, now)} by ${last.updatedBy.name}` : "Nothing in it yet"}</dd>
-    </dl>
-  );
-}
 
 function Info({ host, open, app, note }: ViewProps & { host: PluginHost; open: OpenNotes; note: NoteSummary }) {
   // The tags the note's text has now, as it is typed, read the way the server reads them.
@@ -128,17 +112,8 @@ function Info({ host, open, app, note }: ViewProps & { host: PluginHost; open: O
 export const noteInfo: Plugin = {
   id: "note-info",
   name: "Note info",
-  description: "The details of the note, the folder or the notes in front, in the inspector.",
-  icon: "info",
   activate(host) {
     const open = openNotes(host);
-    host.views.register("inspector", {
-      id: "info",
-      label: "Info",
-      icon: "info",
-      for: ["note", "folder", "notes"],
-      component: ({ app, about }) =>
-        about.kind === "note" ? <Info key={about.note.id} host={host} open={open} app={app} note={about.note} /> : <NotesInfo heading={about.kind === "folder" ? "Folder" : "Showing"} name={about.kind === "folder" ? about.name : about.label} notes={about.notes} />,
-    });
+    host.views.register("inspector", { id: "info", label: "Info", icon: "info", component: (props) => <Info host={host} open={open} {...props} /> });
   },
 };

@@ -36,19 +36,17 @@ type Props<P> = Omit<P, "app"> & {
   view: { id: string; component: ComponentType<P> };
   /** What to show in its place if it throws. Nothing, unless said. */
   fallback?: ReactNode;
-  /** What the view is told of the app in place of what its plugin is given, such as a page that is told its own address. */
-  as?: (app: App) => App;
 };
 
 /**
  * Draws one view a plugin registered, with the `app` its own plugin is given. A view that throws is
  * left out, and the failure is recorded against its plugin.
  */
-export function Drawn<P extends { app: App }>({ host, view, fallback = null, as, ...props }: Props<P>) {
+export function Drawn<P extends { app: App }>({ host, view, fallback = null, ...props }: Props<P>) {
   const View = view.component as ComponentType<{ app: App }>;
   return (
     <Contained subject={view} onError={(error) => host.fail(view, error)} fallback={fallback}>
-      <View {...props} app={as ? as(host.appFor(view)) : host.appFor(view)} />
+      <View {...props} app={host.appFor(view)} />
     </Contained>
   );
 }
