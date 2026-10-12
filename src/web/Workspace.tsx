@@ -25,7 +25,7 @@ import { isBoolean, useStored } from "./stored.ts";
 import { undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
-const WRITING_KEY = "ink.writing";
+const FOCUS_KEY = "ink.focus";
 const SIDEBAR_KEY = "ink.sidebar";
 const INSPECTOR_KEY = "ink.inspector";
 /** How wide the sidebar and the inspector start, and how far a member can drag each. */
@@ -104,8 +104,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   /** Every note in the workspace, for a folder's list, tab titles, and quick open. */
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
   const [listVersion, setListVersion] = useState(0);
-  /** Writing mode shows the editor area and neither side, whichever of them is open. */
-  const [writing, setWriting] = useStored(WRITING_KEY, isBoolean, false);
+  /** In focus the tab in front of the focused group fills the window, over everything else, which stays as it is underneath. Which group that is, the layout already says. */
+  const [focusMode, setFocusMode] = useStored(FOCUS_KEY, isBoolean, false);
   const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
   /** The inspector's tab the member last picked, kept in this browser as the widths are. Only a pick changes it: what is in front shows it when it has it. */
@@ -197,16 +197,20 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     },
     [setEditor, navigate],
   );
-  /** Back retraces every open and close. Moving between tabs already open is one step however many moves it took, and never takes the place of an open. */
+  /**
+   * Back retraces every open and close. Moving between tabs already open is one step however many moves it took, and never takes the place of an open.
+   * A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
+   */
   const dispatch = useCallback(
     (action: EditorAction) => {
       const next = editorReducer(shown.current.editor, action);
+      if ((action.type === "split" || action.type === "send") && next !== shown.current.editor) setFocusMode(false);
       if (action.type !== "resize") return showEditor(next, action.type === "focus" || action.type === "activate");
       // Dragging the edge of a split goes nowhere.
       shown.current.editor = next;
       setEditor(next);
     },
-    [showEditor, setEditor],
+    [showEditor, setEditor, setFocusMode],
   );
 
   useEffect(() => {
@@ -244,7 +248,14 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   }, [workspaceId, currentId, currentRevision, me.person.id]);
   const unseen = !!current && others?.noteId === current.id && others.revision > (seen[current.id] ?? 0);
 
-  const toggleWriting = useCallback(() => setWriting((w) => !w), [setWriting]);
+  /** Asked for on a group, focus turns to that group first, so what fills the window is its tab in front. */
+  const toggleFocus = useCallback(
+    (groupId?: string) => {
+      if (groupId && groupId !== shown.current.editor.focusedGroupId) dispatch({ type: "focus", groupId });
+      setFocusMode((on) => !on);
+    },
+    [dispatch, setFocusMode],
+  );
   const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), [setSidebarOpen]);
   const toggleInspector = useCallback(() => setInspectorOpen((open) => !open), [setInspectorOpen]);
   const closePalette = useCallback(() => setPalette(null), []);
@@ -319,7 +330,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       { id: "notes.quickOpen", title: "Go to note…", run: show("notes") },
       { id: "notes.all", title: "Open All notes", run: () => latest.current.openFolder(ALL_NOTES) },
       { id: "commands.show", title: "Show all commands", run: show("commands") },
-      { id: "view.toggleWritingMode", title: "Toggle writing mode", run: toggleWriting },
+      { id: "view.toggleFocus", title: "Toggle focus", run: () => toggleFocus() },
       { id: "view.toggleSidebar", title: "Toggle sidebar", run: toggleSidebar },
       { id: "view.toggleInspector", title: "Toggle inspector", run: toggleInspector },
       { id: "tab.keep", title: "Keep tab open", run: onTab((tab) => ({ type: "pin", ...tab })) },
@@ -333,7 +344,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     ];
     const unregister = all.map((command) => commands.register(command));
     return () => unregister.forEach((off) => off());
-  }, [commands, canEdit, dispatch, toggleWriting, toggleSidebar, toggleInspector, workspaceId, remember]);
+  }, [commands, canEdit, dispatch, toggleFocus, toggleSidebar, toggleInspector, workspaceId, remember]);
 
   useEffect(() => {
     let pending = "";
@@ -452,59 +463,44 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     );
   };
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
-  /** The buttons that act on the window and on no one note. The editor area puts them at the ends of its tab rows: the sidebar's before the first tab at the top left, the rest after the last at the top right. */
-  const controls = {
-    start: !writing && (
-      <div className="window-controls" role="group" aria-label="Window">
-        <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
-          <Icon name="sidebar" />
-        </button>
-      </div>
-    ),
-    end: (
-      <div className="window-controls end" role="group" aria-label="Window">
-        {!writing && (
-          <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
-            <Icon name="inspector" />
-          </button>
-        )}
-        <button type="button" className="icon-button" aria-label="Writing mode" title={`Writing mode (${shortcut("view.toggleWritingMode")})`} aria-pressed={writing} onClick={toggleWriting}>
-          <Icon name="writing" />
-        </button>
-      </div>
-    ),
-  };
+  /** The buttons that act on the window and on no one note, together where the sidebar meets the editor area: before the first tab of the top left group. */
+  const controls = (
+    <div className="window-controls" role="group" aria-label="Window">
+      <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
+        <Icon name="sidebar" />
+      </button>
+      <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
+        <Icon name="inspector" />
+      </button>
+    </div>
+  );
 
   return (
-    <div className="app" data-writing={writing || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
-      {!writing && (
-        <>
-          <Sidebar
-            me={me}
-            workspace={workspace}
-            activeMode={activeMode}
-            onSwitch={onSwitch}
-            onGo={go}
-            onSplit={openBeside}
-            onNewNote={canEdit ? () => void createNote() : undefined}
-            newNoteIn={(frontFolderId && tree?.byId.get(frontFolderId)?.name) || "Unsorted"}
-            open={sidebarOpen}
-            onOpen={() => setSidebarOpen(true)}
-          >
-            {folders}
-          </Sidebar>
-          {sidebarOpen && (
-            <ResizeHandle
-              label="Resize sidebar"
-              orientation="vertical"
-              value={sidebarWidth}
-              {...SIDEBAR}
-              step={WIDTH_STEP}
-              onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
-              onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
-            />
-          )}
-        </>
+    <div className="app" data-focus-mode={focusMode || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+      <Sidebar
+        me={me}
+        workspace={workspace}
+        activeMode={activeMode}
+        onSwitch={onSwitch}
+        onGo={go}
+        onSplit={openBeside}
+        onNewNote={canEdit ? () => void createNote() : undefined}
+        newNoteIn={(frontFolderId && tree?.byId.get(frontFolderId)?.name) || "Unsorted"}
+        open={sidebarOpen}
+        onOpen={() => setSidebarOpen(true)}
+      >
+        {folders}
+      </Sidebar>
+      {sidebarOpen && (
+        <ResizeHandle
+          label="Resize sidebar"
+          orientation="vertical"
+          value={sidebarWidth}
+          {...SIDEBAR}
+          step={WIDTH_STEP}
+          onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
+          onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
+        />
       )}
 
       <main className="main" aria-label="Editor">
@@ -518,46 +514,46 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
             render={(group, tab) => (tab.kind === "folder" ? renderFolder(tab.id) : tab.kind === "page" ? renderPage(tab.id) : renderNote(group, tab.id))}
             empty={empty}
             controls={controls}
+            focusMode={{ on: focusMode, keys: shortcut("view.toggleFocus"), toggle: toggleFocus }}
           />
         )}
       </main>
 
-      {!writing &&
-        (inspectorOpen ? (
-          <>
-            <ResizeHandle
-              label="Resize inspector"
-              orientation="vertical"
-              value={inspectorWidth}
-              {...INSPECTOR}
-              step={WIDTH_STEP}
-              perPixel={() => -1}
-              onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
-              onReset={() => setWidths(({ inspector: _, ...w }) => w)}
-            />
-            <Inspector subject={subject} picked={picked} onPick={pick} />
-          </>
-        ) : (
-          <nav className="rail" aria-label="Inspector bar">
-            {viewsFor(subject).map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                className="icon-button"
-                aria-label={v.label}
-                title={v.label}
-                aria-description={markOf(v, subject)}
-                onClick={() => {
-                  pick(v.id);
-                  setInspectorOpen(true);
-                }}
-              >
-                <Icon name={v.icon} />
-                {markOf(v, subject) && <span className="unseen-dot" />}
-              </button>
-            ))}
-          </nav>
-        ))}
+      {inspectorOpen ? (
+        <>
+          <ResizeHandle
+            label="Resize inspector"
+            orientation="vertical"
+            value={inspectorWidth}
+            {...INSPECTOR}
+            step={WIDTH_STEP}
+            perPixel={() => -1}
+            onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
+            onReset={() => setWidths(({ inspector: _, ...w }) => w)}
+          />
+          <Inspector subject={subject} picked={picked} onPick={pick} />
+        </>
+      ) : (
+        <nav className="rail" aria-label="Inspector bar">
+          {viewsFor(subject).map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              className="icon-button"
+              aria-label={v.label}
+              title={v.label}
+              aria-description={markOf(v, subject)}
+              onClick={() => {
+                pick(v.id);
+                setInspectorOpen(true);
+              }}
+            >
+              <Icon name={v.icon} />
+              {markOf(v, subject) && <span className="unseen-dot" />}
+            </button>
+          ))}
+        </nav>
+      )}
       {palette === "commands" && (
         <Palette
           key="commands"

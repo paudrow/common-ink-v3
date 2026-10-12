@@ -77,7 +77,7 @@ test("the inspector's History tab opens on what the note's changes come to and e
   await expect(added(changes(panel).first())).toHaveText(["", "Typed just now"]);
 });
 
-test("writing mode shows no History mark: the way out is its only button, and the dot waits on the inspector's History tab", async ({ page }) => {
+test("focus shows no History mark: the way out is its only button, and the dot waits on the inspector's History tab", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const claude = await connectAgent(page, "Claude");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nMine." });
@@ -85,17 +85,16 @@ test("writing mode shows no History mark: the way out is its only button, and th
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveAccessibleName("Writing mode");
+  await expect(page.locator(".tab-row").getByRole("button").filter({ visible: true })).toHaveCount(1);
+  await expect(page.locator(".tab-row").getByRole("button").filter({ visible: true })).toHaveAccessibleName("Focus");
 
   await claude.tool<Note>("write_note", { id: note.id, baseRevision: 1, text: "# Draft\n\nMine.\n\nFrom Claude." });
   await expect(editorLines(page)).toHaveText(["# Draft", "", "Mine.", "", "From Claude."], { timeout: 15_000 });
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveAccessibleName("Writing mode");
+  await expect(page.locator(".tab-row").getByRole("button").filter({ visible: true })).toHaveCount(1);
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  expect((await page.getByRole("main", { name: "Editor" }).boundingBox())!.width).toBe(1280);
+  expect((await page.locator(".group-body").filter({ visible: true }).boundingBox())!.width).toBe(1280);
 
-  await page.getByRole("button", { name: "Writing mode" }).click();
+  await page.getByRole("button", { name: "Focus" }).click();
   await expect(page.getByRole("tab", { name: "History" })).toHaveAccessibleDescription(UNSEEN);
 });
 
