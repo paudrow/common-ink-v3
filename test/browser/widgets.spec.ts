@@ -12,7 +12,8 @@ test.afterEach(() => expect(errors).toEqual([]));
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const lines = (page: Page) => page.locator(".cm-line");
 const menu = (page: Page) => page.getByRole("listbox");
-const options = (page: Page) => menu(page).getByRole("option");
+// A list still waiting on what was just typed is shown, but no key picks from it: these are its items once it has caught up.
+const options = (page: Page) => page.locator(".cm-tooltip-autocomplete:not(.cm-tooltip-autocomplete-disabled)").getByRole("option");
 const read = async (page: Page, id: string) => (await perform(page, { type: "note.read", id })).text;
 const authors = async (page: Page, id: string) => (await perform(page, { type: "note.history", id })).map((c) => `${c.author.kind} ${c.author.name}`);
 const column = (page: Page, name: string) => editor(page).getByRole("region", { name, exact: true });

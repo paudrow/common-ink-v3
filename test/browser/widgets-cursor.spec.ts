@@ -195,7 +195,8 @@ test("Tab picks the highlighted item of the / menu, as Enter does", async ({ pag
   const note = await open(page, "# Menu\n\n");
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
-  const menu = page.locator(".cm-tooltip-autocomplete").getByRole("option");
+  // A list still waiting on what was just typed is shown, but no key picks from it.
+  const menu = page.locator(".cm-tooltip-autocomplete:not(.cm-tooltip-autocomplete-disabled)").getByRole("option");
   await page.keyboard.type("/stop");
   await expect(menu.filter({ hasText: "Stopwatch" })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Tab");
