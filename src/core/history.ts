@@ -1,6 +1,6 @@
 import { ChangeSet, Text } from "@codemirror/state";
 import type { Reverts } from "./protocol.ts";
-import { anchored, between, lift, lower, terminated, toDoc } from "./text.ts";
+import { anchored, applyChanges, between, changesBetween, lift, lineHunks, lower, terminated, toDoc } from "./text.ts";
 
 /** A recorded change, as much of it as moving through history needs. */
 export interface Step {
@@ -33,6 +33,7 @@ interface Left {
   loose: boolean;
 }
 
+const NO_TEXT_ENDED = Text.of(["", ""]);
 const ALL_KEPT: Left = { drop: ChangeSet.empty(0), loose: false };
 
 /**
@@ -40,7 +41,26 @@ const ALL_KEPT: Left = { drop: ChangeSet.empty(0), loose: false };
  * undid it then leaves no trace, where their inverses composed rewrite that text in place and would
  * misplace a later change made inside it.
  */
-const settled = (left: Left, doc: Text) => (left.loose ? anchored(left.drop, doc) : left.drop);
+function settled(left: Left, doc: Text): ChangeSet {
+  const drop = whole(left.drop, doc);
+  if (!left.loose && drop === left.drop) return drop;
+  // Text taken out and written again the same is no change, and read as one it would be moved over later changes as an edit of those lines.
+  return drop.apply(doc).eq(doc) ? ChangeSet.empty(doc.length) : anchored(drop, doc);
+}
+
+/**
+ * `drop` leaving terminated text: every line with its line end, and a note with no text with no
+ * lines. Left otherwise, a line written after it later would be joined to its last line, or follow
+ * an empty one.
+ */
+function whole(drop: ChangeSet, doc: Text): ChangeSet {
+  let atEnd = false;
+  drop.iterChangedRanges((_from, to) => void (atEnd ||= to === doc.length));
+  if (!atEnd) return drop;
+  const left = drop.apply(doc);
+  if (left.eq(NO_TEXT_ENDED)) return ChangeSet.of(doc.length ? { from: 0, to: doc.length } : [], doc.length);
+  return !left.length || endsLine(left) ? drop : drop.compose(ChangeSet.of({ from: left.length, insert: "\n" }, left.length));
+}
 
 interface Edit {
   from: number;
@@ -94,10 +114,29 @@ function leaving(left: Left, { change, doc }: Made, out: boolean): Left {
  * text at that revision.
  */
 export function takeOut(changes: readonly ChangeSet[], revisions: ReadonlySet<number>): ChangeSet {
+  return takeOutWith(changes, revisions, new Map());
+}
+
+/** For a change, which of its edits as `replayed` reads them, counted from 0. */
+type EditsOf = ReadonlyMap<number, ReadonlySet<number>>;
+
+/** `left` for the text after `made`, with the edits of it named in `some` left out and the rest of it kept: the change as two, the edits that stay and then the ones taken out. */
+function leavingSome(left: Left, made: Made, some: ReadonlySet<number>): Left {
+  const edits = editsOf(made.change);
+  const rest = ChangeSet.of(edits.filter((_, i) => !some.has(i)), made.doc.length);
+  const between = rest.apply(made.doc);
+  const taken = ChangeSet.of(edits.filter((_, i) => some.has(i)), made.doc.length).map(rest);
+  return leaving(leaving(left, { ...made, change: rest, next: between }, false), { ...made, change: taken, doc: between }, true);
+}
+
+/** `takeOut`, with the edits named in `also` taken out of changes that are otherwise kept: those edits alone, and the rest of each change stays. */
+function takeOutWith(changes: readonly ChangeSet[], revisions: ReadonlySet<number>, also: EditsOf): ChangeSet {
   let doc = Text.empty;
   let left = ALL_KEPT;
   for (const made of replayed(changes)) {
-    left = leaving(left, made, revisions.has(made.revision));
+    const out = revisions.has(made.revision);
+    const some = out ? undefined : also.get(made.revision);
+    left = some ? leavingSome(left, made, some) : leaving(left, made, out);
     doc = made.next;
   }
   return lower(settled(left, doc), doc);
@@ -129,15 +168,49 @@ export function revertedBy(steps: readonly Step[]): Map<number, number> {
   return by;
 }
 
+/**
+ * What a revert did besides taking changes out, when the person reverting chose what became of
+ * lines later changes had edited: `reverted` takes the changes out and keeps every later edit, as a
+ * revert with nothing chosen does, and `edit` is what they chose, made to the text that leaves.
+ * The two composed are the change as recorded.
+ */
+export interface Resolution {
+  reverted: ChangeSet;
+  edit: ChangeSet;
+}
+
 /** A recorded change with its diff. */
 export interface Recorded extends Step {
   changes: ChangeSet;
+  resolution?: Resolution | null;
 }
 
-/** The changes a note's text leaves out, once `reverts` is recorded if it is given: every change that took others out, and the edits that are gone. */
-function leftOut(history: readonly Step[], reverts?: Reverts): Set<number> {
+/**
+ * One change as moving through history replays it. A revert with a resolution is two: the revert,
+ * and after it the resolution, which stands as an edit does until that revert is itself reverted.
+ */
+interface Part {
+  revision: number;
+  change: ChangeSet;
+  chosen: boolean;
+}
+
+const partsOf = (history: readonly Recorded[]): Part[] =>
+  history.flatMap(({ revision, changes, resolution }) =>
+    resolution
+      ? [
+          { revision, change: resolution.reverted, chosen: false },
+          { revision, change: resolution.edit, chosen: true },
+        ]
+      : [{ revision, change: changes, chosen: false }],
+  );
+
+/** The parts a note's text leaves out, numbered from 1, once `reverts` is recorded if it is given: every change that took others out, and the edits that are gone. */
+function leftOut(history: readonly Step[], parts: readonly Part[], reverts?: Reverts): Set<number> {
   const gone = revertedBy(reverts ? [...history, { revision: history.length + 1, reverts }] : history);
-  return new Set(history.filter((c) => c.reverts || gone.has(c.revision)).map((c) => c.revision));
+  const out = new Set<number>();
+  for (const [i, part] of parts.entries()) if (gone.has(part.revision) || (!part.chosen && history[part.revision - 1]!.reverts)) out.add(i + 1);
+  return out;
 }
 
 /**
@@ -146,7 +219,8 @@ function leftOut(history: readonly Step[], reverts?: Reverts): Set<number> {
  * gone, so the text follows the record however often a change was reverted and that revert reverted.
  */
 export function takeBackOut(history: readonly Recorded[], reverts: Reverts): ChangeSet {
-  return takeOut(history.map((c) => c.changes), leftOut(history, reverts));
+  const parts = partsOf(history);
+  return takeOut(parts.map((p) => p.change), leftOut(history, parts, reverts));
 }
 
 /**
@@ -166,22 +240,29 @@ function linesOf(edit: Edit, doc: Text): [number, number] | null {
  * changes did in place, on a line that otherwise returns to how it was.
  */
 export function overlapping(history: readonly Recorded[], reverts: Reverts): number[] {
-  const was = leftOut(history);
-  const will = leftOut(history, reverts);
-  const overlaps: number[] = [];
+  const parts = partsOf(history);
+  return [...new Set([...overlappingEdits(parts, leftOut(history, parts), leftOut(history, parts, reverts)).keys()].map((n) => parts[n - 1]!.revision))];
+}
+
+/** For each part that overlaps a revert, its edits that do. `was` and `will` are the parts left out before the revert and after. */
+function overlappingEdits(parts: readonly Part[], was: ReadonlySet<number>, will: ReadonlySet<number>): Map<number, Set<number>> {
+  const overlaps = new Map<number, Set<number>>();
   let [standing, reverted] = [ALL_KEPT, ALL_KEPT];
-  for (const made of replayed(history.map((c) => c.changes))) {
+  for (const made of replayed(parts.map((p) => p.change))) {
     const [outWas, outWill] = [was.has(made.revision), will.has(made.revision)];
     if (standing !== reverted && !outWas && !outWill) {
       // The text as it stands and as it would be differ where the two leave different things out of the text this change was made to.
       const [now, then] = [standing, reverted].map((left) => new Map(editsOf(settled(left, made.doc)).map((e) => [`${e.from}:${e.to}`, e])));
       const same = (e: Edit, others: Map<string, Edit>) => others.get(`${e.from}:${e.to}`)?.insert.eq(e.insert) ?? false;
       const moved = [...[...now!.values()].filter((e) => !same(e, then!)), ...[...then!.values()].filter((e) => !same(e, now!))].flatMap((e) => [linesOf(e, made.doc) ?? []]);
-      const edited = editsOf(made.change).flatMap((e) => [linesOf(e, made.doc) ?? []]);
-      if (edited.some(([from, to]) => moved.some(([first, last]) => from! <= last! && first! <= to!))) overlaps.push(made.revision);
+      const edited = editsOf(made.change).map((e) => linesOf(e, made.doc));
+      const hit = edited.flatMap((lines, i) => (lines && moved.some(([first, last]) => lines[0] <= last! && first! <= lines[1]) ? [i] : []));
+      if (hit.length) overlaps.set(made.revision, new Set(hit));
     }
     const next = leaving(standing, made, outWas);
-    reverted = standing === reverted && outWas === outWill ? next : leaving(reverted, made, outWill);
+    const hit = overlaps.get(made.revision);
+    // An edit that overlaps is left out of the reverted text from here on, so that a change built on it is found to overlap too.
+    reverted = hit ? leavingSome(reverted, made, hit) : standing === reverted && outWas === outWill ? next : leaving(reverted, made, outWill);
     standing = next;
   }
   return overlaps;
@@ -204,6 +285,105 @@ export function revertOfAuthor<S extends Step>(steps: readonly S[], isTheirs: (s
     return all.filter((s) => !s.reverts && !out.has(s.revision)).map((s) => s.revision).join();
   };
   return edits(steps) === edits([...steps, { revision: steps.length + 1, reverts }]) ? null : reverts;
+}
+
+/** One place where a revert and later changes that still stand edited the same lines. Lines are without their line ends. */
+export interface Conflict {
+  /** The line of the note after the revert, every later edit kept, that `kept` starts at. Counted from 1. */
+  line: number;
+  /** The lines as they were before the reverted changes, with the later edits to them out too. */
+  before: string[];
+  /** The lines as the note has them now. */
+  now: string[];
+  /** The lines a revert leaves when the later edits are kept. */
+  kept: string[];
+  /** The later changes that edited these lines. */
+  later: number[];
+}
+
+/** What becomes of a conflict's lines: the later edits kept, the lines as they were before, or the lines given, where no text is no lines. */
+export type Choice = "keep" | "back" | { text: string };
+
+export interface Reverting {
+  /** The change that reverts and keeps every later edit. */
+  changes: ChangeSet;
+  overlaps: number[];
+  conflicts: Conflict[];
+}
+
+/** More later changes than this, and every conflict names them all. */
+const MAX_TOLD_APART = 12;
+
+const linesOfText = (text: string) => (text ? text.split("\n") : []);
+
+/** Whether two stretches of lines share a line, or one of them is a place between lines that the other reaches. */
+const meet = (aFrom: number, aTo: number, bFrom: number, bTo: number) => (aFrom < aTo && bFrom < bTo ? aFrom < bTo && bFrom < aTo : aFrom <= bTo && bFrom <= aTo);
+
+/**
+ * What `reverts` would do to a note whose text is `text`, and each place where a later change that
+ * still stands edited lines it changes. A conflict is a stretch where the note after the revert
+ * differs from the note with those edits taken out as well: those edits alone, so what the same
+ * later change did to other lines is no conflict and stays.
+ */
+export function reverting(history: readonly Recorded[], reverts: Reverts, text: string): Reverting {
+  const parts = partsOf(history);
+  const all = parts.map((p) => p.change);
+  const will = leftOut(history, parts, reverts);
+  const changes = takeOut(all, will);
+  const later = overlappingEdits(parts, leftOut(history, parts), will);
+  const overlaps = [...new Set([...later.keys()].map((n) => parts[n - 1]!.revision))];
+  if (!later.size) return { changes, overlaps, conflicts: [] };
+
+  const without = (edits: EditsOf) => linesOfText(applyChanges(takeOutWith(all, will, edits), text));
+  const [now, kept, before] = [linesOfText(text), linesOfText(applyChanges(changes, text)), without(later)];
+  const fromNow = lineHunks(now, kept);
+  const told = later.size <= MAX_TOLD_APART ? [...later].map(([n, edits]) => ({ revision: parts[n - 1]!.revision, hunks: lineHunks(kept, without(new Map([[n, edits]]))) })) : [];
+
+  const conflicts = lineHunks(kept, before).map((h): Conflict => {
+    const by = told.filter((t) => t.hunks.some((o) => meet(h.aFrom, h.aTo, o.aFrom, o.aTo))).map((t) => t.revision);
+    return {
+      line: h.aFrom + 1,
+      before: before.slice(h.bFrom, h.bTo),
+      now: now.slice(...across(fromNow, h.aFrom, h.aTo)),
+      kept: kept.slice(h.aFrom, h.aTo),
+      later: by.length ? [...new Set(by)] : overlaps,
+    };
+  });
+  return { changes, overlaps, conflicts };
+}
+
+/** The lines of `a` that lines `from` up to `to` of `b` came of, given where the two differ. */
+function across(hunks: readonly { aFrom: number; aTo: number; bFrom: number; bTo: number }[], from: number, to: number): [number, number] {
+  let [start, end] = [Infinity, -Infinity];
+  let [a, b] = [0, 0];
+  const take = (first: number, last: number) => ([start, end] = [Math.min(start, first), Math.max(end, last)]);
+  for (const h of [...hunks, { aFrom: Infinity, aTo: Infinity, bFrom: Infinity, bTo: Infinity }]) {
+    // The lines both have, up to this hunk.
+    const [lo, hi] = [Math.max(from, b), Math.min(to, h.bFrom)];
+    if (lo < hi || (from === to && lo === hi)) take(a + lo - b, a + hi - b);
+    if (h.bFrom === Infinity) break;
+    if (meet(h.bFrom, h.bTo, from, to)) take(h.aFrom, h.aTo);
+    [a, b] = [h.aTo, h.bTo];
+  }
+  return [start, end];
+}
+
+/** The note after a revert that left it as `kept`, with each of its conflicts settled as chosen. */
+export function resolved(kept: string, conflicts: readonly Conflict[], choices: readonly Choice[]): string {
+  const lines = linesOfText(kept);
+  for (const [i, conflict] of [...conflicts.entries()].reverse()) {
+    const choice = choices[i]!;
+    const put = choice === "keep" ? conflict.kept : choice === "back" ? conflict.before : linesOfText(choice.text);
+    lines.splice(conflict.line - 1, conflict.kept.length, ...put);
+  }
+  return lines.join("\n");
+}
+
+/** The change to record for a revert of the note `text` with its conflicts settled as chosen: the same change as with nothing chosen when every later edit is kept. */
+export function settledRevert({ changes, conflicts }: Reverting, text: string, choices: readonly Choice[]): { changes: ChangeSet; resolution: Resolution | null } {
+  const kept = applyChanges(changes, text);
+  const edit = changesBetween(kept, resolved(kept, conflicts, choices));
+  return edit.empty ? { changes, resolution: null } : { changes: changes.compose(edit), resolution: { reverted: changes, edit } };
 }
 
 /** The author's latest change that still stands and isn't itself an undo: what undo takes back. */

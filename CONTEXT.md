@@ -166,7 +166,10 @@ _Avoid_: Restore, rollback, put back, reapply, take back out
 What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Every revert in the app is shown as one first, an author's changes note by note. Anyone who can read the note's history can ask for one.
 
 **Overlap**:
-A later change that still stands and edited a line a revert changes. The revert keeps what that change did, on a line it otherwise returns to how it was, so a preview names each one. A line added or removed whole next to such a line is not an overlap.
+A later change that still stands and edited a line a revert changes. A preview names each one. A line added or removed whole next to such a line is not an overlap.
+
+**Conflict**:
+A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
 
 **Undo**:
 Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
