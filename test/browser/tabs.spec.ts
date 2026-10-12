@@ -486,6 +486,7 @@ const PAGES = [
   ["/history", "History"],
   ["/contacts", "Contacts"],
   ["/uploads", "Uploads"],
+  ["/settings", "Settings"],
   ["/plugins", "Plugins"],
   ["/agents", "Agents"],
 ] as const;
@@ -573,61 +574,82 @@ test("a page's tab is a preview until it is kept, is focused and not opened twic
   await expect(group(page, 2).getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
 });
 
-test("Plugins keeps to one tab through every plugin's details, at the address of what is showing, across a reload, Back, and a split", async ({ page }) => {
+test("Settings and Plugins each keep to one tab through every category and plugin's details, at the address of what is showing, across a reload, Back, and a split", async ({ page }) => {
   await withNotes(page, "Alpha");
+  const categories = page.getByRole("navigation", { name: "Categories" });
   const more = page.getByRole("navigation", { name: "Modes" });
 
-  await page.goto("/history");
-  await expect(tabs(page)).toHaveText(["History"]);
-  await tab(page, "History").dblclick();
+  await page.goto("/settings");
+  await expect(tabs(page)).toHaveText(["Settings"]);
+  await tab(page, "Settings").dblclick();
+  for (const [name, path] of [["Keyboard shortcuts", "/settings/keyboard"], ["Appearance", "/settings/appearance"], ["Note list", "/settings/plugins/note-list"]] as const) {
+    await categories.getByRole("link", { name, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await expect(categories.getByRole("link", { name, exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("region", { name, exact: true })).toBeVisible();
+    await expect(tabs(page)).toHaveText(["Settings"]);
+  }
+  await page.getByRole("button", { name: "Open settings (JSON)" }).click();
+  await expect(page).toHaveURL(/\/settings\/json$/);
+  await expect(tabs(page)).toHaveText(["Settings"]);
+  await page.getByRole("button", { name: "Open settings (UI)" }).click();
+  await categories.getByRole("link", { name: "Note list", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/plugins\/note-list$/);
 
-  // A plugin's details are the Plugins page's and open in its tab.
-  await more.getByRole("link", { name: "Plugins" }).click();
-  await page.getByRole("list", { name: "Plugins", exact: true }).getByRole("link", { name: "Note list" }).click();
+  // From a plugin's settings to what the plugin is, which is the Plugins page's and opens in its tab.
+  await page.getByRole("link", { name: "About this plugin" }).click();
   await expect(page).toHaveURL(/\/plugins\/note-list$/);
-  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
   await expect(page.getByRole("heading", { name: "Note list", level: 1 })).toBeVisible();
+  await more.getByRole("button", { name: "More" }).click();
   await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
   await tab(page, "Plugins").dblclick();
 
   // Each tab is at the address it was left at.
-  await tab(page, "History").click();
-  await expect(page).toHaveURL(/\/history$/);
+  await tab(page, "Settings").click();
+  await expect(page).toHaveURL(/\/settings\/plugins\/note-list$/);
+  await expect(page.getByRole("region", { name: "Note list", exact: true })).toBeVisible();
   await tab(page, "Plugins").click();
   await expect(page).toHaveURL(/\/plugins\/note-list$/);
 
   // Back from a plugin's details reached from the list is the list, in the same tab.
   await more.getByRole("link", { name: "Plugins" }).click();
   await expect(page).toHaveURL(/\/plugins$/);
-  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
   await page.getByRole("list", { name: "Plugins", exact: true }).getByRole("link", { name: "Tabs and splits" }).click();
   await expect(page).toHaveURL(/\/plugins\/tabs$/);
   await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
   await page.goBack();
   await expect(page).toHaveURL(/\/plugins$/);
   await expect(page.getByRole("list", { name: "Plugins", exact: true })).toBeVisible();
-  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
   await page.goForward();
   await expect(page).toHaveURL(/\/plugins\/tabs$/);
   await expect(page.getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
-  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
 
   // Side by side, each is still where it was, and a reload brings both back there.
   await tab(page, "Plugins").click({ button: "right" });
   await page.getByRole("menu", { name: "Plugins tab" }).getByRole("menuitem", { name: "Split right" }).click();
-  await expect(tabs(page, 0)).toHaveText(["History"]);
+  await expect(tabs(page, 0)).toHaveText(["Settings"]);
   await expect(tabs(page, 1)).toHaveText(["Plugins"]);
-  await expect(group(page, 1).getByRole("heading", { name: "History", level: 1 })).toBeVisible();
+  await expect(group(page, 1).getByRole("region", { name: "Note list", exact: true })).toBeVisible();
   await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "History" })).toHaveCount(1);
+  // In half the window the categories are a menu above the settings.
+  await group(page, 1).getByRole("combobox", { name: "Category" }).selectOption({ label: "Appearance" });
+  await expect(page).toHaveURL(/\/settings\/appearance$/);
+  await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Settings" })).toHaveCount(1);
   await expect(page.getByRole("tab", { name: "Plugins" })).toHaveCount(1);
 
   await page.reload();
-  await expect(page).toHaveURL(/\/plugins\/tabs$/);
-  await expect(tabs(page, 0)).toHaveText(["History"]);
+  await expect(page).toHaveURL(/\/settings\/appearance$/);
+  await expect(tabs(page, 0)).toHaveText(["Settings"]);
   await expect(tabs(page, 1)).toHaveText(["Plugins"]);
-  await expect(group(page, 1).getByRole("heading", { name: "History", level: 1 })).toBeVisible();
+  await expect(group(page, 1).getByRole("region", { name: "Appearance", exact: true })).toBeVisible();
   await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
+  await tab(page, "Plugins", 1).click();
+  await expect(page).toHaveURL(/\/plugins\/tabs$/);
 });
 
 test("a page a plugin adds opens in a tab, with the plugin doing nothing for it", async ({ page }) => {

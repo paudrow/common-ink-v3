@@ -1535,12 +1535,6 @@ button.link:hover {
   margin: 0;
 }
 
-.settings-count {
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 400;
-}
-
 .plugin-adds dt {
   font-size: 12.5px;
   font-weight: 600;
@@ -1556,7 +1550,8 @@ button.link:hover {
   font-size: 13px;
 }
 
-.plugin-adds code {
+.plugin-adds code,
+.shortcuts code {
   color: var(--faint);
   font-family: var(--mono);
   font-size: 11.5px;
@@ -1654,17 +1649,160 @@ kbd {
   border-color: var(--danger);
 }
 
-.settings-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 14px;
-  border-bottom: 1px solid var(--line);
+.mode-view.settings {
+  max-width: 62rem;
+  container-type: inline-size;
 }
 
-.settings-bar .tabs {
-  padding: 0;
-  border-bottom: 0;
+.settings-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.settings-head h1 {
+  margin: 0;
+}
+
+.settings-head .save-state {
+  flex: 1;
+}
+
+.settings-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.settings-tools .filter {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-tools [aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.settings-body {
+  display: grid;
+  grid-template-columns: 12.5rem minmax(0, 1fr);
+  gap: 0 28px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav a {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.settings-nav a:hover {
+  background: var(--hover);
+}
+
+.settings-nav a[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-nav h2 {
+  margin: 12px 0 2px;
+  padding: 0 10px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-count {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.settings-pick {
+  display: none;
+  grid-column: 1 / -1;
+  margin-bottom: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Too narrow to keep the categories beside the settings: they are a menu above them. */
+@container (max-width: 40rem) {
+  .settings-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    display: none;
+  }
+
+  .settings-pick {
+    display: block;
+  }
+
+  .shortcuts thead {
+    display: none;
+  }
+
+  .shortcuts,
+  .shortcuts tbody,
+  .shortcuts tr {
+    display: block;
+  }
+
+  .shortcuts tr {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: center;
+  }
+
+  .shortcuts tr > th {
+    flex-basis: 100%;
+  }
+
+  .shortcuts tr > th,
+  .shortcuts tr > td {
+    padding: 0;
+    border: 0;
+  }
+
+  .shortcuts .shortcut-actions {
+    margin-left: auto;
+  }
+
+  .shortcuts tr {
+    padding: 8px 0 8px 8px;
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 .settings-problems {
@@ -1687,21 +1825,167 @@ kbd {
   font-size: 13px;
 }
 
-.settings .filter {
-  width: 100%;
-  margin-top: 14px;
-  box-sizing: border-box;
-}
-
-.settings-groups {
+.settings-pane {
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
 }
 
+.settings-pane > .soon {
+  margin-top: 0;
+}
+
+.settings-group:first-child h2 {
+  margin-top: 0;
+}
+
 .settings-group h2 {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
   margin: 22px 0 4px;
-  font-size: 14px;
+  font-size: 15px;
+}
+
+.settings-about-plugin {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.shortcuts {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.shortcuts th,
+.shortcuts td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.shortcuts thead th {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.shortcuts tbody th {
+  border-left: 2px solid transparent;
+}
+
+.shortcuts tr[data-modified] th {
+  border-left-color: var(--accent);
+}
+
+.shortcut-title {
+  margin-right: 8px;
+}
+
+.shortcuts .error {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.shortcut-keys {
+  white-space: nowrap;
+}
+
+.shortcut-keys kbd + kbd {
+  margin-left: 4px;
+}
+
+.shortcut-keys kbd button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.shortcut-keys kbd button:hover {
+  color: var(--danger);
+}
+
+.shortcut-none,
+.shortcut-from {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shortcut-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.shortcut-actions .button + .button {
+  margin-left: 4px;
+}
+
+.recorder-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: start center;
+  padding-top: 18vh;
+  background: rgb(0 0 0 / 0.25);
+}
+
+.recorder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(26rem, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.recorder p {
+  margin: 0;
+}
+
+.recorder-keys {
+  display: grid;
+  place-items: center;
+  min-height: 3.25rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  outline: none;
+}
+
+.recorder-keys:focus {
+  border-color: var(--accent);
+  border-style: solid;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.recorder-keys kbd {
+  padding: 2px 10px;
+  font-size: 15px;
+}
+
+.recorder-says {
+  min-height: 2.5em;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recorder-warning {
+  color: var(--danger);
 }
 
 .setting {

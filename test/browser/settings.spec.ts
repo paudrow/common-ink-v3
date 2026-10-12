@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { category, group, json, openJson, openOptions, setPlugin, typeJson } from "./settings-helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -13,26 +14,15 @@ const stored = async (page: Page) => JSON.parse((await perform(page, { type: "se
 const write = async (page: Page, document: Record<string, unknown>) =>
   perform(page, { type: "settings.write", text: JSON.stringify(document), baseRevision: (await perform(page, { type: "settings.read" })).revision });
 
-const tab = (page: Page, name: "Options" | "JSON") => page.getByRole("tab", { name, exact: true });
-const group = (page: Page, name: string) => page.getByRole("tabpanel").getByRole("region", { name, exact: true });
 const problems = (page: Page) => page.getByRole("list", { name: "Problems" }).getByRole("listitem");
-const json = (page: Page) => page.getByRole("textbox", { name: "Settings JSON" });
 const palette = (page: Page) => page.getByRole("dialog", { name: "Commands" });
 const snippet = (page: Page, title: string) => noteCard(page, title).locator(".card-preview");
 /** Goes back to the Settings page from the list of notes that was opened over it. */
 async function backToSettings(page: Page) {
   await page.goBack();
-  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page).toHaveURL(/\/settings(\/|$)/);
 }
 const theme = (page: Page) => page.locator("html").getAttribute("data-theme");
-
-/** Replaces the whole of the JSON, as a member who selects all and types would. */
-async function typeJson(page: Page, text: string) {
-  await tab(page, "JSON").click();
-  await json(page).click();
-  await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.insertText(text);
-}
 
 async function openSettings(page: Page) {
   await signInAsNewPerson(page, "Ada Lovelace");
@@ -45,35 +35,41 @@ test("changing a setting in the options writes only that value, keeps the member
   await openSettings(page);
   await write(page, { "someone.elses": { kept: [1, 2] } });
   await page.reload();
-  const row = group(page, "Common Ink");
-  await expect(row.getByRole("combobox", { name: "Theme" })).toHaveValue("system");
+  const themeBox = page.getByRole("combobox", { name: "Theme" });
+  const size = page.getByRole("spinbutton", { name: "Editor text size" });
+  await category(page, "Appearance");
+  await expect(themeBox).toHaveValue("system");
   expect(await theme(page)).toBeNull();
 
-  await row.getByRole("combobox", { name: "Theme" }).selectOption("dark");
+  await themeBox.selectOption("dark");
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(await theme(page)).toBe("dark");
   await expect.poll(() => stored(page)).toEqual({ "someone.elses": { kept: [1, 2] }, "core.theme": "dark" });
 
-  await row.getByRole("spinbutton", { name: "Editor text size" }).fill("150");
+  const editor = await category(page, "Editor");
+  await expect(themeBox).toHaveCount(0);
+  await size.fill("150");
   await page.keyboard.press("Enter");
   await expect.poll(() => stored(page)).toEqual({ "someone.elses": { kept: [1, 2] }, "core.theme": "dark", "core.editorTextSize": 150 });
 
-  await row.getByRole("combobox", { name: "Theme" }).selectOption("system");
+  await category(page, "Appearance");
+  await themeBox.selectOption("system");
   await expect.poll(() => stored(page)).toEqual({ "someone.elses": { kept: [1, 2] }, "core.editorTextSize": 150 });
   expect(await theme(page)).toBeNull();
-  await row.getByRole("button", { name: "Reset Editor text size" }).click();
+  await category(page, "Editor");
+  await editor.getByRole("button", { name: "Reset Editor text size" }).click();
   await expect.poll(() => stored(page)).toEqual({ "someone.elses": { kept: [1, 2] } });
-  await expect(row.getByRole("spinbutton", { name: "Editor text size" })).toHaveValue("100");
+  await expect(size).toHaveValue("100");
 });
 
 test("a value the options won't take is refused there with the reason, and nothing is written", async ({ page }) => {
   await openSettings(page);
-  const size = group(page, "Common Ink").getByRole("spinbutton", { name: "Editor text size" });
+  const size = group(page, "Editor").getByRole("spinbutton", { name: "Editor text size" });
 
   await size.fill("500");
   await page.keyboard.press("Enter");
 
-  await expect(group(page, "Common Ink")).toContainText("Expected 200 or less, not 500. Nothing was changed.");
+  await expect(group(page, "Editor")).toContainText("Expected 200 or less, not 500. Nothing was changed.");
   await expect(size).toHaveAttribute("aria-invalid", "true");
   expect(await stored(page)).toEqual({});
 });
@@ -92,23 +88,25 @@ test("editing the JSON changes the options and the app, and editing the options 
   expect(await stored(page)).toEqual({ "note-list.snippets": false, "core.editorTextSize": 120 });
   await backToSettings(page);
 
-  await tab(page, "Options").click();
-  await expect(group(page, "Note list").getByRole("checkbox", { name: "Show snippets" })).not.toBeChecked();
-  await expect(group(page, "Common Ink").getByRole("spinbutton", { name: "Editor text size" })).toHaveValue("120");
+  await openOptions(page);
+  await expect(group(page, "Editor").getByRole("spinbutton", { name: "Editor text size" })).toHaveValue("120");
+  const noteList = await category(page, "Note list");
+  await expect(noteList.getByRole("checkbox", { name: "Show snippets" })).not.toBeChecked();
 
-  await group(page, "Note list").getByRole("checkbox", { name: "Show snippets" }).check();
+  await noteList.getByRole("checkbox", { name: "Show snippets" }).check();
   await openAllNotes(page);
   await expect(snippet(page, "Alpha")).toHaveText("The first lines of Alpha.");
   await backToSettings(page);
-  await tab(page, "JSON").click();
+  await openJson(page);
   await expect(json(page)).toHaveText('{  "core.editorTextSize": 120}');
 });
 
-test("a plugin's options are listed under it with their schema, and apply without a reload", async ({ page }) => {
+test("a plugin's options are listed under it with their schema and apply without a reload, and its switch is on the Plugins page and not among them", async ({ page }) => {
   await openSettings(page);
-  const noteList = group(page, "Note list");
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list"]);
+  const noteList = await category(page, "Note list");
 
-  await expect(noteList.getByRole("checkbox", { name: "On", exact: true })).toBeChecked();
+  await expect(noteList.getByRole("checkbox")).toHaveCount(1);
   await expect(noteList.getByRole("checkbox", { name: "Show snippets" })).toBeChecked();
   await expect(noteList).toContainText("note-list.snippets");
   await expect(noteList).toContainText("Show the first lines of each note under its title.");
@@ -121,10 +119,14 @@ test("a plugin's options are listed under it with their schema, and apply withou
   await expect.poll(() => stored(page)).toEqual({ "note-list.snippets": false });
   await backToSettings(page);
 
-  await noteList.getByRole("checkbox", { name: "On", exact: true }).uncheck();
-  await expect(noteList).toContainText("Note list is off, so its options change nothing until it is on.");
-  await expect(noteList.getByRole("checkbox", { name: "Show snippets" })).not.toBeChecked();
+  await setPlugin(page, "Note list", false);
   await expect.poll(() => stored(page)).toEqual({ "note-list.snippets": false, "note-list.enabled": false });
+  await page.goto("/settings/plugins/note-list");
+  await expect(noteList).toContainText("Note list is off, so its options change nothing until it is turned on on the Plugins page.");
+  await expect(noteList.getByRole("checkbox", { name: "Show snippets" })).not.toBeChecked();
+  await noteList.getByRole("link", { name: "About this plugin" }).click();
+  await expect(page).toHaveURL(/\/plugins\/note-list$/);
+  await expect(page.getByRole("checkbox", { name: "Note list", exact: true })).not.toBeChecked();
   await openAllNotes(page);
   await expect(page.getByRole("region", { name: "All notes" }).getByRole("link")).toHaveText(["Alpha"]);
   await expect(page.getByRole("navigation", { name: "Notes" })).toHaveCount(0);
@@ -147,15 +149,17 @@ test("a value the schema refuses and a key it doesn't know are flagged in the JS
   expect(await theme(page)).toBe("dark");
   expect(await stored(page)).toEqual({ "core.theme": "dark", "core.editorTextSize": 500, "core.theem": "light", "keybindings.view.toggleWritingMode": ["cmd+y"] });
 
-  await tab(page, "Options").click();
-  const core = group(page, "Common Ink");
+  await openOptions(page);
+  const core = group(page, "Editor");
   await expect(core.getByRole("spinbutton", { name: "Editor text size" })).toHaveValue("100");
   await expect(core.getByRole("spinbutton", { name: "Editor text size" })).toHaveAttribute("aria-invalid", "true");
   await expect(core).toContainText("Expected 200 or less, not 500. The default is used.");
-  await expect(group(page, "Keybindings")).toContainText('"cmd" in "cmd+y" isn\'t a modifier.');
-  await expect(group(page, "Not recognized")).toContainText("core.theem");
+  await expect((await category(page, "Keyboard shortcuts")).getByRole("row", { name: /Toggle writing mode/ })).toContainText('"cmd" in "cmd+y" isn\'t a modifier.');
+  const unknown = await category(page, "Not recognized");
+  await expect(unknown).toContainText("core.theem");
 
-  await group(page, "Not recognized").getByRole("button", { name: "Remove core.theem" }).click();
+  await unknown.getByRole("button", { name: "Remove core.theem" }).click();
+  await category(page, "Editor");
   await core.getByRole("button", { name: "Reset Editor text size" }).click();
   await expect(problems(page)).toHaveCount(1);
   await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "keybindings.view.toggleWritingMode": ["cmd+y"] });
@@ -174,9 +178,10 @@ test("JSON that can't be read is flagged in both views and isn't saved, and the 
   expect(await theme(page)).toBe("dark");
   expect(await stored(page)).toEqual({ "core.theme": "dark" });
 
-  await tab(page, "Options").click();
+  await openOptions(page);
   await expect(page.getByRole("alert")).toContainText("The JSON has a mistake in it, so nothing can be changed here until it is fixed.");
-  await expect(group(page, "Common Ink").getByRole("combobox", { name: "Theme" })).toBeDisabled();
+  await expect((await category(page, "Appearance")).getByRole("combobox", { name: "Theme" })).toBeDisabled();
+  await expect((await category(page, "Keyboard shortcuts")).getByRole("button", { name: "Record a key for Undo" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Show the JSON" }).click();
   await expect(json(page)).toHaveText('{"core.theme": "light",');
@@ -188,17 +193,47 @@ test("JSON that can't be read is flagged in both views and isn't saved, and the 
   expect(await stored(page)).toEqual({ "core.theme": "light", "core.editorTextSize": 90 });
 });
 
-test("a keybinding is rebound, unbound, and flagged when it takes another command's key", async ({ page }) => {
+test("a keybinding is recorded by pressing it, warned of when another command has the key, removed, and reset, in the table of keyboard shortcuts", async ({ page }) => {
   await openSettings(page);
   const app = page.locator(".app");
-  const keys = group(page, "Keybindings");
-  await page.getByRole("searchbox", { name: "Filter settings" }).fill("writing mode");
-  const writing = keys.getByRole("textbox", { name: "Toggle writing mode" });
-  await expect(writing).toHaveValue("mod+.");
+  const keys = await category(page, "Keyboard shortcuts");
+  await expect(keys.getByRole("row", { name: /Undo/ }).getByRole("cell").nth(1)).toHaveText("Default");
+  await page.getByRole("searchbox", { name: "Search settings" }).fill("writing mode");
+  await expect(keys.getByRole("row")).toHaveCount(2);
+  const writing = keys.getByRole("row", { name: /Toggle writing mode/ });
+  const key = writing.locator("kbd");
+  const from = writing.getByRole("cell").nth(1);
+  await expect(key).toHaveText([/^(⌘\.|Ctrl\+\.)/]);
+  await expect(from).toHaveText("Default");
 
-  await writing.fill("Shift+Mod+Y");
+  await writing.getByRole("button", { name: "Record a key for Toggle writing mode" }).click();
+  const recorder = page.getByRole("dialog", { name: "Record a key for Toggle writing mode" });
+  await expect(recorder.getByRole("group", { name: "Press the keys" })).toBeFocused();
+  await expect(recorder.getByRole("button", { name: "Save" })).toBeDisabled();
+  // The key that toggles writing mode is written down there, and toggles nothing.
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(recorder).toContainText("Toggle writing mode has this key already.");
+  await expect(app).not.toHaveAttribute("data-writing");
+  // A key pressed after another makes a sequence of them, and Start over takes them all back.
+  await page.keyboard.press("y");
+  await expect(recorder.locator("kbd")).toHaveText(/^(⌘\. Y|Ctrl\+\. Y)$/);
+  await expect(recorder).not.toContainText("has this key already");
+  await recorder.getByRole("button", { name: "Start over" }).click();
+  await expect(recorder.getByRole("group", { name: "Press the keys" })).toBeFocused();
+  await expect(recorder.locator("kbd")).toHaveCount(0);
+  await expect(recorder.getByRole("button", { name: "Save" })).toBeDisabled();
+  await page.keyboard.press("y");
+  await expect(recorder.locator("kbd")).toHaveText("Y");
+  await expect(recorder).toContainText("Y begins with a key that types, so it runs only where nothing is being typed.");
+  await expect(recorder.getByRole("button", { name: "Save" })).toBeEnabled();
+  await recorder.getByRole("button", { name: "Start over" }).click();
+  await page.keyboard.press("ControlOrMeta+Shift+Y");
+  await expect(recorder.locator("kbd")).toHaveText(/^(⇧⌘Y|Ctrl\+Shift\+Y)$/);
+  await expect(recorder.getByRole("alert")).toHaveCount(0);
   await page.keyboard.press("Enter");
-  await expect(writing).toHaveValue("mod+shift+y");
+  await expect(recorder).toHaveCount(0);
+  await expect(key).toHaveText([/^(⇧⌘Y|Ctrl\+Shift\+Y)/]);
+  await expect(from).toHaveText("Yours");
   await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleWritingMode": ["mod+shift+y"] });
   await page.getByRole("heading", { name: "Settings", level: 1 }).click();
 
@@ -214,29 +249,109 @@ test("a keybinding is rebound, unbound, and flagged when it takes another comman
   await expect(palette(page).getByRole("option").first()).toContainText(/Toggle writing mode.*(⇧⌘Y|Ctrl\+Shift\+Y)/);
   await page.keyboard.press("Escape");
 
-  await writing.fill("mod+shift+p");
-  await page.keyboard.press("Enter");
+  await writing.getByRole("button", { name: "Record a key for Toggle writing mode" }).click();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await expect(palette(page)).toHaveCount(0);
+  await expect(recorder.getByRole("alert")).toHaveText(/^(⇧⌘P|Ctrl\+Shift\+P) is already the key for Show all commands\. Saved, it runs Toggle writing mode instead\.$/);
+  await page.keyboard.press("Escape");
+  await expect(recorder).toHaveCount(0);
+  await expect(writing.getByRole("button", { name: "Record a key for Toggle writing mode" })).toBeFocused();
+  expect(await stored(page)).toEqual({ "keybindings.view.toggleWritingMode": ["mod+shift+y"] });
+
+  await writing.getByRole("button", { name: "Record a key for Toggle writing mode" }).click();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await recorder.getByRole("button", { name: "Save" }).click();
   await expect(problems(page)).toHaveText(["keybindings.view.toggleWritingMode mod+shift+p is also the key for Show all commands (commands.show). It runs Toggle writing mode. Show all commands is left with no key."]);
-  await expect(keys).toContainText("mod+shift+p is also the key for Show all commands");
+  await expect(writing).toContainText("mod+shift+p is also the key for Show all commands");
   await page.getByRole("heading", { name: "Settings", level: 1 }).click();
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await expect(app).toHaveAttribute("data-writing", "true");
   await expect(palette(page)).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+Shift+P");
 
-  await writing.fill("");
-  await page.keyboard.press("Enter");
+  await writing.getByRole("button", { name: /^Remove .+ from Toggle writing mode$/ }).click();
+  await expect(writing.getByRole("cell").first()).toHaveText("No key");
   await expect(problems(page)).toHaveCount(0);
   await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleWritingMode": [] });
   await page.getByRole("heading", { name: "Settings", level: 1 }).click();
   await page.keyboard.press("ControlOrMeta+.");
   await expect(app).not.toHaveAttribute("data-writing");
 
-  await keys.getByRole("button", { name: "Reset Toggle writing mode" }).click();
+  await writing.getByRole("button", { name: "Reset Toggle writing mode" }).click();
+  await expect(from).toHaveText("Default");
   await expect.poll(() => stored(page)).toEqual({});
   await page.getByRole("heading", { name: "Settings", level: 1 }).click();
   await page.keyboard.press("ControlOrMeta+.");
   await expect(app).toHaveAttribute("data-writing", "true");
+  await page.keyboard.press("ControlOrMeta+.");
+
+  await writing.getByRole("button", { name: "Add another key for Toggle writing mode" }).click();
+  await page.keyboard.press("F8");
+  await page.keyboard.press("Enter");
+  await expect(key).toHaveText([/^(⌘\.|Ctrl\+\.)/, /^F8/]);
+  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleWritingMode": ["mod+.", "f8"] });
+});
+
+test("one search finds settings in every category and keyboard shortcuts, a category narrows it, and Modified shows only what was changed", async ({ page }) => {
+  await openSettings(page);
+  await write(page, { "core.theme": "dark", "note-list.snippets": false, "keybindings.view.toggleInspector": ["mod+shift+i"], "backlinks.enabled": false });
+  await page.reload();
+  const categories = page.getByRole("navigation", { name: "Categories" }).getByRole("link");
+  const shown = page.locator(".settings-pane").getByRole("region");
+  const names = () => shown.evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")));
+  const search = page.getByRole("searchbox", { name: "Search settings" });
+  await expect(shown).toHaveText([/^Editor/]);
+
+  await search.fill("note list");
+  await expect(categories).toHaveText(["All results2", "Keyboard shortcuts1", "Note list1"]);
+  await expect(group(page, "Keyboard shortcuts").getByRole("rowheader")).toHaveText([/Disable plugin: Note list/]);
+  await expect(categories.first()).toHaveAttribute("aria-current", "page");
+  await search.fill("note");
+  await expect.poll(names).toEqual(["Editor", "Note list", "Keyboard shortcuts"]);
+  await expect(group(page, "Note list").getByRole("checkbox", { name: "Show snippets" })).not.toBeChecked();
+  await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /New note/ })).toBeVisible();
+  await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /Undo/ })).toHaveCount(0);
+
+  await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: /^Note list, 1 found$/ }).click();
+  await expect.poll(names).toEqual(["Note list"]);
+  await expect(page).toHaveURL(/\/settings\/plugins\/note-list$/);
+  await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: /^All results/ }).click();
+  await expect(shown).toHaveCount(3);
+
+  await search.fill("zzzz");
+  await expect(page.locator(".settings-pane")).toHaveText("No setting or keyboard shortcut matches.");
+  await search.fill("");
+  await expect.poll(names).toEqual(["Note list"]);
+
+  await page.getByRole("button", { name: "Modified" }).click();
+  await expect(page.getByRole("button", { name: "Modified" })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(names).toEqual(["Appearance", "Note list", "Keyboard shortcuts"]);
+  await expect(page.locator(".settings-pane .setting")).toHaveCount(2);
+  await expect(group(page, "Keyboard shortcuts").getByRole("row")).toHaveText([/Command/, /Toggle inspector/]);
+  await group(page, "Note list").getByRole("button", { name: "Reset Show snippets" }).click();
+  await expect.poll(names).toEqual(["Appearance", "Keyboard shortcuts"]);
+  await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "keybindings.view.toggleInspector": ["mod+shift+i"], "backlinks.enabled": false });
+});
+
+test("at a narrow width the categories are a menu above the settings, and in the dark theme the page is dark", async ({ page }) => {
+  await openSettings(page);
+  const list = page.getByRole("navigation", { name: "Categories" });
+  const menu = page.getByRole("combobox", { name: "Category" });
+  await expect(list).toBeVisible();
+  await expect(menu).toBeHidden();
+
+  await page.setViewportSize({ width: 560, height: 800 });
+  await expect(list).toBeHidden();
+  await expect(menu).toHaveValue("editor");
+  await menu.selectOption({ label: "Appearance" });
+  await expect(page).toHaveURL(/\/settings\/appearance$/);
+  await group(page, "Appearance").getByRole("combobox", { name: "Theme" }).selectOption("dark");
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector(".settings")!).colorScheme)).toBe("dark");
+  await menu.selectOption({ label: "Keyboard shortcuts" });
+  await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /Undo/ })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  const overflowing = await page.evaluate(() => [...document.querySelectorAll(".settings-pane *")].filter((el) => el.getBoundingClientRect().right > document.querySelector(".main")!.getBoundingClientRect().right + 1).length);
+  expect(overflowing).toBe(0);
 });
 
 test("settings follow the member to another browser, and plugins turned off are among them", async ({ page, browser }) => {
@@ -248,8 +363,8 @@ test("settings follow the member to another browser, and plugins turned off are 
   await page.keyboard.type("Disable plugin: Sidebar");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toHaveCount(0);
-  await page.goto("/settings");
-  await group(page, "Common Ink").getByRole("combobox", { name: "Theme" }).selectOption("dark");
+  await page.goto("/settings/appearance");
+  await group(page, "Appearance").getByRole("combobox", { name: "Theme" }).selectOption("dark");
   await expect.poll(() => stored(page)).toEqual({ "sidebar.enabled": false, "core.theme": "dark" });
   expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("ink.plugins.off")))).toEqual([]);
 
@@ -261,8 +376,7 @@ test("settings follow the member to another browser, and plugins turned off are 
   await expect(other.getByRole("complementary", { name: "Sidebar" })).toHaveCount(0);
   expect(await theme(other)).toBe("dark");
 
-  await other.goto("/settings");
-  await group(other, "Sidebar").getByRole("checkbox", { name: "On", exact: true }).check();
+  await setPlugin(other, "Sidebar", true);
   await expect(other.getByRole("complementary", { name: "Sidebar" })).toBeVisible();
   await expect.poll(() => stored(other)).toEqual({ "core.theme": "dark" });
 
@@ -280,8 +394,10 @@ test("the Settings page is there by its address with every plugin off, and from 
 
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
-  await group(page, "Sidebar").getByRole("checkbox", { name: "On", exact: true }).check();
-  await group(page, "Command palette").getByRole("checkbox", { name: "On", exact: true }).check();
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Keyboard shortcuts" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "On", exact: true })).toHaveCount(0);
+  await setPlugin(page, "Sidebar", true);
+  await setPlugin(page, "Command palette", true);
 
   await page.goto("/");
   await page.getByRole("complementary", { name: "Sidebar" }).getByRole("button", { name: /Ada/ }).click();
@@ -344,7 +460,7 @@ test("a plugin that asks to change settings is refused and nothing is written, w
   expect(await theme(page)).toBeNull();
   await expect(sidebar).toContainText("greedy says hello");
 
-  await group(page, "Greedy").getByRole("checkbox", { name: "Shout" }).check();
+  await (await category(page, "Greedy")).getByRole("checkbox", { name: "Shout" }).check();
   await expect(sidebar).toContainText("GREEDY SAYS HELLO");
   await expect.poll(() => stored(page)).toEqual({ "greedy.shout": true });
 });

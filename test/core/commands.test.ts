@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advance, chordFor, chordLabel, chordOf, typed } from "../../src/web/keybindings.ts";
+import { advance, bind, chordFor, chordLabel, chordOf, overlap, typed } from "../../src/web/keybindings.ts";
 import { matching } from "../../src/web/plugins/lib/match.ts";
 
 describe("keybindings", () => {
@@ -23,6 +23,34 @@ describe("keybindings", () => {
   it("knows the keys that would otherwise type, by the chord they begin with", () => {
     for (const keys of ["j", "shift+g", "g g", "enter", "space", "/", "backspace", "j mod+k"]) expect(typed(keys), keys).toBe(true);
     for (const keys of ["mod+j", "mod+w h", "alt+shift+g", "escape", "shift+escape", "f2", "f12 j", "mod+k l"]) expect(typed(keys), keys).toBe(false);
+  });
+
+  it("says how two commands' keys stand to each other: the same, or one the first keys of the other", () => {
+    expect(overlap("g g", "g g")).toBe("same");
+    expect(overlap("g", "g g")).toBe("begins");
+    expect(overlap("mod+w", "mod+w h")).toBe("begins");
+    expect(overlap("g g", "g")).toBe("follows");
+    expect(overlap("g g j", "g g")).toBe("follows");
+    expect(overlap("g", "g+g")).toBeNull();
+    expect(overlap("g t", "g g")).toBeNull();
+    expect(overlap("mod+g", "g g")).toBeNull();
+  });
+
+  it("flags keys a member chose that begin another command's sequence or go on from another's keys, and still binds both", () => {
+    const first = { id: "vim.first", title: "Vim: first row", chords: ["g g"], chosen: false };
+    const tab = { id: "vim.nextTab", title: "Vim: next tab", chords: ["g t"], chosen: false };
+    const down = { id: "vim.down", title: "Vim: down a row", chords: ["j"], chosen: false };
+
+    expect(bind([first, tab, down, { id: "note.new", title: "New note", chords: ["g"], chosen: true }])).toEqual({
+      keybindings: { g: "note.new", "g g": "vim.first", "g t": "vim.nextTab", j: "vim.down" },
+      conflicts: [{ commandId: "note.new", reason: "g is the first key of g g, the keys for Vim: first row (vim.first), and of g t, the keys for Vim: next tab (vim.nextTab). Where both can run, g runs New note and the longer keys never run." }],
+    });
+    expect(bind([first, down, { id: "note.new", title: "New note", chords: ["j k"], chosen: true }]).conflicts).toEqual([
+      { commandId: "note.new", reason: "j k begins with j, the key for Vim: down a row (vim.down). Where both can run, j runs Vim: down a row and j k never runs." },
+    ]);
+    // Defaults that overlap are the app's own to keep apart, and nobody's mistake to be told of.
+    expect(bind([first, { id: "note.new", title: "New note", chords: ["g"], chosen: false }]).conflicts).toEqual([]);
+    expect(bind([first, tab, down, { id: "note.new", title: "New note", chords: ["g n", "mod+w h"], chosen: true }]).conflicts).toEqual([]);
   });
 
   it("finds the chord bound to a command", () => {

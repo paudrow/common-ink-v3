@@ -39,10 +39,11 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** One plugin: what it is, what it adds, its pictures, and its switch. */
+/** One plugin: what it is, what it adds, its pictures and its options, and its switch. */
 export function PluginDetails({ plugin, contributed, host, mac, go }: Props) {
   const { id, name, state } = plugin;
   const adds = state.adds;
+  const options = contributed.settings.declared.filter((d) => d.group.id === id && !d.switch);
 
   return (
     <section className="mode-view plugins-page plugin-details">
@@ -92,9 +93,29 @@ export function PluginDetails({ plugin, contributed, host, mac, go }: Props) {
 
       <Section title="What it adds">
         {adds ? (
-          <Adds adds={adds} off={!state.enabled} keys={(commandId) => chordFor(commandId, contributed.keybindings)} mac={mac} />
+          <Adds adds={adds} options={options.length} off={!state.enabled} keys={(commandId) => chordFor(commandId, contributed.keybindings)} mac={mac} />
         ) : (
           <p className="soon">It hasn't been on since the app loaded, so what it adds isn't listed yet. Turn it on to see.</p>
+        )}
+      </Section>
+
+      <Section title="Settings">
+        {options.length === 0 ? (
+          <p className="soon">It has no settings.</p>
+        ) : (
+          <>
+            <ul className="plugin-options" aria-label={`Settings of ${name}`}>
+              {options.map((d) => (
+                <li key={d.key}>
+                  <span className="plugin-option">{d.setting.title}</span>
+                  {d.setting.description && <span className="plugin-about">{d.setting.description}</span>}
+                </li>
+              ))}
+            </ul>
+            <a className="button small" {...within(go, `/settings/plugins/${encodeURIComponent(id)}`)}>
+              Open in Settings
+            </a>
+          </>
         )}
       </Section>
     </section>
@@ -103,6 +124,8 @@ export function PluginDetails({ plugin, contributed, host, mac, go }: Props) {
 
 interface AddsProps {
   adds: Added;
+  /** How many options it declares. */
+  options: number;
   /** Whether the plugin is off, so this is what it added when it was last on. */
   off: boolean;
   /** The chord that runs a command now, if one does. */
@@ -111,18 +134,18 @@ interface AddsProps {
 }
 
 /** What a plugin has registered, kind by kind. It is read from the host's tables, and never written by hand. */
-function Adds({ adds, off, keys, mac }: AddsProps) {
+function Adds({ adds, options, off, keys, mac }: AddsProps) {
   const kinds: { title: string; items: { key: string; text: string; code?: string; chord?: string }[] }[] = [
     { title: "Commands", items: adds.commands.map((c) => ({ key: c.id, text: c.title, code: c.id, chord: keys(c.id) })) },
     { title: "Views", items: adds.views.map((v) => ({ key: `${v.slot}.${v.id}`, text: v.label ? `${SLOT_WORDS[v.slot]}: ${v.label}` : SLOT_WORDS[v.slot] })) },
     { title: "Embeds", items: adds.embeds.map((e) => ({ key: e.name, text: e.title, code: `::${e.name}{}` })) },
   ].filter((kind) => kind.items.length > 0);
-  const nothing = kinds.length === 0;
+  const nothing = kinds.length === 0 && options === 0;
 
   return (
     <>
       {off && !nothing && <p className="soon">It is off, so none of this is in the app now. This is what it adds when it is on.</p>}
-      {nothing && <p className="soon">It adds nothing that is listed: no command, view or embed.</p>}
+      {nothing && <p className="soon">It adds nothing that is listed: no command, view, embed or setting.</p>}
       <dl className="plugin-adds">
         {kinds.map((kind) => (
           <div key={kind.title} role="group" aria-label={kind.title}>
@@ -138,6 +161,16 @@ function Adds({ adds, off, keys, mac }: AddsProps) {
             ))}
           </div>
         ))}
+        {options > 0 && (
+          <div role="group" aria-label="Settings">
+            <dt>
+              Settings <span className="settings-count">{options}</span>
+            </dt>
+            <dd>
+              <span>Listed below, and changed in Settings</span>
+            </dd>
+          </div>
+        )}
       </dl>
     </>
   );
