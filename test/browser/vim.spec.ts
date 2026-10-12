@@ -328,20 +328,23 @@ test("moving through a note in a preview tab leaves it a preview, and an edit ke
   await expect.poll(() => italic(page)).toEqual([false, false]);
 });
 
-test("the cursor moves across an embed, which is shown as written while the cursor is on it and drawn again after", async ({ page }) => {
+test("the cursor moves across an embed, which stays drawn and is shown as written after its drawing while the cursor is on it", async ({ page }) => {
   const [note] = await withVim(page, "# Laps\nTime ::stopwatch{} here\nend");
   await edit(page, note!.id);
   const watch = page.getByRole("button", { name: /^Stopwatch/ });
 
   await page.keyboard.press("j");
   await expect(watch).toBeVisible();
+  await expect(lines(page).nth(1)).toHaveText("Time 0:00 here");
   await expect(page.locator(".cm-fat-cursor")).toHaveText("T");
+  const drawn = await watch.elementHandle();
   await page.keyboard.press("w");
-  await expect(watch).toHaveCount(0);
-  await expect(lines(page).nth(1)).toHaveText("Time ::stopwatch{} here");
+  await expect(lines(page).nth(1)).toHaveText("Time 0:00::stopwatch{} here");
   await expect(page.locator(".cm-fat-cursor")).toHaveText(":");
+  expect(await watch.evaluate((el, was) => el === was, drawn)).toBe(true);
   await page.keyboard.press("$");
-  await expect(watch).toBeVisible();
+  await expect(lines(page).nth(1)).toHaveText("Time 0:00 here");
+  expect(await watch.evaluate((el, was) => el === was, drawn)).toBe(true);
   await expect(page.locator(".cm-fat-cursor")).toHaveText("e");
   await keys(page, "j", "k", "0");
   await expect(watch).toBeVisible();

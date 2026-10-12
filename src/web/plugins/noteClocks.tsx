@@ -29,6 +29,8 @@ export function runningIn(text: string, kinds: ReadonlySet<string>): Running[] {
 export const noteClocks: Plugin = {
   id: "note-clocks",
   name: "Note clocks",
+  description: "The open note's running timers and stopwatches, in the bottom bar.",
+  icon: "clock",
   activate(host) {
     const notes = openNotes(host);
     host.views.register("bar", {

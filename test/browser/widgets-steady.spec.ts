@@ -320,7 +320,8 @@ test("a line is as tall and starts where it did whether its clock is drawn or sh
   await expect(lines(page).filter({ hasText: /^Tea/ })).toContainText("::timer{5m}");
   expect({ clocks: await box("Tea"), after: await box("words after"), board: await board(), last: await box("The last line.") }).toEqual(drawn);
 
-  await editor(page).getByRole("button", { name: "Edit as markdown" }).click();
+  await editor(page).getByRole("button", { name: "Options for Kanban board" }).click();
+  await page.getByRole("dialog", { name: "Options for Kanban board" }).getByRole("button", { name: "Edit as markdown" }).click();
   await expect(lines(page).filter({ hasText: ":::kanban{}" })).toBeVisible();
   expect(await board()).toEqual(drawn.board);
   expect(await box("words after")).toEqual(drawn.after);

@@ -23,6 +23,8 @@ const kept = (value: unknown): Kept | null => {
 export const quickTimer: Plugin = {
   id: "quick-timer",
   name: "Quick timer",
+  description: "A timer that belongs to no note, started from the command palette.",
+  icon: "clock",
   activate(host) {
     const listeners = new Set<() => void>();
     let now = kept(host.storage.get(KEY));

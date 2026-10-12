@@ -312,7 +312,7 @@ test("Plugins is under More in the sidebar, which says More closed and Less open
   await expect(modes.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
 
   // Loaded at a page that is under More, the list starts open on it.
-  await page.goto("/plugins/stopwatch");
+  await page.goto("/plugins/kanban");
   await expect(modes.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
   await expect(modes.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
   await modes.getByRole("button", { name: "Less" }).click();
@@ -355,11 +355,11 @@ test("the Plugins page lists every plugin with its icon, name, description and s
   await expect(page.getByText("No plugin matches.")).toBeVisible();
 
   // The search is still there on the way back from a plugin's details.
-  await search.fill("stopw");
-  await openDetails(page, "Stopwatch");
+  await search.fill("kanb");
+  await openDetails(page, "Kanban");
   await page.getByRole("link", { name: "All plugins" }).click();
-  await expect(search).toHaveValue("stopw");
-  await expect(pluginRows(page)).toHaveAccessibleName("Stopwatch");
+  await expect(search).toHaveValue("kanb");
+  await expect(pluginRows(page)).toHaveAccessibleName("Kanban");
 
   await search.fill("");
   await page.setViewportSize({ width: 520, height: 800 });
@@ -367,33 +367,42 @@ test("the Plugins page lists every plugin with its icon, name, description and s
   expect(await fits(page)).toBe(true);
 });
 
-test("a built-in plugin's details show what it is, what it adds as it registered it, and its switch", async ({ page }) => {
+test("a built-in plugin's details show what it is, its pictures in the theme the app is in, what it adds as it registered it, and its switch", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.goto("/plugins");
-  await openDetails(page, "Stopwatch");
-  await expect(page).toHaveURL(/\/plugins\/stopwatch$/);
+  await openDetails(page, "Kanban");
+  await expect(page).toHaveURL(/\/plugins\/kanban$/);
   const details = page.locator(".plugin-details");
   await expect(details.locator(".plugin-head svg")).toHaveCount(1);
   await expect(details.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
-  await expect(details).toContainText("A stopwatch in a note, written ::stopwatch{}.");
+  await expect(details).toContainText("A board of columns and cards kept in a note as headings and lists.");
   await expect(section(page, "Permissions")).toContainText("It comes with Common Ink and runs inside the app as you, so it asks for nothing");
-  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Permissions", "What it adds", "Settings"]);
+  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Pictures", "Permissions", "What it adds", "Settings"]);
+
+  const picture = section(page, "Pictures").locator("img:visible");
+  const shown = () => picture.evaluate((img: HTMLImageElement) => [new URL(img.currentSrc || img.src).pathname, img.complete && img.naturalWidth > 600]);
+  await expect(picture).toHaveCount(1);
+  await expect(picture).toHaveAccessibleName("A board in a note: three columns of cards, each with a button to add a card.");
+  await expect.poll(shown).toEqual(["/plugin-shots/kanban-light.png", true]);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(shown).toEqual(["/plugin-shots/kanban-dark.png", true]);
+  await page.emulateMedia({ colorScheme: "light" });
 
   const adds = section(page, "What it adds");
   await expect(adds.getByRole("group")).toHaveAccessibleName("Embeds");
-  await expect(adds.getByRole("group", { name: "Embeds" })).toHaveText("Embeds 1Stopwatch::stopwatch{}");
+  await expect(adds.getByRole("group", { name: "Embeds" })).toHaveText("Embeds 1Kanban board:::kanban{}");
   await expect(section(page, "Settings")).toHaveText("SettingsIt has no settings.");
 
   // Its switch is here, and what it added when it was on is still said once it is off.
-  const toggle = details.getByRole("checkbox", { name: "Stopwatch", exact: true });
+  const toggle = details.getByRole("checkbox", { name: "Kanban", exact: true });
   await expect(toggle).toBeChecked();
   await toggle.uncheck();
   await expect(details.locator(".plugin-switch")).toHaveText("Off");
   await expect(adds).toContainText("It is off, so none of this is in the app now. This is what it adds when it is on.");
-  await expect(adds.getByRole("group", { name: "Embeds" })).toContainText("Stopwatch");
-  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)).toEqual({ "stopwatch.enabled": false });
+  await expect(adds.getByRole("group", { name: "Embeds" })).toContainText("Kanban board");
+  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)).toEqual({ "kanban.enabled": false });
   await page.getByRole("link", { name: "All plugins" }).click();
-  await expect(pluginRow(page, "Stopwatch").getByRole("checkbox")).not.toBeChecked();
+  await expect(pluginRow(page, "Kanban").getByRole("checkbox")).not.toBeChecked();
 
   await openDetails(page, "Tabs and splits");
   await expect(section(page, "What it adds").getByRole("group", { name: "Commands" })).toContainText("Close tab");
@@ -401,9 +410,10 @@ test("a built-in plugin's details show what it is, what it adds as it registered
   await expect(section(page, "Pictures")).toHaveCount(0);
 
   await page.setViewportSize({ width: 520, height: 800 });
-  await page.goto("/plugins/stopwatch");
-  await page.locator(".plugin-details").getByRole("checkbox", { name: "Stopwatch", exact: true }).check();
-  await expect(section(page, "What it adds").getByRole("group", { name: "Embeds" })).toContainText("Stopwatch");
+  await page.goto("/plugins/kanban");
+  await expect(section(page, "Pictures").locator("img:visible")).toHaveCount(1);
+  await page.locator(".plugin-details").getByRole("checkbox", { name: "Kanban", exact: true }).check();
+  await expect(section(page, "What it adds").getByRole("group", { name: "Embeds" })).toContainText("Kanban board");
   expect(await fits(page)).toBe(true);
 
   await page.goto("/plugins/no-such-plugin");

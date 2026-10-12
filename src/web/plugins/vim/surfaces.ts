@@ -16,7 +16,7 @@ const SEARCH = 'input[type="search"], [role="searchbox"]';
 const EDITOR = '[contenteditable="true"][role="textbox"]';
 const TEXTLESS = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"]);
 
-/** What an embed draws in a note. Focus that has gone into it is the embed's, and so are the keys. */
+/** What an embed draws in a note. Focus that has gone into it is the embed's, and so are the keys: its cards are no list of the window's. */
 export const DRAWN = ".cm-content .embed";
 
 const shown = (el: Element) => el.getClientRects().length > 0;

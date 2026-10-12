@@ -1,5 +1,7 @@
-import type { Embedded, Plugin } from "../../plugin-api.ts";
-import { addCard, cardsOf, moveCard, parseBoard, serializeBoard, type Board, type Place } from "./board.ts";
+import { createElement } from "react";
+import { SWATCHES, type Drawn, type EmbedOptions, type Embedded, type Plugin, type Swatch } from "../../plugin-api.ts";
+import { openPopover } from "../lib/Popover.tsx";
+import { addCard, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard, type Board, type Place } from "./board.ts";
 
 const CARD_DRAG = "application/x-common-ink-card";
 
@@ -30,6 +32,15 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, { data, ...props }: Pr
 
 const focusKey = ({ column, card }: Place) => `card:${column}:${card}`;
 
+const named = (colour: Swatch | "") => (colour ? colour[0]!.toUpperCase() + colour.slice(1) : "No colour");
+const COLOURS = (["", ...SWATCHES] as const).map((colour) => ({ value: colour, label: named(colour), swatch: colour }));
+
+/** A column's colour is set from the board's options too, a field for each column. */
+const options: EmbedOptions = {
+  fields: ({ body }) => parseBoard(body).columns.map((column, c) => ({ id: String(c), label: `${column.title} colour`, kind: "choice", value: column.colour ?? "", choices: COLOURS })),
+  set: ({ body }, id, value) => ({ body: serializeBoard(colourColumn(parseBoard(body), Number(id), (value as Swatch) || null)) }),
+};
+
 /** Where a card dropped at height `y` over a list of cards goes: before the first card whose middle is below it. */
 function dropIndex(list: HTMLElement, y: number): number {
   const cards = [...list.querySelectorAll<HTMLElement>(".kanban-card:not(.dragging)")];
@@ -40,19 +51,34 @@ function dropIndex(list: HTMLElement, y: number): number {
   return at < 0 ? cards.length : at;
 }
 
-function draw(el: HTMLElement, embed: Embedded) {
+function draw(el: HTMLElement, embed: Embedded): Drawn {
   const board = parseBoard(embed.body);
   const drawn = {};
   const write = (next: Board) => next !== board && embed.update({ body: serializeBoard(next) });
 
-  const editAsMarkdown = h("button", { type: "button", className: "kanban-edit", textContent: "Edit as markdown" });
-  editAsMarkdown.addEventListener("click", () => embed.edit());
   /** What only a member who can change the note is given. */
   const controls = (...nodes: Node[]) => (embed.readOnly ? [] : nodes);
   if (!board.columns.length) {
-    el.append(h("div", { className: "kanban kanban-empty" }, h("p", {}, "A kanban board has a column for each heading, such as ## To do, and a card for each list item under it."), ...controls(editAsMarkdown)));
-    return;
+    el.append(h("div", { className: "kanban kanban-empty" }, h("p", {}, "A kanban board has a column for each heading, such as ## To do, and a card for each list item under it.")));
+    return {};
   }
+
+  /** What the arrow keys stop at in each column, from the top: its cards, then "Add a card". */
+  const stops: HTMLElement[][] = board.columns.map(() => []);
+  /** Moves the focus from the `i`th stop of column `c`: up and down its column and out of the board past either end, and across to a card of the next column where it has one. */
+  const step = (e: KeyboardEvent, c: number, i: number) => {
+    const across = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+    const down = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+    const there = stops[c + across];
+    if (!there) return;
+    e.preventDefault();
+    const cards = there.filter((stop) => stop.matches(".kanban-card"));
+    const onCard = stops[c]![i]!.matches(".kanban-card");
+    if (across) (onCard && cards.length ? cards[Math.min(i, cards.length - 1)] : there.at(-1))?.focus();
+    else if (there[i + down]) there[i + down]!.focus();
+    else embed.leave(down < 0 ? "above" : "below");
+  };
+  const arrow = (e: KeyboardEvent) => e.key.startsWith("Arrow") && !e.altKey && !e.ctrlKey && !e.metaKey;
 
   const columns = board.columns.map((column, c) => {
     const cards = cardsOf(column);
@@ -78,21 +104,19 @@ function draw(el: HTMLElement, embed: Embedded) {
         item.classList.remove("dragging");
       });
       item.addEventListener("keydown", (e) => {
-        if (!e.key.startsWith("Arrow") || e.altKey || e.ctrlKey || e.metaKey || (e.shiftKey && embed.readOnly)) return;
+        if (!arrow(e) || (e.shiftKey && embed.readOnly)) return;
+        if (!e.shiftKey) return step(e, c, i);
         const across = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
         const down = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
-        const column = c + across;
-        const there = board.columns[column];
+        const there = board.columns[c + across];
         if (!there) return;
         e.preventDefault();
-        const others = cardsOf(there).length - (across ? 0 : 1);
-        const to = { column, card: Math.max(0, Math.min(i + down, e.shiftKey ? others : others - (across ? 1 : 0))) };
-        if (e.shiftKey) {
-          // The card is drawn again in its new place, and takes the focus there.
-          item.dataset.focus = focusKey(to);
-          write(moveCard(board, at, to));
-        } else el.querySelector<HTMLElement>(`[data-focus="${focusKey(to)}"]`)?.focus();
+        const to = { column: c + across, card: Math.max(0, Math.min(i + down, cardsOf(there).length - (across ? 0 : 1))) };
+        // The card is drawn again in its new place, and takes the focus there.
+        item.dataset.focus = focusKey(to);
+        write(moveCard(board, at, to));
       });
+      stops[c]!.push(item);
       list.append(item);
     });
 
@@ -100,10 +124,14 @@ function draw(el: HTMLElement, embed: Embedded) {
     add.setAttribute("aria-label", `Add a card to ${column.title}`);
     const input = h("input", { type: "text", className: "kanban-add-text", placeholder: "New card", data: { focus: `add:${c}` } });
     input.setAttribute("aria-label", `New card in ${column.title}`);
+    let closing = false;
     const close = () => {
       drafts.delete(el);
       input.value = "";
-      input.replaceWith(add);
+      // Taking the field out takes the keyboard from it, which would close it a second time from inside the first.
+      closing = true;
+      swap(input, add);
+      closing = false;
     };
     input.addEventListener("input", () => drafts.set(el, { column: c, text: input.value }));
     input.addEventListener("keydown", (e) => {
@@ -118,19 +146,56 @@ function draw(el: HTMLElement, embed: Embedded) {
       e.preventDefault();
       e.stopPropagation();
     });
-    input.addEventListener("blur", () => input.isConnected && !input.value.trim() && close());
+    input.addEventListener("blur", () => !closing && input.isConnected && !input.value.trim() && close());
+    /** Swaps the button for the field, or back, in the column and among its stops. */
+    const swap = (from: HTMLElement, to: HTMLElement) => {
+      from.replaceWith(to);
+      stops[c] = stops[c]!.map((stop) => (stop === from ? to : stop));
+    };
     add.addEventListener("click", () => {
-      add.replaceWith(input);
+      swap(add, input);
       input.focus();
     });
+    add.addEventListener("keydown", (e) => arrow(e) && !e.shiftKey && step(e, c, cards.length));
     const draft = drafts.get(el);
     if (draft?.column === c) {
       input.value = draft.text;
       input.setSelectionRange(draft.text.length, draft.text.length);
     }
     const adding = draft?.column === c ? input : add;
+    if (!embed.readOnly) stops[c]!.push(adding);
 
-    const section = h("section", { className: "kanban-column" }, h("h3", {}, column.title, h("span", { className: "kanban-count" }, String(cards.length))), list, ...controls(adding));
+    const colour = h("button", { type: "button", className: "kanban-colour", title: `Colour of ${column.title}`, data: { focus: `colour:${c}`, ...(column.colour && { colour: column.colour }) } });
+    colour.setAttribute("aria-label", `Colour of ${column.title}: ${named(column.colour ?? "").toLowerCase()}`);
+    colour.addEventListener("click", () =>
+      openPopover(colour, `Colour of ${column.title}`, (shut) =>
+        createElement(
+          "div",
+          { className: "kanban-palette", role: "radiogroup", "aria-label": `Colour of ${column.title}` },
+          COLOURS.map(({ value, label }) =>
+            createElement("button", {
+              key: value,
+              type: "button",
+              role: "radio",
+              "aria-checked": value === (column.colour ?? ""),
+              "aria-label": label,
+              title: label,
+              className: "embed-option-choice swatch",
+              "data-colour": value || undefined,
+              onClick: () => {
+                // The board is drawn again with the colour, and the button that opened this has the focus there.
+                shut();
+                colour.focus();
+                write(colourColumn(board, c, value || null));
+              },
+            }),
+          ),
+        ),
+      ),
+    );
+
+    const heading = h("h3", {}, h("span", { className: "kanban-title" }, column.title), ...controls(colour), h("span", { className: "kanban-count" }, String(cards.length)));
+    const section = h("section", { className: "kanban-column", data: column.colour ? { colour: column.colour } : {} }, heading, list, ...controls(adding));
     section.setAttribute("aria-label", column.title);
     const mine = (e: DragEvent) => dragging?.drawn === drawn && e.dataTransfer?.types.includes(CARD_DRAG);
     section.addEventListener("dragover", (e) => {
@@ -148,17 +213,30 @@ function draw(el: HTMLElement, embed: Embedded) {
     return section;
   });
 
-  el.append(h("div", { className: "kanban" }, h("div", { className: "kanban-columns" }, ...columns), ...controls(editAsMarkdown)));
+  el.append(h("div", { className: "kanban" }, h("div", { className: "kanban-columns" }, ...columns)));
+  return {
+    // The cursor comes in at the first column that has anything to stop at: its top from above, its foot from below.
+    enter(from) {
+      const column = stops.find((column) => column.length);
+      const stop = column?.at(from === "above" ? 0 : -1);
+      stop?.focus();
+      return !!stop && document.activeElement === stop;
+    },
+  };
 }
 
 /**
  * A kanban board kept in a note as a block: `:::kanban{}`, a heading for each column with its cards
- * as a list under it, then `:::`. Moving or adding a card rewrites that markdown.
+ * as a list under it, then `:::`. Moving or adding a card rewrites that markdown, and so does giving
+ * a column a colour, which its heading then ends with: `## Doing {.blue}`.
  */
 export const kanban: Plugin = {
   id: "kanban",
   name: "Kanban",
+  description: "A board of columns and cards kept in a note as headings and lists.",
+  icon: "board",
+  screenshots: [{ src: "/plugin-shots/kanban-light.png", dark: "/plugin-shots/kanban-dark.png", alt: "A board in a note: three columns of cards, each with a button to add a card." }],
   activate(host) {
-    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, render: draw });
+    host.embeds.register({ name: "kanban", title: "Kanban board", block: true, entered: true, starts: { body: "## To do\n\n## Doing\n\n## Done\n" }, options, render: draw });
   },
 };

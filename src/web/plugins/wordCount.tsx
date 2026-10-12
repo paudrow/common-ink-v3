@@ -16,6 +16,8 @@ export function counted(text: string): { words: number; minutes: number } {
 export const wordCount: Plugin = {
   id: "word-count",
   name: "Word count",
+  description: "The open note's word count and reading time, in the bottom bar.",
+  icon: "text",
   activate(host) {
     const notes = openNotes(host);
     host.views.register("bar", {

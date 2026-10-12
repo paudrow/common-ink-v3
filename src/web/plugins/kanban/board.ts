@@ -1,3 +1,5 @@
+import { SWATCHES, type Swatch } from "../../plugin-api.ts";
+
 /**
  * A kanban block's body, read as a board. Headings are columns and top-level list items are cards.
  * Every line of the body is kept in the place it was read from, so writing a board back out gives
@@ -10,9 +12,12 @@ export interface Board {
 }
 
 export interface Column {
-  /** The heading line as written, such as `## Doing`. */
+  /** The heading line as written, such as `## Doing` or `## Doing {.blue}`. */
   heading: string;
+  /** The heading's text, without its colour. */
   title: string;
+  /** The colour the heading ends with, written as markdown writes a heading's class: `{.blue}`. */
+  colour: Swatch | null;
   parts: readonly Part[];
 }
 
@@ -36,6 +41,8 @@ export interface Place {
 }
 
 const HEADING = /^#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+/** A heading's text, read as its title and the colour it ends with. Braces that name no colour are part of the title. */
+const COLOURED = new RegExp(`^(.*?)[ \\t]*\\{\\.(${SWATCHES.join("|")})\\}$`);
 const ITEM = /^(?:[-*+]|\d+[.)])[ \t]+(.*)$/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 /** `---`, `* * *`, `___`: a rule across the page, which the list markers `-` and `*` would otherwise make a card of. */
@@ -47,7 +54,7 @@ const carriesOn = (line: string) => line.trim() !== "" && !HEADING.test(line) &&
 export function parseBoard(body: string): Board {
   const lines = body.split("\n");
   const before: string[] = [];
-  const columns: { heading: string; title: string; parts: Part[] }[] = [];
+  const columns: (Omit<Column, "parts"> & { parts: Part[] })[] = [];
   let fence: string | null = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
@@ -60,7 +67,10 @@ export function parseBoard(body: string): Board {
     }
     const heading = HEADING.exec(line);
     const item = into && !RULE.test(line) && ITEM.exec(line);
-    if (heading) columns.push({ heading: line, title: heading[1]!, parts: [] });
+    if (heading) {
+      const coloured = COLOURED.exec(heading[1]!);
+      columns.push({ heading: line, title: coloured ? coloured[1]! : heading[1]!, colour: (coloured?.[2] as Swatch | undefined) ?? null, parts: [] });
+    }
     else if (item) {
       // A card takes the indented lines under it, blank lines only where an indented line follows them, and lines that carry on from the one before.
       let end = i + 1;
@@ -125,4 +135,13 @@ export function addCard(board: Board, column: number, text: string): Board {
   const marker = /^(?:[-*+]|\d+[.)])/.exec(board.columns.flatMap(cardsOf)[0]?.lines[0] ?? "")?.[0] ?? "-";
   const card: Card = { card: true, lines: [`${/\d/.test(marker) ? "1." : marker} ${line}`], text: line, more: "" };
   return withParts(board, column, (parts) => void parts.splice(slot(parts, Infinity), 0, card));
+}
+
+/** Gives a column a colour, or with null takes it away, by rewriting the end of its heading line and nothing else. */
+export function colourColumn(board: Board, column: number, colour: Swatch | null): Board {
+  const at = board.columns[column];
+  if (!at || at.colour === colour) return board;
+  const [, marks, closing = ""] = /^(#{1,6}[ \t]+).*?((?:[ \t]+#+)?[ \t]*)$/.exec(at.heading)!;
+  const heading = `${marks}${at.title}${colour ? ` {.${colour}}` : ""}${closing}`;
+  return { ...board, columns: board.columns.map((c, i) => (i === column ? { ...c, heading, colour } : c)) };
 }

@@ -288,7 +288,7 @@ async function holdOver(page: Page, from: Locator, body: Locator, across: number
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 3 });
   await page.mouse.move(box.x + box.width * across, box.y + box.height * down, { steps: 3 });
   // The browser tells the page where a drag is a move late, so the pointer is moved once more where it already is.
-  await page.mouse.move(box.x + box.width * across + 1, box.y + box.height * down);
+  await page.mouse.move(box.x + box.width * across + 1, box.y + box.height * down + 1);
   await page.mouse.move(box.x + box.width * across, box.y + box.height * down);
 }
 

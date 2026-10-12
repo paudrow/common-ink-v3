@@ -1335,7 +1335,197 @@ button.link:hover {
   padding: 6px 0;
 }
 
+/* The host's own element around each drawn embed: the drawing, then its options button where it has one, which stays on the drawing's row. */
+.embed-frame.with-options {
+  white-space: nowrap;
+}
+
+/* A block's options button has a narrow column of its own at the block's top corner, so it is never laid over what the embed draws. */
+.embed-frame-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  white-space: normal;
+}
+
+.embed-options {
+  margin-block: -1px;
+  margin-left: 3px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  cursor: pointer;
+}
+
+.embed-frame-block > .embed-options {
+  margin: 6px 0 0 4px;
+  padding: 1px 6px;
+  font-family: var(--prose);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* Drawn here and not written in the button, so it adds no text to its line. */
+.embed-options::before {
+  content: "⋯";
+}
+
+.embed-options:hover,
+.embed-options[aria-expanded="true"] {
+  border-color: var(--line);
+  background: var(--bg-side);
+  color: var(--ink);
+}
+
+.embed-options:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* An inline embed as the note writes it, shown after its drawing while the cursor is on it. */
+.embed-source {
+  color: var(--muted);
+}
+
+.embed-options-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 12rem;
+  font-family: var(--prose);
+}
+
+.embed-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.embed-option-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.embed-option input {
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.embed-option input:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.embed-option-hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.embed-option-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.embed-option-choices,
+.kanban-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.embed-option-choice {
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.embed-option-choice.swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--swatch, transparent);
+}
+
+/* No colour: a ring with a line through it. */
+.embed-option-choice.swatch:not([data-colour]) {
+  background: linear-gradient(to top right, transparent calc(50% - 1px), var(--faint) calc(50% - 1px), var(--faint) calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+.embed-option-choice[aria-checked="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.embed-option-choice:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.embed-option-edit {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.embed-option-edit:hover,
+.embed-option-edit:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* The colours an embed asks for by name. One value serves both themes: what is tinted with it is mixed into the theme's own surface. */
+[data-colour="red"] {
+  --swatch: #e5484d;
+}
+
+[data-colour="orange"] {
+  --swatch: #f76b15;
+}
+
+[data-colour="yellow"] {
+  --swatch: #e2b100;
+}
+
+[data-colour="green"] {
+  --swatch: #30a46c;
+}
+
+[data-colour="blue"] {
+  --swatch: #3e8ee6;
+}
+
+[data-colour="purple"] {
+  --swatch: #8e4ec6;
+}
+
+[data-colour="pink"] {
+  --swatch: #d6409f;
+}
+
+[data-colour="gray"] {
+  --swatch: #8b8d98;
+}
+
 .clock,
+.clock-press,
 .clock-reset {
   /* The border is taken back out of the line's height, so a line with a clock in it is as tall as one without. */
   margin-block: -1px;
@@ -1366,21 +1556,31 @@ button.link:hover {
   color: var(--danger);
 }
 
+.clock-press,
 .clock-reset {
   margin-left: 3px;
   padding: 0 6px;
   color: var(--muted);
+  font-size: 0.85em;
 }
 
-/* Drawn here and not written in the button, so the time is the only text a stopwatch adds to its line. */
-/* Kept in its place and out of sight, so the line is as wide before the clock starts as after. Not hidden outright, which the caret is lost beside. */
+/* As wide whichever of its words it says, so starting the clock moves nothing after it. */
+.clock-press {
+  min-width: 4em;
+  text-align: center;
+}
+
+/* Kept in its place while it can't be pressed, so the line is as wide before the clock starts as after. */
+.clock-press:disabled,
 .clock-reset:disabled {
-  opacity: 0;
+  opacity: 0.45;
   cursor: default;
 }
 
+/* Drawn here and not written in the button, so the time is the only text a clock adds to its line. */
+.clock-press::before,
 .clock-reset::before {
-  content: "↺";
+  content: attr(data-label);
 }
 
 .clock-unread {
@@ -1411,6 +1611,12 @@ button.link:hover {
   background: var(--bg-side);
 }
 
+/* A coloured column is tinted with its colour over the theme's own surface, so it reads in light and dark. */
+.kanban-column[data-colour] {
+  border-color: color-mix(in srgb, var(--swatch) 45%, var(--line));
+  background: color-mix(in srgb, var(--swatch) 14%, var(--bg-side));
+}
+
 .kanban-column.drop {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -1423,6 +1629,58 @@ button.link:hover {
   margin: 0 2px 8px;
   font-size: 13px;
   font-weight: 600;
+}
+
+.kanban-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.kanban-column[data-colour] .kanban-title {
+  color: color-mix(in srgb, var(--swatch) 55%, var(--ink));
+}
+
+.kanban-colour {
+  flex: none;
+  align-self: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--swatch, transparent);
+  cursor: pointer;
+}
+
+.kanban-colour[data-colour] {
+  border-color: transparent;
+}
+
+.kanban-colour:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A panel opened from a chip, laid over the app. It is placed by its opener, under its chip. */
+.chip-popover {
+  position: fixed;
+  z-index: 40;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.kanban-palette {
+  padding: 2px;
 }
 
 .kanban-count {
@@ -1450,8 +1708,7 @@ button.link:hover {
 }
 
 .kanban-card:focus-visible,
-.kanban-add:focus-visible,
-.kanban-edit:focus-visible {
+.kanban-add:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -1468,8 +1725,7 @@ button.link:hover {
   white-space: pre-wrap;
 }
 
-.kanban-add,
-.kanban-edit {
+.kanban-add {
   border: 0;
   border-radius: 6px;
   background: none;
@@ -1477,9 +1733,6 @@ button.link:hover {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-}
-
-.kanban-add {
   width: 100%;
   margin-top: 6px;
   padding: 4px 8px;
@@ -1490,8 +1743,7 @@ button.link:hover {
   content: "+ ";
 }
 
-.kanban-add:hover,
-.kanban-edit:hover {
+.kanban-add:hover {
   background: var(--hover);
   color: var(--ink);
 }
@@ -1507,11 +1759,6 @@ button.link:hover {
   color: var(--ink);
   font: inherit;
   outline: none;
-}
-
-.kanban-edit {
-  margin-top: 2px;
-  padding: 2px 6px;
 }
 
 .kanban-empty p {

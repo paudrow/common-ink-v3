@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { perform, signInAsNewPerson } from "./helpers.ts";
+import { openPlugins } from "./plugins-helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -55,6 +56,12 @@ async function drag(page: Page, from: Locator, to: Locator, at: { x: number; y: 
   await page.mouse.up();
 }
 
+/** Asks for a board's markdown from its options, which is the only way to it. */
+async function editAsMarkdown(page: Page) {
+  await editor(page).getByRole("button", { name: "Options for Kanban board" }).click();
+  await page.getByRole("dialog", { name: "Options for Kanban board" }).getByRole("button", { name: "Edit as markdown" }).click();
+}
+
 const BOARD = "# Plan\n\n:::kanban{}\n## To do\n- write\n- review\n\n## Doing\n- build\n\n## Done\n:::\n\nAfter the board.\n";
 
 test("/ opens the embed menu, typing filters it, and picking a timer writes it with its length ready to type over", async ({ page }) => {
@@ -73,7 +80,8 @@ test("/ opens the embed menu, typing filters it, and picking a timer writes it w
   await settled(page);
   await page.keyboard.press("Enter");
   await expect(menu(page)).toHaveCount(0);
-  await expect(lines(page).nth(2)).toHaveText("::timer{5m}");
+  // The timer is drawn at once, and with the cursor in it the line shows it as written after the drawing.
+  await expect(lines(page).nth(2)).toHaveText("5:00::timer{5m}");
 
   await page.keyboard.type("10m");
   await page.keyboard.press("ControlOrMeta+End");
@@ -149,20 +157,28 @@ test("a kanban block draws a column for each heading and a card for each list it
   await expect(editor(page)).not.toContainText(":::kanban{}");
   await expect(editor(page)).toContainText("After the board.");
 
-  // The arrow keys step over the board's hidden lines, so what is typed after them lands above the board.
+  // The arrow keys go through the board's cards and never into its hidden lines, so what is typed after them lands above the board.
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("ArrowUp");
+  await expect(editor(page).getByRole("button", { name: "Add a card to To do" })).toBeFocused();
+  for (const card of ["review", "write"]) {
+    await page.keyboard.press("ArrowUp");
+    await expect(column(page, "To do").getByRole("listitem").filter({ hasText: card })).toBeFocused();
+  }
+  await page.keyboard.press("ArrowUp");
+  await expect(editor(page)).toBeFocused();
   await page.keyboard.type("above");
   await expect(lines(page).nth(1)).toHaveText("above");
-  await page.keyboard.press("ArrowDown");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
+  await expect(editor(page)).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Home");
   await page.keyboard.type("below ");
   await expect(editor(page)).toContainText("below After the board.");
   await expect(editor(page)).not.toContainText(":::kanban{}");
 
-  await editor(page).getByRole("button", { name: "Edit as markdown" }).click();
+  await editAsMarkdown(page);
   await expect(lines(page)).toContainText([":::kanban{}", "## To do", "- write"]);
   await expect(editor(page).getByRole("region")).toHaveCount(3);
   await page.keyboard.press("End");
@@ -305,8 +321,7 @@ test("a timer that has run its length says so, and one that can't be read says h
   await expect(lines(page).nth(2)).toContainText("unread Timer: write it like ::timer{5m} and Timer: write it like ::timer{5m}.");
   await editor(page).getByRole("button", { name: "Timer, finished" }).click();
   await expect(editor(page).getByRole("button", { name: "Timer, 5:00 left" })).toBeVisible();
-  await page.getByRole("button", { name: /Ada/ }).click();
-  await page.getByRole("menuitem", { name: "Plugins" }).click();
+  await openPlugins(page);
   await expect(page.getByRole("checkbox", { name: "Timer", exact: true })).toBeChecked();
   await expect(page.getByRole("list", { name: "Plugins" }).getByRole("alert")).toHaveCount(0);
 });
@@ -338,17 +353,21 @@ test("with vim on, / opens the embed menu in insert mode and is vim's search in 
   await expect.poll(() => read(page, note.id)).toBe("# Tea\n\nsteep ::stopwatch{} go /");
 });
 
-test("with vim on, j and k step over a board's hidden lines, and the board is still drawn", async ({ page }) => {
+test("with vim on, j and k go through a board's cards and never into its hidden lines, and the board is still drawn", async ({ page }) => {
   await open(page, BOARD, { "vim.enabled": true });
   await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
 
   await page.keyboard.press("g");
   await page.keyboard.press("g");
-  // Down from the title: the blank line, the blank line past the board, then the words after it.
-  for (const key of ["j", "j", "j"]) await page.keyboard.press(key);
+  // Down from the title: the blank line, the board's first column from its top to "Add a card", the blank line past the board, then the words after it.
+  for (const key of ["j", "j"]) await page.keyboard.press(key);
+  await expect(column(page, "To do").getByRole("listitem").filter({ hasText: "write" })).toBeFocused();
+  for (const key of ["j", "j", "j", "j"]) await page.keyboard.press(key);
   await expect(page.locator(".cm-fat-cursor")).toHaveText("A");
   await expect(editor(page)).not.toContainText(":::kanban{}");
-  for (const key of ["k", "k", "k"]) await page.keyboard.press(key);
+  for (const key of ["k", "k"]) await page.keyboard.press(key);
+  await expect(editor(page).getByRole("button", { name: "Add a card to To do" })).toBeFocused();
+  for (const key of ["k", "k", "k", "k"]) await page.keyboard.press(key);
   await expect(page.locator(".cm-fat-cursor")).toHaveText("#");
   await expect(editor(page)).not.toContainText(":::kanban{}");
   await page.keyboard.press("i");
@@ -442,8 +461,7 @@ test("a completion that throws offers nothing, typing carries on, and the Plugin
   await expect(options(page)).toHaveText(["Ada Lovelace"]);
   await page.keyboard.press("Enter");
   await expect.poll(() => read(page, note.id)).toBe("# People\n\nask @x ada@example.com and @ada");
-  await page.getByRole("button", { name: /Ada/ }).click();
-  await page.getByRole("menuitem", { name: "Plugins" }).click();
+  await openPlugins(page);
   await expect(page.getByRole("list", { name: "Plugins" }).getByRole("listitem").filter({ hasText: "Broken fixture" }).getByRole("alert")).toContainText("The people list broke");
 });
 
@@ -479,7 +497,7 @@ test("a member who can't change the note sees its embeds without their controls,
   const clocks = editor(page).getByRole("button", { name: /^(Timer|Stopwatch)/ });
   await expect(clocks).toHaveText(["5:00", "0:05", /^8:\d\d$/]);
   for (const clock of await clocks.all()) await expect(clock).toBeDisabled();
-  await expect(editor(page).getByRole("button", { name: /Reset|Add a card|Edit as markdown/ })).toHaveCount(0);
+  await expect(editor(page).getByRole("button", { name: /Reset|Start|Add a card|Edit as markdown|Options|Colour/ })).toHaveCount(0);
   const card = column(page, "To do").getByRole("listitem");
   await expect(card).not.toHaveAttribute("draggable");
 

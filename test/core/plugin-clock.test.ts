@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { durationOf, durationText, elapsedOf, finished, readClock, shown, toggled, writeClock, type Clock } from "../../src/web/plugins/lib/clock.ts";
+
+import { clockOptions } from "../../src/web/plugins/lib/clockEmbed.ts";
 
 const NOON = Date.parse("2026-10-10T12:00:00.000Z");
 const timer = (config: string) => readClock(config, "timer")!;
@@ -81,5 +83,36 @@ describe("a clock running", () => {
   it("shows nothing run for a clock started by someone whose clock is ahead", () => {
     expect(shown(watch("since=2026-10-10T12:00:05.000Z"), NOON)).toBe("0:00");
     expect(shown(timer("5m since=2026-10-10T12:00:05.000Z"), NOON)).toBe("5:00");
+  });
+});
+
+describe("a clock's options", () => {
+  afterEach(() => vi.useRealTimers());
+  const at = (config: string) => ({ config, body: "" });
+  const [ofTimer, ofWatch] = [clockOptions("timer"), clockOptions("stopwatch")];
+
+  it("are a timer's length, and how long a stopwatch has run", () => {
+    vi.useFakeTimers({ now: NOON + 65_000 });
+    expect(ofTimer.fields(at("25m at=3s")).map((f) => [f.id, f.label, f.value])).toEqual([["length", "Length", "25m"]]);
+    expect(ofWatch.fields(at("since=2026-10-10T12:00:00.000Z")).map((f) => [f.id, f.label, f.value])).toEqual([["time", "Time so far", "1m5s"]]);
+    expect(ofWatch.fields(at("")).map((f) => f.value)).toEqual(["0s"]);
+  });
+
+  it("are none for a config that can't be read", () => {
+    expect([ofTimer.fields(at("soon")), ofTimer.fields(at("")), ofWatch.fields(at("5m"))]).toEqual([[], [], []]);
+  });
+
+  it("set a timer's length and keep how far it has run", () => {
+    expect(ofTimer.set(at("5m at=3s"), "length", " 1h30m ")).toEqual({ config: "1h30m at=3s" });
+    expect(ofTimer.set(at("5m since=2026-10-10T12:00:00.000Z"), "length", "10m")).toEqual({ config: "10m since=2026-10-10T12:00:00.000Z" });
+    for (const not of ["", "0s", "ten", "5", "5m}"]) expect(ofTimer.set(at("5m"), "length", not)).toBe("Write it like 25m, 1h30m or 90s.");
+  });
+
+  it("set how long a stopwatch has run, and a running one runs on from there", () => {
+    vi.useFakeTimers({ now: NOON });
+    expect(ofWatch.set(at(""), "time", "1m5s")).toEqual({ config: "at=1m5s" });
+    expect(ofWatch.set(at("at=9s"), "time", "0s")).toEqual({ config: "" });
+    expect(ofWatch.set(at("since=2026-10-10T11:00:00.000Z"), "time", "1m")).toEqual({ config: "since=2026-10-10T11:59:00.000Z" });
+    expect(ofWatch.set(at(""), "time", "a while")).toBe("Write it like 25m, 1h30m or 90s.");
   });
 });

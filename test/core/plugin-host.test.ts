@@ -695,7 +695,7 @@ describe("what the host says of each plugin", () => {
     expect(stateOf(host, "palette")).toMatchObject({ description: null, icon: null, screenshots: [] });
   });
 
-  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot, its embeds and editor extensions", () => {
+  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot, its embeds, completions and editor extensions", () => {
     const editing: Plugin = { id: "editing", name: "Editing", activate: (host) => void host.editorExtensions.register({ id: "editing.keys", extension: {} }) };
     const { host } = hostWith([notes, palette, editing]);
 
@@ -708,10 +708,11 @@ describe("what the host says of each plugin", () => {
         { slot: "column", id: "list", label: null },
         { slot: "page", id: "todos", label: "Todos" },
       ],
-      embeds: [{ name: "timer", title: "Timer" }],
+      embeds: [{ name: "timer", title: "Timer", block: false }],
+      completions: [{ id: "embeds", trigger: "/" }],
       editorExtensions: [],
     });
-    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [], editorExtensions: [] });
+    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [], completions: [], editorExtensions: [] });
     expect(stateOf(host, "editing").adds?.editorExtensions).toEqual(["editing.keys"]);
   });
 
