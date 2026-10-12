@@ -130,7 +130,8 @@ test("the bottom bar is there in writing mode, and gone with every plugin that p
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
 
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
+  await expect(page.locator(".app[data-writing]")).toBeVisible();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:[45]\d$/]);
   await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");
   await page.keyboard.press("ControlOrMeta+.");
