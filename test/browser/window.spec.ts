@@ -233,15 +233,14 @@ test("a closed inspector leaves a bar with an icon for each of its tabs for what
 
   await bar.getByRole("button", { name: "History" }).click();
   await expect(inspector(page).getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
-  await expect(inspector(page).getByRole("tabpanel")).toHaveText("Who changed this note and how arrives with #5.");
+  await expect(inspector(page).getByRole("tabpanel").getByRole("list", { name: "Changes" }).getByRole("listitem")).toHaveCount(1);
   await expect(bar).toHaveCount(0);
   await expect(windowButtons(page).getByRole("button", { name: "Inspector" })).toHaveAttribute("aria-pressed", "true");
 
-  // A folder's list has the one tab, and a mode has none: the bar is there, with nothing in it to press that would say nothing.
+  // A folder's list has its two tabs, and a mode has none: the bar is there, with nothing in it to press that would say nothing.
   await windowButtons(page).getByRole("button", { name: "Inspector" }).click();
   await page.getByRole("treeitem", { name: "Unsorted" }).click();
-  await expect(bar.getByRole("button")).toHaveText([""]);
-  await expect(bar.getByRole("button", { name: "Info" })).toBeVisible();
+  expect((await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Info"]);
   await bar.getByRole("button", { name: "Info" }).click();
   await expect(inspector(page).getByRole("definition")).toHaveText(["Unsorted", "1 note", "just now by Ada Lovelace"]);
 

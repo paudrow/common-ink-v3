@@ -2,7 +2,7 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import type { Note, NoteSummary } from "../core/protocol.ts";
 import { notePath } from "../core/slug.ts";
 import { pathName, type FolderTree } from "./folders.ts";
-import { NoteHistory } from "./History.tsx";
+import { FolderHistory, NoteHistory } from "./History.tsx";
 import type { IconName } from "./icons.tsx";
 import { Soon } from "./Soon.tsx";
 import { ago, useNow } from "./time.ts";
@@ -22,7 +22,17 @@ export type Subject =
       /** The note after History reverted it or applied a selection of its changes. */
       onChanged: (note: Note) => void;
     }
-  | { kind: "folder"; name: string; notes: readonly NoteSummary[] }
+  | {
+      kind: "folder";
+      workspaceId: string;
+      name: string;
+      notes: readonly NoteSummary[];
+      /** Whether its notes are every note of the workspace: All notes. */
+      whole: boolean;
+      canEdit: boolean;
+      onOpenNote: (noteId: string) => void;
+      onChanged: (note: Note) => void;
+    }
   | { kind: "page" };
 
 type Kind = Subject["kind"];
@@ -54,8 +64,18 @@ const INSPECTOR_VIEWS: readonly InspectorView[] = [
   }),
   view({ id: "backlinks", label: "Backlinks", icon: "backlinks", for: "note", render: () => <Soon issue={13}>Notes that link here arrive with</Soon> }),
   view({ id: "info", label: "Info", icon: "info", for: "note", render: (subject) => <Info {...subject} /> }),
+  view({
+    id: "folder-history",
+    label: "History",
+    icon: "history",
+    for: "folder",
+    render: (s) => <FolderHistory workspaceId={s.workspaceId} notes={s.notes} whole={s.whole} canEdit={s.canEdit} onOpenNote={s.onOpenNote} onChanged={s.onChanged} />,
+  }),
   view({ id: "folder-info", label: "Info", icon: "info", for: "folder", render: (subject) => <FolderInfo {...subject} /> }),
 ];
+
+/** What a view's tab or icon is marked with for what is in front, if anything. */
+export const markOf = (v: InspectorView, subject: Subject | null) => (subject ? v.mark?.(subject) : undefined);
 
 /** The tabs the inspector has for what is in front, in order. None for a page, which has nothing to show there yet. */
 export const viewsFor = (subject: Subject | null) => INSPECTOR_VIEWS.filter((v) => v.for === subject?.kind);
@@ -95,11 +115,11 @@ export function Inspector({ subject, picked, onPick }: Props) {
                 id={`${ids}-${v.id}`}
                 aria-selected={v === shown}
                 aria-controls={`${ids}-panel`}
-                aria-description={v.mark?.(subject)}
+                aria-description={markOf(v, subject)}
                 onClick={() => onPick(v.id)}
               >
                 {v.label}
-                {v.mark?.(subject) && <span className="unseen-dot" />}
+                {markOf(v, subject) && <span className="unseen-dot" />}
               </button>
             ))}
           </div>

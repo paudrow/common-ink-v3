@@ -283,7 +283,7 @@ test("⌘. toggles writing mode, which shows the note with neither side nor a ba
   await expect(tree(page)).toHaveCount(0);
   await expect(page.getByRole("complementary")).toHaveCount(0);
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
+  await expect(page.getByRole("group", { name: "Window" }).getByRole("button", { name: /Sidebar|Inspector/ })).toHaveCount(0);
   expect(await width(page)).toBe(1280);
   expect((await editorPane(page).boundingBox())!.x).toBe(0);
 
@@ -338,7 +338,7 @@ test("the inspector stays open whatever is in front and shows what belongs to it
 
   await folder(page, "Projects").click();
   await expect(listHeading(page)).toHaveText("Projects");
-  await expect(inspector.getByRole("tab")).toHaveText(["Info"]);
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Notes", "Last changed"]);
   await expect(panel.getByRole("definition")).toHaveText(["Projects", "2 notes", "just now by Ada Lovelace"]);
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);

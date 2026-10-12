@@ -1459,7 +1459,35 @@ button.link:hover {
   min-height: 0;
 }
 
-.popover.right > .changes {
+/* The note's history in writing mode: a quiet mark beside the way out, and the changes over the note under it. */
+.history-mark {
+  position: relative;
+  color: var(--faint);
+}
+
+.popover {
+  position: absolute;
+  top: 40px;
+  right: 6px;
+  bottom: 6px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+}
+
+.popover h2 {
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.popover > .changes {
   flex: 1;
   margin: 0;
   padding: 14px;

@@ -3,13 +3,14 @@ import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.t
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, perform } from "./api.ts";
 import { createCommands, type Command } from "./commands.ts";
+import { useDismiss } from "./dismiss.ts";
 import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction, type EditorLayout, type Group, type Opened } from "./editorLayout.ts";
 import { ALL_NOTES, folderTitle, folderTree, pathName, type FolderTree as Tree } from "./folders.ts";
 import { FolderTree } from "./FolderTree.tsx";
 import { HistoryMode } from "./History.tsx";
 import { Icon, type IconName } from "./icons.tsx";
-import { Inspector, viewsFor, type Subject } from "./Inspector.tsx";
+import { Inspector, markOf, viewsFor, type Subject } from "./Inspector.tsx";
 import { FIELD_COMMANDS, KEYBINDINGS, advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
 import { MODES, modePath, type ModeId } from "./modes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
@@ -400,7 +401,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     if (!routeFolderId) return { kind: "page" };
     if (!tree || !notes) return null;
     const name = folderTitle(tree, routeFolderId);
-    return name === null ? { kind: "page" } : { kind: "folder", name, notes: notesIn(notes, routeFolderId) };
+    if (name === null) return { kind: "page" };
+    return { kind: "folder", workspaceId, name, notes: notesIn(notes, routeFolderId), whole: routeFolderId === ALL_NOTES, canEdit, onOpenNote: (id) => openNote(id), onChanged: remember };
   })();
   const pick = setPicked;
   const activeMode = route.kind === "mode" ? route.mode : null;
@@ -451,6 +453,19 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     );
   };
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
+  /**
+   * In writing mode there is no inspector to say a note has changes the member hasn't seen, so the note's history is one small mark
+   * beside the way out of writing mode, and opens over the note.
+   */
+  const history = writing ? viewsFor(subject).find((v) => v.id === "history") : undefined;
+  const [historyShown, setHistoryShown] = useState(false);
+  const closeHistory = useCallback(() => setHistoryShown(false), []);
+  const historyOpen = historyShown && !!history;
+  const historyMark = useRef<HTMLButtonElement>(null);
+  const historyPopover = useRef<HTMLDivElement>(null);
+  useDismiss(historyOpen ? closeHistory : null, historyPopover, historyMark);
+  useEffect(() => setHistoryShown(false), [routeNoteId, writing]);
+
   /** The buttons that act on the window and on no one note. The editor area puts them at the ends of its tab rows: the sidebar's before the first tab at the top left, the rest after the last at the top right. */
   const controls = {
     start: !writing && (
@@ -462,6 +477,21 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     ),
     end: (
       <div className="window-controls end" role="group" aria-label="Window">
+        {history && (
+          <button
+            ref={historyMark}
+            type="button"
+            className="icon-button history-mark"
+            aria-label="History"
+            title="History"
+            aria-expanded={historyOpen}
+            aria-description={markOf(history, subject)}
+            onClick={() => setHistoryShown(!historyOpen)}
+          >
+            <Icon name="history" />
+            {markOf(history, subject) && <span className="unseen-dot" />}
+          </button>
+        )}
         {!writing && (
           <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
             <Icon name="inspector" />
@@ -545,16 +575,24 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
                 className="icon-button"
                 aria-label={v.label}
                 title={v.label}
+                aria-description={markOf(v, subject)}
                 onClick={() => {
                   pick(v.id);
                   setInspectorOpen(true);
                 }}
               >
                 <Icon name={v.icon} />
+                {markOf(v, subject) && <span className="unseen-dot" />}
               </button>
             ))}
           </nav>
         ))}
+      {historyOpen && subject && (
+        <div ref={historyPopover} className="popover" role="dialog" aria-label="History">
+          <h2>History</h2>
+          {history.render(subject)}
+        </div>
+      )}
       {palette === "commands" && (
         <Palette
           key="commands"

@@ -512,6 +512,31 @@ interface HistoryModeProps {
   onChanged: (note: Note) => void;
 }
 
+interface FolderHistoryProps {
+  workspaceId: string;
+  /** The folder's notes. */
+  notes: readonly NoteSummary[];
+  /** Whether they are every note of the workspace, as All notes lists. */
+  whole: boolean;
+  canEdit: boolean;
+  onOpenNote: (noteId: string) => void;
+  onChanged: (note: Note) => void;
+}
+
+/** As many notes as history can be narrowed to at once. A folder with more shows the ones changed last. */
+const MOST_NOTES = 200;
+
+/** A folder's history: the notes that changed as History mode lists them, and only the folder's. */
+export function FolderHistory({ workspaceId, notes, whole, canEdit, onOpenNote, onChanged }: FolderHistoryProps) {
+  const heads = useMemo(() => new Map(notes.map((n) => [n.id, n.revision])), [notes]);
+  const version = useMemo(() => notes.reduce((sum, n) => sum + n.revision, 0), [notes]);
+  const ids = useMemo(() => [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MOST_NOTES).map((n) => n.id).join(","), [notes]);
+  const filters = useMemo<Filters>(() => (whole ? {} : { noteIds: ids.split(",") }), [whole, ids]);
+  const empty = whole ? "Nothing has been written in this workspace yet." : "Nothing has been written in this folder yet.";
+  if (!whole && !notes.length) return <p className="empty">{empty}</p>;
+  return <ChangedNotes workspaceId={workspaceId} filters={filters} version={version} canEdit={canEdit} head={(noteId) => heads.get(noteId)} empty={empty} onChanged={onChanged} onOpenNote={onOpenNote} />;
+}
+
 /** The workspace's history: the notes that changed, filtered by author, date, and notes. */
 export function HistoryMode({ workspaceId, notes, canEdit, onOpenNote, onChanged }: HistoryModeProps) {
   const [authors, setAuthors] = useState<Author[]>([]);

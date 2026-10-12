@@ -395,7 +395,7 @@ test("the inspector follows the tab in front: a note's tabs, a folder tab's Info
   const place = await inspector.boundingBox();
 
   await tab(page, "Projects").click();
-  await expect(inspector.getByRole("tab")).toHaveText(["Info"]);
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
   await expect(inspector.getByRole("definition")).toHaveText(["Projects", "1 note", "just now by Ada Lovelace"]);
   expect(await inspector.boundingBox()).toEqual(place);
 
@@ -424,7 +424,7 @@ test("the inspector follows the tab in front: a note's tabs, a folder tab's Info
   await tab(page, "Calendar").click();
   await expect(bar.getByRole("button")).toHaveCount(0);
   await tabs(page, 1).first().click();
-  await expect(bar.getByRole("button")).toHaveCount(1);
+  await expect(bar.getByRole("button")).toHaveCount(2);
   await bar.getByRole("button", { name: "Info" }).click();
   await expect(inspector.getByRole("definition").first()).toHaveText("Projects");
 });
