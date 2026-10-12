@@ -114,7 +114,7 @@ test("a folder with notes in it can't be deleted, and an empty one can", async (
 
   await folder(page, "Empty").hover();
   await page.getByRole("button", { name: "Actions for Empty" }).click();
-  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["New folder inside", "Rename", "Delete"]);
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in a split right", "Open in a split down", "New folder inside", "Rename", "Delete"]);
   await page.getByRole("menuitem", { name: "Delete" }).click();
 
   await expect(tree(page).getByRole("treeitem")).toHaveText([/^All notes/, /^Unsorted/, /^Full/]);
@@ -236,6 +236,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  // With no tab picked yet, Info shows.
   await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
   const panel = inspector.getByRole("tabpanel");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
@@ -259,14 +260,14 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(folder(page, "Projects")).toHaveAccessibleDescription("1");
   await expect(folder(page, "Common Ink")).toHaveAccessibleDescription("0");
 
-  await page.getByRole("button", { name: "Inspector" }).click();
+  await page.getByRole("button", { name: "Inspector", exact: true }).click();
   await expect(inspector).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole("button", { name: "Inspector" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "Inspector", exact: true })).toHaveAttribute("aria-pressed", "false");
   await expect(inspector).toHaveCount(0);
 });
 
-test("⌘. toggles writing mode, collapsing both sides to rails and giving the editor their width", async ({ page }) => {
+test("⌘. toggles writing mode, which shows the note with neither side nor a bar of icons, and gives the editor the whole window", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
   await page.goto(`/note/draft-${note.id}`);
@@ -276,54 +277,93 @@ test("⌘. toggles writing mode, collapsing both sides to rails and giving the e
   await page.getByRole("textbox", { name: "Note text" }).click();
   await page.keyboard.press("ControlOrMeta+.");
 
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
-  for (const name of ["History", "Backlinks", "Info"]) await expect(page.getByRole("navigation", { name: "Right rail" }).getByRole("button", { name })).toBeVisible();
-  await expect(tree(page)).toHaveCount(0);
-  await expect(page.getByRole("complementary", { name: "Inspector" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
-  expect(await width(page)).toBe(1192);
+  await expect(tree(page)).toHaveCount(0);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "Window" }).getByRole("button", { name: /Sidebar|Inspector/ })).toHaveCount(0);
+  expect(await width(page)).toBe(1280);
+  expect((await editorPane(page).boundingBox())!.x).toBe(0);
 
   await page.reload();
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("navigation")).toHaveCount(0);
   await page.getByRole("button", { name: "Writing mode" }).click();
   await expect(tree(page)).toBeVisible();
   expect(await width(page)).toBe(764);
 });
 
-test("a rail opens its panel over the note without moving it, and opening a note from it closes it", async ({ page }) => {
+test("writing mode shows neither bar when the sidebar and the inspector were closed, on a note and on a mode, and leaving it brings the bars back", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  const first = await perform(page, { type: "note.create", text: "# First\n\nOne." });
-  const second = await perform(page, { type: "note.create", text: "# Second\n\nTwo." });
-  await page.goto(`/note/first-${first.id}`);
-  const text = page.getByRole("textbox", { name: "Note text" });
-  await expect(text).toHaveText("# FirstOne.");
+  const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
+  await page.goto(`/note/draft-${note.id}`);
+  await page.getByRole("button", { name: "Sidebar", exact: true }).click();
+  await page.getByRole("button", { name: "Inspector", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
+  expect(await width(page)).toBe(1280 - 44 - 44);
+
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
-  const before = await text.boundingBox();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  expect(await width(page)).toBe(1280);
 
-  await page.getByRole("button", { name: "Info", exact: true }).click();
-  const info = page.getByRole("dialog", { name: "Info" });
-  await expect(info.getByRole("combobox", { name: "Move to" })).toHaveValue(first.folderId);
-  expect(await text.boundingBox()).toEqual(before);
-  await text.click();
-  await expect(info).toHaveCount(0);
+  await page.goto("/calendar");
+  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
+  expect(await width(page)).toBe(1280);
 
-  await page.getByRole("button", { name: "Folders", exact: true }).click();
-  const folders = page.getByRole("dialog", { name: "Folders" });
-  await expect(folders.getByRole("treeitem", { name: "Unsorted" })).toHaveAttribute("aria-selected", "true");
-  expect(await text.boundingBox()).toEqual(before);
-  await page.keyboard.press("Escape");
-  await expect(folders).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
+});
 
-  await page.getByRole("button", { name: "Folders", exact: true }).click();
-  await expect(folders.getByRole("navigation", { name: "Notes" })).toHaveCount(0);
-  await folders.getByRole("treeitem", { name: "All notes" }).click();
-  await expect(folders).toHaveCount(0);
-  await expect(page).toHaveURL(/\/folder\/all$/);
-  await listedNote(page, "Second").click();
-  await expect(page).toHaveURL(new RegExp(`/note/second-${second.id}$`));
-  await expect(page.locator(".cm-line")).toHaveText(["# Second", "", "Two."]);
-  expect(noteIdIn(page)).toBe(second.id);
+test("the inspector stays open whatever is in front and shows what belongs to it: a note's tabs, a folder's Info, and one quiet line on a mode", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const projects = await perform(page, { type: "folder.create", name: "Projects" });
+  const plan = await perform(page, { type: "note.create", folderId: projects.id, text: "# Plan" });
+  await perform(page, { type: "note.create", folderId: projects.id, text: "# Budget" });
+  await perform(page, { type: "note.create", text: "# Loose" });
+  await page.goto(`/note/plan-${plan.id}`);
+
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  const panel = inspector.getByRole("tabpanel");
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  await inspector.getByRole("tab", { name: "Info" }).click();
+  await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
+  const place = await inspector.boundingBox();
+
+  await folder(page, "Projects").click();
+  await expect(listHeading(page)).toHaveText("Projects");
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
+  await expect(panel.getByRole("term")).toHaveText(["Folder", "Notes", "Last changed"]);
+  await expect(panel.getByRole("definition")).toHaveText(["Projects", "2 notes", "just now by Ada Lovelace"]);
+  await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
+  await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveCount(0);
+  expect(await inspector.boundingBox()).toEqual(place);
+
+  // The tab picked on a note is the one a folder showed, and the one a note comes back to.
+  await page.goBack();
+  await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
+  expect(await inspector.boundingBox()).toEqual(place);
+
+  await openAllNotes(page);
+  await expect(panel.getByRole("definition")).toHaveText(["All notes", "3 notes", "just now by Ada Lovelace"]);
+  await newFolder(page, "Empty");
+  await folder(page, "Empty").click();
+  await expect(panel.getByRole("definition")).toHaveText(["Empty", "0 notes", "Nothing in it yet"]);
+
+  await page.getByRole("link", { name: "Calendar" }).click();
+  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
+  await expect(inspector).toHaveText("Nothing to show for this view");
+  await expect(inspector.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Inspector", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(await inspector.boundingBox()).toEqual(place);
+
+  await page.goto("/folder/nosuchfolder");
+  await expect(page.getByText("This folder doesn't exist, or you can't see it.")).toBeVisible();
+  await expect(inspector).toHaveText("Nothing to show for this view");
+
 });
 
 test("the workspace menu names the workspace and your role, and signs out", async ({ page }) => {

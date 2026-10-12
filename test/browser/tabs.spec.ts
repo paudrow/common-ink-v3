@@ -29,14 +29,15 @@ async function withNotes(page: Page, ...titles: string[]) {
 test("a single click opens a note in an italic preview tab, and the next single click replaces it", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta");
 
+  // The list is a preview, and the note opened from it takes its place: one italic tab throughout.
   await preview(page, "Alpha");
-  await expect(tabs(page)).toHaveText(["All notes", "Alpha"]);
-  expect(await italic(page)).toEqual([false, true]);
+  await expect(tabs(page)).toHaveText(["Alpha"]);
+  expect(await italic(page)).toEqual([true]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
 
   await preview(page, "Beta");
-  await expect(tabs(page)).toHaveText(["All notes", "Beta"]);
-  expect(await italic(page)).toEqual([false, true]);
+  await expect(tabs(page)).toHaveText(["Beta"]);
+  expect(await italic(page)).toEqual([true]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Beta");
   await expect(page).toHaveURL(/\/note\/beta-[a-z0-9]{12}$/);
 });
@@ -46,18 +47,18 @@ test("a note's pencil keeps it in its own tab, and so does double-clicking its t
 
   await keep(page, "Alpha");
   await preview(page, "Beta");
-  await expect(tabs(page)).toHaveText(["All notes", "Alpha", "Beta"]);
-  expect(await italic(page)).toEqual([false, false, true]);
+  await expect(tabs(page)).toHaveText(["Beta", "Alpha"]);
+  expect(await italic(page)).toEqual([true, false]);
 
   await tab(page, "Beta").dblclick();
-  expect(await italic(page)).toEqual([false, false, false]);
+  expect(await italic(page)).toEqual([false, false]);
 
   await preview(page, "Gamma");
-  await expect(tabs(page)).toHaveText(["All notes", "Alpha", "Beta", "Gamma"]);
-  expect(await italic(page)).toEqual([false, false, false, true]);
+  await expect(tabs(page)).toHaveText(["Beta", "Gamma", "Alpha"]);
+  expect(await italic(page)).toEqual([false, true, false]);
   await page.getByRole("textbox", { name: "Note text" }).click();
   await page.keyboard.type(" more");
-  await expect.poll(() => italic(page)).toEqual([false, false, false, false]);
+  await expect.poll(() => italic(page)).toEqual([false, false, false]);
 
   await tab(page, "Alpha").click();
   await expect(tab(page, "Alpha")).toHaveAttribute("aria-selected", "true");
@@ -71,6 +72,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   const noteUrl = page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" });
   await keep(page, "Alpha");
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
+  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Info" }).click();
 
   const { width } = (await group(1).boundingBox())!;
   await openAllNotes(page);
@@ -175,7 +177,9 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
   await expect(palette.getByRole("option")).toHaveText([/^Toggle writing mode/]);
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.keyboard.type("writing");
@@ -190,7 +194,7 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await palette.getByRole("option", { name: "New note" }).click();
-  await expect(tabs(page)).toHaveText(["All notes", "Alpha", "Untitled"]);
+  await expect(tabs(page)).toHaveText(["Alpha", "Untitled"]);
   await expect(text).toBeFocused();
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
@@ -473,9 +477,9 @@ test("the edge between two halves of a split is dragged, moved with the arrow ke
   const before = await boxOf(group(page, 1));
   await level.focus();
   await page.keyboard.press("ArrowDown");
-  expect((await boxOf(group(page, 1))).height).toBeGreaterThan(before.height);
+  await expect.poll(async () => (await boxOf(group(page, 1))).height).toBeGreaterThan(before.height);
   await page.keyboard.press("Enter");
-  expect(Math.abs((await boxOf(group(page, 1))).height - before.height)).toBeLessThanOrEqual(1);
+  await expect.poll(async () => Math.abs((await boxOf(group(page, 1))).height - before.height)).toBeLessThanOrEqual(1);
 });
 
 const PAGES = [

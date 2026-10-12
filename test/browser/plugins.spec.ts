@@ -92,15 +92,15 @@ test("turning the sidebar off takes the workspace menu, the page links, and the 
   await run(page, "Disable plugin: Sidebar");
   await expect(sidebar).toHaveCount(0);
   await expect(page.getByRole("tree", { name: "Folders" })).toHaveCount(0);
-  await tabs(page).filter({ hasText: "All notes" }).click();
+  await run(page, "Open All notes");
   await listedNote(page, "Alpha").click();
   await writes(page, note.id, "written with the sidebar off");
 
-  await page.keyboard.press("ControlOrMeta+.");
-  const rail = page.getByRole("navigation", { name: "Left rail" });
-  await expect(rail.getByRole("button", { name: "Folders" })).toBeVisible();
-  await expect(rail.getByRole("link")).toHaveCount(0);
-  await page.keyboard.press("ControlOrMeta+.");
+  // With no sidebar there is nothing to close to a bar, so its button and its key do nothing here.
+  await expect(page.getByRole("button", { name: "Sidebar", exact: true })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+\\");
+  await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+\\");
 
   await run(page, "Enable plugin: Sidebar");
   await expect(sidebar.getByRole("link", { name: "Dashboard" })).toBeVisible();
@@ -109,7 +109,7 @@ test("turning the sidebar off takes the workspace menu, the page links, and the 
   await expect(page.getByRole("menuitem")).toHaveText(["Agents", "Sign out"]);
 });
 
-test("turning folders off takes the folder tree out of the sidebar and the popover, and leaves the notes", async ({ page }) => {
+test("turning folders off takes the folder tree out of the sidebar and its icon out of the closed bar, and leaves the notes", async ({ page }) => {
   const note = await withNote(page, "Alpha");
   await openNote(page, "Alpha");
   const tree = page.getByRole("tree", { name: "Folders" });
@@ -118,16 +118,17 @@ test("turning folders off takes the folder tree out of the sidebar and the popov
   await run(page, "Disable plugin: Folders");
   await expect(tree).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: "Dashboard" })).toBeVisible();
-  await tabs(page).filter({ hasText: "All notes" }).click();
+  await run(page, "Open All notes");
   await expect(page.getByRole("heading", { name: "All notes", level: 1 })).toBeVisible();
   await listedNote(page, "Alpha").click();
   await writes(page, note.id, "written with folders off");
 
-  await page.keyboard.press("ControlOrMeta+.");
-  // With no section left there is nothing for the left popover to hold, so its button goes too.
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Left rail" }).getByRole("button", { name: "Folders" })).toHaveCount(0);
-  await page.keyboard.press("ControlOrMeta+.");
+  await page.keyboard.press("ControlOrMeta+\\");
+  // With no section left the open sidebar has nothing under its links, so the closed bar has no icon for it.
+  const bar = page.getByRole("navigation", { name: "Sidebar bar" });
+  await expect(bar.getByRole("link", { name: "Dashboard" })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Folders" })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+\\");
 
   await run(page, "Enable plugin: Folders");
   await tree.getByRole("treeitem", { name: "Unsorted" }).click();
@@ -418,4 +419,45 @@ test("a plugin that hasn't been on since the app loaded says so in its details u
 
   await details.getByRole("checkbox", { name: "Note list", exact: true }).check();
   await expect(section(page, "What it adds").getByRole("group", { name: "Views" })).toBeVisible();
+});
+
+test("an inspector view a plugin adds is a tab only for what it says it is for, is handed that thing, and is found again by its label", async ({ page }) => {
+  await page.addInitScript(() => {
+    type Register = (slot: string, view: unknown) => void;
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "fixture",
+        name: "Fixture",
+        activate(host: { views: { register: Register } }) {
+          host.views.register("inspector", { id: "count-note", label: "Count", icon: "info", for: "note", component: ({ note }: { note: { title: string } }) => `Counting the note ${note.title}` });
+          host.views.register("inspector", { id: "count-folder", label: "Count", icon: "info", for: "folder", component: ({ name, notes }: { name: string; notes: unknown[] }) => `Counting ${notes.length} in ${name}` });
+          host.views.register("inspector", { id: "about-page", label: "About", icon: "info", for: "page", component: ({ page }: { page: { label: string } }) => `About the page ${page.label}` });
+        },
+      },
+    ];
+  });
+  await withNote(page, "Alpha");
+  await keepNote(page, "Alpha");
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  const shown = inspector.getByRole("tab", { selected: true });
+
+  // Nothing picked yet is Info, whatever a plugin adds after it.
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info", "Count"]);
+  await expect(shown).toHaveText("Info");
+  await inspector.getByRole("tab", { name: "Count" }).click();
+  await expect(inspector.getByRole("tabpanel")).toHaveText("Counting the note Alpha");
+
+  // A folder has its own view of that name, and it is the one that shows.
+  await openAllNotes(page);
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info", "Count"]);
+  await expect(shown).toHaveText("Count");
+  await expect(inspector.getByRole("tabpanel")).toHaveText("Counting 1 in All notes");
+
+  // A page has only what was added for a page, and the pick is as it was when a note is in front again.
+  await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Dashboard" }).click();
+  await expect(inspector.getByRole("tab")).toHaveText(["About"]);
+  await expect(inspector.getByRole("tabpanel")).toHaveText("About the page Dashboard");
+  await tabs(page).filter({ hasText: "Alpha" }).click();
+  await expect(shown).toHaveText("Count");
+  await expect(inspector.getByRole("tabpanel")).toHaveText("Counting the note Alpha");
 });
