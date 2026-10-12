@@ -886,6 +886,21 @@ button.link:hover {
   overflow-y: auto;
 }
 
+/* A page that only leads somewhere else has the editor area's place for that moment, with the editor area kept under it and not shown. */
+.passing {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+}
+
+.editor-area {
+  display: contents;
+}
+
+.editor-area[data-under] {
+  visibility: hidden;
+}
+
 /* An edge dragged to resize what is either side of it. It lies over the edge and takes no room of its own, so nothing is narrower for it. */
 .resize-handle {
   position: relative;

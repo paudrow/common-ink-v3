@@ -314,10 +314,12 @@ test("Plugins is under More in the sidebar, which says More closed and Less open
   await modes.getByRole("button", { name: "Less" }).click();
   await expect(modes.getByRole("link", { name: "Plugins" })).toHaveCount(0);
 
-  await page.goto("/");
+  // `/` would come back to the Plugins tab, which opens More as any way there does.
+  await page.goto("/dashboard");
   await expect(modes.getByRole("button", { name: "More" })).toBeVisible();
   await run(page, "Go to Plugins");
   await expect(page).toHaveURL(/\/plugins$/);
+  await expect(modes.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
 });
 
 test("the Plugins page lists every plugin with its icon, name, description and switch, and one search narrows the list", async ({ page }) => {

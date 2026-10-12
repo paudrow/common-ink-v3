@@ -659,3 +659,97 @@ test("a page a plugin adds opens in a tab, with the plugin doing nothing for it"
   await tab(page, "Fixture page").click();
   await expect(page).toHaveURL(/\/fixture\/deeper$/);
 });
+
+test("a page that only leads somewhere else leaves the editor of a note open beside it as it was: the same one, not one made again", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "fixture",
+        name: "Fixture",
+        activate(host: { views: { register(slot: string, view: unknown): void } }) {
+          host.views.register("page", {
+            id: "fixture-onward",
+            path: "/onward",
+            label: "Onward",
+            nav: "primary",
+            transient: true,
+            component: ({ app }: { app: { show(tab: unknown): void } }) => {
+              setTimeout(() => app.show({ kind: "note", id: (window as unknown as { onwardTo: string }).onwardTo }), 400);
+              return "On the way";
+            },
+          });
+        },
+      },
+    ];
+  });
+  const [, , gamma] = await withNotes(page, "Alpha", "Beta", "Gamma");
+  await page.evaluate((id) => ((window as unknown as { onwardTo: string }).onwardTo = id), gamma!.id);
+  await keep(page, "Alpha");
+  await keep(page, "Beta");
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type("Split editor right");
+  await page.keyboard.press("Enter");
+  await expect(tabs(page, 1)).toHaveText(["Beta"]);
+  const alpha = page.getByRole("region", { name: "Editor group 1" }).locator(".cm-editor");
+  await expect(alpha.locator(".cm-line").first()).toContainText("Alpha");
+  await alpha.evaluate((el) => ((el as HTMLElement & { wasThere?: boolean }).wasThere = true));
+
+  await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Onward" }).click();
+  await expect(page.getByRole("main").getByText("On the way")).toBeVisible();
+  await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
+  await expect(page).toHaveURL(/\/note\/gamma-/);
+  await expect(page.getByRole("main").getByText("On the way")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Onward" })).toHaveCount(0);
+  expect(await alpha.evaluate((el) => (el as HTMLElement & { wasThere?: boolean }).wasThere)).toBe(true);
+});
+
+test("a key sequence begun and given up takes no key from a note: a press elsewhere, a move of focus or a wait ends it", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "fixture",
+        name: "Fixture",
+        activate(host: { commands: { register(command: unknown): void } }) {
+          host.commands.register({ id: "fixture.count", title: "Count", keys: ["g a"], run: () => void (document.body.dataset.ran = String(Number(document.body.dataset.ran ?? 0) + 1)) });
+        },
+      },
+    ];
+  });
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
+  await page.goto(`/note/${note.id}`);
+  const editor = page.getByRole("textbox", { name: "Note text" });
+  const row = page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "All notes", exact: true });
+  const ran = () => page.evaluate(() => document.body.dataset.ran ?? "0");
+  await expect(editor).toContainText("words");
+
+  // The sequence runs its command where nothing is typed.
+  await row.focus();
+  await page.keyboard.press("g");
+  await page.keyboard.press("a");
+  await expect.poll(ran).toBe("1");
+
+  // g waits for the rest. A press in the note ends the wait, so what is typed next arrives in its text.
+  await row.focus();
+  await page.keyboard.press("g");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("xa");
+  await expect(editor.locator(".cm-line").last()).toHaveText("wordsxa");
+
+  // So does focus going there with no press.
+  await row.focus();
+  await page.keyboard.press("g");
+  await editor.focus();
+  await page.keyboard.type("y");
+  await expect(editor.locator(".cm-line").last()).toHaveText("wordsxay");
+
+  // And so does time: an a long after the g finishes nothing.
+  await row.focus();
+  await page.keyboard.press("g");
+  await page.waitForTimeout(1800);
+  await page.keyboard.press("a");
+  expect(await ran()).toBe("1");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plum\n\nwordsxay");
+});
+

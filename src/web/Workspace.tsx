@@ -44,6 +44,9 @@ const isAnything = (_: unknown): _ is unknown => true;
 const isRevisions = (v: unknown): v is Record<string, number> => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number");
 const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 
+/** How long the first keys of a sequence wait for the rest. */
+const SEQUENCE_MS = 1500;
+
 const popoverKey = (p: Popover | null) => (p ? (p.side === "left" ? "left" : p.tab) : null);
 
 const summaryOf = ({ text: _, ...summary }: Note): NoteSummary => summary;
@@ -380,12 +383,20 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
 
   useEffect(() => {
     let pending = "";
+    /** What had focus when the sequence was begun. */
+    let begunAt: EventTarget | null = null;
+    let waiting: ReturnType<typeof setTimeout> | undefined;
+    /** A sequence is given up when the member goes elsewhere or waits, so its first keys take nothing from what is pressed next. */
+    const giveUp = () => {
+      pending = "";
+      clearTimeout(waiting);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || isModifier(e.key)) return;
       const { keybindings, commands } = host.contributions();
       const chord = chordOf(e);
       const begun = pending;
-      pending = "";
+      giveUp();
       const commandFor = (keys: string) => commands.find((c) => c.id === keybindings[keys]);
       const ready = Object.keys(keybindings).filter((keys) => {
         if (keys !== chord && !keys.startsWith(`${chord} `) && !(begun && keys.startsWith(`${begun} `))) return false;
@@ -396,12 +407,25 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
       });
       const next = advance(begun, chord, ready);
       if (!next) return;
-      if (next !== "dropped" && "pending" in next) pending = next.pending;
-      else if (next !== "dropped" && !host.run(commandFor(next.run)!.id)) return;
+      if (next === "dropped") {
+        // A key that finishes nothing is dropped only where the sequence was begun. Anywhere else it is that place's key.
+        if (e.target !== begunAt) return;
+      } else if ("pending" in next) {
+        pending = next.pending;
+        begunAt = e.target;
+        waiting = setTimeout(giveUp, SEQUENCE_MS);
+      } else if (!host.run(commandFor(next.run)!.id)) return;
       e.preventDefault();
     };
     addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
+    addEventListener("focusin", giveUp, true);
+    addEventListener("pointerdown", giveUp, true);
+    return () => {
+      giveUp();
+      removeEventListener("keydown", onKey);
+      removeEventListener("focusin", giveUp, true);
+      removeEventListener("pointerdown", giveUp, true);
+    };
   }, [host]);
 
   const actions = useLatest({
@@ -443,9 +467,9 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
   };
   appNow.current = app;
   const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
+  const editorArea = contributed.views.editor.at(-1);
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay);
 
-  const editorArea = contributed.views.editor.at(-1);
   app.sections = contributed.views.section.map((section) => <Drawn key={section.id} host={host} view={section} />);
   const inspectorTabs = contributed.views.inspector;
   /**
@@ -586,14 +610,20 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
       )}
 
       <main className="main" aria-label="Editor">
-        {route.kind === "page" && !routePage ? (
+        {passing && (
+          <div className="passing">
+            <Drawn key={passing.id} host={host} view={passing} />
+          </div>
+        )}
+        {/* The editor area stays as it is under a page that only leads somewhere else, out of sight, so no open editor or embed is made again. */}
+        {route.kind === "page" && !routePageId && !passing ? (
           <p className="notice">There's nothing at this address.</p>
-        ) : passing ? (
-          <Drawn key={passing.id} host={host} view={passing} />
         ) : editorArea ? (
-          <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} controls={controls} fallback={loneEditor} />
+          <div className="editor-area" data-under={passing ? "" : undefined}>
+            <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} controls={controls} fallback={loneEditor} />
+          </div>
         ) : (
-          loneEditor
+          !passing && loneEditor
         )}
       </main>
 

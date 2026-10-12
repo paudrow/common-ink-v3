@@ -337,3 +337,35 @@ test("the workspace menu names the workspace and your role, and signs out", asyn
 
   await expect(page.getByRole("button", { name: "Dev's workspace Admin" })).toBeVisible();
 });
+
+test("More opens by itself when a page under it is reached another way, and stays closed once closed by hand until the next time", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const modes = page.getByRole("navigation", { name: "Modes" });
+  const run = async (command: string) => {
+    await page.keyboard.press("ControlOrMeta+Shift+P");
+    await page.keyboard.type(command);
+    await expect(page.getByRole("dialog", { name: "Commands" }).getByRole("option").first()).toHaveText(command);
+    await page.keyboard.press("Enter");
+  };
+  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+
+  await run("Go to Plugins");
+  await expect(page).toHaveURL(/\/plugins$/);
+  await expect(modes.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
+  await expect(modes.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
+
+  // Closed by hand it stays closed, on this page and under it, and on the pages that aren't under More.
+  await modes.getByRole("button", { name: "Less" }).click();
+  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "Plugins" }).dblclick();
+  await page.getByRole("list", { name: "Plugins" }).getByRole("link", { name: "History", exact: true }).click();
+  await expect(page).toHaveURL(/\/plugins\/history$/);
+  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+  await modes.getByRole("link", { name: "Dashboard" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+
+  // A tab is another way to a page under More.
+  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "Plugins" }).click();
+  await expect(modes.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
+  await expect(modes.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
+});

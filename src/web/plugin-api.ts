@@ -174,7 +174,7 @@ export interface Slots {
    * path, such as `/plugins/tabs` for the page at `/plugins`, unless another page is at exactly that address:
    * it reads the rest from `app.path`. One that is `transient` only leads somewhere else
    * with `app.show`: it is never a tab, and is drawn in place of the editor area for the moment it
-   * takes to find where to go.
+   * takes to find where to go, with the editor area kept as it is underneath.
    */
   page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; transient?: boolean; component: View };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it. */

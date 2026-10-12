@@ -5,8 +5,15 @@ const ROLE_LABEL: Record<Role, string> = { admin: "Admin", editor: "Editor", vie
 
 function Sidebar({ app }: ViewProps) {
   const under = (nav: PageInfo["nav"]) => app.pages.filter((p) => p.nav === nav);
-  // It starts open on a page that is under it, so the page the member is on is marked in the list.
-  const [more, setMore] = useState(() => under("more").some((p) => p.path === app.path || app.path.startsWith(`${p.path}/`)));
+  // It opens on arriving at a page that is under it, however that page was reached, so the page the member is on is marked in the
+  // list. Closed by hand, it stays closed until they arrive at such a page again.
+  const on = under("more").find((p) => p.path === app.path || app.path.startsWith(`${p.path}/`))?.id ?? null;
+  const [was, setWas] = useState(on);
+  const [more, setMore] = useState(on !== null);
+  if (on !== was) {
+    setWas(on);
+    if (on !== null) setMore(true);
+  }
   const links = (nav: PageInfo["nav"]) => under(nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled />);
   return (
     <aside className="sidebar" aria-label="Sidebar">
