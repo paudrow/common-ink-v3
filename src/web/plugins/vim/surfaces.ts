@@ -87,6 +87,8 @@ export interface Surfaces {
   move(move: Move): void;
   open(): void;
   out(): void;
+  /** Expands the selected row, or collapses it, where it has something that does. */
+  toggle(): void;
   search(): void;
   /** An arrow key for the field, which a field with a list under it has its own answer to. One with none sends focus into the list. */
   arrow(key: "ArrowDown" | "ArrowUp"): void;
@@ -216,6 +218,11 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       const parent = level > 1 ? rows.slice(0, rows.indexOf(row)).findLast((r) => Number(r.ariaLevel) < level) : undefined;
       const outer = list.parentElement?.closest(LIST);
       select(parent ?? (outer ? rowsOf(outer).find((r) => r.contains(list)) : undefined));
+    }),
+    toggle: keyed(() => {
+      const list = active().closest(LIST);
+      const row = list && rowAt(list);
+      [...(row?.querySelectorAll<HTMLElement>("[data-row-toggle], button[aria-expanded]") ?? [])].find((t) => t.closest(LIST) === list)?.click();
     }),
     search: () => searchBox()?.focus(),
     arrow: keyed((key: "ArrowDown" | "ArrowUp") => {

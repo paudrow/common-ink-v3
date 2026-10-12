@@ -23,7 +23,7 @@ test("a plugin whose views and embed throw is left out, the note keeps its typin
         activate(host: { views: { register(slot: string, view: unknown): void }; embeds: { register(embed: unknown): void } }) {
           host.views.register("column", { id: "broken-column", component: broken("The column") });
           host.views.register("section", { id: "broken-section", component: broken("The section") });
-          host.views.register("inspector", { id: "broken-tab", label: "Broken", icon: "info", component: broken("The tab") });
+          host.views.register("inspector", { id: "broken-tab", label: "Broken", icon: "info", for: "note", component: broken("The tab") });
           host.views.register("editor", { id: "broken-editor", component: broken("The editor area") });
           host.embeds.register({ name: "broken", title: "Broken embed", render: broken("The embed") });
         },

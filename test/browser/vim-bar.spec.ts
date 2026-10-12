@@ -105,31 +105,37 @@ test("a long note scrolls under the mode bar, which stays at the foot of the pan
   await expect.poll(under, "the last line's bottom is above the bar's top").toBeLessThanOrEqual(1);
 });
 
-test("each side of a split has its own mode bar at its own foot", async ({ page }) => {
-  await withVim(page, "# Left\n\nShort.");
-  await perform(page, { type: "note.create", text: "# Right\n\nShort too." });
-  await run(page, "Keep tab open");
-  await page.keyboard.press("ControlOrMeta+p");
-  await page.keyboard.type("Right");
-  await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText("Right");
-  await page.keyboard.press("Enter");
-  await run(page, "Split editor right");
-  await expect(editor(page, 1)).toContainText("Right");
-  await expect(page.locator(".cm-vim-panel")).toHaveCount(2);
-  for (const n of [0, 1]) {
-    const pane = await box(page, ".note", n);
-    const bar = await box(page, ".cm-vim-panel", n);
-    expect(Math.abs(bar.y + bar.height - (pane.y + pane.height)), `pane ${n}: the bar's bottom is the pane's`).toBeLessThanOrEqual(1);
-    expect(Math.abs(bar.x - pane.x), `pane ${n}: the bar starts at the pane's left`).toBeLessThanOrEqual(1);
-    expect(Math.abs(bar.width - pane.width), `pane ${n}: the bar is as wide as the pane`).toBeLessThanOrEqual(1);
-  }
-  // Each says its own editor's mode.
-  await editor(page, 1).click();
-  await page.keyboard.press("i");
-  await expect(statusLine(page, 1)).toHaveText("--INSERT--");
-  await expect(statusLine(page, 0)).toHaveText("--NORMAL--");
-  await expect(group(page, 2)).toBeVisible();
-});
+for (const side of ["right", "down"] as const) {
+  test(`each side of a split ${side} has its own mode bar at its own foot`, async ({ page }) => {
+    await withVim(page, "# Left\n\nShort.");
+    await perform(page, { type: "note.create", text: "# Right\n\nShort too." });
+    await run(page, "Keep tab open");
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("Right");
+    await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText("Right");
+    await page.keyboard.press("Enter");
+    await run(page, `Split editor ${side}`);
+    await expect(editor(page, 1)).toContainText("Right");
+    await expect(page.locator(".cm-vim-panel")).toHaveCount(2);
+    const main = await box(page, "main");
+    for (const n of [0, 1]) {
+      const pane = await box(page, ".note", n);
+      const bar = await box(page, ".cm-vim-panel", n);
+      const group = await box(page, '[aria-label^="Editor group"]', n);
+      expect(Math.abs(pane.y + pane.height - (group.y + group.height)), `pane ${n}: the note ends where its side of the split does`).toBeLessThanOrEqual(1);
+      if (side === "down") expect(group.height, `pane ${n}: its side is about half the window's height`).toBeLessThan(main.height * 0.6);
+      expect(Math.abs(bar.y + bar.height - (pane.y + pane.height)), `pane ${n}: the bar's bottom is the pane's`).toBeLessThanOrEqual(1);
+      expect(Math.abs(bar.x - pane.x), `pane ${n}: the bar starts at the pane's left`).toBeLessThanOrEqual(1);
+      expect(Math.abs(bar.width - pane.width), `pane ${n}: the bar is as wide as the pane`).toBeLessThanOrEqual(1);
+    }
+    // Each says its own editor's mode.
+    await editor(page, 1).click();
+    await page.keyboard.press("i");
+    await expect(statusLine(page, 1)).toHaveText("--INSERT--");
+    await expect(statusLine(page, 0)).toHaveText("--NORMAL--");
+    await expect(group(page, 2)).toBeVisible();
+  });
+}
 
 for (const vim of [true, false]) {
   test(`a click in the empty room below a note's text puts the cursor at the note's end${vim ? ", in vim mode" : ""}`, async ({ page }) => {

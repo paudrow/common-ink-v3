@@ -247,11 +247,12 @@ test("in Settings, Enter on a setting goes to its field and Escape comes back to
   await expect(shown("Vim: last row of a list")).toHaveText([MAC ? /^⇧G/ : /^Shift\+G/]);
   await expect(shown("Vim: half a page down a list")).toHaveText([MAC ? /^⌃D/ : /^Ctrl\+D/]);
   await expect(shown("Vim: open the selected row")).toHaveText([/^ENTER/, /^L/]);
+  await expect(shown("Vim: expand or collapse the selected row")).toHaveText([/^Z A/]);
   await expect(shown("Vim: go to the region on the left")).toHaveText([MAC ? /^⌃W H/ : /^Ctrl\+W H/]);
   await expect(shown("Vim: next tab")).toHaveText([/^G T/]);
   await expect(shown("Vim: next row, from a field")).toHaveText(MAC ? [/^⌃J/, /^⌃N/] : [/^Ctrl\+J/, /^Ctrl\+N/]);
-  await expect(all).toHaveCount(18);
-  await expect(shortcuts.locator("tbody tr")).toHaveCount(18);
+  await expect(all).toHaveCount(19);
+  await expect(shortcuts.locator("tbody tr")).toHaveCount(19);
 
   // Escape leaves the search box for the list, on its first row, and the keys go on through the shortcuts.
   await page.keyboard.press("Escape");
@@ -459,6 +460,8 @@ test("gt from a note to a folder's tab puts the keys on the list's rows, and Ent
   await open(page, "/folder/all");
   const cards = page.locator(".cards > li");
   await expect(cards).toHaveCount(3);
+  // A note opened from a previewed list takes the list's place, so the list is kept first.
+  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "All notes" }).dblclick();
   const first = await cards.nth(0).locator(".card-title").innerText();
   await keys(page, "j", "Enter");
   await expect(editor(page)).toBeFocused();
@@ -529,4 +532,112 @@ test("vim mode leaves the app's own keys alone: Escape still cancels a folder's 
   await cards.first().focus();
   await page.keyboard.press("ArrowDown");
   await expect(cards.nth(1)).toBeFocused();
+});
+
+test("a sequence begun on a row and given up takes no key from a note: a press, a move of focus or a second's wait ends it", async ({ page }) => {
+  await signIn(page);
+  await perform(page, { type: "folder.create", name: "Zebra" });
+  const note = await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
+  await open(page, `/note/${note.id}`);
+  const item = (name: string) => page.getByRole("tree").getByRole("treeitem", { name, exact: true });
+  await expect(editor(page)).toContainText("words");
+  await expect(statusLine(page)).toHaveText("--NORMAL--");
+
+  // g on a folder's row waits for a second g. A press in the note ends the wait, so the next key is the note's.
+  await item("All notes").focus();
+  await page.keyboard.press("g");
+  await editor(page).click();
+  await page.keyboard.press("Shift+A");
+  await expect(statusLine(page)).toHaveText("--INSERT--");
+  await page.keyboard.press("Escape");
+
+  // So does focus going there with no press.
+  await item("All notes").focus();
+  await page.keyboard.press("g");
+  await editor(page).focus();
+  await page.keyboard.press("Shift+A");
+  await expect(statusLine(page)).toHaveText("--INSERT--");
+  await page.keyboard.press("Escape");
+
+  // And so does time: a g long after a g is a first g again, and the one after it goes to the first row.
+  await item("Zebra").focus();
+  await page.keyboard.press("g");
+  await page.waitForTimeout(1800);
+  await page.keyboard.press("g");
+  await expect(item("Zebra")).toBeFocused();
+  await page.keyboard.press("g");
+  await expectSelected(item("All notes"), "the first row");
+});
+
+test("a letter typed in a note right after a sequence was given up elsewhere arrives in its text", async ({ page }) => {
+  await signIn(page, { "keybindings.notes.all": ["g a"] });
+  const note = await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
+  await open(page, `/note/${note.id}`, false);
+  await expect(editor(page)).toContainText("words");
+  await page.getByRole("tree").getByRole("treeitem", { name: "All notes", exact: true }).focus();
+  await page.keyboard.press("g");
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("xa");
+  await expect(editor(page).locator(".cm-line").last()).toHaveText("wordsxa");
+  await expect(page).toHaveURL(new RegExp(`${note.id}$`));
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plum\n\nwordsxa");
+});
+
+test("za expands and collapses the selected row: a note's card in a folder's list, and a folder in the tree", async ({ page }) => {
+  await signIn(page);
+  const work = await perform(page, { type: "folder.create", name: "Work" });
+  await perform(page, { type: "folder.create", name: "Plans", parentId: work.id });
+  await perform(page, { type: "note.create", text: "# Plum\n\nwords of the plum" });
+  await open(page, "/folder/all");
+  const cards = page.locator(".cards > li");
+  await expect(cards).toHaveCount(1);
+  const chevron = cards.getByRole("button", { name: /^(Expand|Collapse) Plum$/ });
+  await page.keyboard.press("j");
+  await expectSelected(cards.nth(0), "the card");
+  await keys(page, "z", "a");
+  await expect(chevron).toHaveAttribute("aria-expanded", "true");
+  await expect(cards.nth(0).locator(".cm-content")).toContainText("words of the plum");
+  await expectSelected(cards.nth(0), "the card, expanded");
+  await keys(page, "z", "a");
+  await expect(chevron).toHaveAttribute("aria-expanded", "false");
+  await expect(page).toHaveURL(/\/folder\/all$/);
+
+  const item = (name: string) => page.getByRole("tree").getByRole("treeitem", { name, exact: true });
+  await item("Work").focus();
+  await expect(item("Work")).toHaveAttribute("aria-expanded", "false");
+  await keys(page, "z", "a");
+  await expect(item("Work")).toHaveAttribute("aria-expanded", "true");
+  await expect(item("Plans")).toBeVisible();
+  await keys(page, "z", "a");
+  await expect(item("Work")).toHaveAttribute("aria-expanded", "false");
+});
+
+test("inside what an embed draws in a note, vim's list, search and tab keys do nothing: focus there is the embed's, and so are the keys", async ({ page }) => {
+  await signIn(page);
+  await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
+  const note = await perform(page, { type: "note.create", text: "# Laps\n\nTime ::stopwatch{} here\n\nend" });
+  await open(page, "/folder/all");
+  await page.locator(".cards > li").first().waitFor();
+  // A note opened from a previewed list takes the list's place, so the list is kept first.
+  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "All notes" }).dblclick();
+  await page.goto(`/note/${note.id}`);
+  await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
+  await expect(page.getByRole("tablist", { name: "Open notes" }).getByRole("tab")).toHaveCount(2);
+  const embed = page.locator(".cm-content .embed");
+  await expect(embed).toBeVisible();
+  // The embed is given a list of its own, as a board or a table of an embed's would be.
+  await embed.evaluate((el) => {
+    const list = Object.assign(document.createElement("ul"), { ariaLabel: "Laps" });
+    for (const name of ["One", "Two"]) list.append(Object.assign(document.createElement("li"), {}).appendChild(Object.assign(document.createElement("button"), { textContent: name, type: "button" })).parentElement!);
+    el.append(list);
+  });
+  const one = embed.getByRole("button", { name: "One" });
+  await one.focus();
+  for (const press of [["j"], ["Shift+G"], ["g", "g"], ["/"], ["g", "t"], ["l"]]) {
+    await keys(page, ...press);
+    await expect(one, `${press.join(" ")} leaves focus where it was`).toBeFocused();
+    await expect(page.locator("[data-vim-at]"), `${press.join(" ")} selects no row`).toHaveCount(0);
+    await expect(page).toHaveURL(new RegExp(`${note.id}$`));
+  }
 });
