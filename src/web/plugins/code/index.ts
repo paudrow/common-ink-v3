@@ -34,6 +34,8 @@ const look = EditorView.baseTheme({
 export const codeBlocks: Plugin = {
   id: "code-blocks",
   name: "Code blocks",
+  description: "Fenced code drawn as code, in its language's colors, with Copy and Wrap.",
+  icon: "code",
   activate(host) {
     let stopped = false;
     let highlighted: Highlighted | undefined;

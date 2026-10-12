@@ -83,7 +83,7 @@ Three optional fields are what the Plugins page shows of a plugin. Every built-i
 
 - `description`: one line on what it is for, said beside its name in the list and at the top of its details. It names no other plugin, so a row is found by its plugin's name alone.
 - `icon`: one of the app's own icons, by name (`IconName`). Without one the plugin stands under the picture every plugin has.
-- `screenshots`: pictures of it at work, shown in its details: each `{ src, dark?, alt }`. `src` is a file the app serves, `dark` is the same picture taken in the dark theme and is shown in its place there, and `alt` says what the picture shows and is its caption. Kanban has them, in `public/plugin-shots/`.
+- `screenshots`: pictures of it at work, shown in its details: each `{ src, dark?, alt }`. `src` is a file the app serves, `dark` is the same picture taken in the dark theme and is shown in its place there, and `alt` says what the picture shows and is its caption. Kanban and Tables have them, in `public/plugin-shots/`.
 
 Nothing else on the Plugins page is written by hand. A plugin's details list what it adds from what it registered: its commands, its views by slot, its embeds, its completions, its editor extensions and its settings (`PluginState.adds` in `src/web/pluginHost.ts`). A plugin that is off is listed with what it added when it was last on, and one that hasn't been on since the app loaded says so, since nothing but running `activate` could tell.
 

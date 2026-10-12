@@ -408,7 +408,9 @@ test("a code block has its language's colors, a Copy button, and a Wrap toggle t
   await expect(line(page, "const greeting")).toHaveCSS("white-space", "pre");
 
   // The code is drawn the same with the cursor in it, and a fence is shown as written with the cursor on its line.
-  // Not a click past the line's end, which without wrapping is off the screen.
+  // Not a click past the line's end, which without wrapping is off the screen. And not before the colors are in: they redraw the line, and a click
+  // that finds its line redrawn under it is tried again with the whole of that line scrolled to, which is far off to the side.
+  await expect(line(page, "export default").locator(".tok-keyword").first()).toHaveText("export");
   await line(page, "export default").click({ position: { x: 60, y: 8 } });
   await expectShown(lines(page).nth(2), /^\s*ts\s*Copy\s*Wrap\s*$/);
   await expect(line(page, "const greeting").locator(".tok-keyword")).toHaveText("const");

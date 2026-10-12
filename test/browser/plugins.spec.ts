@@ -411,10 +411,9 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
   await expect(section(page, "Pictures")).toHaveCount(0);
 
   await page.setViewportSize({ width: 520, height: 800 });
-  await page.goto("/plugins/kanban");
+  await page.goto("/plugins/tables");
   await expect(section(page, "Pictures").locator("img:visible")).toHaveCount(1);
-  await page.locator(".plugin-details").getByRole("checkbox", { name: "Kanban", exact: true }).check();
-  await expect(section(page, "What it adds").getByRole("group", { name: "Embeds" })).toContainText("Kanban board");
+  await expect(section(page, "What it adds").getByRole("group", { name: "Commands" })).toContainText("Edit the next table");
   expect(await fits(page)).toBe(true);
 
   await page.goto("/plugins/no-such-plugin");

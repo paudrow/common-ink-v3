@@ -211,6 +211,14 @@ test("Tab picks the highlighted item of the / menu, as Enter does", async ({ pag
   await page.keyboard.press("Tab");
   await expect.poll(() => read(page, note.id)).toBe(`# Menu\n\n::stopwatch{} ${second}`);
   await expect(menu).toHaveCount(0);
+  // With no menu open, Tab is not taken from the note.
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("- one");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("two");
+  await page.keyboard.press("Tab");
+  await expect.poll(() => read(page, note.id)).toMatch(/\n- one\n[ \t]+- two$/);
 });
 
 const BOARD = "# Board\n\nabove\n:::kanban{}\n## To do\n- write\n- review\n\n## Doing\n- build\n\n## Done\n:::\nbelow\n";

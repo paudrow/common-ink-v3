@@ -10,6 +10,8 @@ import { taskCheckboxes } from "./tasks.ts";
 export const gfm: Plugin = {
   id: "gfm",
   name: "GitHub-flavored markdown",
+  description: "Emphasis, headings, links, quotes and inline code drawn where they are written.",
+  icon: "markdown",
   activate(host) {
     host.editorExtensions.register({ id: "gfm.marks", extension: markdownMarks });
     host.editorExtensions.register({ id: "gfm.tasks", extension: taskCheckboxes });
