@@ -65,15 +65,15 @@ test("a running stopwatch is the same element, in the same place, still counting
   const written = (await read(page, note.id)).split("\n")[3]!;
   for (let i = 0; i < written.length; i++) {
     await page.keyboard.press("ArrowRight");
-    expect(await marked(page)).toEqual({ same: true, removed: 0 });
-    expect(await place(page, ".embed")).toEqual(at);
+    await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
+    await expect.poll(() => place(page, ".embed")).toEqual(at);
   }
   await expect(line(page, "Lap")).not.toContainText("::stopwatch");
   await page.keyboard.press("ArrowLeft");
   for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowLeft");
   // With the cursor in it, the line shows the embed as the note writes it, after the drawing, and the rows keep their place and height.
   await expect(line(page, "Lap")).toContainText(/^Lap \d:\d\d::stopwatch\{since=[^}]+\} here\.$/);
-  expect(await place(page, ".embed")).toEqual(at);
+  await expect.poll(() => place(page, ".embed")).toEqual(at);
   expect({ line: await line(page, "Lap").boundingBox(), after: await line(page, "after").boundingBox() }).toEqual(rows);
 
   await page.keyboard.press("ArrowUp");
@@ -85,8 +85,8 @@ test("a running stopwatch is the same element, in the same place, still counting
   await page.keyboard.press("End");
   await page.keyboard.type(" And on its own line.");
   await expect.poll(() => read(page, note.id)).toMatch(/before typed above\nLap ::stopwatch\{since=[^}]+\} here\. And on its own line\.\nafter typed below\n/);
-  expect(await marked(page)).toEqual({ same: true, removed: 0 });
-  expect(await place(page, ".embed")).toEqual(at);
+  await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
+  await expect.poll(() => place(page, ".embed")).toEqual(at);
 
   // It never stopped: it shows at least the time that has gone by since the cursor first came, and is still running.
   const gone = Math.floor((Date.now() - started) / 1000);
@@ -120,24 +120,24 @@ test("a stopwatch and a timer say what their buttons do, and each button does it
   const stopwatch = editor(page).locator('.embed[data-embed="stopwatch"]');
   const timer = editor(page).locator('.embed[data-embed="timer"]');
   const says = (clock: typeof timer) => clock.locator("button").evaluateAll((buttons) => buttons.map((b) => (b.textContent || getComputedStyle(b, "::before").content.replaceAll('"', "")) + (b.hasAttribute("disabled") ? " (off)" : "")));
-  expect(await says(stopwatch)).toEqual(["0:00", "Start", "Reset (off)"]);
-  expect(await says(timer)).toEqual(["5:00", "Start", "Reset (off)"]);
+  await expect.poll(() => says(stopwatch)).toEqual(["0:00", "Start", "Reset (off)"]);
+  await expect.poll(() => says(timer)).toEqual(["5:00", "Start", "Reset (off)"]);
   const width = (await timer.boundingBox())!.width;
 
   await timer.getByRole("button", { name: "Start timer" }).click();
   await expect(timer.getByRole("button", { name: "Pause timer" })).toBeFocused();
-  expect((await says(timer)).slice(1)).toEqual(["Pause", "Reset"]);
+  await expect.poll(async () => (await says(timer)).slice(1)).toEqual(["Pause", "Reset"]);
   await expect.poll(() => read(page, note.id)).toMatch(/::timer\{5m since=[^}]+\}/);
   await timer.getByRole("button", { name: "Pause timer" }).click();
   await expect.poll(() => read(page, note.id)).toMatch(/::timer\{5m at=\d+s\}|::timer\{5m\}/);
-  expect((await says(timer)).slice(1)).toEqual(["Start", "Reset"]);
+  await expect.poll(async () => (await says(timer)).slice(1)).toEqual(["Start", "Reset"]);
   await timer.getByRole("button", { name: "Reset timer" }).click();
   await expect.poll(() => read(page, note.id)).toContain("::timer{5m}");
-  expect(await says(timer)).toEqual(["5:00", "Start", "Reset (off)"]);
-  expect((await timer.boundingBox())!.width).toBe(width);
+  await expect.poll(() => says(timer)).toEqual(["5:00", "Start", "Reset (off)"]);
+  await expect.poll(async () => (await timer.boundingBox())!.width).toBe(width);
 
   await stopwatch.getByRole("button", { name: "Start stopwatch" }).click();
-  expect((await says(stopwatch)).slice(1)).toEqual(["Stop", "Reset"]);
+  await expect.poll(async () => (await says(stopwatch)).slice(1)).toEqual(["Stop", "Reset"]);
   await stopwatch.getByRole("button", { name: "Stop stopwatch" }).click();
   await stopwatch.getByRole("button", { name: "Reset stopwatch" }).click();
   await expect.poll(() => read(page, note.id)).toContain("::stopwatch{} and");
@@ -157,13 +157,13 @@ test("an embed's options button opens its options, and setting one rewrites the 
   await page.keyboard.type("x");
   await page.keyboard.press("Enter");
   await expect(options.getByRole("alert")).toHaveText("Write it like 25m, 1h30m or 90s.");
-  expect(await read(page, note.id)).toContain("::timer{5m}");
+  await expect.poll(() => read(page, note.id)).toContain("::timer{5m}");
   await options.getByRole("textbox", { name: "Length" }).fill("25m");
   await page.keyboard.press("Enter");
   await expect(editor(page).getByRole("button", { name: "Timer, 25:00 left" })).toBeVisible();
   await expect.poll(() => read(page, note.id)).toContain("Tea ::timer{25m} and");
   await expect(options.getByRole("textbox", { name: "Length" })).toHaveValue("25m");
-  expect(await marked(page)).toEqual({ same: true, removed: 0 });
+  await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
   // A longer time is wider. It starts where it did and is as tall.
   const now = await place(page, ".embed");
   expect([now[0], now[1], now[3]]).toEqual([at[0], at[1], at[3]]);
@@ -342,7 +342,7 @@ test("a column is given a colour from the board, which its heading keeps as mark
   await expect(column(page, "Doing").getByRole("heading")).toHaveText("Doing1");
   const light = await column(page, "Doing").evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(light).not.toBe(plain);
-  expect(await place(page, ".embed-block")).toEqual(board);
+  await expect.poll(() => place(page, ".embed-block")).toEqual(board);
 
   await page.emulateMedia({ colorScheme: "dark" });
   const dark = await column(page, "Doing").evaluate((el) => getComputedStyle(el).backgroundColor);

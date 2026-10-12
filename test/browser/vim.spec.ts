@@ -176,7 +176,7 @@ test("visual mode selects by character and by line, and a search moves to each m
   await keys(page, "k", "Shift+V", "d");
 
   await expect(lines(page)).toHaveText(["# Pick", "green blue", "cyan magenta yellow", "cyan agenta yellow"]);
-  expect(await page.evaluate(() => document.querySelectorAll(".cm-line")[1]!.textContent)).toBe(" green blue");
+  await expect.poll(() => page.evaluate(() => document.querySelectorAll(".cm-line")[1]!.textContent)).toBe(" green blue");
 });
 
 test("u and ctrl+r are the app's undo and redo: local for typing not yet saved, and a recorded change for typing that was", async ({ page }) => {
@@ -305,7 +305,7 @@ test("in insert mode ctrl+o runs one normal command and ctrl+i types a tab, and 
   await page.keyboard.press("Control+i");
   await page.keyboard.type("Y");
   await expect(page).toHaveURL(/\/note\/beta-/);
-  expect(await page.evaluate(() => document.querySelector(".cm-line")!.textContent)).toBe("Z\tY# Beta");
+  await expect.poll(() => page.evaluate(() => document.querySelector(".cm-line")!.textContent)).toBe("Z\tY# Beta");
 
   await keys(page, "Escape", "Control+o");
   await expect(page).toHaveURL(/\/note\/alpha-/);
@@ -321,7 +321,7 @@ test("moving through a note in a preview tab leaves it a preview, and an edit ke
   await page.keyboard.type("second");
   await page.keyboard.press("Enter");
   await expect(statusLine(page)).toHaveText("--NORMAL--");
-  expect(await italic(page)).toEqual([true]);
+  await expect.poll(() => italic(page)).toEqual([true]);
 
   await page.keyboard.press("x");
   await expect(lines(page).nth(1)).toHaveText("econd line");
@@ -377,11 +377,11 @@ test("Escape closes what is open before it leaves insert mode, and the app's key
   await expect(lines(page)).toHaveText(["# Keys", "econd"]);
 
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.locator(".app")).toHaveAttribute("data-writing", "true");
+  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
   await expect(statusLine(page)).toHaveText("--NORMAL--");
   await page.keyboard.press("i");
   await page.keyboard.type("S");
-  // Writing mode has no popovers to close any more, so Escape here has only insert mode to leave.
+  // Focus has no popovers to close, so Escape here has only insert mode to leave.
   await expect(statusLine(page)).toHaveText("--INSERT--");
   await page.keyboard.type("s");
   await page.keyboard.press("Escape");

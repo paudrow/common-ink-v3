@@ -38,12 +38,13 @@ async function dragOnto(page: Page, from: Locator, onto: Locator, across: number
 
 /** What scrolls in a group, and how it sits in the group's body. */
 const SCROLLERS = ".folder-list, .note-scroll, .page-pane";
-const fit = async (page: Page, n: number) => {
-  await body(page, n).locator(SCROLLERS).locator("h1, input, .cm-line").first().waitFor();
-  return body(page, n).evaluate((el, scrollers) => {
+/** Null until the pane has drawn what it holds: a note's first line arrives after its tab does, so this is asked again until it is there. */
+const fit = (page: Page, n: number) =>
+  body(page, n).evaluate((el, scrollers) => {
     const scroller = el.querySelector(scrollers);
-    if (!scroller) throw new Error("nothing scrolls in this group");
-    const [pane, inner, first] = [el.getBoundingClientRect(), scroller.getBoundingClientRect(), scroller.querySelector("h1, input, .cm-line")!.getBoundingClientRect()];
+    const top = scroller?.querySelector("h1, input, .cm-line");
+    if (!scroller || !top) return null;
+    const [pane, inner, first] = [el.getBoundingClientRect(), scroller.getBoundingClientRect(), top.getBoundingClientRect()];
     return {
       // How far past the pane's foot what scrolls ends, and how far above its head it starts.
       below: Math.round(inner.bottom - pane.bottom),
@@ -53,7 +54,6 @@ const fit = async (page: Page, n: number) => {
       firstLineInside: first.top >= pane.top && first.bottom <= pane.bottom,
     };
   }, SCROLLERS);
-};
 /** What is in the pane ends where the pane does, and is short enough that there is nowhere to scroll. */
 const FITS = { below: 0, above: 0, hidden: 0, firstLineInside: true };
 
@@ -70,16 +70,15 @@ test("in a split down, a folder's list, a note and a page are each as tall as th
 
   const window = page.viewportSize()!.height;
   for (const n of [1, 2]) {
-    const height = (await body(page, n).boundingBox())!.height;
-    expect(height).toBeLessThan(window / 2);
-    expect(await fit(page, n)).toEqual(FITS);
+    await expect.poll(async () => (await body(page, n).boundingBox())!.height).toBeLessThan(window / 2);
+    await expect.poll(() => fit(page, n)).toEqual(FITS);
   }
 
   // A page in the top half, and a short note below.
   await tab(page, "Unsorted").click();
   await modes(page).getByRole("link", { name: "Dashboard" }).click();
   await expect(group(page, 1).getByRole("heading", { name: "Dashboard", level: 1 })).toBeVisible();
-  expect(await fit(page, 1)).toEqual(FITS);
+  await expect.poll(() => fit(page, 1)).toEqual(FITS);
 
   // The edge dragged down: both still fit, the top one taller than it was.
   const before = (await body(page, 1).boundingBox())!.height;
@@ -90,14 +89,14 @@ test("in a split down, a folder's list, a note and a page are each as tall as th
   await page.mouse.move(at.x + at.width / 2, at.y + 120, { steps: 4 });
   await page.mouse.up();
   await expect.poll(async () => (await body(page, 1).boundingBox())!.height).toBeGreaterThan(before + 60);
-  for (const n of [1, 2]) expect(await fit(page, n)).toEqual(FITS);
+  for (const n of [1, 2]) await expect.poll(() => fit(page, n)).toEqual(FITS);
 
   // A window too short for the list: each pane shrinks with it, the list scrolls inside its own, and nothing hangs out of a pane.
   const ENDS_WITH_ITS_PANE = { below: 0, above: 0 };
   await page.setViewportSize({ width: 1280, height: 520 });
   await tab(page, "Unsorted").click();
   await expect.poll(() => fit(page, 1)).toMatchObject(ENDS_WITH_ITS_PANE);
-  expect((await fit(page, 1)).hidden).toBeGreaterThan(0);
+  await expect.poll(async () => (await fit(page, 1))?.hidden).toBeGreaterThan(0);
   await expect.poll(() => fit(page, 2)).toMatchObject(ENDS_WITH_ITS_PANE);
 
   // A split inside the upper half, with the list in it: all three end where their panes do.
@@ -112,8 +111,8 @@ test("in a split down, a folder's list, a note and a page are each as tall as th
   await group(page, 2).locator(".cm-content").click();
   await page.keyboard.press("ControlOrMeta+End");
   for (let i = 0; i < 30; i++) await page.keyboard.press("Enter");
-  await expect.poll(async () => (await fit(page, 2)).hidden).toBeGreaterThan(0);
-  expect(await fit(page, 2)).toMatchObject(ENDS_WITH_ITS_PANE);
+  await expect.poll(async () => (await fit(page, 2))?.hidden).toBeGreaterThan(0);
+  await expect.poll(() => fit(page, 2)).toMatchObject(ENDS_WITH_ITS_PANE);
 });
 
 const sidebarButton = (page: Page) => page.getByRole("group", { name: "Window" }).getByRole("button", { name: "Sidebar" });
@@ -130,14 +129,14 @@ test("a mode or a folder dragged from the sidebar lands in a pane as a tab does:
   // A click is what it was: a preview in the pane in front.
   await modes(page).getByRole("link", { name: "Search" }).click();
   await expect(tabs(page, 0)).toHaveText(["Alpha", "Search"]);
-  expect(await previews(page)).toEqual(["Search"]);
+  await expect.poll(() => previews(page)).toEqual(["Search"]);
 
   // The middle of the pane: a kept tab there, in front, at its address. The preview is as it was.
   await dragOnto(page, modes(page).getByRole("link", { name: "Dashboard" }), body(page, 1), 0.5, 0.5);
   await expect(tabs(page, 0)).toHaveText(["Alpha", "Search", "Dashboard"]);
   await expect(tab(page, "Dashboard")).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveURL(/\/dashboard$/);
-  expect(await previews(page)).toEqual(["Search"]);
+  await expect.poll(() => previews(page)).toEqual(["Search"]);
 
   // An edge: a pane of its own on that side.
   await dragOnto(page, modes(page).getByRole("link", { name: "Todos" }), body(page, 1), 0.9, 0.5);
@@ -170,7 +169,7 @@ test("a mode or a folder dragged from the sidebar lands in a pane as a tab does:
   await expect(page.getByRole("tab", { name: "Todos" })).toHaveCount(1);
 
   // Everything dragged in is kept: the one preview is still the one that was clicked.
-  expect(await previews(page)).toEqual(["Search"]);
+  await expect.poll(() => previews(page)).toEqual(["Search"]);
 
   // The sidebar closed to its bar: its icons drag the same way.
   await sidebarButton(page).click();
@@ -214,7 +213,7 @@ test("a mode's and a folder's menu open it in a split to the right or below, kep
   await folderRow(page, "All notes").click({ button: "right" });
   await page.getByRole("menu", { name: "All notes actions" }).getByRole("menuitem", { name: "Open in a split right" }).click();
   await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(4);
-  expect(await previews(page)).toEqual([]);
+  await expect.poll(() => previews(page)).toEqual([]);
 
   // With the keyboard: the menu key on a mode's link, and Enter on the first thing in the menu.
   await modes(page).getByRole("link", { name: "Search" }).focus();
@@ -244,13 +243,13 @@ test("the window has one italic tab, in whichever pane is in front, and it is ke
     await folderRow(page, folder).click();
     await expect(tabs(page, pane - 1)).toHaveText([...tabsThere]);
     await expect(tabs(page, 2 - pane)).toHaveText([...tabsOther]);
-    expect(await previews(page)).toEqual([folder]);
+    await expect.poll(() => previews(page)).toEqual([folder]);
   }
 
   // A mode's link and a note's title are the same: each takes the italic tab's place.
   await modes(page).getByRole("link", { name: "Todos" }).click();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Todos"]);
-  expect(await previews(page)).toEqual(["Todos"]);
+  await expect.poll(() => previews(page)).toEqual(["Todos"]);
 
   // Turning to another tab, another pane and back, and reloading, leave it italic.
   await tab(page, "Beta", 1).click();
@@ -258,10 +257,10 @@ test("the window has one italic tab, in whichever pane is in front, and it is ke
   await tab(page, "Alpha").click();
   await group(page, 2).getByRole("heading", { name: "Todos", level: 1 }).click();
   await expect(group(page, 2)).toHaveAttribute("data-focused", "true");
-  expect(await previews(page)).toEqual(["Todos"]);
+  await expect.poll(() => previews(page)).toEqual(["Todos"]);
   await page.reload();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Todos"]);
-  expect(await previews(page)).toEqual(["Todos"]);
+  await expect.poll(() => previews(page)).toEqual(["Todos"]);
 
   // A note opened from an italic folder tab takes the list's place in that tab, and Back returns to the list.
   await folderRow(page, "Unsorted").click();
@@ -270,7 +269,7 @@ test("the window has one italic tab, in whichever pane is in front, and it is ke
   // Alpha has a kept tab in the other pane, which the click turns to: nothing opened, so the list is where it was, and italic.
   await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
   await expect(tabs(page, 1)).toHaveText(["Beta", "Unsorted"]);
-  expect(await previews(page)).toEqual(["Unsorted"]);
+  await expect.poll(() => previews(page)).toEqual(["Unsorted"]);
   // One with no tab yet takes the list's place.
   await perform(page, { type: "note.create", text: "# Gamma\n\nAbout Gamma." });
   await page.reload();
@@ -278,11 +277,11 @@ test("the window has one italic tab, in whichever pane is in front, and it is ke
   await folderRow(page, "Unsorted").click();
   await group(page, 2).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Gamma" }).click();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
-  expect(await previews(page)).toEqual(["Gamma"]);
+  await expect.poll(() => previews(page)).toEqual(["Gamma"]);
   await expect(group(page, 2).locator(".cm-line").first()).toHaveText("# Gamma");
   await page.goBack();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Unsorted"]);
-  expect(await previews(page)).toEqual(["Unsorted"]);
+  await expect.poll(() => previews(page)).toEqual(["Unsorted"]);
   await page.goForward();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
 
@@ -290,22 +289,22 @@ test("the window has one italic tab, in whichever pane is in front, and it is ke
   await tab(page, "Gamma", 1).click({ button: "right" });
   await menuItem(page, "Split down").click();
   await expect(tabs(page, 2)).toHaveText(["Gamma"]);
-  expect(await previews(page)).toEqual(["Gamma"]);
+  await expect.poll(() => previews(page)).toEqual(["Gamma"]);
   await tab(page, "Gamma", 2).click({ button: "right" });
   await menuItem(page, "Keep open").click();
-  expect(await previews(page)).toEqual([]);
+  await expect.poll(() => previews(page)).toEqual([]);
   await folderRow(page, "Ideas").click();
   await expect(tabs(page, 2)).toHaveText(["Gamma", "Ideas"]);
-  expect(await previews(page)).toEqual(["Ideas"]);
+  await expect.poll(() => previews(page)).toEqual(["Ideas"]);
   await tab(page, "Ideas", 2).dblclick();
-  expect(await previews(page)).toEqual([]);
+  await expect.poll(() => previews(page)).toEqual([]);
 
   // Dragged to another pane, an italic tab is kept there.
   await folderRow(page, "Plans").click();
-  expect(await previews(page)).toEqual(["Plans"]);
+  await expect.poll(() => previews(page)).toEqual(["Plans"]);
   await dragOnto(page, tab(page, "Plans", 2), body(page, 1), 0.5, 0.5);
   await expect(tabs(page, 0)).toHaveText(["Alpha", "Plans"]);
-  expect(await previews(page)).toEqual([]);
+  await expect.poll(() => previews(page)).toEqual([]);
 });
 
 test("a layout kept with an italic tab in each pane opens with one, in the pane in front, and no tab closed", async ({ page }) => {
@@ -324,7 +323,7 @@ test("a layout kept with an italic tab in each pane opens with one, in the pane 
   await page.reload();
   await expect(tabs(page, 0)).toHaveText(["All notes", "Alpha"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
-  expect(await previews(page)).toEqual(["Beta"]);
+  await expect.poll(() => previews(page)).toEqual(["Beta"]);
 });
 
 test("the inspector shows the tab last picked, on whatever has it, and one it does have on what doesn't, without forgetting the pick", async ({ page }) => {
@@ -440,7 +439,8 @@ test("Back retraces every open in a split, whatever was clicked between them", a
   await expect(tabs(page, 1)).toHaveText(["Alpha", "Projects"]);
   await body(page, 1).dispatchEvent("pointerdown");
   await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
-  expect(address()).not.toBe(`/folder/${projects.id}`);
+  // The address follows the pane in front a moment after it is in front.
+  await expect(page).not.toHaveURL(new RegExp(`/folder/${projects.id}$`));
   const upper = address();
   await folderRow(page, "All notes").dblclick();
   await expect(page).toHaveURL(/\/folder\/all$/);

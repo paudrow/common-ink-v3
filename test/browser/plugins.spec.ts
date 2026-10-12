@@ -370,6 +370,64 @@ test("the Plugins page lists every plugin with its icon, name, description and s
   expect(await fits(page)).toBe(true);
 });
 
+test("each plugin is a card of its own, and the whole card opens the plugin while its switch only switches", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.goto("/plugins");
+  const card = pluginRow(page, "Folders");
+  await expect(card).toBeVisible();
+
+  // Cards like a folder's notes: one column, each bordered all round and rounded, with space between them.
+  const looks = await pluginRows(page).evaluateAll((rows) =>
+    rows.slice(0, 3).map((row) => {
+      const style = getComputedStyle(row);
+      const box = row.getBoundingClientRect();
+      return { x: box.x, top: box.top, bottom: box.bottom, radius: style.borderTopLeftRadius, borders: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth] };
+    }),
+  );
+  expect(looks.map((l) => l.radius)).toEqual(["12px", "12px", "12px"]);
+  expect(looks.map((l) => l.borders)).toEqual(Array(3).fill(["1px", "1px", "1px", "1px"]));
+  expect(new Set(looks.map((l) => l.x)).size).toBe(1);
+  expect(looks[1]!.top - looks[0]!.bottom).toBe(10);
+  expect(looks[2]!.top - looks[1]!.bottom).toBe(10);
+
+  // A press anywhere on the card opens the plugin: on its description, its icon, and the bare card beside the switch.
+  // Pressed with the mouse where each is, as a member would: the link lies over them, so they are not themselves what takes the press.
+  const box = (await card.boundingBox())!;
+  const middleOf = async (selector: string) => {
+    const part = (await card.locator(selector).boundingBox())!;
+    return [part.x + part.width / 2, part.y + part.height / 2] as const;
+  };
+  for (const at of [await middleOf(".plugin-about"), await middleOf(".plugin-icon"), [box.x + box.width - 90, box.y + box.height - 6] as const]) {
+    await page.mouse.click(...at);
+    await expect(page).toHaveURL(/\/plugins\/folders$/);
+    await expect(page.getByRole("heading", { name: "Folders", level: 1 })).toBeVisible();
+    await page.goBack();
+    await expect(card).toBeVisible();
+  }
+
+  // The switch acts as itself and goes nowhere.
+  await card.getByRole("checkbox", { name: "Folders" }).click();
+  await expect(card.getByRole("checkbox", { name: "Folders" })).not.toBeChecked();
+  await expect(page).toHaveURL(/\/plugins$/);
+  await expect(page.getByRole("tree", { name: "Folders" })).toHaveCount(0);
+  await card.getByRole("checkbox", { name: "Folders" }).click();
+  await expect(page.getByRole("tree", { name: "Folders" })).toBeVisible();
+
+  // By keyboard a card is one stop that opens on Enter, and its switch is the next.
+  await pluginRow(page, "Sidebar").getByRole("checkbox").focus();
+  await page.keyboard.press("Tab");
+  await expect(card.getByRole("link", { name: "Folders" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(card.getByRole("checkbox", { name: "Folders" })).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(card.getByRole("checkbox", { name: "Folders" })).not.toBeChecked();
+  await expect(page).toHaveURL(/\/plugins$/);
+  await page.keyboard.press("Space");
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/plugins\/folders$/);
+});
+
 test("a built-in plugin's details show what it is, its pictures in the theme the app is in, what it adds as it registered it, and its switch", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.goto("/plugins");
@@ -423,14 +481,17 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
   await expect(page.getByText("There's no plugin here.")).toBeVisible();
 });
 
-test("a plugin's details list its settings and link to them in Settings, and one that hasn't been on says so until it is", async ({ page }) => {
+test("a plugin's details have its settings and link to them in Settings, and one that hasn't been on says so until it is", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.goto("/plugins/vim");
   const details = page.locator(".plugin-details");
   await expect(page.getByRole("heading", { name: "Vim mode", level: 1 })).toBeVisible();
   await expect(details.locator(".plugin-switch")).toHaveText("Off");
   await expect(section(page, "What it adds")).toContainText("It hasn't been on since the app loaded, so what it adds isn't listed yet. Turn it on to see.");
-  await expect(section(page, "Settings").getByRole("list", { name: "Settings of Vim mode" }).getByRole("listitem")).toHaveText([/^j and k move by the rows on screenOff, j and k move by whole lines/]);
+  const own = section(page, "Settings").getByRole("group", { name: "Settings of Vim mode" });
+  await expect(own.getByRole("checkbox")).toHaveAccessibleName("j and k move by the rows on screen");
+  await expect(own).toContainText("Off, j and k move by whole lines");
+  await expect(section(page, "Settings")).toContainText("Vim mode is off, so its options change nothing until it is turned on.");
 
   await details.getByRole("checkbox", { name: "Vim mode", exact: true }).check();
   await expect(section(page, "What it adds").getByRole("group", { name: "Editor extensions" })).toBeVisible();
