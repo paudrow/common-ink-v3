@@ -22,7 +22,6 @@ interface Props extends PluginsProps {
 const SLOT_WORDS: Record<keyof Slots, string> = {
   column: "A column beside the editor",
   section: "A section of the sidebar",
-  rail: "Icons in the rail of writing mode",
   editor: "The editor area",
   folder: "A folder's list of notes",
   inspector: "An inspector tab",

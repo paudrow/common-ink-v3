@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { chordLabel, chordOf, readKeys, typed } from "./keybindings.ts";
+import { chordLabel, chordOf, pressing, readKeys, typed } from "./keybindings.ts";
 import { holdersOf, overlapsOf, type Shortcut } from "./settingsLayout.ts";
 
 interface Props {
@@ -112,6 +112,8 @@ export function KeyboardShortcuts({ shortcuts, all, mac, onSet }: Props) {
 }
 
 const MODIFIER_KEYS = ["Shift", "Control", "Alt", "Meta"];
+/** What each key presses when it has focus, which the key is then left to. */
+const PRESSES = { enter: "button or link", space: "button or checkbox" };
 
 interface RecorderProps {
   shortcut: Shortcut;
@@ -139,6 +141,7 @@ function Recorder({ shortcut, add, all, mac, onSave, onClose }: RecorderProps) {
   const overlaps = chord ? overlapsOf(chord, all, shortcut.commandId) : [];
   const has = chord !== null && shortcut.chords.includes(chord);
   const names = holders.map((h) => h.title).join(" and ");
+  const press = chord === null ? null : pressing(chord);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (MODIFIER_KEYS.includes(e.key)) return;
@@ -178,7 +181,15 @@ function Recorder({ shortcut, add, all, mac, onSave, onClose }: RecorderProps) {
                 : `${label} begins with ${chordLabel(o.keys, mac)}, the key for ${o.shortcut.title}. Where both can run, ${label} never would.`}
             </p>
           ))}
-          {chord !== null && typed(chord) && <p>{label} begins with a key that types, so it runs only where nothing is being typed.</p>}
+          {chord !== null &&
+            typed(chord) &&
+            (press ? (
+              <p>
+                {label} begins with a key that types, and that presses a {PRESSES[press]} in focus. So it runs only where nothing is being typed and focus is on no such control.
+              </p>
+            ) : (
+              <p>{label} begins with a key that types, so it runs only where nothing is being typed.</p>
+            ))}
           {pressed.length === 0 ? <p>Press Enter to save and Escape to cancel.</p> : <p>Press another key to make a sequence of them, pressed one after another.</p>}
         </div>
         <div className="agent-actions">

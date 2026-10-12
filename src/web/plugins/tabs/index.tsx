@@ -82,6 +82,11 @@ export const tabs: Plugin = {
       );
     }
 
-    host.views.register("editor", { id: "tabs", component: Editor, open: (tab, { preview, background }) => dispatch({ type: "open", tab, preview, background }) });
+    host.views.register("editor", {
+      id: "tabs",
+      component: Editor,
+      open: (tab, { preview, background }) => dispatch({ type: "open", tab, preview, background }),
+      split: (tab, side) => dispatch({ type: "split", groupId: layout.focusedGroupId, side, tab, keep: true }),
+    });
   },
 };

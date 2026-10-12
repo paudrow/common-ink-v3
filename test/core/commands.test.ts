@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advance, bind, chordFor, chordLabel, chordOf, overlap, typed } from "../../src/web/keybindings.ts";
+import { advance, bind, chordFor, chordLabel, chordOf, overlap, pressing, typed } from "../../src/web/keybindings.ts";
 import { matching } from "../../src/web/plugins/lib/match.ts";
 
 describe("keybindings", () => {
@@ -23,6 +23,12 @@ describe("keybindings", () => {
   it("knows the keys that would otherwise type, by the chord they begin with", () => {
     for (const keys of ["j", "shift+g", "g g", "enter", "space", "/", "backspace", "j mod+k"]) expect(typed(keys), keys).toBe(true);
     for (const keys of ["mod+j", "mod+w h", "alt+shift+g", "escape", "shift+escape", "f2", "f12 j", "mod+k l"]) expect(typed(keys), keys).toBe(false);
+  });
+
+  it("knows the keys a button, a link or a checkbox acts on itself: Enter and Space, alone or with Shift", () => {
+    for (const keys of ["enter", "shift+enter", "enter j"]) expect(pressing(keys), keys).toBe("enter");
+    for (const keys of ["space", "shift+space"]) expect(pressing(keys), keys).toBe("space");
+    for (const keys of ["j", "mod+enter", "alt+space", "g enter", "escape"]) expect(pressing(keys), keys).toBe(null);
   });
 
   it("says how two commands' keys stand to each other: the same, or one the first keys of the other", () => {
