@@ -152,6 +152,17 @@ describe("splitting", () => {
     });
   });
 
+  it("beside a group that isn't there changes nothing, and so does any other action on one: the tab stays where it was", () => {
+    for (const action of [
+      { type: "split", groupId: "9", side: "right", tab: note("b") },
+      { type: "drop", groupId: "9", index: 0, tab: note("b") },
+      { type: "add", groupId: "9", tab: note("b") },
+      { type: "activate", groupId: "9", tab: note("b") },
+      { type: "close", scope: "tab", groupId: "9", tab: note("b") },
+    ] satisfies EditorAction[])
+      expect(editorReducer(layout, action), action.type).toBe(layout);
+  });
+
   it("from a workspace with nothing open leaves one group", () => {
     const empty: EditorLayout = { groups: [{ id: "1", tabs: [], active: null }], focusedGroupId: "1" };
 

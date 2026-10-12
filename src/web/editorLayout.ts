@@ -262,6 +262,8 @@ const lift = (layout: EditorLayout, tab: Opened, keepIn?: string): EditorLayout 
 
 export function editorReducer(layout: EditorLayout, action: EditorAction): EditorLayout {
   const tab: Opened | null = "tab" in action ? refOf(action.tab) : null;
+  // A group may have gone since the action was made, as when its last tab closed. The tab it names stays where it is.
+  if ("groupId" in action && !layout.groups.some((g) => g.id === action.groupId)) return layout;
   switch (action.type) {
     case "open": {
       const holder = layout.groups.find((g) => has(g, tab!))?.id;
