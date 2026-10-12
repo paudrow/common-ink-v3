@@ -32,6 +32,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   revert ID --revision N              put a note back to a revision, as a new change
   revert ID --changes N,N             revert chosen changes, as one new change; revert a revert to have its changes again
   revert ID ... --preview             what either revert would do, and the later changes to the same lines, with nothing written
+  revert ID --author KIND:ID --preview
+                                      what revert-author would do to this one note, with nothing written
   revert-author KIND:ID [--note ID,ID] [--after ID]
                                       revert every change an author made that still stands
   undo ID                             take back your latest change to a note
@@ -194,6 +196,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
         args = { id: needId(), revision: integer("--revision", flags.get("revision")!), name: flags.get("name") ?? null };
         break;
       case "revert":
+        if (flags.has("author")) {
+          if (!flags.has("preview") || flags.has("revision") || flags.has("changes")) throw new UsageError("revert --author takes --preview and nothing else: revert-author is what reverts an author's changes");
+          tool = "preview_revert";
+          args = { id: needId(), author: authorRef(flags.get("author")!) };
+          break;
+        }
         if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to revert those");
         if (flags.has("preview")) {
           tool = "preview_revert";

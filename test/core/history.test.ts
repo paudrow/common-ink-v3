@@ -502,6 +502,24 @@ describe("a preview of a revert", () => {
     expect((await history(ada, id))[4]!.reverts!.revisions).toEqual(preview.revisions);
   });
 
+  it("says what reverting an author would do to a note, and reverting the author then does exactly that there", async () => {
+    const { ada, claude, id } = await sharedNote();
+    const grace = await addMember(ada, "viewer");
+
+    const preview = await perform(env.DB, grace, { type: "note.previewRevert", id, author: claude.ref });
+
+    expect(preview).toMatchObject({ revision: 4, revisions: [3], overlaps: [], diff: { added: 0, removed: 2 } });
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [3] })).toEqual(preview);
+    expect(await changeRows(id)).toBe(4);
+    await perform(env.DB, ada, { type: "history.revertAuthor", author: claude.ref });
+    expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 5 })).toEqual(preview.diff);
+    const nothing = { revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0 }, overlaps: [] };
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref })).toEqual(nothing);
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, author: { kind: "agent", id: "aaaaaaaaaaaa" } })).toEqual(nothing);
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref, revisions: [3] })).rejects.toMatchObject({ code: "invalid" });
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref, to: 1 })).rejects.toMatchObject({ code: "invalid" });
+  });
+
   it("says what putting the note back to a revision would do, and the revert then does exactly that", async () => {
     const { ada, id } = await sharedNote();
 

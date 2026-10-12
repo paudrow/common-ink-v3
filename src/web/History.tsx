@@ -3,6 +3,7 @@ import type { Author, AuthorRef, ChangedNote, Diff, HistoryEntry, HistoryPage, H
 import { perform } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
 import { RevertAuthor } from "./RevertAuthor.tsx";
+import { DiffView, RevertDialog } from "./RevertDialog.tsx";
 import { moveThroughHistory } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
@@ -26,35 +27,6 @@ function Stat({ added, removed }: { added: number; removed: number }) {
     <span className="change-stat">
       <span className="added">+{added}</span> <span className="removed">−{removed}</span>
     </span>
-  );
-}
-
-const MARK = { add: "+", del: "−", same: "" } as const;
-
-function DiffView({ diff }: { diff: Diff }) {
-  if (!diff.hunks.length) return <p className="diff-none">No text changed.</p>;
-  return (
-    <div className="diff">
-      {diff.hunks.map((hunk) => (
-        <div key={hunk.oldStart} className="hunk">
-          <div className="hunk-head">
-            @@ −{hunk.oldStart} +{hunk.newStart} @@
-          </div>
-          {hunk.lines.map((line, i) => {
-            const Line = line.kind === "add" ? "ins" : line.kind === "del" ? "del" : "div";
-            return (
-              <Line key={i} className="diff-line">
-                <span className="diff-mark" aria-hidden="true">
-                  {MARK[line.kind]}
-                </span>
-                <span className="diff-text">{line.text || " "}</span>
-              </Line>
-            );
-          })}
-        </div>
-      ))}
-      {diff.omitted > 0 && <p className="diff-none">{count(diff.omitted, "more line")}</p>}
-    </div>
   );
 }
 
@@ -109,7 +81,7 @@ type RevertOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" }>
 
 type Previewed = { state: "reading" } | { state: "read"; preview: RevertPreview } | { state: "failed"; message: string };
 
-interface RevertDialogProps {
+interface NoteRevertProps {
   workspaceId: string;
   op: RevertOp;
   noteTitle: string;
@@ -121,27 +93,11 @@ interface RevertDialogProps {
 }
 
 /** What a revert would do, shown before it is made: the changes it reverts, the note's lines it changes, and the later changes that overlap. */
-function RevertDialog({ workspaceId, op, noteTitle, version, onShow, onReverted, onClose }: RevertDialogProps) {
-  const ids = useId();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const inside = useRef<HTMLDivElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
+function NoteRevert({ workspaceId, op, noteTitle, version, onShow, onReverted, onClose }: NoteRevertProps) {
   const [previewed, setPreviewed] = useState<Previewed>({ state: "reading" });
   const [busy, setBusy] = useState(false);
   const asked = JSON.stringify(op.type === "note.revert" ? { id: op.id, to: op.revision } : { id: op.id, revisions: op.revisions });
 
-  useDismiss(onClose, inside);
-  useEffect(() => {
-    const focused = document.activeElement;
-    const modal = dialog.current!;
-    modal.showModal();
-    cancel.current!.focus();
-    return () => {
-      // While it is still open as a modal the rest of the page can't take focus.
-      modal.close();
-      if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
-    };
-  }, []);
   useEffect(() => {
     let live = true;
     perform(workspaceId, { type: "note.previewRevert", ...(JSON.parse(asked) as { id: string; to: number } | { id: string; revisions: number[] }) }).then(
@@ -171,36 +127,30 @@ function RevertDialog({ workspaceId, op, noteTitle, version, onShow, onReverted,
     onShow(revision);
   };
   return (
-    <dialog ref={dialog} className="revert-dialog" aria-labelledby={`${ids}-title`} onCancel={(e) => e.preventDefault()}>
-      <div ref={inside} className="revert-dialog-body">
-        <h2 id={`${ids}-title`}>{op.type === "note.revert" ? `Revert note to revision ${op.revision}` : `Revert ${op.revisions.length === 1 ? `change ${op.revisions[0]}` : `${op.revisions.length} changes`}`}</h2>
-        {previewed.state === "reading" && <p className="diff-none">Working out what this would change…</p>}
-        {previewed.state === "failed" && <p role="alert" className="error">{previewed.message}</p>}
-        {preview && reverted && (
-          <>
-            {reverted.length > 0 && (
-              <p>
-                Reverts <Named revisions={reverted} onShow={show} /> to {noteTitle} as one new change.
-              </p>
-            )}
-            {changesNothing ? <p>Nothing in the note would change.</p> : <DiffView diff={preview.diff} />}
-            {preview.overlaps.length > 0 && (
-              <p className="revert-overlap">
-                Later, <Named revisions={preview.overlaps} onShow={show} /> edited the same lines. {preview.overlaps.length === 1 ? "Its" : "Their"} edits stay, on lines this revert otherwise returns to how they were.
-              </p>
-            )}
-          </>
-        )}
-        <div className="revert-dialog-actions">
-          <button ref={cancel} type="button" className="button small" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="button small primary" disabled={busy || !preview || changesNothing} onClick={revert}>
-            Revert
-          </button>
-        </div>
-      </div>
-    </dialog>
+    <RevertDialog
+      title={op.type === "note.revert" ? `Revert note to revision ${op.revision}` : `Revert ${op.revisions.length === 1 ? `change ${op.revisions[0]}` : `${op.revisions.length} changes`}`}
+      ready={!busy && preview !== null && !changesNothing}
+      onRevert={revert}
+      onClose={onClose}
+    >
+      {previewed.state === "reading" && <p className="diff-none">Working out what this would change…</p>}
+      {previewed.state === "failed" && <p role="alert" className="error">{previewed.message}</p>}
+      {preview && reverted && (
+        <>
+          {reverted.length > 0 && (
+            <p>
+              Reverts <Named revisions={reverted} onShow={show} /> to {noteTitle} as one new change.
+            </p>
+          )}
+          {changesNothing ? <p>Nothing in the note would change.</p> : <DiffView diff={preview.diff} />}
+          {preview.overlaps.length > 0 && (
+            <p className="revert-overlap">
+              Later, <Named revisions={preview.overlaps} onShow={show} /> edited the same lines. {preview.overlaps.length === 1 ? "Its" : "Their"} edits stay, on lines this revert otherwise returns to how they were.
+            </p>
+          )}
+        </>
+      )}
+    </RevertDialog>
   );
 }
 
@@ -402,7 +352,7 @@ function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, he
         </button>
       )}
       {reverting && (
-        <RevertDialog
+        <NoteRevert
           workspaceId={workspaceId}
           op={reverting}
           noteTitle={titleOf(changes[0]?.noteTitle ?? "")}
@@ -745,6 +695,7 @@ export function HistoryMode({ workspaceId, notes, canEdit, showAuthor, onShownAu
             name={one.name}
             where={noteIds.length ? `in the ${count(noteIds.length, "note")} chosen` : "in this workspace"}
             noteIds={noteIds.length ? noteIds : undefined}
+            version={version}
             onReverted={onReverted}
           />
         </div>

@@ -1700,6 +1700,38 @@ button.link:hover {
   background: var(--removed-soft);
 }
 
+.revert-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 50vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.revert-notes li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.revert-notes h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.revert-note-count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.revert-notes .diff {
+  max-height: none;
+  overflow-y: visible;
+}
+
 .revert-dialog-actions {
   display: flex;
   justify-content: flex-end;
@@ -1997,6 +2029,17 @@ del.diff-line {
 
 .connect .button {
   justify-self: start;
+}
+
+.agent-edit {
+  margin-top: 4px;
+  background: var(--bg);
+}
+
+.agent-edit .hint,
+.agent-edit .agent-actions {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .new-token {

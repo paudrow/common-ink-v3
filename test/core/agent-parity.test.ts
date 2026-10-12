@@ -34,6 +34,7 @@ const COMMANDS: Record<string, string[][]> = {
   preview_revert: [
     ["revert", ID, "--changes", "1,2", "--preview"],
     ["revert", ID, "--revision", "1", "--preview"],
+    ["revert", ID, "--author", AUTHOR, "--preview"],
   ],
   revert_author: [["revert-author", AUTHOR, "--note", ID, "--after", ID]],
   undo: [["undo", ID]],

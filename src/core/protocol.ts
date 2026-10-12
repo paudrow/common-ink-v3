@@ -54,11 +54,15 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions }),
   /**
    * What a revert would do, with nothing written: of the chosen changes as `note.revertChanges`
-   * reverts them, or of the note to a revision as `note.revert` does.
+   * reverts them, of the note to a revision as `note.revert` does, or of one author's changes
+   * to this note as `history.revertAuthor` does.
    */
   z
-    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional() })
-    .refine((op) => (op.revisions === undefined) !== (op.to === undefined), "pass either revisions, the changes to revert, or to, the revision to return to"),
+    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional(), author: AuthorRef.optional() })
+    .refine(
+      (op) => [op.revisions, op.to, op.author].filter((given) => given !== undefined).length === 1,
+      "pass one of revisions, the changes to revert, to, the revision to return to, or author, whose changes to revert",
+    ),
   /** Takes back the author's own latest change that still stands. */
   z.object({ type: z.literal("note.undo"), id: Id }),
   z.object({ type: z.literal("note.redo"), id: Id }),
@@ -269,13 +273,11 @@ export const MAX_EXPIRY_DAYS = 365;
 export interface Agent {
   id: string;
   name: string;
-  /** Tells this token from the member's other tokens under the same name, e.g. "laptop". */
-  label: string | null;
   /** The first characters of its token, to tell tokens apart. Not enough to use it. */
   tokenPrefix: string;
   createdAt: number;
-  /** After this the token stops working. */
-  expiresAt: number;
+  /** After this the token stops working. Null when it never expires. */
+  expiresAt: number | null;
   lastUsedAt: number | null;
   revokedAt: number | null;
   /** The one workspace this token can reach, or null for every workspace its member can reach. */
@@ -285,13 +287,28 @@ export interface Agent {
 }
 
 /** What a member may ask for when connecting an agent. */
+/** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
+export const ExpiresIn = z.union([z.number().int().min(1).max(MAX_EXPIRY_DAYS), z.literal("never")]);
+export type ExpiresIn = z.infer<typeof ExpiresIn>;
+
 export const ConnectOptions = z.object({
-  label: z.string().trim().max(MAX_AGENT_NAME).optional(),
-  expiresInDays: z.number().int().min(1).max(MAX_EXPIRY_DAYS).default(DEFAULT_EXPIRY_DAYS),
+  expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
   workspaceId: Id.optional(),
   readOnly: z.boolean().default(false),
 });
 export type ConnectOptions = z.input<typeof ConnectOptions>;
+
+/**
+ * What a member changes about an agent they connected: what its token may do, with the token itself
+ * unchanged. A field left out stays as it is. `expiresInDays` counts from the edit, and a null
+ * `workspaceId` lets the token reach every workspace its member can.
+ */
+export const AgentEdit = z.strictObject({
+  expiresInDays: ExpiresIn.optional(),
+  workspaceId: Id.nullable().optional(),
+  readOnly: z.boolean().optional(),
+});
+export type AgentEdit = z.input<typeof AgentEdit>;
 
 export interface WorkspaceSummary {
   id: string;

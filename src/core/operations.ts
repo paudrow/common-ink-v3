@@ -516,7 +516,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     // It shows nothing a viewer can't already read: the note at any revision, and every change's diff.
     needs: "view",
     async run(ctx, op) {
-      const { row, history, reverts, changes } = await takingBack(ctx, op.id, op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!));
+      const author = op.author;
+      const choose: Choose = author ? (history) => revertOfAuthor(history, (c) => sameAuthor(c.author, author)) : op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!);
+      const { row, history, reverts, changes } = await takingBack(ctx, op.id, choose);
       return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: reverts ? overlapping(history, reverts) : [] };
     },
   },

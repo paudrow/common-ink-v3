@@ -151,7 +151,7 @@ _Avoid_: Commit, event, op
 Who made a change: a member, a named agent, or a plugin.
 
 **Agent**:
-An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. An agent's changes can be reverted on their own, which keeps everyone else's.
+An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. What an agent may do (read only or not, the workspace it reaches, when it expires or that it never does) is set when it is connected and can be edited afterwards by the member who connected it, with the same token. An agent's changes can be reverted on their own, which keeps everyone else's.
 _Avoid_: Bot
 
 **History**:
@@ -163,7 +163,7 @@ A new change that takes the effect of earlier changes out of a note and keeps ev
 _Avoid_: Restore, rollback, put back, reapply, take back out
 
 **Revert preview**:
-What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Anyone who can read the note's history can ask for one.
+What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Every revert in the app is shown as one first, an author's changes note by note. Anyone who can read the note's history can ask for one.
 
 **Overlap**:
 A later change that still stands and edited a line a revert changes. The revert keeps what that change did, on a line it otherwise returns to how it was, so a preview names each one. A line added or removed whole next to such a line is not an overlap.

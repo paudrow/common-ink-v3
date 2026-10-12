@@ -199,8 +199,8 @@ export const TOOLS: Tool[] = [
   {
     name: "preview_revert",
     description:
-      "What a revert would do to a note, with nothing written. Pass revisions to preview revert_changes of those changes, or to to preview revert_note to that revision. Returns the note's revision it was worked out at, the changes that would be reverted (revisions), the diff from the note as it is to the note after (diff), and overlaps: later changes that still stand and edited the same lines, whose edits would stay on lines the revert otherwise returns to how they were. Read those changes before reverting. A read-only token can use it.",
-    inputSchema: object({ id: noteId, revisions, to: { type: "integer", minimum: 0, description: "The revision to return to" } }, ["id"]),
+      "What a revert would do to a note, with nothing written. Pass one of: revisions to preview revert_changes of those changes, to to preview revert_note to that revision, or author to preview what revert_author would do to this note. Returns the note's revision it was worked out at, the changes that would be reverted (revisions), the diff from the note as it is to the note after (diff), and overlaps: later changes that still stand and edited the same lines, whose edits would stay on lines the revert otherwise returns to how they were. Read those changes before reverting. A read-only token can use it.",
+    inputSchema: object({ id: noteId, revisions, to: { type: "integer", minimum: 0, description: "The revision to return to" }, author: { ...author, description: "Whose changes, from history_authors" } }, ["id"]),
     op: "note.previewRevert",
   },
   {

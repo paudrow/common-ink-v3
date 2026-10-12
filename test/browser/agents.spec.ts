@@ -49,7 +49,8 @@ test("a member connects an agent from the workspace menu and is shown its token 
   await expect(page).toHaveURL(/\/agents$/);
   await expect(agentsView(page)).toContainText("No agent is connected.");
 
-  const { shown, token } = await connectInApp(page, "Claude", (form) => form.getByRole("textbox", { name: "Label" }).fill("laptop"));
+  await expect(page.getByRole("form", { name: "Connect an agent" }).getByRole("textbox")).toHaveAccessibleName("Name");
+  const { shown, token } = await connectInApp(page, "Claude");
 
   expect(token).toMatch(/^cink_[A-Za-z0-9_-]{43}$/);
   await expect(shown.getByRole("textbox", { name: "ink command" })).toHaveValue(`export INK_URL=${baseURL}\nexport INK_TOKEN=${token}\nnpm run ink -- notes`);
@@ -63,7 +64,7 @@ test("a member connects an agent from the workspace menu and is shown its token 
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(token);
 
   const row = connected(page);
-  await expect(row).toHaveAccessibleName("Claude, laptop");
+  await expect(row).toHaveAccessibleName("Claude");
   await expect(row).toContainText(`${token.slice(0, 9)}…`);
   await expect(row).toContainText("reaches every workspace you're in");
   await expect(row).toContainText("never used");
@@ -89,7 +90,7 @@ test("a token can be limited to reading, and the agent is refused a write", asyn
   const { token } = await connectInApp(page, "Reader", async (form) => {
     await form.getByRole("checkbox", { name: /^Read only/ }).check();
     await form.getByRole("combobox", { name: "Reaches" }).selectOption({ index: 1 });
-    await form.getByRole("combobox", { name: "Expires in" }).selectOption("30");
+    await form.getByRole("combobox", { name: "Expires" }).selectOption("In 30 days");
   });
 
   await expect(connected(page)).toContainText("read only");
@@ -98,6 +99,105 @@ test("a token can be limited to reading, and the agent is refused a write", asyn
   const reader = agentWith(page, token);
   expect(await reader.tool("list_notes", {})).toEqual([]);
   await expect(reader.tool("create_note", { text: "# No" })).rejects.toThrow("forbidden: A read-only token can't note.create");
+});
+
+test("an agent can be connected to never expire, and its row says so", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.goto("/agents");
+  const form = page.getByRole("form", { name: "Connect an agent" });
+  await expect(form.getByRole("combobox", { name: "Expires" }).getByRole("option")).toHaveText(["In 30 days", "In 90 days", "In 365 days", "Never"]);
+  await expect(form.getByRole("combobox", { name: "Expires" })).toHaveValue("90");
+
+  const { token } = await connectInApp(page, "Claude", (form) => form.getByRole("combobox", { name: "Expires" }).selectOption("Never").then(() => {}));
+
+  await expect(connected(page)).toContainText("never expires");
+  expect(await agentWith(page, token).status()).toBe(200);
+  await page.reload();
+  await expect(connected(page)).toContainText("never expires");
+});
+
+test("editing an agent changes what its token may do, with no new agent and no new token", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.goto("/agents");
+  const { shown, token } = await connectInApp(page, "Claude");
+  await shown.getByRole("button", { name: "Done" }).click();
+  const claude = agentWith(page, token);
+  await claude.tool<Note>("create_note", { text: "# Before" });
+  const row = connected(page);
+  await expect(row).toContainText("expires in 90 days");
+  await expect(row).not.toContainText("read only");
+
+  await row.getByRole("button", { name: "Edit" }).click();
+  const edit = row.getByRole("form", { name: "Edit Claude" });
+  await expect(edit.getByRole("combobox", { name: "Expires" })).toHaveValue("");
+  await expect(edit.getByRole("combobox", { name: "Expires" }).getByRole("option").first()).toHaveText("As it is: expires in 90 days");
+  await expect(edit.getByRole("combobox", { name: "Reaches" })).toHaveValue("");
+  await expect(edit.getByRole("checkbox", { name: /^Read only/ })).not.toBeChecked();
+  await edit.getByRole("checkbox", { name: /^Read only/ }).check();
+  await edit.getByRole("button", { name: "Cancel" }).click();
+  await expect(edit).toHaveCount(0);
+  await expect(row).not.toContainText("read only");
+
+  await row.getByRole("button", { name: "Edit" }).click();
+  await edit.getByRole("checkbox", { name: /^Read only/ }).check();
+  await edit.getByRole("combobox", { name: "Expires" }).selectOption("Never");
+  await edit.getByRole("combobox", { name: "Reaches" }).selectOption({ index: 1 });
+  await edit.getByRole("button", { name: "Save" }).click();
+
+  await expect(edit).toHaveCount(0);
+  await expect(connected(page)).toHaveCount(1);
+  await expect(row).toContainText("read only");
+  await expect(row).toContainText("never expires");
+  await expect(row).toContainText("reaches only ");
+  await expect(row).toContainText(`${token.slice(0, 9)}…`);
+  await expect(page.getByRole("region", { name: "New token" })).toHaveCount(0);
+  await expect(claude.tool("create_note", { text: "# No" })).rejects.toThrow("forbidden: A read-only token can't note.create");
+  expect(await claude.tool("list_notes", {})).toHaveLength(1);
+
+  await row.getByRole("button", { name: "Edit" }).click();
+  await expect(edit.getByRole("checkbox", { name: /^Read only/ })).toBeChecked();
+  await expect(edit.getByRole("combobox", { name: "Expires" }).getByRole("option")).toHaveText(["As it is: never expires", "In 30 days", "In 90 days", "In 365 days"]);
+  await edit.getByRole("checkbox", { name: /^Read only/ }).uncheck();
+  await edit.getByRole("combobox", { name: "Expires" }).selectOption("In 30 days");
+  await edit.getByRole("button", { name: "Save" }).click();
+  await expect(row).toContainText("expires in 30 days");
+  await expect(row).not.toContainText("read only");
+  await claude.tool<Note>("create_note", { text: "# After" });
+  await page.reload();
+  await expect(connected(page)).toContainText("expires in 30 days");
+});
+
+test("saving an edit sends only what was changed, so an agent pinned to a workspace the member has left keeps its reach", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.goto("/agents");
+  const { shown } = await connectInApp(page, "Claude", (form) => form.getByRole("combobox", { name: "Reaches" }).selectOption({ index: 1 }).then(() => {}));
+  await shown.getByRole("button", { name: "Done" }).click();
+  await page.route("**/api/agents", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const res = await route.fetch();
+    const { agents } = (await res.json()) as { agents: { workspaceId: string | null }[] };
+    await route.fulfill({ response: res, json: { agents: agents.map((a) => ({ ...a, workspaceId: "aaaaaaaaaaaa" })) } });
+  });
+  const sent: unknown[] = [];
+  await page.route("**/api/agents/*", async (route) => {
+    sent.push(route.request().postDataJSON());
+    await route.fallback();
+  });
+  await page.reload();
+  const row = connected(page);
+  await expect(row).toContainText("reaches only a workspace you have left");
+
+  await row.getByRole("button", { name: "Edit" }).click();
+  const edit = row.getByRole("form", { name: "Edit Claude" });
+  await expect(edit.getByRole("combobox", { name: "Reaches" })).toHaveValue("aaaaaaaaaaaa");
+  await edit.getByRole("button", { name: "Save" }).click();
+  await expect(edit).toHaveCount(0);
+  await row.getByRole("button", { name: "Edit" }).click();
+  await edit.getByRole("checkbox", { name: /^Read only/ }).check();
+  await edit.getByRole("button", { name: "Save" }).click();
+  await expect(edit).toHaveCount(0);
+
+  expect(sent).toEqual([{}, { readOnly: true }]);
 });
 
 test("disconnecting an agent stops its token at once, and keeps its changes in history", async ({ page }) => {
@@ -139,12 +239,19 @@ test("an agent's entry shows its changes on their own, and reverts them in every
   await expect.poll(names(mode)).toEqual(["Change 3 to Trip by Claude", "Change 2 to Trip by Claude", "Change 2 to Plan by Claude"]);
 
   await page.goBack();
-  await connected(page).getByRole("button", { name: "Revert Claude's changes" }).click();
-  const ask = page.getByRole("group", { name: "Revert Claude's changes" });
-  await expect(ask).toContainText("Revert every change Claude made in");
+  await connected(page).getByRole("button", { name: "Revert Claude's changes…" }).click();
+  const ask = page.getByRole("dialog", { name: "Revert Claude's changes" });
+  await expect(ask).toContainText(/Reverts 3 changes Claude made in .* that still stand, in 2 notes\. Everyone else's changes are kept\./);
+  const notes = ask.getByRole("list", { name: "Notes this would change" }).getByRole("listitem");
+  await expect(notes).toHaveCount(2);
+  await expect(notes.filter({ hasText: "Trip" })).toContainText("2 changes");
+  await expect(notes.filter({ hasText: "Trip" }).locator("del")).toHaveText(["−", "−Pack light.", "−", "−Leave early."]);
+  await expect(notes.filter({ hasText: "Plan" }).locator("del")).toHaveText(["−Claude's step", "−"]);
+  await expect(notes.filter({ hasText: "Plan" }).locator("ins")).toHaveCount(0);
   await ask.getByRole("button", { name: "Cancel" }).click();
+  await expect(ask).toHaveCount(0);
   expect(await text(page, trip)).toBe("# Trip\n\nPack light.\n\nLeave early.");
-  await connected(page).getByRole("button", { name: "Revert Claude's changes" }).click();
+  await connected(page).getByRole("button", { name: "Revert Claude's changes…" }).click();
   await ask.getByRole("button", { name: "Revert" }).click();
 
   await expect(connected(page).getByRole("status")).toHaveText("Reverted 3 changes by Claude in 2 notes.");
@@ -156,9 +263,11 @@ test("an agent's entry shows its changes on their own, and reverts them in every
     ["Trip", "Ada Lovelace", { how: "revert", revisions: [2, 3] }],
   ]);
 
-  await connected(page).getByRole("button", { name: "Revert Claude's changes" }).click();
-  await ask.getByRole("button", { name: "Revert" }).click();
-  await expect(connected(page).getByRole("status")).toContainText("Nothing by Claude still stands in");
+  await connected(page).getByRole("button", { name: "Revert Claude's changes…" }).click();
+  await expect(ask).toContainText("Nothing by Claude still stands in");
+  await expect(ask.getByRole("button", { name: "Revert" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(ask).toHaveCount(0);
   expect((await perform(page, { type: "history.list" })).changes).toHaveLength(8);
 });
 
@@ -167,8 +276,8 @@ test("reverting an agent names the notes it left empty, which stay until they ca
   const draft = await claude.tool<Note>("create_note", { text: "# Draft\n\nClaude's own" });
   await page.goto("/agents");
 
-  await connected(page).getByRole("button", { name: "Revert Claude's changes" }).click();
-  await page.getByRole("group", { name: "Revert Claude's changes" }).getByRole("button", { name: "Revert" }).click();
+  await connected(page).getByRole("button", { name: "Revert Claude's changes…" }).click();
+  await page.getByRole("dialog", { name: "Revert Claude's changes" }).getByRole("button", { name: "Revert" }).click();
 
   await expect(connected(page).getByRole("status")).toHaveText("Reverted 4 changes by Claude in 3 notes. Draft is now empty. It can be deleted once Trash exists.");
   await expect.poll(() => text(page, draft.id)).toBe("");
@@ -185,8 +294,8 @@ test("reverting an agent that reaches every workspace says the member's other wo
   });
   await page.goto("/agents");
 
-  await connected(page).getByRole("button", { name: "Revert Claude's changes" }).click();
-  const ask = page.getByRole("group", { name: "Revert Claude's changes" });
+  await connected(page).getByRole("button", { name: "Revert Claude's changes…" }).click();
+  const ask = page.getByRole("dialog", { name: "Revert Claude's changes" });
   await expect(ask).toContainText("Your other workspaces aren't covered.");
   await ask.getByRole("button", { name: "Revert" }).click();
   await expect(connected(page).getByRole("status")).toHaveText("Reverted 3 changes by Claude in 2 notes. Your other workspaces aren't covered. Switch to each one to revert Claude's changes there.");
@@ -208,9 +317,10 @@ test("History mode, filtered to one agent, reverts that agent's changes in the n
   await page.keyboard.press("Escape");
   await openNotes(mode, 1);
   await expect.poll(names(mode)).toEqual(["Change 2 to Plan by Claude"]);
-  await mode.getByRole("button", { name: "Revert Claude's changes" }).click();
-  const ask = mode.getByRole("group", { name: "Revert Claude's changes" });
-  await expect(ask).toContainText("in the 1 note chosen");
+  await mode.getByRole("button", { name: "Revert Claude's changes…" }).click();
+  const ask = page.getByRole("dialog", { name: "Revert Claude's changes" });
+  await expect(ask).toContainText("Reverts 1 change Claude made in the 1 note chosen that still stands, in 1 note.");
+  await expect(ask.getByRole("list", { name: "Notes this would change" }).getByRole("listitem")).toHaveAccessibleName("Plan");
   await ask.getByRole("button", { name: "Revert" }).click();
 
   await expect(mode.getByRole("status")).toHaveText("Reverted 1 change by Claude in 1 note.");
@@ -221,7 +331,7 @@ test("History mode, filtered to one agent, reverts that agent's changes in the n
 
   await page.goto("/history");
   await mode.getByRole("group", { name: "Authors" }).getByRole("button", { name: "Ada Lovelace" }).click();
-  await expect(mode.getByRole("button", { name: /^Revert .* changes$/ })).toHaveCount(0);
+  await expect(mode.getByRole("button", { name: /^Revert .* changes…$/ })).toHaveCount(0);
 });
 
 test("the command palette goes to Agents, in focus too", async ({ page }) => {
