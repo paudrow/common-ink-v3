@@ -201,7 +201,8 @@ test("an invite's link lets in only the invited email, and nobody once it is rev
   const mallory = await anotherPerson(page, "Mallory");
   await mallory.goto(link);
   await expect(mallory.getByRole("heading")).toHaveText("This invite doesn't let you in");
-  await expect(mallory.getByText("Ada")).toHaveCount(0);
+  // Not "Ada" alone: the page shows the visitor's own email, which is random here and now and then has "ada" in it.
+  await expect(mallory.getByText(/Ada's|Lovelace/)).toHaveCount(0);
   await mallory.getByRole("button", { name: "Go to my notes" }).click();
   await expect(workspaceButton(mallory)).toHaveText("Mallory's workspaceAdmin");
   await expect.poll(async () => (await me(mallory)).workspaces).toHaveLength(1);
