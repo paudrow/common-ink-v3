@@ -16,6 +16,15 @@ const LabelName = z
 const Time = z.number().int().min(0);
 /** Revisions of one note that a change made, so never 0. */
 const Revisions = z.array(Revision.min(1)).min(1).max(500);
+/** What becomes of one conflict of a revert: the later edits kept, the lines as they were before, or the lines given (no text is no lines). */
+const Choice = z.union([z.literal("keep"), z.literal("back"), z.object({ text: NoteText }).strict()]);
+/**
+ * How a revert's conflicts are settled: one choice for all of them, or one for each in the order
+ * `note.previewRevert` lists them. `at` is the note's revision that preview was worked out at; the
+ * revert is refused when the note has changed since.
+ */
+const Resolve = z.object({ at: Revision, choices: z.union([z.literal("keep"), z.literal("back"), z.array(Choice).max(1000)]) }).strict();
+export type Resolve = z.output<typeof Resolve>;
 const AuthorRef = z.object({ kind: z.enum(["member", "agent", "plugin"]), id: Id });
 export type AuthorRef = z.output<typeof AuthorRef>;
 
@@ -46,18 +55,19 @@ export const Op = z.discriminatedUnion("type", [
   /** Names a revision, or takes its name away when `name` is null. */
   z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
   /** Puts the note back to how it was at `revision`, as a new change. */
-  z.object({ type: z.literal("note.revert"), id: Id, revision: Revision }),
+  z.object({ type: z.literal("note.revert"), id: Id, revision: Revision, resolve: Resolve.optional() }),
   /**
    * Reverts the chosen changes and keeps the rest, as one new change. Reverting a change that was
    * itself a revert, an undo, or a redo has what it reverted stand again.
    */
-  z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions }),
+  z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions, resolve: Resolve.optional() }),
   /**
    * What a revert would do, with nothing written: of the chosen changes as `note.revertChanges`
-   * reverts them, or of the note to a revision as `note.revert` does.
+   * reverts them, or of the note to a revision as `note.revert` does. With `resolve`, the diff is of
+   * the revert with its conflicts settled that way.
    */
   z
-    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional() })
+    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional(), resolve: Resolve.optional() })
     .refine((op) => (op.revisions === undefined) !== (op.to === undefined), "pass either revisions, the changes to revert, or to, the revision to return to"),
   /** Takes back the author's own latest change that still stands. */
   z.object({ type: z.literal("note.undo"), id: Id }),
@@ -181,10 +191,26 @@ export interface RevertPreview {
   revision: number;
   /** The changes that would be reverted. */
   revisions: number[];
-  /** From the note's text as it is to its text after the revert. */
+  /** From the note's text as it is to its text after the revert, its conflicts settled as asked: every later edit kept when nothing was asked. */
   diff: Diff;
-  /** Later changes that still stand and edited lines the revert changes: what they did stays, on lines otherwise returned to how they were. */
+  /** Later changes that still stand and edited lines the revert changes. */
   overlaps: number[];
+  /** Each place those changes edited lines the revert changes, top of the note first. A revert settles each with a choice. */
+  conflicts: RevertConflict[];
+}
+
+/** Lines are without their line ends. */
+export interface RevertConflict {
+  /** The line of the note after the revert, with every later edit kept, that `kept` starts at. Counted from 1. */
+  line: number;
+  /** The lines as they were before the reverted changes, with the later edits to them out too: what "back" leaves. */
+  before: string[];
+  /** The lines as the note has them now. */
+  now: string[];
+  /** What "keep" leaves: the revert, and the later edits kept. */
+  kept: string[];
+  /** The later changes that edited these lines. */
+  later: Array<{ revision: number; author: Author }>;
 }
 
 export interface HistoryEntry extends ChangeEntry {

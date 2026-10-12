@@ -25,7 +25,10 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   label ID --revision N [--name NAME] name a revision, or take its name away without --name
   revert ID --revision N              put a note back to a revision, as a new change
   revert ID --changes N,N             revert chosen changes, as one new change; revert a revert to have its changes again
-  revert ID ... --preview             what either revert would do, and the later changes to the same lines, with nothing written
+  revert ID ... --preview             what either revert would do, and each conflict with later changes to the same lines, with nothing written
+  revert ID ... --resolve keep|back|JSON --at N
+                                      settle the conflicts the preview listed at revision N: keep the later edits, go back to the
+                                      lines as they were, or a JSON list with "keep", "back" or {"text": "..."} for each conflict
   undo ID                             take back your latest change to a note
   redo ID                             revert your latest undo, so what it undid stands again
 
@@ -60,6 +63,18 @@ const integer = (name: string, value: string): number => {
 };
 
 const integers = (name: string, value: string) => value.split(",").map((part) => integer(name, part));
+
+/** How a revert's conflicts are settled: one word for all of them, or a JSON list with a choice for each. The server checks the choices. */
+function choices(value: string): unknown {
+  if (value === "keep" || value === "back") return value;
+  try {
+    const list: unknown = JSON.parse(value);
+    if (Array.isArray(list)) return list;
+  } catch {
+    // Said below.
+  }
+  throw new UsageError('--resolve must be keep, back, or a JSON list with "keep", "back" or {"text": "..."} for each conflict');
+}
 
 const time = (name: string, value: string): number => {
   const parsed = Date.parse(value);
@@ -138,13 +153,15 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "revert":
         if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to revert those");
+        if (flags.has("resolve") !== flags.has("at")) throw new UsageError("revert needs --resolve and --at together: how to settle the conflicts, and the revision the preview was of");
         if (flags.has("preview")) {
           tool = "preview_revert";
           args = flags.has("revision") ? { id: needId(), to: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
-          break;
+        } else {
+          tool = flags.has("revision") ? "revert_note" : "revert_changes";
+          args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
         }
-        tool = flags.has("revision") ? "revert_note" : "revert_changes";
-        args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+        if (flags.has("resolve")) args.resolve = { at: integer("--at", flags.get("at")!), choices: choices(flags.get("resolve")!) };
         break;
       case "undo":
       case "redo":

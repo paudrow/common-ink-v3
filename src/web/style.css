@@ -180,7 +180,8 @@ button.link:hover {
   font-size: 12px;
 }
 
-.button:disabled {
+.button:disabled,
+.button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
@@ -1693,17 +1694,153 @@ button.link:hover {
   text-decoration: underline;
 }
 
-.revert-overlap {
-  padding: 6px 8px;
-  border-left: 3px solid var(--danger);
-  border-radius: 4px;
+.revert-started-over {
+  color: var(--muted);
+}
+
+.revert-dialog h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.conflicts,
+.conflicts ol,
+.conflict,
+.revert-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conflicts ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conflicts-all {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.conflict {
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.conflict dl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.conflict dt,
+.conflict-after > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.conflict dd {
+  margin: 0 0 2px;
+}
+
+.conflict-lines {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.conflict-lines.now {
   background: var(--removed-soft);
 }
 
+.conflict-lines.after {
+  background: var(--added-soft);
+}
+
+.conflict-none {
+  color: var(--muted);
+  font-family: var(--prose);
+  font-style: italic;
+}
+
+.conflict-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.conflict-choices label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.conflict-choices input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.conflict-after {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conflict-typed {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.revert-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.revert-result output {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.revert-result[aria-busy="true"] .diff {
+  opacity: 0.6;
+}
+
+/* The buttons stay in reach under a preview taller than the window. */
 .revert-dialog-actions {
+  position: sticky;
+  bottom: 0;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  margin: 0 -16px -16px;
+  padding: 10px 16px 16px;
+  background: var(--bg-elev);
+  box-shadow: 0 -1px 0 var(--line);
 }
 
 .change-author {

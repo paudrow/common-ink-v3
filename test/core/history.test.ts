@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { run } from "../../scripts/ink-cli.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
-import { OpError, type HistoryEntry, type OpInput } from "../../src/core/protocol.ts";
+import { OpError, type HistoryEntry, type OpInput, type Resolve } from "../../src/core/protocol.ts";
 import worker from "../../src/worker/index.ts";
 import { addMember, newMember } from "./members.ts";
 
@@ -511,7 +511,7 @@ describe("a preview of a revert", () => {
     expect(await changeRows(id)).toBe(4);
     await perform(env.DB, ada, { type: "note.revert", id, revision: 2 });
     expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 5 })).toEqual(preview.diff);
-    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, to: 5 })).toEqual({ revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0 }, overlaps: [] });
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, to: 5 })).toEqual({ revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0 }, overlaps: [], conflicts: [] });
   });
 
   it("names no later change when the later edits are on other lines", async () => {
@@ -543,6 +543,84 @@ describe("a preview of a revert", () => {
     await perform(env.DB, ada, { type: "note.revertChanges", id: note.id, revisions: [3] });
     expect((await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [2] })).overlaps).toEqual([5]);
     expect((await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [6] })).overlaps).toEqual([5]);
+  });
+
+  /** Claude edits two todos, Ada edits one of them and adds a line, Claude ticks the other: reverting Claude's first change conflicts with the two after it. */
+  async function conflicted() {
+    const ada = await newMember();
+    const claude = await agentOf(ada);
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank" });
+    await write(claude.actor, note.id, "# List\n- [ ] buy milk now\n- [ ] sit still\n- [ ] call bank today");
+    await write(ada, note.id, "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [ ] call bank today\n- [ ] water plants");
+    await write(claude.actor, note.id, "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [x] call bank today\n- [ ] water plants");
+    return { ada, claude, id: note.id, revert: { type: "note.revertChanges" as const, id: note.id, revisions: [2] } };
+  }
+
+  it("lists each place a later change edited a line the revert changes: the line before, now, and with the later edit kept, and who edited it in which change", async () => {
+    const { ada, claude, id } = await conflicted();
+    const preview = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2] });
+    expect(preview.overlaps).toEqual([3, 4]);
+    expect(preview.conflicts).toEqual([
+      { line: 2, before: ["- [ ] buy milk"], now: ["- [ ] buy oat milk now"], kept: ["- [ ] buy oat milk"], later: [{ revision: 3, author: { kind: "member", personId: ada.personId, name: "Ada Lovelace" } }] },
+      { line: 4, before: ["- [ ] call bank"], now: ["- [x] call bank today"], kept: ["- [x] call bank"], later: [{ revision: 4, author: { kind: "agent", agentId: claude.actor.agentId, name: "Claude", onBehalfOf: ada.personId } }] },
+    ]);
+    expect(preview.diff).toMatchObject({ added: 2, removed: 2 });
+  });
+
+  it("previews and makes the same note for the choices given: each later edit kept, the line as it was before, or lines typed by hand", async () => {
+    const { ada, id, revert } = await conflicted();
+    const resolve = { at: 4, choices: ["back", { text: "- [ ] call the bank\r\n- [ ] and the broker" }] } satisfies Resolve;
+    const preview = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve });
+    expect(preview.diff.hunks.flatMap((h) => h.lines.filter((l) => l.kind === "add").map((l) => l.text))).toEqual(["- [ ] buy milk", "- [ ] call the bank", "- [ ] and the broker"]);
+    expect(await changeRows(id)).toBe(4);
+
+    const note = await perform(env.DB, ada, { ...revert, resolve });
+    expect(note.text).toBe("# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call the bank\n- [ ] and the broker\n- [ ] water plants");
+    const changes = await perform(env.DB, ada, { type: "note.history", id });
+    expect(changes.find((c) => c.revision === 5)).toMatchObject({ revision: 5, reverts: { how: "revert", revisions: [2] } });
+    expect(await changeRows(id)).toBe(5);
+
+    // What was chosen is part of the record: an edit made after it and undone leaves it, and reverting the revert takes it out.
+    await write(ada, id, `${note.text}\n- [ ] one more`);
+    expect((await perform(env.DB, ada, { type: "note.undo", id })).text).toBe(note.text);
+    expect((await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [5] })).text).toBe("# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [x] call bank today\n- [ ] water plants");
+  });
+
+  it("settles every conflict one way when one choice is given, and a revert to a revision the same way", async () => {
+    const { ada, id, revert } = await conflicted();
+    const kept = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve: { at: 4, choices: "keep" } });
+    expect(kept).toEqual(await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2] }));
+    expect((await perform(env.DB, ada, { ...revert, resolve: { at: 4, choices: "back" } })).text).toBe("# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank\n- [ ] water plants");
+
+    const other = await conflicted();
+    expect((await perform(env.DB, other.ada, { ...other.revert, resolve: { at: 4, choices: "keep" } })).text).toBe("# List\n- [ ] buy oat milk\n- [ ] sit still\n- [x] call bank\n- [ ] water plants");
+    expect((await perform(env.DB, other.ada, { type: "note.previewRevert", id: other.id, to: 1 })).conflicts).toEqual([]);
+    expect((await perform(env.DB, other.ada, { type: "note.revert", id: other.id, revision: 1, resolve: { at: 5, choices: [] } })).text).toBe("# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank");
+  });
+
+  it("refuses choices made for a note that has changed since, or not one for each conflict, and records nothing", async () => {
+    const { ada, id, revert } = await conflicted();
+    await expect(perform(env.DB, ada, { ...revert, resolve: { at: 4, choices: ["back"] } })).rejects.toMatchObject({
+      code: "invalid",
+      message: "This revert has 2 conflicts to settle, and 1 choice was given: give one for each, in the order the preview lists them",
+    });
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve: { at: 4, choices: ["back", "keep", "keep"] } })).rejects.toMatchObject({ code: "invalid" });
+    await write(ada, id, "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [x] call bank today\n- [ ] water plants\n- [ ] new");
+    const stale = { code: "invalid", message: "The note has changed since this revert was previewed: it was at revision 4 and is at 5. Preview the revert again, and settle its conflicts as they are now" };
+    await expect(perform(env.DB, ada, { ...revert, resolve: { at: 4, choices: "back" } })).rejects.toMatchObject(stale);
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve: { at: 4, choices: "back" } })).rejects.toMatchObject(stale);
+    await expect(perform(env.DB, ada, { ...revert, resolve: { at: 5, choices: ["sideways"] } } as unknown as OpInput)).rejects.toMatchObject({ code: "invalid" });
+    expect(await changeRows(id)).toBe(5);
+  });
+
+  it("gives an agent the same conflicts and choices through its tools, and a read-only token the preview alone", async () => {
+    const { ada, claude, id } = await conflicted();
+    const reader = await agentOf(ada, "Reader", { readOnly: true });
+    const asAda = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve: { at: 4, choices: "back" } });
+    expect((await tool(reader.token, "preview_revert", { id, revisions: [2], resolve: { at: 4, choices: "back" } })).json()).toEqual(asAda);
+    expect((await tool(reader.token, "revert_changes", { id, revisions: [2], resolve: { at: 4, choices: "back" } })).isError).toBe(true);
+    const done = await tool(claude.token, "revert_changes", { id, revisions: [2], resolve: { at: 4, choices: ["keep", { text: "- [ ] call bank, by Claude" }] } });
+    expect(done.json()).toMatchObject({ revision: 5, text: "# List\n- [ ] buy oat milk\n- [ ] sit still\n- [ ] call bank, by Claude\n- [ ] water plants" });
   });
 
   it("refuses what the revert would refuse, in the same words", async () => {
@@ -761,6 +839,11 @@ describe("history for an agent", () => {
     expect(await run(["revert", id, "--changes", "3,4"], io)).toBe(0);
     expect(await run(["revert", id, "--changes", "3,4", "--preview"], io)).toBe(0);
     expect(await run(["revert", id, "--preview", "--revision", "2"], io)).toBe(0);
+    expect(await run(["revert", id, "--changes", "3", "--resolve", "back", "--at", "7"], io)).toBe(0);
+    expect(await run(["revert", id, "--revision", "2", "--resolve", '["keep", {"text": "by hand"}]', "--at", "7"], io)).toBe(0);
+    expect(await run(["revert", id, "--changes", "3", "--preview", "--resolve", "keep", "--at", "7"], io)).toBe(0);
+    expect(await run(["revert", id, "--changes", "3", "--resolve", "back"], io)).toBe(2);
+    expect(await run(["revert", id, "--changes", "3", "--resolve", "sideways", "--at", "7"], io)).toBe(2);
     expect(await run(["revert", id, "--preview"], io)).toBe(2);
     expect(await run(["reapply", id, "--changes", "3"], io)).toBe(2);
     expect(await run(["diff", id, "--change", "3"], io)).toBe(0);
@@ -780,6 +863,9 @@ describe("history for an agent", () => {
       ["revert_changes", { id, revisions: [3, 4] }],
       ["preview_revert", { id, revisions: [3, 4] }],
       ["preview_revert", { id, to: 2 }],
+      ["revert_changes", { id, revisions: [3], resolve: { at: 7, choices: "back" } }],
+      ["revert_note", { id, revision: 2, resolve: { at: 7, choices: ["keep", { text: "by hand" }] } }],
+      ["preview_revert", { id, revisions: [3], resolve: { at: 7, choices: "keep" } }],
       ["change_diff", { id, revision: 3 }],
       ["history_summary", { noteIds: [id], authors: [{ kind: "agent", id: "cccccccccccc" }], limit: 5 }],
       ["undo", { id }],
