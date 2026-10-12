@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import type { Note } from "../../src/core/protocol.ts";
+import type { Me, Note, OpInput } from "../../src/core/protocol.ts";
 import { connectAgent, listedNote, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 const UNSEEN = "Changes you haven't seen";
@@ -203,11 +203,28 @@ test("History mode opens on the notes that changed, each closed with its lines a
 });
 
 test("History mode lists a page of notes at a time, and a note a page of its changes", async ({ page }) => {
+  // 64 writes before the page is opened. Against a deployed preview each is a round trip, so the workspace is asked for
+  // once, the notes are made several at a time, and the test is given the time the rest still takes.
+  test.slow();
   await signInAsNewPerson(page, "Ada Lovelace");
-  const first = await perform(page, { type: "note.create", text: "# Note 00" });
-  for (let i = 1; i <= 31; i++) await perform(page, { type: "note.create", text: `# Note ${String(i).padStart(2, "0")}` });
+  const workspaceId = await page.evaluate(async () => ((await (await fetch("/api/me")).json()) as Me).workspaces[0]!.id);
+  const send = (ops: OpInput[]) =>
+    page.evaluate(
+      ({ ops, workspaceId }) =>
+        Promise.all(
+          ops.map(async (op) => {
+            const res = await fetch(`/api/workspaces/${workspaceId}/ops`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(op) });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.message);
+            return json;
+          }),
+        ),
+      { ops, workspaceId },
+    );
+  const [first] = (await send([{ type: "note.create", text: "# Note 00" }])) as Note[];
+  for (let from = 1; from <= 31; from += 8) await send(Array.from({ length: Math.min(8, 32 - from) }, (_, i) => ({ type: "note.create" as const, text: `# Note ${String(from + i).padStart(2, "0")}` })));
   let text = "# Note 00";
-  for (let revision = 1; revision <= 32; revision++) await perform(page, { type: "note.write", id: first.id, baseRevision: revision, text: (text += `\n${revision}`) });
+  for (let revision = 1; revision <= 32; revision++) await send([{ type: "note.write", id: first!.id, baseRevision: revision, text: (text += `\n${revision}`) }]);
 
   await page.goto("/history");
   const mode = historyMode(page);
