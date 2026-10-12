@@ -71,6 +71,11 @@ A search of the text of notes a member can see, including todo lines, tags, and 
 **Quick open**:
 A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included.
 
+## Editor
+
+**Window buttons**:
+The buttons that act on the window and on no one note: the inspector and writing mode. They are at the top right corner of the editor area, whatever is open.
+
 ## Access
 
 **Member**:

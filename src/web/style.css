@@ -197,11 +197,13 @@ button.link:hover {
 
 /* Folders column */
 
+/* The sidebar and the inspector are as wide as the member dragged them, and give way down to their least widths before the editor area goes under its own. */
 .sidebar {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   flex-direction: column;
-  width: 216px;
+  width: var(--sidebar-width, 216px);
+  min-width: 150px;
   min-height: 0;
   padding: 8px 6px;
   overflow-y: auto;
@@ -357,6 +359,14 @@ button.link:hover {
   color: var(--muted);
 }
 
+.more-toggle svg {
+  transition: transform 0.12s;
+}
+
+.more-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
 .mode:hover {
   background: var(--hover);
 }
@@ -501,11 +511,13 @@ button.link:hover {
 
 /* Note list */
 
+/* The note list gives way first, so the sidebar and the inspector stay as wide as they were dragged while there is room. */
 .note-list {
   display: flex;
-  flex: none;
+  flex: 0 1000 auto;
   flex-direction: column;
   width: 280px;
+  min-width: 160px;
   min-height: 0;
   border-right: 1px solid var(--line);
   background: var(--bg-elev);
@@ -640,18 +652,71 @@ button.link:hover {
 
 /* Editor */
 
+/* 490px is the least the sidebar, the note list and the inspector take together, so in a window too narrow for all four the editor area has what is left. */
 .main {
   position: relative;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: min(320px, 100% - 490px);
   min-height: 0;
   overflow-y: auto;
+}
+
+/* An edge dragged to resize what is either side of it. It lies over the edge and takes no room of its own, so nothing is narrower for it. */
+.resize-handle {
+  position: relative;
+  z-index: 6;
+  flex: none;
+  width: 6px;
+  margin: 0 -3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle[aria-orientation="horizontal"] {
+  width: auto;
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+}
+
+.resize-handle::after {
+  position: absolute;
+  inset: 0 2px;
+  content: "";
+}
+
+.resize-handle[aria-orientation="horizontal"]::after {
+  inset: 2px 0;
+}
+
+.resize-handle:hover::after,
+.resize-handle[data-dragging]::after,
+.resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
+.resize-handle:focus-visible {
+  outline: none;
+}
+
+/* The window's own buttons, over the top right corner of the editor area. A note's bar leaves them room. */
+.window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 38px;
+  padding: 0 6px;
 }
 
 .note {
   display: flex;
   flex-direction: column;
   height: 100%;
+  container: note / inline-size;
 }
 
 .note-bar {
@@ -660,7 +725,7 @@ button.link:hover {
   align-items: center;
   gap: 10px;
   height: 38px;
-  padding: 0 8px 0 16px;
+  padding: 0 80px 0 16px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-size: 12px;
@@ -678,6 +743,30 @@ button.link:hover {
 .note-meta > * {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* In a narrow window, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
+@container note (max-width: 520px) {
+  .note-bar {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    height: auto;
+    min-height: 38px;
+    padding-block: 6px;
+  }
+
+  .note-meta {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .note-meta > * {
+    max-width: 100%;
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
 }
 
 .crumbs {
@@ -744,9 +833,10 @@ button.link:hover {
 
 .inspector {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   flex-direction: column;
-  width: 300px;
+  width: var(--inspector-width, 300px);
+  min-width: 180px;
   min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--bg-side);

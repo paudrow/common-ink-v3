@@ -130,13 +130,19 @@ test("More expands and collapses Contacts, Uploads, and History, and each mode n
   const modes = page.getByRole("navigation", { name: "Modes" });
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar"]);
 
-  await modes.getByRole("button", { name: "More" }).click();
+  const more = modes.getByRole("button", { name: "More" });
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await more.click();
+  const less = modes.getByRole("button", { name: "Less" });
+  await expect(less).toHaveAttribute("aria-expanded", "true");
+  await expect(more).toHaveCount(0);
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(editorPane(page)).toHaveText("HistoryHistory arrives with #5.");
 
-  await modes.getByRole("button", { name: "More" }).click();
+  await less.click();
+  await expect(more).toHaveAttribute("aria-expanded", "false");
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar"]);
   await modes.getByRole("link", { name: "Todos" }).click();
   await expect(editorPane(page)).toHaveText("TodosTodos arrives with #18.");

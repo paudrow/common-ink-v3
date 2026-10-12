@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { notePath } from "../core/slug.ts";
 import { perform } from "./api.ts";
@@ -10,6 +10,7 @@ import { INSPECTOR_TABS, Inspector, InspectorPanel, type InspectorTab } from "./
 import { MODES, type ModeId } from "./modes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { NoteList } from "./NoteList.tsx";
+import { ResizeHandle } from "./resize.tsx";
 import type { Navigate, Route } from "./router.ts";
 import { ModeLink, Sidebar } from "./Sidebar.tsx";
 import { Soon } from "./Soon.tsx";
@@ -24,6 +25,14 @@ const BROWSING: Layout = { writing: false };
 const WRITING: Layout = { writing: true, popover: null };
 const WRITING_KEY = "ink.writing";
 const INSPECTOR_KEY = "ink.inspector";
+/** How wide the sidebar and the inspector start, and how far a member can drag each. */
+const SIDEBAR = { start: 216, min: 150, max: 480 };
+const INSPECTOR = { start: 300, min: 180, max: 600 };
+/** How far an arrow key moves the edge of one. */
+const WIDTH_STEP = 16;
+type Widths = { sidebar?: number; inspector?: number };
+const isWidths = (v: unknown): v is Widths => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number" && n > 0);
+const within = ({ min, max }: { min: number; max: number }, width: number) => Math.min(max, Math.max(min, width));
 
 const popoverKey = (p: Popover | null) => (p ? (p.side === "left" ? "left" : p.tab) : null);
 
@@ -51,6 +60,10 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const [openNote, setOpenNote] = useState<NoteSummary | null>(null);
   const [layout, setLayout] = useState<Layout>(() => (readStored(WRITING_KEY, isBoolean) ? WRITING : BROWSING));
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
+  /** How wide the member dragged the sidebar and the inspector. Kept in this browser, as the layout is: a width suits the screen it was set on. */
+  const [widths, setWidths] = useStored<Widths>(`ink.widths.${me.person.id}`, isWidths, {});
+  const sidebarWidth = within(SIDEBAR, widths.sidebar ?? SIDEBAR.start);
+  const inspectorWidth = within(INSPECTOR, widths.inspector ?? INSPECTOR.start);
 
   const selectedFolderId = tree && chosenFolderId && !tree.byId.has(chosenFolderId) ? null : chosenFolderId;
   const current = route.kind === "note" && openNote?.id === route.id ? openNote : null;
@@ -154,6 +167,20 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const panelProps = current && tree && { note: current, tree, canEdit, onMove: (id: string, folderId: string) => moveNote(id, folderId).then(() => selectFolder(folderId)) };
   const activeMode = route.kind === "mode" ? route.mode : null;
 
+  /** The buttons that act on the window and on no one note. The editor area puts them at its top right corner, out of any note's bar. */
+  const controls = (
+    <div className="window-controls" role="group" aria-label="Window">
+      {!layout.writing && (
+        <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen(!inspectorOpen)}>
+          <Icon name="inspector" />
+        </button>
+      )}
+      <button type="button" className="icon-button" aria-label="Writing mode" title="Writing mode (⌘.)" aria-pressed={layout.writing} onClick={toggleWriting}>
+        <Icon name="writing" />
+      </button>
+    </div>
+  );
+
   const popoverRef = useRef<HTMLDivElement>(null);
   const leftRail = useRef<HTMLElement>(null);
   const rightRail = useRef<HTMLElement>(null);
@@ -162,7 +189,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   useDismiss(popover ? closePopover : null, popoverRef, leftRail, rightRail);
 
   return (
-    <div className="app" data-writing={layout.writing || undefined}>
+    <div className="app" data-writing={layout.writing || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
       {layout.writing ? (
         <nav ref={leftRail} className="rail" aria-label="Left rail">
           <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />
@@ -186,11 +213,21 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
           >
             {folders}
           </Sidebar>
+          <ResizeHandle
+            label="Resize sidebar"
+            orientation="vertical"
+            value={sidebarWidth}
+            {...SIDEBAR}
+            step={WIDTH_STEP}
+            onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
+            onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
+          />
           {noteList}
         </>
       )}
 
       <main className="main" aria-label="Editor">
+        {controls}
         {route.kind === "note" && (
           <NoteEditor
             key={route.id}
@@ -207,18 +244,6 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
                   </span>
                 </>
               )
-            }
-            actions={
-              <>
-                {!layout.writing && (
-                  <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen(!inspectorOpen)}>
-                    <Icon name="inspector" />
-                  </button>
-                )}
-                <button type="button" className="icon-button" aria-label="Writing mode" title="Writing mode (⌘.)" aria-pressed={layout.writing} onClick={toggleWriting}>
-                  <Icon name="writing" />
-                </button>
-              </>
             }
           />
         )}
@@ -245,7 +270,22 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
           ))}
         </nav>
       ) : (
-        panelProps && inspectorOpen && <Inspector {...panelProps} />
+        panelProps &&
+        inspectorOpen && (
+          <>
+            <ResizeHandle
+              label="Resize inspector"
+              orientation="vertical"
+              value={inspectorWidth}
+              {...INSPECTOR}
+              step={WIDTH_STEP}
+              perPixel={() => -1}
+              onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
+              onReset={() => setWidths(({ inspector: _, ...w }) => w)}
+            />
+            <Inspector {...panelProps} />
+          </>
+        )
       )}
 
       {popover?.side === "left" && (

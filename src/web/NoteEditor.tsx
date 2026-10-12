@@ -36,10 +36,9 @@ interface Props {
   onLoaded: (note: Note) => void;
   onSaved: (note: Note) => void;
   meta: ReactNode;
-  actions: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta, actions }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [missing, setMissing] = useState(false);
@@ -98,7 +97,6 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta, actio
         <div className="save-state" role="status">
           {SAVE_LABEL[saveState]}
         </div>
-        {actions}
       </header>
       <div className="note-scroll">
         <div className="editor" ref={host} />

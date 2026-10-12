@@ -20,7 +20,8 @@ interface Props {
 }
 
 export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, newNoteIn, children }: Props) {
-  const [more, setMore] = useState(false);
+  // It starts open on a mode that is under it, so the mode the member is on is marked in the list.
+  const [more, setMore] = useState(() => MODES.some((m) => !m.primary && m.id === activeMode));
   const link = (mode: (typeof MODES)[number]) => <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={onGo} labelled />;
   return (
     <aside className="sidebar" aria-label="Sidebar">
@@ -33,9 +34,9 @@ export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, 
       )}
       <nav aria-label="Modes" className="modes">
         {MODES.filter((m) => m.primary).map(link)}
-        <button type="button" className="mode" aria-expanded={more} onClick={() => setMore(!more)}>
-          <Icon name="more" />
-          <span>More</span>
+        <button type="button" className="mode more-toggle" aria-expanded={more} onClick={() => setMore(!more)}>
+          <Icon name="chevron" />
+          <span>{more ? "Less" : "More"}</span>
         </button>
         {more && MODES.filter((m) => !m.primary).map(link)}
       </nav>
