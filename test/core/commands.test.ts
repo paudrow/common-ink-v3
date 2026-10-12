@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createCommands } from "../../src/web/commands.ts";
-import { chordFor, chordLabel, chordOf } from "../../src/web/keybindings.ts";
+import { advance, chordFor, chordLabel, chordOf, typed } from "../../src/web/keybindings.ts";
 import { matching } from "../../src/web/match.ts";
 
 describe("commands", () => {
@@ -50,6 +50,17 @@ describe("keybindings", () => {
     expect(press("k", { ctrlKey: true, altKey: true })).toBe("mod+alt+k");
   });
 
+  it("writes the space bar and the plus key by name, which a chord is joined and a sequence is spaced with", () => {
+    expect(press(" ")).toBe("space");
+    expect(press(" ", { ctrlKey: true })).toBe("mod+space");
+    expect(press("+", { shiftKey: true })).toBe("shift+plus");
+  });
+
+  it("knows the keys that would otherwise type, by the chord they begin with", () => {
+    for (const keys of ["j", "shift+g", "g g", "enter", "space", "/", "backspace", "j mod+k"]) expect(typed(keys), keys).toBe(true);
+    for (const keys of ["mod+j", "mod+w h", "alt+shift+g", "escape", "shift+escape", "f2", "f12 j", "mod+k l"]) expect(typed(keys), keys).toBe(false);
+  });
+
   it("finds the chord bound to a command", () => {
     const bindings = { "mod+p": "notes.quickOpen", "mod+shift+p": "commands.show" };
 
@@ -61,6 +72,38 @@ describe("keybindings", () => {
     expect(chordLabel("mod+shift+p", true)).toBe("⇧⌘P");
     expect(chordLabel("mod+shift+p", false)).toBe("Ctrl+Shift+P");
     expect(chordLabel("mod+.", true)).toBe("⌘.");
+  });
+
+  it("labels keys pressed one after another, chord by chord", () => {
+    expect(chordLabel("g g", true)).toBe("G G");
+    expect(chordLabel("mod+w h", true)).toBe("⌘W H");
+    expect(chordLabel("mod+w h", false)).toBe("Ctrl+W H");
+    expect(chordLabel("g shift+t", false)).toBe("G Shift+T");
+  });
+
+  it("runs a sequence on its last key, and takes the keys that begin one only while a command that can run goes on from them", () => {
+    const ready = ["j", "g g", "g t", "mod+w h", "mod+p"];
+
+    expect(advance("", "j", ready)).toEqual({ run: "j" });
+    expect(advance("", "g", ready)).toEqual({ pending: "g" });
+    expect(advance("g", "g", ready)).toEqual({ run: "g g" });
+    expect(advance("g", "t", ready)).toEqual({ run: "g t" });
+    expect(advance("mod+w", "h", ready)).toEqual({ run: "mod+w h" });
+    // A key nobody has is left to whatever has focus, and so is one that begins a sequence no command can finish now.
+    expect(advance("", "x", ready)).toBeNull();
+    expect(advance("", "g", ["j", "mod+p"])).toBeNull();
+    expect(advance("", "h", ready)).toBeNull();
+  });
+
+  it("gives up a sequence on a key that doesn't go on from it: the key runs what it runs alone, and otherwise goes nowhere", () => {
+    const ready = ["j", "g g", "mod+w h", "mod+p"];
+
+    expect(advance("g", "j", ready)).toEqual({ run: "j" });
+    expect(advance("g", "mod+p", ready)).toEqual({ run: "mod+p" });
+    expect(advance("mod+w", "g", ready)).toEqual({ pending: "g" });
+    // Ctrl-w and then x in a note must not delete a letter.
+    expect(advance("mod+w", "x", ready)).toBe("dropped");
+    expect(advance("g", "escape", ready)).toBe("dropped");
   });
 });
 

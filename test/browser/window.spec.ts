@@ -96,14 +96,23 @@ test("the buttons for the inspector and writing mode are at the top right of the
   await expect(page.locator(".note-bar").getByRole("button", { name: /Inspector|Writing mode/ })).toHaveCount(0);
 
   const main = (await page.getByRole("main", { name: "Editor" }).boundingBox())!;
+  const bar = (await page.locator(".note-bar").boundingBox())!;
   const at = (await buttons.boundingBox())!;
-  expect(Math.round(at.y)).toBe(Math.round(main.y));
+  expect(at.y).toBeGreaterThanOrEqual(main.y);
+  expect(at.y + at.height).toBeLessThanOrEqual(bar.y);
   expect(Math.round(at.x + at.width)).toBe(Math.round(main.x + main.width));
 
+  await page.getByRole("tab", { name: "Draft" }).dblclick();
   await page.getByRole("link", { name: "Search" }).click();
-  await expect(page.getByRole("heading", { name: "Search" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Search" })).toHaveAttribute("aria-selected", "true");
   await expect(buttons.getByRole("button", { name: "Writing mode" })).toBeVisible();
   await expect(buttons.getByRole("button", { name: "Inspector" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "Draft" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Split down" }).click();
+  await expect(page.getByRole("region", { name: "Editor group 2" })).toBeVisible();
+  await expect(buttons).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Editor group 1" }).getByRole("group", { name: "Window" })).toBeVisible();
 
   await buttons.getByRole("button", { name: "Writing mode" }).click();
   await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
@@ -114,12 +123,13 @@ test("the buttons for the inspector and writing mode are at the top right of the
 
 test("with nothing open the buttons are still there", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
+  await expect(page.getByRole("tab")).toHaveCount(0);
   await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
   await expect(windowButtons(page).getByRole("button", { name: "Writing mode" })).toBeVisible();
   await expect(windowButtons(page).getByRole("button", { name: "Inspector" })).toBeVisible();
 });
 
-for (const width of [900, 700]) {
+for (const width of [900, 700, 480]) {
   test(`in a window ${width}px wide every control is inside it, and the sidebar and the inspector still open and close`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await withNote(page, "# Draft with a long title that takes room\n\nWords.");
@@ -148,7 +158,7 @@ for (const width of [900, 700]) {
     const buttons = windowButtons(page);
     const inspectorButton = buttons.getByRole("button", { name: "Inspector" });
     const writingButton = buttons.getByRole("button", { name: "Writing mode" });
-    await inside(inspectorButton, writingButton, sidebar(page), inspector(page), page.getByRole("navigation", { name: "Notes" }), page.locator(".save-state"), edge(page, "Resize sidebar"), edge(page, "Resize inspector"));
+    await inside(inspectorButton, writingButton, sidebar(page), inspector(page), page.getByRole("tab", { name: /Draft/ }), page.locator(".save-state"), edge(page, "Resize sidebar"), edge(page, "Resize inspector"));
     for (const button of await page.locator(".note-bar").getByRole("button").all()) await inside(button);
     let bar = await barIsWhole();
     expect(bar.cut).toEqual([]);

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { listedNote, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 /** Opens a note from the list of every note as a preview, which is what a click on its title does. */
@@ -271,4 +271,302 @@ test("coming back to a tab while its save is on the way shows what was typed", a
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
   await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("typed late");
   await expect(page.getByRole("status")).toHaveText("Saved");
+});
+
+const group = (page: Page, n: number) => page.getByRole("region", { name: `Editor group ${n}` });
+const boxOf = async (part: Locator) => {
+  const { x, y, width, height } = (await part.boundingBox())!;
+  return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
+};
+const storedLayout = (page: Page) => page.evaluate(() => JSON.parse(Object.entries(localStorage).find(([key]) => key.startsWith("ink.editor."))![1]) as { groups: { tabs: { id: string }[] }[]; split?: { direction: string; panes: unknown[]; sizes: number[] } });
+
+/** Takes a tab by the mouse and holds it over a point of a group's body, a share of the way across and down it. The button is still down after. */
+async function holdOver(page: Page, from: Locator, body: Locator, across: number, down: number) {
+  const box = (await body.boundingBox())!;
+  await from.hover();
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 3 });
+  await page.mouse.move(box.x + box.width * across, box.y + box.height * down, { steps: 3 });
+  // The browser tells the page where a drag is a move late, so the pointer is moved once more where it already is.
+  await page.mouse.move(box.x + box.width * across + 1, box.y + box.height * down);
+  await page.mouse.move(box.x + box.width * across, box.y + box.height * down);
+}
+
+test("a tab splits down from its menu and from the command, inside a split to the right, and the arrangement is kept", async ({ page }) => {
+  await withNotes(page, "Alpha", "Beta", "Gamma", "Delta");
+  for (const title of ["Alpha", "Beta", "Gamma"]) await keep(page, title);
+  await tab(page, "All notes").click({ button: "right" });
+  await page.getByRole("menu", { name: "All notes tab" }).getByRole("menuitem", { name: "Close", exact: true }).click();
+  await expect(tabs(page)).toHaveText(["Alpha", "Beta", "Gamma"]);
+
+  await tab(page, "Gamma").click({ button: "right" });
+  await page.getByRole("menu", { name: "Gamma tab" }).getByRole("menuitem", { name: "Split down" }).click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
+  await expect(tabs(page, 1)).toHaveText(["Gamma"]);
+  const top = await boxOf(group(page, 1));
+  const bottom = await boxOf(group(page, 2));
+  expect(bottom.x).toBe(top.x);
+  expect(bottom.width).toBe(top.width);
+  expect(bottom.y).toBeGreaterThanOrEqual(top.y + top.height);
+  expect(Math.abs(bottom.height - top.height)).toBeLessThanOrEqual(2);
+  await expect(group(page, 2).locator(".cm-line").first()).toHaveText("# Gamma");
+
+  await tab(page, "Beta").click();
+  await tab(page, "Beta").click({ button: "right" });
+  await page.getByRole("menu", { name: "Beta tab" }).getByRole("menuitem", { name: "Split right" }).click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 1)).toHaveText(["Beta"]);
+  await expect(tabs(page, 2)).toHaveText(["Gamma"]);
+  const [a, b, c] = [await boxOf(group(page, 1)), await boxOf(group(page, 2)), await boxOf(group(page, 3))];
+  expect(b.y).toBe(a.y);
+  expect(b.x).toBeGreaterThanOrEqual(a.x + a.width);
+  expect(c.y).toBeGreaterThanOrEqual(a.y + a.height);
+  expect(c.width).toBeGreaterThanOrEqual(a.width + b.width);
+
+  await page.reload();
+  await expect(tabs(page, 2)).toHaveText(["Gamma"]);
+  expect(await boxOf(group(page, 1))).toEqual(a);
+  expect(await boxOf(group(page, 2))).toEqual(b);
+  expect(await boxOf(group(page, 3))).toEqual(c);
+  expect((await storedLayout(page)).split).toEqual({ direction: "column", panes: [{ direction: "row", panes: ["1", "3"], sizes: [1, 1] }, "2"], sizes: [1, 1] });
+
+  await group(page, 1).getByRole("textbox", { name: "Note text" }).click();
+  await page.keyboard.press("ControlOrMeta+P");
+  await page.getByRole("dialog", { name: "Go to note" }).getByRole("option", { name: /Delta/ }).click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Delta"]);
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("dialog", { name: "Commands" }).getByRole("option", { name: "Split editor down" }).click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 1)).toHaveText(["Delta"]);
+  await expect(tabs(page, 2)).toHaveText(["Beta"]);
+  await expect(tabs(page, 3)).toHaveText(["Gamma"]);
+  const [alpha, delta] = [await boxOf(group(page, 1)), await boxOf(group(page, 2))];
+  expect(delta.x).toBe(alpha.x);
+  expect(delta.width).toBe(alpha.width);
+  expect(delta.y).toBeGreaterThanOrEqual(alpha.y + alpha.height);
+  expect(delta.y + delta.height).toBeLessThanOrEqual(c.y);
+});
+
+test("a layout kept before a group could be split down opens as it was, side by side", async ({ page }) => {
+  const [alpha, beta] = await withNotes(page, "Alpha", "Beta");
+  await keep(page, "Alpha");
+  await page.evaluate(
+    ([a, b]) => {
+      const key = Object.keys(localStorage).find((k) => k.startsWith("ink.editor."))!;
+      localStorage.setItem(key, JSON.stringify({ groups: [{ id: "1", tabs: [{ noteId: a, preview: false }], activeNoteId: a }, { id: "2", tabs: [{ noteId: b, preview: true }], activeNoteId: b }], focusedGroupId: "2" }));
+    },
+    [alpha!.id, beta!.id],
+  );
+  await page.goto("/");
+
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 1)).toHaveText(["Beta"]);
+  expect(await italic(page, 1)).toEqual([true]);
+  const [left, right] = [await boxOf(group(page, 1)), await boxOf(group(page, 2))];
+  expect(right.y).toBe(left.y);
+  expect(right.x).toBeGreaterThan(left.x);
+  await expect(page).toHaveURL(new RegExp(`${beta!.id}$`));
+});
+
+test("a tab held over a group shows where it would land: the middle adds it there, and each of the four edges splits that way", async ({ page }) => {
+  await withNotes(page, "Alpha", "Beta", "Gamma", "Delta");
+  for (const title of ["Alpha", "Beta", "Gamma", "Delta"]) await keep(page, title);
+  await tab(page, "All notes").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Close", exact: true }).click();
+  await tab(page, "Delta").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Split right" }).click();
+  await expect(tabs(page, 1)).toHaveText(["Delta"]);
+  const body = group(page, 2).locator(".group-body");
+  const whole = await boxOf(body);
+  const zone = page.locator(".drop-zone");
+
+  const shown: Record<string, { x: number; y: number; width: number; height: number }> = {};
+  for (const [name, across, down] of [["left", 0.1, 0.5], ["right", 0.9, 0.5], ["up", 0.5, 0.1], ["down", 0.5, 0.9], ["middle", 0.5, 0.5], ["middle", 0.3, 0.7]] as const) {
+    await holdOver(page, tab(page, "Gamma"), body, across, down);
+    await expect(zone).toHaveAttribute("data-zone", name);
+    shown[name] = await boxOf(zone);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await expect(zone).toHaveCount(0);
+  }
+  const half = { width: Math.round(whole.width / 2), height: Math.round(whole.height / 2) };
+  expect(shown.middle).toEqual(whole);
+  expect(shown.left).toMatchObject({ x: whole.x, y: whole.y, height: whole.height });
+  expect(shown.right).toMatchObject({ y: whole.y, height: whole.height });
+  expect(shown.up).toMatchObject({ x: whole.x, y: whole.y, width: whole.width });
+  expect(shown.down).toMatchObject({ x: whole.x, width: whole.width });
+  expect(Math.abs(shown.left!.width - half.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(shown.right!.x - (whole.x + half.width))).toBeLessThanOrEqual(1);
+  expect(Math.abs(shown.up!.height - half.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(shown.down!.y - (whole.y + half.height))).toBeLessThanOrEqual(1);
+  // Escape let each of them go where it was.
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta", "Gamma"]);
+
+  await holdOver(page, tab(page, "Gamma"), body, 0.5, 0.5);
+  await page.mouse.up();
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Beta"]);
+  await expect(tabs(page, 1)).toHaveText(["Delta", "Gamma"]);
+  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(2);
+  await expect(tab(page, "Gamma", 1)).toHaveAttribute("aria-selected", "true");
+  await expect(group(page, 2).locator(".cm-line").first()).toHaveText("# Gamma");
+
+  await holdOver(page, tab(page, "Beta"), body, 0.5, 0.9);
+  await page.mouse.up();
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 1)).toHaveText(["Delta", "Gamma"]);
+  await expect(tabs(page, 2)).toHaveText(["Beta"]);
+  const [over, under] = [await boxOf(group(page, 2)), await boxOf(group(page, 3))];
+  expect(under.x).toBe(over.x);
+  expect(under.y).toBeGreaterThanOrEqual(over.y + over.height);
+
+  await holdOver(page, tab(page, "Delta", 1), group(page, 1).locator(".group-body"), 0.5, 0.1);
+  await page.mouse.up();
+  await expect(tabs(page, 0)).toHaveText(["Delta"]);
+  await expect(tabs(page, 1)).toHaveText(["Alpha"]);
+  expect((await boxOf(group(page, 2))).y).toBeGreaterThanOrEqual((await boxOf(group(page, 1))).y + (await boxOf(group(page, 1))).height);
+});
+
+test("the edge between two halves of a split is dragged, moved with the arrow keys, kept across a reload, and put back with a double-click", async ({ page }) => {
+  await withNotes(page, "Alpha", "Beta");
+  await keep(page, "Alpha");
+  await keep(page, "Beta");
+  await tab(page, "Beta").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Split right" }).click();
+  const edge = page.getByRole("separator", { name: "Resize split left and right" });
+  await expect(edge).toHaveAttribute("aria-orientation", "vertical");
+  await expect(edge).toHaveAttribute("aria-valuenow", "50");
+  const even = await boxOf(group(page, 1));
+
+  const at = (await edge.boundingBox())!;
+  const middle = at.x + at.width / 2;
+  await page.mouse.move(middle, at.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(middle + 60, at.y + 200, { steps: 4 });
+  await page.mouse.move(middle + 120, at.y + 200, { steps: 4 });
+  await page.mouse.up();
+  expect(Math.abs((await boxOf(group(page, 1))).width - (even.width + 120))).toBeLessThanOrEqual(2);
+  const dragged = await boxOf(group(page, 1));
+
+  await page.reload();
+  await expect(group(page, 2)).toBeVisible();
+  expect(await boxOf(group(page, 1))).toEqual(dragged);
+
+  await edge.focus();
+  await page.keyboard.press("ArrowLeft");
+  expect((await boxOf(group(page, 1))).width).toBeLessThan(dragged.width);
+  await page.keyboard.press("Home");
+  await expect(edge).toHaveAttribute("aria-valuenow", "10");
+  expect((await boxOf(group(page, 1))).width).toBeLessThan((await boxOf(group(page, 2))).width / 5);
+
+  await edge.dblclick();
+  await expect(edge).toHaveAttribute("aria-valuenow", "50");
+  expect(Math.abs((await boxOf(group(page, 1))).width - even.width)).toBeLessThanOrEqual(1);
+  expect((await storedLayout(page)).split).toBeUndefined();
+
+  await tab(page, "Beta", 1).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Close", exact: true }).click();
+  await keep(page, "Beta");
+  await tab(page, "Beta").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Split down" }).click();
+  const level = page.getByRole("separator", { name: "Resize split up and down" });
+  await expect(level).toHaveAttribute("aria-orientation", "horizontal");
+  const before = await boxOf(group(page, 1));
+  await level.focus();
+  await page.keyboard.press("ArrowDown");
+  expect((await boxOf(group(page, 1))).height).toBeGreaterThan(before.height);
+  await page.keyboard.press("Enter");
+  expect(Math.abs((await boxOf(group(page, 1))).height - before.height)).toBeLessThanOrEqual(1);
+});
+
+const PAGES = [
+  ["/dashboard", "Dashboard"],
+  ["/search", "Search"],
+  ["/todos", "Todos"],
+  ["/calendar", "Calendar"],
+  ["/history", "History"],
+  ["/contacts", "Contacts"],
+  ["/uploads", "Uploads"],
+] as const;
+
+test("every page opens in a tab at its own address, and is drawn there", async ({ page }) => {
+  await withNotes(page, "Alpha");
+  await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
+  for (const [path, label] of PAGES) {
+    await page.keyboard.press("ControlOrMeta+Shift+P");
+    await page.keyboard.type(`Go to ${label}`);
+    await page.getByRole("dialog", { name: "Commands" }).getByRole("option", { name: new RegExp(`^Go to ${label}`) }).first().click();
+    await expect(tabs(page)).toHaveText([label]);
+    await expect(tab(page, label)).toHaveAttribute("aria-selected", "true");
+    await expect(tab(page, label)).toHaveAttribute("data-kind", "page");
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await expect(group(page, 1).locator(".page-pane > *").first()).toBeVisible();
+    await expect(group(page, 1).getByText("There's nothing at this address.")).toHaveCount(0);
+  }
+  // Each took the place of the one before, as a preview does: every page looked at left one tab.
+  expect(await italic(page)).toEqual([true]);
+});
+
+test("a page's tab is a preview until it is kept, is focused and not opened twice, sits in a split, and comes back after a reload", async ({ page }) => {
+  await withNotes(page, "Alpha");
+  const nav = page.getByRole("navigation", { name: "Modes" });
+
+  await nav.getByRole("link", { name: "Search" }).click();
+  await expect(tabs(page)).toHaveText(["Search"]);
+  expect(await italic(page)).toEqual([true]);
+  await expect(page).toHaveURL(/\/search$/);
+  await nav.getByRole("link", { name: "Todos" }).click();
+  await expect(tabs(page)).toHaveText(["Todos"]);
+  await expect(page.getByRole("heading", { name: "Todos", level: 1 })).toBeVisible();
+
+  await tab(page, "Todos").dblclick();
+  expect(await italic(page)).toEqual([false]);
+  await nav.getByRole("link", { name: "Search" }).click();
+  await expect(tabs(page)).toHaveText(["Todos", "Search"]);
+  expect(await italic(page)).toEqual([false, true]);
+
+  await tab(page, "Todos").click();
+  await expect(page).toHaveURL(/\/todos$/);
+  await expect(page.getByRole("heading", { name: "Todos", level: 1 })).toBeVisible();
+  await tab(page, "Search").click();
+  await expect(page).toHaveURL(/\/search$/);
+  await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
+
+  await tab(page, "Search").click({ button: "right" });
+  await page.getByRole("menu", { name: "Search tab" }).getByRole("menuitem", { name: "Split down" }).click();
+  await expect(tabs(page, 0)).toHaveText(["Todos"]);
+  await expect(tabs(page, 1)).toHaveText(["Search"]);
+  await expect(group(page, 1).getByRole("heading", { name: "Todos", level: 1 })).toBeVisible();
+  await expect(group(page, 2).getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
+  await expect(page).toHaveURL(/\/search$/);
+
+  // Todos is open in the other group: its link turns to it there, and opens no second tab.
+  await nav.getByRole("link", { name: "Todos" }).click();
+  await expect(page).toHaveURL(/\/todos$/);
+  await expect(page.getByRole("tab", { name: "Todos" })).toHaveCount(1);
+  await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
+  // The page in the other half is still at its own address.
+  await expect(group(page, 2).getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
+
+  // A note opened from a page that is kept goes beside it.
+  await group(page, 2).getByRole("heading", { name: "Search", level: 1 }).click();
+  await expect(page).toHaveURL(/\/search$/);
+  await page.keyboard.press("ControlOrMeta+P");
+  await page.getByRole("dialog", { name: "Go to note" }).getByRole("option", { name: /Alpha/ }).click();
+  await expect(tabs(page, 1)).toHaveText(["Search", "Alpha"]);
+  await expect(group(page, 2).locator(".cm-line").first()).toHaveText("# Alpha");
+
+  // Back goes to the page the note was opened from, in its tab, and forward to the note.
+  await page.goBack();
+  await expect(tab(page, "Search", 1)).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/\/search$/);
+  await page.goForward();
+  await expect(tab(page, "Alpha", 1)).toHaveAttribute("aria-selected", "true");
+
+  await page.reload();
+  await expect(tabs(page, 0)).toHaveText(["Todos"]);
+  await expect(tabs(page, 1)).toHaveText(["Search", "Alpha"]);
+  await expect(group(page, 1).getByRole("heading", { name: "Todos", level: 1 })).toBeVisible();
+  await tab(page, "Search", 1).click();
+  await expect(page).toHaveURL(/\/search$/);
+  await expect(group(page, 2).getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
 });

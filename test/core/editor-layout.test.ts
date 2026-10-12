@@ -422,3 +422,206 @@ describe("a layout kept before folders had tabs", () => {
     expect(keptLayout(one([["a", true]]))).toEqual(one([["a", true]]));
   });
 });
+
+describe("splitting down", () => {
+  const g = (id: string, noteId: string) => ({ id, tabs: [{ kind: "note" as const, id: noteId, preview: false }], active: note(noteId) });
+  const ab: EditorLayout = { groups: [{ id: "1", tabs: [{ kind: "note", id: "a", preview: false }, { kind: "note", id: "b", preview: false }], active: note("b") }], focusedGroupId: "1" };
+
+  it("puts the new group under the one it was split from, or over it", () => {
+    expect(editorReducer(ab, { type: "split", groupId: "1", side: "down", tab: note("b") })).toEqual({
+      groups: [g("1", "a"), g("2", "b")],
+      focusedGroupId: "2",
+      split: { direction: "column", panes: ["1", "2"], sizes: [1, 1] },
+    });
+    expect(editorReducer(ab, { type: "split", groupId: "1", side: "up", tab: note("b") })).toEqual({
+      groups: [g("2", "b"), g("1", "a")],
+      focusedGroupId: "2",
+      split: { direction: "column", panes: ["2", "1"], sizes: [1, 1] },
+    });
+  });
+
+  it("nests inside a row, and a row nests inside it, with the groups kept in reading order", () => {
+    const row: EditorLayout = { groups: [g("1", "a"), g("2", "b")], focusedGroupId: "1" };
+    const down = editorReducer(row, { type: "split", groupId: "2", side: "down", tab: note("c") });
+    expect(down).toEqual({
+      groups: [g("1", "a"), g("2", "b"), g("3", "c")],
+      focusedGroupId: "3",
+      split: { direction: "row", panes: ["1", { direction: "column", panes: ["2", "3"], sizes: [1, 1] }], sizes: [1, 1] },
+    });
+
+    const nested = editorReducer(down, { type: "split", groupId: "2", side: "left", tab: note("d") });
+    expect(nested.groups.map((x) => x.id)).toEqual(["1", "4", "2", "3"]);
+    expect(nested.split).toEqual({
+      direction: "row",
+      panes: ["1", { direction: "column", panes: [{ direction: "row", panes: ["4", "2"], sizes: [1, 1] }, "3"], sizes: [1, 1] }],
+      sizes: [1, 1],
+    });
+    expect(isEditorLayout(nested)).toBe(true);
+  });
+
+  it("joins a column the group is already in, as tall as the group it is beside", () => {
+    const column: EditorLayout = { groups: [g("1", "a"), g("2", "b")], focusedGroupId: "1", split: { direction: "column", panes: ["1", "2"], sizes: [3, 1] } };
+
+    expect(editorReducer(column, { type: "split", groupId: "1", side: "down", tab: note("c") }).split).toEqual({ direction: "column", panes: ["1", "3", "2"], sizes: [3, 3, 1] });
+  });
+
+  it("goes back to the plain row when the group that made the column closes", () => {
+    const column: EditorLayout = {
+      groups: [g("1", "a"), g("2", "b"), g("3", "c")],
+      focusedGroupId: "3",
+      split: { direction: "row", panes: ["1", { direction: "column", panes: ["2", "3"], sizes: [1, 1] }], sizes: [1, 1] },
+    };
+
+    expect(editorReducer(column, { type: "close", scope: "tab", groupId: "3", tab: note("c") })).toEqual({ groups: [g("1", "a"), g("2", "b")], focusedGroupId: "2" });
+  });
+
+  it("keeps the shares of the groups that stay when one between them closes, and a row inside a row is one row", () => {
+    const layout: EditorLayout = {
+      groups: [g("1", "a"), g("2", "b"), g("3", "c"), g("4", "d")],
+      focusedGroupId: "1",
+      split: { direction: "row", panes: ["1", { direction: "column", panes: [{ direction: "row", panes: ["2", "3"], sizes: [1, 3] }, "4"], sizes: [1, 1] }], sizes: [2, 4] },
+    };
+
+    expect(editorReducer(layout, { type: "close", scope: "tab", groupId: "4", tab: note("d") })).toEqual({
+      groups: [g("1", "a"), g("2", "b"), g("3", "c")],
+      focusedGroupId: "1",
+      split: { direction: "row", panes: ["1", "2", "3"], sizes: [2, 1, 3] },
+    });
+  });
+
+  it("moves a group's only tab to its other side without leaving an empty group", () => {
+    const row: EditorLayout = { groups: [g("1", "a"), g("2", "b")], focusedGroupId: "1" };
+
+    expect(editorReducer(row, { type: "split", groupId: "1", side: "down", tab: note("b") })).toEqual({
+      groups: [g("1", "a"), g("3", "b")],
+      focusedGroupId: "3",
+      split: { direction: "column", panes: ["1", "3"], sizes: [1, 1] },
+    });
+  });
+});
+
+describe("resizing a split", () => {
+  const g = (id: string, noteId: string) => ({ id, tabs: [{ kind: "note" as const, id: noteId, preview: false }], active: note(noteId) });
+  const row: EditorLayout = { groups: [g("1", "a"), g("2", "b")], focusedGroupId: "1" };
+
+  it("gives the groups of a plain row their shares, and equal shares make it plain again", () => {
+    const sized = editorReducer(row, { type: "resize", path: [], sizes: [3, 1] });
+    expect(sized).toEqual({ ...row, split: { direction: "row", panes: ["1", "2"], sizes: [3, 1] } });
+    expect(editorReducer(sized, { type: "resize", path: [], sizes: [1, 1] })).toEqual(row);
+  });
+
+  it("reaches a split inside another by the way to it", () => {
+    const nested: EditorLayout = {
+      groups: [g("1", "a"), g("2", "b"), g("3", "c")],
+      focusedGroupId: "1",
+      split: { direction: "row", panes: ["1", { direction: "column", panes: ["2", "3"], sizes: [1, 1] }], sizes: [1, 1] },
+    };
+
+    expect(editorReducer(nested, { type: "resize", path: [1], sizes: [1, 4] }).split).toEqual({
+      direction: "row",
+      panes: ["1", { direction: "column", panes: ["2", "3"], sizes: [1, 4] }],
+      sizes: [1, 1],
+    });
+  });
+
+  it("is refused when the shares don't fit the split", () => {
+    expect(editorReducer(row, { type: "resize", path: [], sizes: [1] })).toEqual(row);
+    expect(editorReducer(row, { type: "resize", path: [], sizes: [1, 0] })).toEqual(row);
+  });
+});
+
+describe("dropping a tab on the middle of a group", () => {
+  it("adds it to the end of that group's tabs, kept and showing, and takes it out of the group it was in", () => {
+    const layout: EditorLayout = {
+      groups: [
+        { id: "1", tabs: [{ kind: "note", id: "a", preview: false }, { kind: "note", id: "b", preview: true }], active: note("a") },
+        { id: "2", tabs: [{ kind: "note", id: "c", preview: false }], active: note("c") },
+      ],
+      focusedGroupId: "1",
+    };
+
+    expect(editorReducer(layout, { type: "add", groupId: "2", tab: note("b") })).toEqual({
+      groups: [
+        { id: "1", tabs: [{ kind: "note", id: "a", preview: false }], active: note("a") },
+        { id: "2", tabs: [{ kind: "note", id: "c", preview: false }, { kind: "note", id: "b", preview: false }], active: note("b") },
+      ],
+      focusedGroupId: "2",
+    });
+    expect(editorReducer(layout, { type: "add", groupId: "1", tab: note("a") }).groups[0]!.tabs.map((t) => t.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("a page's tab", () => {
+  const at = (id: string, path = `/${id}`) => ({ kind: "page" as const, id, path });
+  const open = (layout: EditorLayout, tab: Opened, preview = true) => editorReducer(layout, { type: "open", tab, preview });
+
+  it("is one tab wherever under its path the page is, and remembers the address it is at", () => {
+    const searching = open(open(EMPTY_LAYOUT, at("search")), at("search", "/search?q=plan"));
+
+    expect(searching.groups[0]!.tabs).toEqual([{ kind: "page", id: "search", path: "/search?q=plan", preview: true }]);
+    expect(focused(searching)).toEqual(at("search", "/search?q=plan"));
+  });
+
+  it("as a preview takes the place of the group's preview, as a note's and a folder's do", () => {
+    const layout = open(open(open(EMPTY_LAYOUT, note("a"), false), at("todos")), at("search"));
+
+    expect(layout.groups[0]!.tabs).toEqual([
+      { kind: "note", id: "a", preview: false },
+      { kind: "page", id: "search", path: "/search", preview: true },
+    ]);
+  });
+
+  it("as a preview gives way to a note previewed from it, and is kept once the member keeps it", () => {
+    const searching = open(EMPTY_LAYOUT, at("search", "/search?q=plan"));
+
+    expect(open(searching, note("a")).groups[0]!.tabs).toEqual([{ kind: "note", id: "a", preview: true }]);
+    expect(open(editorReducer(searching, { type: "pin", groupId: "1", tab: at("search") }), note("a")).groups[0]!.tabs).toEqual([
+      { kind: "page", id: "search", path: "/search?q=plan", preview: false },
+      { kind: "note", id: "a", preview: true },
+    ]);
+  });
+
+  it("that is open in another group is shown there and not opened twice", () => {
+    const split = editorReducer(open(open(EMPTY_LAYOUT, note("a"), false), at("todos"), false), { type: "split", groupId: "1", side: "down", tab: at("todos") });
+    const back = open(editorReducer(split, { type: "focus", groupId: "1" }), at("todos"));
+
+    expect(back.groups.map((group) => group.tabs.map((t) => t.id))).toEqual([["a"], ["todos"]]);
+    expect(back.focusedGroupId).toBe("2");
+  });
+
+  it("gives the address it was at to whatever takes over when the tab in front closes", () => {
+    const layout = open(open(EMPTY_LAYOUT, at("tags", "/tags/work"), false), note("a"), false);
+
+    expect(focused(editorReducer(layout, { type: "close", scope: "tab", groupId: "1", tab: note("a") }))).toEqual(at("tags", "/tags/work"));
+  });
+});
+
+describe("a layout kept with splits", () => {
+  const g = (id: string, noteId: string) => ({ id, tabs: [{ kind: "note" as const, id: noteId, preview: false }], active: note(noteId) });
+
+  it("is used when every group has one place in it, and is otherwise the empty layout", () => {
+    const groups = [g("1", "a"), g("2", "b")];
+    const column = { direction: "column", panes: ["1", "2"], sizes: [2, 1] };
+
+    expect(keptLayout({ groups, focusedGroupId: "1", split: column })).toEqual({ groups, focusedGroupId: "1", split: column });
+    expect(keptLayout({ groups, focusedGroupId: "1", split: { ...column, panes: ["1", "1"] } })).toBe(EMPTY_LAYOUT);
+    expect(keptLayout({ groups, focusedGroupId: "1", split: { ...column, panes: ["1"], sizes: [1] } })).toBe(EMPTY_LAYOUT);
+    expect(keptLayout({ groups, focusedGroupId: "1", split: { ...column, sizes: [1] } })).toBe(EMPTY_LAYOUT);
+    expect(keptLayout({ groups, focusedGroupId: "1", split: { ...column, sizes: [1, -1] } })).toBe(EMPTY_LAYOUT);
+  });
+
+  it("is written the one way a layout is: groups in reading order, and no split for a plain row", () => {
+    const groups = [g("1", "a"), g("2", "b")];
+
+    expect(keptLayout({ groups, focusedGroupId: "1", split: { direction: "row", panes: ["2", "1"], sizes: [1, 1] } })).toEqual({ groups: [groups[1], groups[0]], focusedGroupId: "1" });
+    expect(keptLayout({ groups, focusedGroupId: "1", split: { direction: "row", panes: [{ direction: "row", panes: ["1"], sizes: [5] }, "2"], sizes: [1, 1] } })).toEqual({ groups, focusedGroupId: "1" });
+  });
+
+  it("holds a page's tab only with its address", () => {
+    const page = (tab: object) => ({ groups: [{ id: "1", tabs: [{ ...tab, preview: true }], active: tab }], focusedGroupId: "1" });
+
+    expect(isEditorLayout(page({ kind: "page", id: "search", path: "/search?q=a" }))).toBe(true);
+    expect(isEditorLayout(page({ kind: "page", id: "search" }))).toBe(false);
+    expect(isEditorLayout(page({ kind: "page", id: "search", path: "https://elsewhere.example" }))).toBe(false);
+  });
+});
