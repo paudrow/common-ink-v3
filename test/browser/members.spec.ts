@@ -183,7 +183,10 @@ test("a workspace's only admin can't leave or stop being admin, and anyone else 
   await member(grace, "Grace Hopper").getByRole("group", { name: "Leave Ada's workspace" }).getByRole("button", { name: "Leave Ada's workspace" }).click();
 
   await expect(workspaceButton(grace)).toHaveText("Grace's workspaceAdmin");
-  await expect(grace).toHaveURL(/\/$/);
+  // A page is a tab now, so she is on the page she left from, in the workspace she still has: its own members.
+  await expect(grace).toHaveURL(/\/members$/);
+  await expect(member(grace, "Grace Hopper")).toBeVisible();
+  await expect(member(grace, "Ada Lovelace")).toHaveCount(0);
   expect((await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
   await page.reload();
   await expect(memberList(page).getByRole("listitem")).toHaveText([/^Ada Lovelace/]);
