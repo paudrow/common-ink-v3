@@ -108,6 +108,8 @@ const link: Embed = {
 export const media: Plugin = {
   id: "media",
   name: "Media embeds",
+  description: "A video's or a post's address alone on a line is shown below that line.",
+  icon: "play",
   activate(host) {
     for (const embed of [youtube, social, link]) host.embeds.register(embed);
   },

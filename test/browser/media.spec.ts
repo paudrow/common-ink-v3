@@ -330,12 +330,12 @@ test("an HTML embed is picked from the embed menu, runs only when asked, and sta
   await expect(below(page, "html").locator("iframe")).toHaveAttribute("src", "/embed-frame");
 
   // The block as written, with a counter in it. Its body changed, so what was running is gone and it asks again.
-  await editor(page).getByRole("button", { name: "HTML" }).click();
+  await editor(page).getByRole("button", { name: "HTML", exact: true }).click();
   await expect(editor(page)).toContainText("<p>Hello from HTML.</p>");
   await page.keyboard.press("End");
   await page.keyboard.type("<script>window.born = String(Math.random()); window.ticks = 0; setInterval(() => window.ticks++, 20);</script>");
   await goTo(page, 3);
-  await expect(editor(page).getByRole("button", { name: "HTML" })).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "HTML", exact: true })).toBeVisible();
   await expect(runHtml(page)).toBeVisible();
   await expect(page.locator("iframe")).toHaveCount(0);
   await runHtml(page).click();
@@ -360,7 +360,7 @@ test("an HTML embed is picked from the embed menu, runs only when asked, and sta
   await expectStillRunning("after typing below");
 
   // The cursor going into the block shows it as written. Nothing of it changed, so the frame stays.
-  await editor(page).getByRole("button", { name: "HTML" }).click();
+  await editor(page).getByRole("button", { name: "HTML", exact: true }).click();
   await expect(editor(page)).toContainText(":::html{}");
   await expectStillRunning("with the cursor in its block");
   await expectOverItsRoom(page, "html", "with the cursor in its block");
@@ -805,7 +805,7 @@ test("an HTML block's lines fold away when the cursor leaves it, which moves the
   await settled(page);
   const top = () => line(page, "after the block").evaluate((el) => Math.round(el.getBoundingClientRect().top));
   const outside = await top();
-  await editor(page).getByRole("button", { name: "HTML" }).click();
+  await editor(page).getByRole("button", { name: "HTML", exact: true }).click();
   await expect(editor(page)).toContainText(":::html{height=120}");
   await expectOverItsRoom(page, "html", "with the block shown as written");
   // Five lines as written in place of the one line of its button.

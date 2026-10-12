@@ -146,7 +146,7 @@ test("a stopwatch and a timer say what their buttons do, and each button does it
 });
 
 test("an embed's options button opens its options, and setting one rewrites the embed as the member's change, where it stands", async ({ page }) => {
-  const note = await open(page, "# Options\n\nTea ::timer{5m} and lap ::stopwatch{} here.\n\nlast\n");
+  const note = await open(page, "# Options\n\nTea ::timer{5m} and lap ::stopwatch{} here.\n\n:::html{}\n<p>Hi</p>\n:::\n\nlast\n");
   await mark(page);
   const at = await place(page, ".embed");
 
@@ -189,6 +189,13 @@ test("an embed's options button opens its options, and setting one rewrites the 
   await page.keyboard.type("0");
   await expect.poll(() => read(page, note.id)).toContain("::stopwatch{0at=1m5s}");
   await page.keyboard.press("Backspace");
+
+  await editor(page).getByRole("button", { name: "Options for HTML" }).click();
+  await page.getByRole("dialog", { name: "Options for HTML" }).getByRole("textbox", { name: "Height" }).fill("120");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => read(page, note.id)).toContain(":::html{height=120}");
+  await page.getByRole("dialog", { name: "Options for HTML" }).getByRole("button", { name: "Edit as markdown" }).click();
+  await expect(lines(page).filter({ hasText: ":::html{height=120}" })).toBeVisible();
 });
 
 test("Tab picks the highlighted item of the / menu, as Enter does", async ({ page }) => {
@@ -374,8 +381,8 @@ test("a column is given a colour from the board, which its heading keeps as mark
   await expect(column(page, "Doing")).not.toHaveAttribute("data-colour");
 });
 
-test("a key that jumps past a board doesn't go into it, and a half-typed card is a stop like any other", async ({ page }) => {
-  const note = await open(page, "above\n:::kanban{}\n## To do\n- write\n:::\nbelow");
+test("a key that jumps past a board doesn't go into it, a half-typed card is a stop like any other, and leaving a board lands past a block right under it", async ({ page }) => {
+  const note = await open(page, "above\n:::kanban{}\n## To do\n- write\n:::\n:::html{}\n<p>Hi</p>\n:::\nbelow");
   await expect(column(page, "To do")).toBeVisible();
   await line(page, "above").click();
   await page.keyboard.press("ControlOrMeta+End");
@@ -395,8 +402,9 @@ test("a key that jumps past a board doesn't go into it, and a half-typed card is
   await expect(editor(page).getByRole("textbox", { name: "New card in To do" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(editor(page).getByRole("button", { name: "Add a card to To do" })).toBeFocused();
+  // Past the HTML block, whose lines are hidden too, and not into them.
   await page.keyboard.press("ArrowDown");
   await expect(editor(page)).toBeFocused();
   await page.keyboard.type("X");
-  await expect.poll(() => read(page, note.id)).toMatch(/- write\n:::\nXbelow!$/);
+  await expect.poll(() => read(page, note.id)).toMatch(/<p>Hi<\/p>\n:::\nXbelow!$/);
 });

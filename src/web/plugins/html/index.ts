@@ -14,12 +14,23 @@ const START = `<style>body { font: 16px system-ui; }</style>
 export const html: Plugin = {
   id: "html",
   name: "HTML embeds",
+  description: "HTML written in a note, run shut off from the app when a reader presses Run.",
+  icon: "code",
   activate(host) {
     host.embeds.register({
       name: "html",
       title: "HTML",
       block: true,
       starts: { body: START },
+      options: {
+        fields: ({ config }) => [{ id: "height", label: "Height", kind: "text", value: String(heightIn(config)), hint: "In pixels, from 40 to 2000." }],
+        set({ config }, _id, value) {
+          const height = Number(value.trim());
+          if (!Number.isInteger(height) || height < 40 || height > 2000) return "Write a whole number of pixels from 40 to 2000.";
+          const rest = config.split(/\s+/).filter((word) => word && !word.startsWith("height="));
+          return { config: [...rest, `height=${height}`].join(" ") };
+        },
+      },
       render(into, embed) {
         const edit = document.createElement("button");
         edit.type = "button";
