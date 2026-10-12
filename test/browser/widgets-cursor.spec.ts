@@ -407,3 +407,28 @@ test("a key that jumps past a board doesn't go into it, a half-typed card is a s
   await page.keyboard.type("X");
   await expect.poll(() => read(page, note.id)).toMatch(/<p>Hi<\/p>\n:::\nXbelow!$/);
 });
+
+test("with vim on and typing, Escape closes an embed's open options and leaves insert mode alone, and the next Escape is vim's", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
+  const note = await perform(page, { type: "note.create", text: "# Options\n\nTea ::timer{5m} here.\n\nlast\n" });
+  await page.goto(`/note/${note.id}`);
+  const mode = page.locator(".cm-vim-panel");
+  await line(page, "last").click();
+  await expect(mode).toHaveText("--NORMAL--");
+  await page.keyboard.press("i");
+  await expect(mode).toHaveText("--INSERT--");
+
+  await editor(page).getByRole("button", { name: "Options for Timer" }).click();
+  const options = page.getByRole("dialog", { name: "Options for Timer" });
+  await expect(options).toBeVisible();
+  await editor(page).focus();
+  await expect(mode).toHaveText("--INSERT--");
+  await page.keyboard.press("Escape");
+  await expect(options).toHaveCount(0);
+  await expect(mode).toHaveText("--INSERT--");
+
+  await editor(page).focus();
+  await page.keyboard.press("Escape");
+  await expect(mode).toHaveText("--NORMAL--");
+});

@@ -101,17 +101,26 @@ A tab that holds a page. It is one tab wherever under the page's address it is, 
 A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
 
 **Preview tab**:
-The tab a single click opens, shown in italics. A group has at most one. The next thing opened with a single click takes its place, whatever either is of. One case keeps the member's place: a note opened from a previewed folder's list makes that list's tab a kept one, and the note is the preview, so a list stays while notes are looked through from it. Double-clicking a folder or a tab, a card's pencil, or editing the note, keeps the tab.
+The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, in whichever editor group is focused when something is opened: the next thing opened with a single click takes its place, whatever either is of, and a preview in another group closes there. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, a card's pencil, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
 
 **Editor group**:
-A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL follows the focused group's showing tab, and the inspector its note. While a folder's list is in front the inspector stays on the note that was in front before it.
+A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. The inspector shows the tab the member last picked wherever what is in front has it, and otherwise one it does have, with the pick left as it was. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
 _Avoid_: Pane
 
 **Split**:
 Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
 
 **Window buttons**:
-The buttons that act on the window and on no one note: the inspector and writing mode. They are at the top right corner of the editor area, at the end of the tab row there, whatever is open.
+The buttons that act on the window and on no one note, at the ends of the tab rows along the top of the editor area, whatever is open: the sidebar's before the first tab at the top left, the inspector's and writing mode's after the last at the top right.
+
+**Sidebar bar**, **Inspector bar**:
+What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
+
+**Inspector**:
+The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line. A note has History, Backlinks and Info; a folder's list has History, the folder's notes that changed as History mode lists them, and Info.
+
+**Writing mode**:
+The editor area alone: no sidebar, no inspector, and neither bar. ⌘. and the window button leave it.
 
 **Command**:
 A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.
@@ -125,7 +134,7 @@ _Avoid_: Shortcut, hotkey
 The list of commands, narrowed by typing.
 
 **Vim mode**:
-A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
+A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
 
 **Selected row**:
 The row of a list that vim's keys are on. It has focus, is marked, and is kept in view.
@@ -215,7 +224,7 @@ The part of the core that turns plugins on and off, hands each one its reach int
 One thing a plugin adds: a command, a view, an embed, a completion, or an editor extension. It is there while its plugin is on.
 
 **View**:
-Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, an inspector tab, a page, the bottom bar, an overlay, or an icon in a rail.
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector tab, a page, the bottom bar, or an overlay.
 _Avoid_: Panel
 
 **Page**:
