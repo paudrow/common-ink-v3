@@ -17,6 +17,8 @@ const MOST_OFFERED = 50;
 export const links: Plugin = {
   id: "links",
   name: "Links",
+  description: "Links between notes, written with [[ and kept when a note is renamed.",
+  icon: "link",
   activate(host) {
     const editors = new Map<string, EditorView>();
     const notes = () => host.app().notes;
