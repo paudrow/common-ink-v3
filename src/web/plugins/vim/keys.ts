@@ -28,6 +28,8 @@ export const KEYS: readonly VimKey[] = [
   { id: "list.halfUp", title: "Vim: half a page up a list", surface: "list", keys: ["ctrl+u"], run: (ui) => ui.move("halfUp") },
   { id: "list.open", title: "Vim: open the selected row", surface: "row", keys: ["enter", "l"], run: (ui) => ui.open(), arrives: true },
   { id: "list.out", title: "Vim: collapse the selected row, or go to its parent", surface: "row", keys: ["h"], run: (ui) => ui.out() },
+  { id: "list.toggle", title: "Vim: expand or collapse the selected row", surface: "row", keys: ["z a"], run: (ui) => ui.toggle() },
+  // Where / is typed with Shift, as on a German keyboard, the press is written shift+/. On a US one Shift and / is shift+?, which is nobody's.
   { id: "search", title: "Vim: go to the search box", surface: "search", keys: ["/", "shift+/"], run: (ui) => ui.search() },
   { id: "field.down", title: "Vim: next row, from a field", surface: "field", keys: ["ctrl+j", "ctrl+n"], run: (ui) => ui.arrow("ArrowDown") },
   { id: "field.up", title: "Vim: previous row, from a field", surface: "field", keys: ["ctrl+k", "ctrl+p"], run: (ui) => ui.arrow("ArrowUp") },

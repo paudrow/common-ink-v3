@@ -53,7 +53,7 @@ export function Plugins(props: PluginsProps) {
                   <a className="plugin-name" {...within(go, `${PLUGINS_PATH}/${encodeURIComponent(id)}`)}>
                     {name}
                   </a>
-                  <span className="badge">Built-in</span>
+                  {state.builtIn && <span className="badge">Built-in</span>}
                 </div>
                 {plugin.description && <p className="plugin-about">{plugin.description}</p>}
                 {state.error && (

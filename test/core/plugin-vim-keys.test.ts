@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { onPlatform } from "../../src/web/keybindings.ts";
+import { chordOf, onPlatform } from "../../src/web/keybindings.ts";
 import { KEYS } from "../../src/web/plugins/vim/keys.ts";
 import { land, toward, type Box } from "../../src/web/plugins/vim/moving.ts";
 
@@ -83,6 +83,12 @@ describe("vim's keys outside a note", () => {
       const keys = KEYS.flatMap((k) => k.keys.map((key) => onPlatform(key, mac)));
       expect(keys.filter((key, i) => keys.indexOf(key) !== i), mac ? "on a Mac" : "off a Mac").toEqual([]);
     }
+  });
+
+  it("goes to the search box with / on a keyboard that types it with Shift, as a German one does with Shift and 7", () => {
+    const pressed = chordOf({ key: "/", metaKey: false, ctrlKey: false, altKey: false, shiftKey: true }, true);
+
+    expect(KEYS.find((k) => k.id === "search")!.keys).toContain(pressed);
   });
 
   it("begins no sequence with a key that runs a command by itself, which would never wait for the rest", () => {

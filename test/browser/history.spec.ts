@@ -4,7 +4,6 @@ import { connectAgent, listedNote, openAllNotes, perform, signInAsNewPerson } fr
 
 const UNSEEN = "Changes you haven't seen";
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
-const rightRail = (page: Page) => page.getByRole("navigation", { name: "Right rail" });
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const editorLines = (page: Page) => page.locator(".cm-line");
 const changes = (scope: Page | Locator) => scope.getByRole("list", { name: "Changes" }).getByRole("listitem");
@@ -78,47 +77,61 @@ test("the inspector's History tab opens on what the note's changes come to and e
   await expect(added(changes(panel).first())).toHaveText(["", "Typed just now"]);
 });
 
-test("in writing mode the History rail icon shows a dot when an agent edits the note, until the member looks at History", async ({ page }) => {
+test("with Note info turned off a member who has picked no tab is shown Backlinks, not History, and the dot is still there", async ({ page }) => {
+  const { id } = await sharedNote(page);
+  await page.goto("/plugins");
+  await page.getByRole("checkbox", { name: "Note info", exact: true }).setChecked(false);
+  await page.goto(`/note/${id}`);
+
+  await expect(inspector(page).getByRole("tab")).toHaveText(["History", "Backlinks"]);
+  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Backlinks");
+  const historyTab = inspector(page).getByRole("tab", { name: "History" });
+  await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
+  // A folder is left with History alone, which is then what shows, and a folder's History counts nothing as seen.
+  await page.goto("/folder/all");
+  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("History");
+  await page.goto(`/note/${id}`);
+  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Backlinks");
+  await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
+  await historyTab.click();
+  await expect(historyTab).toHaveAccessibleDescription("");
+});
+
+test("writing mode shows no History mark: the way out is its only button, and the dot waits on the inspector's History tab", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const claude = await connectAgent(page, "Claude");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nMine." });
   await page.goto(`/note/${note.id}`);
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+.");
-  const icon = rightRail(page).getByRole("button", { name: "History" });
-  await expect(icon).toBeVisible();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
+  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveAccessibleName("Writing mode");
 
-  await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type(" And more of mine.");
-  await expect(page.getByRole("status")).toHaveText("Saved");
-  await expect(icon).not.toHaveAccessibleDescription(UNSEEN);
-  await expect(icon.locator(".unseen-dot")).toHaveCount(0);
+  await claude.tool<Note>("write_note", { id: note.id, baseRevision: 1, text: "# Draft\n\nMine.\n\nFrom Claude." });
+  await expect(editorLines(page)).toHaveText(["# Draft", "", "Mine.", "", "From Claude."], { timeout: 15_000 });
+  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
+  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveAccessibleName("Writing mode");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect((await page.getByRole("main", { name: "Editor" }).boundingBox())!.width).toBe(1280);
 
-  await claude.tool<Note>("write_note", { id: note.id, baseRevision: 2, text: "# Draft\n\nMine. And more of mine.\n\nFrom Claude." });
-
-  await expect(icon).toHaveAccessibleDescription(UNSEEN, { timeout: 15_000 });
-  await expect(icon.locator(".unseen-dot")).toBeVisible();
-  await expect(editorLines(page)).toHaveText(["# Draft", "", "Mine. And more of mine.", "", "From Claude."]);
-
-  await icon.click();
-  const popover = page.getByRole("dialog", { name: "History" });
-  await expect(changes(popover).first()).toHaveAccessibleName("Change 3 by Claude");
-  await expect(icon).not.toHaveAccessibleDescription(UNSEEN);
-  await page.keyboard.press("Escape");
-  await expect(popover).toHaveCount(0);
-  await expect(icon.locator(".unseen-dot")).toHaveCount(0);
-
-  await page.reload();
-  await expect(icon).toBeVisible();
-  await expect(editorLines(page)).toHaveCount(5);
-  await expect(icon).not.toHaveAccessibleDescription(UNSEEN);
+  await page.getByRole("button", { name: "Writing mode" }).click();
+  await expect(page.getByRole("tab", { name: "History" })).toHaveAccessibleDescription(UNSEEN);
 });
 
 test("a note someone else changed while the member was away shows the dot when it's opened", async ({ page }) => {
   const { id } = await sharedNote(page);
   await page.goto(`/note/${id}`);
 
+  // The member has picked no tab: Info shows, which counts nothing as seen.
   const historyTab = inspector(page).getByRole("tab", { name: "History" });
+  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Info");
+  await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
+  await page.getByRole("button", { name: "Inspector", exact: true }).click();
+  const icon = page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button", { name: "History" });
+  await expect(icon).toHaveAccessibleDescription(UNSEEN);
+  await expect(icon.locator(".unseen-dot")).toBeVisible();
+  await page.getByRole("button", { name: "Inspector", exact: true }).click();
   await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
   await historyTab.click();
   await expect(changes(inspector(page))).toHaveCount(4);
@@ -578,4 +591,52 @@ test("two members on one browser each have their own unseen changes", async ({ p
 
   expect(mine).toHaveLength(1);
   expect(mine[0]!.endsWith(`.${person}`)).toBe(true);
+});
+
+test("with a folder's list in front the inspector's History tab lists that folder's notes that changed, as History mode does, and All notes lists the workspace's", async ({ page }) => {
+  const { claude } = await sharedNote(page);
+  const trips = await perform(page, { type: "folder.create", name: "Trips" });
+  await perform(page, { type: "folder.create", name: "Empty" });
+  const trip = await perform(page, { type: "note.create", folderId: trips.id, text: "# Trip" });
+  await claude.tool<Note>("write_note", { id: trip.id, baseRevision: 1, text: "# Trip\n\nPack light." });
+  await perform(page, { type: "note.create", folderId: trips.id, text: "# Packing" });
+
+  await page.goto(`/folder/${trips.id}`);
+  await expect(inspector(page).getByRole("tab")).toHaveText(["History", "Info"]);
+  // Nothing picked yet: Info, as on a note.
+  await expect(inspector(page).getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
+  await inspector(page).getByRole("tab", { name: "History" }).click();
+  const panel = inspector(page).getByRole("tabpanel");
+  const shown = summary(panel);
+  await expect.poll(shown).toEqual([
+    ["Packing", "+1 −0", "1 change · Ada Lovelace"],
+    ["Trip", "+3 −0", "2 changes · Claude (agent), Ada Lovelace"],
+  ]);
+  await expect(panel.getByRole("button", { expanded: true })).toHaveCount(0);
+
+  // A row opens to that note's changes, as in History mode.
+  await noteToggle(panel, "Trip").click();
+  await expect.poll(names(panel)).toEqual(["Change 2 to Trip by Claude", "Change 1 to Trip by Ada Lovelace"]);
+
+  // The tab picked for a folder stays picked on the next folder, and the list is that folder's.
+  await page.getByRole("treeitem", { name: "Unsorted" }).click();
+  await expect(inspector(page).getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  await expect.poll(shown).toEqual([["Plan", "+7 −0", "4 changes · Ada Lovelace, Claude (agent)"]]);
+
+  await page.getByRole("treeitem", { name: "Empty" }).click();
+  await expect(panel).toHaveText("Nothing has been written in this folder yet.");
+
+  await openAllNotes(page);
+  await expect.poll(shown).toEqual([
+    ["Packing", "+1 −0", "1 change · Ada Lovelace"],
+    ["Trip", "+3 −0", "2 changes · Claude (agent), Ada Lovelace"],
+    ["Plan", "+7 −0", "4 changes · Ada Lovelace, Claude (agent)"],
+  ]);
+
+  // A change made while the list is in front shows up in it.
+  await claude.tool<Note>("write_note", { id: trip.id, baseRevision: 2, text: "# Trip\n\nPack light.\n\nBook trains." });
+  await expect.poll(async () => (await shown())[0], { timeout: 20_000 }).toEqual(["Trip", "+5 −0", "3 changes · Claude (agent), Ada Lovelace"]);
+
+  await changedNote(panel, "Plan").getByRole("button", { name: "Open note" }).click();
+  await expect(editorLines(page).first()).toHaveText("# Plan");
 });
