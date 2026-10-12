@@ -464,3 +464,114 @@ test("a plugin that asks to change settings is refused and nothing is written, w
   await expect(sidebar).toContainText("GREEDY SAYS HELLO");
   await expect.poll(() => stored(page)).toEqual({ "greedy.shout": true });
 });
+
+test("Toggle sidebar and the other commands on the window are in the table of keyboard shortcuts, and take another key there", async ({ page }) => {
+  await openSettings(page);
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+  const sidebarBar = page.getByRole("navigation", { name: "Sidebar bar" });
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  const keys = await category(page, "Keyboard shortcuts");
+  // With the sidebar and the inspector both open, every row's buttons are inside the pane.
+  await expect(keys.getByRole("row", { name: /Redo/ })).toBeVisible();
+  expect(await page.evaluate(() => [...document.querySelectorAll(".settings-pane *")].filter((el) => el.getBoundingClientRect().right > document.querySelector(".main")!.getBoundingClientRect().right + 1).length)).toBe(0);
+  await page.getByRole("searchbox", { name: "Search settings" }).fill("toggle");
+  const row = (title: string) => keys.getByRole("row", { name: new RegExp(title) });
+  await expect(row("Toggle sidebar").locator("kbd")).toHaveText([/^(⌘\\|Ctrl\+\\)/]);
+  await expect(row("Toggle sidebar").getByRole("cell").nth(1)).toHaveText("Default");
+  await expect(row("Toggle writing mode").locator("kbd")).toHaveText([/^(⌘\.|Ctrl\+\.)/]);
+  await expect(row("Toggle inspector").getByRole("cell").first()).toHaveText("No key");
+
+  await row("Toggle sidebar").getByRole("button", { name: "Record a key for Toggle sidebar" }).click();
+  const recorder = page.getByRole("dialog", { name: "Record a key for Toggle sidebar" });
+  await expect(recorder.getByRole("group", { name: "Press the keys" })).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+Shift+U");
+  await expect(recorder.getByRole("alert")).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(recorder).toHaveCount(0);
+  await expect(row("Toggle sidebar").locator("kbd")).toHaveText([/^(⇧⌘U|Ctrl\+Shift\+U)/]);
+  await expect(row("Toggle sidebar").getByRole("cell").nth(1)).toHaveText("Yours");
+  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleSidebar": ["mod+shift+u"] });
+
+  await page.getByRole("heading", { name: "Settings", level: 1 }).click();
+  await expect(sidebar).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+\\");
+  await expect(sidebar, "the key it had runs it no longer").toBeVisible();
+  await page.keyboard.press("ControlOrMeta+Shift+U");
+  await expect(sidebarBar).toBeVisible();
+  await expect(sidebar).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+Shift+U");
+  await expect(sidebar).toBeVisible();
+
+  await row("Toggle inspector").getByRole("button", { name: "Record a key for Toggle inspector" }).click();
+  await page.keyboard.press("F9");
+  await page.keyboard.press("Enter");
+  await expect(row("Toggle inspector").locator("kbd")).toHaveText([/^F9/]);
+  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleSidebar": ["mod+shift+u"], "keybindings.view.toggleInspector": ["f9"] });
+  await page.getByRole("heading", { name: "Settings", level: 1 }).click();
+  const open = await inspector.count();
+  await page.keyboard.press("F9");
+  await expect(inspector).toHaveCount(1 - open);
+  await page.keyboard.press("F9");
+  await expect(inspector).toHaveCount(open);
+
+  await row("Toggle sidebar").getByRole("button", { name: "Reset Toggle sidebar" }).click();
+  await expect(row("Toggle sidebar").locator("kbd")).toHaveText([/^(⌘\\|Ctrl\+\\)/]);
+  await page.getByRole("heading", { name: "Settings", level: 1 }).click();
+  await page.keyboard.press("ControlOrMeta+\\");
+  await expect(sidebarBar).toBeVisible();
+});
+
+test("Enter and Space given to commands leave buttons, links and checkboxes their own press, and run where nothing takes them; another bare key runs on a button too", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await write(page, { "keybindings.note.new": ["enter"], "keybindings.notes.all": ["space"], "keybindings.view.toggleWritingMode": ["w"] });
+  await page.goto("/plugins");
+  const app = page.locator(".app");
+  const modes = page.getByRole("navigation", { name: "Modes" });
+  const notes = async () => (await perform(page, { type: "note.list" })).length;
+  await expect(modes.getByRole("button", { name: "Less" })).toBeVisible();
+
+  await modes.getByRole("button", { name: "Less" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(modes.getByRole("button", { name: "More" })).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(modes.getByRole("button", { name: "Less" })).toBeFocused();
+
+  const backlinks = page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Backlinks", exact: true });
+  await backlinks.focus();
+  await page.keyboard.press("Space");
+  await expect(backlinks).not.toBeChecked();
+  await page.keyboard.press("Space");
+  await expect(backlinks).toBeChecked();
+
+  await page.getByRole("tablist", { name: "Open notes" }).getByRole("tab", { name: "Plugins" }).focus();
+  await page.keyboard.press("Enter");
+  await modes.getByRole("link", { name: "Dashboard" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/dashboard$/);
+  expect(await notes(), "no press of Enter on a control made a note").toBe(0);
+
+  // w is no control's key, so it runs with a button in focus.
+  await modes.getByRole("button", { name: "Less" }).focus();
+  await page.keyboard.press("w");
+  await expect(app).toHaveAttribute("data-writing", "true");
+  await page.keyboard.press("w");
+  await expect(app).not.toHaveAttribute("data-writing");
+
+  // With nothing in focus that takes them, Space and Enter run their commands.
+  await page.getByRole("heading", { name: "Dashboard", level: 1 }).click();
+  await page.keyboard.press("Space");
+  await expect(page).toHaveURL(/\/folder\/all$/);
+  await page.getByRole("heading", { name: "All notes", level: 1 }).click();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/note\//);
+  await expect.poll(notes).toBe(1);
+
+  await page.goto("/settings/keyboard");
+  await page.getByRole("searchbox", { name: "Search settings" }).fill("Toggle inspector");
+  await page.getByRole("button", { name: "Record a key for Toggle inspector" }).click();
+  const recorder = page.getByRole("dialog", { name: "Record a key for Toggle inspector" });
+  await expect(recorder.getByRole("group", { name: "Press the keys" })).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(recorder).toContainText("SPACE begins with a key that types, and that presses a button or checkbox in focus. So it runs only where nothing is being typed and focus is on no such control.");
+  await page.keyboard.press("Escape");
+});
