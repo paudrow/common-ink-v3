@@ -1,23 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { noteIdFromPath, noteSlug, noteTitle } from "../../src/core/slug.ts";
-
-describe("a note's title", () => {
-  it("is its first # heading", () => {
-    expect(noteTitle("intro\n## Not this\n# Café Notes #\n# Later")).toBe("Café Notes");
-  });
-
-  it("skips headings inside code blocks", () => {
-    expect(noteTitle("```sh\n# a comment\n```\n# Real title")).toBe("Real title");
-  });
-
-  it("keeps a # that is part of the words", () => {
-    expect(noteTitle("# Learning C#")).toBe("Learning C#");
-  });
-
-  it("is empty without a heading", () => {
-    expect(noteTitle("#hashtag only\n\nbody")).toBe("");
-  });
-});
+import { noteIdFromPath, noteSlug } from "../../src/core/slug.ts";
 
 describe("a note's slug", () => {
   it("follows the title", () => {

@@ -182,6 +182,23 @@ describe("MCP tools", () => {
     expect(row).toEqual({ author_kind: "agent", author_id: agent.id });
   });
 
+  it("lists a note an agent wrote or created last as changed by the agent", async () => {
+    const ada = await newPerson();
+    const { agent } = await connectAgent(env.DB, ada.personId, "Claude");
+    const claude = { kind: "agent", agentId: agent.id, ...ada } as const;
+    const note = await perform(env.DB, { kind: "member", ...ada }, { type: "note.create", text: "# Plan" }, 1000);
+    await perform(env.DB, claude, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\nby Claude" }, 2000);
+    await perform(env.DB, claude, { type: "note.create", text: "# Claude's" }, 3000);
+
+    const listed = await perform(env.DB, { kind: "member", ...ada }, { type: "note.list" });
+
+    const byClaude = { kind: "agent", agentId: agent.id, name: "Claude", onBehalfOf: ada.personId };
+    expect(listed.map((n) => [n.title, n.updatedBy])).toEqual([
+      ["Claude's", byClaude],
+      ["Plan", byClaude],
+    ]);
+  });
+
   it("reports a failure as a tool error the agent can read", async () => {
     const { token } = await connectAgent(env.DB, (await newPerson()).personId, "Claude");
     expect(await tool(token, "read_note", { id: "aaaaaaaaaaaa" })).toMatchObject({ isError: true, text: "not_found: No such note" });

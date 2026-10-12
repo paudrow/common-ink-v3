@@ -13,10 +13,21 @@ A named location in a workspace. A note or upload has exactly one parent folder.
 _Avoid_: Directory, space
 
 **Unsorted**:
-The default folder. A note created with no other folder selected is placed here.
+The default folder. A note created with no folder in front is placed here.
+
+**Folder's list**:
+The notes in one folder, shown in the editor area as cards: each a title, a line of details, and the note's first lines. A folder's list is of the folder's own notes, not those of the folders inside it.
+_Avoid_: List column, feed
+
+**All notes**:
+The list of every note the member can see, whatever folder it is in. It is the first row of the folder tree.
+
+**Card**:
+One note in a folder's list. It expands in place to the note drawn to be read, first as an excerpt and then whole. A note is changed in its editor, never in its card.
+_Avoid_: Row
 
 **Note**:
-A markdown file in a workspace, identified by a stable id. Its title is the first `#` heading. The id does not change when the title or folder changes.
+A markdown file in a workspace, identified by a stable id. Its title is the words of its first `#` heading, without their markdown. A note with no such heading is titled by its first line of words, cut to a title's length, and a line that is only a web address is passed over for one that says something. A note with no words has no title and is shown as "Untitled". The id does not change when the title or folder changes, and a note's address names it by id, so an address with an old title still opens it. A note a member makes in the app starts as `# `, the mark of its title, with the cursor after it. Until something is typed it is an untitled note with no words.
 _Avoid_: Document, page
 
 **Link**:
@@ -70,6 +81,20 @@ A search of the text of notes a member can see, including todo lines, tags, and 
 
 **Quick open**:
 A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included.
+
+## Editor
+
+**Window buttons**:
+The buttons that act on the window and on no one note, in a row along the top of the editor area, whatever is open: the sidebar's at the left end, the inspector's and writing mode's at the right.
+
+**Sidebar bar**, **Inspector bar**:
+What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
+
+**Inspector**:
+The panel at the right that is about whatever is in front. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front; where no tab is for that kind of thing it shows one quiet line.
+
+**Writing mode**:
+The editor area alone: no sidebar, no inspector, and neither bar. ⌘. and the window button leave it.
 
 ## Access
 

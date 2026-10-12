@@ -153,6 +153,8 @@ describe("a read-only token", () => {
     const actor = { kind: "agent", agentId: "aaaaaaaaaaaa", ...ada, scope: { readOnly: true } } as const;
     await expect(perform(env.DB, actor, { type: "note.create", text: "# x" })).rejects.toMatchObject({ code: "forbidden" });
     await expect(perform(env.DB, actor, { type: "note.list" })).resolves.toEqual([]);
+    const empty = await perform(env.DB, { kind: "member", ...ada }, { type: "folder.create", name: "Empty" });
+    await expect(perform(env.DB, actor, { type: "folder.delete", id: empty.id })).rejects.toMatchObject({ code: "forbidden", message: "A read-only token can't folder.delete" });
   });
 
   it("leaves a token that isn't read-only able to write", async () => {
