@@ -169,6 +169,37 @@ export function revertedBy(steps: readonly Step[]): Map<number, number> {
 }
 
 /**
+ * Of the changes picked for one revert, the ones it takes out, and the ones left be because a change
+ * that is not picked already took them out. A change picked together with the change that took it
+ * out stays out, and that change goes too: the note is as if neither had been made.
+ */
+export function revertible(steps: readonly Step[], picked: Iterable<number>): { revisions: number[]; already: number[] } {
+  const gone = revertedBy(steps);
+  const all = new Set(picked);
+  const sorted = [...all].sort((a, b) => a - b);
+  const already = sorted.filter((r) => gone.has(r) && !all.has(gone.get(r)!));
+  return { revisions: sorted.filter((r) => !already.includes(r)), already };
+}
+
+/** Picked changes of one note that follow one another. `skipped` is how many of the note's changes lie between this run and the one before it. */
+export interface Run {
+  from: number;
+  to: number;
+  skipped: number;
+}
+
+/** The runs a note's picked changes make, earliest first. */
+export function runsOf(picked: Iterable<number>): Run[] {
+  const runs: Run[] = [];
+  for (const revision of [...new Set(picked)].sort((a, b) => a - b)) {
+    const last = runs.at(-1);
+    if (last && revision === last.to + 1) last.to = revision;
+    else runs.push({ from: revision, to: revision, skipped: last ? revision - last.to - 1 : 0 });
+  }
+  return runs;
+}
+
+/**
  * What a revert did besides taking changes out, when the person reverting chose what became of
  * lines later changes had edited: `reverted` takes the changes out and keeps every later edit, as a
  * revert with nothing chosen does, and `edit` is what they chose, made to the text that leaves.

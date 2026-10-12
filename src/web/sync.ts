@@ -1,7 +1,7 @@
 import { redo, undo } from "@codemirror/commands";
 import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
-import type { Note, OpInput } from "../core/protocol.ts";
+import type { Note, OpInput, RevertedNotes } from "../core/protocol.ts";
 import { changesBetween } from "../core/text.ts";
 import { ApiError, perform } from "./api.ts";
 
@@ -37,6 +37,19 @@ export async function moveThroughHistory(workspaceId: string, op: HistoryOp): Pr
   const note = await perform(workspaceId, op);
   await sync?.take(note);
   return note;
+}
+
+/** Sends what is typed in these notes and not yet saved, so that what is read of them next is all of it. */
+export const commitTyping = (noteIds: readonly string[]) => Promise.all(noteIds.flatMap((id) => [open.get(id)?.commit(), committed(id)]));
+
+type RevertMany = Extract<OpInput, { type: "history.revert" }>;
+
+/** Reverts changes of several notes. What's typed in them is saved first, and each reverted note's editor takes the result if it's open. */
+export async function revertMany(workspaceId: string, changes: RevertMany["changes"]): Promise<RevertedNotes> {
+  await commitTyping(changes.map((c) => c.noteId));
+  const done = await perform(workspaceId, { type: "history.revert", changes });
+  await Promise.all(done.reverted.map((r) => open.get(r.noteId)?.pull(r.revision)));
+  return done;
 }
 
 type Step = Extract<HistoryOp, { type: "note.undo" | "note.redo" }>;
