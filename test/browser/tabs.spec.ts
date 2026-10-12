@@ -165,7 +165,7 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await expect(palette.getByRole("combobox")).toBeFocused();
-  for (const title of ["New note", "Go to note…", "Open All notes", "Toggle writing mode", "Toggle inspector", "Close other tabs", "Go to Dashboard"]) {
+  for (const title of ["New note", "Go to note…", "Open All notes", "Toggle focus", "Toggle inspector", "Close other tabs", "Go to Dashboard"]) {
     await expect(palette.getByRole("option", { name: title })).toBeVisible();
   }
   await page.keyboard.press("Escape");
@@ -173,16 +173,16 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
   await expect(text).toBeFocused();
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("writ");
-  await expect(palette.getByRole("option")).toHaveText([/^Toggle writing mode/]);
+  await page.keyboard.type("focus");
+  await expect(palette.getByRole("option")).toHaveText([/^Toggle focus/]);
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.getByRole("complementary")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("writing");
+  await page.keyboard.type("focus");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("navigation", { name: "Left rail" })).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();

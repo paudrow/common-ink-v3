@@ -960,7 +960,7 @@ button.link:hover {
   scrollbar-width: none;
 }
 
-/* The window's own buttons, at the ends of the tab rows where no tab scrolls over them: the sidebar's before the first tab of the top left group, the rest after the last of the top right. */
+/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
 .window-controls {
   display: flex;
   flex: none;
@@ -969,8 +969,51 @@ button.link:hover {
   padding: 0 6px;
 }
 
-.window-controls.end {
-  margin-left: auto;
+/* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
+.focus-button {
+  align-self: center;
+  margin: 0 6px 0 auto;
+}
+
+.group:not([data-front]) .focus-button {
+  opacity: 0.45;
+}
+
+/* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
+.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle),
+.groups[data-focus-mode] .group:not([data-front]),
+.groups[data-focus-mode] .resize-handle {
+  visibility: hidden;
+}
+
+.groups[data-focus-mode] .group[data-front] {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  z-index: 1;
+  height: auto;
+  border: 0;
+  background: none;
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
+  display: none;
+}
+
+/* A note's bar ends short of the way out, so its save state is not under it. */
+.groups[data-focus-mode] .note-bar {
+  padding-right: 40px;
+}
+
+.groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
+  background: none;
+  opacity: 0.45;
 }
 
 /* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
