@@ -248,7 +248,7 @@ test("a closed inspector leaves a bar with an icon for each of its tabs for what
   // A folder's list has its two tabs, and a mode has none: the bar is there, with nothing in it to press that would say nothing.
   await windowButtons(page).getByRole("button", { name: "Inspector" }).click();
   await page.getByRole("treeitem", { name: "Unsorted" }).click();
-  expect((await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Info"]);
+  await expect.poll(async () => (await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Info"]);
   await bar.getByRole("button", { name: "Info" }).click();
   await expect(inspector(page).getByRole("definition")).toHaveText(["Unsorted", "1 note", "just now by Ada Lovelace"]);
 

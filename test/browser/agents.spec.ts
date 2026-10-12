@@ -174,9 +174,13 @@ test("saving an edit sends only what was changed, so an agent pinned to a worksp
   await shown.getByRole("button", { name: "Done" }).click();
   await page.route("**/api/agents", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
-    const res = await route.fetch();
-    const { agents } = (await res.json()) as { agents: { workspaceId: string | null }[] };
-    await route.fulfill({ response: res, json: { agents: agents.map((a) => ({ ...a, workspaceId: "aaaaaaaaaaaa" })) } });
+    try {
+      const res = await route.fetch();
+      const { agents } = (await res.json()) as { agents: { workspaceId: string | null }[] };
+      await route.fulfill({ response: res, json: { agents: agents.map((a) => ({ ...a, workspaceId: "aaaaaaaaaaaa" })) } });
+    } catch {
+      // A request the reload below abandons has no answer to rewrite. The row's text is what says the rewrite reached the page.
+    }
   });
   const sent: unknown[] = [];
   await page.route("**/api/agents/*", async (route) => {
@@ -269,6 +273,67 @@ test("an agent's entry shows its changes on their own, and reverts them in every
   await page.keyboard.press("Escape");
   await expect(ask).toHaveCount(0);
   expect((await perform(page, { type: "history.list" })).changes).toHaveLength(8);
+});
+
+/** Ada's list, which Claude edited twice with an edit of Ada's to one of his lines between, and a note only Claude edited. */
+async function notesWithAConflict(page: Page) {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const claude = await connectAgent(page, "Claude");
+  const list = await perform(page, { type: "note.create", text: "# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank" });
+  await claude.tool<Note>("write_note", { id: list.id, baseRevision: 1, text: "# List\n- [ ] buy milk now\n- [ ] sit still\n- [ ] call bank today" });
+  await perform(page, { type: "note.write", id: list.id, baseRevision: 2, text: "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [ ] call bank today\n- [ ] water plants" });
+  await claude.tool<Note>("write_note", { id: list.id, baseRevision: 3, text: "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [x] call bank today\n- [ ] water plants" });
+  const trip = await perform(page, { type: "note.create", text: "# Trip" });
+  await claude.tool<Note>("write_note", { id: trip.id, baseRevision: 1, text: "# Trip\n\nPack light." });
+  await page.goto("/agents");
+  await connected(page).getByRole("button", { name: "Revert Claude's changes…" }).click();
+  const ask = page.getByRole("dialog", { name: "Revert Claude's changes" });
+  const notes = ask.getByRole("list", { name: "Notes this would change" }).locator("> li");
+  await expect(notes).toHaveCount(2);
+  return { list: list.id, trip: trip.id, ask, inList: notes.filter({ hasText: "List" }), inTrip: notes.filter({ hasText: "Trip" }) };
+}
+
+test("reverting an agent shows each note's conflicts with later edits to settle, and reverts every note with its own settled as chosen", async ({ page }) => {
+  const { list, trip, ask, inList, inTrip } = await notesWithAConflict(page);
+  const conflict = inList.getByRole("list", { name: "Conflicts" }).getByRole("listitem");
+  const added = (scope: Locator) => scope.getByRole("insertion").locator(".diff-text");
+
+  await expect(ask.getByRole("radiogroup")).toHaveCount(1);
+  await expect(conflict.getByRole("radiogroup")).toHaveAccessibleName("Conflict 1 of 1, line 2");
+  await expect(conflict.getByRole("term")).toHaveText(["Before", "Now, edited by Ada Lovelace in change 3"]);
+  await expect(conflict.getByRole("definition")).toHaveText(["- [ ] buy milk", "- [ ] buy oat milk now"]);
+  await expect(conflict.getByRole("radio", { name: "Keep the later edit" })).toBeChecked();
+  await expect(conflict.getByRole("status", { name: "After the revert" })).toHaveText("- [ ] buy oat milk");
+  await expect(added(inList)).toHaveText(["- [ ] buy oat milk", "- [ ] call bank"]);
+  await expect(inTrip.getByRole("deletion").locator(".diff-text")).toHaveText(["", "Pack light."]);
+  await expect(ask).not.toContainText("edited the same lines");
+
+  await conflict.getByRole("radio", { name: "Go back to how it was" }).check();
+  await expect(conflict.getByRole("status", { name: "After the revert" })).toHaveText("- [ ] buy milk");
+  await expect(added(inList)).toHaveText(["- [ ] buy milk", "- [ ] call bank"]);
+  await expect(inList.getByRole("status", { name: "This revert" })).toHaveText("Adds 2 lines and removes 2 lines.");
+  await expect(ask.getByRole("button", { name: "Revert", exact: true })).toHaveAttribute("aria-disabled", "false");
+  await ask.getByRole("button", { name: "Revert", exact: true }).click();
+
+  await expect(connected(page).getByRole("status")).toHaveText("Reverted 3 changes by Claude in 2 notes.");
+  await expect.poll(() => text(page, list)).toBe("# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank\n- [ ] water plants");
+  await expect.poll(() => text(page, trip)).toBe("# Trip");
+});
+
+test("a note that changed after its conflicts were settled is left as it is and named, and the agent's other notes are reverted", async ({ page }) => {
+  const { list, trip, ask, inList } = await notesWithAConflict(page);
+  await inList.getByRole("radio", { name: "Go back to how it was" }).check();
+  await expect(inList.getByRole("insertion").locator(".diff-text")).toHaveText(["- [ ] buy milk", "- [ ] call bank"]);
+  const now = "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [x] call bank today\n- [ ] water plants\n- [ ] feed the cat";
+  await perform(page, { type: "note.write", id: list, baseRevision: 4, text: now });
+
+  await ask.getByRole("button", { name: "Revert", exact: true }).click();
+
+  const said = connected(page).getByRole("alert");
+  await expect(said).toContainText("Reverted 1 change by Claude in 1 note.");
+  await expect(said).toContainText("List was left as it is: The note has changed since this revert was previewed");
+  await expect.poll(() => text(page, list)).toBe(now);
+  await expect.poll(() => text(page, trip)).toBe("# Trip");
 });
 
 test("reverting an agent names the notes it left empty, which stay until they can be deleted", async ({ page }) => {

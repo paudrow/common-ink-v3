@@ -46,7 +46,7 @@ function spans(change: ChangeSet, a: Text, b: Text): Span[] {
   change.iterChangedRanges((fromA, toA, fromB, toB) => {
     const span: Span = { aFrom: a.lineAt(fromA).from, aTo: lineEnd(a, toA), bFrom: b.lineAt(fromB).from, bTo: lineEnd(b, toB) };
     const last = found.at(-1);
-    if (last && (span.aFrom < last.aTo || span.bFrom < last.bTo)) {
+    if (last && (span.aFrom <= last.aTo || span.bFrom <= last.bTo)) {
       last.aTo = span.aTo;
       last.bTo = span.bTo;
     } else found.push(span);
@@ -131,6 +131,28 @@ function inside(a: string, b: string, at: number, specs: ChangeSpec[]): number {
   if (tail && isLow(a.charCodeAt(a.length - tail))) tail--;
   specs.push({ from: at + head, to: at + a.length - tail, insert: b.slice(head, b.length - tail) });
   return at + a.length;
+}
+
+/** A stretch of lines that differs between two texts: lines `aFrom` up to `aTo` of one are lines `bFrom` up to `bTo` of the other. Counted from 0. */
+export interface LineHunk {
+  aFrom: number;
+  aTo: number;
+  bFrom: number;
+  bTo: number;
+}
+
+/** Where two lists of lines differ. */
+export function lineHunks(a: string[], b: string[]): LineHunk[] {
+  const hunks: LineHunk[] = [];
+  let [i, j] = [0, 0];
+  for (const [kept, gone, came] of runs(a, b, MAX_LINES_APART)) {
+    i += kept;
+    j += kept;
+    if (gone || came) hunks.push({ aFrom: i, aTo: i + gone, bFrom: j, bTo: j + came });
+    i += gone;
+    j += came;
+  }
+  return hunks;
 }
 
 const MAX_STEPS = 20_000_000;

@@ -1,7 +1,7 @@
 import { redo, undo } from "@codemirror/commands";
 import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
-import type { AuthorRef, Note, OpInput } from "../core/protocol.ts";
+import type { AuthorRef, Note, OpInput, Resolve } from "../core/protocol.ts";
 import { changesBetween } from "../core/text.ts";
 import { ApiError, perform } from "./api.ts";
 
@@ -64,11 +64,11 @@ export interface AuthorReverting {
  * Takes back out every change by `author` that still stands, a few notes a request until every note
  * is covered. What's typed is saved first, and each open editor takes its note's result.
  */
-export async function revertAuthor(workspaceId: string, author: AuthorRef, noteIds?: string[]): Promise<AuthorReverting> {
+export async function revertAuthor(workspaceId: string, author: AuthorRef, noteIds?: string[], resolve?: Record<string, Resolve>): Promise<AuthorReverting> {
   await Promise.all([...open.values()].map((sync) => sync.commit()));
   const done: AuthorReverting = { notes: 0, changes: 0, emptied: [], failed: [] };
   for (let after: string | undefined; ; ) {
-    const { reverted, emptied, failed, next } = await perform(workspaceId, { type: "history.revertAuthor", author, noteIds, after });
+    const { reverted, emptied, failed, next } = await perform(workspaceId, { type: "history.revertAuthor", author, noteIds, after, resolve });
     for (const { note, revisions } of reverted) {
       done.notes++;
       done.changes += revisions.length;
