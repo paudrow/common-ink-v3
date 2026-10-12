@@ -23,7 +23,7 @@ _Avoid_: List column, feed
 The list of every note the member can see, whatever folder it is in. It is the first row of the folder tree.
 
 **Card**:
-One note in a folder's list. It expands in place to the note drawn to be read, first as an excerpt and then whole. A note is changed in its editor, never in its card.
+One note in a folder's list. It expands in place to the note drawn to be read, first as an excerpt and then whole. A note is changed in its own tab, never in its card.
 _Avoid_: Row
 
 **Note**:
@@ -84,17 +84,44 @@ A list of notes and uploads a member can see, matched on title or filename. Arch
 
 ## Editor
 
+**Tab**:
+A note, a folder's list or a page open in the editor. Each has at most one tab.
+
+**Page tab**:
+A tab that holds a page, such as History. A page already open is turned to and not opened twice. It is a preview like any other: a note previewed from it takes its place, and Back returns to it.
+
+**Folder tab**:
+A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
+
+**Preview tab**:
+The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, in whichever editor group is focused when something is opened: the next thing opened with a single click takes its place, whatever either is of, and a preview in another group closes there. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, a card's pencil, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
+
+**Editor group**:
+A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. The inspector shows the tab the member last picked wherever what is in front has it, and otherwise one it does have, with the pick left as it was. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
+_Avoid_: Pane
+
+**Split**:
+Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
+
 **Window buttons**:
-The buttons that act on the window and on no one note, in a row along the top of the editor area, whatever is open: the sidebar's at the left end, the inspector's and writing mode's at the right.
+The buttons that act on the window and on no one note, whatever is open: the sidebar's and the inspector's, together before the first tab of the top left editor group, where the sidebar meets the editor area.
 
 **Sidebar bar**, **Inspector bar**:
 What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
 
 **Inspector**:
-The panel at the right that is about whatever is in front. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front; where no tab is for that kind of thing it shows one quiet line.
+The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line.
 
-**Writing mode**:
-The editor area alone: no sidebar, no inspector, and neither bar. ⌘. and the window button leave it.
+**Focus**:
+One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
+_Avoid_: Writing mode, fullscreen
+
+**Command**:
+A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.
+_Avoid_: Action
+
+**Command palette**:
+The list of commands, narrowed by typing.
 
 ## Access
 

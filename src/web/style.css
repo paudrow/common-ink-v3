@@ -310,6 +310,12 @@ button.link:hover {
   outline: none;
 }
 
+.menu > button:disabled {
+  background: none;
+  color: var(--faint);
+  cursor: default;
+}
+
 .menu > button[aria-checked="true"] {
   color: var(--accent);
   font-weight: 600;
@@ -523,7 +529,7 @@ button.link:hover {
 .folder-column {
   max-width: 780px;
   margin: 0 auto;
-  padding: 30px clamp(14px, 5%, 32px) 50vh;
+  padding: 30px clamp(14px, 5%, 32px);
 }
 
 .folder-head {
@@ -886,37 +892,268 @@ button.link:hover {
   outline: none;
 }
 
-/* The window's own buttons, in a row over the top of the editor area: the sidebar's at the left end, the rest at the right. A note's bar leaves
-   them room. The row itself takes no clicks, so what lies under the gap between its ends still does. */
-.window-controls {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 5;
+.groups {
   display: flex;
+  height: 100%;
+}
+
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split[data-direction="column"] {
+  flex-direction: column;
+}
+
+.pane {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Between two panes the edge is also the line that parts them, and that line is the one pixel of room it takes. */
+.split > .resize-handle {
+  width: 7px;
+}
+
+.split > .resize-handle[aria-orientation="horizontal"] {
+  width: auto;
+  height: 7px;
+}
+
+.split > .resize-handle::before {
+  position: absolute;
+  inset: 0 3px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.split > .resize-handle[aria-orientation="horizontal"]::before {
+  inset: 3px 0;
+}
+
+.group {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tab-row {
+  display: flex;
+  flex: none;
+  height: 34px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-side);
+}
+
+.tab-bar {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
+.window-controls {
+  display: flex;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  height: 38px;
+  gap: 2px;
   padding: 0 6px;
+}
+
+/* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
+.focus-button {
+  align-self: center;
+  margin: 0 6px 0 auto;
+}
+
+.group:not([data-front]) .focus-button {
+  opacity: 0.45;
+}
+
+/* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
+.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle),
+.groups[data-focus-mode] .group:not([data-front]),
+.groups[data-focus-mode] .resize-handle {
+  visibility: hidden;
+}
+
+.groups[data-focus-mode] .group[data-front] {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  z-index: 1;
+  height: auto;
+  border: 0;
+  background: none;
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
+  display: none;
+}
+
+/* A note's bar ends short of the way out, so its save state is not under it. */
+.groups[data-focus-mode] .note-bar {
+  padding-right: 40px;
+}
+
+.groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
+  background: none;
+  opacity: 0.45;
+}
+
+/* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
+.page-pane {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.tab {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 72px;
+  max-width: 200px;
+  padding: 0 6px 0 12px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab[aria-selected="true"] {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.group[data-focused] .tab[aria-selected="true"] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tab[data-preview] {
+  font-style: italic;
+}
+
+.tab[data-drop="before"] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tab[data-drop="after"] {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tab-kind {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+
+.tab-kind svg {
+  width: 13px;
+  height: 13px;
+}
+
+.tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.tab:hover .tab-close,
+.tab[aria-selected="true"] .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.tab-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.group-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Where a dragged tab would land: over the whole group for the middle, which adds it there, and over the half a split would give it for an edge. */
+.drop-zone {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
   pointer-events: none;
 }
 
-.window-controls-end {
-  display: flex;
-  gap: 2px;
-  margin-left: auto;
+.drop-zone[data-zone="left"] {
+  right: 50%;
 }
 
-.window-controls button {
-  pointer-events: auto;
+.drop-zone[data-zone="right"] {
+  left: 50%;
+}
+
+.drop-zone[data-zone="up"] {
+  bottom: 50%;
+}
+
+.drop-zone[data-zone="down"] {
+  top: 50%;
 }
 
 .note {
   display: flex;
   flex-direction: column;
   height: 100%;
-  container: note / inline-size;
+  /* Its height is a measure too: the room under a note's last line is a share of its own pane, not of the window. */
+  container: note / size;
 }
 
 .note-bar {
@@ -925,7 +1162,7 @@ button.link:hover {
   align-items: center;
   gap: 10px;
   height: 38px;
-  padding: 0 80px 0 40px;
+  padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-size: 12px;
@@ -945,7 +1182,7 @@ button.link:hover {
   text-overflow: ellipsis;
 }
 
-/* In a narrow window, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
+/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
 @container note (max-width: 520px) {
   .note-bar {
     flex-wrap: wrap;
@@ -992,7 +1229,7 @@ button.link:hover {
 .editor {
   max-width: 46rem;
   margin: 0 auto;
-  padding: 2rem 2rem 30vh;
+  padding: 2rem 2rem 30cqh;
 }
 
 .editor .cm-editor {
@@ -1163,6 +1400,69 @@ button.link:hover {
 .inspector-empty {
   margin: 0;
   padding: 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Command palette and quick open */
+
+.palette {
+  position: absolute;
+  top: 12vh;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100% - 32px));
+  max-height: 60vh;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.palette input {
+  flex: none;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+
+.palette ul {
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.palette li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.palette li[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.palette-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-hint {
+  flex: none;
   color: var(--muted);
   font-size: 12px;
 }

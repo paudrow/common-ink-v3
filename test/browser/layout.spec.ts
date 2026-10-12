@@ -5,6 +5,9 @@ const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });
 const editorPane = (page: Page) => page.getByRole("main", { name: "Editor" });
 const width = async (page: Page) => (await editorPane(page).boundingBox())!.width;
+/** In focus, the box of what is in front. */
+const filled = (page: Page) => page.locator(".group-body").filter({ visible: true }).boundingBox();
+const WINDOW = { x: 0, y: 0, width: 1280, height: 720 };
 const listHeading = (page: Page) => editorPane(page).getByRole("heading", { level: 1 });
 
 async function newFolder(page: Page, name: string, parent?: string) {
@@ -74,7 +77,7 @@ test("a new note lands in the folder whose list is open, or Unsorted from the li
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Plan");
 
-  await expect(page).toHaveURL(/\/note\/plan-[a-z0-9]{12}$/);
+  await expect(page.getByRole("tab", { name: "Plan" })).toBeVisible();
   await expect(editorPane(page).locator(".note-meta").getByText("Projects", { exact: true })).toBeVisible();
   await expect(editorPane(page).getByText("edited just now by Ada Lovelace")).toBeVisible();
   await expect(folder(page, "Projects")).toHaveAccessibleDescription("1");
@@ -114,7 +117,7 @@ test("a folder with notes in it can't be deleted, and an empty one can", async (
 
   await folder(page, "Empty").hover();
   await page.getByRole("button", { name: "Actions for Empty" }).click();
-  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["New folder inside", "Rename", "Delete"]);
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in a split right", "Open in a split down", "New folder inside", "Rename", "Delete"]);
   await page.getByRole("menuitem", { name: "Delete" }).click();
 
   await expect(tree(page).getByRole("treeitem")).toHaveText([/^All notes/, /^Unsorted/, /^Full/]);
@@ -214,7 +217,7 @@ test("a folder's list filters on title and snippet, sorts, and narrows to notes 
   await page.getByRole("searchbox", { name: "Filter notes" }).fill("kiwi");
   await expect(page.getByText("No notes match.")).toBeVisible();
 
-  // The list is as it was left when it is come back to, and All notes says which folder each note is in.
+  // The list is as it was left when its tab is come back to, and All notes says which folder each note is in.
   await page.getByRole("searchbox", { name: "Filter notes" }).fill("cherry");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
   await openAllNotes(page);
@@ -235,6 +238,9 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  // No tab is a default: with none picked yet the first shows, and Info once it is picked.
+  await expect(inspector.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
   const panel = inspector.getByRole("tabpanel");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
@@ -265,7 +271,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(inspector).toHaveCount(0);
 });
 
-test("⌘. toggles writing mode, which shows the note with neither side nor a bar of icons, and gives the editor the whole window", async ({ page }) => {
+test("⌘. toggles focus, which shows the note with neither side nor a bar of icons, and gives the editor the whole window", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
   await page.goto(`/note/draft-${note.id}`);
@@ -275,23 +281,24 @@ test("⌘. toggles writing mode, which shows the note with neither side nor a ba
   await page.getByRole("textbox", { name: "Note text" }).click();
   await page.keyboard.press("ControlOrMeta+.");
 
-  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
   await expect(tree(page)).toHaveCount(0);
   await expect(page.getByRole("complementary")).toHaveCount(0);
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
-  expect(await width(page)).toBe(1280);
-  expect((await editorPane(page).boundingBox())!.x).toBe(0);
+  await expect(page.getByRole("group", { name: "Window" })).toHaveCount(0);
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Focus" })).toHaveCount(1);
+  expect(await filled(page)).toEqual(WINDOW);
 
   await page.reload();
-  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  await page.getByRole("button", { name: "Writing mode" }).click();
+  await page.getByRole("button", { name: "Focus" }).click();
   await expect(tree(page)).toBeVisible();
   expect(await width(page)).toBe(764);
 });
 
-test("writing mode shows neither bar when the sidebar and the inspector were closed, on a note and on a mode, and leaving it brings the bars back", async ({ page }) => {
+test("focus shows neither bar when the sidebar and the inspector were closed, on a note and on a mode, and leaving it brings the bars back", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
   await page.goto(`/note/draft-${note.id}`);
@@ -303,13 +310,13 @@ test("writing mode shows neither bar when the sidebar and the inspector were clo
 
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  expect(await width(page)).toBe(1280);
+  expect(await filled(page)).toEqual(WINDOW);
 
   await page.goto("/calendar");
   await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
   await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.getByRole("complementary")).toHaveCount(0);
-  expect(await width(page)).toBe(1280);
+  expect(await filled(page)).toEqual(WINDOW);
 
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
@@ -327,6 +334,7 @@ test("the inspector stays open whatever is in front and shows what belongs to it
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const panel = inspector.getByRole("tabpanel");
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
   const place = await inspector.boundingBox();
   await inspector.getByRole("tab", { name: "History" }).click();
