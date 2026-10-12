@@ -207,7 +207,8 @@ button.link:hover {
   font-size: 12px;
 }
 
-.button:disabled {
+.button:disabled,
+.button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
@@ -1034,7 +1035,7 @@ button.link:hover {
   scrollbar-width: none;
 }
 
-/* The window's own buttons, at the ends of the tab rows where no tab scrolls over them: the sidebar's before the first tab of the top left group, the rest after the last of the top right. */
+/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
 .window-controls {
   display: flex;
   flex: none;
@@ -1043,8 +1044,51 @@ button.link:hover {
   padding: 0 6px;
 }
 
-.window-controls.end {
-  margin-left: auto;
+/* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
+.focus-button {
+  align-self: center;
+  margin: 0 6px 0 auto;
+}
+
+.group:not([data-front]) .focus-button {
+  opacity: 0.45;
+}
+
+/* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
+.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle, .bar),
+.groups[data-focus-mode] .group:not([data-front]),
+.groups[data-focus-mode] .resize-handle {
+  visibility: hidden;
+}
+
+.groups[data-focus-mode] .group[data-front] {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  z-index: 1;
+  height: auto;
+  border: 0;
+  background: none;
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
+  display: none;
+}
+
+/* A note's bar ends short of the way out, so its save state is not under it. */
+.groups[data-focus-mode] .note-bar {
+  padding-right: 40px;
+}
+
+.groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
+  background: none;
+  opacity: 0.45;
 }
 
 /* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
@@ -1951,54 +1995,26 @@ button.link:hover {
   color: var(--muted);
 }
 
-/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
-.app[data-bar] {
-  box-sizing: border-box;
-  padding-bottom: 26px;
+/* A clock in the bottom bar is a button that fills its item, so the item's own padding is the button's. */
+.bar-item:has(> .bar-clock) {
+  padding: 0;
 }
 
-.bar {
-  position: absolute;
-  inset: auto 0 0 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 10px;
-  border-top: 1px solid var(--line);
-  background: var(--bg-side);
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.bar-item {
+.bar-clock {
   padding: 1px 8px;
   border: 0;
   border-radius: 5px;
   background: none;
+  color: var(--accent);
+  font: inherit;
   font-variant-numeric: tabular-nums;
-}
-
-.bar-end {
-  margin-left: auto;
-}
-
-button.bar-item {
   cursor: pointer;
 }
 
-button.bar-item:hover,
-button.bar-item:focus-visible {
+.bar-clock:hover,
+.bar-clock:focus-visible {
   background: var(--hover);
-  color: var(--ink);
   outline: none;
-}
-
-.bar-clock {
-  color: var(--accent);
 }
 
 .bar-clock[data-done] {
@@ -2076,9 +2092,10 @@ button.bar-item:focus-visible {
 }
 
 .plugin-list {
-  display: flex;
-  flex-direction: column;
-  margin: 4px 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -2090,13 +2107,42 @@ button.bar-item:focus-visible {
   align-items: flex-start;
 }
 
-.plugin-row {
-  padding: 10px 8px;
-  border-top: 1px solid var(--line);
+/* A plugin's card, in the look of a note's card in a folder's list. Its name is a link laid over the whole of it, and its switch lies above the link. */
+.plugin-card {
+  position: relative;
+  align-items: center;
+  padding: 12px 14px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
 }
 
-.plugin-row:last-child {
-  border-bottom: 1px solid var(--line);
+.plugin-card:hover {
+  border-color: var(--line-strong);
+}
+
+.plugin-card:has(.plugin-name:focus-visible) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.plugin-card .plugin-name {
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  outline: none;
+}
+
+.plugin-card .plugin-name::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  content: "";
+}
+
+.plugin-card :is(.switch, .error) {
+  position: relative;
+  z-index: 1;
 }
 
 .plugin-icon {
@@ -2280,8 +2326,7 @@ button.bar-item:focus-visible {
   font-weight: 600;
 }
 
-.plugin-adds dd,
-.plugin-options li {
+.plugin-adds dd {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 8px;
@@ -2297,16 +2342,12 @@ button.bar-item:focus-visible {
   font-size: 11.5px;
 }
 
+/* A plugin's options on its own page are the rows Settings draws, in a frame with no border of its own. */
 .plugin-options {
-  display: grid;
-  gap: 6px;
-  margin: 0;
+  min-width: 0;
+  margin: 0 0 10px;
   padding: 0;
-  list-style: none;
-}
-
-.plugin-option {
-  font-weight: 600;
+  border: 0;
 }
 
 /* A switch is a checkbox drawn as one, so it is still a checkbox to the keyboard and to a screen reader. */
@@ -2405,8 +2446,10 @@ kbd {
   margin: 0;
 }
 
+/* Saved and Saving… take the same room, so the head wraps the same way through a save and nothing under it moves. */
 .settings-head .save-state {
   flex: 1;
+  min-width: 4.5rem;
 }
 
 .settings-tools {
@@ -2507,9 +2550,17 @@ kbd {
   .settings-pick {
     display: block;
   }
+}
 
+/* The table of shortcuts is rows of cells only where its own pane has room for the four columns. In less, each command is a card. */
+@container settings-pane (max-width: 38rem) {
+  /* The column names are out of sight and still read out, as the cells keep their order. */
   .shortcuts thead {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 
   .shortcuts,
@@ -2518,15 +2569,28 @@ kbd {
     display: block;
   }
 
+  /* A row is its command, with where its keys are from at the end of that line, and under it the keys and the buttons. The buttons' column is as wide whatever is in it, so the keys' is too. */
   .shortcuts tr {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
     gap: 4px 10px;
     align-items: center;
   }
 
-  .shortcuts tr > th {
-    flex-basis: 100%;
+  .shortcuts tr > .shortcut-from {
+    grid-area: 1 / 2;
+    justify-self: end;
+    align-self: start;
+    width: 48px;
+    text-align: right;
+  }
+
+  .shortcuts tr > .shortcut-keys {
+    grid-area: 2 / 1;
+  }
+
+  .shortcuts tr > .shortcut-actions {
+    grid-area: 2 / 2;
   }
 
   .shortcuts tr > th,
@@ -2535,13 +2599,28 @@ kbd {
     border: 0;
   }
 
-  .shortcuts .shortcut-actions {
-    margin-left: auto;
-  }
-
   .shortcuts tr {
     padding: 8px 0 8px 8px;
     border-bottom: 1px solid var(--line);
+  }
+}
+
+/* In a pane narrower than the buttons and a key side by side, a card is one column: the command, its keys, where they are from, the buttons. */
+@container settings-pane (max-width: 18rem) {
+  .shortcuts tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shortcuts tr > :is(.shortcut-from, .shortcut-keys, .shortcut-actions) {
+    grid-area: auto;
+    justify-self: stretch;
+    width: auto;
+    text-align: left;
+  }
+
+  .shortcuts .shortcut-buttons {
+    grid-template-columns: 50px 38px 48px;
+    justify-content: start;
   }
 }
 
@@ -2566,6 +2645,7 @@ kbd {
 }
 
 .settings-pane {
+  container: settings-pane / inline-size;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -2594,11 +2674,27 @@ kbd {
   font-weight: 400;
 }
 
+/* The columns have widths of their own, not their content's, so a key added to one row moves no other. */
 .shortcuts {
   width: 100%;
   margin-top: 8px;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
+}
+
+@container settings-pane (width > 38rem) {
+  .shortcuts thead th:nth-child(2) {
+    width: 216px;
+  }
+
+  .shortcuts thead th:nth-child(3) {
+    width: 60px;
+  }
+
+  .shortcuts thead th:nth-child(4) {
+    width: 188px;
+  }
 }
 
 .shortcuts th,
@@ -2640,12 +2736,18 @@ kbd {
   font-size: 12px;
 }
 
-.shortcut-keys {
-  white-space: nowrap;
+/* A command's keys are one line whatever their number and their length, so a key added grows no row: those past the column's width are scrolled to, and the cell's title names them all. */
+.shortcut-chords {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-height: 22px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.shortcut-keys kbd + kbd {
-  margin-left: 4px;
+.shortcut-chords > * {
+  flex: none;
 }
 
 .shortcut-keys kbd button {
@@ -2668,13 +2770,25 @@ kbd {
   font-size: 12px;
 }
 
-.shortcut-actions {
-  text-align: right;
-  white-space: nowrap;
+.shortcut-buttons {
+  display: grid;
+  grid-template-columns: 58px 44px 54px;
+  gap: 4px;
+  justify-content: end;
 }
 
-.shortcut-actions .button + .button {
-  margin-left: 4px;
+.shortcut-buttons .button {
+  grid-row: 1;
+  grid-column: 1;
+  padding-inline: 0;
+}
+
+.shortcut-buttons [data-does="add"] {
+  grid-column: 2;
+}
+
+.shortcut-buttons [data-does="reset"] {
+  grid-column: 3;
 }
 
 .recorder-backdrop {
@@ -3185,6 +3299,261 @@ kbd {
   align-self: flex-start;
 }
 
+.change-list-head {
+  display: flex;
+}
+
+/* The tick has a column of its own, so a change that can't be ticked lines up with one that can. */
+.change-list.pickable .change {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 8px;
+}
+
+.change-list.pickable .change > * {
+  grid-column: 2;
+}
+
+.change-list.pickable .change > .change-pick {
+  grid-row: 1;
+  grid-column: 1;
+  align-self: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.revert-dialog {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.revert-dialog::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.revert-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  font-size: 13px;
+}
+
+.revert-dialog h2,
+.revert-dialog p {
+  margin: 0;
+}
+
+.revert-dialog h2 {
+  font-size: 15px;
+}
+
+.revert-dialog .diff {
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.revert-dialog button.link {
+  text-decoration: underline;
+}
+
+.revert-started-over {
+  color: var(--muted);
+}
+
+.revert-more {
+  padding: 6px 8px;
+  border-left: 3px solid var(--danger);
+  border-radius: 4px;
+  background: var(--removed-soft);
+}
+
+.revert-dialog :is(h3, h4) {
+  margin: 0;
+  font-size: 13px;
+}
+
+.conflicts,
+.conflicts ol,
+.conflict,
+.revert-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conflicts ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conflicts-all {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.conflict {
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.conflict dl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.conflict dt,
+.conflict-after > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.conflict dd {
+  margin: 0 0 2px;
+}
+
+.conflict-lines {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.conflict-lines.now {
+  background: var(--removed-soft);
+}
+
+.conflict-lines.after {
+  background: var(--added-soft);
+}
+
+.conflict-none {
+  color: var(--muted);
+  font-family: var(--prose);
+  font-style: italic;
+}
+
+.conflict-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.conflict-choices label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.conflict-choices input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.conflict-after {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conflict-typed {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.revert-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.revert-result output {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.revert-result[aria-busy="true"] .diff {
+  opacity: 0.6;
+}
+
+.revert-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 50vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.revert-notes li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.revert-notes h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.revert-note-count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.revert-notes .diff {
+  max-height: none;
+  overflow-y: visible;
+}
+
+/* The buttons stay in reach under a preview taller than the window. */
+.revert-dialog-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 -16px -16px;
+  padding: 10px 16px 16px;
+  background: var(--bg-elev);
+  box-shadow: 0 -1px 0 var(--line);
+}
+
 .change-author {
   min-width: 0;
   overflow: hidden;
@@ -3478,6 +3847,17 @@ del.diff-line {
   justify-self: start;
 }
 
+.agent-edit {
+  margin-top: 4px;
+  background: var(--bg);
+}
+
+.agent-edit .hint,
+.agent-edit .agent-actions {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .new-token {
   display: flex;
   flex-direction: column;
@@ -3580,4 +3960,54 @@ del.diff-line {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   background-color: var(--accent-soft);
+}
+
+/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
+.app[data-bar] {
+  box-sizing: border-box;
+  padding-bottom: 26px;
+}
+
+.bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-side);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.bar-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* In a window too narrow for both ends, the left end is the one cut short. */
+.bar-side[data-side="right"] {
+  flex: none;
+  max-width: 100%;
+}
+
+.bar-item {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An item with nothing to say takes no room. */
+.bar-item:empty {
+  display: none;
 }

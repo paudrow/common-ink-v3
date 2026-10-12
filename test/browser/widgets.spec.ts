@@ -146,7 +146,7 @@ test("picking a kanban board writes its block on lines of its own and draws it, 
   await expect(options(page)).toHaveText([/^Kanban board/]);
   await page.keyboard.press("Enter");
   await expect(editor(page).getByRole("region")).toHaveCount(3);
-  expect(await board(page)).toEqual({ "To do": [], Doing: [], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": [], Doing: [], Done: [] });
   await page.keyboard.type("after");
   await expect.poll(() => read(page, note.id)).toBe("# Plan\n\nBoard: \n:::kanban{}\n## To do\n\n## Doing\n\n## Done\n:::\nafter");
 });
@@ -154,7 +154,7 @@ test("picking a kanban board writes its block on lines of its own and draws it, 
 test("a kanban block draws a column for each heading and a card for each list item, shows its markdown under the board to be edited, and is only markdown with its plugin off", async ({ page }) => {
   const note = await open(page, BOARD);
 
-  expect(await board(page)).toEqual({ "To do": ["write", "review"], Doing: ["build"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["write", "review"], Doing: ["build"], Done: [] });
   await expect(editor(page)).not.toContainText(":::kanban{}");
   await expect(editor(page)).toContainText("After the board.");
 
@@ -184,10 +184,10 @@ test("a kanban block draws a column for each heading and a card for each list it
   await expect(editor(page).getByRole("region")).toHaveCount(3);
   await page.keyboard.press("End");
   await page.keyboard.type("\n- first");
-  expect(await board(page)).toEqual({ "To do": ["first", "write", "review"], Doing: ["build"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["first", "write", "review"], Doing: ["build"], Done: [] });
   await page.keyboard.press("ControlOrMeta+End");
   await expect(editor(page)).not.toContainText(":::kanban{}");
-  expect(await board(page)).toEqual({ "To do": ["first", "write", "review"], Doing: ["build"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["first", "write", "review"], Doing: ["build"], Done: [] });
   await expect.poll(() => read(page, note.id)).toBe(BOARD.replace("# Plan\n\n", "# Plan\nabove\n").replace("## To do\n", "## To do\n- first\n").replace("After the board.", "below After the board."));
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
@@ -205,18 +205,18 @@ test("moving a card with the keyboard rewrites the markdown, is recorded as the 
   // Undone before it is saved, it is taken back in the editor and never recorded.
   await write("To do").focus();
   await page.keyboard.press("Shift+ArrowRight");
-  expect(await board(page)).toEqual({ "To do": ["review"], Doing: ["write", "build"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["review"], Doing: ["write", "build"], Done: [] });
   await page.keyboard.press("ControlOrMeta+z");
-  expect(await board(page)).toEqual(start);
+  await expect.poll(() => board(page)).toEqual(start);
   await expect(page.getByRole("status")).toHaveText("Saved");
-  expect(await authors(page, note.id)).toEqual(["member Ada Lovelace"]);
+  await expect.poll(() => authors(page, note.id)).toEqual(["member Ada Lovelace"]);
 
   await write("To do").focus();
   await page.keyboard.press("Shift+ArrowRight");
   await expect(write("Doing")).toBeFocused();
   const moved = BOARD.replace("- write\n- review\n\n## Doing\n- build\n", "- review\n\n## Doing\n- write\n- build\n");
   await expect.poll(() => read(page, note.id)).toBe(moved);
-  expect(await authors(page, note.id)).toEqual(["member Ada Lovelace", "member Ada Lovelace"]);
+  await expect.poll(() => authors(page, note.id)).toEqual(["member Ada Lovelace", "member Ada Lovelace"]);
 
   // Undone once saved, it is taken back through the note's history, as saved typing is.
   await page.keyboard.press("ControlOrMeta+z");
@@ -228,9 +228,9 @@ test("moving a card with the keyboard rewrites the markdown, is recorded as the 
 
   await write("Doing").focus();
   await page.keyboard.press("Shift+ArrowDown");
-  expect(await board(page)).toEqual({ "To do": ["review"], Doing: ["build", "write"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["review"], Doing: ["build", "write"], Done: [] });
   await page.keyboard.press("Shift+ArrowRight");
-  expect(await board(page)).toEqual({ "To do": ["review"], Doing: ["build"], Done: ["write"] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["review"], Doing: ["build"], Done: ["write"] });
   await page.keyboard.press("ArrowLeft");
   await expect(column(page, "Doing").getByRole("listitem").filter({ hasText: "build" })).toBeFocused();
   await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n:::kanban{}\n## To do\n- review\n\n## Doing\n- build\n\n## Done\n- write\n:::\n\nAfter the board.\n");
@@ -241,9 +241,9 @@ test("dragging a card to another column, and to a place among its cards, rewrite
   const note = await open(page, BOARD);
 
   await drag(page, column(page, "To do").getByRole("listitem").filter({ hasText: "review" }), column(page, "Done"));
-  expect(await board(page)).toEqual({ "To do": ["write"], Doing: ["build"], Done: ["review"] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["write"], Doing: ["build"], Done: ["review"] });
   await drag(page, column(page, "To do").getByRole("listitem").filter({ hasText: "write" }), column(page, "Doing").getByRole("listitem").filter({ hasText: "build" }), { x: 20, y: 2 });
-  expect(await board(page)).toEqual({ "To do": [], Doing: ["write", "build"], Done: ["review"] });
+  await expect.poll(() => board(page)).toEqual({ "To do": [], Doing: ["write", "build"], Done: ["review"] });
   await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n:::kanban{}\n## To do\n\n## Doing\n- write\n- build\n\n## Done\n- review\n:::\n\nAfter the board.\n");
 });
 
@@ -251,17 +251,17 @@ test("a card is added from the board, and what the board doesn't understand stay
   const body = "intro words\n## To do\n\nA paragraph.\n\n- write\n  - the intro\n\n```\n## not a column\n```\n## Done\n";
   const note = await open(page, `# Plan\n\n:::kanban{keep=me}\n${body}:::\n`);
 
-  expect(await board(page)).toEqual({ "To do": ["write"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["write"], Done: [] });
   await expect(column(page, "To do").getByRole("listitem")).toContainText("- the intro");
   await editor(page).getByRole("button", { name: "Add a card to Done" }).click();
   await page.keyboard.type("ship");
   await page.keyboard.press("Enter");
-  expect(await board(page)).toEqual({ "To do": ["write"], Done: ["ship"] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["write"], Done: ["ship"] });
   await expect(editor(page).getByRole("button", { name: "Add a card to Done" })).toBeFocused();
 
   await column(page, "To do").getByRole("listitem").focus();
   await page.keyboard.press("Shift+ArrowRight");
-  expect(await board(page)).toEqual({ "To do": [], Done: ["write", "ship"] });
+  await expect.poll(() => board(page)).toEqual({ "To do": [], Done: ["write", "ship"] });
   await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n:::kanban{keep=me}\nintro words\n## To do\n\nA paragraph.\n\n\n```\n## not a column\n```\n## Done\n- write\n  - the intro\n- ship\n:::\n");
 });
 
@@ -271,7 +271,7 @@ test("a card moved while the member has typed elsewhere, and after someone else'
   await page.keyboard.type("Typed by Ada.");
   await column(page, "Doing").getByRole("listitem").focus();
   await page.keyboard.press("Shift+ArrowLeft");
-  expect(await board(page)).toEqual({ "To do": ["build", "write", "review"], Doing: [], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["build", "write", "review"], Doing: [], Done: [] });
   const mine = "# Plan\n\n:::kanban{}\n## To do\n- build\n- write\n- review\n\n## Doing\n\n## Done\n:::\n\nAfter the board.\nTyped by Ada.";
   await expect.poll(() => read(page, note.id)).toBe(mine);
 
@@ -374,7 +374,7 @@ test("with vim on, j and k go through a board's cards and never into its hidden 
   await page.keyboard.press("i");
   await page.keyboard.type("top ");
   await expect(lines(page).nth(0)).toHaveText("top # Plan");
-  expect(await board(page)).toEqual({ "To do": ["write", "review"], Doing: ["build"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["write", "review"], Doing: ["build"], Done: [] });
 });
 
 test("the embed menu lists only the embeds of plugins that are on, and is gone with its own plugin off", async ({ page }) => {
@@ -419,17 +419,17 @@ test("an embed's rewrite does nothing once the note says something else of it, a
   const note = await open(page, "# Counts\n\nFirst ::count{1} and second ::count{1}.\n\nwords");
   await expect(lines(page).nth(2)).toHaveText("First count 1 and second count 1.");
 
-  expect(await update(0, { config: "2" })).toBe("done");
+  await expect.poll(() => update(0, { config: "2" })).toBe("done");
   await expect(lines(page).nth(2)).toHaveText("First count 2 and second count 1.");
   // The first drawing was of ::count{1}, which the note no longer says there.
-  expect(await update(0, { config: "9" })).toBe("done");
+  await expect.poll(() => update(0, { config: "9" })).toBe("done");
   await page.keyboard.type(" typed");
   await expect.poll(() => read(page, note.id)).toBe("# Counts\n\nFirst ::count{2} and second ::count{1}.\n\nwords typed");
 
-  expect(await update(-1, { config: "3} ::count{4" })).toContain("config");
-  expect(await update(-1, { config: "3\n" })).toContain("config");
-  expect(await update(-1, { body: "a body" })).toContain("block");
-  expect(await update(-1, { config: "3" })).toBe("done");
+  await expect.poll(() => update(-1, { config: "3} ::count{4" })).toContain("config");
+  await expect.poll(() => update(-1, { config: "3\n" })).toContain("config");
+  await expect.poll(() => update(-1, { body: "a body" })).toContain("block");
+  await expect.poll(() => update(-1, { config: "3" })).toBe("done");
   await expect.poll(() => read(page, note.id)).toBe("# Counts\n\nFirst ::count{3} and second ::count{1}.\n\nwords typed");
 });
 
@@ -493,7 +493,7 @@ test("a member who can't change the note sees its embeds without their controls,
 
   await expect(page.getByRole("button", { name: "Vera's workspace Viewer" })).toBeVisible();
   await expect(column(page, "Done")).toBeVisible();
-  expect(await board(page)).toEqual({ "To do": ["write"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["write"], Done: [] });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   const clocks = editor(page).getByRole("button", { name: /^(Timer|Stopwatch)/ });
   await expect(clocks).toHaveText(["5:00", "0:05", /^8:\d\d$/]);
@@ -511,7 +511,7 @@ test("a member who can't change the note sees its embeds without their controls,
   await page.evaluate(() => (document.querySelector(".cm-content") as HTMLElement).focus());
   await page.keyboard.type("more");
   await page.keyboard.press("Backspace");
-  expect(await board(page)).toEqual({ "To do": ["write"], Done: [] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["write"], Done: [] });
   await expect(lines(page).last()).toHaveText("words");
   await expect(menu(page)).toHaveCount(0);
   await expect(page.getByRole("status")).toHaveText("Saved");
@@ -522,7 +522,7 @@ test("a member who can't change the note sees its embeds without their controls,
   await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: written.replace("words", "words from an editor") });
   await expect(lines(page).last()).toHaveText("words from an editor", { timeout: 20_000 });
   expect(writes).toHaveLength(1);
-  expect(await authors(page, note.id)).toHaveLength(2);
+  await expect.poll(() => authors(page, note.id)).toHaveLength(2);
 });
 
 test("completions whose triggers both fit share one list, in the order of their plugins", async ({ page }) => {
@@ -618,7 +618,7 @@ test("a card half typed into Add a card is still there, with the cursor, after s
   await expect(adding).toBeFocused();
   await page.keyboard.type(" thought");
   await page.keyboard.press("Enter");
-  expect(await board(page)).toEqual({ "To do": ["write", "review"], Doing: ["build", "half a thought"], Done: ["shipped"] });
+  await expect.poll(() => board(page)).toEqual({ "To do": ["write", "review"], Doing: ["build", "half a thought"], Done: ["shipped"] });
   await expect(editor(page).getByRole("textbox", { name: "New card in Doing" })).toHaveCount(0);
   await expect.poll(() => read(page, note.id)).toBe(BOARD.replace("- build\n", "- build\n- half a thought\n").replace("## Done\n", "## Done\n- shipped\n"));
 });

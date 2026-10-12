@@ -65,7 +65,7 @@ test("a video's address pasted on a line of its own shows the video's room below
   const address = (await line(page, "youtube.com/watch").boundingBox())!;
   expect(room.y).toBeGreaterThanOrEqual(address.y + address.height - 1);
   expect(Math.abs(room.width / room.height - 16 / 9)).toBeLessThan(0.05);
-  expect(await topOf(page, "After.")).toBeGreaterThan(room.y + room.height - 1);
+  await expect.poll(() => topOf(page, "After.")).toBeGreaterThan(room.y + room.height - 1);
   await expect.poll(() => read(page, note.id)).toBe(`# Watch\n\nBefore.\n\n${VIDEO}\n\nAfter.`);
   expect(asked, "nothing is asked of another site until the member asks").toEqual([]);
 
@@ -93,7 +93,7 @@ test("a video's address pasted on a line of its own shows the video's room below
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" Typed below.\n\nAnd a new line.");
   await settled(page);
-  expect(await frame.evaluate((el) => (el as HTMLIFrameElement & { marked?: boolean }).marked)).toBe(true);
+  await expect.poll(() => frame.evaluate((el) => (el as HTMLIFrameElement & { marked?: boolean }).marked)).toBe(true);
   expect(played.length).toBe(1);
   expect(asked.filter((url) => !url.startsWith(PLAYER))).toEqual([]);
 });

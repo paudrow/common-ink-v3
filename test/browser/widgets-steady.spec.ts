@@ -231,7 +231,7 @@ test("an embed's own rewrite changes it where it stands: the same element, in th
   const started = editor(page).getByRole("button", { name: /^Timer, (5:00|4:5\d) left/ });
   await expect(started).toHaveAttribute("aria-pressed", "true");
   await expect(started).toBeFocused();
-  expect(await started.evaluate((el) => el === (window as unknown as { __BUTTON__: Element }).__BUTTON__)).toBe(true);
+  await expect.poll(() => started.evaluate((el) => el === (window as unknown as { __BUTTON__: Element }).__BUTTON__)).toBe(true);
   steady(await seen(page), first);
   await started.click();
   await expect(started).toHaveAttribute("aria-pressed", "false");
@@ -323,8 +323,8 @@ test("a line is as tall and starts where it did whether its clock is drawn or sh
   await editor(page).getByRole("button", { name: "Options for Kanban board" }).click();
   await page.getByRole("dialog", { name: "Options for Kanban board" }).getByRole("button", { name: "Edit as markdown" }).click();
   await expect(lines(page).filter({ hasText: ":::kanban{}" })).toBeVisible();
-  expect(await board()).toEqual(drawn.board);
-  expect(await box("words after")).toEqual(drawn.after);
+  await expect.poll(() => board()).toEqual(drawn.board);
+  await expect.poll(() => box("words after")).toEqual(drawn.after);
   await page.keyboard.press("ControlOrMeta+End");
   await expect(lines(page).filter({ hasText: ":::kanban{}" })).toHaveCount(0);
   expect({ clocks: await box("Tea"), after: await box("words after"), board: await board(), last: await box("The last line.") }).toEqual({ ...drawn, clocks: drawn.clocks });
