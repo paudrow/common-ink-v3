@@ -122,6 +122,7 @@ test("a folder's tab has an address that Back, Forward, a reload and a link all 
   await expect(folderRow(page, "All notes")).toHaveAttribute("aria-selected", "true");
 
   // With a list in front the inspector is about the folder.
+  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Info" }).click();
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("definition")).toHaveText(["All notes", "2 notes", "just now by Ada Lovelace"]);
 
   await page.goto("/folder/nosuchfolder");
@@ -148,6 +149,7 @@ test("a folder's tab splits and moves between groups like a note's", async ({ pa
   const listBox = await group(1).boundingBox();
   await group(1).getByRole("searchbox", { name: "Filter notes" }).click();
   await expect(page).toHaveURL(/\/folder\/[a-z0-9]{12}$/);
+  await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(inspector.getByRole("definition")).toHaveText(["Projects", "1 note", "just now by Ada Lovelace"]);
   await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
   expect(await group(1).boundingBox()).toEqual(listBox);
@@ -396,6 +398,7 @@ test("the inspector follows the tab in front: a note's tabs, a folder tab's Info
 
   await tab(page, "Projects").click();
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
+  await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(inspector.getByRole("definition")).toHaveText(["Projects", "1 note", "just now by Ada Lovelace"]);
   expect(await inspector.boundingBox()).toEqual(place);
 

@@ -236,9 +236,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
-  // No tab is a default: with none picked yet the first shows, and Info once it is picked.
-  await expect(inspector.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
-  await inspector.getByRole("tab", { name: "Info" }).click();
+  // With no tab picked yet, Info shows.
   await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
   const panel = inspector.getByRole("tabpanel");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
@@ -334,7 +332,6 @@ test("the inspector stays open whatever is in front and shows what belongs to it
   await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
   const place = await inspector.boundingBox();
-  await inspector.getByRole("tab", { name: "History" }).click();
 
   await folder(page, "Projects").click();
   await expect(listHeading(page)).toHaveText("Projects");
@@ -345,9 +342,9 @@ test("the inspector stays open whatever is in front and shows what belongs to it
   await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveCount(0);
   expect(await inspector.boundingBox()).toEqual(place);
 
-  // The tab picked for a note is the one a note comes back to.
+  // The tab picked on a note is the one a folder showed, and the one a note comes back to.
   await page.goBack();
-  await expect(inspector.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
   expect(await inspector.boundingBox()).toEqual(place);
 
   await openAllNotes(page);

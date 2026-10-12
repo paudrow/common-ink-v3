@@ -38,8 +38,9 @@ async function dragOnto(page: Page, from: Locator, onto: Locator, across: number
 
 /** What scrolls in a group, and how it sits in the group's body. */
 const SCROLLERS = ".folder-list, .note-scroll, .page-pane";
-const fit = (page: Page, n: number) =>
-  body(page, n).evaluate((el, scrollers) => {
+const fit = async (page: Page, n: number) => {
+  await body(page, n).locator(SCROLLERS).locator("h1, input, .cm-line").first().waitFor();
+  return body(page, n).evaluate((el, scrollers) => {
     const scroller = el.querySelector(scrollers);
     if (!scroller) throw new Error("nothing scrolls in this group");
     const [pane, inner, first] = [el.getBoundingClientRect(), scroller.getBoundingClientRect(), scroller.querySelector("h1, input, .cm-line")!.getBoundingClientRect()];
@@ -52,6 +53,7 @@ const fit = (page: Page, n: number) =>
       firstLineInside: first.top >= pane.top && first.bottom <= pane.bottom,
     };
   }, SCROLLERS);
+};
 /** What is in the pane ends where the pane does, and is short enough that there is nowhere to scroll. */
 const FITS = { below: 0, above: 0, hidden: 0, firstLineInside: true };
 
@@ -332,15 +334,15 @@ test("the inspector shows the tab last picked, on whatever has it, and one it do
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const shown = () => inspector.getByRole("tab", { selected: true });
 
-  // Nothing picked yet: the first tab the note has.
-  await expect(shown()).toHaveText("History");
+  // Nothing picked yet: Info.
+  await expect(shown()).toHaveText("Info");
   await inspector.getByRole("tab", { name: "Backlinks" }).click();
   await expect(shown()).toHaveText("Backlinks");
 
   // A folder has no Backlinks: it shows what it has, and the note after it shows Backlinks again, as another note does.
   await tab(page, "All notes").click();
-  await expect(shown()).toHaveText("Info");
-  await expect(inspector.getByRole("tab")).toHaveText(["Info"]);
+  await expect(shown()).toHaveText("History");
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
   await tab(page, "Beta").click();
   await expect(shown()).toHaveText("Backlinks");
   await tab(page, "Alpha").click();

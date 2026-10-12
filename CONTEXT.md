@@ -113,7 +113,7 @@ What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The s
 The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line. A note has History, Backlinks and Info; a folder's list has History, the folder's notes that changed as History mode lists them, and Info.
 
 **Writing mode**:
-The editor area alone: no sidebar, no inspector, and neither bar. ⌘. and the window button leave it. With a note in front, a small History mark sits beside that button, dotted while the note has changes the member hasn't seen, and opens the note's history over the note.
+The editor area alone: no sidebar, no inspector, and neither bar. ⌘. and the window button leave it.
 
 **Command**:
 A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.

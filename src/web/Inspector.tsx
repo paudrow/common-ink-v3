@@ -80,14 +80,18 @@ export const markOf = (v: InspectorView, subject: Subject | null) => (subject ? 
 /** The tabs the inspector has for what is in front, in order. None for a page, which has nothing to show there yet. */
 export const viewsFor = (subject: Subject | null) => INSPECTOR_VIEWS.filter((v) => v.for === subject?.kind);
 
+/** The tab a member who has picked none is shown. Showing History counts a note's changes as seen, so it is never shown unasked. */
+const UNPICKED = "info";
+
 /**
  * The tab that shows: the one the member last picked, or the one of the same name where what is in
  * front has its own, as a folder has its own Info. Where it has neither, the first of the tabs it
- * does have shows, and the pick is as it was for the next thing that has it. No tab is a default.
+ * does have shows, and the pick is as it was for the next thing that has it.
  */
 export const shownView = (views: readonly InspectorView[], picked: string | null) => {
-  const label = INSPECTOR_VIEWS.find((v) => v.id === picked)?.label;
-  return views.find((v) => v.id === picked) ?? views.find((v) => v.label === label) ?? views[0];
+  const id = picked ?? UNPICKED;
+  const label = INSPECTOR_VIEWS.find((v) => v.id === id)?.label;
+  return views.find((v) => v.id === id) ?? views.find((v) => v.label === label) ?? views[0];
 };
 
 interface Props {
