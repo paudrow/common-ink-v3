@@ -1617,8 +1617,7 @@ button.link:hover {
   font-weight: 600;
 }
 
-.plugin-adds dd,
-.plugin-options li {
+.plugin-adds dd {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 8px;
@@ -1634,16 +1633,12 @@ button.link:hover {
   font-size: 11.5px;
 }
 
+/* A plugin's options on its own page are the rows Settings draws, in a frame with no border of its own. */
 .plugin-options {
-  display: grid;
-  gap: 6px;
-  margin: 0;
+  min-width: 0;
+  margin: 0 0 10px;
   padding: 0;
-  list-style: none;
-}
-
-.plugin-option {
-  font-weight: 600;
+  border: 0;
 }
 
 /* A switch is a checkbox drawn as one, so it is still a checkbox to the keyboard and to a screen reader. */
@@ -1742,8 +1737,10 @@ kbd {
   margin: 0;
 }
 
+/* Saved and Saving… take the same room, so the head wraps the same way through a save and nothing under it moves. */
 .settings-head .save-state {
   flex: 1;
+  min-width: 4.5rem;
 }
 
 .settings-tools {
@@ -1844,9 +1841,17 @@ kbd {
   .settings-pick {
     display: block;
   }
+}
 
+/* The table of shortcuts is rows of cells only where its own pane has room for the four columns. In less, each command is a card. */
+@container settings-pane (max-width: 38rem) {
+  /* The column names are out of sight and still read out, as the cells keep their order. */
   .shortcuts thead {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 
   .shortcuts,
@@ -1855,15 +1860,28 @@ kbd {
     display: block;
   }
 
+  /* A row is its command, with where its keys are from at the end of that line, and under it the keys and the buttons. The buttons' column is as wide whatever is in it, so the keys' is too. */
   .shortcuts tr {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
     gap: 4px 10px;
     align-items: center;
   }
 
-  .shortcuts tr > th {
-    flex-basis: 100%;
+  .shortcuts tr > .shortcut-from {
+    grid-area: 1 / 2;
+    justify-self: end;
+    align-self: start;
+    width: 48px;
+    text-align: right;
+  }
+
+  .shortcuts tr > .shortcut-keys {
+    grid-area: 2 / 1;
+  }
+
+  .shortcuts tr > .shortcut-actions {
+    grid-area: 2 / 2;
   }
 
   .shortcuts tr > th,
@@ -1872,13 +1890,28 @@ kbd {
     border: 0;
   }
 
-  .shortcuts .shortcut-actions {
-    margin-left: auto;
-  }
-
   .shortcuts tr {
     padding: 8px 0 8px 8px;
     border-bottom: 1px solid var(--line);
+  }
+}
+
+/* In a pane narrower than the buttons and a key side by side, a card is one column: the command, its keys, where they are from, the buttons. */
+@container settings-pane (max-width: 18rem) {
+  .shortcuts tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shortcuts tr > :is(.shortcut-from, .shortcut-keys, .shortcut-actions) {
+    grid-area: auto;
+    justify-self: stretch;
+    width: auto;
+    text-align: left;
+  }
+
+  .shortcuts .shortcut-buttons {
+    grid-template-columns: 50px 38px 48px;
+    justify-content: start;
   }
 }
 
@@ -1903,6 +1936,7 @@ kbd {
 }
 
 .settings-pane {
+  container: settings-pane / inline-size;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -1931,11 +1965,27 @@ kbd {
   font-weight: 400;
 }
 
+/* The columns have widths of their own, not their content's, so a key added to one row moves no other. */
 .shortcuts {
   width: 100%;
   margin-top: 8px;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
+}
+
+@container settings-pane (width > 38rem) {
+  .shortcuts thead th:nth-child(2) {
+    width: 216px;
+  }
+
+  .shortcuts thead th:nth-child(3) {
+    width: 60px;
+  }
+
+  .shortcuts thead th:nth-child(4) {
+    width: 188px;
+  }
 }
 
 .shortcuts th,
@@ -1977,12 +2027,18 @@ kbd {
   font-size: 12px;
 }
 
-.shortcut-keys {
-  white-space: nowrap;
+/* A command's keys are one line whatever their number and their length, so a key added grows no row: those past the column's width are scrolled to, and the cell's title names them all. */
+.shortcut-chords {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-height: 22px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.shortcut-keys kbd + kbd {
-  margin-left: 4px;
+.shortcut-chords > * {
+  flex: none;
 }
 
 .shortcut-keys kbd button {
@@ -2005,13 +2061,25 @@ kbd {
   font-size: 12px;
 }
 
-.shortcut-actions {
-  text-align: right;
-  white-space: nowrap;
+.shortcut-buttons {
+  display: grid;
+  grid-template-columns: 58px 44px 54px;
+  gap: 4px;
+  justify-content: end;
 }
 
-.shortcut-actions .button + .button {
-  margin-left: 4px;
+.shortcut-buttons .button {
+  grid-row: 1;
+  grid-column: 1;
+  padding-inline: 0;
+}
+
+.shortcut-buttons [data-does="add"] {
+  grid-column: 2;
+}
+
+.shortcut-buttons [data-does="reset"] {
+  grid-column: 3;
 }
 
 .recorder-backdrop {

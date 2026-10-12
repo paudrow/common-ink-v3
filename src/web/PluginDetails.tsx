@@ -1,12 +1,16 @@
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { Icon } from "./icons.tsx";
 import { chordFor, chordLabel } from "./keybindings.ts";
 import type { Slots } from "./plugin-api.ts";
 import type { Added, Contributions, Host } from "./pluginHost.ts";
 import { PLUGINS_PATH, within, type Listed } from "./pluginList.ts";
+import { SettingRow } from "./SettingRow.tsx";
+import { statusLabel, type SettingsStore } from "./settingsStore.ts";
 
 export interface PluginsProps {
   host: Host;
+  /** The member's settings as they are kept, for whether they have been read yet. */
+  store: SettingsStore;
   mac: boolean;
   /** The address the app is at: `/plugins`, or `/plugins/<plugin id>` for one plugin's details. */
   path: string;
@@ -39,11 +43,15 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** One plugin: what it is, what it adds, its pictures and its options, and its switch. */
-export function PluginDetails({ plugin, contributed, host, mac, go }: Props) {
+/** One plugin: what it is, what it adds, its pictures, its switch, and its options, which are changed here as they are in Settings. */
+export function PluginDetails({ plugin, contributed, host, store, mac, go }: Props) {
   const { id, name, state } = plugin;
   const adds = state.adds;
-  const options = contributed.settings.declared.filter((d) => d.group.id === id && !d.switch);
+  const { settings } = contributed;
+  const options = settings.declared.filter((d) => d.group.id === id && !d.switch);
+  /** Until the member's settings have been read nothing can be set, here as in Settings. */
+  const status = useSyncExternalStore(store.subscribe, store.status);
+  const unread = status.kind === "loading" || status.kind === "unread";
 
   return (
     <section className="mode-view plugins-page plugin-details">
@@ -106,14 +114,27 @@ export function PluginDetails({ plugin, contributed, host, mac, go }: Props) {
           <p className="soon">It has no settings.</p>
         ) : (
           <>
-            <ul className="plugin-options" aria-label={`Settings of ${name}`}>
+            {options.some((d) => !d.active) && <p className="soon">{name} is off, so its options change nothing until it is turned on.</p>}
+            {/* Said only when there is something to say: that nothing can be set yet, or that a change wasn't kept. */}
+            {status.kind !== "saved" && status.kind !== "saving" && (
+              <p role="status" className="soon">
+                {statusLabel(status)}
+              </p>
+            )}
+            {/* The same rows Settings draws for this plugin, writing the same settings, so the two are always in step. */}
+            <fieldset className="plugin-options" disabled={unread} aria-label={`Settings of ${name}`}>
               {options.map((d) => (
-                <li key={d.key}>
-                  <span className="plugin-option">{d.setting.title}</span>
-                  {d.setting.description && <span className="plugin-about">{d.setting.description}</span>}
-                </li>
+                <SettingRow
+                  key={d.key}
+                  declared={d}
+                  value={settings.values[d.key]!}
+                  modified={Object.hasOwn(settings.document, d.key)}
+                  problems={settings.problems.filter((p) => p.key === d.key)}
+                  mac={mac}
+                  onSet={(value) => host.setSetting(d.key, value)}
+                />
               ))}
-            </ul>
+            </fieldset>
             <a className="button small" {...within(go, `/settings/plugins/${encodeURIComponent(id)}`)}>
               Open in Settings
             </a>
@@ -169,7 +190,7 @@ function Adds({ adds, options, off, keys, mac }: AddsProps) {
               Settings <span className="settings-count">{options}</span>
             </dt>
             <dd>
-              <span>Listed below, and changed in Settings</span>
+              <span>Changed below, and in Settings</span>
             </dd>
           </div>
         )}

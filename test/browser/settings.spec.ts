@@ -292,6 +292,81 @@ test("a keybinding is recorded by pressing it, warned of when another command ha
   await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleFocus": ["mod+.", "f8"] });
 });
 
+// The widest is the table as rows of cells under its column names, and the others each command as a card, as the pane has room for: at 560px a card of one column.
+for (const width of [1700, 1280, 900, 560]) {
+  test(`recording, adding, removing or resetting a key moves nothing in the table of keyboard shortcuts: every row keeps its box and the page its scroll, at ${width}px`, async ({ page }) => {
+    // Keys are named as they are off a Mac, which is longer: Ctrl+Shift+Y for ⇧⌘Y.
+    await page.addInitScript(() => Object.defineProperty(navigator, "platform", { get: () => "Linux x86_64" }));
+    await page.setViewportSize({ width, height: 480 });
+    await openSettings(page);
+    await page.goto("/settings/keyboard");
+    await expect(page.getByRole("status")).toHaveText("Saved");
+    const row = page.getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Toggle inspector/ });
+    await row.scrollIntoViewIfNeeded();
+    await page.locator(".page-pane").evaluate((pane) => pane.scrollBy(0, 60));
+    /** Every row and every cell and button of the table, where it is in the window, and how far down everything that scrolls is. */
+    const places = async () => {
+      // A change is on its way to the server for a moment, and where things are is read once it is kept.
+      await expect(page.getByRole("status")).toHaveText("Saved");
+      return page.evaluate(async () => {
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        const box = (el: Element) => {
+          const { x, y, width, height } = el.getBoundingClientRect();
+          return [x, y, width, height].map((n) => Math.round(n * 10) / 10);
+        };
+        const table = document.querySelector("table.shortcuts")!;
+        return {
+          table: box(table),
+          rows: [...table.querySelectorAll("tr")].map((tr) => [tr.querySelector("code")?.textContent ?? "head", ...box(tr), ...[...tr.children].flatMap(box)]),
+          record: [...table.querySelectorAll("[data-row-open]")].map(box),
+          scrolled: [...document.querySelectorAll("*")].filter((el) => el.scrollTop > 0).map((el) => [el.className, el.scrollTop]),
+          // Nothing of the table is wider than the table.
+          inside: table.scrollWidth <= table.clientWidth && [...table.querySelectorAll("td, th, .shortcut-buttons button")].every((el) => el.getBoundingClientRect().right <= table.getBoundingClientRect().right + 0.5),
+        };
+      });
+    };
+    const record = async (name: string, key: string) => {
+      await row.getByRole("button", { name: `${name} Toggle inspector` }).click();
+      const recorder = page.getByRole("dialog", { name: `${name} Toggle inspector` });
+      await page.keyboard.press(key);
+      await page.keyboard.press("Enter");
+      await expect(recorder).toHaveCount(0);
+    };
+    const before = await places();
+    expect(before.scrolled.length).toBeGreaterThan(0);
+    expect(before.inside).toBe(true);
+    // Which of the three layouts this is: rows of cells under their column names, or a card of two columns or of one.
+    const layout = await row.evaluate((tr) => (getComputedStyle(tr).display === "grid" ? `card of ${getComputedStyle(tr).gridTemplateColumns.split(" ").length}` : "cells"));
+    expect(layout).toBe({ 1700: "cells", 1280: "card of 2", 900: "card of 2", 560: "card of 1" }[width]);
+    expect(before.rows.length).toBeGreaterThan(8);
+
+    await record("Record a key for", "ControlOrMeta+Shift+Y");
+    await expect(row.getByRole("cell").nth(1)).toHaveText("Yours");
+    await expect(row.locator("kbd")).toHaveCount(1);
+    expect(await places()).toEqual(before);
+
+    await record("Add another key for", "ControlOrMeta+Shift+U");
+    await expect(row.locator("kbd")).toHaveCount(2);
+    expect(await places()).toEqual(before);
+    // A third, and a long one: two keys pressed one after the other.
+    await row.getByRole("button", { name: "Add another key for Toggle inspector" }).click();
+    await page.keyboard.press("ControlOrMeta+Shift+K");
+    await page.keyboard.press("ControlOrMeta+Shift+S");
+    await page.keyboard.press("Enter");
+    await expect(row.locator("kbd")).toHaveText([/^Ctrl\+Shift\+Y/, /^Ctrl\+Shift\+U/, /^Ctrl\+Shift\+K Ctrl\+Shift\+S/]);
+    expect(await places()).toEqual(before);
+
+    await row.locator("kbd").first().getByRole("button").click();
+    await expect(row.locator("kbd")).toHaveCount(2);
+    expect(await places()).toEqual(before);
+
+    await row.getByRole("button", { name: "Reset Toggle inspector" }).click();
+    await expect(row.getByRole("cell").first()).toHaveText("No key");
+    await expect(row.getByRole("cell").nth(1)).toHaveText("Default");
+    expect(await places()).toEqual(before);
+  });
+}
+
 test("one search finds settings in every category and keyboard shortcuts, a category narrows it, and Modified shows only what was changed", async ({ page }) => {
   await openSettings(page);
   await write(page, { "core.theme": "dark", "note-list.snippets": false, "keybindings.view.toggleInspector": ["mod+shift+i"], "backlinks.enabled": false });
@@ -410,6 +485,79 @@ test("the Settings page is there by its address with every plugin off, and from 
   await page.keyboard.type("Go to Settings");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
+});
+
+test("a plugin's options are changed on its own page, with the controls, the refusals and the reset Settings has, and the two stay in step", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "sized",
+        name: "Sized",
+        settings: {
+          rows: { type: "integer", default: 3, minimum: 1, maximum: 9, title: "Rows", description: "How many rows it draws." },
+          look: { type: "string", default: "plain", enum: ["plain", "loud"], title: "Look" },
+        },
+        activate(host: { settings: { get(name: string): unknown }; views: { register(slot: string, view: unknown): void } }) {
+          host.views.register("section", { id: "sized", component: () => `sized draws ${host.settings.get("rows")} rows, ${host.settings.get("look")}` });
+        },
+      },
+    ];
+  });
+  await openSettings(page);
+  await page.goto("/plugins/sized");
+  const options = page.locator(".plugin-details").getByRole("region", { name: "Settings", exact: true });
+  const rows = options.getByRole("spinbutton", { name: "Rows" });
+  const look = options.getByRole("combobox", { name: "Look" });
+  const drawn = page.locator(".sidebar");
+
+  // What Settings shows of each option: its key, what it is for, its default.
+  await expect(rows).toHaveValue("3");
+  await expect(options).toContainText("sized.rows");
+  await expect(options).toContainText("How many rows it draws.");
+  await expect(options).toContainText("Default: 3");
+  await expect(options.getByRole("button", { name: /^Reset/ })).toHaveCount(0);
+  await expect(drawn).toContainText("sized draws 3 rows, plain");
+
+  // A change is written to the member's settings and applies at once.
+  await rows.fill("5");
+  await page.keyboard.press("Enter");
+  await look.selectOption("loud");
+  await expect(drawn).toContainText("sized draws 5 rows, loud");
+  await expect.poll(() => stored(page)).toEqual({ "sized.rows": 5, "sized.look": "loud" });
+
+  // A value the schema refuses is refused here as it is there, and nothing is written.
+  await rows.fill("50");
+  await page.keyboard.press("Enter");
+  await expect(options).toContainText("Expected 9 or less, not 50. Nothing was changed.");
+  await expect(rows).toHaveAttribute("aria-invalid", "true");
+  expect(await stored(page)).toEqual({ "sized.rows": 5, "sized.look": "loud" });
+
+  // Settings lists the same options, with what was set here, and a change there shows here.
+  await options.getByRole("link", { name: "Open in Settings" }).click();
+  await expect(page).toHaveURL(/\/settings\/plugins\/sized$/);
+  const inSettings = group(page, "Sized");
+  await expect(inSettings.getByRole("spinbutton", { name: "Rows" })).toHaveValue("5");
+  await expect(inSettings.getByRole("combobox", { name: "Look" })).toHaveValue("loud");
+  await inSettings.getByRole("spinbutton", { name: "Rows" }).fill("7");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => stored(page)).toEqual({ "sized.rows": 7, "sized.look": "loud" });
+  await inSettings.getByRole("link", { name: "About this plugin" }).click();
+  await expect(page).toHaveURL(/\/plugins\/sized$/);
+  await expect(rows).toHaveValue("7");
+  await expect(rows).not.toHaveAttribute("aria-invalid", "true");
+
+  // Reset puts an option back at its default and takes it out of what is stored.
+  await options.getByRole("button", { name: "Reset Rows" }).click();
+  await expect(rows).toHaveValue("3");
+  await expect(drawn).toContainText("sized draws 3 rows, loud");
+  await expect.poll(() => stored(page)).toEqual({ "sized.look": "loud" });
+  await expect(options.getByRole("button", { name: "Reset Rows" })).toHaveCount(0);
+
+  // Off, its options are still its to set, and the page says they change nothing until it is on.
+  await page.getByRole("checkbox", { name: "Sized", exact: true }).uncheck();
+  await expect(options).toContainText("Sized is off, so its options change nothing until it is turned on.");
+  await look.selectOption("plain");
+  await expect.poll(() => stored(page)).toEqual({ "sized.enabled": false });
 });
 
 test("a plugin that asks to change settings is refused and nothing is written, while its own option is its to read", async ({ page }) => {

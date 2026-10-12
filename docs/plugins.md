@@ -94,7 +94,7 @@ Nothing else on the Plugins page is written by hand. A plugin's details list wha
 
 A plugin's `settings` are its options, by name. Each is a `Setting`: a `type` (`boolean`, `string`, `number`, `integer`, or `chords`), a `default`, a `title`, and optionally a `description`, an `enum` or `maxLength` for a string, and a `minimum` and `maximum` for a number. The words are JSON Schema's. They are plain data, so the app lists them without running the plugin, and they stay listed while it is off.
 
-An option named `unit` in the plugin `word-count` is the setting `word-count.unit`. The member changes it on the Settings page, in the plugin's own category under "Plugins" or in the JSON, and only a value that differs from the default is kept. A plugin's details on the Plugins page list its options and link to that category.
+An option named `unit` in the plugin `word-count` is the setting `word-count.unit`. The member changes it in the plugin: its details on the Plugins page have every option it declares, each with the control its schema asks for, the reason a value was refused, and Reset. The Settings page has the same options, in the plugin's own category under "Plugins" and in the JSON. Both draw one component (`SettingRow`) and write the one setting, so they are always in step, and only a value that differs from the default is kept. A plugin does nothing for either: declaring the option is all.
 
 `host.settings.get(name)` is the option's value now: the member's when it is valid, the default otherwise. A view is drawn again when settings change, so reading it while drawing is enough. Anything else calls `host.settings.subscribe(listener)`.
 

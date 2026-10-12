@@ -152,7 +152,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
   const [host] = useState(() => {
     let created: Host;
-    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} mac={MAC} path={app.path} go={app.go} />;
+    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
       id: "core",

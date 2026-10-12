@@ -466,7 +466,7 @@ test("a built-in plugin's details show what it is, what it adds as it registered
   await expect(page.getByText("There's no plugin here.")).toBeVisible();
 });
 
-test("a plugin's details list its settings and link to them in Settings, and one that hasn't been on says so until it is", async ({ page }) => {
+test("a plugin's details have its settings and link to them in Settings, and one that hasn't been on says so until it is", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.goto("/plugins/note-list");
   const details = page.locator(".plugin-details");
@@ -476,7 +476,10 @@ test("a plugin's details list its settings and link to them in Settings, and one
   await page.reload();
   await expect(details.locator(".plugin-switch")).toHaveText("Off");
   await expect(section(page, "What it adds")).toContainText("It hasn't been on since the app loaded, so what it adds isn't listed yet. Turn it on to see.");
-  await expect(section(page, "Settings").getByRole("list", { name: "Settings of Note list" }).getByRole("listitem")).toHaveText([/^Show snippetsShow the first lines of each note under its title\./]);
+  const own = section(page, "Settings").getByRole("group", { name: "Settings of Note list" });
+  await expect(own.getByRole("checkbox")).toHaveAccessibleName("Show snippets");
+  await expect(own).toContainText("Show the first lines of each note under its title.");
+  await expect(section(page, "Settings")).toContainText("Note list is off, so its options change nothing until it is turned on.");
 
   await details.getByRole("checkbox", { name: "Note list", exact: true }).check();
   await expect(section(page, "What it adds").getByRole("group", { name: "Views" })).toBeVisible();
