@@ -199,6 +199,8 @@ export type EditorAction =
   | { type: "drop"; groupId: string; index: number; tab: Opened }
   /** Adds the tab to the end of a group's, as dropping it on the middle of the group does. */
   | { type: "add"; groupId: string; tab: Opened }
+  /** Moves the tab from `groupId` to the group after or before it, round from the last to the first, as dropping it on the middle of that group does. */
+  | { type: "send"; groupId: string; tab: Opened; to: "next" | "previous" }
   /** Gives the panes of one split new shares of it. `path` is the way to the split from the outermost one: which pane, then which pane of that. */
   | { type: "resize"; path: number[]; sizes: number[] };
 
@@ -297,6 +299,11 @@ export function editorReducer(layout: EditorLayout, action: EditorAction): Edito
     }
     case "add":
       return editorReducer(layout, { type: "drop", groupId: action.groupId, index: layout.groups.find((g) => g.id === action.groupId)?.tabs.length ?? 0, tab: tab! });
+    case "send": {
+      const count = layout.groups.length;
+      const to = layout.groups[(layout.groups.findIndex((g) => g.id === action.groupId) + (action.to === "next" ? 1 : count - 1)) % count]!;
+      return count > 1 ? editorReducer(layout, { type: "add", groupId: to.id, tab: tab! }) : layout;
+    }
     case "resize": {
       const sized = (pane: Pane, path: number[]): Pane => {
         if (typeof pane === "string") return pane;
