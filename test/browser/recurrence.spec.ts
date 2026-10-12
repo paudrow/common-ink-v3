@@ -481,7 +481,7 @@ test("changing the daily folder leaves a daily note already made where it is, an
   expect([first.note.text, first.folder]).toEqual([`# ${today}\n\n- [x] Sweep [[${note.id}]]\n`, "Daily"]);
 
   // The settings are the daily plugin's, under the keys the server reads.
-  await page.goto("/settings");
+  await page.goto("/settings/plugins/daily");
   await expect(page.getByText("Daily notes folder")).toBeVisible();
   await expect(page.getByText("Private daily notes")).toBeVisible();
   await expect(page.getByText("Time zone for agents")).toBeVisible();

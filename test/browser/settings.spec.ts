@@ -103,7 +103,7 @@ test("editing the JSON changes the options and the app, and editing the options 
 
 test("a plugin's options are listed under it with their schema and apply without a reload, and its switch is on the Plugins page and not among them", async ({ page }) => {
   await openSettings(page);
-  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list", "Vim mode"]);
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list", "Daily notes", "Vim mode"]);
   const noteList = await category(page, "Note list");
 
   await expect(noteList.getByRole("checkbox")).toHaveCount(1);
@@ -294,7 +294,7 @@ test("a keybinding is recorded by pressing it, warned of when another command ha
 
 test("one search finds settings in every category and keyboard shortcuts, a category narrows it, and Modified shows only what was changed", async ({ page }) => {
   await openSettings(page);
-  await write(page, { "core.theme": "dark", "note-list.snippets": false, "keybindings.view.toggleInspector": ["mod+shift+i"], "backlinks.enabled": false });
+  await write(page, { "core.theme": "dark", "daily.folder": "Journal", "keybindings.view.toggleInspector": ["mod+shift+i"], "note-list.enabled": false });
   await page.reload();
   const categories = page.getByRole("navigation", { name: "Categories" }).getByRole("link");
   const shown = page.locator(".settings-pane").getByRole("region");
@@ -302,35 +302,35 @@ test("one search finds settings in every category and keyboard shortcuts, a cate
   const search = page.getByRole("searchbox", { name: "Search settings" });
   await expect(shown).toHaveText([/^Editor/]);
 
-  await search.fill("note list");
-  await expect(categories).toHaveText(["All results2", "Keyboard shortcuts1", "Note list1"]);
-  await expect(group(page, "Keyboard shortcuts").getByRole("rowheader")).toHaveText([/Disable plugin: Note list/]);
+  await search.fill("daily");
+  await expect(categories).toHaveText(["All results5", "Keyboard shortcuts2", "Daily notes3"]);
+  await expect(group(page, "Keyboard shortcuts").getByRole("rowheader")).toHaveText([/daily\.today/, /Disable plugin: Daily notes/]);
   await expect(categories.first()).toHaveAttribute("aria-current", "page");
   await search.fill("note");
-  await expect.poll(names).toEqual(["Editor", "Note list", "Keyboard shortcuts"]);
-  await expect(group(page, "Note list").getByRole("checkbox", { name: "Show snippets" })).not.toBeChecked();
+  await expect.poll(names).toEqual(["Editor", "Note list", "Daily notes", "Keyboard shortcuts"]);
+  await expect(group(page, "Daily notes").getByRole("textbox", { name: "Daily notes folder" })).toHaveValue("Journal");
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /New note/ })).toBeVisible();
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /Undo/ })).toHaveCount(0);
 
-  await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: /^Note list, 1 found$/ }).click();
-  await expect.poll(names).toEqual(["Note list"]);
-  await expect(page).toHaveURL(/\/settings\/plugins\/note-list$/);
+  await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: /^Daily notes, 3 found$/ }).click();
+  await expect.poll(names).toEqual(["Daily notes"]);
+  await expect(page).toHaveURL(/\/settings\/plugins\/daily$/);
   await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: /^All results/ }).click();
-  await expect(shown).toHaveCount(3);
+  await expect(shown).toHaveCount(4);
 
   await search.fill("zzzz");
   await expect(page.locator(".settings-pane")).toHaveText("No setting or keyboard shortcut matches.");
   await search.fill("");
-  await expect.poll(names).toEqual(["Note list"]);
+  await expect.poll(names).toEqual(["Daily notes"]);
 
   await page.getByRole("button", { name: "Modified" }).click();
   await expect(page.getByRole("button", { name: "Modified" })).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(names).toEqual(["Appearance", "Note list", "Keyboard shortcuts"]);
+  await expect.poll(names).toEqual(["Appearance", "Daily notes", "Keyboard shortcuts"]);
   await expect(page.locator(".settings-pane .setting")).toHaveCount(2);
   await expect(group(page, "Keyboard shortcuts").getByRole("row")).toHaveText([/Command/, /Toggle inspector/]);
-  await group(page, "Note list").getByRole("button", { name: "Reset Show snippets" }).click();
+  await group(page, "Daily notes").getByRole("button", { name: "Reset Daily notes folder" }).click();
   await expect.poll(names).toEqual(["Appearance", "Keyboard shortcuts"]);
-  await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "keybindings.view.toggleInspector": ["mod+shift+i"], "backlinks.enabled": false });
+  await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "keybindings.view.toggleInspector": ["mod+shift+i"], "note-list.enabled": false });
 });
 
 test("at a narrow width the categories are a menu above the settings, and in the dark theme the page is dark", async ({ page }) => {

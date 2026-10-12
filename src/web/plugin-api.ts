@@ -302,9 +302,9 @@ export interface Slots {
    * `go.<id>` command. `order` places its link among the others: lower first, and those with none
    * after them, in the order of their plugins. A page is also shown at every address under its
    * path, such as `/plugins/tabs` for the page at `/plugins`, unless another page is at exactly that address:
-   * it reads the rest from `app.path`. One that is `transient` only leads somewhere else
-   * with `app.show`: it is never a tab, and is drawn in place of the editor area for the moment it
-   * takes to find where to go.
+   * it reads the rest from `app.path`. One that is `transient` only leads somewhere else, as Today
+   * leads to the day's note with `app.show`: it is never a tab, and is drawn in place of the editor
+   * area for the moment it takes to find where to go.
    */
   page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; component: View };
   /**
