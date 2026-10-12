@@ -4,6 +4,7 @@ import { notePath } from "../core/slug.ts";
 import { pathName, type FolderTree } from "./folders.ts";
 import { FolderHistory, NoteHistory } from "./History.tsx";
 import type { IconName } from "./icons.tsx";
+import { pickView } from "./inspectorPick.ts";
 import { Soon } from "./Soon.tsx";
 import { ago, useNow } from "./time.ts";
 
@@ -80,19 +81,8 @@ export const markOf = (v: InspectorView, subject: Subject | null) => (subject ? 
 /** The tabs the inspector has for what is in front, in order. None for a page, which has nothing to show there yet. */
 export const viewsFor = (subject: Subject | null) => INSPECTOR_VIEWS.filter((v) => v.for === subject?.kind);
 
-/** The tab a member who has picked none is shown. Showing History counts a note's changes as seen, so it is never shown unasked. */
-const UNPICKED = "info";
-
-/**
- * The tab that shows: the one the member last picked, or the one of the same name where what is in
- * front has its own, as a folder has its own Info. Where it has neither, the first of the tabs it
- * does have shows, and the pick is as it was for the next thing that has it.
- */
-export const shownView = (views: readonly InspectorView[], picked: string | null) => {
-  const id = picked ?? UNPICKED;
-  const label = INSPECTOR_VIEWS.find((v) => v.id === id)?.label;
-  return views.find((v) => v.id === id) ?? views.find((v) => v.label === label) ?? views[0];
-};
+/** The tab that shows for what is in front, by the rule in `inspectorPick.ts`. */
+export const shownView = (views: readonly InspectorView[], picked: string | null) => pickView(INSPECTOR_VIEWS, views, picked);
 
 interface Props {
   /** Null while what is in front is still loading: the inspector keeps its place and shows nothing. */
