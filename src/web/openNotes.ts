@@ -1,3 +1,4 @@
+import type { EditorState, Text } from "@codemirror/state";
 import { ViewPlugin, type EditorView } from "@codemirror/view";
 import { useSyncExternalStore } from "react";
 
@@ -8,8 +9,11 @@ export interface OpenNote {
   selected: string;
 }
 
-/** The editor each open note is being written in. A note open in two groups is its editor the member was last in. */
-const editors = new Map<string, EditorView>();
+/** Every editor a note is open in, the one the member was last in at the end. One that opens while another is being written in takes nothing over. */
+const editors = new Map<string, EditorView[]>();
+/** What was read of an editor's state the last time, so a caret that only moves reads no text again. */
+const read = new WeakMap<EditorState, OpenNote>();
+const texts = new WeakMap<Text, string>();
 const listeners = new Set<() => void>();
 let version = 0;
 const changed = () => {
@@ -24,34 +28,46 @@ const subscribe = (listener: () => void) => {
 /** The editor extension that keeps a note's editor where {@link useOpenNote} reads it. */
 export const openNote = (noteId: string) =>
   ViewPlugin.define((view) => {
-    editors.set(noteId, view);
+    const others = () => (editors.get(noteId) ?? []).filter((other) => other !== view);
+    editors.set(noteId, view.hasFocus ? [...others(), view] : [view, ...others()]);
     queueMicrotask(changed);
     return {
       update(update) {
-        if (update.focusChanged && update.view.hasFocus) editors.set(noteId, update.view);
+        if (update.focusChanged && view.hasFocus) editors.set(noteId, [...others(), view]);
         if (update.docChanged || update.selectionSet || update.focusChanged) changed();
       },
       destroy() {
-        if (editors.get(noteId) !== view) return;
-        editors.delete(noteId);
+        const left = others();
+        if (left.length) editors.set(noteId, left);
+        else editors.delete(noteId);
         queueMicrotask(changed);
       },
     };
   });
 
-/**
- * A note's text and selection as its editor has them, drawn again as either changes. Null when the
- * note isn't open in an editor: nothing is asked of the server, and a note only being read is not open.
- */
-export function useOpenNote(noteId: string | null): OpenNote | null {
-  useSyncExternalStore(subscribe, () => version);
-  const state = noteId === null ? undefined : editors.get(noteId)?.state;
-  if (!state) return null;
-  return {
-    text: state.doc.toString(),
+function reading(state: EditorState): OpenNote {
+  let note = read.get(state);
+  if (note) return note;
+  let text = texts.get(state.doc);
+  if (text === undefined) texts.set(state.doc, (text = state.doc.toString()));
+  note = {
+    text,
     selected: state.selection.ranges
       .filter((range) => !range.empty)
       .map((range) => state.sliceDoc(range.from, range.to))
       .join("\n"),
   };
+  read.set(state, note);
+  return note;
+}
+
+/**
+ * A note's text and selection as its editor has them, drawn again as either changes. Null when the
+ * note isn't open in an editor: nothing is asked of the server, and a note only being read is not open.
+ * Open in several editors, it is the one the member was last in. The text is the same string until the note changes.
+ */
+export function useOpenNote(noteId: string | null): OpenNote | null {
+  useSyncExternalStore(subscribe, () => version);
+  const state = noteId === null ? undefined : editors.get(noteId)?.at(-1)?.state;
+  return state ? reading(state) : null;
 }

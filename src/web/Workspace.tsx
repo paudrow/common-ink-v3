@@ -575,8 +575,12 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
     </div>
   );
 
+  /** Focus is of a group, and the way out of it is in that group. With none drawn the window stays whole, so nothing is hidden with no way back. */
+  const nothingThere = route.kind === "page" && !routePageId && !passing;
+  const focusable = !nothingThere && (!!editorArea || !passing);
+
   return (
-    <div className="app" data-focus-mode={focusMode || undefined} data-bar={bar.length > 0 || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
       {contributed.views.column.map((column) => (
         <Drawn key={column.id} host={host} view={column} />
       ))}
@@ -599,7 +603,7 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
           </div>
         )}
         {/* The editor area stays as it is under a page that only leads somewhere else, out of sight, so no open editor or embed is made again. */}
-        {route.kind === "page" && !routePageId && !passing ? (
+        {nothingThere ? (
           <p className="notice">There's nothing at this address.</p>
         ) : editorArea ? (
           <div className="editor-area" data-under={passing ? "" : undefined}>
