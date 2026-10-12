@@ -37,10 +37,8 @@ export function zoneAt({ left, top, width, height }: { left: number; top: number
   return across < EDGE ? "left" : across > 1 - EDGE ? "right" : down < EDGE ? "up" : down > 1 - EDGE ? "down" : "middle";
 }
 
-/** The group at the top left of the arrangement, whose tab row begins with the sidebar's button. */
+/** The group at the top left of the arrangement, whose tab row begins with the window's buttons. */
 const leadOf = (pane: Pane): string => (typeof pane === "string" ? pane : leadOf(pane.panes[0]!));
-/** The group at the top right corner of the arrangement, whose tab row carries the rest of the window's buttons. */
-const cornerOf = (pane: Pane): string => (typeof pane === "string" ? pane : cornerOf(pane.direction === "row" ? pane.panes.at(-1)! : pane.panes[0]!));
 
 interface Props {
   layout: EditorLayout;
@@ -50,8 +48,10 @@ interface Props {
   render: (group: Group, tab: Opened) => ReactNode;
   /** What a group with nothing open shows. */
   empty: ReactNode;
-  /** The window's buttons: `start` goes before the first tab of the top left group's tab row, `end` after the last of the top right's. */
-  controls: { start: ReactNode; end: ReactNode };
+  /** The window's buttons, which go before the first tab of the top left group's tab row. */
+  controls: ReactNode;
+  /** Focus: whether the focused group's tab in front fills the window, the keys that toggle it, and the toggle, which a group's own button calls with its id. */
+  focusMode: { on: boolean; keys?: string; toggle: (groupId: string) => void };
 }
 
 /** Opens the menu of the tab in front, at the tab's foot, as a right click on the tab does: the way to the menu from the keyboard. */
@@ -63,7 +63,7 @@ export function showTabMenu() {
   tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: left, clientY: bottom }));
 }
 
-export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty, controls }: Props) {
+export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty, controls, focusMode }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -90,7 +90,6 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
     };
   }, []);
   const root = arrangement(layout);
-  const corner = cornerOf(root);
   const lead = leadOf(root);
 
   /** Over a drop target the note can't fall through to the editor beneath, which would paste its link. */
@@ -123,10 +122,10 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
         className="group"
         aria-label={`Editor group ${layout.groups.indexOf(group) + 1}`}
         data-focused={(layout.groups.length > 1 && group.id === layout.focusedGroupId) || undefined}
+        data-front={group.id === layout.focusedGroupId || undefined}
       >
-        {(group.tabs.length > 0 || group.id === corner || group.id === lead) && (
-          <div className="tab-row">
-            {group.id === lead && controls.start}
+        <div className="tab-row">
+          {group.id === lead && controls}
             {group.tabs.length > 0 && (
               <div
                 role="tablist"
@@ -192,9 +191,17 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
                 })}
               </div>
             )}
-            {group.id === corner && controls.end}
-          </div>
-        )}
+          <button
+            type="button"
+            className="icon-button focus-button"
+            aria-label="Focus"
+            title={`${focusMode.on ? "Leave focus" : "Focus"}${focusMode.keys ? ` (${focusMode.keys})` : ""}`}
+            aria-pressed={focusMode.on}
+            onClick={() => focusMode.toggle(group.id)}
+          >
+            <Icon name="focus" />
+          </button>
+        </div>
         <div
           className="group-body"
           onPointerDown={focus}
@@ -216,7 +223,7 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
   const drawPane = (pane: Pane, path: number[]): ReactNode => (typeof pane === "string" ? drawGroup(layout.groups.find((g) => g.id === pane)!) : <SplitPanes key={path.join(".")} split={pane} path={path} dispatch={dispatch} draw={drawPane} />);
 
   return (
-    <div className="groups">
+    <div className="groups" data-focus-mode={focusMode.on || undefined}>
       {drawPane(root, [])}
       {menu && menuTab && menuGroup && menuAt >= 0 && (
         <ContextMenu

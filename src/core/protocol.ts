@@ -4,7 +4,9 @@ export const MAX_NOTE_LENGTH = 500_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
 const Revision = z.number().int().min(0);
-const NoteText = z.string().max(MAX_NOTE_LENGTH);
+/** Line endings as a note keeps them and no half of a character pair: what the database and a recorded change would each make of them differs, and the text stored must be the text its changes replay to. */
+const normalized = (text: string) => text.replace(/\r\n?/g, "\n").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+const NoteText = z.string().max(MAX_NOTE_LENGTH).transform(normalized);
 const LabelName = z
   .string()
   .trim()
@@ -50,6 +52,13 @@ export const Op = z.discriminatedUnion("type", [
    * itself a revert, an undo, or a redo has what it reverted stand again.
    */
   z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions }),
+  /**
+   * What a revert would do, with nothing written: of the chosen changes as `note.revertChanges`
+   * reverts them, or of the note to a revision as `note.revert` does.
+   */
+  z
+    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional() })
+    .refine((op) => (op.revisions === undefined) !== (op.to === undefined), "pass either revisions, the changes to revert, or to, the revision to return to"),
   /** Takes back the author's own latest change that still stands. */
   z.object({ type: z.literal("note.undo"), id: Id }),
   z.object({ type: z.literal("note.redo"), id: Id }),
@@ -172,6 +181,17 @@ export interface Diff {
   omitted: number;
 }
 
+export interface RevertPreview {
+  /** The note's revision the preview was worked out at. */
+  revision: number;
+  /** The changes that would be reverted. */
+  revisions: number[];
+  /** From the note's text as it is to its text after the revert. */
+  diff: Diff;
+  /** Later changes that still stand and edited lines the revert changes: what they did stays, on lines otherwise returned to how they were. */
+  overlaps: number[];
+}
+
 export interface HistoryEntry extends ChangeEntry {
   noteId: string;
   noteTitle: string;
@@ -228,6 +248,7 @@ export interface Results {
   "note.label": { id: string; revision: number; label: string | null };
   "note.revert": Note;
   "note.revertChanges": Note;
+  "note.previewRevert": RevertPreview;
   "note.undo": Note;
   "note.redo": Note;
   "note.diff": Diff;

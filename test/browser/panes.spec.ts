@@ -67,6 +67,8 @@ test("in a split down, a folder's list, a note and a page are each as tall as th
   await menuItem(page, "Split down").click();
   await expect(tabs(page, 0)).toHaveText(["Unsorted"]);
   await expect(tabs(page, 1)).toHaveText(["Alpha"]);
+  // The note's first line is measured, so it has to be drawn.
+  await expect(group(page, 2).locator(".cm-line").first()).toBeVisible();
 
   const window = page.viewportSize()!.height;
   for (const n of [1, 2]) {

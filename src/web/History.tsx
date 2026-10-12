@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Author, AuthorRef, ChangedNote, Diff, HistoryEntry, HistoryPage, HistorySummary, Note, NoteSummary, OpInput } from "../core/protocol.ts";
+import type { Author, AuthorRef, ChangedNote, Diff, HistoryEntry, HistoryPage, HistorySummary, Note, NoteSummary, OpInput, RevertPreview } from "../core/protocol.ts";
 import { perform } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
 import { RevertAuthor } from "./RevertAuthor.tsx";
@@ -105,6 +105,105 @@ function whatItDid(change: HistoryEntry, onShow: (revision: number) => void): Re
   return <>Reverts {named}</>;
 }
 
+type RevertOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" }>;
+
+type Previewed = { state: "reading" } | { state: "read"; preview: RevertPreview } | { state: "failed"; message: string };
+
+interface RevertDialogProps {
+  workspaceId: string;
+  op: RevertOp;
+  noteTitle: string;
+  /** Changes when the note does, so the preview is read again. */
+  version: number;
+  onShow: (revision: number) => void;
+  onReverted: (note: Note) => void;
+  onClose: () => void;
+}
+
+/** What a revert would do, shown before it is made: the changes it reverts, the note's lines it changes, and the later changes that overlap. */
+function RevertDialog({ workspaceId, op, noteTitle, version, onShow, onReverted, onClose }: RevertDialogProps) {
+  const ids = useId();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const inside = useRef<HTMLDivElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const [previewed, setPreviewed] = useState<Previewed>({ state: "reading" });
+  const [busy, setBusy] = useState(false);
+  const asked = JSON.stringify(op.type === "note.revert" ? { id: op.id, to: op.revision } : { id: op.id, revisions: op.revisions });
+
+  useDismiss(onClose, inside);
+  useEffect(() => {
+    const focused = document.activeElement;
+    const modal = dialog.current!;
+    modal.showModal();
+    cancel.current!.focus();
+    return () => {
+      // While it is still open as a modal the rest of the page can't take focus.
+      modal.close();
+      if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
+    };
+  }, []);
+  useEffect(() => {
+    let live = true;
+    perform(workspaceId, { type: "note.previewRevert", ...(JSON.parse(asked) as { id: string; to: number } | { id: string; revisions: number[] }) }).then(
+      (preview) => live && setPreviewed({ state: "read", preview }),
+      (err: Error) => live && setPreviewed({ state: "failed", message: err.message }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, asked, version]);
+
+  const revert = async () => {
+    setBusy(true);
+    try {
+      onReverted(await moveThroughHistory(workspaceId, op));
+    } catch (err) {
+      setPreviewed({ state: "failed", message: (err as Error).message });
+      setBusy(false);
+    }
+  };
+
+  const preview = previewed.state === "read" ? previewed.preview : null;
+  const reverted = preview && [...preview.revisions].sort((a, b) => a - b);
+  const changesNothing = preview !== null && !preview.diff.hunks.length;
+  const show = (revision: number) => {
+    onClose();
+    onShow(revision);
+  };
+  return (
+    <dialog ref={dialog} className="revert-dialog" aria-labelledby={`${ids}-title`} onCancel={(e) => e.preventDefault()}>
+      <div ref={inside} className="revert-dialog-body">
+        <h2 id={`${ids}-title`}>{op.type === "note.revert" ? `Revert note to revision ${op.revision}` : `Revert ${op.revisions.length === 1 ? `change ${op.revisions[0]}` : `${op.revisions.length} changes`}`}</h2>
+        {previewed.state === "reading" && <p className="diff-none">Working out what this would change…</p>}
+        {previewed.state === "failed" && <p role="alert" className="error">{previewed.message}</p>}
+        {preview && reverted && (
+          <>
+            {reverted.length > 0 && (
+              <p>
+                Reverts <Named revisions={reverted} onShow={show} /> to {noteTitle} as one new change.
+              </p>
+            )}
+            {changesNothing ? <p>Nothing in the note would change.</p> : <DiffView diff={preview.diff} />}
+            {preview.overlaps.length > 0 && (
+              <p className="revert-overlap">
+                Later, <Named revisions={preview.overlaps} onShow={show} /> edited the same lines. {preview.overlaps.length === 1 ? "Its" : "Their"} edits stay, on lines this revert otherwise returns to how they were.
+              </p>
+            )}
+          </>
+        )}
+        <div className="revert-dialog-actions">
+          <button ref={cancel} type="button" className="button small" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="button small primary" disabled={busy || !preview || changesNothing} onClick={revert}>
+            Revert
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
 interface NoteChangesProps {
   workspaceId: string;
   noteId: string;
@@ -122,7 +221,7 @@ interface NoteChangesProps {
   onLoaded?: (changes: HistoryEntry[]) => void;
 }
 
-/** One note's changes, newest first and each closed: opening one shows its diff. A change can be reverted, labeled, or the note reverted to it. */
+/** One note's changes, newest first and each closed: opening one shows its diff. A change can be reverted, alone or with others ticked, labeled, or the note reverted to it. Every revert is shown in a dialog first. */
 function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, head, onChanged, onLoaded }: NoteChangesProps) {
   const now = useNow();
   const list = useRef<HTMLOListElement>(null);
@@ -131,7 +230,8 @@ function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, he
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
   const [labeling, setLabeling] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());
+  const [reverting, setReverting] = useState<RevertOp | null>(null);
   const [reloads, reload] = useState(0);
   const loaded = useRef(onLoaded);
   loaded.current = onLoaded;
@@ -182,16 +282,12 @@ function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, he
     });
   };
 
-  const act = async (op: Extract<OpInput, { type: "note.revert" | "note.revertChanges" }>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      onChanged(await moveThroughHistory(workspaceId, op));
-    } catch (err) {
-      setError((err as Error).message);
-    }
-    setBusy(false);
+  const pick = (revision: number) => {
+    const ticked = new Set(picked);
+    if (!ticked.delete(revision)) ticked.add(revision);
+    setPicked(ticked);
   };
+  const stopReverting = useCallback(() => setReverting(null), []);
 
   const label = async (change: HistoryEntry, name: string) => {
     setLabeling(null);
@@ -205,16 +301,26 @@ function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, he
   };
 
   if (!changes) return error ? <p role="alert" className="error">{error}</p> : null;
+  // Only ticks on changes that are listed and still stand count, so one reverted or filtered out since is not sent.
+  const ticked = changes.filter((c) => picked.has(c.revision) && c.revertedBy === null).map((c) => c.revision);
   return (
     <div className="note-changes">
       {error && <p role="alert" className="error">{error}</p>}
-      <ol className="change-list" aria-label={`Changes${where}`} ref={list}>
+      {canEdit && changes.some((c) => c.revertedBy === null) && (
+        <div className="change-list-head">
+          <button type="button" className="button small" disabled={!ticked.length} onClick={() => setReverting({ type: "note.revertChanges", id: noteId, revisions: ticked })}>
+            Revert {ticked.length ? `${count(ticked.length, "change")}…` : "changes…"}
+          </button>
+        </div>
+      )}
+      <ol className={canEdit ? "change-list pickable" : "change-list"} aria-label={`Changes${where}`} ref={list}>
         {changes.map((change) => {
           const { revision } = change;
           const did = whatItDid(change, show);
           const isOpen = open.has(revision);
           return (
             <li key={revision} className="change" data-revision={revision} aria-label={`Change ${revision}${where} by ${change.author.name}`}>
+              {canEdit && change.revertedBy === null && <input type="checkbox" className="change-pick" aria-label={`Select change ${revision}${where}`} checked={picked.has(revision)} onChange={() => pick(revision)} />}
               <button type="button" className="change-toggle" aria-expanded={isOpen} onClick={() => toggle(revision)}>
                 <span className="caret" aria-hidden="true" />
                 <span className="change-author">{change.author.name}</span>
@@ -234,8 +340,8 @@ function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, he
                   </span>
                 )}
                 {canEdit && change.revertedBy === null && (
-                  <button type="button" className="link change-revert" disabled={busy} aria-label={`Revert change ${revision}${where}`} onClick={() => act({ type: "note.revertChanges", id: noteId, revisions: [revision] })}>
-                    Revert
+                  <button type="button" className="link change-revert" aria-label={`Revert change ${revision}${where}…`} onClick={() => setReverting({ type: "note.revertChanges", id: noteId, revisions: [revision] })}>
+                    Revert…
                   </button>
                 )}
               </div>
@@ -270,8 +376,8 @@ function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, he
                           {change.label ? "Rename label" : "Label"}
                         </button>
                         {head !== revision && (
-                          <button type="button" className="link" disabled={busy} onClick={() => act({ type: "note.revert", id: noteId, revision })}>
-                            Revert note to here
+                          <button type="button" className="link" onClick={() => setReverting({ type: "note.revert", id: noteId, revision })}>
+                            Revert note to here…
                           </button>
                         )}
                       </div>
@@ -294,6 +400,21 @@ function NoteChanges({ workspaceId, noteId, where, filters, version, canEdit, he
         >
           Show older changes
         </button>
+      )}
+      {reverting && (
+        <RevertDialog
+          workspaceId={workspaceId}
+          op={reverting}
+          noteTitle={titleOf(changes[0]?.noteTitle ?? "")}
+          version={version}
+          onShow={show}
+          onClose={stopReverting}
+          onReverted={(note) => {
+            setReverting(null);
+            setPicked(new Set());
+            onChanged(note);
+          }}
+        />
       )}
     </div>
   );

@@ -61,7 +61,7 @@ const PATHS = {
       <path d="M10 3v10" />
     </>
   ),
-  writing: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
+  focus: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
   agent: (
     <>
       <rect x="3" y="5.5" width="10" height="7.5" rx="2" />

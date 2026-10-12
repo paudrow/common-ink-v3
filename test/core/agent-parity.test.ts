@@ -31,6 +31,10 @@ const COMMANDS: Record<string, string[][]> = {
   label_revision: [["label", ID, "--revision", "1", "--name", "Draft"]],
   revert_note: [["revert", ID, "--revision", "1"]],
   revert_changes: [["revert", ID, "--changes", "1,2"]],
+  preview_revert: [
+    ["revert", ID, "--changes", "1,2", "--preview"],
+    ["revert", ID, "--revision", "1", "--preview"],
+  ],
   revert_author: [["revert-author", AUTHOR, "--note", ID, "--after", ID]],
   undo: [["undo", ID]],
   redo: [["redo", ID]],

@@ -224,7 +224,7 @@ test("History mode, filtered to one agent, reverts that agent's changes in the n
   await expect(mode.getByRole("button", { name: /^Revert .* changes$/ })).toHaveCount(0);
 });
 
-test("the command palette goes to Agents, in writing mode too", async ({ page }) => {
+test("the command palette goes to Agents, in focus too", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft" });
   await page.goto(`/note/${note.id}`);
