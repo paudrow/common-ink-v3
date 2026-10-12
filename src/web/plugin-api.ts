@@ -342,25 +342,12 @@ export interface Embed {
    */
   render(el: HTMLElement, embed: Embedded): void | (() => void) | Drawn;
   /**
-   * For an inline embed whose drawing is doing something a member would lose if it were taken out,
-   * as a clock is running. With the cursor on it, it then stays drawn, the same element in the same
-   * place, and the embed's text is shown after it. Any other inline embed is taken out while the
-   * cursor is on it and shown as written alone, so its line is no longer than it was written.
-   */
-  live?: boolean;
-  /**
-   * What a member can adjust about it without reading its config. The host draws an options button
-   * at the embed's top corner, and under it a field for each of these and "Edit as markdown". A
-   * block has the button whether or not it has options, for "Edit as markdown" alone. A member who
-   * can't change the note has no button.
+   * What a member can adjust about it without reading its config. The host draws one options button
+   * in the embed's card, and opens beneath the card a field for each of these. An embed that has
+   * none, or gives none for what the note says of it now, has no button, and neither has a member
+   * who can't change the note.
    */
   options?: EmbedOptions;
-  /**
-   * For a block whose drawing takes the keyboard: the arrow keys, and vim's j and k, then go from
-   * the line above or below it into the drawing, by {@link Drawn.enter}, and not over it. The
-   * drawing gives the keyboard back with {@link Embedded.leave}.
-   */
-  entered?: boolean;
 }
 
 /**
@@ -398,12 +385,6 @@ export interface Drawn {
   update?(embed: Embedded): void;
   /** Stops whatever the embed started. */
   stop?(): void;
-  /**
-   * For an embed registered as `entered`: takes the keyboard as the cursor comes into the block from
-   * the line above or below it, by focusing something it drew, and says whether it did. When it
-   * didn't, as a board with nothing to focus doesn't, the cursor goes over the block.
-   */
-  enter?(from: "above" | "below"): boolean;
 }
 
 /** What an embed is handed about one place a note writes it. */
@@ -422,17 +403,13 @@ export interface Embedded {
    */
   update(next: { config?: string; body?: string }): void;
   /**
-   * Puts the cursor in the embed as the note writes it, to be changed there. An inline embed is
-   * shown as written while the cursor is on it, after its drawing if it is `live`. A block stays
-   * drawn, with its lines shown under its drawing until the cursor leaves them. For a block this is the
-   * only way into them, and the host offers it as "Edit as markdown" in the block's options.
+   * Puts the cursor in the embed as the note writes it, to be changed there, as moving the cursor
+   * onto it does. The embed stays drawn, the element it was, and its text is shown above its
+   * drawing for as long as the cursor is in it: an inline embed's in rows of their own above its
+   * line, a block's lines above its card. For a block, `at` is how far into its body the cursor goes,
+   * as a board puts it on the line of the card that was pressed. Without it the cursor goes in the config.
    */
-  edit(): void;
-  /**
-   * Gives the keyboard back to the note, with the cursor on the line above or below this block. It
-   * does nothing where the note has no such line, so the keyboard stays where it is.
-   */
-  leave(to: "above" | "below"): void;
+  edit(at?: number): void;
 }
 
 export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts">;

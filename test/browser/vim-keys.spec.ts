@@ -698,15 +698,13 @@ test("inside what an embed draws in a note, vim's list, search and tab keys do n
   // A board's column is a named list of cards, which outside a note vim's keys would move through and open.
   const cards = page.locator(".cm-content .embed").getByRole("list", { name: "To do cards" }).getByRole("listitem");
   await expect(cards).toHaveText(["write", "review"]);
-  await cards.first().focus();
-  for (const press of [["Shift+G"], ["g", "g"], ["Control+d"], ["/"], ["g", "t"], ["Enter"]]) {
+  // The pointer puts focus on one of the board's own buttons, which is in the same column as the list.
+  const colour = page.locator(".cm-content .embed").getByRole("button", { name: "Colour of To do: no colour" });
+  await colour.focus();
+  for (const press of [["Shift+G"], ["g", "g"], ["Control+d"], ["/"], ["g", "t"], ["j"], ["k"]]) {
     await keys(page, ...press);
-    await expect(cards.first(), `${press.join(" ")} leaves focus where it was`).toBeFocused();
+    await expect(colour, `${press.join(" ")} leaves focus where it was`).toBeFocused();
     await expect(page.locator("[data-vim-at]"), `${press.join(" ")} selects no row`).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`${note.id}$`));
   }
-  // j is the board's own key there: it goes to the next card, and marks no row as a list's.
-  await keys(page, "j");
-  await expect(cards.nth(1)).toBeFocused();
-  await expect(page.locator("[data-vim-at]")).toHaveCount(0);
 });

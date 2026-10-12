@@ -8,6 +8,6 @@ export const stopwatch: Plugin = {
   description: "A stopwatch in a note, written ::stopwatch{}, whose time is kept in the note.",
   icon: "stopwatch",
   activate(host) {
-    host.embeds.register({ name: "stopwatch", title: "Stopwatch", live: true, render: clockEmbed("stopwatch"), options: clockOptions("stopwatch") });
+    host.embeds.register({ name: "stopwatch", title: "Stopwatch", render: clockEmbed("stopwatch"), options: clockOptions("stopwatch") });
   },
 };
