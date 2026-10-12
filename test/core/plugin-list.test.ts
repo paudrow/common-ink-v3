@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PluginState } from "../../src/web/pluginHost.ts";
 import { listPlugins, matchesPlugin } from "../../src/web/pluginList.ts";
 
-const state = (id: string, name: string, more: Partial<PluginState> = {}): PluginState => ({ id, name, enabled: true, required: false, error: null, description: null, icon: null, screenshots: [], adds: null, ...more });
+const state = (id: string, name: string, more: Partial<PluginState> = {}): PluginState => ({ id, name, enabled: true, required: false, builtIn: true, error: null, description: null, icon: null, screenshots: [], adds: null, ...more });
 
 const STATES = [
   state("core", "Common Ink", { required: true }),

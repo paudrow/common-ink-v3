@@ -49,13 +49,19 @@ const PATHS = {
   edit: <path d="M9.75 3.75 12.25 6.25M3 13l.6-2.85 7.4-7.4a1.2 1.2 0 0 1 1.7 0l.55.55a1.2 1.2 0 0 1 0 1.7l-7.4 7.4z" />,
   close: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,
   chevron: <path d="m6 4.5 3.5 3.5L6 11.5" />,
+  sidebar: (
+    <>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+      <path d="M6 3v10" />
+    </>
+  ),
   inspector: (
     <>
       <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
       <path d="M10 3v10" />
     </>
   ),
-  writing: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
+  focus: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
   lock: (
     <>
       <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
@@ -130,12 +136,6 @@ const PATHS = {
     </>
   ),
   command: <path d="m3.5 5.5 3 2.5-3 2.5M8.5 11h4" />,
-  sidebar: (
-    <>
-      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-      <path d="M6 3v10" />
-    </>
-  ),
   agent: (
     <>
       <rect x="3" y="5.5" width="10" height="7.5" rx="2" />

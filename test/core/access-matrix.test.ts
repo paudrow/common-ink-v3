@@ -160,6 +160,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.label": { on: "note", needs: "E", args: (id) => ({ id, revision: 1, name: "Start" }) },
   "note.revert": { on: "note", needs: "E", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
   "note.revertChanges": { on: "note", needs: "E", args: (id) => ({ id, revisions: [99] }) },
+  "note.previewRevert": { on: "note", needs: "V", args: (id) => ({ id, revisions: [1] }) },
   "note.undo": { on: "note", needs: "E", args: (id) => ({ id }) },
   "note.redo": { on: "note", needs: "E", args: (id) => ({ id }) },
   "history.summary": { on: "everything", args: () => ({ limit: 100 }) },

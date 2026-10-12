@@ -5,7 +5,9 @@ export const MAX_SETTINGS_LENGTH = 100_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
 const Revision = z.number().int().min(0);
-const NoteText = z.string().max(MAX_NOTE_LENGTH);
+/** Line endings as a note keeps them and no half of a character pair: what the database and a recorded change would each make of them differs, and the text stored must be the text its changes replay to. */
+const normalized = (text: string) => text.replace(/\r\n?/g, "\n").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+const NoteText = z.string().max(MAX_NOTE_LENGTH).transform(normalized);
 const LabelName = z
   .string()
   .trim()
@@ -15,6 +17,15 @@ const LabelName = z
 const Time = z.number().int().min(0);
 /** Revisions of one note that a change made, so never 0. */
 const Revisions = z.array(Revision.min(1)).min(1).max(500);
+/** What becomes of one conflict of a revert: the later edits kept, the lines as they were before, or the lines given (no text is no lines). */
+const Choice = z.union([z.literal("keep"), z.literal("back"), z.object({ text: NoteText }).strict()]);
+/**
+ * How a revert's conflicts are settled: one choice for all of them, or one for each in the order
+ * `note.previewRevert` lists them. `at` is the note's revision that preview was worked out at; the
+ * revert is refused when the note has changed since.
+ */
+const Resolve = z.object({ at: Revision, choices: z.union([z.literal("keep"), z.literal("back"), z.array(Choice).max(1000)]) }).strict();
+export type Resolve = z.output<typeof Resolve>;
 const AuthorRef = z.object({ kind: z.enum(["member", "agent", "plugin"]), id: Id });
 export type AuthorRef = z.output<typeof AuthorRef>;
 
@@ -69,12 +80,24 @@ export const Op = z.discriminatedUnion("type", [
   /** Names a revision, or takes its name away when `name` is null. */
   z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
   /** Puts the note back to how it was at `revision`, as a new change. */
-  z.object({ type: z.literal("note.revert"), id: Id, revision: Revision }),
+  z.object({ type: z.literal("note.revert"), id: Id, revision: Revision, resolve: Resolve.optional() }),
   /**
    * Reverts the chosen changes and keeps the rest, as one new change. Reverting a change that was
    * itself a revert, an undo, or a redo has what it reverted stand again.
    */
-  z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions }),
+  z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions, resolve: Resolve.optional() }),
+  /**
+   * What a revert would do, with nothing written: of the chosen changes as `note.revertChanges`
+   * reverts them, of the note to a revision as `note.revert` does, or of one author's changes
+   * to this note as `history.revertAuthor` does. With `resolve`, the diff is of the revert with its
+   * conflicts settled that way.
+   */
+  z
+    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional(), author: AuthorRef.optional(), resolve: Resolve.optional() })
+    .refine(
+      (op) => [op.revisions, op.to, op.author].filter((given) => given !== undefined).length === 1,
+      "pass one of revisions, the changes to revert, to, the revision to return to, or author, whose changes to revert",
+    ),
   /** Takes back the author's own latest change that still stands. */
   z.object({ type: z.literal("note.undo"), id: Id }),
   z.object({ type: z.literal("note.redo"), id: Id }),
@@ -108,7 +131,8 @@ export const Op = z.discriminatedUnion("type", [
    * Takes back out every change by one author that still stands, as one new change in each note
    * by whoever asks. It covers a few notes at a time; pass the answer's `next` as `after` for the rest.
    */
-  z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional() }),
+  /** `resolve` settles the conflicts of the notes it names, by note id, as `note.previewRevert` with `author` listed them. A note it leaves out keeps every later edit. */
+  z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional(), resolve: z.record(Id, Resolve).refine((byNote) => Object.keys(byNote).length <= 200, "resolve names at most 200 notes").optional() }),
   /**
    * Makes the record of which notes link to which again from the notes' text. Nothing needs it while
    * every write keeps the record, so it is for a record that was changed some other way. It covers
@@ -370,6 +394,33 @@ export interface Diff {
   omitted: number;
 }
 
+export interface RevertPreview {
+  /** The note's revision the preview was worked out at. */
+  revision: number;
+  /** The changes that would be reverted. */
+  revisions: number[];
+  /** From the note's text as it is to its text after the revert, its conflicts settled as asked: every later edit kept when nothing was asked. */
+  diff: Diff;
+  /** Later changes that still stand and edited lines the revert changes. */
+  overlaps: number[];
+  /** Each place those changes edited lines the revert changes, top of the note first. A revert settles each with a choice. */
+  conflicts: RevertConflict[];
+}
+
+/** Lines are without their line ends. */
+export interface RevertConflict {
+  /** The line of the note after the revert, with every later edit kept, that `kept` starts at. Counted from 1. */
+  line: number;
+  /** The lines as they were before the reverted changes, with the later edits to them out too: what "back" leaves. */
+  before: string[];
+  /** The lines as the note has them now. */
+  now: string[];
+  /** What "keep" leaves: the revert, and the later edits kept. */
+  kept: string[];
+  /** The later changes that edited these lines. */
+  later: Array<{ revision: number; author: Author }>;
+}
+
 export interface HistoryEntry extends ChangeEntry {
   noteId: string;
   noteTitle: string;
@@ -438,6 +489,7 @@ export interface Results {
   "note.label": { id: string; revision: number; label: string | null };
   "note.revert": Note;
   "note.revertChanges": Note;
+  "note.previewRevert": RevertPreview;
   "note.undo": Note;
   "note.redo": Note;
   "note.diff": Diff;
@@ -477,13 +529,11 @@ export const MAX_EXPIRY_DAYS = 365;
 export interface Agent {
   id: string;
   name: string;
-  /** Tells this token from the member's other tokens under the same name, e.g. "laptop". */
-  label: string | null;
   /** The first characters of its token, to tell tokens apart. Not enough to use it. */
   tokenPrefix: string;
   createdAt: number;
-  /** After this the token stops working. */
-  expiresAt: number;
+  /** After this the token stops working. Null when it never expires. */
+  expiresAt: number | null;
   lastUsedAt: number | null;
   revokedAt: number | null;
   /** The one workspace this token can reach, or null for every workspace its member can reach. */
@@ -493,13 +543,28 @@ export interface Agent {
 }
 
 /** What a member may ask for when connecting an agent. */
+/** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
+export const ExpiresIn = z.union([z.number().int().min(1).max(MAX_EXPIRY_DAYS), z.literal("never")]);
+export type ExpiresIn = z.infer<typeof ExpiresIn>;
+
 export const ConnectOptions = z.object({
-  label: z.string().trim().max(MAX_AGENT_NAME).optional(),
-  expiresInDays: z.number().int().min(1).max(MAX_EXPIRY_DAYS).default(DEFAULT_EXPIRY_DAYS),
+  expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
   workspaceId: Id.optional(),
   readOnly: z.boolean().default(false),
 });
 export type ConnectOptions = z.input<typeof ConnectOptions>;
+
+/**
+ * What a member changes about an agent they connected: what its token may do, with the token itself
+ * unchanged. A field left out stays as it is. `expiresInDays` counts from the edit, and a null
+ * `workspaceId` lets the token reach every workspace its member can.
+ */
+export const AgentEdit = z.strictObject({
+  expiresInDays: ExpiresIn.optional(),
+  workspaceId: Id.nullable().optional(),
+  readOnly: z.boolean().optional(),
+});
+export type AgentEdit = z.input<typeof AgentEdit>;
 
 export interface WorkspaceSummary {
   id: string;

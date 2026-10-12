@@ -1,5 +1,5 @@
-import type { Plugin } from "../../plugin-api.ts";
-import { HistoryMode, NoteHistory } from "./History.tsx";
+import { ALL_NOTES, type Plugin } from "../../plugin-api.ts";
+import { FolderHistory, HistoryMode, NoteHistory } from "./History.tsx";
 
 export const history: Plugin = {
   id: "history",
@@ -29,8 +29,16 @@ export const history: Plugin = {
       id: "history",
       label: "History",
       icon: "history",
+      for: "note",
       badge: (app) => (app.unseen ? "Changes you haven't seen" : null),
       component: ({ app, note }) => <NoteHistory host={host} noteId={note.id} revision={note.revision} canEdit={note.access === "edit"} onChanged={app.noteChanged} onSeen={app.markSeen} />,
+    });
+    host.views.register("inspector", {
+      id: "folder-history",
+      label: "History",
+      icon: "history",
+      for: "folder",
+      component: ({ app, folderId, notes }) => <FolderHistory host={host} notes={notes} whole={folderId === ALL_NOTES} onOpenNote={app.openNote} onChanged={app.noteChanged} />,
     });
   },
 };

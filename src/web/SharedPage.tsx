@@ -73,7 +73,7 @@ function useDrawing(open: (noteId: string) => void) {
         workspace: { id: "", name: "", role: "guest" },
         app: () => app.current as App,
         perform: NOT_HERE,
-        agents: { list: NOT_HERE, connect: NOT_HERE, disconnect: NOT_HERE },
+        agents: { list: NOT_HERE, connect: NOT_HERE, edit: NOT_HERE, disconnect: NOT_HERE },
         members: { invite: NOT_HERE, setRole: NOT_HERE, remove: NOT_HERE, leave: NOT_HERE, invites: NOT_HERE, revoke: NOT_HERE },
         sharing: { of: NOT_HERE, grant: NOT_HERE, link: NOT_HERE, revoke: NOT_HERE, setPrivate: NOT_HERE, all: NOT_HERE },
         storage: { get: (key) => kept.get(`${plugin.id}.${key}`), set: (key, value) => void kept.set(`${plugin.id}.${key}`, value) },

@@ -1,6 +1,7 @@
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { ago, useDismiss, useNow, type Author, type AuthorRef, type ChangedNote, type Diff, type HistoryEntry, type HistoryPage, type HistorySummary, type Note, type NoteSummary, type OpInput, type PluginHost } from "../../plugin-api.ts";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { ago, useDismiss, useNow, type Author, type AuthorRef, type ChangedNote, type Diff, type HistoryEntry, type HistoryPage, type HistorySummary, type Note, type NoteSummary, type OpInput, type PluginHost, type Resolve } from "../../plugin-api.ts";
 import { RevertAuthor } from "../lib/RevertAuthor.tsx";
+import { authorKey, DiffView, Named, nameOf, RevertChanges, RevertDialog, useRevertPreview } from "../lib/RevertDialog.tsx";
 
 /** What narrows history: to some notes, some authors, a span of time. */
 type Filters = Omit<Extract<OpInput, { type: "history.summary" }>, "type" | "before" | "limit">;
@@ -11,46 +12,15 @@ const CHANGES_A_PAGE = 30;
 const MOST_A_PAGE = 100;
 
 const refOf = (author: Author): AuthorRef => (author.kind === "agent" ? { kind: "agent", id: author.agentId } : { kind: "member", id: author.personId });
-const authorKey = (author: Author) => `${author.kind}:${refOf(author).id}`;
 const refOfKey = (key: string): AuthorRef => ({ kind: key.split(":")[0] as AuthorRef["kind"], id: key.split(":")[1]! });
 const titleOf = (title: string) => title || "Untitled";
 const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
-const nameOf = (author: Author) => (author.kind === "agent" ? `${author.name} (agent)` : author.name);
 
 function Stat({ added, removed }: { added: number; removed: number }) {
   return (
     <span className="change-stat">
       <span className="added">+{added}</span> <span className="removed">−{removed}</span>
     </span>
-  );
-}
-
-const MARK = { add: "+", del: "−", same: "" } as const;
-
-function DiffView({ diff }: { diff: Diff }) {
-  if (!diff.hunks.length) return <p className="diff-none">No text changed.</p>;
-  return (
-    <div className="diff">
-      {diff.hunks.map((hunk) => (
-        <div key={hunk.oldStart} className="hunk">
-          <div className="hunk-head">
-            @@ −{hunk.oldStart} +{hunk.newStart} @@
-          </div>
-          {hunk.lines.map((line, i) => {
-            const Line = line.kind === "add" ? "ins" : line.kind === "del" ? "del" : "div";
-            return (
-              <Line key={i} className="diff-line">
-                <span className="diff-mark" aria-hidden="true">
-                  {MARK[line.kind]}
-                </span>
-                <span className="diff-text">{line.text || " "}</span>
-              </Line>
-            );
-          })}
-        </div>
-      ))}
-      {diff.omitted > 0 && <p className="diff-none">{count(diff.omitted, "more line")}</p>}
-    </div>
   );
 }
 
@@ -72,24 +42,6 @@ function ChangeDiff({ host, noteId, revision }: { host: PluginHost; noteId: stri
   return diff && <DiffView diff={diff} />;
 }
 
-/** The changes a sentence names, each one a way to it. More than a few are only counted. */
-function Named({ revisions, onShow }: { revisions: number[]; onShow: (revision: number) => void }) {
-  if (revisions.length > 3) return <>{revisions.length} changes</>;
-  return (
-    <>
-      {revisions.length === 1 ? "change " : "changes "}
-      {revisions.map((revision, i) => (
-        <Fragment key={revision}>
-          {i > 0 && (i === revisions.length - 1 ? " and " : ", ")}
-          <button type="button" className="link change-ref" aria-label={`Change ${revision}`} onClick={() => onShow(revision)}>
-            {revision}
-          </button>
-        </Fragment>
-      ))}
-    </>
-  );
-}
-
 /** What a change did when it wasn't an edit, in the words a member reads. */
 function whatItDid(change: HistoryEntry, onShow: (revision: number) => void): ReactNode {
   const { reverts } = change;
@@ -99,6 +51,66 @@ function whatItDid(change: HistoryEntry, onShow: (revision: number) => void): Re
   if (reverts.how === "undo") return <>Undoes {named}</>;
   if (reverts.how === "redo") return <>Redoes what {named} undid</>;
   return <>Reverts {named}</>;
+}
+
+type RevertOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" }>;
+
+interface NoteRevertProps {
+  host: PluginHost;
+  op: RevertOp;
+  noteTitle: string;
+  /** Changes when the note does, so the preview is read again. */
+  version: number;
+  onShow: (revision: number) => void;
+  onReverted: (note: Note) => void;
+  onClose: () => void;
+}
+
+/** What a revert would do, shown before it is made: the changes it reverts, each conflict with a later change and the choice of how it is settled, and the note's lines the revert changes as chosen. */
+function NoteRevert({ host, op, noteTitle, version, onShow, onReverted, onClose }: NoteRevertProps) {
+  const [busy, setBusy] = useState(false);
+  const asked = JSON.stringify(op.type === "note.revert" ? { id: op.id, to: op.revision } : { id: op.id, revisions: op.revisions });
+  const read = useCallback(
+    (resolve?: Resolve) => host.perform({ type: "note.previewRevert", ...(JSON.parse(asked) as { id: string; to: number } | { id: string; revisions: number[] }), ...(resolve && { resolve }) }),
+    [host, asked],
+  );
+  const previewed = useRevertPreview(read, version);
+  const { preview, diff, error } = previewed.state;
+
+  const revert = async () => {
+    setBusy(true);
+    try {
+      // With no conflict nothing is settled, and the revert is asked for as it always was.
+      onReverted(await host.perform(previewed.resolve ? { ...op, resolve: previewed.resolve } : op));
+    } catch (err) {
+      previewed.refused(err as Error);
+      setBusy(false);
+    }
+  };
+
+  const reverted = preview && [...preview.revisions].sort((a, b) => a - b);
+  const show = (revision: number) => {
+    onClose();
+    onShow(revision);
+  };
+  return (
+    <RevertDialog
+      title={op.type === "note.revert" ? `Revert note to revision ${op.revision}` : `Revert ${op.revisions.length === 1 ? `change ${op.revisions[0]}` : `${op.revisions.length} changes`}`}
+      ready={!busy && preview !== null && (diff === null || diff.hunks.length > 0)}
+      settled={previewed.settled}
+      onRevert={revert}
+      onClose={onClose}
+    >
+      {!preview && !error && <p className="diff-none">Working out what this would change…</p>}
+      {error && <p role="alert" className="error">{error}</p>}
+      {reverted && reverted.length > 0 && (
+        <p>
+          Reverts <Named revisions={reverted} onShow={show} /> to {noteTitle} as one new change.
+        </p>
+      )}
+      <RevertChanges revert={previewed} onShow={show} />
+    </RevertDialog>
+  );
 }
 
 interface NoteChangesProps {
@@ -118,7 +130,7 @@ interface NoteChangesProps {
   onLoaded?: (changes: HistoryEntry[]) => void;
 }
 
-/** One note's changes, newest first and each closed: opening one shows its diff. A change can be reverted, labeled, or the note reverted to it. */
+/** One note's changes, newest first and each closed: opening one shows its diff. A change can be reverted, alone or with others ticked, labeled, or the note reverted to it. Every revert is shown in a dialog first. */
 function NoteChanges({ host, noteId, where, filters, version, canEdit, head, onChanged, onLoaded }: NoteChangesProps) {
   const now = useNow();
   const list = useRef<HTMLOListElement>(null);
@@ -127,7 +139,8 @@ function NoteChanges({ host, noteId, where, filters, version, canEdit, head, onC
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
   const [labeling, setLabeling] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());
+  const [reverting, setReverting] = useState<RevertOp | null>(null);
   const [reloads, reload] = useState(0);
   const loaded = useRef(onLoaded);
   loaded.current = onLoaded;
@@ -178,16 +191,12 @@ function NoteChanges({ host, noteId, where, filters, version, canEdit, head, onC
     });
   };
 
-  const act = async (op: Extract<OpInput, { type: "note.revert" | "note.revertChanges" }>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      onChanged(await host.perform(op));
-    } catch (err) {
-      setError((err as Error).message);
-    }
-    setBusy(false);
+  const pick = (revision: number) => {
+    const ticked = new Set(picked);
+    if (!ticked.delete(revision)) ticked.add(revision);
+    setPicked(ticked);
   };
+  const stopReverting = useCallback(() => setReverting(null), []);
 
   const label = async (change: HistoryEntry, name: string) => {
     setLabeling(null);
@@ -201,16 +210,26 @@ function NoteChanges({ host, noteId, where, filters, version, canEdit, head, onC
   };
 
   if (!changes) return error ? <p role="alert" className="error">{error}</p> : null;
+  // Only ticks on changes that are listed and still stand count, so one reverted or filtered out since is not sent.
+  const ticked = changes.filter((c) => picked.has(c.revision) && c.revertedBy === null).map((c) => c.revision);
   return (
     <div className="note-changes">
       {error && <p role="alert" className="error">{error}</p>}
-      <ol className="change-list" aria-label={`Changes${where}`} ref={list}>
+      {canEdit && changes.some((c) => c.revertedBy === null) && (
+        <div className="change-list-head">
+          <button type="button" className="button small" disabled={!ticked.length} onClick={() => setReverting({ type: "note.revertChanges", id: noteId, revisions: ticked })}>
+            Revert {ticked.length ? `${count(ticked.length, "change")}…` : "changes…"}
+          </button>
+        </div>
+      )}
+      <ol className={canEdit ? "change-list pickable" : "change-list"} aria-label={`Changes${where}`} ref={list}>
         {changes.map((change) => {
           const { revision } = change;
           const did = whatItDid(change, show);
           const isOpen = open.has(revision);
           return (
             <li key={revision} className="change" data-revision={revision} aria-label={`Change ${revision}${where} by ${change.author.name}`}>
+              {canEdit && change.revertedBy === null && <input type="checkbox" className="change-pick" aria-label={`Select change ${revision}${where}`} checked={picked.has(revision)} onChange={() => pick(revision)} />}
               <button type="button" className="change-toggle" aria-expanded={isOpen} onClick={() => toggle(revision)}>
                 <span className="caret" aria-hidden="true" />
                 <span className="change-author">{change.author.name}</span>
@@ -230,8 +249,8 @@ function NoteChanges({ host, noteId, where, filters, version, canEdit, head, onC
                   </span>
                 )}
                 {canEdit && change.revertedBy === null && (
-                  <button type="button" className="link change-revert" disabled={busy} aria-label={`Revert change ${revision}${where}`} onClick={() => act({ type: "note.revertChanges", id: noteId, revisions: [revision] })}>
-                    Revert
+                  <button type="button" className="link change-revert" aria-label={`Revert change ${revision}${where}…`} onClick={() => setReverting({ type: "note.revertChanges", id: noteId, revisions: [revision] })}>
+                    Revert…
                   </button>
                 )}
               </div>
@@ -266,8 +285,8 @@ function NoteChanges({ host, noteId, where, filters, version, canEdit, head, onC
                           {change.label ? "Rename label" : "Label"}
                         </button>
                         {head !== revision && (
-                          <button type="button" className="link" disabled={busy} onClick={() => act({ type: "note.revert", id: noteId, revision })}>
-                            Revert note to here
+                          <button type="button" className="link" onClick={() => setReverting({ type: "note.revert", id: noteId, revision })}>
+                            Revert note to here…
                           </button>
                         )}
                       </div>
@@ -290,6 +309,21 @@ function NoteChanges({ host, noteId, where, filters, version, canEdit, head, onC
         >
           Show older changes
         </button>
+      )}
+      {reverting && (
+        <NoteRevert
+          host={host}
+          op={reverting}
+          noteTitle={titleOf(changes[0]?.noteTitle ?? "")}
+          version={version}
+          onShow={show}
+          onClose={stopReverting}
+          onReverted={(note) => {
+            setReverting(null);
+            setPicked(new Set());
+            onChanged(note);
+          }}
+        />
       )}
     </div>
   );
@@ -514,6 +548,31 @@ interface HistoryModeProps {
   onReverted: () => void;
 }
 
+interface FolderHistoryProps {
+  host: PluginHost;
+  /** The folder's notes. */
+  notes: readonly NoteSummary[];
+  /** Whether they are every note of the workspace, as All notes lists. */
+  whole: boolean;
+  onOpenNote: (noteId: string) => void;
+  onChanged: (note: Note) => void;
+}
+
+/** As many notes as history can be narrowed to at once. A folder with more shows the ones changed last. */
+const MOST_NOTES = 200;
+
+/** A folder's history: the notes that changed as History mode lists them, and only the folder's. */
+export function FolderHistory({ host, notes, whole, onOpenNote, onChanged }: FolderHistoryProps) {
+  const heads = useMemo(() => new Map(notes.map((n) => [n.id, n.revision])), [notes]);
+  const editable = useMemo(() => new Set(notes.filter((n) => n.access === "edit").map((n) => n.id)), [notes]);
+  const version = useMemo(() => notes.reduce((sum, n) => sum + n.revision, 0), [notes]);
+  const ids = useMemo(() => [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MOST_NOTES).map((n) => n.id).join(","), [notes]);
+  const filters = useMemo<Filters>(() => (whole ? {} : { noteIds: ids.split(",") }), [whole, ids]);
+  const empty = whole ? "Nothing has been written in this workspace yet." : "Nothing has been written in this folder yet.";
+  if (!whole && !notes.length) return <p className="empty">{empty}</p>;
+  return <ChangedNotes host={host} filters={filters} version={version} canEdit={(noteId) => editable.has(noteId)} head={(noteId) => heads.get(noteId)} empty={empty} onChanged={onChanged} onOpenNote={onOpenNote} />;
+}
+
 /** The workspace's history: the notes that changed, filtered by author, date, and notes. */
 export function HistoryMode({ host, notes, canEdit, showAuthor, onOpenNote, onChanged, onReverted }: HistoryModeProps) {
   const [authors, setAuthors] = useState<Author[]>([]);
@@ -592,6 +651,7 @@ export function HistoryMode({ host, notes, canEdit, showAuthor, onOpenNote, onCh
             name={one.name}
             where={noteIds.length ? `in the ${count(noteIds.length, "note")} chosen` : "in this workspace"}
             noteIds={noteIds.length ? noteIds : undefined}
+            version={version}
             onReverted={onReverted}
           />
         </div>
