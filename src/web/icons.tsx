@@ -62,6 +62,12 @@ const PATHS = {
     </>
   ),
   writing: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
+  agent: (
+    <>
+      <rect x="3" y="5.5" width="10" height="7.5" rx="2" />
+      <path d="M8 5.5V3M6.25 9v.01M9.75 9v.01M1.5 8.5v2M14.5 8.5v2" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof PATHS;
