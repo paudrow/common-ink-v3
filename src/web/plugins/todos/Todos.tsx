@@ -69,7 +69,7 @@ function Row({ todo, now, projects, onChange, onOpen }: RowProps) {
           ))}
         </select>
       </span>
-      <button type="button" className="todo-words" onClick={() => onOpen(todo)}>
+      <button type="button" className="todo-words" data-row-open onClick={() => onOpen(todo)}>
         <span>{todo.words || "Nothing written"}</span>
         <span className="todo-note">{todo.noteTitle || "Untitled"}</span>
       </button>

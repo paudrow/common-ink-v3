@@ -411,9 +411,9 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
   await expect(section(page, "Pictures")).toHaveCount(0);
 
   await page.setViewportSize({ width: 520, height: 800 });
-  await page.goto("/plugins/tables");
+  await page.goto("/plugins/todos");
   await expect(section(page, "Pictures").locator("img:visible")).toHaveCount(1);
-  await expect(section(page, "What it adds").getByRole("group", { name: "Commands" })).toContainText("Edit the next table");
+  await expect(section(page, "What it adds").getByRole("group", { name: "Views" })).toContainText("A page: Todos");
   expect(await fits(page)).toBe(true);
 
   await page.goto("/plugins/no-such-plugin");

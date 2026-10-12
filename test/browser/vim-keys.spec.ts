@@ -148,6 +148,16 @@ interface Listed {
 
 const LISTS: Listed[] = [
   {
+    name: "the Todos page",
+    path: "/todos",
+    list: (page) => page.getByRole("list", { name: "Todos" }),
+    opened: async (page) => {
+      await expect(page).toHaveURL(/\/note\//);
+      await expect(editor(page)).toBeFocused();
+      await expect(statusLine(page)).toHaveText("--NORMAL--");
+    },
+  },
+  {
     name: "History's changes",
     path: "/history",
     list: (page) => page.getByRole("list", { name: "Notes that changed" }),
@@ -284,26 +294,26 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
   await expect.poll(stored).toEqual({ "vim.enabled": true, "keybindings.vim.list.first": ["g n"] });
   await expect(page.getByRole("list", { name: "Problems" })).toHaveCount(0);
 
-  await open(page, "/history");
-  const changed = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
-  await expect(changed).toHaveCount(4);
+  await open(page, "/todos");
+  const todos = page.getByRole("list", { name: "Todos" }).locator("> li");
+  await expect(todos).toHaveCount(4);
   await keys(page, "j", "Shift+G");
-  await expectSelected(changed.nth(3), "the last note");
+  await expectSelected(todos.nth(3), "the last todo");
   await keys(page, "g", "g");
-  await expectSelected(changed.nth(3), "the last note still, after the keys that were the default");
+  await expectSelected(todos.nth(3), "the last todo still, after the keys that were the default");
   await keys(page, "g", "n");
-  await expectSelected(changed.nth(0), "the first note, with the keys recorded");
+  await expectSelected(todos.nth(0), "the first todo, with the keys recorded");
 
   // In the JSON a vim key may be one letter, and one that begins another's sequence is flagged and still runs.
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true, "keybindings.vim.list.down": ["n"], "keybindings.vim.list.last": ["g"] }), baseRevision: 2 });
-  await open(page, "/history");
-  await expect(changed).toHaveCount(4);
+  await open(page, "/todos");
+  await expect(todos).toHaveCount(4);
   await keys(page, "n", "n");
-  await expectSelected(changed.nth(1), "the second note, with n");
+  await expectSelected(todos.nth(1), "the second todo, with n");
   await page.keyboard.press("j");
-  await expectSelected(changed.nth(1), "the second note still, after j");
+  await expectSelected(todos.nth(1), "the second todo still, after j");
   await page.keyboard.press("g");
-  await expectSelected(changed.nth(3), "the last note, with g alone");
+  await expectSelected(todos.nth(3), "the last todo, with g alone");
   await open(page, "/settings/keyboard");
   await expect(page.getByRole("list", { name: "Problems" }).getByRole("listitem")).toHaveText([
     /^keybindings\.vim\.list\.last g is the first key of g g, the keys for Vim: first row of a list \(vim\.list\.first\), and of g t, the keys for Vim: next tab \(vim\.tab\.next\), and of g shift\+t, the keys for Vim: previous tab \(vim\.tab\.previous\)\. Where both can run, g runs Vim: last row of a list and the longer keys never run\.$/,
@@ -313,16 +323,16 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
 test("with vim mode off, none of vim's keys do anything and none are listed", async ({ page }) => {
   await signIn(page, {});
   for (let n = 0; n < 3; n++) await perform(page, { type: "note.create", text: `# Plum ${n}\n\n- [ ] pick plum ${n}\n` });
-  await page.goto("/history");
-  const all = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
+  await page.goto("/todos");
+  const all = page.getByRole("list", { name: "Todos" }).locator("> li");
   await expect(all).toHaveCount(3);
   await keys(page, "j", "Shift+G", "g", "g", "Control+d", "/", "Control+w", "h", "g", "t");
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
   expect(await page.evaluate(() => "vimKeys" in document.documentElement.dataset)).toBe(false);
-  await all.nth(0).getByRole("button").first().focus();
+  await all.nth(0).getByRole("checkbox").focus();
   await keys(page, "j", "l");
-  await expect(all.nth(0).getByRole("button").first()).toBeFocused();
-  await expect(page).toHaveURL(/\/history/);
+  await expect(all.nth(0).getByRole("checkbox")).toBeFocused();
+  await expect(page).toHaveURL(/\/todos/);
   expect(await all.nth(0).evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
 
   await page.goto("/settings/keyboard");
@@ -491,21 +501,21 @@ test("the selected row is marked in light and in dark", async ({ page }) => {
   for (const theme of ["light", "dark"]) {
     await signIn(page, { "vim.enabled": true, "core.theme": theme });
     for (let n = 0; n < 3; n++) await perform(page, { type: "note.create", text: `# Plum ${n}\n\n- [ ] pick plum ${n}\n` });
-    await open(page, "/history");
-    const all = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
+    await open(page, "/todos");
+    const all = page.getByRole("list", { name: "Todos" }).locator("> li");
     await expect(all).toHaveCount(3);
     await keys(page, "j", "j");
-    await expectSelected(all.nth(1), `the second note, in ${theme}`);
+    await expectSelected(all.nth(1), `the second todo, in ${theme}`);
     const colors = await all.nth(1).evaluate((el) => ({ outline: getComputedStyle(el).outlineColor, width: getComputedStyle(el).outlineWidth, accent: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(), other: getComputedStyle(el.previousElementSibling!).outlineStyle }));
     expect(colors.width).toBe("2px");
     expect(colors.other, "only the selected row is marked").toBe("none");
     // Held with Control a key is no sign to the browser that keys are in use, so the mark is the app's own.
     await all.nth(0).click({ position: { x: 2, y: 2 } });
     await keys(page, "Control+d", "Control+d");
-    await expectSelected(all.nth(2), `the last note, in ${theme}`);
+    await expectSelected(all.nth(2), `the last todo, in ${theme}`);
     expect(colors.accent).toBe(theme === "light" ? "#5b5bd6" : "#8f8ff0");
     expect(colors.outline).toBe(theme === "light" ? "rgb(91, 91, 214)" : "rgb(143, 143, 240)");
-    await page.screenshot({ path: test.info().outputPath(`history-${theme}.png`) });
+    await page.screenshot({ path: test.info().outputPath(`todos-${theme}.png`) });
   }
 });
 

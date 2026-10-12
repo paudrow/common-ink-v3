@@ -17,6 +17,9 @@ const SETTLE_MS = 3000;
 export const todos: Plugin = {
   id: "todos",
   name: "Todos",
+  description: "Checkbox lines with due dates, importance and recurrence, and a page of every todo.",
+  icon: "todos",
+  screenshots: [{ src: "/plugin-shots/todos-light.png", dark: "/plugin-shots/todos-dark.png", alt: "The Todos page: every open todo with its importance, its due date and the note it is in." }],
   activate(host) {
     const editors = new Map<string, EditorView>();
     let projects: readonly string[] = [];
