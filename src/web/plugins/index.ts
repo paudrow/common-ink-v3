@@ -26,4 +26,4 @@ import { vim } from "./vim/index.ts";
 import { wordCount } from "./wordCount.tsx";
 
 /** The plugins that come with the app, in the order their contributions are shown. Each is on until a member turns it off, except one that says it starts off. */
-export const BUILT_INS: readonly Plugin[] = [sidebar, folders, noteList, tabs, quickOpen, commandPalette, comingSoon, history, agents, backlinks, noteInfo, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, wordCount, gfm, tables, math, codeBlocks, bullets, lineNumbers, vim];
+export const BUILT_INS: readonly Plugin[] = [sidebar, folders, noteList, tabs, quickOpen, commandPalette, comingSoon, history, agents, backlinks, noteInfo, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, gfm, tables, math, codeBlocks, bullets, lineNumbers, vim, wordCount];

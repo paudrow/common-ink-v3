@@ -106,9 +106,9 @@ test("a folder's notes move with j, k, gg, G and half pages; / goes to the searc
   expect(half).toBeLessThan(29);
   await expectSelected(cards.nth(half), "the note half a page down");
   await page.keyboard.press("Control+d");
-  expect(await at()).toBe(Math.min(29, half * 2));
+  await expect.poll(() => at()).toBe(Math.min(29, half * 2));
   await page.keyboard.press("Control+u");
-  expect(await at()).toBe(Math.min(29, half * 2) - half);
+  await expect.poll(() => at()).toBe(Math.min(29, half * 2) - half);
   await page.keyboard.press("Shift+G");
   await expectSelected(cards.nth(29), "the last note");
   await keys(page, "g", "g");
@@ -209,8 +209,10 @@ test("History's list of notes to show moves with Ctrl-j from its field, and with
   await page.getByRole("button", { name: "All notes" }).click();
   const menu = page.getByRole("group", { name: "Notes to show" });
   await expect(menu.getByRole("searchbox")).toBeFocused();
-  await page.keyboard.press("Control+j");
   const all = menu.locator("ul > li");
+  // The notes arrive a moment after the menu opens, and a key pressed before then has no list to go into.
+  await expect(all).toHaveCount(4);
+  await page.keyboard.press("Control+j");
   await expectSelected(all.nth(0), "the first note");
   await page.keyboard.press("j");
   await expectSelected(all.nth(1), "the second note");
@@ -318,13 +320,13 @@ test("with vim mode off, none of vim's keys do anything and none are listed", as
   const all = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
   await expect(all).toHaveCount(3);
   await keys(page, "j", "Shift+G", "g", "g", "Control+d", "/", "Control+w", "h", "g", "t");
-  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
-  expect(await page.evaluate(() => "vimKeys" in document.documentElement.dataset)).toBe(false);
+  await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await expect.poll(() => page.evaluate(() => "vimKeys" in document.documentElement.dataset)).toBe(false);
   await all.nth(0).getByRole("button").first().focus();
   await keys(page, "j", "l");
   await expect(all.nth(0).getByRole("button").first()).toBeFocused();
   await expect(page).toHaveURL(/\/history/);
-  expect(await all.nth(0).evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
+  await expect.poll(() => all.nth(0).evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
 
   await page.goto("/settings/keyboard");
   await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Undo/ })).toBeVisible();
@@ -452,6 +454,75 @@ test("Ctrl-w h and l move between the sidebar, the sides of a split and the insp
   await expect.poll(async () => (await perform(page, { type: "note.read", id: third.id })).text).toBe("# Third\n\nthird words\ngt gT jk hl /G");
   await expect(selected()).toHaveAccessibleName("Third");
   expect(right.id).not.toBe(left.id);
+});
+
+test("Ctrl-w j and k move between the sides of a split down, and in focus the keys stay in the one tab that is seen", async ({ page }) => {
+  await signIn(page);
+  const upper = await perform(page, { type: "note.create", text: "# Upper\n\nupper words" });
+  await perform(page, { type: "note.create", text: "# Lower\n\nlower words" });
+  const run = async (command: string) => {
+    await page.keyboard.press("ControlOrMeta+Shift+P");
+    await page.getByRole("combobox", { name: "Commands" }).fill(command);
+    await page.keyboard.press("Enter");
+  };
+  await open(page, `/note/${upper.id}`);
+  await expect(statusLine(page)).toHaveText("--NORMAL--");
+  await run("Keep tab open");
+  await page.keyboard.press("ControlOrMeta+p");
+  await page.getByRole("combobox", { name: "Go to note" }).fill("Lower");
+  await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText("Lower");
+  await page.keyboard.press("Enter");
+  await expect(editor(page)).toContainText("lower words");
+  await run("Split editor down");
+  await expect(editor(page, 1)).toContainText("lower words");
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  if (!(await inspector.isVisible())) await run("Toggle inspector");
+  await expect(inspector).toBeVisible();
+
+  await editor(page, 1).click();
+  await keys(page, "Control+w", "k");
+  await expect(editor(page, 0)).toBeFocused();
+  // Nothing is above the upper side, so the keys stay where they are.
+  await keys(page, "Control+w", "k");
+  await expect(editor(page, 0)).toBeFocused();
+  await keys(page, "Control+w", "j");
+  await expect(editor(page, 1)).toBeFocused();
+  await keys(page, "Control+w", "h");
+  await expect(page.getByRole("tree").getByRole("treeitem", { name: "Unsorted" })).toBeFocused();
+  // Both sides are as near the sidebar and share as much of its edge: the upper one, which comes first, is the one gone to.
+  await keys(page, "Control+w", "l");
+  await expect(editor(page, 0)).toBeFocused();
+  await keys(page, "Control+w", "j");
+  await expect(editor(page, 1)).toBeFocused();
+
+  // In focus the sidebar, the inspector and the other side keep their places out of sight, and no key goes to them.
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
+  const only = page.getByRole("textbox", { name: "Note text" });
+  await expect(only).toHaveCount(1);
+  await expect(only).toContainText("lower words");
+  for (const side of ["h", "j", "k", "l"]) {
+    await keys(page, "Control+w", side);
+    await expect(only, `Ctrl-w ${side} in focus`).toBeFocused();
+    await expect(page.locator("[data-vim-at]"), `Ctrl-w ${side} marks no row`).toHaveCount(0);
+  }
+  await keys(page, "Shift+G", "$", "x");
+  await expect(only.locator(".cm-line").last()).toHaveText("lower word");
+  // With focus on nothing, the keys still find only what is seen.
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+  await keys(page, "Control+w", "h");
+  await expect(page.locator("[data-vim-at]")).toHaveCount(0);
+  await keys(page, "j");
+  await expect(page.locator("[data-vim-at]")).toHaveCount(0);
+  await expect(statusLine(page, 1)).toHaveText("--NORMAL--");
+
+  // Out of focus the keys reach the other side again.
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
+  await keys(page, "Control+w", "k");
+  await expect(editor(page, 0)).toBeFocused();
+  await keys(page, "Control+w", "l");
+  await expect.poll(() => inspector.evaluate((el) => el.contains(document.activeElement))).toBe(true);
 });
 
 test("gt from a note to a folder's tab puts the keys on the list's rows, and Enter there opens the next note in normal mode", async ({ page }) => {

@@ -200,7 +200,7 @@ for (const width of [1600, 820]) {
 
     for (const word of LINES) {
       await clickOn(word);
-      expect(await cursorLine(), `the cursor is on "${word}"`).toContain(word);
+      await expect.poll(() => cursorLine(), `the cursor is on "${word}"`).toContain(word);
       expectUnmoved(await places(page, WORDS), before, `with the cursor on "${word}"`);
     }
 
