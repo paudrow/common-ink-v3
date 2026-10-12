@@ -171,6 +171,7 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
     created = createPluginHost({
       // A test puts plugins on the page before the app loads. Loading a member's own plugins is another matter.
       plugins: [core, ...BUILT_INS, ...((window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__ ?? []), pluginsPage],
+      builtIn: [core, ...BUILT_INS, pluginsPage].map((p) => p.id),
       required: [core.id, pluginsPage.id],
       // Settings will keep this per member per workspace; until then it is kept in this browser.
       disabled: { read: () => readStored(disabledKey, isStrings) ?? [], write: (ids) => writeStored(disabledKey, ids) },
@@ -277,12 +278,12 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
   const byIdNow = useRef(byId);
   byIdNow.current = byId;
   const show = useCallback(
-    (tab: Opened | null, { replace = false }: { replace?: boolean } = {}) => {
+    (tab: Opened | null, how: { replace?: boolean; move?: boolean } = {}) => {
       if (!tab) navigate("/");
-      else if (tab.kind === "folder") navigate(folderPath(tab.id), { replace });
-      else if (tab.kind === "page") navigate(tab.path, { replace });
+      else if (tab.kind === "folder") navigate(folderPath(tab.id), how);
+      else if (tab.kind === "page") navigate(tab.path, how);
       // A note's address may be written with an older title, and is still the note's.
-      else if (noteIdFromPath(location.pathname) !== tab.id) navigate(pathTo(byIdNow.current, tab.id), { replace });
+      else if (noteIdFromPath(location.pathname) !== tab.id) navigate(pathTo(byIdNow.current, tab.id), how);
     },
     [navigate],
   );

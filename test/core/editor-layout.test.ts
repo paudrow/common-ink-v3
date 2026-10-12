@@ -615,6 +615,34 @@ describe("dropping a tab on the middle of a group", () => {
   });
 });
 
+describe("sending a tab to the next or the previous group", () => {
+  const three: EditorLayout = {
+    groups: [
+      { id: "1", tabs: [{ kind: "note", id: "a", preview: false }, { kind: "note", id: "b", preview: false }], active: note("b") },
+      { id: "2", tabs: [{ kind: "note", id: "c", preview: false }], active: note("c") },
+      { id: "3", tabs: [{ kind: "note", id: "d", preview: false }], active: note("d") },
+    ],
+    focusedGroupId: "1",
+  };
+  const titles = (layout: EditorLayout) => layout.groups.map((g) => g.tabs.map((t) => t.id).join(""));
+
+  it("adds it to the end of that group's tabs, showing and focused, and goes round from the last group to the first", () => {
+    const next = editorReducer(three, { type: "send", groupId: "1", tab: note("b"), to: "next" });
+    expect(titles(next)).toEqual(["a", "cb", "d"]);
+    expect(focused(next)).toEqual(note("b"));
+    expect(next.focusedGroupId).toBe("2");
+
+    expect(titles(editorReducer(three, { type: "send", groupId: "1", tab: note("b"), to: "previous" }))).toEqual(["a", "c", "db"]);
+    expect(titles(editorReducer(three, { type: "send", groupId: "3", tab: note("d"), to: "next" }))).toEqual(["abd", "c"]);
+  });
+
+  it("leaves the layout as it is when there is one group", () => {
+    const layout = one([["a", false], ["b", false]]);
+
+    expect(editorReducer(layout, { type: "send", groupId: "1", tab: note("b"), to: "next" })).toBe(layout);
+  });
+});
+
 describe("a page's tab", () => {
   const at = (id: string, path = `/${id}`) => ({ kind: "page" as const, id, path });
   const open = (layout: EditorLayout, tab: Opened, preview = true) => editorReducer(layout, { type: "open", tab, preview });

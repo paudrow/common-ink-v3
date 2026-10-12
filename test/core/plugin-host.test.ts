@@ -126,7 +126,16 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
+  });
+
+  it("says which plugins came with the app, and no others", () => {
+    const { host } = hostWith([notes, palette], { builtIn: ["notes"] });
+
+    expect(host.contributions().plugins.map((p) => [p.id, p.builtIn])).toEqual([
+      ["notes", true],
+      ["palette", false],
+    ]);
   });
 
   it("leaves out the whole of a plugin that can't start, and says why", () => {

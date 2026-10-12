@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { Drawn } from "./Drawn.tsx";
-import { UNPICKED, type App, type Inspected, type InspectorView } from "./plugin-api.ts";
+import { pickView } from "./inspectorPick.ts";
+import type { App, Inspected, InspectorView } from "./plugin-api.ts";
 import type { Host } from "./pluginHost.ts";
 
 /**
@@ -12,16 +13,13 @@ export type Subject = { [K in keyof Inspected]: { kind: K; props: Inspected[K] }
 /** The views plugins have added for what is in front, in order. */
 export const viewsFor = (views: readonly InspectorView[], subject: Subject | null) => views.filter((v) => v.for === subject?.kind);
 
-/**
- * The tab that shows: the one the member last picked, or the one of the same name where what is in
- * front has its own, as a folder has its own Info. Where it has neither, the first of the tabs it
- * does have shows, and the pick is as it was for the next thing that has it.
- */
-export const shownView = (all: readonly InspectorView[], views: readonly InspectorView[], picked: string | null) => {
-  const id = picked ?? UNPICKED;
-  const label = all.find((v) => v.id === id)?.label;
-  return views.find((v) => v.id === id) ?? views.find((v) => v.label === label) ?? views[0];
-};
+/** Draws a view with what it is for. `viewsFor` saw to it that the view is for what is in front. */
+function drawn(host: Host, view: InspectorView, subject: Subject) {
+  if (view.for === "note" && subject.kind === "note") return <Drawn key={view.id} host={host} view={view} {...subject.props} />;
+  if (view.for === "folder" && subject.kind === "folder") return <Drawn key={view.id} host={host} view={view} {...subject.props} />;
+  if (view.for === "page" && subject.kind === "page") return <Drawn key={view.id} host={host} view={view} {...subject.props} />;
+  return null;
+}
 
 interface Props {
   host: Host;
@@ -38,7 +36,7 @@ interface Props {
 export function Inspector({ host, views: all, app, subject, picked, onPick }: Props) {
   const ids = useId();
   const views = viewsFor(all, subject);
-  const shown = shownView(all, views, picked);
+  const shown = pickView(all, views, picked);
   return (
     <aside className="inspector" aria-label="Inspector">
       {subject && shown ? (
@@ -64,8 +62,7 @@ export function Inspector({ host, views: all, app, subject, picked, onPick }: Pr
             })}
           </div>
           <div role="tabpanel" id={`${ids}-panel`} aria-labelledby={`${ids}-${shown.id}`} className="panel">
-            {/* A view is handed what it is for, which `viewsFor` saw to and the types can't follow. */}
-            <Drawn key={shown.id} host={host} view={shown as never} {...subject.props} />
+            {drawn(host, shown, subject)}
           </div>
         </>
       ) : (

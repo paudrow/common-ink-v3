@@ -54,10 +54,12 @@ export function PluginDetails({ plugin, contributed, host, mac, go }: Props) {
         </span>
         <div className="plugin-text">
           <h1>{name}</h1>
-          <p className="plugin-meta">
-            <span className="badge">Built-in</span>
-            <span>Comes with Common Ink</span>
-          </p>
+          {state.builtIn && (
+            <p className="plugin-meta">
+              <span className="badge">Built-in</span>
+              <span>Comes with Common Ink</span>
+            </p>
+          )}
         </div>
         <label className="plugin-switch">
           <span>{state.enabled ? "On" : "Off"}</span>
@@ -86,7 +88,7 @@ export function PluginDetails({ plugin, contributed, host, mac, go }: Props) {
       )}
 
       <Section title="Permissions">
-        <p className="soon">It comes with Common Ink and runs inside the app as you, so it asks for nothing: it can do what you can, and no more. What it does with that is what it adds, below.</p>
+        <p className="soon">{state.builtIn ? "It comes with Common Ink and runs" : "It runs"} inside the app as you, so it asks for nothing: it can do what you can, and no more. What it does with that is what it adds, below.</p>
       </Section>
 
       <Section title="What it adds">
