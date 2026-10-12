@@ -1007,7 +1007,7 @@ button.link:hover {
   scrollbar-width: none;
 }
 
-/* The window's own buttons, at the ends of the tab rows where no tab scrolls over them: the sidebar's before the first tab of the top left group, the rest after the last of the top right. */
+/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
 .window-controls {
   display: flex;
   flex: none;
@@ -1016,8 +1016,51 @@ button.link:hover {
   padding: 0 6px;
 }
 
-.window-controls.end {
-  margin-left: auto;
+/* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
+.focus-button {
+  align-self: center;
+  margin: 0 6px 0 auto;
+}
+
+.group:not([data-front]) .focus-button {
+  opacity: 0.45;
+}
+
+/* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
+.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle),
+.groups[data-focus-mode] .group:not([data-front]),
+.groups[data-focus-mode] .resize-handle {
+  visibility: hidden;
+}
+
+.groups[data-focus-mode] .group[data-front] {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  z-index: 1;
+  height: auto;
+  border: 0;
+  background: none;
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
+  display: none;
+}
+
+/* A note's bar ends short of the way out, so its save state is not under it. */
+.groups[data-focus-mode] .note-bar {
+  padding-right: 40px;
+}
+
+.groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
+  background: none;
+  opacity: 0.45;
 }
 
 /* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
@@ -1963,6 +2006,118 @@ kbd {
   align-self: flex-start;
 }
 
+.change-list-head {
+  display: flex;
+}
+
+/* The tick has a column of its own, so a change that can't be ticked lines up with one that can. */
+.change-list.pickable .change {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 8px;
+}
+
+.change-list.pickable .change > * {
+  grid-column: 2;
+}
+
+.change-list.pickable .change > .change-pick {
+  grid-row: 1;
+  grid-column: 1;
+  align-self: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.revert-dialog {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.revert-dialog::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.revert-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  font-size: 13px;
+}
+
+.revert-dialog h2,
+.revert-dialog p {
+  margin: 0;
+}
+
+.revert-dialog h2 {
+  font-size: 15px;
+}
+
+.revert-dialog .diff {
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.revert-dialog button.link {
+  text-decoration: underline;
+}
+
+.revert-overlap {
+  padding: 6px 8px;
+  border-left: 3px solid var(--danger);
+  border-radius: 4px;
+  background: var(--removed-soft);
+}
+
+.revert-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 50vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.revert-notes li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.revert-notes h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.revert-note-count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.revert-notes .diff {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.revert-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .change-author {
   min-width: 0;
   overflow: hidden;
@@ -2254,6 +2409,17 @@ del.diff-line {
 
 .connect .button {
   justify-self: start;
+}
+
+.agent-edit {
+  margin-top: 4px;
+  background: var(--bg);
+}
+
+.agent-edit .hint,
+.agent-edit .agent-actions {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .new-token {
