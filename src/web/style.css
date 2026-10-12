@@ -1034,7 +1034,7 @@ button.link:hover {
   scrollbar-width: none;
 }
 
-/* The window's own buttons, at the ends of the tab rows where no tab scrolls over them: the sidebar's before the first tab of the top left group, the rest after the last of the top right. */
+/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
 .window-controls {
   display: flex;
   flex: none;
@@ -1043,8 +1043,51 @@ button.link:hover {
   padding: 0 6px;
 }
 
-.window-controls.end {
-  margin-left: auto;
+/* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
+.focus-button {
+  align-self: center;
+  margin: 0 6px 0 auto;
+}
+
+.group:not([data-front]) .focus-button {
+  opacity: 0.45;
+}
+
+/* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
+.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle, .bar),
+.groups[data-focus-mode] .group:not([data-front]),
+.groups[data-focus-mode] .resize-handle {
+  visibility: hidden;
+}
+
+.groups[data-focus-mode] .group[data-front] {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  z-index: 1;
+  height: auto;
+  border: 0;
+  background: none;
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
+  display: none;
+}
+
+/* A note's bar ends short of the way out, so its save state is not under it. */
+.groups[data-focus-mode] .note-bar {
+  padding-right: 40px;
+}
+
+.groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
+  background: none;
+  opacity: 0.45;
 }
 
 /* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
@@ -1340,9 +1383,10 @@ button.link:hover {
 }
 
 .plugin-list {
-  display: flex;
-  flex-direction: column;
-  margin: 4px 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -1354,13 +1398,42 @@ button.link:hover {
   align-items: flex-start;
 }
 
-.plugin-row {
-  padding: 10px 8px;
-  border-top: 1px solid var(--line);
+/* A plugin's card, in the look of a note's card in a folder's list. Its name is a link laid over the whole of it, and its switch lies above the link. */
+.plugin-card {
+  position: relative;
+  align-items: center;
+  padding: 12px 14px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
 }
 
-.plugin-row:last-child {
-  border-bottom: 1px solid var(--line);
+.plugin-card:hover {
+  border-color: var(--line-strong);
+}
+
+.plugin-card:has(.plugin-name:focus-visible) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.plugin-card .plugin-name {
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  outline: none;
+}
+
+.plugin-card .plugin-name::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  content: "";
+}
+
+.plugin-card :is(.switch, .error) {
+  position: relative;
+  z-index: 1;
 }
 
 .plugin-icon {
@@ -2449,6 +2522,118 @@ kbd {
   align-self: flex-start;
 }
 
+.change-list-head {
+  display: flex;
+}
+
+/* The tick has a column of its own, so a change that can't be ticked lines up with one that can. */
+.change-list.pickable .change {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 8px;
+}
+
+.change-list.pickable .change > * {
+  grid-column: 2;
+}
+
+.change-list.pickable .change > .change-pick {
+  grid-row: 1;
+  grid-column: 1;
+  align-self: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.revert-dialog {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.revert-dialog::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.revert-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  font-size: 13px;
+}
+
+.revert-dialog h2,
+.revert-dialog p {
+  margin: 0;
+}
+
+.revert-dialog h2 {
+  font-size: 15px;
+}
+
+.revert-dialog .diff {
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.revert-dialog button.link {
+  text-decoration: underline;
+}
+
+.revert-overlap {
+  padding: 6px 8px;
+  border-left: 3px solid var(--danger);
+  border-radius: 4px;
+  background: var(--removed-soft);
+}
+
+.revert-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 50vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.revert-notes li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.revert-notes h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.revert-note-count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.revert-notes .diff {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.revert-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .change-author {
   min-width: 0;
   overflow: hidden;
@@ -2742,6 +2927,17 @@ del.diff-line {
   justify-self: start;
 }
 
+.agent-edit {
+  margin-top: 4px;
+  background: var(--bg);
+}
+
+.agent-edit .hint,
+.agent-edit .agent-actions {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .new-token {
   display: flex;
   flex-direction: column;
@@ -2832,4 +3028,54 @@ del.diff-line {
 
 .said.failed {
   color: var(--danger);
+}
+
+/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
+.app[data-bar] {
+  box-sizing: border-box;
+  padding-bottom: 26px;
+}
+
+.bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-side);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.bar-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* In a window too narrow for both ends, the left end is the one cut short. */
+.bar-side[data-side="right"] {
+  flex: none;
+  max-width: 100%;
+}
+
+.bar-item {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An item with nothing to say takes no room. */
+.bar-item:empty {
+  display: none;
 }

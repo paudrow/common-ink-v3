@@ -61,7 +61,7 @@ const PATHS = {
       <path d="M10 3v10" />
     </>
   ),
-  writing: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
+  focus: <path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" />,
   plugin: <path d="M6.5 3.5a1.5 1.5 0 0 1 3 0v1h2.5a1 1 0 0 1 1 1V8h-1a1.5 1.5 0 0 0 0 3h1v1.5a1 1 0 0 1-1 1H9.5v-1a1.5 1.5 0 0 0-3 0v1H4a1 1 0 0 1-1-1V10h1a1.5 1.5 0 0 0 0-3H3V5.5a1 1 0 0 1 1-1h2.5z" />,
   settings: (
     <>

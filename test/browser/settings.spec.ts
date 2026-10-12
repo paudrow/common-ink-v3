@@ -135,11 +135,11 @@ test("a plugin's options are listed under it with their schema and apply without
 test("a value the schema refuses and a key it doesn't know are flagged in the JSON and in the options, and the rest still applies", async ({ page }) => {
   await openSettings(page);
 
-  await typeJson(page, '{"core.theme": "dark", "core.editorTextSize": 500, "core.theem": "light", "keybindings.view.toggleWritingMode": ["cmd+y"]}');
+  await typeJson(page, '{"core.theme": "dark", "core.editorTextSize": 500, "core.theem": "light", "keybindings.view.toggleFocus": ["cmd+y"]}');
 
   await expect(problems(page)).toHaveText([
     "core.editorTextSize Expected 200 or less, not 500. The default is used.",
-    'keybindings.view.toggleWritingMode "cmd" in "cmd+y" isn\'t a modifier. Use mod, alt, or shift, then one key. The default is used.',
+    'keybindings.view.toggleFocus "cmd" in "cmd+y" isn\'t a modifier. Use mod, alt, or shift, then one key. The default is used.',
     "core.theem There's no setting by this name. It may belong to a plugin that isn't installed.",
   ]);
   await expect(page.locator(".settings-json .cm-lintRange-error")).toHaveText(["500", '["cmd+y"]']);
@@ -147,14 +147,14 @@ test("a value the schema refuses and a key it doesn't know are flagged in the JS
   await page.locator(".settings-json .cm-lintRange-error").first().hover();
   await expect(page.locator(".cm-tooltip-lint")).toHaveText("Expected 200 or less, not 500. The default is used.");
   expect(await theme(page)).toBe("dark");
-  expect(await stored(page)).toEqual({ "core.theme": "dark", "core.editorTextSize": 500, "core.theem": "light", "keybindings.view.toggleWritingMode": ["cmd+y"] });
+  expect(await stored(page)).toEqual({ "core.theme": "dark", "core.editorTextSize": 500, "core.theem": "light", "keybindings.view.toggleFocus": ["cmd+y"] });
 
   await openOptions(page);
   const core = group(page, "Editor");
   await expect(core.getByRole("spinbutton", { name: "Editor text size" })).toHaveValue("100");
   await expect(core.getByRole("spinbutton", { name: "Editor text size" })).toHaveAttribute("aria-invalid", "true");
   await expect(core).toContainText("Expected 200 or less, not 500. The default is used.");
-  await expect((await category(page, "Keyboard shortcuts")).getByRole("row", { name: /Toggle writing mode/ })).toContainText('"cmd" in "cmd+y" isn\'t a modifier.');
+  await expect((await category(page, "Keyboard shortcuts")).getByRole("row", { name: /Toggle focus/ })).toContainText('"cmd" in "cmd+y" isn\'t a modifier.');
   const unknown = await category(page, "Not recognized");
   await expect(unknown).toContainText("core.theem");
 
@@ -162,7 +162,7 @@ test("a value the schema refuses and a key it doesn't know are flagged in the JS
   await category(page, "Editor");
   await core.getByRole("button", { name: "Reset Editor text size" }).click();
   await expect(problems(page)).toHaveCount(1);
-  await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "keybindings.view.toggleWritingMode": ["cmd+y"] });
+  await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "keybindings.view.toggleFocus": ["cmd+y"] });
 });
 
 test("JSON that can't be read is flagged in both views and isn't saved, and the settings stay as they were", async ({ page }) => {
@@ -198,22 +198,22 @@ test("a keybinding is recorded by pressing it, warned of when another command ha
   const app = page.locator(".app");
   const keys = await category(page, "Keyboard shortcuts");
   await expect(keys.getByRole("row", { name: /Undo/ }).getByRole("cell").nth(1)).toHaveText("Default");
-  await page.getByRole("searchbox", { name: "Search settings" }).fill("writing mode");
+  await page.getByRole("searchbox", { name: "Search settings" }).fill("toggle focus");
   await expect(keys.getByRole("row")).toHaveCount(2);
-  const writing = keys.getByRole("row", { name: /Toggle writing mode/ });
-  const key = writing.locator("kbd");
-  const from = writing.getByRole("cell").nth(1);
+  const focusRow = keys.getByRole("row", { name: /Toggle focus/ });
+  const key = focusRow.locator("kbd");
+  const from = focusRow.getByRole("cell").nth(1);
   await expect(key).toHaveText([/^(⌘\.|Ctrl\+\.)/]);
   await expect(from).toHaveText("Default");
 
-  await writing.getByRole("button", { name: "Record a key for Toggle writing mode" }).click();
-  const recorder = page.getByRole("dialog", { name: "Record a key for Toggle writing mode" });
+  await focusRow.getByRole("button", { name: "Record a key for Toggle focus" }).click();
+  const recorder = page.getByRole("dialog", { name: "Record a key for Toggle focus" });
   await expect(recorder.getByRole("group", { name: "Press the keys" })).toBeFocused();
   await expect(recorder.getByRole("button", { name: "Save" })).toBeDisabled();
-  // The key that toggles writing mode is written down there, and toggles nothing.
+  // The key that toggles focus is written down there, and toggles nothing.
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(recorder).toContainText("Toggle writing mode has this key already.");
-  await expect(app).not.toHaveAttribute("data-writing");
+  await expect(recorder).toContainText("Toggle focus has this key already.");
+  await expect(app).not.toHaveAttribute("data-focus-mode");
   // A key pressed after another makes a sequence of them, and Start over takes them all back.
   await page.keyboard.press("y");
   await expect(recorder.locator("kbd")).toHaveText(/^(⌘\. Y|Ctrl\+\. Y)$/);
@@ -234,62 +234,62 @@ test("a keybinding is recorded by pressing it, warned of when another command ha
   await expect(recorder).toHaveCount(0);
   await expect(key).toHaveText([/^(⇧⌘Y|Ctrl\+Shift\+Y)/]);
   await expect(from).toHaveText("Yours");
-  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleWritingMode": ["mod+shift+y"] });
+  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleFocus": ["mod+shift+y"] });
   await page.getByRole("heading", { name: "Settings", level: 1 }).click();
 
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(app).not.toHaveAttribute("data-writing");
+  await expect(app).not.toHaveAttribute("data-focus-mode");
   await page.keyboard.press("ControlOrMeta+Shift+Y");
-  await expect(app).toHaveAttribute("data-writing", "true");
+  await expect(app).toHaveAttribute("data-focus-mode", "true");
   await page.keyboard.press("ControlOrMeta+Shift+Y");
-  await expect(app).not.toHaveAttribute("data-writing");
+  await expect(app).not.toHaveAttribute("data-focus-mode");
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("Toggle writing");
-  await expect(palette(page).getByRole("option").first()).toContainText(/Toggle writing mode.*(⇧⌘Y|Ctrl\+Shift\+Y)/);
+  await page.keyboard.type("Toggle focus");
+  await expect(palette(page).getByRole("option").first()).toContainText(/Toggle focus.*(⇧⌘Y|Ctrl\+Shift\+Y)/);
   await page.keyboard.press("Escape");
 
-  await writing.getByRole("button", { name: "Record a key for Toggle writing mode" }).click();
+  await focusRow.getByRole("button", { name: "Record a key for Toggle focus" }).click();
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await expect(palette(page)).toHaveCount(0);
-  await expect(recorder.getByRole("alert")).toHaveText(/^(⇧⌘P|Ctrl\+Shift\+P) is already the key for Show all commands\. Saved, it runs Toggle writing mode instead\.$/);
+  await expect(recorder.getByRole("alert")).toHaveText(/^(⇧⌘P|Ctrl\+Shift\+P) is already the key for Show all commands\. Saved, it runs Toggle focus instead\.$/);
   await page.keyboard.press("Escape");
   await expect(recorder).toHaveCount(0);
-  await expect(writing.getByRole("button", { name: "Record a key for Toggle writing mode" })).toBeFocused();
-  expect(await stored(page)).toEqual({ "keybindings.view.toggleWritingMode": ["mod+shift+y"] });
+  await expect(focusRow.getByRole("button", { name: "Record a key for Toggle focus" })).toBeFocused();
+  expect(await stored(page)).toEqual({ "keybindings.view.toggleFocus": ["mod+shift+y"] });
 
-  await writing.getByRole("button", { name: "Record a key for Toggle writing mode" }).click();
+  await focusRow.getByRole("button", { name: "Record a key for Toggle focus" }).click();
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await recorder.getByRole("button", { name: "Save" }).click();
-  await expect(problems(page)).toHaveText(["keybindings.view.toggleWritingMode mod+shift+p is also the key for Show all commands (commands.show). It runs Toggle writing mode. Show all commands is left with no key."]);
-  await expect(writing).toContainText("mod+shift+p is also the key for Show all commands");
+  await expect(problems(page)).toHaveText(["keybindings.view.toggleFocus mod+shift+p is also the key for Show all commands (commands.show). It runs Toggle focus. Show all commands is left with no key."]);
+  await expect(focusRow).toContainText("mod+shift+p is also the key for Show all commands");
   await page.getByRole("heading", { name: "Settings", level: 1 }).click();
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await expect(app).toHaveAttribute("data-writing", "true");
+  await expect(app).toHaveAttribute("data-focus-mode", "true");
   await expect(palette(page)).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+Shift+P");
 
-  await writing.getByRole("button", { name: /^Remove .+ from Toggle writing mode$/ }).click();
-  await expect(writing.getByRole("cell").first()).toHaveText("No key");
+  await focusRow.getByRole("button", { name: /^Remove .+ from Toggle focus$/ }).click();
+  await expect(focusRow.getByRole("cell").first()).toHaveText("No key");
   await expect(problems(page)).toHaveCount(0);
-  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleWritingMode": [] });
+  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleFocus": [] });
   await page.getByRole("heading", { name: "Settings", level: 1 }).click();
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(app).not.toHaveAttribute("data-writing");
+  await expect(app).not.toHaveAttribute("data-focus-mode");
 
-  await writing.getByRole("button", { name: "Reset Toggle writing mode" }).click();
+  await focusRow.getByRole("button", { name: "Reset Toggle focus" }).click();
   await expect(from).toHaveText("Default");
   await expect.poll(() => stored(page)).toEqual({});
   await page.getByRole("heading", { name: "Settings", level: 1 }).click();
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(app).toHaveAttribute("data-writing", "true");
+  await expect(app).toHaveAttribute("data-focus-mode", "true");
   await page.keyboard.press("ControlOrMeta+.");
 
-  await writing.getByRole("button", { name: "Add another key for Toggle writing mode" }).click();
+  await focusRow.getByRole("button", { name: "Add another key for Toggle focus" }).click();
   await page.keyboard.press("F8");
   await page.keyboard.press("Enter");
   await expect(key).toHaveText([/^(⌘\.|Ctrl\+\.)/, /^F8/]);
-  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleWritingMode": ["mod+.", "f8"] });
+  await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleFocus": ["mod+.", "f8"] });
 });
 
 test("one search finds settings in every category and keyboard shortcuts, a category narrows it, and Modified shows only what was changed", async ({ page }) => {
@@ -478,7 +478,7 @@ test("Toggle sidebar and the other commands on the window are in the table of ke
   const row = (title: string) => keys.getByRole("row", { name: new RegExp(title) });
   await expect(row("Toggle sidebar").locator("kbd")).toHaveText([/^(⌘\\|Ctrl\+\\)/]);
   await expect(row("Toggle sidebar").getByRole("cell").nth(1)).toHaveText("Default");
-  await expect(row("Toggle writing mode").locator("kbd")).toHaveText([/^(⌘\.|Ctrl\+\.)/]);
+  await expect(row("Toggle focus").locator("kbd")).toHaveText([/^(⌘\.|Ctrl\+\.)/]);
   await expect(row("Toggle inspector").getByRole("cell").first()).toHaveText("No key");
 
   await row("Toggle sidebar").getByRole("button", { name: "Record a key for Toggle sidebar" }).click();
@@ -523,7 +523,7 @@ test("Toggle sidebar and the other commands on the window are in the table of ke
 
 test("Enter and Space given to commands leave buttons, links and checkboxes their own press, and run where nothing takes them; another bare key runs on a button too", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  await write(page, { "keybindings.note.new": ["enter"], "keybindings.notes.all": ["space"], "keybindings.view.toggleWritingMode": ["w"] });
+  await write(page, { "keybindings.note.new": ["enter"], "keybindings.notes.all": ["space"], "keybindings.view.toggleFocus": ["w"] });
   await page.goto("/plugins");
   const app = page.locator(".app");
   const modes = page.getByRole("navigation", { name: "Modes" });
@@ -553,9 +553,9 @@ test("Enter and Space given to commands leave buttons, links and checkboxes thei
   // w is no control's key, so it runs with a button in focus.
   await modes.getByRole("button", { name: "Less" }).focus();
   await page.keyboard.press("w");
-  await expect(app).toHaveAttribute("data-writing", "true");
+  await expect(app).toHaveAttribute("data-focus-mode", "true");
   await page.keyboard.press("w");
-  await expect(app).not.toHaveAttribute("data-writing");
+  await expect(app).not.toHaveAttribute("data-focus-mode");
 
   // With nothing in focus that takes them, Space and Enter run their commands.
   await page.getByRole("heading", { name: "Dashboard", level: 1 }).click();

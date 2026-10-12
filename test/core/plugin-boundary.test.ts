@@ -28,9 +28,9 @@ describe("the plugin boundary", () => {
     expect(reaching).toEqual([]);
   });
 
-  it("builds the plugin API from the operations protocol and six small helpers, so widening it is a choice", () => {
+  it("builds the plugin API from the operations protocol and seven small helpers, so widening it is a choice", () => {
     const api = files.find((f) => f.path === API)!;
 
-    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/protocol.ts", "./dismiss.ts", "./dragged.ts", "./icons.tsx", "./inspectorPick.ts", "./resize.tsx", "./time.ts", "react"]);
+    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/protocol.ts", "./dismiss.ts", "./dragged.ts", "./icons.tsx", "./inspectorPick.ts", "./openNotes.ts", "./resize.tsx", "./time.ts", "react"]);
   });
 });

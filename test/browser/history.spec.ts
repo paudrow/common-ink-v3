@@ -22,6 +22,13 @@ const summary = (mode: Locator) => () =>
   changedNotes(mode).evaluateAll((rows) =>
     rows.map((row) => [row.querySelector(".changed-note-title")!.textContent, row.querySelector(".change-stat")!.textContent, row.querySelector(".changed-note-meta")!.textContent!.split(" · ").slice(0, 2).join(" · ")]),
   );
+const revertDialog = (page: Page) => page.getByRole("dialog", { name: /^Revert/ });
+/** Opens a revert's dialog from its button and confirms it. */
+async function revertFrom(page: Page, opener: Locator) {
+  await opener.click();
+  await revertDialog(page).getByRole("button", { name: "Revert", exact: true }).click();
+  await expect(revertDialog(page)).toHaveCount(0);
+}
 const text = async (page: Page, id: string) => (await perform(page, { type: "note.read", id })).text;
 
 /** Ada's note, which she wrote and edited, her agent Claude then edited, and she edited again. */
@@ -97,7 +104,7 @@ test("with Note info turned off a member who has picked no tab is shown Backlink
   await expect(historyTab).toHaveAccessibleDescription("");
 });
 
-test("writing mode shows no History mark: the way out is its only button, and the dot waits on the inspector's History tab", async ({ page }) => {
+test("focus shows no History mark: the way out is its only button, and the dot waits on the inspector's History tab", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const claude = await connectAgent(page, "Claude");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nMine." });
@@ -105,17 +112,16 @@ test("writing mode shows no History mark: the way out is its only button, and th
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.getByRole("navigation")).toHaveCount(0);
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveAccessibleName("Writing mode");
+  await expect(page.locator(".tab-row").getByRole("button").filter({ visible: true })).toHaveCount(1);
+  await expect(page.locator(".tab-row").getByRole("button").filter({ visible: true })).toHaveAccessibleName("Focus");
 
   await claude.tool<Note>("write_note", { id: note.id, baseRevision: 1, text: "# Draft\n\nMine.\n\nFrom Claude." });
   await expect(editorLines(page)).toHaveText(["# Draft", "", "Mine.", "", "From Claude."], { timeout: 15_000 });
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveCount(1);
-  await expect(page.getByRole("group", { name: "Window" }).getByRole("button")).toHaveAccessibleName("Writing mode");
+  await expect(page.locator(".tab-row").getByRole("button").filter({ visible: true })).toHaveCount(1);
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  expect((await page.getByRole("main", { name: "Editor" }).boundingBox())!.width).toBe(1280);
+  expect((await page.locator(".group-body").filter({ visible: true }).boundingBox())!.width).toBe(1280);
 
-  await page.getByRole("button", { name: "Writing mode" }).click();
+  await page.getByRole("button", { name: "Focus" }).click();
   await expect(page.getByRole("tab", { name: "History" })).toHaveAccessibleDescription(UNSEEN);
 });
 
@@ -271,7 +277,7 @@ test("a revision can be labeled, and the note reverted to it as a new change", a
   await expect(latest.getByRole("button", { name: "Label" })).toBeVisible();
   await expect(latest.getByRole("button", { name: "Revert note to here" })).toHaveCount(0);
 
-  await second.getByRole("button", { name: "Revert note to here" }).click();
+  await revertFrom(page, second.getByRole("button", { name: "Revert note to here…" }));
 
   await expect(editorLines(page)).toHaveText(["# Plan", "", "Ada's step"]);
   await expect(changes(panel)).toHaveCount(5);
@@ -303,10 +309,9 @@ test("a change is reverted as a new change, and reverting that revert has it aga
   await noteToggle(mode, "Plan").click();
   await expect.poll(names(mode)).toEqual(["Change 3 to Plan by Claude"]);
   const third = change(mode, "Change 3 to Plan by Claude");
-  await expect(mode.getByRole("checkbox")).toHaveCount(0);
   for (const gone of ["Revert selected", "Put back selected", "Clear"]) await expect(mode.getByRole("button", { name: gone, exact: true })).toHaveCount(0);
 
-  await third.getByRole("button", { name: "Revert change 3 to Plan" }).click();
+  await revertFrom(page, third.getByRole("button", { name: "Revert change 3 to Plan…" }));
 
   await expect(third).toContainText("Reverted by change 5");
   await expect(third.getByRole("button", { name: /^Revert change/ })).toHaveCount(0);
@@ -317,7 +322,7 @@ test("a change is reverted as a new change, and reverting that revert has it aga
   await expect(fifth).toContainText("Reverts change 3");
   await expect(fifth).toContainText("+0 −2");
 
-  await fifth.getByRole("button", { name: "Revert change 5 to Plan" }).click();
+  await revertFrom(page, fifth.getByRole("button", { name: "Revert change 5 to Plan…" }));
 
   const sixth = change(mode, "Change 6 to Plan by Ada Lovelace");
   await expect(sixth).toContainText("Reverts change 5");
@@ -327,7 +332,7 @@ test("a change is reverted as a new change, and reverting that revert has it aga
   await expect(third.getByRole("button", { name: "Revert change 3 to Plan" })).toBeVisible();
   expect(await text(page, id)).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
 
-  await sixth.getByRole("button", { name: "Revert change 6 to Plan" }).click();
+  await revertFrom(page, sixth.getByRole("button", { name: "Revert change 6 to Plan…" }));
 
   const seventh = change(mode, "Change 7 to Plan by Ada Lovelace");
   await expect(seventh).toContainText("Reverts change 6");
@@ -336,6 +341,174 @@ test("a change is reverted as a new change, and reverting that revert has it aga
   await expect(mode).not.toContainText(/put back|taken back|Put back|Taken back/);
   expect(await text(page, id)).toBe("# Plan\n\nAda's step\n\nAda's last word");
   expect((await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3], [5], [6]]);
+});
+
+test("a revert is shown before it is made: the dialog has the diff of what it will do, cancelling changes nothing, and confirming records one change", async ({ page }) => {
+  const { id } = await sharedNote(page);
+  const panel = await openHistoryTab(page, id);
+  const third = change(panel, "Change 3 by Claude");
+  const opener = third.getByRole("button", { name: "Revert change 3…" });
+  await expect(opener).toHaveText("Revert…");
+
+  await opener.click();
+
+  const dialog = revertDialog(page);
+  await expect(dialog).toHaveAccessibleName("Revert change 3");
+  await expect(dialog).toContainText("Reverts change 3 to Plan as one new change.");
+  await expect(removed(dialog)).toHaveText(["Claude's step", ""]);
+  await expect(dialog.getByRole("insertion")).toHaveCount(0);
+  await expect(dialog).not.toContainText("edited the same lines");
+  expect(await dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await opener.click();
+  await expect(removed(dialog)).toHaveText(["Claude's step", ""]);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await opener.click();
+  await page.mouse.click(5, 5);
+  await expect(dialog).toHaveCount(0);
+  expect(await text(page, id)).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
+  expect(await perform(page, { type: "note.history", id })).toHaveLength(4);
+  await expect(changes(panel)).toHaveCount(4);
+
+  await opener.click();
+  await dialog.getByRole("button", { name: "Revert", exact: true }).click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(change(panel, "Change 5 by Ada Lovelace")).toContainText("Reverts change 3");
+  await expect(editorLines(page)).toHaveText(["# Plan", "", "Ada's step", "", "Ada's last word"]);
+  expect((await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3]]);
+});
+
+test("the dialog names the later changes that edited the same lines, each a way to that change, and says nothing of later edits elsewhere", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\none\n\ntwo" });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\none, edited\n\ntwo" });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 2, text: "# Plan\n\none, edited\n\ntwo, edited" });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 3, text: "# Plan\n\none, edited again\n\ntwo, edited" });
+  const panel = await openHistoryTab(page, note.id);
+  const dialog = revertDialog(page);
+
+  await change(panel, "Change 3 by Ada Lovelace").getByRole("button", { name: "Revert change 3…" }).click();
+  await expect(added(dialog)).toHaveText(["two"]);
+  await expect(dialog).not.toContainText("edited the same lines");
+  await expect(dialog.getByRole("button", { name: "Revert", exact: true })).toBeEnabled();
+  await page.keyboard.press("Escape");
+
+  await change(panel, "Change 2 by Ada Lovelace").getByRole("button", { name: "Revert change 2…" }).click();
+  await expect(dialog).toContainText("Later, change 4 edited the same lines. Its edits stay, on lines this revert otherwise returns to how they were.");
+  await dialog.getByRole("button", { name: "Change 4", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(toggle(change(panel, "Change 4 by Ada Lovelace"))).toBeFocused();
+
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 4, text: "# Plan\n\none, edited a third time\n\ntwo, edited" });
+  await expect(changes(panel)).toHaveCount(5);
+  await change(panel, "Change 2 by Ada Lovelace").getByRole("button", { name: "Revert change 2…" }).click();
+  await expect(dialog).toContainText("Later, changes 4 and 5 edited the same lines. Their edits stay, on lines this revert otherwise returns to how they were.");
+});
+
+test("several changes are ticked and reverted at once as one change, from the head of the note's list", async ({ page }) => {
+  const { id } = await sharedNote(page);
+  const panel = await openHistoryTab(page, id);
+  const several = panel.getByRole("button", { name: /^Revert( \d+)? changes?…$/ });
+  const rows = () => changes(panel).evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)));
+  await expect(changes(panel)).toHaveCount(4);
+  await expect(panel.getByRole("checkbox")).toHaveCount(4);
+  await expect(several).toBeDisabled();
+  const before = await rows();
+
+  await panel.getByRole("checkbox", { name: "Select change 4" }).check();
+  await expect(several).toHaveText("Revert 1 change…");
+  await panel.getByRole("checkbox", { name: "Select change 3" }).focus();
+  await page.keyboard.press("Space");
+  await expect(panel.getByRole("checkbox", { name: "Select change 3" })).toBeChecked();
+  await expect(several).toHaveText("Revert 2 changes…");
+  await expect(several).toBeEnabled();
+  expect(await rows()).toEqual(before);
+  for (const gone of ["Revert selected", "Put back selected", "Clear"]) await expect(panel.getByRole("button", { name: gone, exact: true })).toHaveCount(0);
+
+  await several.click();
+  const dialog = revertDialog(page);
+  await expect(dialog).toHaveAccessibleName("Revert 2 changes");
+  await expect(dialog).toContainText("Reverts changes 3 and 4 to Plan as one new change.");
+  await expect(removed(dialog)).toHaveText(["", "Claude's step", "", "Ada's last word"]);
+  await dialog.getByRole("button", { name: "Revert", exact: true }).click();
+
+  await expect(change(panel, "Change 5 by Ada Lovelace")).toContainText("Reverts changes 3 and 4");
+  expect(await text(page, id)).toBe("# Plan\n\nAda's step");
+  expect((await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3, 4]]);
+  await expect(panel.getByRole("checkbox", { checked: true })).toHaveCount(0);
+  await expect(several).toBeDisabled();
+  for (const reverted of [3, 4]) await expect(panel.getByRole("checkbox", { name: `Select change ${reverted}` })).toHaveCount(0);
+  await expect(panel.getByRole("checkbox", { name: "Select change 5" })).toBeVisible();
+});
+
+test("in History mode each note has its own ticks and its own button, and closing a note's changes forgets its ticks", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  for (const title of ["Plan", "Menu"]) {
+    const note = await perform(page, { type: "note.create", text: `# ${title}` });
+    await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: `# ${title}\n\nmore` });
+  }
+  await page.goto("/history");
+  const mode = historyMode(page);
+  await noteToggle(mode, "Plan").click();
+  await noteToggle(mode, "Menu").click();
+  const several = (title: string) => changedNote(mode, title).getByRole("button", { name: /^Revert( \d+)? changes?…$/ });
+
+  await changedNote(mode, "Plan").getByRole("checkbox", { name: "Select change 2 to Plan" }).check();
+  await expect(several("Plan")).toHaveText("Revert 1 change…");
+  await expect(several("Menu")).toBeDisabled();
+  await expect(changedNote(mode, "Menu").getByRole("checkbox", { checked: true })).toHaveCount(0);
+
+  await noteToggle(mode, "Plan").click();
+  await noteToggle(mode, "Plan").click();
+  await expect(changedNote(mode, "Plan").getByRole("checkbox", { name: "Select change 2 to Plan" })).not.toBeChecked();
+  await expect(several("Plan")).toBeDisabled();
+});
+
+test("a viewer has no ticks and no way to revert", async ({ page }) => {
+  const { id } = await sharedNote(page);
+  await page.route("**/api/me", async (route) => {
+    const me = (await (await route.fetch()).json()) as Me;
+    await route.fulfill({ json: { ...me, workspaces: me.workspaces.map((w) => ({ ...w, role: "viewer" })) } });
+  });
+  const panel = await openHistoryTab(page, id);
+  await expect(changes(panel)).toHaveCount(4);
+  await expect(panel.getByRole("checkbox")).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: /Revert/ })).toHaveCount(0);
+});
+
+test("a revert that would change nothing can't be confirmed, and one the note has moved past says why in the dialog", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Plan" });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\nstep" });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 2, text: "# Plan" });
+  await perform(page, { type: "note.write", id: note.id, baseRevision: 3, text: "# Plan\n\nlast" });
+  const panel = await openHistoryTab(page, note.id);
+  const dialog = revertDialog(page);
+  const confirm = dialog.getByRole("button", { name: "Revert", exact: true });
+
+  await change(panel, "Change 2 by Ada Lovelace").getByRole("button", { name: "Revert change 2…" }).click();
+  await expect(dialog).toContainText("Nothing in the note would change.");
+  await expect(dialog.locator(".diff")).toHaveCount(0);
+  await expect(confirm).toBeDisabled();
+  await page.keyboard.press("Escape");
+
+  await change(panel, "Change 4 by Ada Lovelace").getByRole("button", { name: "Revert change 4…" }).click();
+  await expect(added(dialog)).toHaveCount(0);
+  await expect(removed(dialog)).toHaveText(["", "last"]);
+  await perform(page, { type: "note.revertChanges", id: note.id, revisions: [4] });
+  // The dialog may have read the preview again by now, and then there is nothing to press.
+  await confirm.click({ timeout: 2000 }).catch(() => {});
+  await expect(dialog.getByRole("alert")).toHaveText("Change 4 was already reverted, by change 5. Revert change 5 to have it again");
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(change(panel, "Change 4 by Ada Lovelace")).toContainText("Reverted by change 5");
+  expect(await text(page, note.id)).toBe("# Plan");
 });
 
 for (const [where, width] of [["History mode, wide", 1440], ["History mode, narrow", 700], ["the inspector's History tab", 1100]] as const) {

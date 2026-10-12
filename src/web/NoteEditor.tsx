@@ -9,6 +9,7 @@ import { embedding } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import type { Embed } from "./plugin-api.ts";
 import { TITLE_MARK } from "./titleMark.ts";
+import { openNote } from "./openNotes.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
@@ -98,6 +99,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
               sync.extension,
+              openNote(noteId),
               EditorView.updateListener.of((u) => {
                 if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();
               }),
