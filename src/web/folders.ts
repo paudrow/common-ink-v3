@@ -19,6 +19,12 @@ export function folderTree({ unsortedId, folders }: Results["folder.list"]): Fol
   return { unsortedId, byId: new Map(folders.map((f) => [f.id, f])), childrenOf: (id) => children.get(id) ?? [] };
 }
 
+/** What stands for a folder where the notes listed are every note the member can see. */
+export const ALL_NOTES = "all";
+
+/** What a folder's list is called. Null for a folder that isn't there, or that the member can't see. */
+export const folderTitle = (tree: FolderTree, folderId: string): string | null => (folderId === ALL_NOTES ? "All notes" : (tree.byId.get(folderId)?.name ?? null));
+
 /** The folder and its ancestors, outermost first. */
 export function pathOf(tree: FolderTree, id: string): ListedFolder[] {
   const path: ListedFolder[] = [];

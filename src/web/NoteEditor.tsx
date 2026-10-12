@@ -7,11 +7,14 @@ import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
 import { noteHighlighting } from "./highlight.ts";
 import { TITLE_MARK } from "./titleMark.ts";
-import { NoteSync, type SaveState } from "./sync.ts";
+import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
   rejected: "Couldn't save this version. Edit the note to try again.",
 };
+
+const typingIn = (el: Element | null) =>
+  el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable);
 
 /**
  * Someone who types or pastes a heading's mark after that one anyway, as they would in an empty
@@ -35,11 +38,17 @@ interface Props {
   noteId: string;
   onLoaded: (note: Note) => void;
   onSaved: (note: Note) => void;
+  /** Whether the editor is to take the cursor, now or once the note has loaded. `onFocused` is called when it has. */
+  focus: boolean;
+  onFocused: () => void;
   meta: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, focus, onFocused, meta }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const now = useRef({ focus, onFocused });
+  now.current = { focus, onFocused };
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [missing, setMissing] = useState(false);
 
@@ -48,7 +57,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta }: Pro
     let sync: NoteSync | null = null;
     let cancelled = false;
 
-    perform(workspaceId, { type: "note.read", id: noteId }).then(
+    committed(noteId).then(() => perform(workspaceId, { type: "note.read", id: noteId })).then(
       (note) => {
         if (cancelled || !host.current) return;
         onLoaded(note);
@@ -56,7 +65,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta }: Pro
         const text = fresh ? TITLE_MARK : note.text;
         // The sync is told the mark is what the server has, so an untouched note is never sent: there is nothing of the member's in it.
         sync = new NoteSync(workspaceId, { ...note, text }, onSaved, setSaveState);
-        view = new EditorView({
+        view = viewRef.current = new EditorView({
           parent: host.current,
           state: EditorState.create({
             doc: text,
@@ -75,7 +84,9 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta }: Pro
           }),
         });
         sync.attach(view);
-        if (!note.text) view.focus();
+        // A note that took a while to load doesn't take the cursor from a field the member has since gone to.
+        if (!note.text || (now.current.focus && !typingIn(document.activeElement))) view.focus();
+        if (now.current.focus) now.current.onFocused();
       },
       (err) => {
         if (!cancelled && err instanceof ApiError && err.code === "not_found") setMissing(true);
@@ -84,10 +95,17 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, meta }: Pro
 
     return () => {
       cancelled = true;
+      viewRef.current = null;
       void sync?.close();
       view?.destroy();
     };
   }, [workspaceId, noteId, onLoaded, onSaved]);
+
+  useEffect(() => {
+    if (!focus || !viewRef.current) return;
+    viewRef.current.focus();
+    now.current.onFocused();
+  }, [focus]);
 
   if (missing) return <p className="notice">This note doesn't exist, or you can't see it.</p>;
   return (

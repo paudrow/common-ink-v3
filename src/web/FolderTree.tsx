@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, ty
 import type { ListedFolder, OpInput, Role } from "../core/protocol.ts";
 import { perform } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
-import { pathOf, type FolderTree as Tree } from "./folders.ts";
+import { ALL_NOTES, pathOf, type FolderTree as Tree } from "./folders.ts";
 import { Icon } from "./icons.tsx";
 import { NOTE_DRAG } from "./NoteList.tsx";
 import { isStrings, useStored } from "./stored.ts";
@@ -16,13 +16,17 @@ interface Props {
   workspaceId: string;
   tree: Tree;
   role: Role;
+  /** How many notes there are in all, for the row that lists every one. */
+  total: number;
+  /** The folder in front, which is marked. */
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  /** Opens a folder's list of notes. */
+  onOpen: (id: string) => void;
   onChanged: () => void;
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
 }
 
-export function FolderTree({ workspaceId, tree, role, selectedId, onSelect, onChanged, onMoveNote }: Props) {
+export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen, onChanged, onMoveNote }: Props) {
   const ids = useId();
   const [expandedList, setExpanded] = useStored(`ink.expanded.${workspaceId}`, isStrings, []);
   const expanded = new Set(expandedList);
@@ -37,7 +41,7 @@ export function FolderTree({ workspaceId, tree, role, selectedId, onSelect, onCh
   const collapse = (id: string) => setExpanded((list) => list.filter((x) => x !== id));
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId || !tree.byId.has(selectedId)) return;
     const ancestors = pathOf(tree, selectedId)
       .slice(0, -1)
       .map((f) => f.id);
@@ -80,13 +84,42 @@ export function FolderTree({ workspaceId, tree, role, selectedId, onSelect, onCh
     </div>
   );
 
-  const rows: ReactNode[] = [];
+  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and it has no menu. */
+  const listRow = (id: string, name: string, count: number) => (
+    <div
+      key={id}
+      role="treeitem"
+      className="folder-row"
+      style={indent(1)}
+      aria-level={1}
+      aria-selected={selectedId === id}
+      aria-labelledby={`${ids}-${id}`}
+      aria-describedby={`${ids}-${id}-count`}
+      tabIndex={selectedId === id || (id === ALL_NOTES && !(selectedId && tree.byId.has(selectedId))) ? 0 : -1}
+      onClick={() => onOpen(id)}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        onOpen(id);
+      }}
+    >
+      <span className="chevron" />
+      <span className="folder-name" id={`${ids}-${id}`}>
+        {name}
+      </span>
+      <span className="count" id={`${ids}-${id}-count`}>
+        {count}
+      </span>
+    </div>
+  );
+
+  const rows: ReactNode[] = [listRow(ALL_NOTES, "All notes", total)];
   const visit = (parentId: string | null, depth: number) => {
     for (const folder of tree.childrenOf(parentId)) {
       const open = expanded.has(folder.id);
       const hasChildren = tree.childrenOf(folder.id).length > 0;
       const choose = () => {
-        onSelect(folder.id);
+        onOpen(folder.id);
         expand(folder.id);
       };
       if (editing?.kind === "rename" && editing.id === folder.id) {

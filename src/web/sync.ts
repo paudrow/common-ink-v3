@@ -21,6 +21,9 @@ addEventListener("beforeunload", (e) => {
   if (unsaved.size) e.preventDefault();
 });
 
+/** Settles once typing in this note from editors that have closed has been sent, so a read after it includes that typing. */
+export const committed = (noteId: string) => Promise.all([...unsaved].filter((sync) => sync.noteId === noteId).map((sync) => sync.commit()));
+
 const fromServer = Annotation.define<boolean>();
 
 interface Write {
@@ -35,7 +38,7 @@ interface Write {
  * meantime waits for the next write. The server's merge is applied over that typing.
  */
 export class NoteSync {
-  private readonly noteId: string;
+  readonly noteId: string;
   private revision: number;
   private savedText: string;
   private timer: ReturnType<typeof setTimeout> | undefined;

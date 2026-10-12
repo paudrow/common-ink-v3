@@ -1,36 +1,43 @@
 import { expect, test, type Page } from "@playwright/test";
-import { noteIdIn, perform, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 const history = (page: Page, id: string) => perform(page, { type: "note.history", id });
 
 const writeElsewhere = (page: Page, op: { id: string; baseRevision: number; text: string }) => perform(page, { type: "note.write", ...op });
 
 /** Clicking outside the editor takes focus from it. */
-const leaveEditor = (page: Page) => page.getByRole("heading", { level: 2 }).click();
+const leaveEditor = (page: Page) => page.getByRole("complementary", { name: "Sidebar" }).getByText("Folders", { exact: true }).click();
 
 test("opens signed in as the dev user, with no login", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByText("Dev's workspace")).toBeVisible();
-  await expect(page.locator(".note-list").getByRole("button", { name: "New note" })).toBeVisible();
+  await openAllNotes(page);
+  await expect(page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" })).toBeVisible();
 });
 
 test("a new person signs in, writes a note, and finds it intact after reloading", async ({ page }) => {
   await signInAsNewPerson(page, "Mary Somerville");
   await expect(page.getByText("Mary's workspace")).toBeVisible();
 
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   const editor = page.getByRole("textbox", { name: "Note text" });
   await expect(editor).toBeFocused();
   await page.keyboard.type("# Field notes\n\nTyped in one go.");
 
   await expect(page).toHaveURL(/\/note\/field-notes-[a-z0-9]{12}$/);
   await expect(page.getByRole("status")).toHaveText("Saved");
-  await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("link")).toHaveText(["Field notesTyped in one go.just now · Mary Somerville"]);
   const changes = await history(page, noteIdIn(page));
   expect(changes.map((c) => ({ revision: c.revision, baseRevision: c.baseRevision, author: c.author.name }))).toEqual([
     { revision: 1, baseRevision: 0, author: "Mary Somerville" },
   ]);
+  await openAllNotes(page);
+  await expect(listedNotes(page)).toHaveText(["Field notes"]);
+  await expect(noteCard(page, "Field notes").locator(".card-preview")).toHaveText("Typed in one go.");
+  await expect(noteCard(page, "Field notes")).toContainText("just now");
+  await expect(noteCard(page, "Field notes")).toContainText("Mary Somerville");
+  await listedNote(page, "Field notes").click();
 
   await page.reload();
   await expect(page.locator(".cm-line")).toHaveText(["# Field notes", "", "Typed in one go."]);
@@ -38,7 +45,8 @@ test("a new person signs in, writes a note, and finds it intact after reloading"
 
 test("typing is committed as soon as the note loses focus", async ({ page }) => {
   await signInAsNewPerson(page, "Emmy Noether");
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Draft");
 
@@ -52,7 +60,8 @@ test("typing is committed as soon as the note loses focus", async ({ page }) => 
 
 test("a save based on an old revision keeps the other writer's change, and the editor shows both", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Shared\n\nmine");
   await expect(page).toHaveURL(/\/note\/shared-[a-z0-9]{12}$/);
@@ -78,7 +87,8 @@ test("a save whose answer is lost is sent again without doubling the text", asyn
     await route.fetch();
     await route.abort();
   });
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Lost answer");
 
@@ -91,7 +101,8 @@ test("a save whose answer is lost is sent again without doubling the text", asyn
 
 test("leaving a note while its save is on the way keeps the other writer's change", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Shared\n\nmine");
   await expect(page).toHaveURL(/\/note\/shared-[a-z0-9]{12}$/);
@@ -109,13 +120,15 @@ test("leaving a note while its save is on the way keeps the other writer's chang
   });
   await page.keyboard.type(" too");
   await leaveEditor(page);
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
+  await expect(page).toHaveURL(/\/note\/untitled-[a-z0-9]{12}$/);
   await expect(page).not.toHaveURL(new RegExp(id));
-
-  const notes = page.getByRole("navigation", { name: "Notes" });
-  await expect(notes.getByRole("link", { name: "Shared" })).toContainText("theirs");
-  await expect(notes.getByRole("link", { name: "Untitled" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" })).toHaveValue(new RegExp(`${noteIdIn(page)}$`));
+
+  await openAllNotes(page);
+  await expect(listedNotes(page)).toHaveText(["Untitled", "Shared"]);
+  await expect(noteCard(page, "Shared")).toContainText("theirs");
 
   await expect.poll(async () => (await history(page, id)).length, { timeout: 10_000 }).toBe(3);
   await page.goto(`/note/${id}`);
@@ -126,7 +139,8 @@ test("leaving a note while its save is on the way keeps the other writer's chang
 
 test("a long note in a script that takes several bytes a character saves", async ({ page }) => {
   await signInAsNewPerson(page, "Lu Xun");
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.insertText(`# 狂人日记\n\n${"今天晚上，很好的月光。".repeat(2500)}`);
 
@@ -138,7 +152,8 @@ test("a long note in a script that takes several bytes a character saves", async
 
 test("typing undone before the pause leaves the note saved", async ({ page }) => {
   await signInAsNewPerson(page, "Grace Hopper");
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Undone");
   await expect(page).toHaveURL(/\/note\/undone-[a-z0-9]{12}$/);
@@ -156,7 +171,8 @@ test("typing undone before the pause leaves the note saved", async ({ page }) =>
 
 test("an old link with an outdated slug still opens the note", async ({ page }) => {
   await signInAsNewPerson(page, "Sofia Kovalevskaya");
-  await page.locator(".note-list").getByRole("button", { name: "New note" }).click();
+  await openAllNotes(page);
+  await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Current title");
   await expect(page).toHaveURL(/\/note\/current-title-[a-z0-9]{12}$/);

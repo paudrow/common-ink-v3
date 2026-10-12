@@ -13,7 +13,18 @@ A named location in a workspace. A note or upload has exactly one parent folder.
 _Avoid_: Directory, space
 
 **Unsorted**:
-The default folder. A note created with no other folder selected is placed here.
+The default folder. A note created with no folder in front is placed here.
+
+**Folder's list**:
+The notes in one folder, shown in the editor area as cards: each a title, a line of details, and the note's first lines. A folder's list is of the folder's own notes, not those of the folders inside it.
+_Avoid_: List column, feed
+
+**All notes**:
+The list of every note the member can see, whatever folder it is in. It is the first row of the folder tree.
+
+**Card**:
+One note in a folder's list. It expands in place to the note drawn to be read, first as an excerpt and then whole. A note is changed in its editor, never in its card.
+_Avoid_: Row
 
 **Note**:
 A markdown file in a workspace, identified by a stable id. Its title is the words of its first `#` heading, without their markdown. A note with no such heading is titled by its first line of words, cut to a title's length, and a line that is only a web address is passed over for one that says something. A note with no words has no title and is shown as "Untitled". The id does not change when the title or folder changes, and a note's address names it by id, so an address with an old title still opens it. A note a member makes in the app starts as `# `, the mark of its title, with the cursor after it. Until something is typed it is an untitled note with no words.

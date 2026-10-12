@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { notePath } from "../core/slug.ts";
 import { perform } from "./api.ts";
@@ -9,9 +9,11 @@ import { Icon } from "./icons.tsx";
 import { INSPECTOR_TABS, Inspector, InspectorPanel, type InspectorTab } from "./Inspector.tsx";
 import { MODES, type ModeId } from "./modes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
-import { NoteList } from "./NoteList.tsx";
+import { FolderList, type Kept } from "./NoteList.tsx";
+import { INITIAL_VIEW } from "./noteListView.ts";
+import { NoteReader } from "./NoteReader.tsx";
 import { ResizeHandle } from "./resize.tsx";
-import type { Navigate, Route } from "./router.ts";
+import { folderPath, type Navigate, type Route } from "./router.ts";
 import { ModeLink, Sidebar } from "./Sidebar.tsx";
 import { Soon } from "./Soon.tsx";
 import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
@@ -36,9 +38,6 @@ const within = ({ min, max }: { min: number; max: number }, width: number) => Ma
 
 const popoverKey = (p: Popover | null) => (p ? (p.side === "left" ? "left" : p.tab) : null);
 
-/** A folder's notes as last listed; `folderId` null lists every note. */
-type Listing = { folderId: string | null; notes: NoteSummary[] };
-
 const summaryOf = ({ text: _, ...summary }: Note): NoteSummary => summary;
 
 interface Props {
@@ -54,10 +53,14 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const canEdit = workspace.role !== "viewer";
   const now = useNow();
   const [tree, setTree] = useState<Tree | null>(null);
-  const [chosenFolderId, selectFolder] = useState<string | null>(null);
-  const [listing, setListing] = useState<Listing | null>(null);
+  /** Every note the member can see. A folder's list is the ones in it. */
+  const [notes, setNotes] = useState<NoteSummary[] | null>(null);
   const [listVersion, setListVersion] = useState(0);
   const [openNote, setOpenNote] = useState<NoteSummary | null>(null);
+  /** How each folder's list was left, so coming back to one finds it as it was. */
+  const [keptLists] = useState(() => new Map<string, Kept>());
+  /** The note whose editor is to take the cursor once it is there. */
+  const [toFocus, setToFocus] = useState<string | null>(null);
   const [layout, setLayout] = useState<Layout>(() => (readStored(WRITING_KEY, isBoolean) ? WRITING : BROWSING));
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
   /** How wide the member dragged the sidebar and the inspector. Kept in this browser, as the layout is: a width suits the screen it was set on. */
@@ -65,19 +68,21 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const sidebarWidth = within(SIDEBAR, widths.sidebar ?? SIDEBAR.start);
   const inspectorWidth = within(INSPECTOR, widths.inspector ?? INSPECTOR.start);
 
-  const selectedFolderId = tree && chosenFolderId && !tree.byId.has(chosenFolderId) ? null : chosenFolderId;
+  const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
   const current = route.kind === "note" && openNote?.id === route.id ? openNote : null;
+  /** The folder in front: the one whose list is showing, or the folder of the note that is open. */
+  const frontFolderId = route.kind === "folder" ? route.id : (current?.folderId ?? null);
 
   const loadFolders = useCallback(() => perform(workspaceId, { type: "folder.list" }).then((r) => setTree(folderTree(r))), [workspaceId]);
   useEffect(() => void loadFolders(), [loadFolders]);
 
   useEffect(() => {
     let live = true;
-    perform(workspaceId, { type: "note.list", folderId: selectedFolderId ?? undefined }).then((notes) => live && setListing({ folderId: selectedFolderId, notes }));
+    perform(workspaceId, { type: "note.list" }).then((all) => live && setNotes(all));
     return () => {
       live = false;
     };
-  }, [workspaceId, selectedFolderId, listVersion]);
+  }, [workspaceId, listVersion]);
 
   const refresh = useCallback(() => {
     void loadFolders();
@@ -88,11 +93,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     (note: Note) => {
       const summary = summaryOf(note);
       setOpenNote((n) => (n?.id === note.id ? summary : n));
-      setListing((l) => {
-        if (!l) return l;
-        const others = l.notes.filter((n) => n.id !== note.id);
-        return { ...l, notes: l.folderId === null || l.folderId === note.folderId ? [summary, ...others] : others };
-      });
+      setNotes((all) => all && [summary, ...all.filter((n) => n.id !== note.id)]);
       if (location.pathname.startsWith("/note/") && location.pathname.endsWith(note.id)) navigate(notePath(note), { replace: true });
     },
     [navigate],
@@ -102,7 +103,6 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     (note: Note) => {
       setOpenNote(summaryOf(note));
       remember(note);
-      selectFolder(note.folderId);
     },
     [remember],
   );
@@ -127,8 +127,10 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     closePopover();
   };
 
-  const createNote = async () => {
-    const note = await perform(workspaceId, { type: "note.create", folderId: selectedFolderId ?? undefined });
+  /** A new note goes in the folder asked for, or else the folder in front, when that is a folder; otherwise in Unsorted. */
+  const createNote = async (folderId?: string) => {
+    const asked = folderId ?? frontFolderId;
+    const note = await perform(workspaceId, { type: "note.create", folderId: asked && tree?.byId.has(asked) ? asked : undefined });
     void loadFolders();
     remember(note);
     go(notePath(note));
@@ -148,23 +150,27 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       workspaceId={workspaceId}
       tree={tree}
       role={workspace.role}
-      selectedId={selectedFolderId}
-      onSelect={selectFolder}
+      total={(notes ?? []).length}
+      selectedId={frontFolderId}
+      onOpen={(id) => go(folderPath(id))}
       onChanged={refresh}
       onMoveNote={moveNote}
     />
   );
-  const noteList = (
-    <NoteList
-      heading={selectedFolderId && tree ? (tree.byId.get(selectedFolderId)?.name ?? "") : "All notes"}
-      notes={listing?.folderId === selectedFolderId ? listing.notes : null}
-      openId={current?.id ?? null}
-      canEdit={canEdit}
-      onNew={createNote}
-      onOpen={(note) => go(notePath(note))}
-    />
-  );
-  const panelProps = current && tree && { note: current, tree, canEdit, onMove: (id: string, folderId: string) => moveNote(id, folderId).then(() => selectFolder(folderId)) };
+  const keptFor = (folderId: string) => {
+    if (!keptLists.has(folderId)) keptLists.set(folderId, { view: INITIAL_VIEW, scrollTop: 0 });
+    return keptLists.get(folderId)!;
+  };
+  /** A note opened from a folder's list takes the list's place, with the cursor in it. ⌘-click leaves the list in front and opens the note in a tab of the browser's. */
+  const openFromList = (noteId: string, how: "preview" | "keep" | "behind") => {
+    const note = byId.get(noteId);
+    if (!note) return;
+    const path = notePath(note);
+    if (how === "behind") return void window.open(path, "_blank");
+    setToFocus(noteId);
+    go(path);
+  };
+  const panelProps = current && tree && { note: current, tree, canEdit, onMove: moveNote };
   const activeMode = route.kind === "mode" ? route.mode : null;
 
   /** The buttons that act on the window and on no one note. The editor area puts them at its top right corner, out of any note's bar. */
@@ -209,7 +215,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
             onSwitch={onSwitch}
             onGo={go}
             onNewNote={canEdit ? () => void createNote() : undefined}
-            newNoteIn={(selectedFolderId && tree?.byId.get(selectedFolderId)?.name) || "Unsorted"}
+            newNoteIn={(frontFolderId && tree?.byId.get(frontFolderId)?.name) || "Unsorted"}
           >
             {folders}
           </Sidebar>
@@ -222,7 +228,6 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
             onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
             onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
           />
-          {noteList}
         </>
       )}
 
@@ -235,6 +240,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
             noteId={route.id}
             onLoaded={opened}
             onSaved={remember}
+            focus={toFocus === route.id}
+            onFocused={() => setToFocus(null)}
             meta={
               current && (
                 <>
@@ -245,6 +252,20 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
                 </>
               )
             }
+          />
+        )}
+        {route.kind === "folder" && (
+          <FolderList
+            key={route.id}
+            folderId={route.id}
+            tree={tree}
+            notes={notes}
+            openId={null}
+            canEdit={canEdit}
+            readNote={(noteId) => <NoteReader key={noteId} workspaceId={workspaceId} noteId={noteId} revision={byId.get(noteId)?.revision} />}
+            kept={keptFor(route.id)}
+            onNew={(id) => void createNote(id)}
+            onOpen={openFromList}
           />
         )}
         {route.kind === "mode" && <ModeView mode={route.mode} />}
@@ -291,7 +312,6 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       {popover?.side === "left" && (
         <div ref={popoverRef} className="popover left" role="dialog" aria-label="Folders">
           <div className="popover-folders">{folders}</div>
-          {noteList}
         </div>
       )}
       {popoverTab && panelProps && (

@@ -148,7 +148,7 @@ for (const width of [900, 700]) {
     const buttons = windowButtons(page);
     const inspectorButton = buttons.getByRole("button", { name: "Inspector" });
     const writingButton = buttons.getByRole("button", { name: "Writing mode" });
-    await inside(inspectorButton, writingButton, sidebar(page), inspector(page), page.getByRole("navigation", { name: "Notes" }), page.locator(".save-state"), edge(page, "Resize sidebar"), edge(page, "Resize inspector"));
+    await inside(inspectorButton, writingButton, sidebar(page), inspector(page), page.locator(".save-state"), edge(page, "Resize sidebar"), edge(page, "Resize inspector"));
     for (const button of await page.locator(".note-bar").getByRole("button").all()) await inside(button);
     let bar = await barIsWhole();
     expect(bar.cut).toEqual([]);
