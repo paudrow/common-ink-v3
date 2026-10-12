@@ -540,7 +540,17 @@ export interface Agent {
   workspaceId: string | null;
   /** A read-only token can't change anything, whatever its member's role. */
   readOnly: boolean;
+  /**
+   * The folders this token is limited to, in its one workspace: it reaches them, the folders under
+   * them, and the notes in those, and nothing else is there for it. Null for every note its member
+   * can reach. A folder deleted since is still listed, and stands for nothing.
+   */
+  folderIds: string[] | null;
 }
+
+export const MAX_AGENT_FOLDERS = 50;
+/** The folders to limit an agent to. Each stands for itself and the folders under it. */
+const FolderLimit = z.array(Id).min(1, "Name at least one folder, or leave folders out for all notes").max(MAX_AGENT_FOLDERS);
 
 /** What a member may ask for when connecting an agent. */
 /** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
@@ -551,18 +561,23 @@ export const ConnectOptions = z.object({
   expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
   workspaceId: Id.optional(),
   readOnly: z.boolean().default(false),
+  /** Limits the agent to these folders of `workspaceId`, which must then be given. Left out, it reaches all notes. */
+  folderIds: FolderLimit.optional(),
 });
 export type ConnectOptions = z.input<typeof ConnectOptions>;
 
 /**
  * What a member changes about an agent they connected: what its token may do, with the token itself
- * unchanged. A field left out stays as it is. `expiresInDays` counts from the edit, and a null
- * `workspaceId` lets the token reach every workspace its member can.
+ * unchanged. A field left out stays as it is. `expiresInDays` counts from the edit, a null
+ * `workspaceId` lets the token reach every workspace its member can, and a null `folderIds` lets it
+ * reach all notes. Folders are those of the token's one workspace, so an edit that moves a limited
+ * token to another workspace names its folders there, or null.
  */
 export const AgentEdit = z.strictObject({
   expiresInDays: ExpiresIn.optional(),
   workspaceId: Id.nullable().optional(),
   readOnly: z.boolean().optional(),
+  folderIds: FolderLimit.nullable().optional(),
 });
 export type AgentEdit = z.input<typeof AgentEdit>;
 

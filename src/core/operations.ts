@@ -1,6 +1,6 @@
 import { ChangeSet } from "@codemirror/state";
 import { z } from "zod";
-import { SEEN, SEEN_FOLDER, allows, folderLevel, noteLevel, type GrantLevel, type Sight } from "./access.ts";
+import { SEEN, SEEN_FOLDER, allows, folderLevel, noteLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { lineDiff } from "./diff.ts";
 import { dayIn, rebased, redoTarget, revertOfAuthor, revertedBy, reverting, settledRevert, undoTarget, type Choice, type Resolution, type Reverting } from "./history.ts";
 import { newId } from "./ids.ts";
@@ -47,10 +47,12 @@ export interface Visitor {
   personId: string | null;
 }
 
-/** What narrows an agent's token below its member: one workspace, and no changes. */
+/** What narrows an agent's token below its member: one workspace, no changes, and only some folders. */
 export interface AgentScope {
   pinnedWorkspaceId?: string | null;
   readOnly?: boolean;
+  /** The folders it is limited to, each with the folders under it. Null or left out for every note its member can reach. */
+  folderIds?: readonly string[] | null;
 }
 
 const authorId = (ctx: Context) => (ctx.author.kind === "agent" ? ctx.author.agentId : ctx.author.personId);
@@ -88,7 +90,7 @@ type Handler<K extends OpType> = {
    * `visitor`: whoever holds a link, who may ask nothing else.
    */
   by?: "member" | "visitor";
-  /** Set when a guest may not ask, only a member of the workspace. */
+  /** Set when only a member of the workspace may ask, and one who sees all of it: not a guest, and not an agent limited to folders. */
   members?: true;
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
@@ -101,12 +103,13 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   const handler = HANDLERS[op.type] as Handler<OpType>;
 
   if (actor.kind === "agent" && actor.scope?.pinnedWorkspaceId && actor.scope.pinnedWorkspaceId !== actor.workspaceId) throw new OpError("not_found", NO_SUCH_WORKSPACE);
-  const standing = actor.kind === "visitor" ? await standingByLink(db, actor.token, actor.personId) : await standingIn(db, actor.personId, actor.workspaceId);
+  const standing = actor.kind === "visitor" ? await standingByLink(db, actor.token, actor.personId) : await standingIn(db, actor.personId, actor.workspaceId, actor.kind === "agent" ? (actor.scope?.folderIds ?? null) : null);
   if (!standing) throw new OpError("not_found", NO_SUCH_WORKSPACE);
   // Whoever holds a link is let into the operations made for them and no other, whatever is added later.
   if ((actor.kind === "visitor") !== (handler.by === "visitor")) throw new OpError("forbidden", actor.kind === "visitor" ? `A link can't ${op.type}` : `Only a link can ${op.type}`);
   if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
   if (actor.kind === "agent" && actor.scope?.readOnly && handler.needs !== "view") throw new OpError("forbidden", `A read-only token can't ${op.type}`);
+  if (handler.members && standing.sight.within) throw new OpError("forbidden", `An agent limited to folders can't ${op.type}`);
   if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
 
   let author: Author = { kind: "member", personId: standing.personId ?? "", name: standing.name };
@@ -240,6 +243,8 @@ export async function loadFolder(ctx: Context, id: string | undefined, need: Gra
     .bind(ctx.workspaceId, id ?? null)
     .first<FolderRow>();
   const level = row ? folderLevel(ctx.sight, row.id) : "none";
+  // Unsorted is no secret, so an agent that named no folder is told why it has none to fall back on.
+  if (row && level === "none" && id === undefined && ctx.sight.within) throw new OpError("invalid", "Say which folder: this agent is limited to folders, and Unsorted isn't one of them");
   if (!row || level === "none") throw new OpError("not_found", NO_SUCH_FOLDER);
   if (!allows(level, need)) throw new OpError("forbidden", "You can read this folder, and not change it");
   return row;
@@ -986,7 +991,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "edit",
     async run(ctx, op) {
       if (op.parentId) await loadFolder(ctx, op.parentId, "edit");
-      else if (!ctx.role) throw new OpError("forbidden", "A guest can make a folder only inside one shared with them");
+      else if (!seesEveryFolder(ctx.sight)) throw new OpError("forbidden", ctx.sight.within ? "An agent limited to folders can make a folder only inside one of them" : "A guest can make a folder only inside one shared with them");
       const folder: Folder = { id: newId(), name: op.name, parentId: op.parentId ?? null };
       await intoFolder(ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) VALUES (?, ?, ?, ?)").bind(folder.id, ctx.workspaceId, folder.parentId, folder.name).run(), folder.name);
       return folder;
@@ -998,8 +1003,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       const folder = await loadFolder(ctx, op.id, "edit");
       if (folder.unsorted) throw new OpError("invalid", "Unsorted can't be renamed");
-      // Beside a folder shared with a guest are folders they can't see, and a name refused for being taken would name one.
-      if (!ctx.role && !(folder.parent_id && allows(folderLevel(ctx.sight, folder.parent_id), "view"))) throw new OpError("forbidden", "A guest can rename only the folders inside one shared with them");
+      // Beside a folder shared with a guest, or one an agent is limited to, are folders they can't see, and a name refused for being taken would name one.
+      if (!seesEveryFolder(ctx.sight) && !(folder.parent_id && allows(folderLevel(ctx.sight, folder.parent_id), "view")))
+        throw new OpError("forbidden", ctx.sight.within ? "An agent limited to folders can rename only the folders inside one of them" : "A guest can rename only the folders inside one shared with them");
       await intoFolder(ctx.db.prepare("UPDATE folders SET name = ? WHERE id = ?").bind(op.name, folder.id).run(), op.name);
       return toFolder(ctx, { ...folder, name: op.name });
     },
@@ -1016,17 +1022,18 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           .prepare(
             `UPDATE notes SET folder_id = ${UNSORTED}
              WHERE folder_id = ?1 AND workspace_id = ?2 AND ?1 <> ${UNSORTED} AND NOT ${SEEN("notes", "?3")}
+               AND EXISTS (SELECT 1 FROM folders f WHERE f.id = ?1 AND ${SEEN_FOLDER("f", "?3")})
                AND NOT EXISTS (SELECT 1 FROM notes v WHERE v.folder_id = ?1 AND ${SEEN("v", "?3")})
                AND NOT EXISTS (SELECT 1 FROM folders child WHERE child.parent_id = ?1)`,
           )
           .bind(op.id, ctx.workspaceId, ctx.sight.bind),
         ctx.db
           .prepare(
-            `DELETE FROM folders WHERE id = ?1 AND workspace_id = ?2 AND id <> ${UNSORTED}
+            `DELETE FROM folders WHERE id = ?1 AND workspace_id = ?2 AND id <> ${UNSORTED} AND ${SEEN_FOLDER("folders", "?3")}
                AND NOT EXISTS (SELECT 1 FROM notes WHERE folder_id = folders.id)
                AND NOT EXISTS (SELECT 1 FROM folders child WHERE child.parent_id = folders.id)`,
           )
-          .bind(op.id, ctx.workspaceId),
+          .bind(op.id, ctx.workspaceId, ctx.sight.bind),
       ]);
       if (deleted!.meta.changes) return { id: op.id };
       const folder = await loadFolder(ctx, op.id, "edit");

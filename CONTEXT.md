@@ -201,8 +201,12 @@ _Avoid_: Commit, event, op
 Who made a change: a member, a named agent, or a plugin.
 
 **Agent**:
-An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. What an agent may do (read only or not, the workspace it reaches, when it expires or that it never does) is set when it is connected and can be edited afterwards by the member who connected it, with the same token. An agent's changes can be reverted on their own, which keeps everyone else's.
+An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. What an agent may do (read only or not, the workspace it reaches, the folders it is limited to there, when it expires or that it never does) is set when it is connected and can be edited afterwards by the member who connected it, with the same token. An agent's changes can be reverted on their own, which keeps everyone else's.
 _Avoid_: Bot
+
+**Folder limit**:
+The folders an agent is limited to in the one workspace it reaches: it reaches those folders, the folders inside them and the notes in those, with what its member may do there and no more. Everything outside is to it as if it weren't there. With no folder limit an agent reaches all notes its member can. The limit is read from where notes and folders are at the time, and one whose folders are all deleted leaves the agent nothing.
+_Avoid_: Scope, sandbox
 
 **History**:
 The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as the notes that changed, each with the lines its changes added and removed, then a note's changes, then one change's diff. The diff of the open note and the workspace history are this same record.

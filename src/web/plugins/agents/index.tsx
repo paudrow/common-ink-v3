@@ -20,6 +20,7 @@ export const agents: Plugin = {
           host={host}
           workspace={app.workspace}
           workspaces={app.workspaces}
+          folders={app.folders}
           version={(app.notes ?? []).reduce((sum, n) => sum + n.revision, 0)}
           onShowChanges={app.pages.some((p) => p.path === HISTORY) ? (agentId) => app.go(HISTORY, { state: `agent:${agentId}` }) : undefined}
           onReverted={app.refresh}

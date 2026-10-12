@@ -3862,6 +3862,45 @@ del.diff-line {
   justify-self: start;
 }
 
+.folder-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.folder-limit legend {
+  margin-bottom: 3px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.folder-limit .hint {
+  margin: 0;
+}
+
+.folder-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 14rem;
+  margin: 0;
+  padding: 8px 10px;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.folder-picks .check {
+  padding-left: calc(var(--depth) * 18px);
+}
+
 .agent-edit {
   margin-top: 4px;
   background: var(--bg);

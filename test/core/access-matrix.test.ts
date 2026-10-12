@@ -206,15 +206,28 @@ async function ask(actor: Actor | Visitor, op: OpInput): Promise<{ outcome: Outc
 }
 
 const roleOf = (name: ActorName) => (name.includes("admin") ? "admin" : name.includes("editor") ? "editor" : name.includes("viewer") ? "viewer" : "guest");
-const levelOf = (name: ActorName, note: NoteName) => ACTORS[name].notes[NOTES.indexOf(note)] as Level;
-const folderLevelOf = (name: ActorName, folder: FolderName) => ACTORS[name].folders[FOLDERS.indexOf(folder)] as Level;
+const personLevelOf = (name: ActorName, note: NoteName) => ACTORS[name].notes[NOTES.indexOf(note)] as Level;
+const personFolderLevelOf = (name: ActorName, folder: FolderName) => ACTORS[name].folders[FOLDERS.indexOf(folder)] as Level;
 const enough = (level: Level, needs: "V" | "E") => level === "E" || (level === "V" && needs === "V");
 /** Whether an actor may share a note: its owner when it is private, and otherwise a member who shares and can edit it. */
-const sharesNote = (name: ActorName, note: NoteName) => OWNER[note] === name || (ACTORS[name].shares && levelOf(name, note) === "E");
-const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && folderLevelOf(name, folder) === "E";
+const sharesNote = (name: ActorName, note: NoteName) => OWNER[note] === name || (ACTORS[name].shares && personLevelOf(name, note) === "E");
+const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
 const CHANGES: readonly OpType[] = ["history.revertAuthor", "links.rebuild", "folder.delete"];
-const AGENTS = ["their agent", "their read-only agent", "their agent pinned to this workspace"] as const;
+const AGENTS = [
+  "their agent",
+  "their read-only agent",
+  "their agent pinned to this workspace",
+  "their agent limited to the folder Team",
+  "their read-only agent limited to the folder Team",
+  "their agent limited to the folder Open",
+] as const;
+/** The folder an agent is limited to, and what that takes in: Deep is inside Team. Nothing else is there for it, whoever its person is. */
+const LIMITED: Partial<Record<(typeof AGENTS)[number], readonly FolderName[]>> = {
+  "their agent limited to the folder Team": ["Team", "Deep"],
+  "their read-only agent limited to the folder Team": ["Team", "Deep"],
+  "their agent limited to the folder Open": ["Open"],
+};
 
 /** `not_found` for a note that was never there, which is what one the actor can't see must be answered with. */
 const NO_NOTE: Outcome = "not_found: No such note";
@@ -234,14 +247,23 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
       it(`${name}, as ${as}`, async () => {
         const w = await world();
         const person = w.actors[name];
-        const scope = as === "their read-only agent" ? { readOnly: true } : as === "their agent pinned to this workspace" ? { pinnedWorkspaceId: person.workspaceId } : undefined;
+        const within = as === "themself" ? undefined : LIMITED[as];
+        const scope =
+          as === "their read-only agent"
+            ? { readOnly: true }
+            : as === "their agent pinned to this workspace"
+              ? { pinnedWorkspaceId: person.workspaceId }
+              : within && { pinnedWorkspaceId: person.workspaceId, folderIds: [w.folders[within[0]!]], readOnly: as.includes("read-only") };
+        // The table says what the person may do. An agent limited to a folder has that of what is inside it, and nothing of the rest.
+        const levelOf = (who: ActorName, note: NoteName): Level => (within && !within.includes(FOLDER_OF[note]) ? "-" : personLevelOf(who, note));
+        const folderLevelOf = (who: ActorName, folder: FolderName): Level => (within && !within.includes(folder) ? "-" : personFolderLevelOf(who, folder));
         const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope };
-        const readOnly = as === "their read-only agent";
+        const readOnly = as.includes("read-only");
         const role = roleOf(name);
         // What is told as a number gives a note away as surely as its title: a folder's count, and an author's changes by day.
         const { folders: listed } = await perform(env.DB, actor, { type: "folder.list" });
         const counted = (folder: FolderName) => NOTES.filter((note) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-").length;
-        expect(Object.fromEntries(listed.map((f) => [f.name, f.noteCount]))).toEqual(Object.fromEntries(FOLDERS.filter((f) => folderLevelOf(name, f) !== "-").map((f) => [`${f}-folder`, counted(f)]).concat(role === "guest" ? [] : [["Unsorted", 0]])));
+        expect(Object.fromEntries(listed.map((f) => [f.name, f.noteCount]))).toEqual(Object.fromEntries(FOLDERS.filter((f) => folderLevelOf(name, f) !== "-").map((f) => [`${f}-folder`, counted(f)]).concat(role === "guest" || within ? [] : [["Unsorted", 0]])));
 
         const answers: unknown[] = [];
         const got: Record<string, Outcome> = {};
@@ -284,6 +306,8 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
               if (plan.share && role === "guest") expectation = "forbidden";
               // A guest renames only inside what was shared: Team is the shared folder itself, Deep is inside it.
               if (type === "folder.rename" && role === "guest" && expectation === "done" && folder === "Team") expectation = "forbidden";
+              // As an agent does only inside what it is limited to: the folder it is limited to has folders beside it that it can't see.
+              if (type === "folder.rename" && within && expectation === "done" && folder === within[0]) expectation = "forbidden";
               await run(`${type} ${folder}`, type, plan.args(w.folders[folder], w), expectation);
             }
           } else if (plan.on === "everything") {
@@ -293,6 +317,8 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             if (type === "history.revertAuthor" && role === "guest") allowed = ACTORS[name].notes.includes("E");
             // The one admin can't leave, and nobody here asks to: leaving is checked in members.test.ts.
             if (type === "member.leave") continue;
+            // Who is in the workspace is told to whoever sees all of it.
+            if (type === "member.list" && within) allowed = false;
             await run(type, type, plan.args(w), allowed ? "done" : "forbidden", true);
           } else {
             await run(type, type, plan.args(w), "forbidden");
@@ -316,7 +342,9 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         // Nothing any operation answered says anything of what the actor can't see: not an id, a title, a word of it, or who wrote it.
         const said = JSON.stringify(answers);
         const hidden = [...NOTES.filter((note) => levelOf(name, note) === "-"), ...FOLDERS.filter((folder) => folderLevelOf(name, folder) === "-")];
-        expect(hidden.flatMap((item) => w.marks[item].filter((mark) => said.includes(mark)).map((mark) => `${item}: ${mark}`))).toEqual([]);
+        // A link is written in the note that makes it, as its target's id. Whoever reads `secret` reads the id of `open`, and is told no more of it: not its title, nor that there is such a note.
+        const written = levelOf(name, "secret") === "-" ? [] : [`open: ${w.notes.open}`];
+        expect(hidden.flatMap((item) => w.marks[item].filter((mark) => said.includes(mark)).map((mark) => `${item}: ${mark}`)).filter((found) => !written.includes(found))).toEqual([]);
         // And what they can see is there, so the check above isn't passing on an empty answer.
         const seen = NOTES.filter((note) => levelOf(name, note) !== "-");
         expect(seen.filter((note) => !said.includes(`Title-${note}`))).toEqual([]);
@@ -330,7 +358,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
     const expected: Record<string, boolean> = {};
     for (const name of Object.keys(ACTORS) as ActorName[]) {
       const maker = w.actors[name];
-      const items = [...NOTES.map((note) => ({ key: note as string, column: "note_id", id: w.notes[note], level: levelOf(name, note) })), ...FOLDERS.map((folder) => ({ key: folder as string, column: "folder_id", id: w.folders[folder], level: folderLevelOf(name, folder) }))];
+      const items = [...NOTES.map((note) => ({ key: note as string, column: "note_id", id: w.notes[note], level: personLevelOf(name, note) })), ...FOLDERS.map((folder) => ({ key: folder as string, column: "folder_id", id: w.folders[folder], level: personFolderLevelOf(name, folder) }))];
       for (const item of items) {
         const email = address();
         // Written straight into the record, as a grant made while its maker still could and left waiting since.
