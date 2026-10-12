@@ -462,6 +462,8 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
   appNow.current = app;
   const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
   const editorArea = contributed.views.editor.at(-1);
+  /** The bottom bar's items, lowest order first. Sorting keeps those of one order as the plugins added them. */
+  const bar = useMemo(() => [...contributed.views.bar].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.bar]);
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay);
 
   app.sections = contributed.views.section.length === 0 ? null : contributed.views.section.map((section) => <Drawn key={section.id} host={host} view={section} />);
@@ -574,7 +576,7 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
   );
 
   return (
-    <div className="app" data-focus-mode={focusMode || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+    <div className="app" data-focus-mode={focusMode || undefined} data-bar={bar.length > 0 || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
       {contributed.views.column.map((column) => (
         <Drawn key={column.id} host={host} view={column} />
       ))}
@@ -647,6 +649,21 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
             })}
           </nav>
         ))}
+      {bar.length > 0 && (
+        <div className="bar" role="group" aria-label="Bottom bar">
+          {(["left", "right"] as const).map((side) => (
+            <div key={side} className="bar-side" data-side={side}>
+              {bar
+                .filter((item) => (item.side ?? "left") === side)
+                .map((item) => (
+                  <span key={item.id} className="bar-item" data-bar-item={item.id}>
+                    <Drawn host={host} view={item} />
+                  </span>
+                ))}
+            </div>
+          ))}
+        </div>
+      )}
       {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} />}
     </div>
   );

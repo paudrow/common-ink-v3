@@ -20,6 +20,8 @@ export { useDismiss } from "./dismiss.ts";
 export { ResizeHandle } from "./resize.tsx";
 export { Icon, type IconName } from "./icons.tsx";
 export { ago, useNow } from "./time.ts";
+/** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
+export { useOpenNote, type OpenNote } from "./openNotes.ts";
 
 /**
  * Dragging to the editor area. `carry` puts a note, a folder's list or a page on a drag, `carried`
@@ -198,6 +200,16 @@ export interface Slots {
    * takes to find where to go, with the editor area kept as it is underneath.
    */
   page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; transient?: boolean; component: View };
+  /**
+   * An item in the bottom bar: one thin line along the foot of the window for small things to
+   * glance at, such as a count of the open note's words. `side` is the end it sits at, the left
+   * unless said, and `order` places it among the others at that end, lowest first and 0 unless
+   * said. Items of one order stay in the order of the plugins that added them. A component with
+   * nothing to say draws nothing, and takes no room. The bar is there while any plugin has an item
+   * in it, with something to say or not, so nothing above it moves as items come and go. In focus
+   * it is out of sight.
+   */
+  bar: { id: string; component: View; side?: "left" | "right"; order?: number };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it. */
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void }> };
 }

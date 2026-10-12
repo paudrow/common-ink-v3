@@ -1027,7 +1027,7 @@ button.link:hover {
 }
 
 /* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
-.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle),
+.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle, .bar),
 .groups[data-focus-mode] .group:not([data-front]),
 .groups[data-focus-mode] .resize-handle {
   visibility: hidden;
@@ -1356,9 +1356,10 @@ button.link:hover {
 }
 
 .plugin-list {
-  display: flex;
-  flex-direction: column;
-  margin: 4px 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -1370,13 +1371,42 @@ button.link:hover {
   align-items: flex-start;
 }
 
-.plugin-row {
-  padding: 10px 8px;
-  border-top: 1px solid var(--line);
+/* A plugin's card, in the look of a note's card in a folder's list. Its name is a link laid over the whole of it, and its switch lies above the link. */
+.plugin-card {
+  position: relative;
+  align-items: center;
+  padding: 12px 14px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
 }
 
-.plugin-row:last-child {
-  border-bottom: 1px solid var(--line);
+.plugin-card:hover {
+  border-color: var(--line-strong);
+}
+
+.plugin-card:has(.plugin-name:focus-visible) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.plugin-card .plugin-name {
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  outline: none;
+}
+
+.plugin-card .plugin-name::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  content: "";
+}
+
+.plugin-card .switch {
+  position: relative;
+  z-index: 1;
 }
 
 .plugin-icon {
@@ -2512,4 +2542,46 @@ del.diff-line {
 
 .said.failed {
   color: var(--danger);
+}
+
+/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
+.app[data-bar] {
+  box-sizing: border-box;
+  padding-bottom: 26px;
+}
+
+.bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-side);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.bar-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bar-item {
+  padding: 1px 8px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An item with nothing to say takes no room. */
+.bar-item:empty {
+  display: none;
 }

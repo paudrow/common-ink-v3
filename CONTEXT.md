@@ -193,8 +193,12 @@ The part of the core that turns plugins on and off, hands each one its reach int
 One thing a plugin adds: a command, a view, or an embed. It is there while its plugin is on.
 
 **View**:
-Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector tab, a page, or an overlay.
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector tab, a page, the bottom bar, or an overlay.
 _Avoid_: Panel, widget
+
+**Bottom bar**:
+The thin line along the foot of the window where plugins put small things to glance at, such as the word count of the note in front. An item sits at its left or its right end. It is there while any plugin has an item in it, is the same height whatever the items say, and is out of sight in focus.
+_Avoid_: Status bar, footer
 
 **Page**:
 A view with its own address, such as History or Agents, opened in a tab of the editor as a note is.
