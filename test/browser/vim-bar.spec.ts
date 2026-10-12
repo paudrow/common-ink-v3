@@ -94,16 +94,15 @@ test("a long note scrolls under the mode bar, which stays at the foot of the pan
   };
   expect(Math.abs(await at())).toBeLessThanOrEqual(1);
   await page.keyboard.press("Shift+G");
-  await expect(page.locator(".cm-line").filter({ hasText: /^Line 199$/ })).toBeVisible();
-  // The editor goes on measuring its lines after the jump and scrolls again as it does, so each place is read until it has settled.
+  // The editor scrolls to the cursor a frame after G moves it, and goes on measuring its lines and scrolling after that, so each place is read until it has settled.
+  await expect(page.locator(".cm-line").filter({ hasText: /^Line 199$/ })).toBeInViewport();
   await expect.poll(async () => Math.abs(await at())).toBeLessThanOrEqual(1);
   // The last line is above the bar, not behind it.
-  await expect
-    .poll(async () => {
-      const last = await placeOf(page, "Line 199");
-      return last.top + last.height - (await box(page, ".cm-vim-panel")).y;
-    })
-    .toBeLessThanOrEqual(1);
+  const under = async () => {
+    const last = await placeOf(page, "Line 199");
+    return last.top + last.height - (await box(page, ".cm-vim-panel")).y;
+  };
+  await expect.poll(under, "the last line's bottom is above the bar's top").toBeLessThanOrEqual(1);
 });
 
 test("each side of a split has its own mode bar at its own foot", async ({ page }) => {
@@ -181,8 +180,8 @@ test("with the setting on, j and k move by the rows on screen and dj still takes
   // Off, which is the default: one j passes the whole wrapped line. It reaches the open editor without a reload.
   const settings = await perform(page, { type: "settings.read" });
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: settings.revision });
-  await page.goto("/settings");
-  await expect(page.getByRole("tabpanel").getByRole("region", { name: "Vim mode", exact: true })).toContainText("j and k move by the rows on screen");
+  await page.goto("/settings/plugins/vim");
+  await expect(page.getByRole("region", { name: "Vim mode", exact: true })).toContainText("j and k move by the rows on screen");
   await page.goBack();
   await expect(statusLine(page)).toHaveText("--NORMAL--");
   await editor(page).click();
@@ -202,9 +201,8 @@ test("line numbers are shown by a setting, beside the text and off the text's ow
   const off = await places();
   await expect(page.locator(".cm-lineNumbers")).toHaveCount(0);
 
-  await page.goto("/settings");
-  const setting = page.getByRole("tabpanel").getByRole("region", { name: "Line numbers", exact: true });
-  await setting.getByRole("checkbox", { name: "On" }).check();
+  await page.goto("/plugins");
+  await page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Line numbers", exact: true }).check();
   await page.goBack();
   await expect(page.locator(".cm-lineNumbers .cm-gutterElement").filter({ hasText: /^12$/ })).toBeVisible();
   const on = await places();

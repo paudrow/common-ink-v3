@@ -339,10 +339,11 @@ test("the Plugins page lists every plugin with its icon, name, description and s
   expect(listed.filter((row) => row.kind !== "Built-in")).toEqual([]);
   expect(listed.slice(0, 3).map((row) => row.name)).toEqual(["Sidebar", "Folders", "Note list"]);
   await expect(pluginRow(page, "Tabs and splits")).toContainText("Open notes in tabs, and side by side in splits.");
+  await expect(pluginRow(page, "Vim mode").getByRole("checkbox")).not.toBeChecked();
 
   const search = page.getByRole("searchbox", { name: "Search plugins" });
-  await search.fill("stopw");
-  await expect(pluginRows(page)).toHaveAccessibleName("Stopwatch");
+  await search.fill("vim");
+  await expect(pluginRows(page)).toHaveAccessibleName("Vim mode");
   await search.fill("SIDE BY SIDE IN SPLITS");
   await expect(pluginRows(page)).toHaveAccessibleName("Tabs and splits");
   await search.fill("no such plugin");
@@ -407,25 +408,22 @@ test("a built-in plugin's details show what it is, what it adds as it registered
 
 test("a plugin's details list its settings and link to them in Settings, and one that hasn't been on says so until it is", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  await page.goto("/plugins/note-list");
+  await page.goto("/plugins/vim");
   const details = page.locator(".plugin-details");
-  await expect(page.getByRole("heading", { name: "Note list", level: 1 })).toBeVisible();
-  await details.getByRole("checkbox", { name: "Note list", exact: true }).uncheck();
-  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)).toEqual({ "note-list.enabled": false });
-  await page.reload();
+  await expect(page.getByRole("heading", { name: "Vim mode", level: 1 })).toBeVisible();
   await expect(details.locator(".plugin-switch")).toHaveText("Off");
   await expect(section(page, "What it adds")).toContainText("It hasn't been on since the app loaded, so what it adds isn't listed yet. Turn it on to see.");
-  await expect(section(page, "Settings").getByRole("list", { name: "Settings of Note list" }).getByRole("listitem")).toHaveText([/^Show snippetsShow the first lines of each note under its title\./]);
+  await expect(section(page, "Settings").getByRole("list", { name: "Settings of Vim mode" }).getByRole("listitem")).toHaveText([/^j and k move by the rows on screenOff, j and k move by whole lines/]);
 
-  await details.getByRole("checkbox", { name: "Note list", exact: true }).check();
-  await expect(section(page, "What it adds").getByRole("group", { name: "Views" })).toBeVisible();
+  await details.getByRole("checkbox", { name: "Vim mode", exact: true }).check();
+  await expect(section(page, "What it adds").getByRole("group", { name: "Editor extensions" })).toBeVisible();
   await expect(section(page, "What it adds").getByRole("group", { name: "Settings" })).toContainText("Settings 1");
 
   await section(page, "Settings").getByRole("link", { name: "Open in Settings" }).click();
-  await expect(page).toHaveURL(/\/settings\/plugins\/note-list$/);
-  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Note list" })).toHaveAttribute("aria-current", "page");
-  const noteList = page.getByRole("region", { name: "Note list", exact: true });
-  await expect(noteList.getByRole("checkbox")).toHaveAccessibleName("Show snippets");
-  await noteList.getByRole("link", { name: "About this plugin" }).click();
-  await expect(page).toHaveURL(/\/plugins\/note-list$/);
+  await expect(page).toHaveURL(/\/settings\/plugins\/vim$/);
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Vim mode" })).toHaveAttribute("aria-current", "page");
+  const vim = page.getByRole("region", { name: "Vim mode", exact: true });
+  await expect(vim.getByRole("checkbox")).toHaveAccessibleName("j and k move by the rows on screen");
+  await vim.getByRole("link", { name: "About this plugin" }).click();
+  await expect(page).toHaveURL(/\/plugins\/vim$/);
 });

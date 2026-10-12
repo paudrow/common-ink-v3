@@ -121,8 +121,7 @@ test("an editor extension given as a function is made for each editor with its o
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" typed");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: beta.id })).text).toBe("# Beta typed");
-  await page.getByRole("button", { name: /Ada/ }).click();
-  await page.getByRole("menuitem", { name: "Plugins" }).click();
+  await openPlugins(page);
   await expect(page.getByRole("checkbox", { name: "Per-note fixture" })).toBeChecked();
   await expect(page.getByRole("list", { name: "Plugins" }).getByRole("listitem").filter({ hasText: "Per-note fixture" }).getByRole("alert")).toHaveCount(0);
 });
@@ -154,8 +153,7 @@ test("an editor extension whose function throws, or makes what isn't one, is lef
   await page.keyboard.type(" typed");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Alpha typed");
 
-  await page.getByRole("button", { name: /Ada/ }).click();
-  await page.getByRole("menuitem", { name: "Plugins" }).click();
+  await openPlugins(page);
   const failed = page.getByRole("list", { name: "Plugins" }).getByRole("listitem").filter({ hasText: "Broken fixture" }).getByRole("alert");
   await expect(failed).toContainText(`Nothing for the note ${note.id}`);
   await expect(failed).toContainText("Unrecognized extension value");

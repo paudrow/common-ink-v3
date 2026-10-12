@@ -49,14 +49,13 @@ async function edit(page: Page, noteId: string) {
   await keys(page, "g", "g");
 }
 
-test("vim mode is off until it is turned on in settings, and turning it on or off reaches every open editor at once", async ({ page }) => {
+test("vim mode is off until it is turned on on the Plugins page, and turning it on or off reaches every open editor at once", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const alpha = await perform(page, { type: "note.create", text: "# Alpha" });
   const beta = await perform(page, { type: "note.create", text: "# Beta" });
-  await page.goto("/settings");
-  const vim = page.getByRole("tabpanel").getByRole("region", { name: "Vim mode", exact: true });
-  await expect(vim.getByRole("checkbox", { name: "On" }).first()).not.toBeChecked();
-  await expect(vim).toContainText("Vim mode is off until you turn it on here.");
+  await page.goto("/plugins");
+  const vim = page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Vim mode", exact: true });
+  await expect(vim).not.toBeChecked();
 
   await page.goto(`/note/${alpha.id}`);
   await editor(page).click();
@@ -75,14 +74,21 @@ test("vim mode is off until it is turned on in settings, and turning it on or of
   await run(page, "Split editor right");
   await expect(editors(page)).toHaveCount(2);
 
-  await run(page, "Go to Settings");
-  await vim.getByRole("checkbox", { name: "On" }).first().check();
+  await run(page, "Go to Plugins");
+  await vim.check();
   await expect.poll(() => stored(page)).toEqual({ "vim.enabled": true });
-  await page.getByRole("tab", { name: "JSON", exact: true }).click();
+  await run(page, "Go to Settings");
+  await page.getByRole("button", { name: "Open settings (JSON)" }).click();
   await expect(page.getByRole("textbox", { name: "Settings JSON" })).toContainText('"vim.enabled": true');
-  await expect(statusLine(page)).toHaveCount(0);
+  // Settings is a tab in one group, and the editor still showing in the other has vim at once.
+  await expect(editors(page)).toHaveCount(1);
+  await expect(statusLine(page)).toHaveText(["--NORMAL--"]);
 
-  await page.goBack();
+  // Back from the JSON, from Settings, and from the Plugins page, to the notes.
+  for (const address of [/\/settings$/, /\/plugins$/, /\/note\//]) {
+    await page.goBack();
+    await expect(page).toHaveURL(address);
+  }
   await expect(editors(page)).toHaveCount(2);
   await expect(statusLine(page, 0)).toHaveText("--NORMAL--");
   await expect(statusLine(page, 1)).toHaveText("--NORMAL--");
@@ -473,6 +479,7 @@ test("when vim's editing can't be loaded the Plugins page says so, notes are edi
   await expect(vim.getByRole("checkbox")).toBeChecked();
   await expect(vim.getByRole("alert")).toHaveText("Failed: Vim's editing couldn't be loaded, so notes are edited without it. Reload the page to try again.");
   await run(page, "Go to Settings");
-  await expect(page.getByText("keybindings.note.save")).toBeVisible();
-  await expect(page.getByText("keybindings.vim.back")).toHaveCount(0);
+  await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Keyboard shortcuts" }).click();
+  await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByText("note.save", { exact: true })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByText("vim.back", { exact: true })).toHaveCount(0);
 });

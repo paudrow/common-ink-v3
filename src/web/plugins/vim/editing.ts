@@ -29,6 +29,12 @@ Vim.defineEx("redo", "red", () => void run("history.redo"));
 Vim.defineAction("typeTab", (cm) => cm.replaceSelection("\t"));
 Vim.mapCommand("<C-i>", "action", "typeTab", {}, { context: "insert" });
 
+// A note's tabs are vim's tab pages. In a note g begins many of vim's own keys, so these two are vim's to map and not the window's.
+Vim.defineAction("nextTab", () => void run("vim.tab.next"));
+Vim.defineAction("previousTab", () => void run("vim.tab.previous"));
+Vim.mapCommand("gt", "action", "nextTab", {}, { context: "normal" });
+Vim.mapCommand("gT", "action", "previousTab", {}, { context: "normal" });
+
 // A note saves itself, so :w sends what's typed now, and :q closes the tab.
 Vim.defineEx("write", "w", () => void run("note.save"));
 Vim.defineEx("quit", "q", () => void run("tab.close"));
@@ -57,7 +63,7 @@ const titleFirst = ViewPlugin.define((view) => {
 let byRows = false;
 
 /** The editor extension for vim, with `runCommand` as the way it runs the app's commands. */
-export function vimEditing(runCommand: (commandId: string) => boolean): { extension: Extension; jumpsFrom: (focused: HTMLElement) => boolean; moveByRows: (on: boolean) => void } {
+export function vimEditing(runCommand: (commandId: string) => boolean): { extension: Extension; jumpsFrom: (focused: HTMLElement) => boolean; toNormal: (focused: HTMLElement) => void; moveByRows: (on: boolean) => void } {
   run = runCommand;
   return {
     /** Whether j and k, and the arrows, move by the rows on screen, as gj and gk do, in normal and visual mode. After an operator they are whole lines still: dj takes two lines. */
@@ -77,6 +83,12 @@ export function vimEditing(runCommand: (commandId: string) => boolean): { extens
       vim({ status: true }),
       titleFirst,
     ],
+    /** Leaves insert or visual mode in the note whose text the element is, as Escape does. */
+    toNormal(focused) {
+      const view = EditorView.findFromDOM(focused);
+      const cm = view && getCM(view);
+      if (cm && (cm.state.vim?.insertMode || cm.state.vim?.visualMode)) Vim.handleKey(cm, "<Esc>", "mapping");
+    },
     /** Whether the element is a note's text with vim in a mode where ctrl+o and ctrl+i are jumps: not insert mode, and not its `:` prompt. */
     jumpsFrom(focused) {
       const view = EditorView.findFromDOM(focused);

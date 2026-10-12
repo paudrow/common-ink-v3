@@ -582,7 +582,7 @@ test("Settings and Plugins each keep to one tab through every category and plugi
   await page.goto("/settings");
   await expect(tabs(page)).toHaveText(["Settings"]);
   await tab(page, "Settings").dblclick();
-  for (const [name, path] of [["Keyboard shortcuts", "/settings/keyboard"], ["Appearance", "/settings/appearance"], ["Note list", "/settings/plugins/note-list"]] as const) {
+  for (const [name, path] of [["Keyboard shortcuts", "/settings/keyboard"], ["Appearance", "/settings/appearance"], ["Vim mode", "/settings/plugins/vim"]] as const) {
     await categories.getByRole("link", { name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(categories.getByRole("link", { name, exact: true })).toHaveAttribute("aria-current", "page");
@@ -593,24 +593,24 @@ test("Settings and Plugins each keep to one tab through every category and plugi
   await expect(page).toHaveURL(/\/settings\/json$/);
   await expect(tabs(page)).toHaveText(["Settings"]);
   await page.getByRole("button", { name: "Open settings (UI)" }).click();
-  await categories.getByRole("link", { name: "Note list", exact: true }).click();
-  await expect(page).toHaveURL(/\/settings\/plugins\/note-list$/);
+  await categories.getByRole("link", { name: "Vim mode", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/plugins\/vim$/);
 
   // From a plugin's settings to what the plugin is, which is the Plugins page's and opens in its tab.
   await page.getByRole("link", { name: "About this plugin" }).click();
-  await expect(page).toHaveURL(/\/plugins\/note-list$/);
+  await expect(page).toHaveURL(/\/plugins\/vim$/);
   await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
-  await expect(page.getByRole("heading", { name: "Note list", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Vim mode", level: 1 })).toBeVisible();
   await more.getByRole("button", { name: "More" }).click();
   await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
   await tab(page, "Plugins").dblclick();
 
   // Each tab is at the address it was left at.
   await tab(page, "Settings").click();
-  await expect(page).toHaveURL(/\/settings\/plugins\/note-list$/);
-  await expect(page.getByRole("region", { name: "Note list", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/plugins\/vim$/);
+  await expect(page.getByRole("region", { name: "Vim mode", exact: true })).toBeVisible();
   await tab(page, "Plugins").click();
-  await expect(page).toHaveURL(/\/plugins\/note-list$/);
+  await expect(page).toHaveURL(/\/plugins\/vim$/);
 
   // Back from a plugin's details reached from the list is the list, in the same tab.
   await more.getByRole("link", { name: "Plugins" }).click();
@@ -633,7 +633,7 @@ test("Settings and Plugins each keep to one tab through every category and plugi
   await page.getByRole("menu", { name: "Plugins tab" }).getByRole("menuitem", { name: "Split right" }).click();
   await expect(tabs(page, 0)).toHaveText(["Settings"]);
   await expect(tabs(page, 1)).toHaveText(["Plugins"]);
-  await expect(group(page, 1).getByRole("region", { name: "Note list", exact: true })).toBeVisible();
+  await expect(group(page, 1).getByRole("region", { name: "Vim mode", exact: true })).toBeVisible();
   await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
   // In half the window the categories are a menu above the settings.
   await group(page, 1).getByRole("combobox", { name: "Category" }).selectOption({ label: "Appearance" });
