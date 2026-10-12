@@ -85,7 +85,16 @@ A list of notes and uploads a member can see, matched on title or filename. Arch
 ## Editor
 
 **Window buttons**:
-The buttons that act on the window and on no one note: the inspector and writing mode. They are at the top right corner of the editor area, whatever is open.
+The buttons that act on the window and on no one note, in a row along the top of the editor area, whatever is open: the sidebar's at the left end, the inspector's and writing mode's at the right.
+
+**Sidebar bar**, **Inspector bar**:
+What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
+
+**Inspector**:
+The panel at the right that is about whatever is in front. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front; where no tab is for that kind of thing it shows one quiet line.
+
+**Writing mode**:
+The editor area alone: no sidebar, no inspector, and neither bar. ⌘. and the window button leave it.
 
 ## Access
 

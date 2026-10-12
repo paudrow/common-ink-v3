@@ -80,8 +80,10 @@ test("a folder's list has an address that Back, Forward, a reload and a link all
   await expect(folderRow(page, "All notes")).toHaveAttribute("aria-selected", "true");
   await expect(folderRow(page, "All notes")).toHaveAccessibleDescription("2");
 
-  // A list has no note for the inspector to be about.
-  await expect(page.getByRole("complementary", { name: "Inspector" })).toHaveCount(0);
+  // With a list in front the inspector is about the folder, and never about a note that was open before.
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await expect(inspector.getByRole("definition")).toHaveText(["All notes", "2 notes", "just now by Ada Lovelace"]);
+  await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
 
   await page.goto("/folder/nosuchfolder");
   await expect(page.getByText("This folder doesn't exist, or you can't see it.")).toBeVisible();
