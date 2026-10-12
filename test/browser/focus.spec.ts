@@ -69,11 +69,11 @@ test("every group has a focus button at the right end of its tab row, fainter wh
     await expect(focusButton(page, n)).toHaveAttribute("aria-pressed", "false");
   }
   const faint = () => Promise.all([1, 2, 3].map((n) => focusButton(page, n).evaluate((el) => Number(getComputedStyle(el).opacity) < 1)));
-  expect(await faint()).toEqual([true, false, true]);
+  await expect.poll(() => faint()).toEqual([true, false, true]);
 
   const before = await Promise.all([1, 2, 3].map((n) => focusButton(page, n).boundingBox()));
   await group(page, 3).locator(".group-body").click();
-  expect(await faint()).toEqual([true, true, false]);
+  await expect.poll(() => faint()).toEqual([true, true, false]);
   expect(await Promise.all([1, 2, 3].map((n) => focusButton(page, n).boundingBox()))).toEqual(before);
 });
 
@@ -105,7 +105,7 @@ for (const { n, kind, shows } of KINDS) {
     await focusButton(page, n).click();
     await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("button")).toHaveCount(await group(page, n).locator(".group-body").getByRole("button").count() + 1);
-    expect(await group(page, n).locator(".group-body").boundingBox()).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
+    await expect.poll(() => group(page, n).locator(".group-body").boundingBox()).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
     await expect(shows(page)).toBeVisible();
     for (const role of ["tab", "complementary", "separator"] as const) await expect(page.getByRole(role).filter({ visible: true })).toHaveCount(0);
     await expect(page.getByRole("region", { name: /^Editor group/ }).filter({ visible: true })).toHaveCount(1);
@@ -119,7 +119,7 @@ for (const { n, kind, shows } of KINDS) {
     await page.reload();
     await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
     await expect(shows(page)).toBeVisible();
-    expect(await group(page, n).locator(".group-body").boundingBox()).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
+    await expect.poll(() => group(page, n).locator(".group-body").boundingBox()).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
 
     await page.keyboard.press("ControlOrMeta+.");
     await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeVisible();
@@ -133,10 +133,10 @@ for (const { n, kind, shows } of KINDS) {
 
     await page.keyboard.press("ControlOrMeta+.");
     await expect(shows(page)).toBeVisible();
-    expect(await group(page, n).locator(".group-body").boundingBox()).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
+    await expect.poll(() => group(page, n).locator(".group-body").boundingBox()).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
     await page.getByRole("button", { name: "Focus" }).click();
     // The reload put the note back at its head, and nothing since has moved it or the layout.
-    expect(await places(page)).toEqual({ ...before, scrolled: after.scrolled });
+    await expect.poll(() => places(page)).toEqual({ ...before, scrolled: after.scrolled });
   });
 }
 
@@ -149,7 +149,7 @@ test("leaving focus without a reload leaves every group scrolled as it was, and 
   await expect(page.locator(".tab").filter({ visible: true })).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.locator(".tab").filter({ visible: true })).toHaveCount(3);
-  expect(await places(page)).toEqual(before);
+  await expect.poll(() => places(page)).toEqual(before);
 
   const run = async (command: string) => {
     await page.keyboard.press("ControlOrMeta+Shift+P");
