@@ -39,6 +39,7 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 
 /** A layout is kept as it was written, and read by `keptLayout`, which knows the shape it had before a folder could have a tab. */
+const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 const isAnything = (_: unknown): _ is unknown => true;
 
 /** What a tab can hold besides a note and a folder's list: each mode. */
@@ -102,8 +103,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const [writing, setWriting] = useStored(WRITING_KEY, isBoolean, false);
   const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
-  /** The inspector's tab the member last picked for each kind of thing it can be about. */
-  const [picked, setPicked] = useState<Partial<Record<Subject["kind"], string>>>({});
+  /** The inspector's tab the member last picked, kept in this browser as the widths are. Only a pick changes it: what is in front shows it when it has it. */
+  const [picked, setPicked] = useStored<string | null>(`ink.inspectorTab.${me.person.id}`, isStringOrNull, null);
   /** How wide the member dragged the sidebar and the inspector. Kept in this browser, as the layout is: a width suits the screen it was set on. */
   const [widths, setWidths] = useStored<Widths>(`ink.widths.${me.person.id}`, isWidths, {});
   const sidebarWidth = within(SIDEBAR, widths.sidebar ?? SIDEBAR.start);
@@ -216,6 +217,9 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     dispatch({ type: "open", tab: { kind: "folder", id: folderId }, preview: !keep });
   };
 
+  /** Opens a folder's list or a page in a group of its own, beside or under the one in front, as a tab's Split does. It is kept there. */
+  const openBeside = (tab: Opened, side: "right" | "down") => dispatch({ type: "split", groupId: shown.current.editor.focusedGroupId, side, tab, keep: true });
+
   /** A new note goes in the folder asked for, or else the folder in front, when that is a folder; otherwise in Unsorted. */
   const createNote = async (folderId?: string) => {
     const asked = folderId ?? frontFolderId;
@@ -295,6 +299,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       total={(notes ?? []).length}
       selectedId={frontFolderId}
       onOpen={openFolder}
+      onSplit={(id, side) => openBeside({ kind: "folder", id }, side)}
       onChanged={refresh}
       onMoveNote={moveNote}
     />
@@ -325,7 +330,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     const name = folderTitle(tree, routeFolderId);
     return name === null ? { kind: "page" } : { kind: "folder", name, notes: notesIn(notes, routeFolderId) };
   })();
-  const pick = (viewId: string) => subject && setPicked((p) => ({ ...p, [subject.kind]: viewId }));
+  const pick = setPicked;
   const activeMode = route.kind === "mode" ? route.mode : null;
 
   const renderNote = (group: Group, noteId: string) => {
@@ -400,6 +405,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
             activeMode={activeMode}
             onSwitch={onSwitch}
             onGo={go}
+            onSplit={openBeside}
             onNewNote={canEdit ? () => void createNote() : undefined}
             newNoteIn={(frontFolderId && tree?.byId.get(frontFolderId)?.name) || "Unsorted"}
             open={sidebarOpen}
@@ -449,7 +455,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
               onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
               onReset={() => setWidths(({ inspector: _, ...w }) => w)}
             />
-            <Inspector subject={subject} picked={subject ? picked[subject.kind] : undefined} onPick={pick} />
+            <Inspector subject={subject} picked={picked} onPick={pick} />
           </>
         ) : (
           <nav className="rail" aria-label="Inspector bar">

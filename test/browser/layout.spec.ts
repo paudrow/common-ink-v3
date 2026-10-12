@@ -114,7 +114,7 @@ test("a folder with notes in it can't be deleted, and an empty one can", async (
 
   await folder(page, "Empty").hover();
   await page.getByRole("button", { name: "Actions for Empty" }).click();
-  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["New folder inside", "Rename", "Delete"]);
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in a split right", "Open in a split down", "New folder inside", "Rename", "Delete"]);
   await page.getByRole("menuitem", { name: "Delete" }).click();
 
   await expect(tree(page).getByRole("treeitem")).toHaveText([/^All notes/, /^Unsorted/, /^Full/]);
@@ -235,6 +235,9 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  // No tab is a default: with none picked yet the first shows, and Info once it is picked.
+  await expect(inspector.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
   const panel = inspector.getByRole("tabpanel");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
@@ -327,6 +330,7 @@ test("the inspector stays open whatever is in front and shows what belongs to it
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const panel = inspector.getByRole("tabpanel");
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
   const place = await inspector.boundingBox();
   await inspector.getByRole("tab", { name: "History" }).click();

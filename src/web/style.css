@@ -529,7 +529,7 @@ button.link:hover {
 .folder-column {
   max-width: 780px;
   margin: 0 auto;
-  padding: 30px clamp(14px, 5%, 32px) 50vh;
+  padding: 30px clamp(14px, 5%, 32px);
 }
 
 .folder-head {
@@ -1109,7 +1109,8 @@ button.link:hover {
   display: flex;
   flex-direction: column;
   height: 100%;
-  container: note / inline-size;
+  /* Its height is a measure too: the room under a note's last line is a share of its own pane, not of the window. */
+  container: note / size;
 }
 
 .note-bar {
@@ -1185,7 +1186,7 @@ button.link:hover {
 .editor {
   max-width: 46rem;
   margin: 0 auto;
-  padding: 2rem 2rem 30vh;
+  padding: 2rem 2rem 30cqh;
 }
 
 .editor .cm-editor {

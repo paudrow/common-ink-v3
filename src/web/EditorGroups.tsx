@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "rea
 import { arrangement, same, type EditorAction, type EditorLayout, type Group, type Opened, type Pane, type Side, type Split } from "./editorLayout.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { ContextMenu } from "./Menu.tsx";
-import { NOTE_DRAG } from "./NoteList.tsx";
+import { carried, carriesTab, carry } from "./dragged.ts";
 import { ResizeHandle } from "./resize.tsx";
 
 /** Where on a group's body a dragged tab is: near one of its edges, which splits the group that way, or in the middle, which adds the tab to it. */
@@ -11,24 +11,11 @@ export type Zone = Side | "middle";
 type Drop = { groupId: string; at: number | Zone };
 type TabMenu = { groupId: string; tab: Opened; x: number; y: number };
 
-/** The drag type that carries a tab that isn't a note's, as JSON. A note's tab is dragged as its note, so it also drops wherever a note does. */
-const TAB_DRAG = "application/x-common-ink-tab";
 /** How much of a group's width or height, from each edge, splits it. The rest is the middle. */
 const EDGE = 0.25;
 /** The least share of a split a pane can be dragged down to. */
 const LEAST = 0.1;
 
-const carriesTab = (e: DragEvent) => e.dataTransfer.types.includes(NOTE_DRAG) || e.dataTransfer.types.includes(TAB_DRAG);
-function carried(e: DragEvent): Opened | null {
-  const noteId = e.dataTransfer.getData(NOTE_DRAG);
-  if (noteId) return { kind: "note", id: noteId };
-  try {
-    const tab = JSON.parse(e.dataTransfer.getData(TAB_DRAG)) as Opened;
-    return tab.kind === "folder" ? { kind: "folder", id: String(tab.id) } : tab.kind === "page" ? { kind: "page", id: String(tab.id), path: String(tab.path) } : null;
-  } catch {
-    return null;
-  }
-}
 const keyOf = (tab: Opened) => `${tab.kind} ${tab.id}`;
 
 function gapAt(bar: HTMLElement, x: number) {
@@ -99,18 +86,18 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
 
   /** Over a drop target the note can't fall through to the editor beneath, which would paste its link. */
   const over = (e: DragEvent, next: Drop) => {
-    if (!carriesTab(e)) return;
+    if (!carriesTab(e.dataTransfer)) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
     setDrop((d) => (d?.groupId === next.groupId && d.at === next.at ? d : next));
   };
   const dropped = (e: DragEvent, action: (tab: Opened) => EditorAction) => {
-    if (!carriesTab(e)) return;
+    if (!carriesTab(e.dataTransfer)) return;
     e.preventDefault();
     e.stopPropagation();
     setDrop(null);
-    const tab = carried(e);
+    const tab = carried(e.dataTransfer);
     if (tab) dispatch(action(tab));
   };
   const left = (e: DragEvent) => {
@@ -158,11 +145,7 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
                       tabIndex={0}
                       title={title}
                       draggable
-                      onDragStart={(e) => {
-                        if (tab.kind === "note") e.dataTransfer.setData(NOTE_DRAG, tab.id);
-                        else e.dataTransfer.setData(TAB_DRAG, JSON.stringify(tab));
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
+                      onDragStart={(e) => carry(e.dataTransfer, tab)}
                       onClick={activate}
                       onDoubleClick={() => dispatch({ type: "pin", groupId: group.id, tab })}
                       onKeyDown={(e) => {
@@ -211,7 +194,7 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
           onDragLeave={left}
           onDropCapture={(e) => {
             const at = zone(e);
-            dropped(e, (tab) => (at === "middle" ? { type: "add", groupId: group.id, tab } : { type: "split", groupId: group.id, side: at, tab }));
+            dropped(e, (tab) => (at === "middle" ? { type: "add", groupId: group.id, tab } : { type: "split", groupId: group.id, side: at, tab, keep: true }));
           }}
         >
           {group.active ? render(group, group.active) : empty}

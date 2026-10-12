@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 import type { ListedFolder, OpInput, Role } from "../core/protocol.ts";
 import { perform } from "./api.ts";
+import { carry } from "./dragged.ts";
 import { ALL_NOTES, pathOf, type FolderTree as Tree } from "./folders.ts";
 import { Icon } from "./icons.tsx";
 import { ContextMenu } from "./Menu.tsx";
@@ -8,7 +9,8 @@ import { NOTE_DRAG } from "./NoteList.tsx";
 import { isStrings, useStored } from "./stored.ts";
 
 type Editing = { kind: "create"; parentId: string | null } | { kind: "rename"; id: string };
-type Menu = { folder: ListedFolder; x: number; y: number };
+/** A row's menu. `folder` is left out for a row that is a list and no folder, which can be opened and not changed. */
+type Menu = { id: string; name: string; folder?: ListedFolder; x: number; y: number };
 
 const indent = (depth: number) => ({ "--depth": depth }) as CSSProperties;
 
@@ -22,11 +24,13 @@ interface Props {
   selectedId: string | null;
   /** A single click opens a folder's list as a preview; a double click keeps it open. */
   onOpen: (id: string, keep: boolean) => void;
+  /** Opens a folder's list in a group of its own, beside or under the one in front. */
+  onSplit: (id: string, side: "right" | "down") => void;
   onChanged: () => void;
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
 }
 
-export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen, onChanged, onMoveNote }: Props) {
+export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen, onSplit, onChanged, onMoveNote }: Props) {
   const ids = useId();
   const [expandedList, setExpanded] = useStored(`ink.expanded.${workspaceId}`, isStrings, []);
   const expanded = new Set(expandedList);
@@ -84,7 +88,10 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
     </div>
   );
 
-  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and it has no menu. */
+  /** Dragged to the editor area, a row's list is dropped in a group as a tab is. */
+  const dragged = (id: string) => ({ draggable: true, onDragStart: (e: DragEvent) => carry(e.dataTransfer, { kind: "folder", id }) });
+
+  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and its menu only opens it. */
   const listRow = (id: string, name: string, count: number) => (
     <div
       key={id}
@@ -96,8 +103,13 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
       aria-labelledby={`${ids}-${id}`}
       aria-describedby={`${ids}-${id}-count`}
       tabIndex={selectedId === id || (id === ALL_NOTES && !(selectedId && tree.byId.has(selectedId))) ? 0 : -1}
+      {...dragged(id)}
       onClick={() => onOpen(id, false)}
       onDoubleClick={() => onOpen(id, true)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ id, name, x: e.clientX, y: e.clientY });
+      }}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
@@ -139,6 +151,7 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
             aria-labelledby={`${ids}-${folder.id}`}
             aria-describedby={`${ids}-${folder.id}-count`}
             tabIndex={folder.id === selectedId ? 0 : -1}
+            {...dragged(folder.id)}
             onClick={choose}
             onDoubleClick={() => onOpen(folder.id, true)}
             onKeyDown={(e) => {
@@ -147,9 +160,8 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
               choose();
             }}
             onContextMenu={(e) => {
-              if (!canEdit) return;
               e.preventDefault();
-              setMenu({ folder, x: e.clientX, y: e.clientY });
+              setMenu({ id: folder.id, name: folder.name, folder, x: e.clientX, y: e.clientY });
             }}
             onDragOver={(e) => {
               if (!e.dataTransfer.types.includes(NOTE_DRAG)) return;
@@ -189,8 +201,7 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
             <span className="count" id={`${ids}-${folder.id}-count`}>
               {folder.noteCount}
             </span>
-            {canEdit && (
-              <button
+            <button
                 type="button"
                 className="row-actions"
                 tabIndex={-1}
@@ -198,12 +209,11 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
                 onClick={(e) => {
                   e.stopPropagation();
                   const box = e.currentTarget.getBoundingClientRect();
-                  setMenu({ folder, x: box.left, y: box.bottom + 2 });
+                  setMenu({ id: folder.id, name: folder.name, folder, x: box.left, y: box.bottom + 2 });
                 }}
               >
                 <Icon name="more" />
               </button>
-            )}
           </div>,
         );
       }
@@ -236,23 +246,25 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
       )}
       {menu && (
         <ContextMenu
-          label={`${menu.folder.name} actions`}
+          label={`${menu.name} actions`}
           x={menu.x}
           y={menu.y}
           onClose={closeMenu}
           items={[
-            { label: "New folder inside", action: () => startCreate(menu.folder.id) },
-            ...(menu.folder.id === tree.unsortedId
+            { label: "Open in a split right", action: () => onSplit(menu.id, "right") },
+            { label: "Open in a split down", action: () => onSplit(menu.id, "down") },
+            ...(canEdit && menu.folder ? [{ label: "New folder inside", action: () => startCreate(menu.id) }] : []),
+            ...(!canEdit || !menu.folder || menu.id === tree.unsortedId
               ? []
               : [
                   {
                     label: "Rename",
                     action: () => {
                       setError(null);
-                      setEditing({ kind: "rename", id: menu.folder.id });
+                      setEditing({ kind: "rename", id: menu.id });
                     },
                   },
-                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.folder.id }) }] : []),
+                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.id }) }] : []),
                 ]),
           ]}
         />

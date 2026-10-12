@@ -36,13 +36,21 @@ const INSPECTOR_VIEWS: readonly InspectorView[] = [
 /** The tabs the inspector has for what is in front, in order. None for a page, which has nothing to show there yet. */
 export const viewsFor = (subject: Subject | null) => INSPECTOR_VIEWS.filter((v) => v.for === subject?.kind);
 
-/** The tab that shows: the one the member last picked for this kind of thing, or else Info, which is the last. */
-export const shownView = (views: readonly InspectorView[], picked: string | undefined) => views.find((v) => v.id === picked) ?? views.at(-1);
+/**
+ * The tab that shows: the one the member last picked, or the one of the same name where what is in
+ * front has its own, as a folder has its own Info. Where it has neither, the first of the tabs it
+ * does have shows, and the pick is as it was for the next thing that has it. No tab is a default.
+ */
+export const shownView = (views: readonly InspectorView[], picked: string | null) => {
+  const label = INSPECTOR_VIEWS.find((v) => v.id === picked)?.label;
+  return views.find((v) => v.id === picked) ?? views.find((v) => v.label === label) ?? views[0];
+};
 
 interface Props {
   /** Null while what is in front is still loading: the inspector keeps its place and shows nothing. */
   subject: Subject | null;
-  picked: string | undefined;
+  /** The tab the member last picked, whatever was in front then. */
+  picked: string | null;
   onPick: (viewId: string) => void;
 }
 

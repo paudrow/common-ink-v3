@@ -29,7 +29,7 @@ async function withFolders(page: Page) {
   return { projects, journal, plan, monday };
 }
 
-test("a group has one italic preview tab: a folder's is kept when a note is opened from it, and the next thing opened takes the preview's place", async ({ page }) => {
+test("there is one italic preview tab: the next thing opened takes its place, a note opened from a folder's list too, and a list stays once it is kept", async ({ page }) => {
   const { projects, journal } = await withFolders(page);
   /** The tabs in order, which may never show more than one in italics. */
   const shows = async (titles: string[], previewAt: number) => {
@@ -53,32 +53,33 @@ test("a group has one italic preview tab: a folder's is kept when a note is open
   await shows(["Journal"], 0);
   await expect(page).toHaveURL(new RegExp(`/folder/${journal.id}$`));
 
-  // A note opened from the list: the list's tab stays, kept, and the note is the preview.
+  // A note opened from the list takes the list's place: nothing is kept that the member didn't keep.
   await listedNote(page, "Monday").click();
-  await shows(["Journal", "Monday"], 1);
+  await shows(["Monday"], 0);
   await expect(folderRow(page, "Journal")).toHaveAttribute("aria-selected", "true");
 
   // A folder from the tree takes the note's place.
   await folderRow(page, "Projects").click();
-  await shows(["Journal", "Projects"], 1);
+  await shows(["Projects"], 0);
   await listedNote(page, "Plan").click();
-  await shows(["Journal", "Projects", "Plan"], 2);
+  await shows(["Plan"], 0);
   await expect(folderRow(page, "Projects")).toHaveAttribute("aria-selected", "true");
 
-  // Notes looked through from a list replace one another beside it.
-  await tab(page, "Journal").click();
+  // A double click on a folder takes the preview's place and keeps the list, and a note looked at from it opens beside it.
+  await folderRow(page, "Journal").dblclick();
+  await shows(["Journal"], -1);
   await listedNote(page, "Monday").click();
-  await shows(["Journal", "Projects", "Monday"], 2);
+  await shows(["Journal", "Monday"], 1);
 
   // A double click keeps what it opens, and All notes from the tree then has the preview.
   await tab(page, "Monday").dblclick();
-  await shows(["Journal", "Projects", "Monday"], -1);
+  await shows(["Journal", "Monday"], -1);
   await openAllNotes(page);
-  await shows(["Journal", "Projects", "Monday", "All notes"], 3);
+  await shows(["Journal", "Monday", "All notes"], 2);
 
   // A note opened behind is a kept tab, and the preview is as it was.
   await listedNote(page, "Plan").click({ modifiers: ["ControlOrMeta"] });
-  await shows(["Journal", "Projects", "Monday", "All notes", "Plan"], 3);
+  await shows(["Journal", "Monday", "All notes", "Plan"], 2);
 });
 
 test("a folder's tab has an address that Back, Forward, a reload and a link all come to", async ({ page }) => {
@@ -208,15 +209,15 @@ test("a card's title and its pencil open the note with the cursor in it, the tit
   await openAllNotes(page);
 
   await listedNote(page, "Plan").click();
-  await expect(tabs(page)).toHaveText(["All notes", "Plan"]);
-  expect(await italic(page)).toEqual([false, true]);
+  await expect(tabs(page)).toHaveText(["Plan"]);
+  expect(await italic(page)).toEqual([true]);
   await expect(editor(page)).toBeFocused();
 
   await openAllNotes(page);
   await noteCard(page, "Monday").hover();
   await noteCard(page, "Monday").getByRole("button", { name: "Edit Monday" }).click();
-  await expect(tabs(page)).toHaveText(["All notes", "Plan", "Monday"]);
-  expect(await italic(page)).toEqual([false, true, false]);
+  await expect(tabs(page)).toHaveText(["All notes", "Monday"]);
+  expect(await italic(page)).toEqual([true, false]);
   await expect(editor(page)).toBeFocused();
   await expect(page.locator(".cm-line").first()).toHaveText("# Monday");
 });
@@ -265,7 +266,7 @@ test("the arrow keys move between cards, Enter expands and collapses one, and ‚å
   await page.keyboard.press("ArrowUp");
   await expect(noteCard(page, "Monday")).toBeFocused();
   await page.keyboard.press("ControlOrMeta+Enter");
-  await expect(tabs(page)).toHaveText(["All notes", "Monday"]);
+  await expect(tabs(page)).toHaveText(["Monday"]);
   await expect(editor(page)).toBeFocused();
   await expect(page.locator(".cm-line").first()).toHaveText("# Monday");
 });
@@ -400,6 +401,7 @@ test("the inspector follows the tab in front: a note's tabs, a folder tab's Info
 
   await tab(page, "Plan").click();
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveValue(/\/note\/plan-[a-z0-9]{12}$/);
   expect(await inspector.boundingBox()).toEqual(place);
 

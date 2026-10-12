@@ -2,7 +2,10 @@ import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { Me, Role, WorkspaceSummary } from "../core/protocol.ts";
 import { signOut } from "./api.ts";
 import { useDismiss } from "./dismiss.ts";
+import { carry } from "./dragged.ts";
+import type { Opened } from "./editorLayout.ts";
 import { Icon } from "./icons.tsx";
+import { ContextMenu } from "./Menu.tsx";
 import { MODES, modePath, type ModeId } from "./modes.ts";
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
@@ -13,6 +16,8 @@ interface Props {
   activeMode: ModeId | null;
   onSwitch: (workspaceId: string) => void;
   onGo: (path: string) => void;
+  /** Opens a mode's page in a group of its own, beside or under the one in front. */
+  onSplit: (page: Opened, side: "right" | "down") => void;
   /** Makes a note in the folder in front, named by `newNoteIn`, or in Unsorted. Left out for a viewer, who has no such button. */
   onNewNote?: () => void;
   newNoteIn: string;
@@ -22,7 +27,10 @@ interface Props {
   children: ReactNode;
 }
 
-export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, newNoteIn, open, onOpen, children }: Props) {
+type Mode = (typeof MODES)[number];
+const pageOf = (mode: Mode): Opened => ({ kind: "page", id: mode.id, path: modePath(mode.id) });
+
+export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onSplit, onNewNote, newNoteIn, open, onOpen, children }: Props) {
   // It opens on arriving at a mode that is under it, however that mode was reached, so the mode the member is on is marked in the
   // list. Closed by hand, it stays closed until they arrive at such a mode again.
   const on = MODES.find((m) => !m.primary && m.id === activeMode)?.id ?? null;
@@ -32,7 +40,8 @@ export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, 
     setWas(on);
     if (on !== null) setMore(true);
   }
-  const link = (mode: (typeof MODES)[number]) => <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={onGo} labelled={open} />;
+  const [menu, setMenu] = useState<{ mode: Mode; x: number; y: number } | null>(null);
+  const link = (mode: Mode) => <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={onGo} labelled={open} onMenu={(x, y) => setMenu({ mode, x, y })} />;
   const modes = (
     <>
       {MODES.filter((m) => m.primary).map(link)}
@@ -41,6 +50,18 @@ export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, 
         {open && <span>{more ? "Less" : "More"}</span>}
       </button>
       {more && MODES.filter((m) => !m.primary).map(link)}
+      {menu && (
+        <ContextMenu
+          label={`${menu.mode.label} actions`}
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: "Open in a split right", action: () => onSplit(pageOf(menu.mode), "right") },
+            { label: "Open in a split down", action: () => onSplit(pageOf(menu.mode), "down") },
+          ]}
+        />
+      )}
     </>
   );
   if (!open)
@@ -75,7 +96,8 @@ export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, 
   );
 }
 
-function ModeLink({ mode, active, onGo, labelled }: { mode: (typeof MODES)[number]; active: boolean; onGo: (path: string) => void; labelled?: boolean }) {
+/** A mode's link. Clicked, it goes there; dragged to the editor area, its page is dropped in a group as a tab is. */
+function ModeLink({ mode, active, onGo, labelled, onMenu }: { mode: Mode; active: boolean; onGo: (path: string) => void; labelled?: boolean; onMenu: (x: number, y: number) => void }) {
   const path = modePath(mode.id);
   return (
     <a
@@ -84,6 +106,12 @@ function ModeLink({ mode, active, onGo, labelled }: { mode: (typeof MODES)[numbe
       aria-current={active ? "page" : undefined}
       aria-label={labelled ? undefined : mode.label}
       title={labelled ? undefined : mode.label}
+      draggable
+      onDragStart={(e) => carry(e.dataTransfer, pageOf(mode))}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(e.clientX, e.clientY);
+      }}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
         e.preventDefault();
