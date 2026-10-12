@@ -205,7 +205,13 @@ test("a link to a note that isn't there, or to nothing by a title, says so or st
   await other.close();
   await signInAsNewPerson(page, "Ada Lovelace");
   const diary = await perform(page, { type: "note.create", text: `# Diary\n\nGone [[zzzzzzzzzzzz]], hers [[${secret.id}]], shown [[${secret.id}|as I call it]], typed [[Some title]].`, linkTitles: "keep" });
+  // The note is drawn before its workspace's notes are listed, as on a slow connection: a link waits as "…" and then says what it is.
+  await page.route("**/api/**", async (route) => {
+    if (route.request().postData()?.includes('"note.list"')) await new Promise((r) => setTimeout(r, 1500));
+    await route.fallback();
+  });
   await page.goto(`/note/${diary.id}`);
+  await expect(lines(page).last()).toHaveText("Gone …, hers …, shown as I call it, typed [[Some title]].");
 
   await expect(lines(page).last()).toHaveText("Gone Unavailable note, hers Unavailable note, shown as I call it, typed [[Some title]].");
   await expect.poll(() => page.content()).not.toContain("Grace's secret");
