@@ -8,6 +8,8 @@ export interface PluginState {
   enabled: boolean;
   /** A required plugin can't be turned off. */
   required: boolean;
+  /** Whether it came with the app, and wasn't added to it. */
+  builtIn: boolean;
   /** Why the plugin isn't running though it is turned on, or what of it failed while being drawn. */
   error: string | null;
   description: string | null;
@@ -54,6 +56,8 @@ export interface HostOptions {
   /** Every installed plugin, in the order their contributions are shown. */
   plugins: readonly Plugin[];
   required?: readonly string[];
+  /** The ids of the plugins that came with the app. */
+  builtIn?: readonly string[];
   /** The member's settings as they are at the start. */
   settings: SettingsDocument;
   /**
@@ -103,7 +107,7 @@ const RESERVED = ["plugins.", "go.", "settings."];
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
-export function createPluginHost({ plugins, required = [], settings, write, mac, provide }: HostOptions): Host {
+export function createPluginHost({ plugins, required = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed>>();
   const editorExtensions = new Map<string, Owned<EditorExtension>>();
@@ -375,6 +379,7 @@ export function createPluginHost({ plugins, required = [], settings, write, mac,
         name: p.name,
         enabled: !off.has(p.id),
         required: required.includes(p.id),
+        builtIn: builtIn.includes(p.id),
         error: errors.get(p.id) ?? null,
         description: p.description ?? null,
         icon: p.icon ?? null,

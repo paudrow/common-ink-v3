@@ -431,6 +431,25 @@ test("a plugin's details list its settings and link to them in Settings, and one
   await expect(page).toHaveURL(/\/plugins\/vim$/);
 });
 
+test("only a plugin that came with the app is called Built-in", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [{ id: "fixture", name: "Fixture", description: "A plugin a test put on the page.", activate() {} }];
+  });
+  await withNote(page, "Alpha");
+  await page.goto("/plugins");
+  await expect(pluginRow(page, "Backlinks").locator(".badge")).toHaveText("Built-in");
+  await expect(pluginRow(page, "Fixture")).toContainText("A plugin a test put on the page.");
+  await expect(pluginRow(page, "Fixture").locator(".badge")).toHaveCount(0);
+
+  await page.goto("/plugins/fixture");
+  await expect(page.getByRole("heading", { name: "Fixture", level: 1 })).toBeVisible();
+  await expect(page.getByText("Built-in")).toHaveCount(0);
+  await expect(page.locator(".plugin-meta")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Permissions" })).toHaveText("PermissionsIt runs inside the app as you, so it asks for nothing: it can do what you can, and no more. What it does with that is what it adds, below.");
+  await page.goto("/plugins/backlinks");
+  await expect(page.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
+});
+
 test("an inspector view a plugin adds is a tab only for what it says it is for, is handed that thing, and is found again by its label", async ({ page }) => {
   await page.addInitScript(() => {
     type Register = (slot: string, view: unknown) => void;

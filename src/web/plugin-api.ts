@@ -227,7 +227,9 @@ export interface Slots {
    *
    * One tab is remembered per person, across everything: the one they last picked. What shows is
    * the view with the picked id, or else the view with the same label where what is in front has
-   * its own, or else the first. A person who has picked none is shown {@link UNPICKED}.
+   * its own, or else the first view with no `badge`, or else the first. A person who has picked
+   * none is shown {@link UNPICKED}. A view with a `badge` counts what it flags as seen by being
+   * shown, as History does, so it is never shown unasked ahead of a view without one.
    */
   inspector: InspectorView;
   /**
@@ -267,11 +269,7 @@ export type InspectorView = {
   };
 }[keyof Inspected];
 
-/**
- * The id of the inspector view shown to a person who has picked none: Info. Showing a note's
- * History counts its changes as seen, so History is never the tab shown unasked.
- */
-export const UNPICKED = "info";
+export { UNPICKED } from "./inspectorPick.ts";
 
 export interface FolderProps extends ViewProps {
   /** The folder whose notes to list: a folder's id, or {@link ALL_NOTES}. It may name no folder the member can see. */
@@ -413,8 +411,13 @@ export interface App {
   openBeside: ((tab: Opened, side: "right" | "down") => void) | null;
   /** Where a folder's list lives, such as `/folder/all`. */
   folderPath(folderId: string): string;
-  /** For the editor area: puts a note, a folder's list or a page at the app's address, or nothing. `replace` keeps Back from retracing the step. */
-  show(tab: Opened | null, options?: { replace?: boolean }): void;
+  /**
+   * For the editor area: puts a note, a folder's list or a page at the app's address, or nothing.
+   * `replace` keeps Back from retracing the step. `move` is a step between things already open, as a
+   * click on a tab is: Back retraces it, and the next move takes its place, so a run of moves is one
+   * step and none of them takes the place of an open.
+   */
+  show(tab: Opened | null, options?: { replace?: boolean; move?: boolean }): void;
   /**
    * Creates a note and opens it. It goes in `folderId` when that is a folder; otherwise in the
    * folder in front, which is the open note's folder when a note is in front; otherwise in Unsorted.
