@@ -31,6 +31,6 @@ describe("the plugin boundary", () => {
   it("builds the plugin API from the operations protocol, how a link is written, and nine small helpers, so widening it is a choice", () => {
     const api = files.find((f) => f.path === API)!;
 
-    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/links.ts", "../core/protocol.ts", "./dismiss.ts", "./dragged.ts", "./htmlFrame.ts", "./icons.tsx", "./inspectorPick.ts", "./readOnly.ts", "./resize.tsx", "./time.ts", "./titleMark.ts", "react"]);
+    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/links.ts", "../core/protocol.ts", "./dismiss.ts", "./dragged.ts", "./htmlFrame.ts", "./icons.tsx", "./inspectorPick.ts", "./openNotes.ts", "./readOnly.ts", "./resize.tsx", "./time.ts", "./titleMark.ts", "react"]);
   });
 });

@@ -10,7 +10,7 @@
  * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, ConnectOptions, ListedFolder, Note, NoteSummary, OpInput, Results, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, AgentEdit, ConnectOptions, ListedFolder, Note, NoteSummary, OpInput, Results, WorkspaceSummary } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
@@ -28,6 +28,8 @@ export { ResizeHandle } from "./resize.tsx";
 export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
 export { ago, useNow } from "./time.ts";
+/** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
+export { useOpenNote, type OpenNote } from "./openNotes.ts";
 
 /**
  * Dragging to the editor area. `carry` puts a note, a folder's list or a page on a drag, `carried`
@@ -159,6 +161,8 @@ export interface PluginHost {
   readonly agents: {
     list(): Promise<Agent[]>;
     connect(name: string, options: ConnectOptions): Promise<{ agent: Agent; token: string }>;
+    /** Changes what an agent may do. Its token stays the one it has. */
+    edit(id: string, edit: AgentEdit): Promise<Agent>;
     disconnect(id: string): Promise<void>;
   };
   /** JSON this plugin keeps in this browser for this workspace. Other plugins can't see it. */
@@ -203,7 +207,7 @@ export interface Slots {
   /**
    * A column left of the editor: the sidebar. It is drawn closed too, when `app.sidebarOpen` is
    * false, and is then to be a narrow bar of icons (`<nav class="rail">`) for what it lists when
-   * open, with a way back to open (`app.toggleSidebar`). In writing mode it isn't drawn at all.
+   * open, with a way back to open (`app.toggleSidebar`). In focus it is still drawn, out of sight.
    */
   column: { id: string; component: View };
   /** A section of the sidebar, such as the folder tree. A column places them with `app.sections`, while it is open. */
@@ -259,11 +263,15 @@ export interface Slots {
    */
   page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; transient?: boolean; component: View };
   /**
-   * A widget in the bar along the bottom of the app, such as a running timer. The bar is one line of
-   * small things to glance at. It is there in writing mode too, and keeps its height when a widget
-   * has nothing to show, so nothing above it moves when one appears.
+   * An item in the bottom bar: one thin line along the foot of the window for small things to
+   * glance at, such as a count of the open note's words. `side` is the end it sits at, the left
+   * unless said, and `order` places it among the others at that end, lowest first and 0 unless
+   * said. Items of one order stay in the order of the plugins that added them. A component with
+   * nothing to say draws nothing, and takes no room. The bar is there while any plugin has an item
+   * in it, with something to say or not, so nothing above it moves as items come and go. In focus
+   * it is out of sight.
    */
-  bar: { id: string; component: View };
+  bar: { id: string; component: View; side?: "left" | "right"; order?: number };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it. */
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void }> };
 }
@@ -310,11 +318,12 @@ export interface EditorProps extends ViewProps {
   /** What to show where nothing is open: a line saying to pick a note. */
   empty: ReactNode;
   /**
-   * The buttons that act on the window and on no one note. Put each once, where it stays whatever
-   * is open beneath: `start` (the sidebar's) at the top left corner of the editor area, before the
-   * first tab, and `end` (the inspector's and writing mode's) at the top right, after the last.
+   * The buttons that act on the window and on no one note: the sidebar's and the inspector's, as
+   * one group. Put it once, where it stays whatever is open beneath: at the top left corner of the
+   * editor area, before the first tab. Focus is not among them. It belongs to whatever fills the
+   * window, so the view draws its own button for it from `app.focus` and `app.setFocus`.
    */
-  controls: { start: ReactNode; end: ReactNode };
+  controls: ReactNode;
 }
 
 /**
@@ -574,8 +583,13 @@ export interface App {
    * folder of the note it names. Null on a page, and when nothing is open. The folder tree marks it.
    */
   folderId: string | null;
-  /** Writing mode: the editor area alone, with no sidebar and no inspector. */
-  writing: boolean;
+  /**
+   * Focus: what is in front in the editor area fills the window. The sidebar, the inspector and
+   * their bars are still drawn, out of sight, so leaving focus puts everything back as it was. A
+   * view in the `editor` slot marks what fills the window: `data-focus-mode` on its `.groups`
+   * and `data-front` on the one `.group` to show.
+   */
+  focus: boolean;
   /** Whether the sidebar is open. Closed, the `column` view is a narrow bar of icons. */
   sidebarOpen: boolean;
   pages: readonly PageInfo[];
@@ -627,6 +641,8 @@ export interface App {
   markSeen(noteId: string, revision: number): void;
   toggleOverlay(id: string): void;
   toggleSidebar(): void;
+  /** Enters or leaves focus. */
+  setFocus(on: boolean): void;
   switchWorkspace(workspaceId: string): void;
   signOut(): void;
 }

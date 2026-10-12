@@ -1,6 +1,6 @@
-// Connecting and disconnecting agents, from a signed-in member's session. The token is in the answer to
+// Connecting, editing and disconnecting agents, from a signed-in member's session. The token is in the answer to
 // the connect call and nowhere else: only its hash is kept.
-import { connectAgent, disconnectAgent, listAgents } from "../../core/agents.ts";
+import { connectAgent, disconnectAgent, editAgent, listAgents } from "../../core/agents.ts";
 import { OpError, type OpErrorCode } from "../../core/protocol.ts";
 import { sessionPersonId } from "../auth.ts";
 
@@ -20,21 +20,23 @@ export async function handleAgentsApi(req: Request, env: Env, url: URL): Promise
 
   if (isList && req.method === "GET") return json({ agents: await listAgents(env.DB, personId) });
 
-  if ((isList && req.method === "POST") || (one && req.method === "DELETE")) {
+  if ((isList && req.method === "POST") || (one && (req.method === "DELETE" || req.method === "PATCH"))) {
     // The session cookie rides along on any request to us, so changes come from Common Ink's own pages.
     if (req.headers.get("Origin") !== url.origin) return json({ error: "forbidden", message: "Agents are connected from Common Ink itself" }, 403);
     try {
-      if (one) {
+      if (one && req.method === "DELETE") {
         await disconnectAgent(env.DB, personId, one[1]!);
         return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
       }
       if (!req.headers.get("Content-Type")?.startsWith("application/json")) return json({ error: "invalid", message: "Send JSON" }, 400);
-      let body: { name?: unknown; label?: unknown; expiresInDays?: unknown; workspaceId?: unknown; readOnly?: unknown };
+      let body: { name?: unknown; expiresInDays?: unknown; workspaceId?: unknown; readOnly?: unknown };
       try {
         body = (await req.json()) as typeof body;
       } catch {
         return json({ error: "invalid", message: "The body isn't JSON" }, 400);
       }
+      // An edit keeps its nulls: a null workspace there means every workspace.
+      if (one) return json({ agent: await editAgent(env.DB, personId, one[1]!, body as never) });
       if (typeof body?.name !== "string") return json({ error: "invalid", message: "Give the agent a name" }, 400);
       const { name, ...options } = body;
       return json(await connectAgent(env.DB, personId, name, stripNull(options) as never), 201);

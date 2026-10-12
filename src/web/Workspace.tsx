@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
-import { ApiError, connectAgent, disconnectAgent, listAgents, perform, signOut } from "./api.ts";
+import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, signOut } from "./api.ts";
 import { Drawn } from "./Drawn.tsx";
 import { usable } from "./editorExtensions.ts";
 import { folderTree } from "./folders.ts";
@@ -23,7 +23,7 @@ import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
 import { performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
-const WRITING_KEY = "ink.writing";
+const FOCUS_KEY = "ink.focus";
 const SIDEBAR_KEY = "ink.sidebar";
 const INSPECTOR_KEY = "ink.inspector";
 /** How wide the sidebar and the inspector start, and how far a member can drag each. */
@@ -129,8 +129,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   /** Every note in the workspace, for the note list, tab titles, and quick open. */
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
   const [listVersion, setListVersion] = useState(0);
-  /** Writing mode shows the editor area and neither side, whichever of them is open. */
-  const [writing, setWriting] = useStored(WRITING_KEY, isBoolean, false);
+  /** In focus the tab in front of the focused group fills the window, over everything else, which stays as it is underneath. Which group that is, the layout already says. */
+  const [focusMode, setFocusMode] = useStored(FOCUS_KEY, isBoolean, false);
   const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
   /** The inspector's tab the member last picked, kept in this browser as the widths are. Only a pick changes it: what is in front shows it when it has it. */
@@ -152,10 +152,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
 
   const appNow = useRef<App>(null!);
   /** What the app's own commands do, as of the latest render. */
-  const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleWriting: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
+  const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
   const [host] = useState(() => {
     let created: Host;
-    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} mac={MAC} path={app.path} go={app.go} />;
+    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
       id: "core",
@@ -172,7 +172,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
           h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], run: () => inner.current.save() });
           h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], leaveToFields: true, run: () => inner.current.step("note.redo") });
         }
-        h.commands.register({ id: "view.toggleWritingMode", title: "Toggle writing mode", keys: ["mod+."], run: () => inner.current.toggleWriting() });
+        h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], run: () => inner.current.toggleFocus() });
         h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], run: () => inner.current.toggleSidebar() });
         h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", run: () => inner.current.toggleInspector() });
       },
@@ -200,7 +200,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         app: () => appNow.current,
         // Made for the one plugin that asked, so this is where its permissions will be checked. The server records the member as the author.
         perform: (op) => performInSync(workspaceId, op),
-        agents: { list: listAgents, connect: connectAgent, disconnect: (id) => disconnectAgent(id).then(() => {}) },
+        agents: { list: listAgents, connect: connectAgent, edit: editAgent, disconnect: (id) => disconnectAgent(id).then(() => {}) },
         storage: {
           get: (key) => readStored(`ink.plugin.${plugin.id}.${workspaceId}.${key}`, isAnything),
           set: (key, value) => writeStored(`ink.plugin.${plugin.id}.${workspaceId}.${key}`, value),
@@ -354,7 +354,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   }, [workspaceId, currentId, currentRevision, me.person.id]);
   const unseen = !!current && others?.noteId === current.id && others.revision > (seen[current.id] ?? 0);
 
-  const toggleWriting = useCallback(() => setWriting((w) => !w), [setWriting]);
+  const toggleFocus = useCallback(() => setFocusMode((on) => !on), [setFocusMode]);
   const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), [setSidebarOpen]);
   const toggleInspector = useCallback(() => setInspectorOpen((open) => !open), [setInspectorOpen]);
   const closeOverlay = useCallback(() => setOverlay(null), []);
@@ -408,7 +408,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       (err: Error) => setStuck({ noteId: routeNoteId, message: err instanceof ApiError ? err.message : `Couldn't ${type === "note.undo" ? "undo" : "redo"}. Common Ink can't be reached.` }),
     );
   };
-  inner.current = { step, save: () => routeNoteId && void saveNow(routeNoteId), toggleWriting, toggleSidebar, toggleInspector };
+  inner.current = { step, save: () => routeNoteId && void saveNow(routeNoteId), toggleFocus, toggleSidebar, toggleInspector };
 
   useEffect(() => {
     // A keybinding is the app's before it is anyone else's: a key press that was taken reaches no editor and no row's own handler.
@@ -482,6 +482,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     markSeen,
     toggleOverlay: (id: string) => setOverlay((open) => (open === id ? null : id)),
     toggleSidebar,
+    setFocus: setFocusMode,
     switchWorkspace: onSwitch,
     signOut: () => void signOut().then(() => location.assign("/")),
   });
@@ -499,7 +500,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     notes,
     folders: tree,
     folderId: frontFolderId,
-    writing,
+    focus: focusMode,
     sidebarOpen,
     pages: contributed.views.page,
     sections: null,
@@ -511,6 +512,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   appNow.current = app;
   const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
   const editorArea = contributed.views.editor.at(-1);
+  /** The bottom bar's items, lowest order first. Sorting keeps those of one order as the plugins added them. */
+  const bar = useMemo(() => [...contributed.views.bar].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.bar]);
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay);
 
   app.sections = contributed.views.section.length === 0 ? null : contributed.views.section.map((section) => <Drawn key={section.id} host={host} view={section} />);
@@ -591,39 +594,34 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     );
   };
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
-  /** The buttons that act on the window and on no one note. The editor area puts them at the ends of its tab rows: the sidebar's before the first tab at the top left, the rest after the last at the top right. */
-  const controls = {
-    start: !writing && contributed.views.column.length > 0 && (
-      <div className="window-controls" role="group" aria-label="Window">
+  /** The buttons that act on the window and on no one note, together where the sidebar meets the editor area: before the first tab of the top left group. Each is there while there is something for it to open. */
+  const controls = (
+    <div className="window-controls" role="group" aria-label="Window">
+      {contributed.views.column.length > 0 && (
         <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
           <Icon name="sidebar" />
         </button>
-      </div>
-    ),
-    end: (
-      <div className="window-controls end" role="group" aria-label="Window">
-        {!writing && inspectorViews.length > 0 && (
-          <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
-            <Icon name="inspector" />
-          </button>
-        )}
-        <button type="button" className="icon-button" aria-label="Writing mode" title={`Writing mode (${shortcut("view.toggleWritingMode")})`} aria-pressed={writing} onClick={toggleWriting}>
-          <Icon name="writing" />
+      )}
+      {inspectorViews.length > 0 && (
+        <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
+          <Icon name="inspector" />
         </button>
-      </div>
-    ),
-  };
+      )}
+    </div>
+  );
 
   /**
    * What the address names alone, for when no plugin fills the editor area or the one that does
    * throws. At `/` it is every note, so there is a way to a note whatever is turned off.
    */
   const loneEditor = (
-    <div className="groups">
-      <section className="group">
+    <div className="groups" data-focus-mode={focusMode || undefined}>
+      <section className="group" data-front="">
         <div className="tab-row">
-          {controls.start}
-          {controls.end}
+          {controls}
+          <button type="button" className="icon-button focus-button" aria-label="Focus" title={`${focusMode ? "Leave focus" : "Focus"} (${shortcut("view.toggleFocus")})`} aria-pressed={focusMode} onClick={toggleFocus}>
+            <Icon name="focus" />
+          </button>
         </div>
         <div className="group-body">
           {routeNoteId ? renderNote(routeNoteId) : routeFolderId ? renderFolder(routeFolderId) : opened?.kind === "page" ? renderPage(opened.id, opened.path) : renderFolder(ALL_NOTES)}
@@ -632,25 +630,25 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     </div>
   );
 
+  /** Focus is of a group, and the way out of it is in that group. With none drawn the window stays whole, so nothing is hidden with no way back. */
+  const nothingThere = route.kind === "page" && !routePageId && !passing;
+  const focusable = !nothingThere && (!!editorArea || !passing);
+
   return (
-    <div className="app" data-writing={writing || undefined} data-bar={contributed.views.bar.length > 0 || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100, "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
-      {!writing && (
-        <>
-          {contributed.views.column.map((column) => (
-            <Drawn key={column.id} host={host} view={column} />
-          ))}
-          {sidebarOpen && contributed.views.column.length > 0 && (
-            <ResizeHandle
-              label="Resize sidebar"
-              orientation="vertical"
-              value={sidebarWidth}
-              {...SIDEBAR}
-              step={WIDTH_STEP}
-              onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
-              onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
-            />
-          )}
-        </>
+    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100, "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+      {contributed.views.column.map((column) => (
+        <Drawn key={column.id} host={host} view={column} />
+      ))}
+      {sidebarOpen && contributed.views.column.length > 0 && (
+        <ResizeHandle
+          label="Resize sidebar"
+          orientation="vertical"
+          value={sidebarWidth}
+          {...SIDEBAR}
+          step={WIDTH_STEP}
+          onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
+          onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
+        />
       )}
 
       <main className="main" aria-label="Editor">
@@ -660,7 +658,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
           </div>
         )}
         {/* The editor area stays as it is under a page that only leads somewhere else, out of sight, so no open editor or embed is made again. */}
-        {route.kind === "page" && !routePageId && !passing ? (
+        {nothingThere ? (
           <p className="notice">There's nothing at this address.</p>
         ) : editorArea ? (
           <div className="editor-area" data-under={passing ? "" : undefined}>
@@ -671,8 +669,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         )}
       </main>
 
-      {!writing &&
-        inspectorViews.length > 0 &&
+      {inspectorViews.length > 0 &&
         (inspectorOpen ? (
           <>
             <ResizeHandle
@@ -711,10 +708,18 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
             })}
           </nav>
         ))}
-      {contributed.views.bar.length > 0 && (
+      {bar.length > 0 && (
         <div className="bar" role="group" aria-label="Bottom bar">
-          {contributed.views.bar.map((item) => (
-            <Drawn key={item.id} host={host} view={item} />
+          {(["left", "right"] as const).map((side) => (
+            <div key={side} className="bar-side" data-side={side}>
+              {bar
+                .filter((item) => (item.side ?? "left") === side)
+                .map((item) => (
+                  <span key={item.id} className="bar-item" data-bar-item={item.id}>
+                    <Drawn host={host} view={item} />
+                  </span>
+                ))}
+            </div>
           ))}
         </div>
       )}

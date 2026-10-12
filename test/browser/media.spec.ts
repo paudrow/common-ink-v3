@@ -172,7 +172,7 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
     ticks = now.ticks;
     expect(now.born, `the same load ${when}`).toBe(born);
     expect(asked, `asked for once ${when}`).toHaveLength(1);
-    expect(await kept(page, "youtube"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
+    await expect.poll(() => kept(page, "youtube"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
   };
   await expectStillPlaying("after it started");
 
@@ -254,7 +254,7 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
   await expect(line(page, "Watch")).toContainText("::youtube{https://youtu.be/dQw4w9WgXcc}");
   await expect.poll(() => player(page)).toBeUndefined();
   const again = page.locator(".embed-below").first();
-  expect(await again.evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
+  await expect.poll(() => again.evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
   await expect.poll(async () => (await placed(page, "youtube")).el, "and in the place it had").toEqual(boxBefore);
   await expect(below(page, "youtube").getByRole("button", { name: "Play video" })).toHaveCount(2);
   expect(asked).toHaveLength(1);
@@ -295,7 +295,7 @@ test("nothing in the note moves when the cursor comes to a video's line, or when
   for (const lineNumber of [5, 9, 3, 11]) {
     await goTo(page, lineNumber);
     await settled(page);
-    expect(await measured(), `with the cursor on line ${lineNumber}`).toEqual(before);
+    await expect.poll(() => measured(), `with the cursor on line ${lineNumber}`).toEqual(before);
   }
   await goTo(page, 5);
   await expect(page.locator(".cm-line").nth(4)).toHaveText("::youtube{https://youtu.be/dQw4w9WgXcQ}");
@@ -306,7 +306,7 @@ test("nothing in the note moves when the cursor comes to a video's line, or when
   await settled(page);
   await goTo(page, 1);
   await settled(page);
-  expect(await measured(), "after the video loaded").toEqual(before);
+  await expect.poll(() => measured(), "after the video loaded").toEqual(before);
 });
 
 test("an HTML embed is picked from the embed menu, runs only when asked, and stays running while the note is written around it", async ({ page }) => {
@@ -325,7 +325,7 @@ test("an HTML embed is picked from the embed menu, runs only when asked, and sta
   await runHtml(page).click();
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
   await expect(framed.getByText("Hello from HTML.")).toBeVisible();
-  expect((await placed(page, "html")).el, "running, it is where its button was").toEqual(room);
+  await expect.poll(async () => (await placed(page, "html")).el, "running, it is where its button was").toEqual(room);
   await expect(below(page, "html").locator("iframe")).toHaveAttribute("sandbox", "allow-scripts");
   await expect(below(page, "html").locator("iframe")).toHaveAttribute("src", "/embed-frame");
 
@@ -350,7 +350,7 @@ test("an HTML embed is picked from the embed menu, runs only when asked, and sta
     const now = await playing(running(page)[0]!);
     ticks = now.ticks;
     expect(now.born, `the same load ${when}`).toBe(born);
-    expect(await kept(page, "html"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
+    await expect.poll(() => kept(page, "html"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
   };
   await page.keyboard.type(" and more\nand a new line");
   await expectStillRunning("after typing above");
@@ -471,7 +471,7 @@ test("an HTML embed can't reach the app, the member's session, the browser's sto
     history: "refused: SecurityError",
     form: "still here",
   });
-  expect(await page.evaluate(() => history.length), "it added nothing to what Back goes through").toBe(pages);
+  await expect.poll(() => page.evaluate(() => history.length), "it added nothing to what Back goes through").toBe(pages);
 
   await settled(page);
   expect(new URL(page.url()).origin, "the app's window was taken nowhere").toBe(app);
@@ -479,7 +479,7 @@ test("an HTML embed can't reach the app, the member's session, the browser's sto
   expect(reached, "nothing reached another site").toEqual([]);
   expect([...new Set(answered)], "the app answered an embed with nothing but its own empty document").toEqual(["/embed-frame"]);
   // The member is still signed in, and the note is as it was.
-  expect((await perform(page, { type: "note.read", id: note.id })).text).toContain("# Probe");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("# Probe");
 });
 
 test("what is below a line is there, whole and in its place, in every frame painted: as the note loads, and as the note is written above it", async ({ page }) => {
@@ -660,7 +660,7 @@ test("a frame the member clicks into has the keyboard, and gives it back from a 
   await expect.poll(() => read(page, note.id)).toContain("!");
   await expect(inside).toHaveValue("typed inside, twice");
   await expect(stopped(page)).toHaveCount(0);
-  expect(await read(page, note.id)).not.toContain("typed inside");
+  await expect.poll(() => read(page, note.id)).not.toContain("typed inside");
 });
 
 test("another site's frame that takes the keyboard is stopped the same way", async ({ page }) => {
@@ -719,10 +719,10 @@ test("what is below a line can write what it learned into the note, which is whe
   await expect.poll(() => read(page, note.id)).toBe("# Album\n\nabove\n\n::pic{cat 400x100}\n\nbelow\n");
   await expect.poll(async () => { const [width, height] = await size(); return Math.round(width! / height!); }).toBe(4);
   await expectOverItsRoom(page, "pic", "once its size is in the note");
-  expect(await below(page, "pic").evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
-  expect(await page.evaluate(() => (window as unknown as { drawn: string[] }).drawn)).toEqual(["cat", "cat 400x100"]);
+  await expect.poll(() => below(page, "pic").evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { drawn: string[] }).drawn)).toEqual(["cat", "cat 400x100"]);
   // It is the member's edit: one step of undo takes it back, and it is in the note's history as theirs.
-  expect((await perform(page, { type: "note.history", id: note.id })).map((c) => c.author.kind)).toEqual(["member", "member"]);
+  await expect.poll(async () => (await perform(page, { type: "note.history", id: note.id })).map((c) => c.author.kind)).toEqual(["member", "member"]);
 });
 
 test("a playing video goes on through vim's operators, undo and redo, and plugins turned off and on", async ({ page }) => {
@@ -745,7 +745,7 @@ test("a playing video goes on through vim's operators, undo and redo, and plugin
     ticks = now.ticks;
     expect(now.born, `the same load ${when}`).toBe(born);
     expect(asked, `asked for once ${when}`).toHaveLength(1);
-    expect(await kept(page, "youtube"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
+    await expect.poll(() => kept(page, "youtube"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
   };
   const toLine = async (lineNumber: number) => {
     await editor(page).focus();
@@ -810,7 +810,7 @@ test("an HTML block's lines fold away when the cursor leaves it, which moves the
   await expectOverItsRoom(page, "html", "with the block shown as written");
   // Five lines as written in place of the one line of its button.
   const lineHeight = await line(page, "after the block").evaluate((el) => el.getBoundingClientRect().height);
-  expect((await top()) - outside).toBeGreaterThan(3 * lineHeight);
+  await expect.poll(async () => (await top()) - outside).toBeGreaterThan(3 * lineHeight);
   await page.keyboard.press("ControlOrMeta+Home");
   await expect.poll(top).toBe(outside);
   await expectOverItsRoom(page, "html", "with the block folded again");

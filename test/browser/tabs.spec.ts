@@ -32,12 +32,12 @@ test("a single click opens a note in an italic preview tab, and the next single 
   // The list is a preview, and the note opened from it takes its place: one italic tab throughout.
   await preview(page, "Alpha");
   await expect(tabs(page)).toHaveText(["Alpha"]);
-  expect(await italic(page)).toEqual([true]);
+  await expect.poll(() => italic(page)).toEqual([true]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
 
   await preview(page, "Beta");
   await expect(tabs(page)).toHaveText(["Beta"]);
-  expect(await italic(page)).toEqual([true]);
+  await expect.poll(() => italic(page)).toEqual([true]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Beta");
   await expect(page).toHaveURL(/\/note\/beta-[a-z0-9]{12}$/);
 });
@@ -48,14 +48,14 @@ test("a note's pencil keeps it in its own tab, and so does double-clicking its t
   await keep(page, "Alpha");
   await preview(page, "Beta");
   await expect(tabs(page)).toHaveText(["Beta", "Alpha"]);
-  expect(await italic(page)).toEqual([true, false]);
+  await expect.poll(() => italic(page)).toEqual([true, false]);
 
   await tab(page, "Beta").dblclick();
-  expect(await italic(page)).toEqual([false, false]);
+  await expect.poll(() => italic(page)).toEqual([false, false]);
 
   await preview(page, "Gamma");
   await expect(tabs(page)).toHaveText(["Beta", "Gamma", "Alpha"]);
-  expect(await italic(page)).toEqual([false, true, false]);
+  await expect.poll(() => italic(page)).toEqual([false, true, false]);
   await page.getByRole("textbox", { name: "Note text" }).click();
   await page.keyboard.type(" more");
   await expect.poll(() => italic(page)).toEqual([false, false, false]);
@@ -79,7 +79,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   await noteCard(page, "Beta").dragTo(group(1), { targetPosition: { x: width * 0.8, y: 130 } });
   await expect(tabs(page, 0)).toHaveText(["All notes", "Alpha"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
-  expect(await italic(page, 1)).toEqual([false]);
+  await expect.poll(() => italic(page, 1)).toEqual([false]);
   await expect(group(2).locator(".cm-line")).toHaveText(["# Beta", "", "About Beta."]);
   await expect(page).toHaveURL(new RegExp(`/note/beta-${beta!.id}$`));
   await expect(noteUrl).toHaveValue(new RegExp(`${beta!.id}$`));
@@ -101,7 +101,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   await tab(page, "All notes").click();
   await noteCard(page, "Gamma").dragTo(tabBar(page, 1));
   await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
-  expect(await italic(page, 1)).toEqual([false, false]);
+  await expect.poll(() => italic(page, 1)).toEqual([false, false]);
   await expect(group(2).locator(".cm-line").first()).toHaveText("# Gamma");
 
   await page.reload();
@@ -165,7 +165,7 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await expect(palette.getByRole("combobox")).toBeFocused();
-  for (const title of ["New note", "Go to note…", "Open All notes", "Toggle writing mode", "Toggle inspector", "Close other tabs", "Go to Dashboard"]) {
+  for (const title of ["New note", "Go to note…", "Open All notes", "Toggle focus", "Toggle inspector", "Close other tabs", "Go to Dashboard"]) {
     await expect(palette.getByRole("option", { name: title })).toBeVisible();
   }
   await page.keyboard.press("Escape");
@@ -173,16 +173,16 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
   await expect(text).toBeFocused();
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("writ");
-  await expect(palette.getByRole("option")).toHaveText([/^Toggle writing mode/]);
+  await page.keyboard.type("toggle focus");
+  await expect(palette.getByRole("option")).toHaveText([/^Toggle focus/]);
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.getByRole("complementary")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("writing");
+  await page.keyboard.type("toggle focus");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("navigation", { name: "Left rail" })).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
@@ -217,7 +217,7 @@ test("⌘P finds notes by title, best match first, and opens the one chosen in i
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
   await expect(tabs(page)).toHaveText(["Trip planning"]);
-  expect(await italic(page)).toEqual([false]);
+  await expect.poll(() => italic(page)).toEqual([false]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Trip planning");
   await expect(page).toHaveURL(/\/note\/trip-planning-[a-z0-9]{12}$/);
 
@@ -329,9 +329,9 @@ test("a tab splits down from its menu and from the command, inside a split to th
 
   await page.reload();
   await expect(tabs(page, 2)).toHaveText(["Gamma"]);
-  expect(await boxOf(group(page, 1))).toEqual(a);
-  expect(await boxOf(group(page, 2))).toEqual(b);
-  expect(await boxOf(group(page, 3))).toEqual(c);
+  await expect.poll(() => boxOf(group(page, 1))).toEqual(a);
+  await expect.poll(() => boxOf(group(page, 2))).toEqual(b);
+  await expect.poll(() => boxOf(group(page, 3))).toEqual(c);
   expect((await storedLayout(page)).split).toEqual({ direction: "column", panes: [{ direction: "row", panes: ["1", "3"], sizes: [1, 1] }, "2"], sizes: [1, 1] });
 
   await group(page, 1).getByRole("textbox", { name: "Note text" }).click();
@@ -365,7 +365,7 @@ test("a layout kept before a group could be split down opens as it was, side by 
 
   await expect(tabs(page, 0)).toHaveText(["Alpha"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
-  expect(await italic(page, 1)).toEqual([true]);
+  await expect.poll(() => italic(page, 1)).toEqual([true]);
   const [left, right] = [await boxOf(group(page, 1)), await boxOf(group(page, 2))];
   expect(right.y).toBe(left.y);
   expect(right.x).toBeGreaterThan(left.x);
@@ -453,7 +453,7 @@ test("the edge between two halves of a split is dragged, moved with the arrow ke
 
   await page.reload();
   await expect(group(page, 2)).toBeVisible();
-  expect(await boxOf(group(page, 1))).toEqual(dragged);
+  await expect.poll(() => boxOf(group(page, 1))).toEqual(dragged);
 
   await edge.focus();
   await page.keyboard.press("ArrowLeft");
@@ -510,7 +510,7 @@ test("every page opens in a tab at its own address, and is drawn there", async (
     await expect(group(page, 1).getByText("There's nothing at this address.")).toHaveCount(0);
   }
   // Each took the place of the one before, as a preview does: every page looked at left one tab.
-  expect(await italic(page)).toEqual([true]);
+  await expect.poll(() => italic(page)).toEqual([true]);
 });
 
 test("a page's tab is a preview until it is kept, is focused and not opened twice, sits in a split, and comes back after a reload", async ({ page }) => {
@@ -519,17 +519,17 @@ test("a page's tab is a preview until it is kept, is focused and not opened twic
 
   await nav.getByRole("link", { name: "Search" }).click();
   await expect(tabs(page)).toHaveText(["Search"]);
-  expect(await italic(page)).toEqual([true]);
+  await expect.poll(() => italic(page)).toEqual([true]);
   await expect(page).toHaveURL(/\/search$/);
   await nav.getByRole("link", { name: "Todos" }).click();
   await expect(tabs(page)).toHaveText(["Todos"]);
   await expect(page.getByRole("heading", { name: "Todos", level: 1 })).toBeVisible();
 
   await tab(page, "Todos").dblclick();
-  expect(await italic(page)).toEqual([false]);
+  await expect.poll(() => italic(page)).toEqual([false]);
   await nav.getByRole("link", { name: "Search" }).click();
   await expect(tabs(page)).toHaveText(["Todos", "Search"]);
-  expect(await italic(page)).toEqual([false, true]);
+  await expect.poll(() => italic(page)).toEqual([false, true]);
 
   await tab(page, "Todos").click();
   await expect(page).toHaveURL(/\/todos$/);
