@@ -278,7 +278,7 @@ const boxOf = async (part: Locator) => {
   const { x, y, width, height } = (await part.boundingBox())!;
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 };
-const storedLayout = (page: Page) => page.evaluate(() => JSON.parse(Object.entries(localStorage).find(([key]) => key.startsWith("ink.editor."))![1]) as { groups: { tabs: { id: string }[] }[]; split?: { direction: string; panes: unknown[]; sizes: number[] } });
+const storedLayout = (page: Page) => page.evaluate(() => JSON.parse(Object.entries(localStorage).find(([key]) => key.startsWith("ink.plugin.tabs.") && key.endsWith(".layout"))![1]) as { groups: { tabs: { id: string }[] }[]; split?: { direction: string; panes: unknown[]; sizes: number[] } });
 
 /** Takes a tab by the mouse and holds it over a point of a group's body, a share of the way across and down it. The button is still down after. */
 async function holdOver(page: Page, from: Locator, body: Locator, across: number, down: number) {
@@ -352,7 +352,7 @@ test("a layout kept before a group could be split down opens as it was, side by 
   await keep(page, "Alpha");
   await page.evaluate(
     ([a, b]) => {
-      const key = Object.keys(localStorage).find((k) => k.startsWith("ink.editor."))!;
+      const key = Object.keys(localStorage).find((k) => k.startsWith("ink.plugin.tabs.") && k.endsWith(".layout"))!;
       localStorage.setItem(key, JSON.stringify({ groups: [{ id: "1", tabs: [{ noteId: a, preview: false }], activeNoteId: a }, { id: "2", tabs: [{ noteId: b, preview: true }], activeNoteId: b }], focusedGroupId: "2" }));
     },
     [alpha!.id, beta!.id],
@@ -486,6 +486,7 @@ const PAGES = [
   ["/history", "History"],
   ["/contacts", "Contacts"],
   ["/uploads", "Uploads"],
+  ["/plugins", "Plugins"],
   ["/agents", "Agents"],
 ] as const;
 
@@ -570,4 +571,91 @@ test("a page's tab is a preview until it is kept, is focused and not opened twic
   await tab(page, "Search", 1).click();
   await expect(page).toHaveURL(/\/search$/);
   await expect(group(page, 2).getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
+});
+
+test("Plugins keeps to one tab through every plugin's details, at the address of what is showing, across a reload, Back, and a split", async ({ page }) => {
+  await withNotes(page, "Alpha");
+  const more = page.getByRole("navigation", { name: "Modes" });
+
+  await page.goto("/history");
+  await expect(tabs(page)).toHaveText(["History"]);
+  await tab(page, "History").dblclick();
+
+  // A plugin's details are the Plugins page's and open in its tab.
+  await more.getByRole("link", { name: "Plugins" }).click();
+  await page.getByRole("list", { name: "Plugins", exact: true }).getByRole("link", { name: "Note list" }).click();
+  await expect(page).toHaveURL(/\/plugins\/note-list$/);
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await expect(page.getByRole("heading", { name: "Note list", level: 1 })).toBeVisible();
+  await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
+  await tab(page, "Plugins").dblclick();
+
+  // Each tab is at the address it was left at.
+  await tab(page, "History").click();
+  await expect(page).toHaveURL(/\/history$/);
+  await tab(page, "Plugins").click();
+  await expect(page).toHaveURL(/\/plugins\/note-list$/);
+
+  // Back from a plugin's details reached from the list is the list, in the same tab.
+  await more.getByRole("link", { name: "Plugins" }).click();
+  await expect(page).toHaveURL(/\/plugins$/);
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await page.getByRole("list", { name: "Plugins", exact: true }).getByRole("link", { name: "Tabs and splits" }).click();
+  await expect(page).toHaveURL(/\/plugins\/tabs$/);
+  await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/plugins$/);
+  await expect(page.getByRole("list", { name: "Plugins", exact: true })).toBeVisible();
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/plugins\/tabs$/);
+  await expect(page.getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+
+  // Side by side, each is still where it was, and a reload brings both back there.
+  await tab(page, "Plugins").click({ button: "right" });
+  await page.getByRole("menu", { name: "Plugins tab" }).getByRole("menuitem", { name: "Split right" }).click();
+  await expect(tabs(page, 0)).toHaveText(["History"]);
+  await expect(tabs(page, 1)).toHaveText(["Plugins"]);
+  await expect(group(page, 1).getByRole("heading", { name: "History", level: 1 })).toBeVisible();
+  await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "History" })).toHaveCount(1);
+  await expect(page.getByRole("tab", { name: "Plugins" })).toHaveCount(1);
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/plugins\/tabs$/);
+  await expect(tabs(page, 0)).toHaveText(["History"]);
+  await expect(tabs(page, 1)).toHaveText(["Plugins"]);
+  await expect(group(page, 1).getByRole("heading", { name: "History", level: 1 })).toBeVisible();
+  await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
+});
+
+test("a page a plugin adds opens in a tab, with the plugin doing nothing for it", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "fixture",
+        name: "Fixture",
+        activate(host: { views: { register(slot: string, view: unknown): void } }) {
+          host.views.register("page", { id: "fixture-page", path: "/fixture", label: "Fixture page", nav: "primary", component: ({ app }: { app: { path: string } }) => `Fixture at ${app.path}` });
+        },
+      },
+    ];
+  });
+  await withNotes(page, "Alpha");
+  await keep(page, "Alpha");
+
+  await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Fixture page" }).click();
+  // The list of every note was the group's preview, and the page takes its place as the next thing previewed does.
+  await expect(tabs(page)).toHaveText(["Fixture page", "Alpha"]);
+  expect(await italic(page)).toEqual([true, false]);
+  await expect(tab(page, "Fixture page")).toHaveAttribute("aria-selected", "true");
+  await expect(group(page, 1).locator(".page-pane")).toHaveText("Fixture at /fixture");
+
+  await page.goto("/fixture/deeper");
+  await expect(tabs(page)).toHaveText(["Fixture page", "Alpha"]);
+  await expect(group(page, 1).locator(".page-pane")).toHaveText("Fixture at /fixture/deeper");
+  await tab(page, "Alpha").click();
+  await tab(page, "Fixture page").click();
+  await expect(page).toHaveURL(/\/fixture\/deeper$/);
 });

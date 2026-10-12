@@ -9,6 +9,8 @@ const clock = (ms: number) => {
 export const stopwatch: Plugin = {
   id: "stopwatch",
   name: "Stopwatch",
+  description: "A stopwatch in a note, written ::stopwatch{}.",
+  icon: "stopwatch",
   activate(host) {
     host.embeds.register({
       name: "stopwatch",

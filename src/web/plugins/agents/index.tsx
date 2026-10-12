@@ -7,6 +7,8 @@ const HISTORY = "/history";
 export const agents: Plugin = {
   id: "agents",
   name: "Agents",
+  description: "Connect an AI agent to your notes, and see what each one changed.",
+  icon: "agent",
   activate(host) {
     host.views.register("page", {
       id: "agents",

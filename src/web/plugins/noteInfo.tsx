@@ -77,6 +77,8 @@ function Info({ app, note }: ViewProps & { note: NoteSummary }) {
 export const noteInfo: Plugin = {
   id: "note-info",
   name: "Note info",
+  description: "The open note's details, in the inspector.",
+  icon: "info",
   activate(host) {
     host.views.register("inspector", { id: "info", label: "Info", icon: "info", component: Info });
   },

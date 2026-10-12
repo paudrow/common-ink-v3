@@ -145,7 +145,7 @@ test("More expands and collapses Contacts, Uploads, and History, and a mode not 
   const less = modes.getByRole("button", { name: "Less" });
   await expect(less).toHaveAttribute("aria-expanded", "true");
   await expect(more).toHaveCount(0);
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");

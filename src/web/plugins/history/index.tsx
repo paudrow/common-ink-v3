@@ -4,6 +4,8 @@ import { HistoryMode, NoteHistory } from "./History.tsx";
 export const history: Plugin = {
   id: "history",
   name: "History",
+  description: "Every change to a note, who made it, and a way to take it back.",
+  icon: "history",
   activate(host) {
     host.views.register("page", {
       id: "history",

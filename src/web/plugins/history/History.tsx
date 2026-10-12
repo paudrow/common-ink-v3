@@ -423,7 +423,7 @@ function ChangedNotes({ host, filters, version, canEdit, head, empty, onChanged,
               </button>
               <div className="changed-note-about">
                 <Span note={note} now={now} />
-                <button type="button" className="link" onClick={() => onOpenNote(note.noteId)}>
+                <button type="button" className="link" data-row-open onClick={() => onOpenNote(note.noteId)}>
                   Open note
                 </button>
               </div>
@@ -480,7 +480,7 @@ function NoteScope({ notes, picked, onPick }: NoteScopeProps) {
       {open && (
         <div id={`${ids}-notes`} className="menu note-scope-menu" role="group" aria-label="Notes to show">
           <input type="search" className="filter" aria-label="Find a note" placeholder="Find a note" value={filter} onChange={(e) => setFilter(e.target.value)} autoFocus />
-          <ul>
+          <ul data-list>
             {notes
               .filter((n) => !needle || titleOf(n.title).toLowerCase().includes(needle))
               .map((n) => (

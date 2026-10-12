@@ -185,7 +185,7 @@ function FolderList({ app, folderId, readNote, kept }: Props) {
         </div>
         <nav aria-label="Notes">
           {!notes.length && <p className="empty">{count ? "No notes match." : "No notes in this folder."}</p>}
-          <ul className="cards">
+          <ul className="cards" data-list>
             {notes.map((note, at) => {
               const expanded = view.expanded[note.id];
               const name = titleOf(note);
@@ -304,6 +304,8 @@ function FolderList({ app, folderId, readNote, kept }: Props) {
 export const noteList: Plugin = {
   id: "note-list",
   name: "Note list",
+  description: "A folder's notes as cards, each with its details and its first lines, to sort and to filter.",
+  icon: "list",
   activate(host) {
     /** How each folder's list was left, for as long as the app is open. */
     const kept = new Map<string, Kept>();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { App, Dispose, Plugin, PluginHost } from "../../src/web/plugin-api.ts";
-import { createPluginHost, type HostOptions } from "../../src/web/pluginHost.ts";
+import { createPluginHost, type Host, type HostOptions } from "../../src/web/pluginHost.ts";
 
 const View = () => null;
 
@@ -126,7 +126,7 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, error: null });
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
   });
 
   it("leaves out the whole of a plugin that can't start, and says why", () => {
@@ -301,5 +301,50 @@ describe("plugin host", () => {
     const heard = told;
     host.setEnabled("palette", true);
     expect(told).toBe(heard);
+  });
+});
+
+describe("what the host says of each plugin", () => {
+  const stateOf = (host: Host, id: string) => host.contributions().plugins.find((p) => p.id === id)!;
+
+  it("passes on a plugin's description, icon and pictures, and says nothing for one that has none", () => {
+    const shown: Plugin = { ...notes, description: "Notes, listed.", icon: "list", screenshots: [{ src: "/shots/notes.png", alt: "The list of notes" }] };
+    const { host } = hostWith([shown, palette]);
+
+    expect(stateOf(host, "notes")).toMatchObject({ description: "Notes, listed.", icon: "list", screenshots: [{ src: "/shots/notes.png", alt: "The list of notes" }] });
+    expect(stateOf(host, "palette")).toMatchObject({ description: null, icon: null, screenshots: [] });
+  });
+
+  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot and its embeds", () => {
+    const { host } = hostWith([notes, palette]);
+
+    expect(stateOf(host, "notes").adds).toEqual({
+      commands: [
+        { id: "note.new", title: "New note" },
+        { id: "go.todos", title: "Go to Todos" },
+      ],
+      views: [
+        { slot: "column", id: "list", label: null },
+        { slot: "page", id: "todos", label: "Todos" },
+      ],
+      embeds: [{ name: "timer", title: "Timer" }],
+    });
+    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [] });
+  });
+
+  it("remembers the whole of what a plugin added once it is turned off, and knows nothing of one that hasn't been on", () => {
+    const quiet: Plugin = { id: "quiet", name: "Quiet", activate: (host) => void host.commands.register({ id: "quiet.go", title: "Go quietly", run: () => {} }) };
+    const { host, ids } = hostWith([notes, quiet], { disabled: { read: () => ["quiet"], write: () => {} } });
+    // A page that is listening reads the contributions each time one is taken out, as the Plugins page does.
+    host.subscribe(() => void host.contributions());
+    const whole = stateOf(host, "notes").adds;
+    expect(stateOf(host, "quiet").adds).toBeNull();
+
+    host.setEnabled("notes", false);
+    host.setEnabled("quiet", true);
+
+    expect(ids()).toEqual(["quiet.go", "plugins.enable.notes", "plugins.disable.quiet"]);
+    expect(stateOf(host, "notes")).toMatchObject({ enabled: false, adds: whole });
+    expect(stateOf(host, "quiet").adds?.commands).toEqual([{ id: "quiet.go", title: "Go quietly" }]);
   });
 });

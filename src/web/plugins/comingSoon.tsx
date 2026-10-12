@@ -14,6 +14,8 @@ const PAGES: readonly { id: string; label: string; icon: IconName; nav: "primary
 export const comingSoon: Plugin = {
   id: "coming-soon",
   name: "Pages to come",
+  description: "Pages that are not built yet, each naming the issue that builds it.",
+  icon: "calendar",
   activate(host) {
     for (const { issue, ...page } of PAGES) {
       host.views.register("page", {

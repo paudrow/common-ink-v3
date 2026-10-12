@@ -6,7 +6,7 @@ The plugin API is one module, `src/web/plugin-api.ts`. Its doc comments are the 
 
 ## A plugin
 
-A plugin is a value with an id, a name, and an `activate` function. The host calls `activate` when the plugin is turned on and hands it a `PluginHost`. Everything the plugin registers is taken back out when it is turned off. A plugin that starts anything else, such as a timer, returns a function from `activate` that stops it.
+A plugin is a value with an id, a name, an `activate` function, and optionally what it says of itself. The host calls `activate` when the plugin is turned on and hands it a `PluginHost`. Everything the plugin registers is taken back out when it is turned off. A plugin that starts anything else, such as a timer, returns a function from `activate` that stops it.
 
 ```tsx
 import type { Plugin } from "../plugin-api.ts";
@@ -14,6 +14,8 @@ import type { Plugin } from "../plugin-api.ts";
 export const wordCount: Plugin = {
   id: "word-count",
   name: "Word count",
+  description: "The open note's word count, in the inspector.",
+  icon: "text",
   activate(host) {
     host.commands.register({
       id: "wordCount.open",
@@ -49,7 +51,7 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 ## What a plugin is handed
 
 - `host.commands` registers commands, lists every command, and runs one by id. A command's `keys` are its default chords.
-- `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `rail`, `editor`, `folder`, `inspector`, `page`, and `overlay`. A page gets a `go.<id>` command.
+- `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `rail`, `editor`, `folder`, `inspector`, `page`, and `overlay`. A page gets a `go.<id>` command. A page is also shown at every address under its path, so the Plugins page at `/plugins` is the page at `/plugins/tabs` too, and reads which from `app.path`. A page registered at exactly that address wins. A page is opened in the editor area as a note is, which with Tabs and splits on is in a tab, and it does nothing for that: see [Pages are tabs](#pages-are-tabs).
 - `host.embeds` registers an embed, drawn wherever a note says `::name{config}`.
 - `host.app()` is the app as it is now: the open note, the notes and folders, and what can be done about them. A view is handed the same thing as its `app` prop.
 - `host.perform(op)` performs a workspace operation as the member. The operations are the ones in `src/core/protocol.ts`.
@@ -57,13 +59,31 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 - `host.agents` lists, connects, and disconnects the member's agents.
 - What the editor area has in front is `app.opened`: `{ kind: "note", id }`, or `{ kind: "folder", id }` for a folder's list of notes, where `id` is a folder's id, or `ALL_NOTES` for every note. `app.noteId` and `app.note` are the note's when a note is in front and null otherwise. `app.folderId` is the folder in front: the one whose list is open, or the folder of the note in front, which is what the folder tree marks. `app.openFolder(id, { preview })` opens a folder's list (a preview unless said, which gives way to the next folder previewed and never to a note), `app.folderPath(id)` is its address (`/folder/<id>`, `/folder/all`), and `folderTitle(folders, id)` is what it is called. `app.openNote(id, { background: true })` opens a note in a tab of its own without leaving what is in front. `app.createNote(folderId?)` puts the note in that folder when it is one, otherwise in the folder in front, otherwise in Unsorted.
 - **The `folder` slot** draws a folder's list of notes wherever a folder is open: in a tab when the tabs plugin is on, alone at the folder's address when it is off. It is handed `folderId`, which may name no folder the member can see, and `readNote(noteId)`, which draws a note's text to be read and not changed, as its editor draws it, at its full height. The last view registered is used. With none, the core lists the folder's notes by title. A page that lists notes the same way draws them with `app.readNote(noteId)`, which is the same function: the Search page is the note list's `NoteFinder` (`plugins/noteList.tsx`) of every note, with its view kept in the address where a folder's tab keeps its own for as long as the app is open. With no `editor` view, `/` lists every note, and the command `notes.all` opens that list from anywhere, so there is a way to a note whatever is turned off. No page can be registered at `/folder` or under it.
-- **The `editor` slot** is asked to open what the app would otherwise go to: `open(tab, { preview, background })` with a note or a folder's list, and it calls `app.show(tab)` with what ends up in front. It is handed `renderNote` and `renderFolder` to draw what its tabs hold.
+- **The `editor` slot** is asked to open what the app would otherwise go to: `open(tab, { preview, background })` with a note, a folder's list or a page, and it calls `app.show(tab)` with what ends up in front. It is handed `renderNote`, `renderFolder` and `renderPage` to draw what its tabs hold, `empty` to draw where nothing is open (a line saying to pick a note), and `controls`, the buttons that act on the window and on no one note (the inspector and writing mode), which it puts once at the top right corner of the editor area. They were in a note's bar, where they read as the note's and were missing whenever no note was in front.
+- **Pages are tabs.** <a id="pages-are-tabs"></a>`Opened`, what the editor area has in front and what `app.opened`, `app.show` and the `editor` slot's `open` speak of, has a third kind: `{ kind: "page", id, path }`, where `id` is the page's id and `path` the address it is at. The core makes it from the address, so `app.go("/search")`, a link, the `go.<id>` command and Back all open or turn to the page's tab, and no plugin registers anything more than its `page` view. A page is one tab wherever under its path it is: going from `/plugins` to `/plugins/tabs` moves that tab and opens no other, and the tab keeps the address, so it comes back to it when it is turned to again or the app is reloaded. Two pages can be open side by side, so a page is drawn with an `app` whose `path` and `pageState` are its own and whose `opened` is itself, with `noteId`, `note` and `folderId` null as they were when a page had the editor area to itself. `host.app()` is still the app as a whole, at the address of the tab in front. A page is drawn only while its tab is showing, so what it must keep while another tab is in front belongs in its address. One page is not a tab: a page registered `transient: true` only leads somewhere else, so it is drawn in place of the editor area for that moment and leaves no tab behind.
+- **`ResizeHandle`** from the plugin API is the edge between two parts of the window that is dragged to give one more room: a focusable `role="separator"` with the arrow keys, Home, End, Enter and a double-click to put it back. The core uses it for the sidebar's and the inspector's inner edges, whose widths it keeps in the browser for each member, and Tabs and splits for the edge between two groups. The `column` view and the inspector's tabs are given their width and do nothing for it.
 
 A plugin does not call `fetch` or read `localStorage`. The host is where a third-party plugin's permissions will be checked, so a plugin that goes around it can't be trusted later. Settings are not in the API.
 
+## What a plugin says of itself
+
+Three optional fields are what the Plugins page shows of a plugin. Every built-in has the first two, which `test/core/plugin-declarations.test.ts` checks.
+
+- `description`: one line on what it is for, said beside its name in the list and at the top of its details. It names no other plugin, so a row is found by its plugin's name alone.
+- `icon`: one of the app's own icons, by name (`IconName`). Without one the plugin stands under the picture every plugin has.
+- `screenshots`: pictures of it at work, shown in its details: each `{ src, dark?, alt }`. `src` is a file the app serves, `dark` is the same picture taken in the dark theme and is shown in its place there, and `alt` says what the picture shows and is its caption.
+
+Nothing else on the Plugins page is written by hand. A plugin's details list what it adds from what it registered: its commands, its views by slot and its embeds (`PluginState.adds` in `src/web/pluginHost.ts`). A plugin that is off is listed with what it added when it was last on, and one that hasn't been on since the app loaded says so, since nothing but running `activate` could tell.
+
+## Keybindings
+
+A command's default `keys` may be a sequence: chords pressed one after another, written with spaces between them, such as `g g` or `mod+k l`. The keys that begin a sequence are taken only while a command that can run now goes on from them, so `g` is nobody's key in a text field. A key that doesn't go on from what was begun runs what it runs by itself, and otherwise goes nowhere. A default may also be a bare key such as `j`: it is never run while something is being typed in. Don't give one command a key that begins another's sequence: the shorter keys run on their last press and the longer never do.
+
 ## Turning plugins off
 
-A member turns a plugin off from the palette (`Disable plugin: Tabs and splits`) or on the Plugins page, which is in the workspace menu and always at `/plugins`. The page belongs to the core, so it is there when the palette and the sidebar are off. The choice is kept in this browser per member and workspace until settings hold it.
+A member turns a plugin off on the Plugins page, in the list or in the plugin's details, or from the palette (`Disable plugin: Tabs and splits`). The choice is kept in this browser per member and workspace until settings hold it.
+
+The Plugins page is under More in the sidebar. It is always at `/plugins` and has a `go.` command. It belongs to the core, so it is there by its address when the palette and the sidebar are off. A plugin's details are at `/plugins/<plugin id>`.
 
 With every plugin off, the core still opens the note its address names, takes typing, and saves.
 

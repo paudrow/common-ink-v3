@@ -17,6 +17,7 @@ export type * from "../core/protocol.ts";
 export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS } from "../core/protocol.ts";
 
 export { useDismiss } from "./dismiss.ts";
+export { ResizeHandle } from "./resize.tsx";
 export { Icon, type IconName } from "./icons.tsx";
 export { ago, useNow } from "./time.ts";
 
@@ -30,16 +31,24 @@ export const folderTitle = (folders: Folders, folderId: string): string | null =
 export const ALL_NOTES = "all";
 
 /**
- * What the editor area has in front, and what an address can name there: a note, or a folder's list
- * of notes. A folder's `id` is a folder's id, or {@link ALL_NOTES}.
+ * What the editor area has in front, and what an address can name there: a note, a folder's list
+ * of notes, or a page. A folder's `id` is a folder's id, or {@link ALL_NOTES}.
+ * A page's `id` is the id it was registered with, and `path` is the address it is at:
+ * `/plugins/tabs` for the page at `/plugins`. Wherever under its path a page is, it is the same page.
  */
-export type Opened = { kind: "note"; id: string } | { kind: "folder"; id: string };
+export type Opened = { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "page"; id: string; path: string };
 
 export interface Plugin {
   /** What the plugin is known by in storage and in what it contributes. It never changes. */
   id: string;
   /** What a person sees it called. */
   name: string;
+  /** One line on what it is for, said beside its name on the Plugins page. */
+  description?: string;
+  /** What stands for it on the Plugins page. Without one, the picture every plugin has. */
+  icon?: IconName;
+  /** Pictures of it at work, shown in its details on the Plugins page. */
+  screenshots?: readonly Screenshot[];
   /**
    * Called when the plugin is turned on. Everything it registers here is taken back out when it is
    * turned off. A plugin that starts anything else, such as a timer or a listener, returns a
@@ -47,6 +56,15 @@ export interface Plugin {
    */
   activate(host: PluginHost): void | Dispose;
 }
+
+/** A picture of a plugin at work. `dark` is the same picture taken in the dark theme, shown in its place there. */
+export interface Screenshot {
+  src: string;
+  dark?: string;
+  /** What the picture shows, for whoever can't see it. It is also its caption. */
+  alt: string;
+}
+
 
 /** Takes one contribution back out. */
 export type Dispose = () => void;
@@ -122,13 +140,13 @@ export interface Slots {
   section: { id: string; component: View };
   /** An icon, or a few, in the left rail of writing mode. */
   rail: { id: string; component: View };
-  /** What fills the editor area when a note, a folder's list, or nothing is open. The last one registered is used; with none, the app shows what the address names alone. */
+  /** What fills the editor area when a note, a folder's list, a page, or nothing is open. The last one registered is used; with none, the app shows what the address names alone. */
   editor: {
     id: string;
     component: ComponentType<EditorProps>;
     /**
-     * Asked to open a note or a folder's list, in place of the app going to it. Call `app.show` with
-     * what ends up in front. With `background` it is opened without being put in front.
+     * Asked to open a note, a folder's list or a page, in place of the app going to it. Call
+     * `app.show` with what ends up in front. With `background` it is opened without being put in front.
      */
     open?: (tab: Opened, options: { preview: boolean; background?: boolean }) => void;
   };
@@ -147,11 +165,18 @@ export interface Slots {
     badge?: (app: App) => string | null;
   };
   /**
-   * A page with its own address, shown in place of the editor. `nav` says where its link goes:
+   * A page with its own address, shown in the editor area as a note is: in a tab, where the editor
+   * area has tabs. A page does nothing for that. It is drawn with an `app` whose `path` and
+   * `pageState` are its own, so two pages open side by side each read their own address, and
+   * `app.go` to an address under its path moves that page and no other. `nav` says where its link goes:
    * with the main links of the sidebar, under More, or in the workspace menu. Each page gets a
-   * `go.<id>` command.
+   * `go.<id>` command. A page is also shown at every address under its
+   * path, such as `/plugins/tabs` for the page at `/plugins`, unless another page is at exactly that address:
+   * it reads the rest from `app.path`. One that is `transient` only leads somewhere else
+   * with `app.show`: it is never a tab, and is drawn in place of the editor area for the moment it
+   * takes to find where to go.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; component: View };
+  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; transient?: boolean; component: View };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it. */
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void }> };
 }
@@ -167,13 +192,19 @@ export interface FolderProps extends ViewProps {
 }
 
 export interface EditorProps extends ViewProps {
-  /**
-   * Draws the editor for a note. `onEdit` is called on each change typed or pasted. `corner` is
-   * for the editor at the right edge, which carries the buttons for the inspector and writing mode.
-   */
-  renderNote: (noteId: string, options?: { onEdit?: () => void; corner?: boolean }) => ReactNode;
+  /** Draws the editor for a note. `onEdit` is called on each change typed or pasted. */
+  renderNote: (noteId: string, options?: { onEdit?: () => void }) => ReactNode;
   /** Draws a folder's list of notes, with whatever is in the `folder` slot. */
   renderFolder: (folderId: string) => ReactNode;
+  /** Draws a page at the address it is at, which is {@link Opened}'s `path`. One no plugin has registered any more is drawn as nothing being there. */
+  renderPage: (pageId: string, path: string) => ReactNode;
+  /** What to show where nothing is open: a line saying to pick a note. */
+  empty: ReactNode;
+  /**
+   * The buttons that act on the window and on no one note: the inspector and writing mode. Put them
+   * once, at the top right corner of the editor area, where they stay whatever is open beneath.
+   */
+  controls: ReactNode;
 }
 
 /**
@@ -215,7 +246,7 @@ export interface App {
   path: string;
   /** What `go` was handed for this address, if anything. It is handed over once: Back or a reload finds nothing. */
   pageState: unknown;
-  /** What the address names in the editor area: the note or the folder's list in front. Null on a page, and when nothing is open. */
+  /** What the address names in the editor area: the note, the folder's list or the page in front. Null when nothing is open, and at an address nothing is at. */
   opened: Opened | null;
   /** The note the address names. Null on a page, on a folder's list, and when nothing is open. */
   noteId: string | null;
@@ -241,8 +272,8 @@ export interface App {
   /** The overlay that is open. */
   overlay: string | null;
 
-  /** Goes to an address. `state` is for the page there, which reads it as `pageState`. */
-  go(path: string, options?: { state?: unknown }): void;
+  /** Goes to an address. `state` is for the page there, which reads it as `pageState`. `replace` keeps Back from retracing the step. */
+  go(path: string, options?: { state?: unknown; replace?: boolean }): void;
   /** Where a note lives, such as `/note/plan-3k2j5h8d9f0a`. */
   notePath(noteId: string): string;
   /**
@@ -255,7 +286,7 @@ export interface App {
   openFolder(folderId: string, options?: { preview?: boolean }): void;
   /** Where a folder's list lives, such as `/folder/all`. */
   folderPath(folderId: string): string;
-  /** For the editor area: puts a note or a folder's list at the app's address, or nothing. `replace` keeps Back from retracing the step. */
+  /** For the editor area: puts a note, a folder's list or a page at the app's address, or nothing. `replace` keeps Back from retracing the step. */
   show(tab: Opened | null, options?: { replace?: boolean }): void;
   /**
    * Creates a note and opens it. It goes in `folderId` when that is a folder; otherwise in the

@@ -6,6 +6,8 @@ const SHOW = "commands.show";
 export const commandPalette: Plugin = {
   id: "command-palette",
   name: "Command palette",
+  description: "Every command in one list, found by typing and run from the keyboard.",
+  icon: "command",
   activate(host) {
     host.commands.register({ id: SHOW, title: "Show all commands", keys: ["mod+shift+p"], run: () => host.app().toggleOverlay("commands") });
     host.views.register("overlay", {

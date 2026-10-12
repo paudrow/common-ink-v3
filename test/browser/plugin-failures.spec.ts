@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { listedNote, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { openPlugins } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 
@@ -46,8 +47,7 @@ test("a plugin whose views and embed throw is left out, the note keeps its typin
   await expect(page.getByRole("tabpanel")).toBeEmpty();
   await expect(text(page)).toContainText("typed beside a broken plugin");
 
-  await page.getByRole("button", { name: /Ada/ }).click();
-  await page.getByRole("menuitem", { name: "Plugins" }).click();
+  await openPlugins(page);
   const failed = page.getByRole("listitem").filter({ hasText: "Broken fixture" }).getByRole("alert");
   for (const what of ["The column broke", "The section broke", "The tab broke", "The editor area broke", "The embed broke"]) await expect(failed).toContainText(what);
   await page.getByRole("checkbox", { name: "Broken fixture" }).uncheck();

@@ -167,6 +167,7 @@ function FolderTree({ host, tree, role, total, selectedId, onOpen, onChanged, on
               <button
                 type="button"
                 className="chevron"
+                data-row-toggle
                 data-open={open || undefined}
                 tabIndex={-1}
                 aria-label={`${open ? "Collapse" : "Expand"} ${folder.name}`}
@@ -287,6 +288,8 @@ function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit:
 export const folders: Plugin = {
   id: "folders",
   name: "Folders",
+  description: "The folder tree in the sidebar, where notes are filed, moved and found.",
+  icon: "folders",
   activate(host) {
     host.views.register("section", {
       id: "folders",

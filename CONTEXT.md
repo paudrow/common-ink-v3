@@ -88,7 +88,7 @@ A list of notes and uploads a member can see, matched on title or filename. Arch
 A note, a folder's list or a page open in the editor. Each has at most one tab.
 
 **Page tab**:
-A tab that holds a page, such as History. A page already open is turned to and not opened twice. It is a preview like any other: a note previewed from it takes its place, and Back returns to it.
+A tab that holds a page. It is one tab wherever under the page's address it is, and it keeps the address it is at. A page already open is turned to and not opened twice. It is a preview like any other: a note previewed from it takes its place, and Back returns to it.
 
 **Folder tab**:
 A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
@@ -164,7 +164,7 @@ A name attached to one revision in history. A revision has at most one, and a no
 ## Configuration
 
 **Plugin**:
-A unit of functionality that adds commands, views, embeds, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
+A unit of functionality that adds commands, views, embeds, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves on the Plugins page, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
 _Avoid_: Extension, add-on
 
 **Built-in plugin**:
@@ -181,7 +181,7 @@ Something a plugin draws in a slot of the app: a column, a section of the sideba
 _Avoid_: Panel, widget
 
 **Page**:
-A view with its own address, shown in place of the editor, such as History or Agents.
+A view with its own address, such as History or Agents, opened in a tab of the editor as a note is.
 _Avoid_: Mode, screen
 
 **Embed**:

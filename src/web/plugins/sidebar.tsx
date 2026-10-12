@@ -4,17 +4,19 @@ import { Icon, useDismiss, type PageInfo, type Plugin, type Role, type ViewProps
 const ROLE_LABEL: Record<Role, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
 
 function Sidebar({ app }: ViewProps) {
-  const [more, setMore] = useState(false);
-  const links = (nav: PageInfo["nav"]) => app.pages.filter((p) => p.nav === nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled />);
+  const under = (nav: PageInfo["nav"]) => app.pages.filter((p) => p.nav === nav);
+  // It starts open on a page that is under it, so the page the member is on is marked in the list.
+  const [more, setMore] = useState(() => under("more").some((p) => p.path === app.path || app.path.startsWith(`${p.path}/`)));
+  const links = (nav: PageInfo["nav"]) => under(nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled />);
   return (
     <aside className="sidebar" aria-label="Sidebar">
       <WorkspaceMenu app={app} />
       <NewNote app={app} />
       <nav aria-label="Modes" className="modes">
         {links("primary")}
-        <button type="button" className="mode" aria-expanded={more} onClick={() => setMore(!more)}>
-          <Icon name="more" />
-          <span>More</span>
+        <button type="button" className="mode more-toggle" aria-expanded={more} onClick={() => setMore(!more)}>
+          <Icon name="chevron" />
+          <span>{more ? "Less" : "More"}</span>
         </button>
         {more && links("more")}
       </nav>
@@ -50,7 +52,7 @@ function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelle
     <a
       href={page.path}
       className="mode"
-      aria-current={page.path === app.path ? "page" : undefined}
+      aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) ? "page" : undefined}
       aria-label={labelled ? undefined : page.label}
       title={labelled ? undefined : page.label}
       onClick={(e) => {
@@ -126,6 +128,8 @@ function WorkspaceMenu({ app }: ViewProps) {
 export const sidebar: Plugin = {
   id: "sidebar",
   name: "Sidebar",
+  description: "The column on the left: the workspace menu, the links to pages, and what other plugins put under them.",
+  icon: "sidebar",
   activate(host) {
     host.views.register("column", { id: "sidebar", component: Sidebar });
     host.views.register("rail", {

@@ -1,5 +1,5 @@
 import { chordFor, chordLabel } from "./keybindings.ts";
-import type { App, Command, CommandInfo, Dispose, Embed, Plugin, PluginHost, Slots } from "./plugin-api.ts";
+import type { App, Command, CommandInfo, Dispose, Embed, IconName, Plugin, PluginHost, Screenshot, Slots } from "./plugin-api.ts";
 
 export interface PluginState {
   id: string;
@@ -9,6 +9,18 @@ export interface PluginState {
   required: boolean;
   /** Why the plugin isn't running though it is turned on, or what of it failed while being drawn. */
   error: string | null;
+  description: string | null;
+  icon: IconName | null;
+  screenshots: readonly Screenshot[];
+  /** What it has registered: as it stands while the plugin is on, and as it last stood once it is off. Null for one that hasn't been on since the app loaded. */
+  adds: Added | null;
+}
+
+/** What one plugin has registered, read from the host's own tables and never from what the plugin says of itself. */
+export interface Added {
+  commands: readonly { id: string; title: string }[];
+  views: readonly { slot: keyof Slots; id: string; label: string | null }[];
+  embeds: readonly { name: string; title: string }[];
 }
 
 /** Everything the plugins that are on have added, in the order of the plugins and then of their registering. */
@@ -67,6 +79,8 @@ export function createPluginHost({ plugins, required = [], disabled, mac, provid
   /** What each running plugin registered, to take back out when it is turned off. */
   const running = new Map<string, Set<Dispose>>();
   const errors = new Map<string, string>();
+  /** What each plugin had registered when contributions were last read with it on. */
+  const added = new Map<string, Added>();
   const off = new Set(disabled.read().filter((id) => !required.includes(id)));
   const listeners = new Set<() => void>();
   /** Which plugin registered a view or an embed, and the reach that plugin was given. */
@@ -156,8 +170,10 @@ export function createPluginHost({ plugins, required = [], disabled, mac, provid
   }
 
   function stop(plugin: Plugin) {
-    for (const dispose of running.get(plugin.id) ?? []) dispose();
+    const mine = running.get(plugin.id) ?? [];
+    // It stops running before its contributions go one by one, so what it added is remembered whole and not as it stood halfway out.
     running.delete(plugin.id);
+    for (const dispose of mine) dispose();
     errors.delete(plugin.id);
   }
 
@@ -207,9 +223,22 @@ export function createPluginHost({ plugins, required = [], disabled, mac, provid
     changed();
   }
 
+  /** What the plugin at one place has in the tables now. */
+  function addedBy(place: number): Added {
+    const mine = <T>(owned: Iterable<Owned<T>>) => inOrder([...owned].filter((o) => o.plugin === place));
+    return {
+      commands: mine(commands.values()).map(({ id, title }) => ({ id, title })),
+      views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: "label" in view ? view.label : null }))),
+      embeds: mine(embeds.values()).map(({ name, title }) => ({ name, title })),
+    };
+  }
+
   function contributions(): Contributions {
     startAll();
     if (snapshot) return snapshot;
+    plugins.forEach((p, place) => {
+      if (running.has(p.id)) added.set(p.id, addedBy(place));
+    });
     const toggles = plugins
       .filter((p) => !required.includes(p.id))
       .map((p): Command => {
@@ -224,7 +253,17 @@ export function createPluginHost({ plugins, required = [], disabled, mac, provid
       keybindings,
       views: Object.fromEntries(SLOTS.map((slot) => [slot, inOrder(views.get(slot)!.values())])) as unknown as Contributions["views"],
       embeds: inOrder(embeds.values()),
-      plugins: plugins.map((p) => ({ id: p.id, name: p.name, enabled: !off.has(p.id), required: required.includes(p.id), error: errors.get(p.id) ?? null })),
+      plugins: plugins.map((p) => ({
+        id: p.id,
+        name: p.name,
+        enabled: !off.has(p.id),
+        required: required.includes(p.id),
+        error: errors.get(p.id) ?? null,
+        description: p.description ?? null,
+        icon: p.icon ?? null,
+        screenshots: p.screenshots ?? [],
+        adds: added.get(p.id) ?? null,
+      })),
     });
   }
 
