@@ -78,11 +78,13 @@ test("vim's mode bar is at the foot of the note's pane, and nothing above it mov
   await steady("in visual mode");
   await page.keyboard.press("Escape");
 
-  // Writing mode: still the foot of the pane.
-  await run(page, "Toggle writing mode");
+  // In focus the pane is the window, and the bar is at the foot of both.
+  await run(page, "Toggle focus");
+  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
   await editor(page).click();
-  const writing = { pane: await box(page, ".note"), bar: await box(page, ".cm-vim-panel") };
-  expect(Math.abs(writing.bar.y + writing.bar.height - (writing.pane.y + writing.pane.height))).toBeLessThanOrEqual(1);
+  const height = page.viewportSize()!.height;
+  await expect.poll(async () => { const b = await box(page, ".cm-vim-panel"); return Math.abs(b.y + b.height - height); }, "the bar's bottom is the window's").toBeLessThanOrEqual(1);
+  await expect.poll(async () => { const b = await box(page, ".cm-vim-panel"); const pane = await box(page, ".note"); return Math.abs(b.y + b.height - (pane.y + pane.height)); }, "the bar's bottom is the pane's").toBeLessThanOrEqual(1);
 });
 
 test("a long note scrolls under the mode bar, which stays at the foot of the pane", async ({ page }) => {
@@ -134,6 +136,35 @@ for (const side of ["right", "down"] as const) {
     await expect(statusLine(page, 1)).toHaveText("--INSERT--");
     await expect(statusLine(page, 0)).toHaveText("--NORMAL--");
     await expect(group(page, 2)).toBeVisible();
+
+    // Focus on one side: its bar is the only one seen, at the window's foot, and vim's keys are that editor's.
+    await page.keyboard.press("Escape");
+    await expect(statusLine(page, 1)).toHaveText("--NORMAL--");
+    await page.keyboard.press("ControlOrMeta+.");
+    await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
+    const seen = page.locator(".cm-vim-panel").filter({ visible: true });
+    await expect(seen).toHaveCount(1);
+    await expect(seen).toHaveText("--NORMAL--");
+    const height = page.viewportSize()!.height;
+    await expect.poll(async () => { const b = (await seen.boundingBox())!; return Math.abs(b.y + b.height - height); }, "in focus the bar's bottom is the window's").toBeLessThanOrEqual(1);
+    await keys(page, "g", "g", "x");
+    await expect(page.getByRole("textbox", { name: "Note text" })).toHaveCount(1);
+    await expect(editor(page).locator(".cm-line").first()).toHaveText(/^ Right$/);
+    await keys(page, ":");
+    await expect(seen.locator("input")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(editor(page)).toBeFocused();
+
+    // Leaving puts each bar back at its own foot.
+    await page.keyboard.press("ControlOrMeta+.");
+    await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
+    await expect(page.locator(".cm-vim-panel").filter({ visible: true })).toHaveCount(2);
+    await expect(editor(page, 0).locator(".cm-line").first()).toHaveText("# Left");
+    await expect(editor(page, 1).locator(".cm-line").first()).toHaveText(/^ Right$/);
+    for (const n of [0, 1]) {
+      await expect.poll(async () => { const b = await box(page, ".cm-vim-panel", n); const pane = await box(page, ".note", n); return Math.abs(b.y + b.height - (pane.y + pane.height)); }, `pane ${n}: out of focus the bar's bottom is the pane's`).toBeLessThanOrEqual(1);
+      if (side === "down") await expect.poll(async () => (await box(page, '[aria-label^="Editor group"]', n)).height, `pane ${n}: its side is about half the window again`).toBeLessThan(main.height * 0.6);
+    }
   });
 }
 
@@ -173,7 +204,7 @@ test("with the setting on, j and k move by the rows on screen and dj still takes
   await expect.poll(cursorTop, "j goes to the second row of the wrapped line").toBeGreaterThan(first + 10);
   await expect(page.locator(".cm-fat-cursor")).not.toHaveText("");
   const second = await cursorTop();
-  expect((await placeOf(page, "A long line")).height).toBeGreaterThan(second - first + 10);
+  await expect.poll(async () => (await placeOf(page, "A long line")).height).toBeGreaterThan(second - first + 10);
   await page.keyboard.press("k");
   await expect.poll(cursorTop, "k goes back up a row").toBe(first);
 

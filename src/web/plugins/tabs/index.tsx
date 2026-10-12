@@ -34,6 +34,8 @@ export const tabs: Plugin = {
      */
     const dispatch = (action: EditorAction) => {
       const next = editorReducer(layout, action);
+      // A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
+      if ((action.type === "split" || action.type === "send") && next !== layout) host.app().setFocus(false);
       if (next !== layout) {
         layout = next;
         host.storage.set("layout", layout);
@@ -81,6 +83,15 @@ export const tabs: Plugin = {
           render={(group, tab) => (tab.kind === "folder" ? renderFolder(tab.id) : tab.kind === "page" ? renderPage(tab.id, tab.path) : renderNote(tab.id, { onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }) }))}
           empty={empty}
           controls={controls}
+          focusMode={{
+            on: app.focus,
+            keys: host.commands.list().find((c) => c.id === "view.toggleFocus")?.shortcut,
+            // Asked for on a group, focus turns to that group first, so what fills the window is its tab in front.
+            toggle: (groupId) => {
+              if (groupId !== layout.focusedGroupId) dispatch({ type: "focus", groupId });
+              app.setFocus(!app.focus);
+            },
+          }}
         />
       );
     }

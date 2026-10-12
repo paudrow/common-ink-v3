@@ -22,7 +22,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       workspace: { id: "w1", name: "Acme", role: "editor" },
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
-      agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
+      agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,

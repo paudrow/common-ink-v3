@@ -171,8 +171,8 @@ test("a plugin that names a command or a page as the app's own are named is left
 test("a key that types is a keybinding only where nothing is being typed, so Enter in a note stays Enter", async ({ page }) => {
   const note = await openSettings(page);
 
-  await typeJson(page, '{"keybindings.note.new": ["enter"], "keybindings.view.toggleWritingMode": ["backspace"], "keybindings.view.toggleInspector": ["f6"]}');
-  await expect.poll(() => stored(page)).toEqual({ "keybindings.note.new": ["enter"], "keybindings.view.toggleWritingMode": ["backspace"], "keybindings.view.toggleInspector": ["f6"] });
+  await typeJson(page, '{"keybindings.note.new": ["enter"], "keybindings.view.toggleFocus": ["backspace"], "keybindings.view.toggleInspector": ["f6"]}');
+  await expect.poll(() => stored(page)).toEqual({ "keybindings.note.new": ["enter"], "keybindings.view.toggleFocus": ["backspace"], "keybindings.view.toggleInspector": ["f6"] });
   await expect(problems(page)).toHaveCount(0);
 
   await page.goto(`/note/${note.id}`);
@@ -183,7 +183,7 @@ test("a key that types is a keybinding only where nothing is being typed, so Ent
   await page.keyboard.press("Backspace");
   await expect(text(page)).toContainText("The first lines of Alpha.x");
   await expect(page).toHaveURL(new RegExp(`${note.id}$`));
-  await expect(page.locator(".app")).not.toHaveAttribute("data-writing");
+  await expect(page.locator(".app")).not.toHaveAttribute("data-focus-mode");
   expect((await perform(page, { type: "note.list" })).map((n) => n.title)).toEqual(["Alpha"]);
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
@@ -194,9 +194,9 @@ test("a key that types is a keybinding only where nothing is being typed, so Ent
   // Out of the note's text the same keys are the commands'.
   await page.evaluate(() => (document.activeElement as HTMLElement).blur());
   await page.keyboard.press("Backspace");
-  await expect(page.locator(".app")).toHaveAttribute("data-writing", "true");
+  await expect(page.locator(".app")).toHaveAttribute("data-focus-mode", "true");
   await page.keyboard.press("Backspace");
-  await expect(page.locator(".app")).not.toHaveAttribute("data-writing");
+  await expect(page.locator(".app")).not.toHaveAttribute("data-focus-mode");
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await perform(page, { type: "note.list" })).length).toBe(2);
 });
