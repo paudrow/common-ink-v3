@@ -25,6 +25,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   label ID --revision N [--name NAME] name a revision, or take its name away without --name
   revert ID --revision N              put a note back to a revision, as a new change
   revert ID --changes N,N             revert chosen changes, as one new change; revert a revert to have its changes again
+  revert ID ... --preview             what either revert would do, and the later changes to the same lines, with nothing written
   undo ID                             take back your latest change to a note
   redo ID                             revert your latest undo, so what it undid stands again
 
@@ -34,12 +35,16 @@ Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from C
 
 export class UsageError extends Error {}
 
+/** Flags that take no value. */
+const SWITCHES = new Set(["--preview"]);
+
 function parse(argv: string[]): { command: string; positional: string[]; flags: Map<string, string> } {
   const flags = new Map<string, string>();
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg.startsWith("--")) {
+    if (SWITCHES.has(arg)) flags.set(arg.slice(2), "");
+    else if (arg.startsWith("--")) {
       const value = argv[++i];
       if (value === undefined) throw new UsageError(`${arg} needs a value`);
       flags.set(arg.slice(2), value);
@@ -133,6 +138,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "revert":
         if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to revert those");
+        if (flags.has("preview")) {
+          tool = "preview_revert";
+          args = flags.has("revision") ? { id: needId(), to: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+          break;
+        }
         tool = flags.has("revision") ? "revert_note" : "revert_changes";
         args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
         break;

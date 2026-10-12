@@ -133,6 +133,7 @@ describe("MCP protocol", () => {
       "label_revision",
       "revert_note",
       "revert_changes",
+      "preview_revert",
       "undo",
       "redo",
     ]);

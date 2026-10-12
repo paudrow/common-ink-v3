@@ -1626,6 +1626,86 @@ button.link:hover {
   align-self: flex-start;
 }
 
+.change-list-head {
+  display: flex;
+}
+
+/* The tick has a column of its own, so a change that can't be ticked lines up with one that can. */
+.change-list.pickable .change {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 8px;
+}
+
+.change-list.pickable .change > * {
+  grid-column: 2;
+}
+
+.change-list.pickable .change > .change-pick {
+  grid-row: 1;
+  grid-column: 1;
+  align-self: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.revert-dialog {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.revert-dialog::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.revert-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  font-size: 13px;
+}
+
+.revert-dialog h2,
+.revert-dialog p {
+  margin: 0;
+}
+
+.revert-dialog h2 {
+  font-size: 15px;
+}
+
+.revert-dialog .diff {
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.revert-dialog button.link {
+  text-decoration: underline;
+}
+
+.revert-overlap {
+  padding: 6px 8px;
+  border-left: 3px solid var(--danger);
+  border-radius: 4px;
+  background: var(--removed-soft);
+}
+
+.revert-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .change-author {
   min-width: 0;
   overflow: hidden;

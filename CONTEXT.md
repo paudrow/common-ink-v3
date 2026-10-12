@@ -162,6 +162,12 @@ _Avoid_: Log, timeline, versions
 A new change that takes the effect of earlier changes out of a note and keeps every other change. Reverting a note to a revision reverts every change after it. A revert is a change like any other, so reverting it has the changes it reverted stand again, and that is the only way to have them again.
 _Avoid_: Restore, rollback, put back, reapply, take back out
 
+**Revert preview**:
+What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Anyone who can read the note's history can ask for one.
+
+**Overlap**:
+A later change that still stands and edited a line a revert changes. The revert keeps what that change did, on a line it otherwise returns to how it was, so a preview names each one. A line added or removed whole next to such a line is not an overlap.
+
 **Undo**:
 Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
 
