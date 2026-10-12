@@ -960,14 +960,17 @@ button.link:hover {
   scrollbar-width: none;
 }
 
-/* The window's own buttons, at the end of the tab row where no tab scrolls over them. */
+/* The window's own buttons, at the ends of the tab rows where no tab scrolls over them: the sidebar's before the first tab of the top left group, the rest after the last of the top right. */
 .window-controls {
   display: flex;
   flex: none;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
   padding: 0 6px;
+}
+
+.window-controls.end {
+  margin-left: auto;
 }
 
 /* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
@@ -1314,7 +1317,7 @@ button.link:hover {
   font-size: 11.5px;
 }
 
-/* Writing mode */
+/* A closed sidebar and a closed inspector: a bar of icons, one for each thing the open one lists. */
 
 .rail {
   display: flex;
@@ -1346,44 +1349,15 @@ button.link:hover {
   padding: 0;
 }
 
-.popover {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  z-index: 30;
-  display: flex;
-  overflow: hidden;
-  border-radius: 10px;
-  background: var(--bg-elev);
-  box-shadow: var(--shadow);
+.rail .new-note svg {
+  color: var(--accent);
 }
 
-.popover.left {
-  left: 50px;
-}
-
-.popover.right {
-  right: 50px;
-  flex-direction: column;
-  width: 340px;
-}
-
-.popover-folders {
-  width: 216px;
-  padding: 0 6px 8px;
-  overflow-y: auto;
-  background: var(--bg-side);
-}
-
-.popover.right h2 {
+.inspector-empty {
   margin: 0;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13px;
-}
-
-.popover.right > :not(h2) {
-  margin: 14px;
+  padding: 14px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* Command palette and quick open */

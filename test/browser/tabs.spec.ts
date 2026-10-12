@@ -175,7 +175,9 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
   await expect(palette.getByRole("option")).toHaveText([/^Toggle writing mode/]);
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.keyboard.type("writing");

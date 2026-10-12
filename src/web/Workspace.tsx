@@ -3,34 +3,28 @@ import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.t
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { perform } from "./api.ts";
 import { createCommands, type Command } from "./commands.ts";
-import { useDismiss } from "./dismiss.ts";
 import { EditorGroups } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction, type EditorLayout, type Group, type Opened } from "./editorLayout.ts";
 import { ALL_NOTES, folderTitle, folderTree, pathName, type FolderTree as Tree } from "./folders.ts";
 import { FolderTree } from "./FolderTree.tsx";
 import { Icon, type IconName } from "./icons.tsx";
-import { INSPECTOR_TABS, Inspector, InspectorPanel, type InspectorTab } from "./Inspector.tsx";
+import { Inspector, viewsFor, type Subject } from "./Inspector.tsx";
 import { KEYBINDINGS, advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
 import { MODES, modePath, type ModeId } from "./modes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { FolderList, type Kept } from "./NoteList.tsx";
-import { INITIAL_VIEW } from "./noteListView.ts";
+import { INITIAL_VIEW, notesIn } from "./noteListView.ts";
 import { NoteReader } from "./NoteReader.tsx";
 import { Palette } from "./Palette.tsx";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, type Navigate, type Route } from "./router.ts";
-import { ModeLink, Sidebar } from "./Sidebar.tsx";
+import { Sidebar } from "./Sidebar.tsx";
 import { Soon } from "./Soon.tsx";
-import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
+import { isBoolean, useStored } from "./stored.ts";
 import { ago, useNow } from "./time.ts";
 
-type Popover = { side: "left" } | { side: "right"; tab: InspectorTab };
-/** Writing mode collapses both sides to rails; a rail opens its panel as a popover over the editor. */
-type Layout = { writing: false } | { writing: true; popover: Popover | null };
-
-const BROWSING: Layout = { writing: false };
-const WRITING: Layout = { writing: true, popover: null };
 const WRITING_KEY = "ink.writing";
+const SIDEBAR_KEY = "ink.sidebar";
 const INSPECTOR_KEY = "ink.inspector";
 /** How wide the sidebar and the inspector start, and how far a member can drag each. */
 const SIDEBAR = { start: 216, min: 150, max: 480 };
@@ -50,7 +44,6 @@ const isAnything = (_: unknown): _ is unknown => true;
 /** What a tab can hold besides a note and a folder's list: each mode. */
 const PAGES: readonly { id: string; label: string; icon: IconName; path: string }[] = MODES.map((mode) => ({ id: mode.id, label: mode.label, icon: mode.icon, path: modePath(mode.id) }));
 
-const popoverKey = (p: Popover | null) => (p ? (p.side === "left" ? "left" : p.tab) : null);
 
 const summaryOf = ({ text: _, ...summary }: Note): NoteSummary => summary;
 
@@ -105,8 +98,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   /** Every note in the workspace, for a folder's list, tab titles, and quick open. */
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
   const [listVersion, setListVersion] = useState(0);
-  const [layout, setLayout] = useState<Layout>(() => (readStored(WRITING_KEY, isBoolean) ? WRITING : BROWSING));
+  /** Writing mode shows the editor area and neither side, whichever of them is open. */
+  const [writing, setWriting] = useStored(WRITING_KEY, isBoolean, false);
+  const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
   const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
+  /** The inspector's tab the member last picked for each kind of thing it can be about. */
+  const [picked, setPicked] = useState<Partial<Record<Subject["kind"], string>>>({});
   /** How wide the member dragged the sidebar and the inspector. Kept in this browser, as the layout is: a width suits the screen it was set on. */
   const [widths, setWidths] = useStored<Widths>(`ink.widths.${me.person.id}`, isWidths, {});
   const sidebarWidth = within(SIDEBAR, widths.sidebar ?? SIDEBAR.start);
@@ -130,7 +127,6 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   );
   /** The folder in front: the one whose list is open, or the open note's. The folder tree marks it. */
   const frontFolderId = routeFolderId ?? current?.folderId ?? null;
-  const lastNoteId = useRef<string | null>(null);
 
   const loadFolders = useCallback(() => perform(workspaceId, { type: "folder.list" }).then((r) => setTree(folderTree(r))), [workspaceId]);
   useEffect(() => void loadFolders(), [loadFolders]);
@@ -196,18 +192,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     if (route.kind === "home" && tab) navigate(addressOf(shown.current.byId, tab), { replace: true });
   }, [route.kind, navigate]);
 
-  const closePopover = useCallback(() => setLayout((l) => (l.writing ? WRITING : l)), []);
-  const toggleWriting = useCallback(() => setLayout((l) => (l.writing ? BROWSING : WRITING)), []);
-  const togglePopover = (p: Popover) => setLayout((l) => (l.writing ? { writing: true, popover: popoverKey(l.popover) === popoverKey(p) ? null : p } : l));
-  const toggleInspector = () => (layout.writing ? togglePopover({ side: "right", tab: "info" }) : setInspectorOpen(!inspectorOpen));
+  const toggleWriting = useCallback(() => setWriting((w) => !w), [setWriting]);
+  const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), [setSidebarOpen]);
+  const toggleInspector = useCallback(() => setInspectorOpen((open) => !open), [setInspectorOpen]);
   const closePalette = useCallback(() => setPalette(null), []);
 
-  useEffect(() => writeStored(WRITING_KEY, layout.writing), [layout.writing]);
-
-  const go = (path: string) => {
-    navigate(path);
-    closePopover();
-  };
+  const go = navigate;
 
   /** The note whose editor is to take the cursor once it is there. */
   const [toFocus, setToFocus] = useState<string | null>(null);
@@ -220,12 +210,10 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     if (options.background) return dispatch({ type: "open", tab, preview: false, background: true });
     setToFocus(options.focus ? noteId : null);
     dispatch({ type: "open", tab, preview: options.preview ?? false });
-    closePopover();
   };
   /** Opens a folder's list of notes. A preview, which it is unless kept, gives way to the next folder previewed and to no note. */
   const openFolder = (folderId: string, keep = false) => {
     dispatch({ type: "open", tab: { kind: "folder", id: folderId }, preview: !keep });
-    closePopover();
   };
 
   /** A new note goes in the folder asked for, or else the folder in front, when that is a folder; otherwise in Unsorted. */
@@ -246,8 +234,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     [workspaceId, refresh],
   );
 
-  const latest = useRef({ createNote, openFolder, toggleInspector, go });
-  latest.current = { createNote, openFolder, toggleInspector, go };
+  const latest = useRef({ createNote, openFolder, go });
+  latest.current = { createNote, openFolder, go };
   useEffect(() => {
     const show = (which: "commands" | "notes") => () => setPalette((p) => (p === which ? null : which));
     const onTab = (action: (at: { groupId: string; tab: Opened }) => EditorAction) => () => {
@@ -260,7 +248,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       { id: "notes.all", title: "Open All notes", run: () => latest.current.openFolder(ALL_NOTES) },
       { id: "commands.show", title: "Show all commands", run: show("commands") },
       { id: "view.toggleWritingMode", title: "Toggle writing mode", run: toggleWriting },
-      { id: "view.toggleInspector", title: "Toggle inspector", run: () => latest.current.toggleInspector() },
+      { id: "view.toggleSidebar", title: "Toggle sidebar", run: toggleSidebar },
+      { id: "view.toggleInspector", title: "Toggle inspector", run: toggleInspector },
       { id: "tab.keep", title: "Keep tab open", run: onTab((tab) => ({ type: "pin", ...tab })) },
       ...CLOSES.map(({ scope, id, title }) => ({ id, title, run: onTab((tab) => ({ type: "close", scope, ...tab })) })),
       { id: "editor.splitRight", title: "Split editor right", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) },
@@ -269,7 +258,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     ];
     const unregister = all.map((command) => commands.register(command));
     return () => unregister.forEach((off) => off());
-  }, [commands, canEdit, dispatch, toggleWriting]);
+  }, [commands, canEdit, dispatch, toggleWriting, toggleSidebar, toggleInspector]);
 
   useEffect(() => {
     let pending = "";
@@ -328,15 +317,15 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       onOpen={(noteId, how) => (how === "behind" ? openNote(noteId, { background: true }) : openNote(noteId, { preview: how === "preview", focus: true }))}
     />
   );
-  /**
-   * The note the inspector is about: the note in front, and while a folder's list is in front the
-   * note that was in front before it. So the inspector keeps its place and the list keeps its width
-   * when the member goes between a list and the notes opened from it.
-   */
-  if (routeNoteId) lastNoteId.current = routeNoteId;
-  else if (!routeFolderId) lastNoteId.current = null;
-  const inspected = current ?? ((routeFolderId && lastNoteId.current && byId.get(lastNoteId.current)) || null);
-  const panelProps = inspected && tree && { note: inspected, tree, canEdit, onMove: moveNote };
+  /** What is in front, for the inspector to be about: the tab in front of the focused group. Null while it loads. */
+  const subject = ((): Subject | null => {
+    if (routeNoteId) return current && tree ? { kind: "note", note: current, tree, canEdit, onMove: moveNote } : null;
+    if (!routeFolderId) return { kind: "page" };
+    if (!tree || !notes) return null;
+    const name = folderTitle(tree, routeFolderId);
+    return name === null ? { kind: "page" } : { kind: "folder", name, notes: notesIn(notes, routeFolderId) };
+  })();
+  const pick = (viewId: string) => subject && setPicked((p) => ({ ...p, [subject.kind]: viewId }));
   const activeMode = route.kind === "mode" ? route.mode : null;
 
   const renderNote = (group: Group, noteId: string) => {
@@ -378,40 +367,32 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     );
   };
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
-  /** The buttons that act on the window and on no one note. The editor area puts them at its top right corner, out of any note's bar. */
-  const controls = (
-    <div className="window-controls" role="group" aria-label="Window">
-      {!layout.writing && (
-        <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
-          <Icon name="inspector" />
+  /** The buttons that act on the window and on no one note. The editor area puts them at the ends of its tab rows: the sidebar's before the first tab at the top left, the rest after the last at the top right. */
+  const controls = {
+    start: !writing && (
+      <div className="window-controls" role="group" aria-label="Window">
+        <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
+          <Icon name="sidebar" />
         </button>
-      )}
-      <button type="button" className="icon-button" aria-label="Writing mode" title={`Writing mode (${shortcut("view.toggleWritingMode")})`} aria-pressed={layout.writing} onClick={toggleWriting}>
-        <Icon name="writing" />
-      </button>
-    </div>
-  );
-
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const leftRail = useRef<HTMLElement>(null);
-  const rightRail = useRef<HTMLElement>(null);
-  const popover = layout.writing ? layout.popover : null;
-  const popoverTab = popover?.side === "right" ? INSPECTOR_TABS.find((t) => t.id === popover.tab)! : null;
-  useDismiss(popover ? closePopover : null, popoverRef, leftRail, rightRail);
+      </div>
+    ),
+    end: (
+      <div className="window-controls end" role="group" aria-label="Window">
+        {!writing && (
+          <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
+            <Icon name="inspector" />
+          </button>
+        )}
+        <button type="button" className="icon-button" aria-label="Writing mode" title={`Writing mode (${shortcut("view.toggleWritingMode")})`} aria-pressed={writing} onClick={toggleWriting}>
+          <Icon name="writing" />
+        </button>
+      </div>
+    ),
+  };
 
   return (
-    <div className="app" data-writing={layout.writing || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
-      {layout.writing ? (
-        <nav ref={leftRail} className="rail" aria-label="Left rail">
-          <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />
-          <button type="button" className="icon-button" aria-label="Folders" aria-pressed={popover?.side === "left"} onClick={() => togglePopover({ side: "left" })}>
-            <Icon name="folders" />
-          </button>
-          {MODES.filter((m) => m.primary).map((mode) => (
-            <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={go} />
-          ))}
-        </nav>
-      ) : (
+    <div className="app" data-writing={writing || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+      {!writing && (
         <>
           <Sidebar
             me={me}
@@ -421,18 +402,22 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
             onGo={go}
             onNewNote={canEdit ? () => void createNote() : undefined}
             newNoteIn={(frontFolderId && tree?.byId.get(frontFolderId)?.name) || "Unsorted"}
+            open={sidebarOpen}
+            onOpen={() => setSidebarOpen(true)}
           >
             {folders}
           </Sidebar>
-          <ResizeHandle
-            label="Resize sidebar"
-            orientation="vertical"
-            value={sidebarWidth}
-            {...SIDEBAR}
-            step={WIDTH_STEP}
-            onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
-            onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
-          />
+          {sidebarOpen && (
+            <ResizeHandle
+              label="Resize sidebar"
+              orientation="vertical"
+              value={sidebarWidth}
+              {...SIDEBAR}
+              step={WIDTH_STEP}
+              onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
+              onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
+            />
+          )}
         </>
       )}
 
@@ -451,26 +436,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
         )}
       </main>
 
-      {layout.writing ? (
-        <nav ref={rightRail} className="rail" aria-label="Right rail">
-          {INSPECTOR_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              className="icon-button"
-              aria-label={tab.label}
-              title={tab.label}
-              aria-pressed={popoverKey(popover) === tab.id}
-              disabled={!panelProps}
-              onClick={() => togglePopover({ side: "right", tab: tab.id })}
-            >
-              <Icon name={tab.icon} />
-            </button>
-          ))}
-        </nav>
-      ) : (
-        panelProps &&
-        inspectorOpen && (
+      {!writing &&
+        (inspectorOpen ? (
           <>
             <ResizeHandle
               label="Resize inspector"
@@ -482,22 +449,27 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
               onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
               onReset={() => setWidths(({ inspector: _, ...w }) => w)}
             />
-            <Inspector {...panelProps} />
+            <Inspector subject={subject} picked={subject ? picked[subject.kind] : undefined} onPick={pick} />
           </>
-        )
-      )}
-
-      {popover?.side === "left" && (
-        <div ref={popoverRef} className="popover left" role="dialog" aria-label="Folders">
-          <div className="popover-folders">{folders}</div>
-        </div>
-      )}
-      {popoverTab && panelProps && (
-        <div ref={popoverRef} className="popover right" role="dialog" aria-label={popoverTab.label}>
-          <h2>{popoverTab.label}</h2>
-          <InspectorPanel tab={popoverTab.id} {...panelProps} />
-        </div>
-      )}
+        ) : (
+          <nav className="rail" aria-label="Inspector bar">
+            {viewsFor(subject).map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className="icon-button"
+                aria-label={v.label}
+                title={v.label}
+                onClick={() => {
+                  pick(v.id);
+                  setInspectorOpen(true);
+                }}
+              >
+                <Icon name={v.icon} />
+              </button>
+            ))}
+          </nav>
+        ))}
       {palette === "commands" && (
         <Palette
           key="commands"

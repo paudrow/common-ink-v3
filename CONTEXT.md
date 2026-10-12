@@ -104,7 +104,16 @@ _Avoid_: Pane
 Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
 
 **Window buttons**:
-The buttons that act on the window and on no one note: the inspector and writing mode. They are at the top right corner of the editor area, at the end of the tab row there, whatever is open.
+The buttons that act on the window and on no one note, at the ends of the tab rows along the top of the editor area, whatever is open: the sidebar's before the first tab at the top left, the inspector's and writing mode's after the last at the top right.
+
+**Sidebar bar**, **Inspector bar**:
+What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
+
+**Inspector**:
+The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line.
+
+**Writing mode**:
+The editor area alone: no sidebar, no inspector, and neither bar. ⌘. and the window button leave it.
 
 **Command**:
 A named action with an id that doesn't change, run from the command palette or by a keybinding. Plugins add commands.

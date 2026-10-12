@@ -1,6 +1,7 @@
 /** Which command each chord runs. `mod` is ⌘ or Ctrl. */
 export const KEYBINDINGS: Readonly<Record<string, string>> = {
   "mod+.": "view.toggleWritingMode",
+  "mod+\\": "view.toggleSidebar",
   "mod+p": "notes.quickOpen",
   "mod+shift+p": "commands.show",
 };

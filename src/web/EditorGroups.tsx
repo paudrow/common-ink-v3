@@ -50,7 +50,9 @@ export function zoneAt({ left, top, width, height }: { left: number; top: number
   return across < EDGE ? "left" : across > 1 - EDGE ? "right" : down < EDGE ? "up" : down > 1 - EDGE ? "down" : "middle";
 }
 
-/** The group at the top right corner of the arrangement, whose tab row carries the window's buttons. */
+/** The group at the top left of the arrangement, whose tab row begins with the sidebar's button. */
+const leadOf = (pane: Pane): string => (typeof pane === "string" ? pane : leadOf(pane.panes[0]!));
+/** The group at the top right corner of the arrangement, whose tab row carries the rest of the window's buttons. */
 const cornerOf = (pane: Pane): string => (typeof pane === "string" ? pane : cornerOf(pane.direction === "row" ? pane.panes.at(-1)! : pane.panes[0]!));
 
 interface Props {
@@ -61,8 +63,8 @@ interface Props {
   render: (group: Group, tab: Opened) => ReactNode;
   /** What a group with nothing open shows. */
   empty: ReactNode;
-  /** The window's buttons, for the right end of the corner group's tab row. */
-  controls: ReactNode;
+  /** The window's buttons: `start` goes before the first tab of the top left group's tab row, `end` after the last of the top right's. */
+  controls: { start: ReactNode; end: ReactNode };
 }
 
 export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty, controls }: Props) {
@@ -93,6 +95,7 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
   }, []);
   const root = arrangement(layout);
   const corner = cornerOf(root);
+  const lead = leadOf(root);
 
   /** Over a drop target the note can't fall through to the editor beneath, which would paste its link. */
   const over = (e: DragEvent, next: Drop) => {
@@ -125,8 +128,9 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
         aria-label={`Editor group ${layout.groups.indexOf(group) + 1}`}
         data-focused={(layout.groups.length > 1 && group.id === layout.focusedGroupId) || undefined}
       >
-        {(group.tabs.length > 0 || group.id === corner) && (
+        {(group.tabs.length > 0 || group.id === corner || group.id === lead) && (
           <div className="tab-row">
+            {group.id === lead && controls.start}
             {group.tabs.length > 0 && (
               <div
                 role="tablist"
@@ -196,7 +200,7 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
                 })}
               </div>
             )}
-            {group.id === corner && controls}
+            {group.id === corner && controls.end}
           </div>
         )}
         <div
