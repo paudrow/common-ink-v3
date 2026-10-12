@@ -32,9 +32,14 @@ const COMMANDS: Record<string, string[][]> = {
   history: [["changes", "--note", ID, "--author", AUTHOR, "--from", "2026-10-01", "--to", "2026-10-02", "--limit", "5", "--before", `{"createdAt":1,"noteId":"${ID}","revision":1}`, "--diffs", "false"]],
   history_authors: [["authors"]],
   label_revision: [["label", ID, "--revision", "1", "--name", "Draft"]],
-  revert_note: [["revert", ID, "--revision", "1"]],
-  revert_changes: [["revert", ID, "--changes", "1,2"]],
-  revert_author: [["revert-author", AUTHOR, "--note", ID, "--after", ID]],
+  revert_note: [["revert", ID, "--revision", "1", "--resolve", "back", "--at", "3"]],
+  revert_changes: [["revert", ID, "--changes", "1,2", "--resolve", '["keep", {"text": "by hand"}]', "--at", "3"]],
+  preview_revert: [
+    ["revert", ID, "--changes", "1,2", "--preview"],
+    ["revert", ID, "--revision", "1", "--preview"],
+    ["revert", ID, "--author", AUTHOR, "--preview", "--resolve", "keep", "--at", "3"],
+  ],
+  revert_author: [["revert-author", AUTHOR, "--note", ID, "--after", ID, "--resolve", `{"${ID}": {"at": 3, "choices": "back"}}`]],
   undo: [["undo", ID]],
   redo: [["redo", ID]],
 };

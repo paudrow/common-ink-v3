@@ -53,6 +53,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "note.label": { id: noteId, revision: 1, name: "Start" },
   "note.revert": { id: noteId, revision: 1 },
   "note.revertChanges": { id: noteId, revisions: [2] },
+  "note.previewRevert": { id: noteId, revisions: [2] },
   "note.diff": { id: noteId, revision: 1 },
   "history.summary": {},
   "note.undo": { id: noteId },

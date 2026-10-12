@@ -42,7 +42,7 @@ async function withFolders(page: Page) {
   return { projects, journal, plan, monday };
 }
 
-test("a group has one italic preview tab: a folder's is kept when a note is opened from it, and the next thing opened takes the preview's place", async ({ page }) => {
+test("there is one italic preview tab: the next thing opened takes its place, a note opened from a folder's list too, and a list stays once it is kept", async ({ page }) => {
   const { projects, journal } = await withFolders(page);
   /** The tabs in order, which may never show more than one in italics. */
   const shows = async (titles: string[], previewAt: number) => {
@@ -66,32 +66,33 @@ test("a group has one italic preview tab: a folder's is kept when a note is open
   await shows(["Journal"], 0);
   await expect(page).toHaveURL(new RegExp(`/folder/${journal.id}$`));
 
-  // A note opened from the list: the list's tab stays, kept, and the note is the preview.
+  // A note opened from the list takes the list's place: nothing is kept that the member didn't keep.
   await listedNote(page, "Monday").click();
-  await shows(["Journal", "Monday"], 1);
+  await shows(["Monday"], 0);
   await expect(folderRow(page, "Journal")).toHaveAttribute("aria-selected", "true");
 
   // A folder from the tree takes the note's place.
   await folderRow(page, "Projects").click();
-  await shows(["Journal", "Projects"], 1);
+  await shows(["Projects"], 0);
   await listedNote(page, "Plan").click();
-  await shows(["Journal", "Projects", "Plan"], 2);
+  await shows(["Plan"], 0);
   await expect(folderRow(page, "Projects")).toHaveAttribute("aria-selected", "true");
 
-  // Notes looked through from a list replace one another beside it.
-  await tab(page, "Journal").click();
+  // A double click on a folder takes the preview's place and keeps the list, and a note looked at from it opens beside it.
+  await folderRow(page, "Journal").dblclick();
+  await shows(["Journal"], -1);
   await listedNote(page, "Monday").click();
-  await shows(["Journal", "Projects", "Monday"], 2);
+  await shows(["Journal", "Monday"], 1);
 
   // A double click keeps what it opens, and All notes from the tree then has the preview.
   await tab(page, "Monday").dblclick();
-  await shows(["Journal", "Projects", "Monday"], -1);
+  await shows(["Journal", "Monday"], -1);
   await openAllNotes(page);
-  await shows(["Journal", "Projects", "Monday", "All notes"], 3);
+  await shows(["Journal", "Monday", "All notes"], 2);
 
   // A note opened behind is a kept tab, and the preview is as it was.
   await listedNote(page, "Plan").click({ modifiers: ["ControlOrMeta"] });
-  await shows(["Journal", "Projects", "Monday", "All notes", "Plan"], 3);
+  await shows(["Journal", "Monday", "All notes", "Plan"], 2);
 });
 
 test("a folder's tab has an address that Back, Forward, a reload and a link all come to", async ({ page }) => {
@@ -119,7 +120,7 @@ test("a folder's tab has an address that Back, Forward, a reload and a link all 
   await page.reload();
   // The note's preview gave way to All notes when Back came to it.
   await expect(tabs(page)).toHaveText(["Projects", "All notes"]);
-  expect(await italic(page)).toEqual([false, true]);
+  await expect.poll(() => italic(page)).toEqual([false, true]);
   await expect(tab(page, "Projects")).toHaveAttribute("aria-selected", "true");
   await expect(heading(page)).toHaveText("Projects");
 
@@ -133,8 +134,9 @@ test("a folder's tab has an address that Back, Forward, a reload and a link all 
   await expect(listedNotes(page)).toHaveText(["Monday", "Plan"]);
   await expect(folderRow(page, "All notes")).toHaveAttribute("aria-selected", "true");
 
-  // A list opened with no note before it has no note for the inspector to be about.
-  await expect(page.getByRole("complementary", { name: "Inspector" })).toHaveCount(0);
+  // With a list in front the inspector is about the folder.
+  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Info" }).click();
+  await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("definition")).toHaveText(["All notes", "2 notes", "just now by Ada Lovelace"]);
 
   await page.goto("/folder/nosuchfolder");
   await expect(page.getByText("This folder doesn't exist, or you can't see it.")).toBeVisible();
@@ -155,12 +157,14 @@ test("a folder's tab splits and moves between groups like a note's", async ({ pa
   await expect(group(2).locator(".cm-line").first()).toHaveText("# Plan");
   await expect(folderRow(page, "Projects")).toHaveAccessibleDescription("1");
 
-  // With the list in front the inspector stays, about the note that was in front before, so nothing moves under the pointer.
+  // With the list in front the inspector stays where it is and is about the folder, never the note beside it, so nothing moves under the pointer.
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const listBox = await group(1).boundingBox();
   await group(1).getByRole("searchbox", { name: "Filter notes" }).click();
   await expect(page).toHaveURL(/\/folder\/[a-z0-9]{12}$/);
-  await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveValue(/\/note\/plan-[a-z0-9]{12}$/);
+  await inspector.getByRole("tab", { name: "Info" }).click();
+  await expect(inspector.getByRole("definition")).toHaveText(["Projects", "1 note", "just now by Ada Lovelace"]);
+  await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
   expect(await group(1).boundingBox()).toEqual(listBox);
 
   // The list stays beside the note: a title clicked in it shows its note in the group that already has it.
@@ -206,7 +210,7 @@ test("a card expands to its note drawn to be read, which nothing in it changes, 
   await card.getByRole("button", { name: "Expand Plan" }).click();
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(tabs(page)).toHaveText(["Projects", "Plan"]);
-  expect(await italic(page)).toEqual([true, false]);
+  await expect.poll(() => italic(page)).toEqual([true, false]);
   await expect(editor(page)).toBeFocused();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("- [ ] and paper");
@@ -246,15 +250,15 @@ test("a card's title and its pencil open the note with the cursor in it, the tit
   await openAllNotes(page);
 
   await listedNote(page, "Plan").click();
-  await expect(tabs(page)).toHaveText(["All notes", "Plan"]);
-  expect(await italic(page)).toEqual([false, true]);
+  await expect(tabs(page)).toHaveText(["Plan"]);
+  await expect.poll(() => italic(page)).toEqual([true]);
   await expect(editor(page)).toBeFocused();
 
   await openAllNotes(page);
   await noteCard(page, "Monday").hover();
   await noteCard(page, "Monday").getByRole("button", { name: "Edit Monday" }).click();
-  await expect(tabs(page)).toHaveText(["All notes", "Plan", "Monday"]);
-  expect(await italic(page)).toEqual([false, true, false]);
+  await expect(tabs(page)).toHaveText(["All notes", "Monday"]);
+  await expect.poll(() => italic(page)).toEqual([true, false]);
   await expect(editor(page)).toBeFocused();
   await expect(page.locator(".cm-line").first()).toHaveText("# Monday");
 });
@@ -265,7 +269,7 @@ test("âŒ˜-click or a middle click on a title or a collapsed card opens the note 
 
   await listedNote(page, "Plan").click({ modifiers: ["ControlOrMeta"] });
   await expect(tabs(page)).toHaveText(["All notes", "Plan"]);
-  expect(await italic(page)).toEqual([true, false]);
+  await expect.poll(() => italic(page)).toEqual([true, false]);
   await expect(tab(page, "All notes")).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveURL(/\/folder\/all$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All notes");
@@ -303,7 +307,7 @@ test("the arrow keys move between cards, Enter expands and collapses one, and âŒ
   await page.keyboard.press("ArrowUp");
   await expect(noteCard(page, "Monday")).toBeFocused();
   await page.keyboard.press("ControlOrMeta+Enter");
-  await expect(tabs(page)).toHaveText(["All notes", "Monday"]);
+  await expect(tabs(page)).toHaveText(["Monday"]);
   await expect(editor(page)).toBeFocused();
   await expect(page.locator(".cm-line").first()).toHaveText("# Monday");
 });
@@ -345,16 +349,16 @@ test("a card's title and details stay where they are when it expands, shows the 
       await card.getByRole("button", { name: "Expand B long note" }).click();
       await expect(card.locator(".cm-line").first()).toHaveText("# B long note");
       await expect(card.getByRole("button", { name: "Show whole note" })).toBeVisible();
-      expect(await placed(page, long.id), `expanded at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
+      await expect.poll(() => placed(page, long.id), `expanded at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
 
       await card.getByRole("button", { name: "Show whole note" }).click();
       await expect(card.getByRole("button", { name: "Show less" })).toBeVisible();
       expect((await card.boundingBox())!.height).toBeGreaterThan(1500);
-      expect(await placed(page, long.id), `whole note at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
+      await expect.poll(() => placed(page, long.id), `whole note at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
 
       await card.getByRole("button", { name: "Collapse B long note" }).click();
       await expect(card.locator(".cm-line")).toHaveCount(0);
-      expect(await placed(page, long.id), `collapsed at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
+      await expect.poll(() => placed(page, long.id), `collapsed at ${width}px, scrolled ${scrolledBy}`).toEqual(atRest);
     }
   }
 });
@@ -428,7 +432,7 @@ test("with the note list off a folder's notes are listed by title, and with tabs
   await expect(plain.getByRole("link")).toHaveText(["Plan"]);
   await expect(page.getByRole("searchbox", { name: "Filter notes" })).toHaveCount(0);
   await plain.getByRole("link", { name: "Plan" }).click();
-  await expect(tabs(page)).toHaveText(["Projects", "Plan"]);
+  await expect(tabs(page)).toHaveText(["Plan"]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Plan");
   await run(page, "Enable plugin: Note list");
 
@@ -449,4 +453,54 @@ test("with the note list off a folder's notes are listed by title, and with tabs
   await run(page, "Open All notes");
   await expect(page).toHaveURL(/\/folder\/all$/);
   await expect(listedNotes(page)).toHaveText(["Monday", "Plan"]);
+});
+
+test("the inspector follows the tab in front: a note's tabs, a folder tab's Info, a page tab's quiet line, and it stays open and in place across them", async ({ page }) => {
+  await withFolders(page);
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await folderRow(page, "Projects").dblclick();
+  await listedNote(page, "Plan").click();
+  await run(page, "Keep tab open");
+  await run(page, "Go to Calendar");
+  await run(page, "Keep tab open");
+  await expect(tabs(page)).toHaveText(["Projects", "Plan", "Calendar"]);
+
+  await expect(inspector).toHaveText("Nothing to show for this view");
+  await expect(inspector.getByRole("tab")).toHaveCount(0);
+  const place = await inspector.boundingBox();
+
+  await tab(page, "Projects").click();
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
+  await inspector.getByRole("tab", { name: "Info" }).click();
+  await expect(inspector.getByRole("definition")).toHaveText(["Projects", "1 note", "just now by Ada Lovelace"]);
+  expect(await inspector.boundingBox()).toEqual(place);
+
+  await tab(page, "Plan").click();
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  await inspector.getByRole("tab", { name: "Info" }).click();
+  await expect(inspector.getByRole("textbox", { name: "Note URL" })).toHaveValue(/\/note\/plan-[a-z0-9]{12}$/);
+  expect(await inspector.boundingBox()).toEqual(place);
+
+  await tab(page, "Calendar").click();
+  await expect(inspector).toHaveText("Nothing to show for this view");
+  expect(await inspector.boundingBox()).toEqual(place);
+
+  // Beside each other, it is about the one in the group that has the focus.
+  await tab(page, "Projects").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Split right" }).click();
+  await expect(tabs(page, 1)).toHaveText(["Projects"]);
+  await expect(inspector.getByRole("definition").first()).toHaveText("Projects");
+  await tab(page, "Plan").click();
+  await expect(inspector.getByRole("textbox", { name: "Note URL" })).toBeVisible();
+
+  // Closed, its bar has the icons of the tab in front, and none for a page.
+  await run(page, "Toggle inspector");
+  const bar = page.getByRole("navigation", { name: "Inspector bar" });
+  await expect(bar.getByRole("button")).toHaveCount(3);
+  await tab(page, "Calendar").click();
+  await expect(bar.getByRole("button")).toHaveCount(0);
+  await tabs(page, 1).first().click();
+  await expect(bar.getByRole("button")).toHaveCount(2);
+  await bar.getByRole("button", { name: "Info" }).click();
+  await expect(inspector.getByRole("definition").first()).toHaveText("Projects");
 });

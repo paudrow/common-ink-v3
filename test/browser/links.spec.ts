@@ -120,8 +120,8 @@ test("an agent writes a link by title, it is stored by id, and reads back with t
   const made = await agent.tool<{ id: string; text: string }>("create_note", { text: "# From the agent\n\nSee [[Plan]] and [[plan|the same]]." });
   expect(made.text).toBe(`# From the agent\n\nSee [[${plan.id}]] and [[${plan.id}|the same]].`);
   await expect(agent.tool("create_note", { text: "[[No such note]]" })).rejects.toThrow(/No note is titled "No such note"/);
-  expect((await agent.tool<{ links: unknown }>("read_note", { id: made.id })).links).toEqual([{ id: plan.id, title: "Plan" }]);
-  expect((await agent.tool<{ title: string }[]>("backlinks", { id: plan.id })).map((n) => n.title)).toEqual(["From the agent"]);
+  await expect.poll(async () => (await agent.tool<{ links: unknown }>("read_note", { id: made.id })).links).toEqual([{ id: plan.id, title: "Plan" }]);
+  await expect.poll(async () => (await agent.tool<{ title: string }[]>("backlinks", { id: plan.id })).map((n) => n.title)).toEqual(["From the agent"]);
 
   await page.goto(`/note/${made.id}`);
   await expect(drawnLinks(page)).toHaveText(["Plan", "the same"]);
@@ -205,10 +205,16 @@ test("a link to a note that isn't there, or to nothing by a title, says so or st
   await other.close();
   await signInAsNewPerson(page, "Ada Lovelace");
   const diary = await perform(page, { type: "note.create", text: `# Diary\n\nGone [[zzzzzzzzzzzz]], hers [[${secret.id}]], shown [[${secret.id}|as I call it]], typed [[Some title]].`, linkTitles: "keep" });
+  // The note is drawn before its workspace's notes are listed, as on a slow connection: a link waits as "…" and then says what it is.
+  await page.route("**/api/**", async (route) => {
+    if (route.request().postData()?.includes('"note.list"')) await new Promise((r) => setTimeout(r, 1500));
+    await route.fallback();
+  });
   await page.goto(`/note/${diary.id}`);
+  await expect(lines(page).last()).toHaveText("Gone …, hers …, shown as I call it, typed [[Some title]].");
 
   await expect(lines(page).last()).toHaveText("Gone Unavailable note, hers Unavailable note, shown as I call it, typed [[Some title]].");
-  expect(await page.content()).not.toContain("Grace's secret");
+  await expect.poll(() => page.content()).not.toContain("Grace's secret");
   await drawnLinks(page).first().click({ modifiers: ["ControlOrMeta"] });
   await drawnLinks(page).nth(1).click({ modifiers: ["ControlOrMeta"] });
   await page.waitForTimeout(300);
@@ -258,10 +264,10 @@ test("in vim, gd on a link opens its note and ctrl+o comes back, and gd on an ad
   await expect.poll(opened).toEqual([["https://example.org/docs", "_blank", "noopener,noreferrer"]]);
   await keys(page, "3", "f", "h", "g", "d");
   await expect.poll(opened).toHaveLength(2);
-  expect((await opened())[1]).toEqual(["https://example.org/bare", "_blank", "noopener,noreferrer"]);
+  await expect.poll(async () => (await opened())[1]).toEqual(["https://example.org/bare", "_blank", "noopener,noreferrer"]);
   await keys(page, "$", "g", "d");
   await page.waitForTimeout(200);
-  expect(await opened(), "an address that isn't a web page or a mailto is never opened").toHaveLength(2);
+  await expect.poll(() => opened(), "an address that isn't a web page or a mailto is never opened").toHaveLength(2);
   await expect(page).toHaveURL(/\/note\/diary-/);
 
   await keys(page, "Shift+G", "g", "d");
@@ -392,10 +398,10 @@ test("what is drawn as a link is what the server records as one: in a nested bul
   await expect(editor(page)).toContainText("indented Plan");
   await expect(editor(page)).toContainText(`fenced ${link}`);
   await expect(editor(page)).toContainText(`inline ${link}`);
-  expect((await perform(page, { type: "note.backlinks", id: plan.id })).map((n) => n.title)).toEqual(["Diary"]);
+  await expect.poll(async () => (await perform(page, { type: "note.backlinks", id: plan.id })).map((n) => n.title)).toEqual(["Diary"]);
   const emptied = await perform(page, { type: "note.write", id: diary.id, baseRevision: 1, text: `# Diary\n\n\`\`\`\nfenced ${link}\n\`\`\`\n\nand \`inline ${link}\` end` });
   expect(emptied.revision).toBe(2);
-  expect(await perform(page, { type: "note.backlinks", id: plan.id })).toEqual([]);
+  await expect.poll(() => perform(page, { type: "note.backlinks", id: plan.id })).toEqual([]);
 });
 
 interface Place {
