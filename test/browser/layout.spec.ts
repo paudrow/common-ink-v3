@@ -148,6 +148,27 @@ test("More expands and collapses Contacts, Uploads, and History, and each mode n
   await expect(editorPane(page)).toHaveText("TodosTodos arrives with #18.");
 });
 
+test("More opens by itself when a mode under it is reached another way, and stays closed once closed by hand until the next time", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const modes = page.getByRole("navigation", { name: "Modes" });
+  await modes.getByRole("button", { name: "More" }).click();
+  await modes.getByRole("link", { name: "History" }).click();
+  await expect(page).toHaveURL(/\/history$/);
+
+  // Closed by hand it stays closed, on this mode and on the ones that aren't under More.
+  await modes.getByRole("button", { name: "Less" }).click();
+  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+  await modes.getByRole("link", { name: "Todos" }).click();
+  await expect(page).toHaveURL(/\/todos$/);
+  await expect(modes.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+
+  // Back is another way to a mode under More.
+  await page.goBack();
+  await expect(page).toHaveURL(/\/history$/);
+  await expect(modes.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
+  await expect(modes.getByRole("link", { name: "History" })).toHaveAttribute("aria-current", "page");
+});
+
 test("the note list filters on title and snippet, sorts, and narrows to notes with open todos", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const fruit = await perform(page, { type: "folder.create", name: "Fruit" });

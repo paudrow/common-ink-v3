@@ -20,8 +20,15 @@ interface Props {
 }
 
 export function Sidebar({ me, workspace, activeMode, onSwitch, onGo, onNewNote, newNoteIn, children }: Props) {
-  // It starts open on a mode that is under it, so the mode the member is on is marked in the list.
-  const [more, setMore] = useState(() => MODES.some((m) => !m.primary && m.id === activeMode));
+  // It opens on arriving at a mode that is under it, however that mode was reached, so the mode the member is on is marked in the
+  // list. Closed by hand, it stays closed until they arrive at such a mode again.
+  const on = MODES.find((m) => !m.primary && m.id === activeMode)?.id ?? null;
+  const [was, setWas] = useState(on);
+  const [more, setMore] = useState(on !== null);
+  if (on !== was) {
+    setWas(on);
+    if (on !== null) setMore(true);
+  }
   const link = (mode: (typeof MODES)[number]) => <ModeLink key={mode.id} mode={mode} active={mode.id === activeMode} onGo={onGo} labelled />;
   return (
     <aside className="sidebar" aria-label="Sidebar">
