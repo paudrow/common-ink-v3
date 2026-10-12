@@ -8,7 +8,15 @@ export type Route = { kind: "home" } | { kind: "note"; id: string } | { kind: "f
 export const folderPath = (folderId: string) => `/folder/${folderId}`;
 const FOLDER = /^\/folder\/([a-z0-9-]+)$/;
 
-export type Navigate = (path: string, options?: { replace?: boolean }) => void;
+/**
+ * `replace` writes over the entry the browser is at. `move` is a step between things already open:
+ * it adds an entry of its own, which the next move writes over, so Back retraces every open and
+ * the last of a run of moves, and never loses an open to a move made after it.
+ */
+export type Navigate = (path: string, options?: { replace?: boolean; move?: boolean }) => void;
+
+const MOVE = { move: true };
+const isMove = (state: unknown) => typeof state === "object" && state !== null && "move" in state;
 
 export function routeOf(pathname: string): Route {
   if (pathname === "/") return { kind: "home" };
@@ -29,8 +37,9 @@ export function useRoute(): [Route, Navigate] {
   }, []);
   const navigate = useCallback<Navigate>((to, options = {}) => {
     if (to === location.pathname) return;
-    if (options.replace) history.replaceState(null, "", to);
-    else history.pushState(null, "", to);
+    if (options.replace) history.replaceState(history.state, "", to);
+    else if (options.move && isMove(history.state)) history.replaceState(MOVE, "", to);
+    else history.pushState(options.move ? MOVE : null, "", to);
     setPath(to);
   }, []);
   return [routeOf(path), navigate];

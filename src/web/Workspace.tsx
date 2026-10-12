@@ -3,7 +3,7 @@ import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.t
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { perform } from "./api.ts";
 import { createCommands, type Command } from "./commands.ts";
-import { EditorGroups } from "./EditorGroups.tsx";
+import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction, type EditorLayout, type Group, type Opened } from "./editorLayout.ts";
 import { ALL_NOTES, folderTitle, folderTree, pathName, type FolderTree as Tree } from "./folders.ts";
 import { FolderTree } from "./FolderTree.tsx";
@@ -162,17 +162,17 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   shown.current = { editor, byId };
   /** The URL names the focused group's active tab, so every change to the layout goes through here. */
   const showEditor = useCallback(
-    (next: EditorLayout, replace = false) => {
+    (next: EditorLayout, move = false) => {
       shown.current.editor = next;
       setEditor(next);
       const tab = focused(next);
       if (!tab) navigate("/");
       // A note's address may be written with an older title, and is still the note's.
-      else if (tab.kind !== "note" || noteIdFromPath(location.pathname) !== tab.id) navigate(addressOf(shown.current.byId, tab), { replace });
+      else if (tab.kind !== "note" || noteIdFromPath(location.pathname) !== tab.id) navigate(addressOf(shown.current.byId, tab), { move });
     },
     [setEditor, navigate],
   );
-  /** Moving between tabs already open isn't a step Back should retrace, so only an open or a close adds to the browser's history. */
+  /** Back retraces every open and close. Moving between tabs already open is one step however many moves it took, and never takes the place of an open. */
   const dispatch = useCallback(
     (action: EditorAction) => {
       const next = editorReducer(shown.current.editor, action);
@@ -258,6 +258,9 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       ...CLOSES.map(({ scope, id, title }) => ({ id, title, run: onTab((tab) => ({ type: "close", scope, ...tab })) })),
       { id: "editor.splitRight", title: "Split editor right", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) },
       { id: "editor.splitDown", title: "Split editor down", run: onTab((tab) => ({ type: "split", side: "down", ...tab })) },
+      { id: "tab.moveToNextGroup", title: "Move tab to next group", run: onTab((tab) => ({ type: "send", to: "next", ...tab })) },
+      { id: "tab.moveToPreviousGroup", title: "Move tab to previous group", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) },
+      { id: "tab.menu", title: "Show tab menu", run: showTabMenu },
       ...MODES.map((mode) => ({ id: `go.${mode.id}`, title: `Go to ${mode.label}`, run: () => latest.current.go(modePath(mode.id)) })),
     ];
     const unregister = all.map((command) => commands.register(command));

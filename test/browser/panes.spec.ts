@@ -361,3 +361,89 @@ test("the inspector shows the tab last picked, on whatever has it, and one it do
   await tab(page, "Beta").click();
   await expect(shown()).toHaveText("Info");
 });
+
+test("Back retraces every open in a split, whatever was clicked between them", async ({ page }) => {
+  await withNotes(page, "Alpha", "Beta");
+  const projects = await perform(page, { type: "folder.create", name: "Projects" });
+  await page.reload();
+  await keep(page, "Alpha");
+  await folderRow(page, "Unsorted").dblclick();
+  await tab(page, "Alpha").click({ button: "right" });
+  await menuItem(page, "Split down").click();
+  await expect(tabs(page, 0)).toHaveText(["Unsorted"]);
+  await expect(tabs(page, 1)).toHaveText(["Alpha"]);
+  const address = () => new URL(page.url()).pathname;
+
+  // A folder opened in the lower pane, a press in the upper one, another folder opened there, then a tab clicked.
+  await group(page, 2).locator(".cm-line").first().click();
+  await folderRow(page, "Projects").dblclick();
+  await expect(page).toHaveURL(new RegExp(`/folder/${projects.id}$`));
+  await expect(tabs(page, 1)).toHaveText(["Alpha", "Projects"]);
+  await body(page, 1).dispatchEvent("pointerdown");
+  await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
+  expect(address()).not.toBe(`/folder/${projects.id}`);
+  const upper = address();
+  await folderRow(page, "All notes").dblclick();
+  await expect(page).toHaveURL(/\/folder\/all$/);
+  await expect(tabs(page, 0)).toHaveText(["Unsorted", "All notes"]);
+  await tab(page, "Unsorted").click();
+  await expect(page).toHaveURL(new RegExp(`${upper}$`));
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/folder\/all$/);
+  await expect(tab(page, "All notes")).toHaveAttribute("aria-selected", "true");
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`${upper}$`));
+  await expect(tab(page, "Unsorted")).toHaveAttribute("aria-selected", "true");
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/folder/${projects.id}$`));
+  await expect(group(page, 2)).toHaveAttribute("data-focused", "true");
+  await expect(tab(page, "Projects", 1)).toHaveAttribute("aria-selected", "true");
+});
+
+/** Runs a command by its title from the command palette, with the keyboard alone. */
+async function run(page: Page, title: string) {
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  const palette = page.getByRole("dialog", { name: "Commands" });
+  await palette.getByRole("combobox").fill(title);
+  await expect(palette.getByRole("option").first()).toHaveText(new RegExp(`^${title}`));
+  await page.keyboard.press("Enter");
+  await expect(palette).toHaveCount(0);
+}
+
+test("a tab's menu opens from the keyboard, and a tab moves to the next pane and back by a command", async ({ page }) => {
+  await withNotes(page, "Alpha", "Beta");
+  await keep(page, "Alpha");
+  await keep(page, "Beta");
+  await tabBar(page).getByRole("button", { name: "Close All notes" }).click();
+  await expect(tabs(page)).toHaveText(["Alpha", "Beta"]);
+
+  // The menu of the tab in front, with its first item ready for Enter.
+  await run(page, "Show tab menu");
+  const menu = page.getByRole("menu", { name: "Beta tab" });
+  await expect(menu.getByRole("menuitem", { name: "Close", exact: true })).toBeFocused();
+  const [at, under] = [(await menu.boundingBox())!, (await tab(page, "Beta").boundingBox())!];
+  expect(Math.abs(at.x - under.x)).toBeLessThan(2);
+  expect(Math.abs(at.y - (under.y + under.height))).toBeLessThan(2);
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await run(page, "Show tab menu");
+  await menuItem(page, "Split right").focus();
+  await page.keyboard.press("Enter");
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+  await expect(tabs(page, 1)).toHaveText(["Beta"]);
+
+  // With one pane there is nowhere to move to; with two, next and previous are the other one.
+  await run(page, "Move tab to next group");
+  await expect(tabs(page)).toHaveText(["Alpha", "Beta"]);
+  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(1);
+  await run(page, "Move tab to next group");
+  await expect(tabs(page)).toHaveText(["Alpha", "Beta"]);
+
+  await run(page, "Split editor right");
+  await expect(tabs(page, 1)).toHaveText(["Beta"]);
+  await tab(page, "Alpha").click();
+  await run(page, "Move tab to previous group");
+  await expect(tabs(page)).toHaveText(["Beta", "Alpha"]);
+  await expect(tab(page, "Alpha")).toHaveAttribute("aria-selected", "true");
+});

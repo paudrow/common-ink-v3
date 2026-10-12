@@ -54,6 +54,15 @@ interface Props {
   controls: { start: ReactNode; end: ReactNode };
 }
 
+/** Opens the menu of the tab in front, at the tab's foot, as a right click on the tab does: the way to the menu from the keyboard. */
+export function showTabMenu() {
+  const selected = '[role="tab"][aria-selected="true"]';
+  const tab = document.querySelector(`.group[data-focused] ${selected}`) ?? document.querySelector(`.group ${selected}`);
+  if (!tab) return;
+  const { left, bottom } = tab.getBoundingClientRect();
+  tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: left, clientY: bottom }));
+}
+
 export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty, controls }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
