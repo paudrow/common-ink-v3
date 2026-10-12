@@ -222,7 +222,8 @@ const NO_CHANGE: Outcome = "not_found: The note has no change 99";
 const NO_GRANT: Outcome = "not_found: No such grant";
 const MISSING = "zzzzzzzzzzzz";
 
-describe("every operation, by every actor", () => {
+// Each actor's test asks every operation of every note, so it grows with each operation added and has outgrown the default five seconds on CI.
+describe("every operation, by every actor", { timeout: 30_000 }, () => {
   it("has a row in this test, so a new operation can't be added without saying what it needs", () => {
     expect(Object.keys(PLANS).sort()).toEqual(Op.options.map((o) => o.shape.type.value).sort());
   });

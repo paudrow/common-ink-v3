@@ -132,7 +132,10 @@ test("with nothing open the buttons are still there", async ({ page }) => {
 for (const width of [900, 700, 480]) {
   test(`in a window ${width}px wide every control is inside it, and the sidebar and the inspector still open and close`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
-    await withNote(page, "# Draft with a long title that takes room\n\nWords.");
+    const note = await withNote(page, "# Draft with a long title that takes room\n\nWords.");
+    await perform(page, { type: "note.setPrivate", id: note.id, private: true });
+    await page.reload();
+    await expect(page.locator(".note-bar")).toContainText("Private");
 
     /** Every part named is wholly inside the window: none of it is past the right edge, or the left. */
     const inside = async (...parts: Locator[]) => {

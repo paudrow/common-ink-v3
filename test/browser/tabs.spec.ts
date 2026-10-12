@@ -489,6 +489,7 @@ const PAGES = [
   ["/settings", "Settings"],
   ["/plugins", "Plugins"],
   ["/members", "Members"],
+  ["/sharing", "Sharing"],
   ["/agents", "Agents"],
 ] as const;
 
