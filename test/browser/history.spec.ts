@@ -119,7 +119,7 @@ test("focus shows no History mark: the way out is its only button, and the dot w
   await expect(editorLines(page)).toHaveText(["# Draft", "", "Mine.", "", "From Claude."], { timeout: 15_000 });
   await expect(page.locator(".tab-row").getByRole("button").filter({ visible: true })).toHaveCount(1);
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  expect((await page.locator(".group-body").filter({ visible: true }).boundingBox())!.width).toBe(1280);
+  await expect.poll(async () => (await page.locator(".group-body").filter({ visible: true }).boundingBox())!.width).toBe(1280);
 
   await page.getByRole("button", { name: "Focus" }).click();
   await expect(page.getByRole("tab", { name: "History" })).toHaveAccessibleDescription(UNSEEN);
@@ -293,8 +293,8 @@ test("a revision can be labeled, and the note reverted to it as a new change", a
   }
   await change(panel, "Change 3 by Claude").getByRole("button", { name: "Change 5", exact: true }).click();
   await expect(toggle(revert)).toBeFocused();
-  expect(await text(page, id)).toBe("# Plan\n\nAda's step");
-  expect((await perform(page, { type: "note.read", id, revision: 4 })).text).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
+  await expect.poll(() => text(page, id)).toBe("# Plan\n\nAda's step");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id, revision: 4 })).text).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
 
   await page.reload();
   await inspector(page).getByRole("tab", { name: "History" }).click();
@@ -315,7 +315,7 @@ test("a change is reverted as a new change, and reverting that revert has it aga
 
   await expect(third).toContainText("Reverted by change 5");
   await expect(third.getByRole("button", { name: /^Revert change/ })).toHaveCount(0);
-  expect(await text(page, id)).toBe("# Plan\n\nAda's step\n\nAda's last word");
+  await expect.poll(() => text(page, id)).toBe("# Plan\n\nAda's step\n\nAda's last word");
   await mode.getByRole("button", { name: "Clear filters" }).click();
   await expect.poll(summary(mode)).toEqual([["Plan", "+7 −2", "5 changes · Ada Lovelace, Claude (agent)"]]);
   const fifth = change(mode, "Change 5 to Plan by Ada Lovelace");
@@ -330,7 +330,7 @@ test("a change is reverted as a new change, and reverting that revert has it aga
   await expect(fifth).toContainText("Reverted by change 6");
   await expect(third).not.toContainText("Reverted by");
   await expect(third.getByRole("button", { name: "Revert change 3 to Plan" })).toBeVisible();
-  expect(await text(page, id)).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
+  await expect.poll(() => text(page, id)).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
 
   await revertFrom(page, sixth.getByRole("button", { name: "Revert change 6 to Plan…" }));
 
@@ -339,8 +339,8 @@ test("a change is reverted as a new change, and reverting that revert has it aga
   await expect(seventh).toContainText("+0 −2");
   await expect(third).toContainText("Reverted by change 5");
   await expect(mode).not.toContainText(/put back|taken back|Put back|Taken back/);
-  expect(await text(page, id)).toBe("# Plan\n\nAda's step\n\nAda's last word");
-  expect((await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3], [5], [6]]);
+  await expect.poll(() => text(page, id)).toBe("# Plan\n\nAda's step\n\nAda's last word");
+  await expect.poll(async () => (await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3], [5], [6]]);
 });
 
 test("a revert is shown before it is made: the dialog has the diff of what it will do, cancelling changes nothing, and confirming records one change", async ({ page }) => {
@@ -358,7 +358,7 @@ test("a revert is shown before it is made: the dialog has the diff of what it wi
   await expect(removed(dialog)).toHaveText(["Claude's step", ""]);
   await expect(dialog.getByRole("insertion")).toHaveCount(0);
   await expect(dialog).not.toContainText("edited the same lines");
-  expect(await dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+  await expect.poll(() => dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
 
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toHaveCount(0);
@@ -371,8 +371,8 @@ test("a revert is shown before it is made: the dialog has the diff of what it wi
   await opener.click();
   await page.mouse.click(5, 5);
   await expect(dialog).toHaveCount(0);
-  expect(await text(page, id)).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
-  expect(await perform(page, { type: "note.history", id })).toHaveLength(4);
+  await expect.poll(() => text(page, id)).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
+  await expect.poll(() => perform(page, { type: "note.history", id })).toHaveLength(4);
   await expect(changes(panel)).toHaveCount(4);
 
   await opener.click();
@@ -381,10 +381,10 @@ test("a revert is shown before it is made: the dialog has the diff of what it wi
   await expect(dialog).toHaveCount(0);
   await expect(change(panel, "Change 5 by Ada Lovelace")).toContainText("Reverts change 3");
   await expect(editorLines(page)).toHaveText(["# Plan", "", "Ada's step", "", "Ada's last word"]);
-  expect((await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3]]);
+  await expect.poll(async () => (await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3]]);
 });
 
-test("the dialog names the later changes that edited the same lines, each a way to that change, and says nothing of later edits elsewhere", async ({ page }) => {
+test("the dialog shows the later changes that edited the same lines as a conflict to settle, each a way to that change, and none for later edits elsewhere", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Plan\n\none\n\ntwo" });
   await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\none, edited\n\ntwo" });
@@ -395,12 +395,14 @@ test("the dialog names the later changes that edited the same lines, each a way 
 
   await change(panel, "Change 3 by Ada Lovelace").getByRole("button", { name: "Revert change 3…" }).click();
   await expect(added(dialog)).toHaveText(["two"]);
-  await expect(dialog).not.toContainText("edited the same lines");
+  await expect(dialog.getByRole("radiogroup")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Revert", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
 
   await change(panel, "Change 2 by Ada Lovelace").getByRole("button", { name: "Revert change 2…" }).click();
-  await expect(dialog).toContainText("Later, change 4 edited the same lines. Its edits stay, on lines this revert otherwise returns to how they were.");
+  const conflict = dialog.getByRole("list", { name: "Conflicts" }).getByRole("listitem");
+  await expect(conflict.getByRole("term")).toHaveText(["Before", "Now, edited by Ada Lovelace in change 4"]);
+  await expect(dialog).not.toContainText("edited the same lines");
   await dialog.getByRole("button", { name: "Change 4", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(toggle(change(panel, "Change 4 by Ada Lovelace"))).toBeFocused();
@@ -408,7 +410,7 @@ test("the dialog names the later changes that edited the same lines, each a way 
   await perform(page, { type: "note.write", id: note.id, baseRevision: 4, text: "# Plan\n\none, edited a third time\n\ntwo, edited" });
   await expect(changes(panel)).toHaveCount(5);
   await change(panel, "Change 2 by Ada Lovelace").getByRole("button", { name: "Revert change 2…" }).click();
-  await expect(dialog).toContainText("Later, changes 4 and 5 edited the same lines. Their edits stay, on lines this revert otherwise returns to how they were.");
+  await expect(conflict.getByRole("term")).toHaveText(["Before", "Now, edited by Ada Lovelace in changes 4 and 5"]);
 });
 
 test("several changes are ticked and reverted at once as one change, from the head of the note's list", async ({ page }) => {
@@ -428,7 +430,7 @@ test("several changes are ticked and reverted at once as one change, from the he
   await expect(panel.getByRole("checkbox", { name: "Select change 3" })).toBeChecked();
   await expect(several).toHaveText("Revert 2 changes…");
   await expect(several).toBeEnabled();
-  expect(await rows()).toEqual(before);
+  await expect.poll(() => rows()).toEqual(before);
   for (const gone of ["Revert selected", "Put back selected", "Clear"]) await expect(panel.getByRole("button", { name: gone, exact: true })).toHaveCount(0);
 
   await several.click();
@@ -439,8 +441,8 @@ test("several changes are ticked and reverted at once as one change, from the he
   await dialog.getByRole("button", { name: "Revert", exact: true }).click();
 
   await expect(change(panel, "Change 5 by Ada Lovelace")).toContainText("Reverts changes 3 and 4");
-  expect(await text(page, id)).toBe("# Plan\n\nAda's step");
-  expect((await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3, 4]]);
+  await expect.poll(() => text(page, id)).toBe("# Plan\n\nAda's step");
+  await expect.poll(async () => (await perform(page, { type: "note.history", id })).map((c) => c.reverts?.revisions ?? null)).toEqual([null, null, null, null, [3, 4]]);
   await expect(panel.getByRole("checkbox", { checked: true })).toHaveCount(0);
   await expect(several).toBeDisabled();
   for (const reverted of [3, 4]) await expect(panel.getByRole("checkbox", { name: `Select change ${reverted}` })).toHaveCount(0);
@@ -508,7 +510,7 @@ test("a revert that would change nothing can't be confirmed, and one the note ha
   await expect(confirm).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(change(panel, "Change 4 by Ada Lovelace")).toContainText("Reverted by change 5");
-  expect(await text(page, note.id)).toBe("# Plan");
+  await expect.poll(() => text(page, note.id)).toBe("# Plan");
 });
 
 for (const [where, width] of [["History mode, wide", 1440], ["History mode, narrow", 700], ["the inspector's History tab", 1100]] as const) {
@@ -605,8 +607,8 @@ test("undo and redo move through the note's history, across a closed tab and a r
 
   const recorded = await perform(page, { type: "note.history", id });
   expect(recorded.map((c) => c.reverts?.how ?? "edit")).toEqual(["edit", "edit", "edit", "undo", "undo", "redo", "redo", "undo"]);
-  expect(await text(page, id)).toBe("# one two");
-  expect(await text(page, other.id)).toBe("# Other");
+  await expect.poll(() => text(page, id)).toBe("# one two");
+  await expect.poll(() => text(page, other.id)).toBe("# Other");
 });
 
 test("undo takes back what was typed a moment ago without a word to the server, and leaves a text field's own undo alone", async ({ page }) => {
@@ -636,7 +638,7 @@ test("undo takes back what was typed a moment ago without a word to the server, 
   await page.keyboard.press("ControlOrMeta+z");
   await expect(editorLines(page)).toHaveText(["kept"]);
   await page.waitForTimeout(500);
-  expect((await perform(page, { type: "note.history", id: note.id })).map((c) => c.reverts?.how ?? "edit")).toEqual(["edit"]);
+  await expect.poll(async () => (await perform(page, { type: "note.history", id: note.id })).map((c) => c.reverts?.how ?? "edit")).toEqual(["edit"]);
 
   await page.getByRole("tab", { name: "kept" }).click();
   await page.keyboard.press("ControlOrMeta+Shift+P");
@@ -672,7 +674,7 @@ test("undo takes back a paste the server never got, and typing saved before it i
   await page.keyboard.press("ControlOrMeta+z");
   await expect(editorLines(page)).toHaveText(["kept"]);
   await expect.poll(() => text(page, note.id)).toBe("kept");
-  expect((await hows(page, note.id)).at(-1)).toBe("undo");
+  await expect.poll(async () => (await hows(page, note.id)).at(-1)).toBe("undo");
 });
 
 test("undoing typing not yet saved and then pressing undo again takes back one saved change, not two", async ({ page }) => {
@@ -690,7 +692,7 @@ test("undoing typing not yet saved and then pressing undo again takes back one s
   await page.keyboard.press("ControlOrMeta+z");
   await expect(editorLines(page)).toHaveText(["# one two"]);
   await expect(page.getByRole("status")).toHaveText("Saved");
-  expect(await hows(page, id)).toEqual(["edit", "edit"]);
+  await expect.poll(() => hows(page, id)).toEqual(["edit", "edit"]);
 
   const reads: string[] = [];
   page.on("request", (request) => request.postData()?.includes('"note.read"') && reads.push(request.url()));
@@ -702,7 +704,7 @@ test("undoing typing not yet saved and then pressing undo again takes back one s
   await page.keyboard.press("ControlOrMeta+Shift+z");
   await expect(editorLines(page)).toHaveText(["# one two"]);
   await expect.poll(() => hows(page, id)).toEqual(["edit", "edit", "undo", "redo"]);
-  expect(await text(page, id)).toBe("# one two");
+  await expect.poll(() => text(page, id)).toBe("# one two");
 });
 
 test("an undo that can't reach the server says so where a failed save does", async ({ page }) => {
@@ -750,7 +752,7 @@ test("an agent's edit read into the editor while the member types is never what 
   await page.keyboard.press("ControlOrMeta+z");
   await expect(editorLines(page).nth(2)).toHaveText("From Claude.");
   await expect(page.getByRole("status")).toHaveText("Saved");
-  expect(await text(page, note.id)).toContain("From Claude.");
+  await expect.poll(() => text(page, note.id)).toContain("From Claude.");
 });
 
 test("two members on one browser each have their own unseen changes", async ({ page }) => {

@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { ago, useDismiss, useNow, type Author, type AuthorRef, type ChangedNote, type Diff, type HistoryEntry, type HistoryPage, type HistorySummary, type Note, type NoteSummary, type OpInput, type PluginHost, type RevertPreview } from "../../plugin-api.ts";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { ago, useDismiss, useNow, type Author, type AuthorRef, type ChangedNote, type Diff, type HistoryEntry, type HistoryPage, type HistorySummary, type Note, type NoteSummary, type OpInput, type PluginHost, type Resolve } from "../../plugin-api.ts";
 import { RevertAuthor } from "../lib/RevertAuthor.tsx";
-import { DiffView, RevertDialog } from "../lib/RevertDialog.tsx";
+import { authorKey, DiffView, Named, nameOf, RevertChanges, RevertDialog, useRevertPreview } from "../lib/RevertDialog.tsx";
 
 /** What narrows history: to some notes, some authors, a span of time. */
 type Filters = Omit<Extract<OpInput, { type: "history.summary" }>, "type" | "before" | "limit">;
@@ -12,11 +12,9 @@ const CHANGES_A_PAGE = 30;
 const MOST_A_PAGE = 100;
 
 const refOf = (author: Author): AuthorRef => (author.kind === "agent" ? { kind: "agent", id: author.agentId } : { kind: "member", id: author.personId });
-const authorKey = (author: Author) => `${author.kind}:${refOf(author).id}`;
 const refOfKey = (key: string): AuthorRef => ({ kind: key.split(":")[0] as AuthorRef["kind"], id: key.split(":")[1]! });
 const titleOf = (title: string) => title || "Untitled";
 const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
-const nameOf = (author: Author) => (author.kind === "agent" ? `${author.name} (agent)` : author.name);
 
 function Stat({ added, removed }: { added: number; removed: number }) {
   return (
@@ -44,24 +42,6 @@ function ChangeDiff({ host, noteId, revision }: { host: PluginHost; noteId: stri
   return diff && <DiffView diff={diff} />;
 }
 
-/** The changes a sentence names, each one a way to it. More than a few are only counted. */
-function Named({ revisions, onShow }: { revisions: number[]; onShow: (revision: number) => void }) {
-  if (revisions.length > 3) return <>{revisions.length} changes</>;
-  return (
-    <>
-      {revisions.length === 1 ? "change " : "changes "}
-      {revisions.map((revision, i) => (
-        <Fragment key={revision}>
-          {i > 0 && (i === revisions.length - 1 ? " and " : ", ")}
-          <button type="button" className="link change-ref" aria-label={`Change ${revision}`} onClick={() => onShow(revision)}>
-            {revision}
-          </button>
-        </Fragment>
-      ))}
-    </>
-  );
-}
-
 /** What a change did when it wasn't an edit, in the words a member reads. */
 function whatItDid(change: HistoryEntry, onShow: (revision: number) => void): ReactNode {
   const { reverts } = change;
@@ -75,8 +55,6 @@ function whatItDid(change: HistoryEntry, onShow: (revision: number) => void): Re
 
 type RevertOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" }>;
 
-type Previewed = { state: "reading" } | { state: "read"; preview: RevertPreview } | { state: "failed"; message: string };
-
 interface NoteRevertProps {
   host: PluginHost;
   op: RevertOp;
@@ -88,36 +66,29 @@ interface NoteRevertProps {
   onClose: () => void;
 }
 
-/** What a revert would do, shown before it is made: the changes it reverts, the note's lines it changes, and the later changes that overlap. */
+/** What a revert would do, shown before it is made: the changes it reverts, each conflict with a later change and the choice of how it is settled, and the note's lines the revert changes as chosen. */
 function NoteRevert({ host, op, noteTitle, version, onShow, onReverted, onClose }: NoteRevertProps) {
-  const [previewed, setPreviewed] = useState<Previewed>({ state: "reading" });
   const [busy, setBusy] = useState(false);
   const asked = JSON.stringify(op.type === "note.revert" ? { id: op.id, to: op.revision } : { id: op.id, revisions: op.revisions });
-
-  useEffect(() => {
-    let live = true;
-    host.perform({ type: "note.previewRevert", ...(JSON.parse(asked) as { id: string; to: number } | { id: string; revisions: number[] }) }).then(
-      (preview) => live && setPreviewed({ state: "read", preview }),
-      (err: Error) => live && setPreviewed({ state: "failed", message: err.message }),
-    );
-    return () => {
-      live = false;
-    };
-  }, [host, asked, version]);
+  const read = useCallback(
+    (resolve?: Resolve) => host.perform({ type: "note.previewRevert", ...(JSON.parse(asked) as { id: string; to: number } | { id: string; revisions: number[] }), ...(resolve && { resolve }) }),
+    [host, asked],
+  );
+  const previewed = useRevertPreview(read, version);
+  const { preview, diff, error } = previewed.state;
 
   const revert = async () => {
     setBusy(true);
     try {
-      onReverted(await host.perform(op));
+      // With no conflict nothing is settled, and the revert is asked for as it always was.
+      onReverted(await host.perform(previewed.resolve ? { ...op, resolve: previewed.resolve } : op));
     } catch (err) {
-      setPreviewed({ state: "failed", message: (err as Error).message });
+      previewed.refused(err as Error);
       setBusy(false);
     }
   };
 
-  const preview = previewed.state === "read" ? previewed.preview : null;
   const reverted = preview && [...preview.revisions].sort((a, b) => a - b);
-  const changesNothing = preview !== null && !preview.diff.hunks.length;
   const show = (revision: number) => {
     onClose();
     onShow(revision);
@@ -125,27 +96,19 @@ function NoteRevert({ host, op, noteTitle, version, onShow, onReverted, onClose 
   return (
     <RevertDialog
       title={op.type === "note.revert" ? `Revert note to revision ${op.revision}` : `Revert ${op.revisions.length === 1 ? `change ${op.revisions[0]}` : `${op.revisions.length} changes`}`}
-      ready={!busy && preview !== null && !changesNothing}
+      ready={!busy && preview !== null && (diff === null || diff.hunks.length > 0)}
+      settled={previewed.settled}
       onRevert={revert}
       onClose={onClose}
     >
-      {previewed.state === "reading" && <p className="diff-none">Working out what this would change…</p>}
-      {previewed.state === "failed" && <p role="alert" className="error">{previewed.message}</p>}
-      {preview && reverted && (
-        <>
-          {reverted.length > 0 && (
-            <p>
-              Reverts <Named revisions={reverted} onShow={show} /> to {noteTitle} as one new change.
-            </p>
-          )}
-          {changesNothing ? <p>Nothing in the note would change.</p> : <DiffView diff={preview.diff} />}
-          {preview.overlaps.length > 0 && (
-            <p className="revert-overlap">
-              Later, <Named revisions={preview.overlaps} onShow={show} /> edited the same lines. {preview.overlaps.length === 1 ? "Its" : "Their"} edits stay, on lines this revert otherwise returns to how they were.
-            </p>
-          )}
-        </>
+      {!preview && !error && <p className="diff-none">Working out what this would change…</p>}
+      {error && <p role="alert" className="error">{error}</p>}
+      {reverted && reverted.length > 0 && (
+        <p>
+          Reverts <Named revisions={reverted} onShow={show} /> to {noteTitle} as one new change.
+        </p>
       )}
+      <RevertChanges revert={previewed} onShow={show} />
     </RevertDialog>
   );
 }

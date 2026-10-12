@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import type { AuthorRef, PluginHost, RevertPreview } from "../../plugin-api.ts";
-import { DiffView, RevertDialog } from "./RevertDialog.tsx";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { AuthorRef, PluginHost, Resolve, RevertPreview } from "../../plugin-api.ts";
+import { RevertChanges, RevertDialog, useRevertPreview } from "./RevertDialog.tsx";
 
 interface Props {
   host: PluginHost;
@@ -45,15 +45,59 @@ async function previewOf(host: PluginHost, author: AuthorRef, noteIds: string[] 
   return { notes: previews.filter((n) => n.preview === null || n.preview.revisions.length > 0), more: next !== null };
 }
 
+/** How each note's conflicts are settled, by note id. A note with every later edit kept isn't named. */
+type Resolves = Record<string, Resolve>;
+
+interface NoteRevertProps {
+  host: PluginHost;
+  author: AuthorRef;
+  noteId: string;
+  first: RevertPreview;
+  /** Told whether what is shown for this note is what the revert would do to it, and how its conflicts are settled when any later edit isn't kept. */
+  onSettle: (noteId: string, settled: boolean, resolve: Resolve | null) => void;
+}
+
+/** What reverting the author would do to one note, with each of its conflicts to settle. */
+function NoteRevert({ host, author, noteId, first, onSettle }: NoteRevertProps) {
+  const asked = JSON.stringify(author);
+  const read = useCallback((resolve?: Resolve) => host.perform({ type: "note.previewRevert", id: noteId, author: JSON.parse(asked) as AuthorRef, ...(resolve && { resolve }) }), [host, noteId, asked]);
+  const previewed = useRevertPreview(read, undefined, first);
+  const { resolve } = previewed;
+  // A note whose preview can no longer be read is reverted with every later edit kept, as one that never could be is, and doesn't hold up the others.
+  const settled = previewed.settled || (!previewed.state.preview && !previewed.state.reading);
+  // Every later edit kept is what the revert does unasked, and asks nothing of the note staying as it was read.
+  const sent = resolve && (typeof resolve.choices === "string" || resolve.choices.some((choice) => choice !== "keep")) ? JSON.stringify(resolve) : null;
+  useEffect(() => {
+    onSettle(noteId, settled, sent ? (JSON.parse(sent) as Resolve) : null);
+    return () => onSettle(noteId, true, null);
+  }, [onSettle, noteId, settled, sent]);
+  return (
+    <>
+      {previewed.state.error && (
+        <p role="alert" className="error">
+          {previewed.state.error}
+        </p>
+      )}
+      <RevertChanges revert={previewed} heading="h4" />
+    </>
+  );
+}
+
 interface AuthorRevertProps extends Pick<Props, "host" | "author" | "name" | "where" | "noteIds" | "beyond" | "version"> {
   title: string;
-  onRevert: () => void;
+  onRevert: (resolve: Resolves) => void;
   onClose: () => void;
 }
 
 /** What reverting an author would do, note by note, shown before it is done. */
 function AuthorRevert({ host, author, name, where, noteIds, beyond, version, title, onRevert, onClose }: AuthorRevertProps) {
   const [previewed, setPreviewed] = useState<Previewed>({ state: "reading" });
+  const [resolves, setResolves] = useState<Resolves>({});
+  const [unsettled, setUnsettled] = useState<readonly string[]>([]);
+  const settle = useCallback((noteId: string, settled: boolean, resolve: Resolve | null) => {
+    setUnsettled((was) => (was.includes(noteId) === !settled ? was : settled ? was.filter((id) => id !== noteId) : [...was, noteId]));
+    setResolves(({ [noteId]: _, ...others }) => (resolve ? { ...others, [noteId]: resolve } : others));
+  }, []);
   const asked = JSON.stringify({ author, noteIds });
   useEffect(() => {
     let live = true;
@@ -71,7 +115,7 @@ function AuthorRevert({ host, author, name, where, noteIds, beyond, version, tit
   const seen = read?.notes.flatMap((n) => (n.preview ? [n.preview] : [])) ?? [];
   const changes = seen.reduce((sum, preview) => sum + preview.revisions.length, 0);
   return (
-    <RevertDialog title={title} ready={read !== null && (read.notes.length > 0 || read.more)} onRevert={onRevert} onClose={onClose}>
+    <RevertDialog title={title} ready={read !== null && (read.notes.length > 0 || read.more)} settled={!unsettled.length} onRevert={() => onRevert(resolves)} onClose={onClose}>
       {previewed.state === "reading" && <p className="diff-none">Working out what this would change…</p>}
       {previewed.state === "failed" && (
         <p role="alert" className="error">
@@ -99,22 +143,15 @@ function AuthorRevert({ host, author, name, where, noteIds, beyond, version, tit
               </h3>
               {!preview ? (
                 <p className="diff-none">What this would change here couldn't be worked out just now. {name}'s changes to it are reverted all the same.</p>
-              ) : preview.diff.hunks.length ? (
-                <DiffView diff={preview.diff} />
               ) : (
-                <p className="diff-none">Nothing in the note would change.</p>
-              )}
-              {preview && preview.overlaps.length > 0 && (
-                <p className="revert-overlap">
-                  Later, {count(preview.overlaps.length, "change")} edited the same lines. {preview.overlaps.length === 1 ? "Its" : "Their"} edits stay, on lines this revert otherwise returns to how they were.
-                </p>
+                <NoteRevert host={host} author={author} noteId={noteId} first={preview} onSettle={settle} />
               )}
             </li>
           ))}
         </ul>
       )}
       {read?.more && (
-        <p className="revert-overlap">
+        <p className="revert-more">
           {name} changed more notes than the {MOST_NOTES} looked at here. The rest are reverted too, without being shown.
         </p>
       )}
@@ -129,13 +166,13 @@ export function RevertAuthor({ host, author, name, where, noteIds, beyond, versi
   const [said, say] = useState<{ text: string; failed?: boolean } | null>(null);
   const title = `Revert ${name}'s changes`;
 
-  const run = async () => {
+  const run = async (resolve: Resolves) => {
     setStep("busy");
     try {
       const done = { notes: 0, changes: 0, emptied: [] as string[], failed: [] as { title: string; message: string }[] };
       // A few notes are covered a request, so it is asked again until every note has been.
       for (let after: string | undefined, more = true; more; ) {
-        const { reverted, emptied, failed, next } = await host.perform({ type: "history.revertAuthor", author, noteIds, after });
+        const { reverted, emptied, failed, next } = await host.perform({ type: "history.revertAuthor", author, noteIds, after, resolve });
         done.notes += reverted.length;
         for (const { revisions } of reverted) done.changes += revisions.length;
         done.emptied.push(...emptied.map((e) => e.title));
