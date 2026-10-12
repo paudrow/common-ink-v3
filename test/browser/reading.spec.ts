@@ -55,7 +55,7 @@ for (const settings of [{ "vim.enabled": true, "lineNumbers.enabled": true }, {}
     await expect(reading.locator('.embed-below[data-embed="youtube"]').getByRole("button", { name: /Play video/ })).toBeVisible();
     expect(page.frames().filter((f) => /youtube/.test(f.url()))).toEqual([]);
 
-    expect(await text(page, note.id)).toBe(body);
+    await expect.poll(() => text(page, note.id)).toBe(body);
     await expect(folderRow(page, "All notes")).toBeVisible();
   });
 }

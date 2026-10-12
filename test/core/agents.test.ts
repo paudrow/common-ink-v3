@@ -145,6 +145,7 @@ describe("MCP protocol", () => {
       "revert_note",
       "revert_changes",
       "revert_author",
+      "preview_revert",
       "undo",
       "redo",
       "list_members",

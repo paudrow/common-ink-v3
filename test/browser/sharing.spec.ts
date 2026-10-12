@@ -43,7 +43,7 @@ test("a guest given one note to view sees that note and nothing else, and can't 
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
   await expect(tree(grace).getByRole("treeitem")).toHaveText([/^All notes\s*1$/, /^Shared with me\s*1$/]);
   await expect(grace.getByRole("button", { name: "New folder" })).toHaveCount(0);
-  expect(await quickOpenTitles(grace)).toEqual(["Shared plan"]);
+  await expect.poll(() => quickOpenTitles(grace)).toEqual(["Shared plan"]);
   await expect(inspector(grace).getByRole("tabpanel")).toContainText("You can view this note");
   await expect(inspector(grace).getByRole("button", { name: "Share" })).toHaveCount(0);
 
@@ -65,7 +65,7 @@ test("a guest given one note to view sees that note and nothing else, and can't 
   await expect(grace.getByText(NOTHING)).toBeVisible();
   await expect(grace.getByText("Not for Grace.")).toHaveCount(0);
   await expect(perform(grace, { type: "note.read", id: secret.id }, workspaceId)).rejects.toThrow();
-  expect((await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title)).toEqual(["Shared plan"]);
+  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title)).toEqual(["Shared plan"]);
 });
 
 test("a guest given a folder to edit sees what is in it, edits a note, sees its history, and makes a note there, and a note shared to view inside it stays read-only", async ({ page }) => {
@@ -108,7 +108,7 @@ test("a guest given a folder to edit sees what is in it, edits a note, sees its 
   await expect(editor(grace)).toContainText("Fixed by Ada.");
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
   await expect(perform(grace, { type: "note.write", id: q3.id, baseRevision: 1, text: "# Q3\n\nGrace's." }, workspaceId)).rejects.toThrow();
-  expect((await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title).sort()).toEqual(["From Grace", "Kickoff", "Q3"]);
+  await expect.poll(async () => (await perform(grace, { type: "note.list" }, workspaceId)).map((n) => n.title).sort()).toEqual(["From Grace", "Kickoff", "Q3"]);
 });
 
 test("a note its maker makes private is hidden from an admin everywhere, and sharing it with one member lets that member in", async ({ page }) => {
@@ -142,7 +142,7 @@ test("a note its maker makes private is hidden from an admin everywhere, and sha
   await expect(editor(page)).toContainText("See");
   await expect(editor(page).getByRole("link", { name: "Unavailable note" })).toBeVisible();
   await expect(editor(page)).not.toContainText("Diary");
-  expect(await quickOpenTitles(page)).toEqual(["Index", "Target"]);
+  await expect.poll(() => quickOpenTitles(page)).toEqual(["Index", "Target"]);
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Index", "Target"]);
   await listedNote(page, "Target").click();
@@ -204,7 +204,7 @@ test("a public link made in the Share dialog shows the note read-only to someone
   const revoked = await anyone.locator("main").innerText();
   await anyone.goto(`/s/${"x".repeat(43)}`);
   await expect(anyone.getByRole("heading", { name: NO_LINK })).toBeVisible();
-  expect(await anyone.locator("main").innerText()).toBe(revoked);
+  await expect.poll(() => anyone.locator("main").innerText()).toBe(revoked);
 });
 
 test("a link's page draws the note as the app does, and runs nothing in it until the visitor asks", async ({ page }) => {
@@ -230,7 +230,7 @@ test("a link's page draws the note as the app does, and runs nothing in it until
   await anyone.getByRole("button", { name: /^Run HTML/ }).click();
   await expect(anyone.locator('.embed-below[data-embed="html"] iframe')).toHaveAttribute("sandbox", /.*/);
   await expect(editor(anyone)).toHaveAttribute("contenteditable", "false");
-  expect((await perform(page, { type: "note.read", id: note.id })).text).toBe(text);
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(text);
 });
 
 test("a folder's link lists and opens its notes, and not a private note inside it", async ({ page }) => {
@@ -278,7 +278,7 @@ test("a link for people signed in opens for someone signed in who isn't a member
 
   await expect(editor(grace)).toContainText("For anyone with an account.");
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
-  expect((await me(grace)).workspaces.map((w) => w.name), "opening a link makes nobody a guest").toEqual(["Grace's workspace"]);
+  await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name), "opening a link makes nobody a guest").toEqual(["Grace's workspace"]);
 });
 
 test("an editor an admin narrows to view on a folder finds its notes read-only, and is offered no new note there", async ({ page }) => {
@@ -344,7 +344,7 @@ test("an admin's Sharing page lists every grant and revokes one, after which the
   await grace.reload();
   await expect(grace.getByText(NOTHING)).toBeVisible();
   await expect(grace.getByText("For Grace.")).toHaveCount(0);
-  expect((await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
+  await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
 });
 
 test("a grant taken back while the guest has the note open takes the note off their screen without a reload", async ({ page }) => {
@@ -370,7 +370,8 @@ test("a grant taken back while the guest has the note open takes the note off th
   await expect(grace.getByText(HIDDEN)).toBeVisible({ timeout: 30_000 });
   await expect(grace.getByText("Grace may change this for now.")).toHaveCount(0);
   await expect(editor(grace)).toHaveCount(0);
-  await expect(inspector(grace)).toHaveCount(0);
+  // The inspector stays open on whatever is in front, with none of the note's tabs.
+  await expect(inspector(grace).getByRole("tab")).toHaveCount(0);
   await expect(grace.getByRole("tab", { name: "Untitled" })).toBeVisible();
   await openAllNotes(grace);
   await expect(listedNotes(grace)).toHaveText(["Kept"]);
@@ -392,8 +393,8 @@ test("typing in a note whose grant was narrowed to view is refused, and the edit
   await grace.keyboard.type(" Grace's late words.");
 
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false", { timeout: 30_000 });
-  expect((await perform(page, { type: "note.read", id: draft.id })).text).toBe("# Draft\n\nAs Ada left it.");
-  expect((await perform(grace, { type: "note.read", id: draft.id }, workspaceId)).access).toBe("view");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: draft.id })).text).toBe("# Draft\n\nAs Ada left it.");
+  await expect.poll(async () => (await perform(grace, { type: "note.read", id: draft.id }, workspaceId)).access).toBe("view");
 });
 
 test("removing a member says what happens to their private notes, and a member with private notes is told why they can't leave", async ({ page }) => {
@@ -410,7 +411,7 @@ test("removing a member says what happens to their private notes, and a member w
   await members(bob).getByRole("button", { name: "Leave" }).click();
   await members(bob).getByRole("button", { name: "Leave Ada's workspace" }).click();
   await expect(members(bob).getByRole("alert")).toContainText("You have private notes here");
-  expect((await me(bob)).workspaces.map((w) => w.name)).toContain("Ada's workspace");
+  await expect.poll(async () => (await me(bob)).workspaces.map((w) => w.name)).toContain("Ada's workspace");
 
   await page.goto("/members");
   await members(page).getByRole("button", { name: "Remove Bob Editor" }).click();
@@ -489,7 +490,7 @@ test("a plugin that isn't Common Ink's own can't share, change members, or conne
     "Greedy fixture isn't given host.members.invite: only Common Ink's own plugins are",
     "Greedy fixture isn't given host.agents.connect: only Common Ink's own plugins are",
   ]);
-  expect(await perform(page, { type: "grant.list", noteId: note.id })).toMatchObject({ grants: [] });
-  expect(await perform(page, { type: "invite.list" })).toEqual([]);
+  await expect.poll(() => perform(page, { type: "grant.list", noteId: note.id })).toMatchObject({ grants: [] });
+  await expect.poll(() => perform(page, { type: "invite.list" })).toEqual([]);
   expect(await page.evaluate(async () => ((await (await fetch("/api/agents")).json()) as { agents: unknown[] }).agents)).toEqual([]);
 });

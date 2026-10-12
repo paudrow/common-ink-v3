@@ -44,7 +44,7 @@ export const noteClocks: Plugin = {
           const done = finished(clock, now);
           const time = shown(clock, now);
           return (
-            <button key={at} type="button" className="bar-item bar-clock" data-done={done || undefined} title="Show it in the note" aria-label={`${KINDS[kind]} in this note, ${done ? "finished" : kind === "timer" ? `${time} left` : time}`} onClick={() => notes.show(app.noteId!, at)}>
+            <button key={at} type="button" className="bar-clock" data-done={done || undefined} title="Show it in the note" aria-label={`${KINDS[kind]} in this note, ${done ? "finished" : kind === "timer" ? `${time} left` : time}`} onClick={() => notes.show(app.noteId!, at)}>
               {KINDS[kind]} {time}
             </button>
           );

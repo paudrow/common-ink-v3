@@ -10,7 +10,7 @@
  * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
@@ -31,9 +31,15 @@ export { ResizeHandle } from "./resize.tsx";
 export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
 export { ago, useNow } from "./time.ts";
+/** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
+export { useOpenNote, type OpenNote } from "./openNotes.ts";
 
-/** The drag type that carries a note's id, so a note dragged out of one plugin's view can be dropped on another's. */
-export const NOTE_DRAG = "application/x-common-ink-note";
+/**
+ * Dragging to the editor area. `carry` puts a note, a folder's list or a page on a drag, `carried`
+ * reads it back where it is dropped, and `carriesTab` says while it is over something whether it
+ * has one. A note is carried under `NOTE_DRAG` as its id, so it also drops wherever a note does.
+ */
+export { NOTE_DRAG, carried, carriesTab, carry } from "./dragged.ts";
 
 export interface Plugin {
   /** What the plugin is known by in storage and in what it contributes. It never changes. */
@@ -182,6 +188,8 @@ export interface PluginHost {
   readonly agents: {
     list(): Promise<Agent[]>;
     connect(name: string, options: ConnectOptions): Promise<{ agent: Agent; token: string }>;
+    /** Changes what an agent may do. Its token stays the one it has. */
+    edit(id: string, edit: AgentEdit): Promise<Agent>;
     disconnect(id: string): Promise<void>;
   };
   /**
@@ -254,12 +262,14 @@ export type View = ComponentType<ViewProps>;
 
 /** The places a view can go. Views in a slot are drawn in the order of the plugins that added them. */
 export interface Slots {
-  /** A column left of the editor. In writing mode there is no room for it. */
+  /**
+   * A column left of the editor: the sidebar. It is drawn closed too, when `app.sidebarOpen` is
+   * false, and is then to be a narrow bar of icons (`<nav class="rail">`) for what it lists when
+   * open, with a way back to open (`app.toggleSidebar`). In focus it is still drawn, out of sight.
+   */
   column: { id: string; component: View };
-  /** A section of the sidebar, such as the folder tree. A column places them with `app.sections`; in writing mode they are in the left popover. */
+  /** A section of the sidebar, such as the folder tree. A column places them with `app.sections`, while it is open. */
   section: { id: string; component: View };
-  /** An icon, or a few, in the left rail of writing mode. */
-  rail: { id: string; component: View };
   /** What fills the editor area when a note, a folder's list, a page, or nothing is open. The last one registered is used; with none, the app shows what the address names alone. */
   editor: {
     id: string;
@@ -269,21 +279,34 @@ export interface Slots {
      * `app.show` with what ends up in front. With `background` it is opened without being put in front.
      */
     open?: (tab: Opened, options: { preview: boolean; background?: boolean }) => void;
+    /**
+     * Asked to open a note, a folder's list or a page in a part of the editor area of its own,
+     * right of or under what is in front, and to keep it there. An editor area that has this is
+     * what `app.openBeside` goes to, and what makes a page's link and a folder's row in the sidebar
+     * offer "Open in a split".
+     */
+    split?: (tab: Opened, side: "right" | "down") => void;
   };
   /**
    * A folder's list of notes, drawn in the editor area where a folder is open. The last one
    * registered is used; with none, the app lists the folder's notes by title.
    */
   folder: { id: string; component: ComponentType<FolderProps> };
-  /** A tab of the inspector, about the open note. It is also an icon in the right rail of writing mode. The inspector opens on the last tab. */
-  inspector: {
-    id: string;
-    label: string;
-    icon: IconName;
-    component: ComponentType<ViewProps & { note: NoteSummary }>;
-    /** Something to flag on the tab, read to a screen reader, or null. */
-    badge?: (app: App) => string | null;
-  };
+  /**
+   * A tab of the inspector. The inspector is about what the editor area has in front, and a view
+   * says which kind of thing it is `for`: it is a tab only while one of those is in front, and its
+   * component is handed that thing (see {@link Inspected}). A note's tabs and a folder's are
+   * different views, which may share a label, as History and Info do. With no view for what is in
+   * front, which today is every page, the inspector says there is nothing to show. With the
+   * inspector closed each view is an icon in the bar that stands in its place.
+   *
+   * One tab is remembered per person, across everything: the one they last picked. What shows is
+   * the view with the picked id, or else the view with the same label where what is in front has
+   * its own, or else the first view with no `badge`, or else the first. A person who has picked
+   * none is shown {@link UNPICKED}. A view with a `badge` counts what it flags as seen by being
+   * shown, as History does, so it is never shown unasked ahead of a view without one.
+   */
+  inspector: InspectorView;
   /**
    * A page with its own address, shown in the editor area as a note is: in a tab, where the editor
    * area has tabs. A page does nothing for that. It is drawn with an `app` whose `path` and
@@ -295,18 +318,44 @@ export interface Slots {
    * path, such as `/plugins/tabs` for the page at `/plugins`, unless another page is at exactly that address:
    * it reads the rest from `app.path`. One that is `transient` only leads somewhere else
    * with `app.show`: it is never a tab, and is drawn in place of the editor area for the moment it
-   * takes to find where to go.
+   * takes to find where to go, with the editor area kept as it is underneath.
    */
   page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; component: View };
   /**
-   * A widget in the bar along the bottom of the app, such as a running timer. The bar is one line of
-   * small things to glance at. It is there in writing mode too, and keeps its height when a widget
-   * has nothing to show, so nothing above it moves when one appears.
+   * An item in the bottom bar: one thin line along the foot of the window for small things to
+   * glance at, such as a count of the open note's words. `side` is the end it sits at, the left
+   * unless said, and `order` places it among the others at that end, lowest first and 0 unless
+   * said. Items of one order stay in the order of the plugins that added them. A component with
+   * nothing to say draws nothing, and takes no room. The bar is there while any plugin has an item
+   * in it, with something to say or not, so nothing above it moves as items come and go. In focus
+   * it is out of sight.
    */
-  bar: { id: string; component: View };
+  bar: { id: string; component: View; side?: "left" | "right"; order?: number };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it, and what it hands over is `state`. */
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
 }
+
+/** What an inspector view is handed besides `app`, by what it is `for`. */
+export interface Inspected {
+  note: { note: NoteSummary };
+  /** `folderId` is a folder's id, or {@link ALL_NOTES}; `name` is what its list is called; `notes` are the notes in it. */
+  folder: { folderId: string; name: string; notes: readonly NoteSummary[] };
+  page: { page: PageInfo };
+}
+
+export type InspectorView = {
+  [K in keyof Inspected]: {
+    id: string;
+    label: string;
+    icon: IconName;
+    for: K;
+    component: ComponentType<ViewProps & Inspected[K]>;
+    /** Something to flag on the tab and on its icon in the closed bar, by a dot and these words for a screen reader, or null. */
+    badge?: (app: App) => string | null;
+  };
+}[keyof Inspected];
+
+export { UNPICKED } from "./inspectorPick.ts";
 
 export interface FolderProps extends ViewProps {
   /** The folder whose notes to list: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. It may name no folder the member can see. */
@@ -328,8 +377,10 @@ export interface EditorProps extends ViewProps {
   /** What to show where nothing is open: a line saying to pick a note. */
   empty: ReactNode;
   /**
-   * The buttons that act on the window and on no one note: the inspector and writing mode. Put them
-   * once, at the top right corner of the editor area, where they stay whatever is open beneath.
+   * The buttons that act on the window and on no one note: the sidebar's and the inspector's, as
+   * one group. Put it once, where it stays whatever is open beneath: at the top left corner of the
+   * editor area, before the first tab. Focus is not among them. It belongs to whatever fills the
+   * window, so the view draws its own button for it from `app.focus` and `app.setFocus`.
    */
   controls: ReactNode;
 }
@@ -598,9 +649,17 @@ export interface App {
    * nothing is open. The folder tree marks it.
    */
   folderId: string | null;
-  writing: boolean;
+  /**
+   * Focus: what is in front in the editor area fills the window. The sidebar, the inspector and
+   * their bars are still drawn, out of sight, so leaving focus puts everything back as it was. A
+   * view in the `editor` slot marks what fills the window: `data-focus-mode` on its `.groups`
+   * and `data-front` on the one `.group` to show.
+   */
+  focus: boolean;
+  /** Whether the sidebar is open. Closed, the `column` view is a narrow bar of icons. */
+  sidebarOpen: boolean;
   pages: readonly PageInfo[];
-  /** What plugins put in the `section` slot, for the column that shows them. */
+  /** What plugins put in the `section` slot, for the column that shows them. Null when there is nothing in it. */
   sections: ReactNode;
   /** Draws a note's text to be read and not changed, as {@link FolderProps.readNote} does, for a page that lists notes. */
   readNote: (noteId: string) => ReactNode;
@@ -612,17 +671,28 @@ export interface App {
   /** Where a note lives, such as `/note/plan-3k2j5h8d9f0a`. */
   notePath(noteId: string): string;
   /**
-   * Opens a note. A preview gives way to the next thing previewed, and takes the place of the one there, unless that is the folder's list in front: a list a note is previewed from is kept. `focus` puts the cursor in its
+   * Opens a note. There is one preview in the window at most: a preview takes the place of the one there, a folder's list among them, wherever in the
+   * editor area that is. `focus` puts the cursor in its
    * editor. `background` opens it in a tab of its own, which is kept, without leaving what is in
    * front. Where the editor area has no tabs the note is opened as it otherwise would be.
    */
   openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean }): void;
   /** Opens a folder's list of notes: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
   openFolder(folderId: string, options?: { preview?: boolean }): void;
+  /**
+   * Opens a note, a folder's list or a page in a split: a part of the editor area of its own, right
+   * of or under what is in front, where it is kept. Null where the editor area has no splits.
+   */
+  openBeside: ((tab: Opened, side: "right" | "down") => void) | null;
   /** Where a folder's list lives, such as `/folder/all`. */
   folderPath(folderId: string): string;
-  /** For the editor area: puts a note, a folder's list or a page at the app's address, or nothing. `replace` keeps Back from retracing the step. */
-  show(tab: Opened | null, options?: { replace?: boolean }): void;
+  /**
+   * For the editor area: puts a note, a folder's list or a page at the app's address, or nothing.
+   * `replace` keeps Back from retracing the step. `move` is a step between things already open, as a
+   * click on a tab is: Back retraces it, and the next move takes its place, so a run of moves is one
+   * step and none of them takes the place of an open.
+   */
+  show(tab: Opened | null, options?: { replace?: boolean; move?: boolean }): void;
   /**
    * Creates a note and opens it. It goes in `folderId` when that is a folder; otherwise in the
    * folder in front, which is the open note's folder when a note is in front; otherwise in Unsorted.
@@ -638,6 +708,9 @@ export interface App {
   markSeen(noteId: string, revision: number): void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
   toggleOverlay(id: string, state?: unknown): void;
+  toggleSidebar(): void;
+  /** Enters or leaves focus. */
+  setFocus(on: boolean): void;
   switchWorkspace(workspaceId: string): void;
   /** Reads again which workspaces the member is in and their role in each, after a change to members that may be to the member themself. */
   reloadWorkspaces(): void;

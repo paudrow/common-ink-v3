@@ -607,7 +607,7 @@ describe("an agent", () => {
     const gus = await newPerson(ada, "Gus Guest");
     await share(ada, { noteId: plan.id }, gus.email, "edit");
     const { agent } = await connectAgent(env.DB, gus.personId, "Claude", { workspaceId: ada.workspaceId });
-    const claude = { agentId: agent.id, personId: gus.personId, name: "Claude", workspaceId: ada.workspaceId, readOnly: false };
+    const claude = { agentId: agent.id, personId: gus.personId, name: "Claude", workspaceId: ada.workspaceId, readOnly: false, folderIds: null };
 
     expect(JSON.parse((await tool(claude, "list_workspaces")).text).workspaces).toEqual([{ id: ada.workspaceId, name: "Ada's workspace", role: "guest" }]);
     expect(JSON.parse((await tool(claude, "list_notes")).text)).toMatchObject([{ id: plan.id, title: "Plan", access: "edit", folderId: null }]);
@@ -627,7 +627,7 @@ describe("an agent", () => {
     const eve = await addMember(ada, "editor", "Eve Editor");
     const diary = await note(eve, "# Diary");
     await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: true });
-    const of = async (personId: string, readOnly = false) => ({ agentId: (await connectAgent(env.DB, personId, "Claude", { readOnly })).agent.id, personId, name: "Claude", workspaceId: null, readOnly });
+    const of = async (personId: string, readOnly = false) => ({ agentId: (await connectAgent(env.DB, personId, "Claude", { readOnly })).agent.id, personId, name: "Claude", workspaceId: null, readOnly, folderIds: null });
 
     expect(JSON.parse((await tool(await of(ada.personId), "list_notes", { workspace: ada.workspaceId })).text)).toEqual([]);
     expect(await tool(await of(ada.personId), "note_history", { workspace: ada.workspaceId, id: diary.id })).toEqual({ isError: true, text: "not_found: No such note" });

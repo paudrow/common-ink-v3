@@ -71,6 +71,30 @@ const LINKS = "A link to another note is [[id]] or [[id|display text]] with the 
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
 const revisions = { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, description: "The revisions of the changes, from note_history or history" };
+const choice = {
+  anyOf: [
+    { type: "string", enum: ["keep", "back"] },
+    { type: "object", properties: { text: { type: "string", description: "The lines to have there, typed out; an empty string for no lines" } }, required: ["text"], additionalProperties: false },
+  ],
+};
+const resolve = {
+  type: "object",
+  description:
+    'How to settle the conflicts preview_revert lists: places where later changes edited lines this revert changes. "keep" keeps the later edits (what a revert does when this is left out), "back" returns the lines to how they were before the reverted changes and drops the later edits to them, and { text } puts the lines given there. Pass one choice for all of them, or a list with one for each conflict in the order preview_revert lists them.',
+  properties: {
+    at: { type: "integer", minimum: 0, description: "The revision preview_revert answered with. The revert is refused when the note has changed since: preview again" },
+    choices: { anyOf: [{ type: "string", enum: ["keep", "back"] }, { type: "array", items: choice }] },
+  },
+  required: ["at", "choices"],
+  additionalProperties: false,
+};
+const resolveByNote = {
+  type: "object",
+  description:
+    "How to settle the conflicts of the notes named here, by note id: for each, what preview_revert with author listed, settled as resolve settles them there. A note left out keeps every later edit. A note that has changed since its preview is left as it was and named in failed.",
+  additionalProperties: resolve,
+  maxProperties: 200,
+};
 const author = {
   type: "object",
   properties: { kind: { type: "string", enum: ["member", "agent", "plugin"] }, id: { type: "string" } },
@@ -269,23 +293,31 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "revert_note",
-    description: "Put a note back to how it was at a revision. This is recorded as a new change under your agent's name; nothing is erased. Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision to return to" } }, ["id", "revision"]),
+    description:
+      "Put a note back to how it was at a revision. This is recorded as a new change under your agent's name; nothing is erased. Call preview_revert first; if it lists conflicts, pass resolve to settle them. Needs the editor or admin role.",
+    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision to return to" }, resolve }, ["id", "revision"]),
     op: "note.revert",
   },
   {
     name: "revert_changes",
     description:
-      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Needs the editor or admin role.",
-    inputSchema: object({ id: noteId, revisions }, ["id", "revisions"]),
+      "Revert chosen changes of a note and keep every other change, recorded as one new change under your agent's name. History only goes forward: to have a reverted change again, revert the change that reverted it (its revertedBy). Call preview_revert first; if it lists conflicts, pass resolve to settle them, or the later edits are kept. Needs the editor or admin role.",
+    inputSchema: object({ id: noteId, revisions, resolve }, ["id", "revisions"]),
     op: "note.revertChanges",
   },
   {
     name: "revert_author",
     description:
-      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. A note left with no text, such as one the author created, is named in emptied: it stays, since a note can't be deleted yet. Needs the editor or admin role.",
-    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" } }, ["author"]),
+      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. To settle a note's conflicts, preview_revert it with author first and pass resolve; without it the later edits are kept. A note left with no text, such as one the author created, is named in emptied: it stays, since a note can't be deleted yet. Needs the editor or admin role.",
+    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" }, resolve: resolveByNote }, ["author"]),
     op: "history.revertAuthor",
+  },
+  {
+    name: "preview_revert",
+    description:
+      "What a revert would do to a note, with nothing written. Pass one of: revisions to preview revert_changes of those changes, to to preview revert_note to that revision, or author to preview what revert_author would do to this note. Returns the note's revision it was worked out at, the changes that would be reverted (revisions), the diff from the note as it is to the note after (diff), overlaps: later changes that still stand and edited the same lines, and conflicts: each place they did, top of the note first, with the lines as they were before the reverted changes (before), as they are now (now), as the revert leaves them with the later edits kept (kept), the line of the result kept starts at (line), and the later changes that edited them with their authors (later). Settle each conflict with resolve on the revert; pass the same resolve here to see the diff of the revert settled that way. A read-only token can use it.",
+    inputSchema: object({ id: noteId, revisions, to: { type: "integer", minimum: 0, description: "The revision to return to" }, author: { ...author, description: "Whose changes, from history_authors" }, resolve }, ["id"]),
+    op: "note.previewRevert",
   },
   {
     name: "undo",
@@ -321,7 +353,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
     const me = await whoAmI(db, agent.personId);
     // A token pinned to one workspace sees only that one, as if the member belonged to no other.
     if (agent.workspaceId) me.workspaces = me.workspaces.filter((w) => w.id === agent.workspaceId);
-    if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces, readOnly: agent.readOnly });
+    if (name === "list_workspaces") return text({ person: me.person, workspaces: me.workspaces, readOnly: agent.readOnly, folderIds: agent.folderIds });
 
     const { workspace, ...rest } = args;
     let workspaceId: string;
@@ -332,7 +364,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
-    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly } };
+    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly, folderIds: agent.folderIds } };
     return text(await perform(db, actor, { ...rest, type: tool.op! } as OpInput));
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${err.message}`, true);

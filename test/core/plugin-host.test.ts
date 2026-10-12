@@ -22,7 +22,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       workspace: { id: "w1", name: "Acme", role: "editor" },
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
-      agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
+      agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
       members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
       sharing: { of: async () => ({}) as never, grant: async () => ({}) as never, link: async () => null, revoke: async () => {}, setPrivate: async () => ({ removed: 0 }), all: async () => [] },
       storage: { get: () => undefined, set: () => {} },
@@ -153,7 +153,16 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
+  });
+
+  it("says which plugins came with the app, and no others", () => {
+    const { host } = hostWith([notes, palette], { builtIn: ["notes"] });
+
+    expect(host.contributions().plugins.map((p) => [p.id, p.builtIn])).toEqual([
+      ["notes", true],
+      ["palette", false],
+    ]);
   });
 
   it("leaves out the whole of a plugin that can't start, and says why", () => {
