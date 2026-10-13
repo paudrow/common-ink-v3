@@ -166,6 +166,51 @@ describe("plugin host", () => {
     expect(problems()).toEqual([]);
   });
 
+  it("carries on when a plugin throws as it is told of a change to the settings, or as it is stopped, and holds it against that plugin", () => {
+    const heard: string[] = [];
+    const stopped: string[] = [];
+    const loud: Plugin = {
+      id: "loud",
+      name: "Loud",
+      settings: { size: { type: "integer", default: 1, title: "Size" } },
+      activate(h) {
+        h.settings.subscribe(() => {
+          throw new Error("The listener broke");
+        });
+        h.commands.register({ id: "loud.go", title: "Go", run: () => {} });
+        return () => {
+          throw new Error("The stop broke");
+        };
+      },
+    };
+    const quiet: Plugin = {
+      id: "quiet",
+      name: "Quiet",
+      settings: { size: { type: "integer", default: 1, title: "Size" } },
+      activate(h) {
+        h.settings.subscribe(() => heard.push(`quiet ${h.settings.get<number>("size")}`));
+        return () => stopped.push("quiet");
+      },
+    };
+    const { host, wrote, ids } = hostWith([loud, quiet]);
+    const errorOf = (id: string) => host.contributions().plugins.find((p) => p.id === id)!.error;
+
+    // Either throw used to come out of the change itself, in the middle of the settings being saved, and nothing was saved after it.
+    expect(() => wrote({ "quiet.size": 2 })).not.toThrow();
+    expect(heard).toEqual(["quiet 2"]);
+    expect(errorOf("loud")).toBe("The listener broke");
+
+    expect(() => wrote({ "quiet.size": 2, "loud.enabled": false, "quiet.enabled": false })).not.toThrow();
+    expect(stopped).toEqual(["quiet"]);
+    expect(ids()).not.toContain("loud.go");
+    expect(host.contributions().plugins.map((p) => [p.id, p.enabled])).toEqual([["loud", false], ["quiet", false]]);
+    expect(errorOf("loud")).toBe("The stop broke");
+
+    wrote({});
+    expect(ids()).toContain("loud.go");
+    expect(() => host.dispose()).not.toThrow();
+  });
+
   it("won't turn off a required plugin, whatever was stored", () => {
     const { host, ids } = hostWith([notes, palette], { required: ["notes"], settings: { "notes.enabled": false } });
 
