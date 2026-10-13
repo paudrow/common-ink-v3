@@ -443,7 +443,7 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
   await expect(details.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
   await expect(details).toContainText("A board of columns and cards kept in a note as headings and lists.");
   await expect(section(page, "Permissions")).toContainText("It comes with Common Ink and runs inside the app as you, so it asks for nothing");
-  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Pictures", "Permissions", "What it adds", "Settings"]);
+  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Pictures", "Permissions", "What it adds", "Settings", "Source"]);
 
   const picture = section(page, "Pictures").locator("img:visible");
   const shown = () => picture.evaluate((img: HTMLImageElement) => [new URL(img.currentSrc || img.src).pathname, img.complete && img.naturalWidth > 600]);

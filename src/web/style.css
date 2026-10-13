@@ -7242,3 +7242,105 @@ button.dash-row:hover {
   border-color: var(--danger);
   color: var(--danger);
 }
+
+/* Plugin source */
+
+.plugin-source {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.source-code {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+
+.source-code .cm-editor {
+  max-height: 28rem;
+  font-size: 12.5px;
+}
+
+.source-code .cm-editor.cm-focused {
+  outline: none;
+}
+
+.source-code .cm-scroller {
+  overflow: auto;
+  font-family: var(--mono);
+  line-height: 1.5;
+}
+
+.source-code .cm-gutters {
+  border-right: 0;
+  background: none;
+  color: var(--faint);
+}
+
+.source-code .tok-keyword,
+.source-code .tok-operatorKeyword,
+.source-code .tok-modifier {
+  color: light-dark(#8b3fc7, #c792ea);
+}
+
+.source-code .tok-string,
+.source-code .tok-string2 {
+  color: light-dark(#3d7a3d, #a5d6a7);
+}
+
+.source-code .tok-comment,
+.source-code .tok-meta {
+  color: light-dark(#8a8580, #7d7870);
+  font-style: italic;
+}
+
+.source-code .tok-number,
+.source-code .tok-bool,
+.source-code .tok-atom,
+.source-code .tok-literal {
+  color: light-dark(#b25d0f, #f0a868);
+}
+
+.source-code .tok-typeName,
+.source-code .tok-className,
+.source-code .tok-namespace {
+  color: light-dark(#0f7a8a, #7fd0dd);
+}
+
+.source-code .tok-propertyName,
+.source-code .tok-variableName.tok-definition {
+  color: light-dark(#2f5fc4, #8fb4ff);
+}
+
+.source-code .tok-invalid {
+  color: light-dark(#b3261e, #f28b82);
+}
+
+.source-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.source-file select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.source-count {
+  flex: none;
+  color: var(--faint);
+}

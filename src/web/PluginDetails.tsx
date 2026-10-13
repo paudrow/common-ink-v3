@@ -7,6 +7,7 @@ import { INSTALLED_EMBED, type Added, type Contributions, type Host } from "./pl
 import { InstallForm } from "./PluginInstall.tsx";
 import { KIND_LABEL, PLUGINS_PATH, within, type Listed } from "./pluginList.ts";
 import { PermissionRow, sitesIn, useRecordChanges, type RecordChanges } from "./PluginPermissions.tsx";
+import { PluginSource } from "./PluginSource.tsx";
 import { SettingRow } from "./SettingRow.tsx";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
 
@@ -65,8 +66,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /**
- * One plugin: what it is, whose it is, what it is permitted, what it adds, its pictures and its
- * options, which are changed here as they are in Settings, and its switch. For a third-party plugin
+ * One plugin: what it is, whose it is, what it is permitted, what it adds, its pictures, its
+ * options, which are changed here as they are in Settings, its source to read, and its switch. For a third-party plugin
  * an admin decides its permissions here, and updates and uninstalls it.
  */
 export function PluginDetails({ plugin, contributed, host, store, workspaceId, personId, mac, record, onRecord, go }: Props) {
@@ -225,6 +226,10 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
             </a>
           </>
         )}
+      </Section>
+
+      <Section title="Source">
+        <PluginSource plugin={plugin} workspaceId={workspaceId} />
       </Section>
     </section>
   );

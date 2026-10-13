@@ -541,6 +541,8 @@ The Plugins page is under More in the sidebar and the Settings page is in the wo
 
 With every plugin off, the core still opens the note its address names, takes typing, and saves.
 
+A plugin's details end with its **source**, to read. A third-party plugin shows its `manifest.json` and its `plugin.js` as the workspace has them, which every member can read (`plugin.read`). A plugin that comes with Common Ink shows the file it starts from and every file of `src/web/plugins/` that file imports, however far down: `SOURCE_OF` in `src/web/plugins/index.ts` names each one's first file, and `test/core/plugin-source-map.test.ts` holds the table to the imports beside it. The text is bundled when the app is built (`import.meta.glob` with `?raw` in `src/web/pluginSource.ts`), each file in a piece of its own, so what is shown is what was built, no server keeps a second copy, and nothing is fetched until the section is scrolled near: the files, and the editor they are drawn in (`src/web/pluginSourceView.ts`, CodeMirror with the language's colors, read-only). One list picks the file, so a plugin of twenty files adds one control to the page and not twenty.
+
 A plugin whose `activate` throws is left out whole. A view that throws while being drawn is left out alone, an embed that throws is shown as it is written, and a completion that throws offers nothing. Each way the Plugins page says what failed.
 
 ## Third-party plugins
