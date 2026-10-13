@@ -21,7 +21,7 @@ A member connects an agent in the web app, on the Agents page (`/agents`, from t
     PATCH  /api/agents/<id>   {"readOnly": true}   ->  {"agent": {...}}
     DELETE /api/agents/<id>                        ->  204
 
-Optional fields on the POST: `expiresInDays` (default 90, at most 365, or `"never"`), `workspaceId` (one of the member's workspaces), `readOnly` (true or false). For example, a read-only token for one workspace that lasts 30 days:
+Optional fields on the POST: `expiresInDays` (default 90, at most 365, or `"never"`), `workspaceId` (one of the member's workspaces), `readOnly` (true or false). Any other field is refused with a 400 and no token is made: each option narrows the token, so one misspelt and dropped would leave it wider than was asked for. For example, a read-only token for one workspace that lasts 30 days:
 
     {"name": "Claude", "expiresInDays": 30, "workspaceId": "<workspace id>", "readOnly": true}
 

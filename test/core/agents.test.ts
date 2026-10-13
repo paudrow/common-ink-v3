@@ -326,6 +326,45 @@ describe("/api/agents", () => {
     expect((await call(token, rpc("tools/list"))).status).toBe(401);
     expect((await fetchAs("/api/agents", { method: "POST", headers: sameOrigin, body: JSON.stringify({}) })).status).toBe(400);
   });
+
+  it("refuses an option it doesn't know, so a misspelt limit never mints a token broader than was asked for", async () => {
+    const { sign } = await import("../../src/worker/session.ts");
+    const ada = await newPerson();
+    const secretEnv = { ...env, SESSION_SECRET: "test-secret" };
+    const as = `__Host-ink_session=${encodeURIComponent(await sign({ personId: ada.personId }, "test-secret", 3600))}`;
+    const post = (body: string) => send(new Request("https://ink.test/api/agents", { method: "POST", headers: { ...sameOrigin, Cookie: as }, body }), secretEnv);
+    const agents = async () => ((await (await send(new Request("https://ink.test/api/agents", { headers: { Cookie: as } }), secretEnv)).json()) as { agents: { readOnly: boolean; workspaceId: string | null }[] }).agents;
+
+    for (const body of [
+      `{"name":"x","readonly":true}`,
+      `{"name":"x","readonly":null}`,
+      `{"name":"x","read_only":true}`,
+      `{"name":"x","workspace":"${ada.workspaceId}"}`,
+      `{"name":"x","workspaceID":"${ada.workspaceId}"}`,
+      `{"name":"x","expiresIn":1}`,
+      `{"name":"x","readOnly":true,"scope":{"readOnly":false}}`,
+      `{"name":"x","readOnly":true,"__proto__":{"readOnly":false}}`,
+      `{"name":"x","readOnly":"true"}`,
+      `{"name":"x","readOnly":1}`,
+      `{"name":"x","workspaceId":""}`,
+      `{"name":"x","workspaceId":["${ada.workspaceId}"]}`,
+      `[{"name":"x"}]`,
+      `"x"`,
+      `null`,
+    ]) {
+      const res = await post(body);
+      expect([body, res.status]).toEqual([body, 400]);
+      expect(((await res.json()) as { error: string }).error).toBe("invalid");
+    }
+    expect((await post(`{"name":"x","readonly":true}`).then((r) => r.json() as Promise<{ message: string }>)).message).toContain("readonly");
+    expect(await agents()).toEqual([]);
+
+    // What it does know still narrows the token, and a null workspace or expiry is one not given.
+    expect((await post(`{"name":"x","readOnly":true,"workspaceId":"${ada.workspaceId}","expiresInDays":1}`)).status).toBe(201);
+    expect((await post(`{"name":"y","workspaceId":null,"expiresInDays":null}`)).status).toBe(201);
+    expect((await agents()).map((a) => [a.readOnly, a.workspaceId]).sort()).toEqual([[false, null], [true, ada.workspaceId]].sort());
+    await expect(connectAgent(env.DB, ada.personId, "z", { readonly: true } as never)).rejects.toMatchObject({ code: "invalid" });
+  });
 });
 
 describe("the ink command", () => {

@@ -460,12 +460,16 @@ export interface Agent {
   readOnly: boolean;
 }
 
-/** What a member may ask for when connecting an agent. */
 /** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
 export const ExpiresIn = z.union([z.number().int().min(1).max(MAX_EXPIRY_DAYS), z.literal("never")]);
 export type ExpiresIn = z.infer<typeof ExpiresIn>;
 
-export const ConnectOptions = z.object({
+/**
+ * What a member may ask for when connecting an agent. Each option narrows the token and its default
+ * is the widest, so a key this doesn't know is refused: a misspelt `readOnly` or `workspaceId`
+ * left out without a word would mint a token that can do more than was asked for.
+ */
+export const ConnectOptions = z.strictObject({
   expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
   workspaceId: Id.optional(),
   readOnly: z.boolean().default(false),
