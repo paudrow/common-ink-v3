@@ -283,6 +283,8 @@ test("Tab picks the highlighted item of the / menu, as Enter does", async ({ pag
   await expect(menu).toHaveCount(0);
   await page.keyboard.type(" /");
   await expect(menu.first()).toBeVisible();
+  // After words on the line nothing is highlighted until a key moves to an item.
+  await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await expect(menu.nth(1)).toHaveAttribute("aria-selected", "true");
   const second = (await menu.nth(1).locator(".cm-completionDetail").textContent())!;

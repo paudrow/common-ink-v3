@@ -15,6 +15,15 @@ export function typedAfter(before: string, trigger: string, spaces = false): str
   return null;
 }
 
+/**
+ * Whether Enter and Tab pick from a list as soon as it shows, given the line up to the cursor and
+ * what `typedAfter` read from it. With words before the trigger on its line, a completion can ask
+ * for letters first: a `/` and a letter end many an ordinary line.
+ */
+export function picksAtOnce(before: string, typed: string, trigger: string, picksAfter = 0): boolean {
+  return typed.length >= picksAfter || !before.slice(0, before.length - typed.length - trigger.length).trim();
+}
+
 export interface Placing {
   /** Where the trigger starts and the cursor is. */
   from: number;

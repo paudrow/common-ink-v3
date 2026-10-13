@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { placed, typedAfter } from "../../src/web/completionSyntax.ts";
+import { picksAtOnce, placed, typedAfter } from "../../src/web/completionSyntax.ts";
 
 describe("what was typed after a trigger", () => {
   it("is read at the start of a line and after a space", () => {
@@ -25,6 +25,22 @@ describe("what was typed after a trigger", () => {
     expect(typedAfter("see [[Road map", "[[")).toBeNull();
     expect(typedAfter("see [[ Road", "[[", true)).toBeNull();
     expect(typedAfter("[[a]] and [[b", "[[", true)).toBe("b");
+  });
+});
+
+describe("whether Enter picks as soon as the list shows", () => {
+  it("does at the start of a line, and after words once the letters the completion asks for are typed", () => {
+    expect(picksAtOnce("/", "", "/", 2)).toBe(true);
+    expect(picksAtOnce("  /b", "b", "/", 2)).toBe(true);
+    expect(picksAtOnce("A /", "", "/", 2)).toBe(false);
+    expect(picksAtOnce("A /B", "B", "/", 2)).toBe(false);
+    expect(picksAtOnce("- [ ] /t", "t", "/", 2)).toBe(false);
+    expect(picksAtOnce("A /bo", "bo", "/", 2)).toBe(true);
+  });
+
+  it("does anywhere for a completion that asks for none", () => {
+    expect(picksAtOnce("ask @", "", "@")).toBe(true);
+    expect(picksAtOnce("see [[R", "R", "[[")).toBe(true);
   });
 });
 

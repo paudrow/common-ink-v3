@@ -428,6 +428,12 @@ export interface Completion {
   trigger: string;
   /** Whether what is typed after the trigger may hold spaces, as a note's title does. Without it a space closes the list. */
   spaces?: boolean;
+  /**
+   * How many letters must be typed after the trigger, when there are words before it on its line,
+   * before Enter and Tab pick. Until then the list is shown with nothing highlighted, and the arrow
+   * keys or a click pick from it. For a trigger that prose uses too, as it does `/`. Without it, none.
+   */
+  picksAfter?: number;
   /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
   items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
 }

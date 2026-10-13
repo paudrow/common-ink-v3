@@ -21,6 +21,7 @@ export const embedMenu: Plugin = {
     host.completions.register({
       id: "embeds",
       trigger: "/",
+      picksAfter: 2,
       items: (typed) => starting(host.embeds.list(), typed, (e) => `${e.title} ${e.name}`).map(itemFor),
     });
   },

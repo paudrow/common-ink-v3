@@ -127,6 +127,85 @@ test("an ordinary word after a / and Enter or Tab stays as it was typed", async 
   await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /h\nN /A\n/an\n> /tmr\n> in /or\n> x /wat");
 });
 
+const highlighted = (page: Page) => options(page).and(page.locator("[aria-selected=true]"));
+
+test("after words on a line the list highlights nothing until two letters are typed, and Enter is a new line until it does", async ({ page }) => {
+  const note = await open(page, "# Words\n\n");
+
+  // One letter that starts an embed's name is shown what it starts, and Enter is still the member's own.
+  await slash(page, "A /B");
+  await expect(options(page)).toHaveText([/^Kanban board/]);
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(menu(page)).toHaveCount(0);
+  await slash(page, "m /s");
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await slash(page, "either /");
+  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/]);
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("A /B\n", { delay: 20 });
+
+  // The arrow keys still reach an item, and so does a second letter, and taking it back takes the highlight back.
+  await slash(page, "go /t");
+  await page.keyboard.press("ArrowDown");
+  await expect(highlighted(page)).toHaveText([/^Timer/]);
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("ControlOrMeta+End");
+  await slash(page, " then /st");
+  await expect(highlighted(page)).toHaveText([/^Stopwatch/]);
+  await page.keyboard.press("Backspace");
+  await settled(page);
+  await expect(options(page)).toHaveText([/^Stopwatch/]);
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.type("t");
+  await expect(highlighted(page)).toHaveText([/^Stopwatch/]);
+  await settled(page);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("\n");
+
+  // At the start of a line one letter is enough.
+  await slash(page, "/s");
+  await expect(highlighted(page)).toHaveText([/^Stopwatch/]);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("\n");
+
+  // A list closed with Escape takes no Enter, and a / that opens no list never did.
+  await slash(page, "see /board");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Enter");
+  for (const typed of ["a/b", "src/web/timer", "https://example.com/board"]) {
+    await page.keyboard.type(typed);
+    await settled(page);
+    await expect(menu(page)).toHaveCount(0);
+    await page.keyboard.press("Enter");
+  }
+  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nA /B\nm /s\neither /\nA /B\ngo ::timer{5m} then ::stopwatch{}\n::stopwatch{}\nsee /board\na/b\nsrc/web/timer\nhttps://example.com/board\n");
+});
+
+test("with vim on, in insert mode a / after words and one letter leaves Enter a new line", async ({ page }) => {
+  const note = await open(page, "# Tea\n\nsteep", { "vim.enabled": true });
+  await page.keyboard.press("A");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--INSERT--");
+
+  await slash(page, " A /B");
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await slash(page, "m /st");
+  await expect(highlighted(page)).toHaveText([/^Stopwatch/]);
+  await page.keyboard.press("Escape");
+  await expect(menu(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+  await page.keyboard.press("A");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/k");
+  await expect(highlighted(page)).toHaveText([/^Kanban board/]);
+  await page.keyboard.press("Escape");
+  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\nsteep A /B\nm /st\n/k");
+});
+
 test("/ in the middle of a word, in a URL, in a path, or in code opens nothing", async ({ page }) => {
   const note = await open(page, "# Paths\n\n");
 
