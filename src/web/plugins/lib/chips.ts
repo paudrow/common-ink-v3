@@ -1,6 +1,6 @@
 import type { EditorState, Extension, Range } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
-import { drawnInView, inCode, lineTouched, writable } from "./live.ts";
+import { drawnInView, inCode, touched, writable } from "./live.ts";
 import { replacing } from "./rewrite.ts";
 
 /** Where a token is in the note. */
@@ -26,7 +26,7 @@ export interface Source {
 /**
  * A kind of token drawn as a chip: a todo's checkbox, a formula, and later a link or a mention.
  * The note's text stays what it was. The chip is only how the token is shown while the cursor is
- * on another line, and what it changes it changes by rewriting the token.
+ * off the token, and what it changes it changes by rewriting the token.
  */
 export interface Chip<T extends Token> {
   /** Names the chip's element (`md-chip-<id>`) and its edits (`input.<id>`). */
@@ -37,7 +37,7 @@ export interface Chip<T extends Token> {
   draw(el: HTMLElement, token: T, source: Source): void;
   /**
    * Whether the chip is exactly as wide as the token it stands for, so nothing on the line moves when
-   * the cursor comes and the token is shown. The chip is then drawn over the token's own width. Give
+   * the cursor comes to it and the token is shown. The chip is then drawn over the token's own width. Give
    * it to a chip at the start of a line, such as a checkbox.
    */
   keepsWidth?: boolean;
@@ -121,7 +121,7 @@ const look = EditorView.baseTheme({
   ".md-chip-sized > :last-child": { position: "absolute", inset: "0", display: "flex", alignItems: "center", justifyContent: "center" },
 });
 
-/** Draws each of the chip's tokens on screen, except in code and on the cursor's line. */
+/** Draws each of the chip's tokens on screen, except in code and the one the cursor is on. */
 export function chips<T extends Token>(chip: Chip<T>): Extension {
   const drawn = drawnInView((view) => {
     const { state } = view;
@@ -129,7 +129,7 @@ export function chips<T extends Token>(chip: Chip<T>): Extension {
     for (const { from, to } of view.visibleRanges) {
       for (let line = state.doc.lineAt(from); ; line = state.doc.line(line.number + 1)) {
         for (const token of chip.find(line.text, line.from)) {
-          if (lineTouched(state, token.from) || inCode(state, token.from) || chip.skip?.(state, token)) continue;
+          if (touched(state, token.from, token.to) || inCode(state, token.from) || chip.skip?.(state, token)) continue;
           made.push(Decoration.replace({ widget: new ChipWidget(chip, token, state.sliceDoc(token.from, token.to), !writable(state)) }).range(token.from, token.to));
         }
         if (line.to >= to || line.number >= state.doc.lines) break;
