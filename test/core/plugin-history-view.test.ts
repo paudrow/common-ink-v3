@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { textDiff } from "../../src/core/diff.ts";
 import type { Author, HistoryEntry, Reverts } from "../../src/core/protocol.ts";
-import { MOST_OF_A_NOTE, NOTHING, asked, dayLabel, did, groupSaves, initials, only, picked, pieces, sameSelection, sizeOf, who, within, withRows } from "../../src/web/historyView.ts";
+import { MOST_OF_A_NOTE, NOTHING, asked, dayLabel, did, groupSaves, initials, only, picked, pieces, sameSelection, sizeOf, who, within, withRows } from "../../src/web/plugins/lib/historyView.ts";
 
 const ADA: Author = { kind: "member", personId: "ada000000000", name: "Ada Lovelace" };
 const CLAUDE: Author = { kind: "agent", agentId: "claude000000", name: "Claude", onBehalfOf: "ada000000000" };

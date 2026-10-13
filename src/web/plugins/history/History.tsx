@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { MAX_NOTES_AT_ONCE, type AuthorRef, type ChangedNote, type DiffRun, type HistoryEntry, type HistoryPage, type HistorySummary, type NoteDiff, type NoteSummary, type OpInput } from "../core/protocol.ts";
-import { perform } from "./api.ts";
-import { Avatar, DiffView, Stat } from "./HistoryDiff.tsx";
-import { MOST_OF_A_NOTE, NOTHING, asked, clock, count, dayLabel, did, groupSaves, keyOf, only, picked, sameSelection, sizeOf, titleOf, who as whoOf, within, withRows, type Row, type Selection } from "./historyView.ts";
-import { Icon } from "./icons.tsx";
-import { ContextMenu, type MenuItem } from "./Menu.tsx";
-import { useReverts, type RevertAsk } from "./RevertDialog.tsx";
-import { useStored } from "./stored.ts";
-import { useNow } from "./time.ts";
+import { Icon, MAX_NOTES_AT_ONCE, useNow, type AuthorRef, type ChangedNote, type DiffRun, type HistoryEntry, type HistoryPage, type HistorySummary, type NoteDiff, type NoteSummary, type OpInput, type PluginHost } from "../../plugin-api.ts";
+import { Avatar, DiffView, Stat } from "../lib/HistoryDiff.tsx";
+import { MOST_OF_A_NOTE, NOTHING, asked, clock, count, dayLabel, did, groupSaves, keyOf, only, picked, sameSelection, sizeOf, titleOf, who as whoOf, within, withRows, type Row, type Selection } from "../lib/historyView.ts";
+import { useKept } from "../lib/kept.ts";
+import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
+import { useReverts, type RevertAsk } from "../lib/RevertDialog.tsx";
 
 /** What narrows history: to some notes, to some authors, and to people's changes or agents'. */
 type Filters = Pick<Extract<OpInput, { type: "history.list" }>, "noteIds" | "authors" | "by">;
@@ -17,6 +14,9 @@ type Who = "everyone" | "people" | "agents";
 
 /** What History is narrowed to, under the name it goes by: some notes under a note's title or a folder's name, or one author's changes under the author's name. */
 export type Scope = { label: string; noteIds: string[] } | { label: string; author: AuthorRef };
+
+/** Whether a page's state, which any plugin may hand over, is a scope. */
+export const isScope = (v: unknown): v is Scope => typeof v === "object" && v !== null && typeof (v as Scope).label === "string" && (Array.isArray((v as { noteIds?: unknown }).noteIds) || typeof (v as { author?: unknown }).author === "object");
 
 const CHANGES_A_PAGE = 100;
 const NOTES_A_PAGE = 30;
@@ -43,15 +43,15 @@ interface Loaded {
 const NOT_LOADED: Loaded = { changes: null, next: null, notes: null, nextNotes: null, whole: new Map(), error: null };
 
 /** The changes History lists and the notes they are in, read a page at a time and again whenever `version` does. */
-function useChanges(workspaceId: string, filters: Filters, byNote: boolean, version: number) {
+function useChanges(host: PluginHost, filters: Filters, byNote: boolean, version: number) {
   const [loaded, setLoaded] = useState(NOT_LOADED);
   const key = JSON.stringify(filters);
   const latest = useRef(loaded);
   latest.current = loaded;
 
   const list = useCallback(
-    (page: { before?: NonNullable<HistoryPage["next"]>; limit: number; noteIds?: string[] }) => perform(workspaceId, { type: "history.list", ...(JSON.parse(key) as Filters), ...page, diffs: false }),
-    [workspaceId, key],
+    (page: { before?: NonNullable<HistoryPage["next"]>; limit: number; noteIds?: string[] }) => host.perform({ type: "history.list", ...(JSON.parse(key) as Filters), ...page, diffs: false }),
+    [host, key],
   );
 
   /** Every listed change of one note, the latest of them when it has more than a row lists. */
@@ -83,7 +83,7 @@ function useChanges(workspaceId: string, filters: Filters, byNote: boolean, vers
       if (live) setLoaded((was) => ({ ...was, changes, next, error: null }));
     })().catch(fail);
     if (byNote) {
-      perform(workspaceId, { type: "history.summary", ...(JSON.parse(key) as Filters), limit: Math.min(100, Math.max(NOTES_A_PAGE, latest.current.notes?.length ?? 0)) }).then(
+      host.perform({ type: "history.summary", ...(JSON.parse(key) as Filters), limit: Math.min(100, Math.max(NOTES_A_PAGE, latest.current.notes?.length ?? 0)) }).then(
         (summary) => live && setLoaded((was) => ({ ...was, notes: summary.notes, nextNotes: summary.next })),
         fail,
       );
@@ -93,7 +93,7 @@ function useChanges(workspaceId: string, filters: Filters, byNote: boolean, vers
     return () => {
       live = false;
     };
-  }, [workspaceId, key, list, wholeOf, byNote, version]);
+  }, [host, key, list, wholeOf, byNote, version]);
 
   const older = async () => {
     if (!loaded.next || !loaded.changes) return;
@@ -102,7 +102,7 @@ function useChanges(workspaceId: string, filters: Filters, byNote: boolean, vers
   };
   const moreNotes = async () => {
     if (!loaded.nextNotes) return;
-    const summary = await perform(workspaceId, { type: "history.summary", ...filters, before: loaded.nextNotes, limit: NOTES_A_PAGE });
+    const summary = await host.perform({ type: "history.summary", ...filters, before: loaded.nextNotes, limit: NOTES_A_PAGE });
     setLoaded((was) => ({ ...was, notes: [...(was.notes ?? []), ...summary.notes], nextNotes: summary.next }));
   };
 
@@ -180,7 +180,7 @@ function ChangeRow({ id, row, me, named, dated, role, on, focused, onPress }: Ro
 }
 
 interface CardProps {
-  workspaceId: string;
+  host: PluginHost;
   note: NoteDiff;
   canEdit: boolean;
   onOpenNote: (noteId: string) => void;
@@ -194,7 +194,7 @@ interface CardProps {
 const span = (run: DiffRun) => (clock(run.firstAt) === clock(run.lastAt) ? clock(run.lastAt) : `${clock(run.firstAt)}–${clock(run.lastAt)}`);
 
 /** What the picked changes did to one note: each run of them as one diff, with the changes left out between two runs counted. */
-function NoteCard({ workspaceId, note, canEdit, onOpenNote, onRevert, onLabeled, onWanted }: CardProps) {
+function NoteCard({ host, note, canEdit, onOpenNote, onRevert, onLabeled, onWanted }: CardProps) {
   const ids = useId();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [naming, setNaming] = useState(false);
@@ -207,7 +207,7 @@ function NoteCard({ workspaceId, note, canEdit, onOpenNote, onRevert, onLabeled,
     setNaming(false);
     setError(null);
     try {
-      await perform(workspaceId, { type: "note.label", id: note.noteId, revision: last.to, name: name?.trim() || null });
+      await host.perform({ type: "note.label", id: note.noteId, revision: last.to, name: name?.trim() || null });
       onLabeled();
     } catch (err) {
       setError((err as Error).message);
@@ -278,7 +278,7 @@ function NoteCard({ workspaceId, note, canEdit, onOpenNote, onRevert, onLabeled,
           )}
           {run.diff ? (
             run.diff.hunks.length ? (
-              <DiffView diff={run.diff} readBefore={async () => (await perform(workspaceId, { type: "note.read", id: note.noteId, revision: run.from - 1 })).text} />
+              <DiffView diff={run.diff} readBefore={async () => (await host.perform({ type: "note.read", id: note.noteId, revision: run.from - 1 })).text} />
             ) : (
               <p className="diff-none">No text changed overall.</p>
             )
@@ -297,7 +297,7 @@ function NoteCard({ workspaceId, note, canEdit, onOpenNote, onRevert, onLabeled,
 }
 
 interface PaneProps {
-  workspaceId: string;
+  host: PluginHost;
   selection: Selection;
   /** The picked changes as the list counts them: rows, and the saves in them. */
   counted: { changes: number; saves: number };
@@ -312,7 +312,7 @@ interface PaneProps {
 }
 
 /** What the selection did, note by note, under one line that counts it and holds the one thing to do with it: revert. */
-function SelectionPane({ workspaceId, selection, counted, canEdit, version, titleOfNote, onOpenNote, onRevert, onLabeled, onBack }: PaneProps) {
+function SelectionPane({ host, selection, counted, canEdit, version, titleOfNote, onOpenNote, onRevert, onLabeled, onBack }: PaneProps) {
   const [notes, setNotes] = useState<NoteDiff[]>([]);
   const [parts, setParts] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -337,7 +337,7 @@ function SelectionPane({ workspaceId, selection, counted, canEdit, version, titl
     const timer = setTimeout(async () => {
       try {
         const read: NoteDiff[] = [];
-        for (let i = 0; i < changes.length; i += MAX_NOTES_AT_ONCE) read.push(...(await perform(workspaceId, { type: "history.diff", changes: changes.slice(i, i + MAX_NOTES_AT_ONCE) })).notes);
+        for (let i = 0; i < changes.length; i += MAX_NOTES_AT_ONCE) read.push(...(await host.perform({ type: "history.diff", changes: changes.slice(i, i + MAX_NOTES_AT_ONCE) })).notes);
         if (!live) return;
         setNotes(read);
         setError(null);
@@ -351,13 +351,13 @@ function SelectionPane({ workspaceId, selection, counted, canEdit, version, titl
       live = false;
       clearTimeout(timer);
     };
-  }, [workspaceId, wanted, version]);
+  }, [host, wanted, version]);
 
   const fill = async (noteId: string) => {
     const one = all.find((c) => c.noteId === noteId);
     if (!one) return;
     try {
-      const [read] = (await perform(workspaceId, { type: "history.diff", changes: [one] })).notes;
+      const [read] = (await host.perform({ type: "history.diff", changes: [one] })).notes;
       setNotes((was) => was.map((n) => (n.noteId === noteId && read ? read : n)));
     } catch (err) {
       setError((err as Error).message);
@@ -400,7 +400,7 @@ function SelectionPane({ workspaceId, selection, counted, canEdit, version, titl
       ) : (
         <div className={loading ? "hist-files loading" : "hist-files"} aria-busy={loading}>
           {notes.map((note) => (
-            <NoteCard key={note.noteId} workspaceId={workspaceId} note={note} canEdit={canEdit} onOpenNote={onOpenNote} onRevert={onRevert} onLabeled={onLabeled} onWanted={(noteId) => void fill(noteId)} />
+            <NoteCard key={note.noteId} host={host} note={note} canEdit={canEdit} onOpenNote={onOpenNote} onRevert={onRevert} onLabeled={onLabeled} onWanted={(noteId) => void fill(noteId)} />
           ))}
           {notes.length > 0 && left > 0 && (
             <button type="button" className="button small" onClick={() => setParts(parts + 1)}>
@@ -414,7 +414,7 @@ function SelectionPane({ workspaceId, selection, counted, canEdit, version, titl
 }
 
 interface PanesProps {
-  workspaceId: string;
+  host: PluginHost;
   /** The member, whose own changes read "You". */
   me: string;
   canEdit: boolean;
@@ -439,11 +439,11 @@ interface PanesProps {
  * ⌘-click to add or skip, shift-click for a range. The other pane shows what everything picked
  * did, note by note, and reverts it.
  */
-function HistoryPanes({ workspaceId, me, canEdit, view, filters, layout, version, head, empty, onOpenNote, onChanged, onLoaded }: PanesProps) {
+function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head, empty, onOpenNote, onChanged, onLoaded }: PanesProps) {
   const ids = useId();
   const now = useNow();
   const [reloads, reload] = useState(0);
-  const data = useChanges(workspaceId, filters, view === "note", version + reloads);
+  const data = useChanges(host, filters, view === "note", version + reloads);
   const [selection, setPicked] = useState<Selection>(NOTHING);
   const [cut, setCut] = useState(false);
   /** Picks, with no more of one note than a request takes: the rest are left out, which the list says. */
@@ -621,7 +621,7 @@ function HistoryPanes({ workspaceId, me, canEdit, view, filters, layout, version
     reload((n) => n + 1);
     onChanged();
   };
-  const reverts = useReverts({ workspaceId, version, onChanged: changed });
+  const reverts = useReverts({ host, version, onChanged: changed });
 
   const isTree = view === "note";
   let day = "";
@@ -743,7 +743,7 @@ function HistoryPanes({ workspaceId, me, canEdit, view, filters, layout, version
         )}
       </div>
       <SelectionPane
-        workspaceId={workspaceId}
+        host={host}
         selection={selection}
         counted={counted}
         canEdit={canEdit}
@@ -772,7 +772,7 @@ function OpenInHistory({ onOpen }: OpenInHistoryProps) {
 }
 
 interface NoteHistoryProps {
-  workspaceId: string;
+  host: PluginHost;
   me: string;
   note: NoteSummary;
   canEdit: boolean;
@@ -784,12 +784,12 @@ interface NoteHistoryProps {
 }
 
 /** The open note's history, for the inspector: History's list and what the picked changes did, one over the other. */
-export function NoteHistory({ workspaceId, me, note, canEdit, onChanged, onOpenNote, onOpenHistory, onSeen }: NoteHistoryProps) {
+export function NoteHistory({ host, me, note, canEdit, onChanged, onOpenNote, onOpenHistory, onSeen }: NoteHistoryProps) {
   const filters = useMemo<Filters>(() => ({ noteIds: [note.id] }), [note.id]);
   return (
     <HistoryPanes
       key={note.id}
-      workspaceId={workspaceId}
+      host={host}
       me={me}
       canEdit={canEdit}
       view="time"
@@ -806,7 +806,7 @@ export function NoteHistory({ workspaceId, me, note, canEdit, onChanged, onOpenN
 }
 
 interface FolderHistoryProps {
-  workspaceId: string;
+  host: PluginHost;
   me: string;
   name: string;
   /** The folder's notes. */
@@ -823,7 +823,7 @@ interface FolderHistoryProps {
 const MOST_NOTES = 200;
 
 /** A folder's history, for the inspector: its notes that changed, each opening to its changes. */
-export function FolderHistory({ workspaceId, me, name, notes, whole, canEdit, onOpenNote, onOpenHistory, onChanged }: FolderHistoryProps) {
+export function FolderHistory({ host, me, name, notes, whole, canEdit, onOpenNote, onOpenHistory, onChanged }: FolderHistoryProps) {
   const version = useMemo(() => notes.reduce((sum, n) => sum + n.revision, 0), [notes]);
   const ids = useMemo(() => [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MOST_NOTES).map((n) => n.id).join(","), [notes]);
   const filters = useMemo<Filters>(() => (whole ? {} : { noteIds: ids.split(",") }), [whole, ids]);
@@ -831,7 +831,7 @@ export function FolderHistory({ workspaceId, me, name, notes, whole, canEdit, on
   if (!whole && !notes.length) return <p className="empty">{empty}</p>;
   return (
     <HistoryPanes
-      workspaceId={workspaceId}
+      host={host}
       me={me}
       canEdit={canEdit}
       view="note"
@@ -847,7 +847,7 @@ export function FolderHistory({ workspaceId, me, name, notes, whole, canEdit, on
 }
 
 interface HistoryModeProps {
-  workspaceId: string;
+  host: PluginHost;
   me: string;
   /** Every note in the workspace. */
   notes: readonly NoteSummary[];
@@ -867,8 +867,8 @@ const WHO: readonly [Who, string][] = [
 ];
 
 /** The workspace's history: every change by time or by note, and what any selection of them did. */
-export function HistoryMode({ workspaceId, me, notes, canEdit, scope, onScope, onOpenNote, onChanged }: HistoryModeProps) {
-  const [view, setView] = useStored<View>(`ink.historyView.${me}`, isView, "time");
+export function HistoryMode({ host, me, notes, canEdit, scope, onScope, onOpenNote, onChanged }: HistoryModeProps) {
+  const [view, setView] = useKept<View>(host.storage, "view", isView, "time");
   const [who, setWho] = useState<Who>("everyone");
   const version = useMemo(() => notes.reduce((sum, n) => sum + n.revision, 0), [notes]);
   const author = scope && "author" in scope ? scope.author : null;
@@ -918,7 +918,7 @@ export function HistoryMode({ workspaceId, me, notes, canEdit, scope, onScope, o
     <section className="history-mode" aria-label="History">
       <HistoryPanes
         key={JSON.stringify(filters)}
-        workspaceId={workspaceId}
+        host={host}
         me={me}
         canEdit={canEdit}
         view={view}

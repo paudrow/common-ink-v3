@@ -1,5 +1,7 @@
-import type { Opened } from "./editorLayout.ts";
-import { NOTE_DRAG } from "./NoteList.tsx";
+import type { Opened } from "./plugin-api.ts";
+
+/** The drag type that carries a note's id, so a note dragged out of one plugin's view can be dropped on another's. */
+export const NOTE_DRAG = "application/x-common-ink-note";
 
 /**
  * What is dragged to the editor area is what a tab can hold, wherever the drag began: a tab, a

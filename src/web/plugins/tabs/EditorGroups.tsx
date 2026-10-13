@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { arrangement, same, type EditorAction, type EditorLayout, type Group, type Opened, type Pane, type Side, type Split } from "./editorLayout.ts";
-import { Icon, type IconName } from "./icons.tsx";
-import { ContextMenu } from "./Menu.tsx";
-import { carried, carriesTab, carry } from "./dragged.ts";
-import { ResizeHandle } from "./resize.tsx";
+import { arrangement, same, type EditorAction, type EditorLayout, type Group, type Pane, type Side, type Split } from "./editorLayout.ts";
+import { Icon, ResizeHandle, carried, carriesTab, carry, type IconName, type Opened } from "../../plugin-api.ts";
+import { ContextMenu } from "../lib/Menu.tsx";
 
 /** Where on a group's body a dragged tab is: near one of its edges, which splits the group that way, or in the middle, which adds the tab to it. */
 export type Zone = Side | "middle";
@@ -120,6 +118,7 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
       <section
         key={group.id}
         className="group"
+        data-region
         aria-label={`Editor group ${layout.groups.indexOf(group) + 1}`}
         data-focused={(layout.groups.length > 1 && group.id === layout.focusedGroupId) || undefined}
         data-front={group.id === layout.focusedGroupId || undefined}

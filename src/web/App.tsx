@@ -44,7 +44,7 @@ function SignIn() {
 }
 
 function SignedIn({ me }: { me: Me }) {
-  const [route, navigate] = useRoute();
+  const [place, navigate] = useRoute();
   const [chosenId, choose] = useStored("ink.workspace", isString, me.workspaces[0]!.id);
   const workspace = me.workspaces.find((w) => w.id === chosenId) ?? me.workspaces[0]!;
   return (
@@ -52,7 +52,7 @@ function SignedIn({ me }: { me: Me }) {
       key={workspace.id}
       me={me}
       workspace={workspace}
-      route={route}
+      place={place}
       navigate={navigate}
       onSwitch={(id) => {
         choose(id);

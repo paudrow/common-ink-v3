@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 /**
- * What a tab holds, and what an address can name in the editor area: a note, a folder's list of
- * notes, or a page. A folder's `id` is a folder's id, or `all` for every note. A page's `path`,
- * the address it is at, is no part of which tab it is.
+ * What a tab holds: a note, a folder's list of notes, or a page. It is the plugin API's `Opened`,
+ * written here so the layout stands on its own. A page is the same tab wherever under its path it
+ * is, so `path`, the address it is at, is no part of which tab it is.
  */
 export type Opened = { kind: "note"; id: string } | { kind: "folder"; id: string } | { kind: "page"; id: string; path: string };
 
@@ -42,7 +42,7 @@ export interface EditorLayout {
 export const EMPTY_LAYOUT: EditorLayout = { groups: [{ id: "1", tabs: [], active: null }], focusedGroupId: "1" };
 
 export const same = (a: Opened | null, b: Opened | null) => a?.kind === b?.kind && a?.id === b?.id;
-/** What a tab holds, without whether it is a preview. A page's is the whole `Opened`, its address with it. */
+/** What a tab holds, without whether it is a preview. A page's is the plugin API's whole `Opened`, its address with it. */
 const refOf = (tab: Opened): Opened => (tab.kind === "page" ? { kind: tab.kind, id: tab.id, path: tab.path } : { kind: tab.kind, id: tab.id });
 const has = (group: Group, tab: Opened) => group.tabs.some((t) => same(t, tab));
 const indexOf = (group: Group, tab: Opened | null) => group.tabs.findIndex((t) => same(t, tab));

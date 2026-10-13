@@ -282,7 +282,7 @@ const boxOf = async (part: Locator) => {
   const { x, y, width, height } = (await part.boundingBox())!;
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 };
-const storedLayout = (page: Page) => page.evaluate(() => JSON.parse(Object.entries(localStorage).find(([key]) => key.startsWith("ink.editor."))![1]) as { groups: { tabs: { id: string }[] }[]; split?: { direction: string; panes: unknown[]; sizes: number[] } });
+const storedLayout = (page: Page) => page.evaluate(() => JSON.parse(Object.entries(localStorage).find(([key]) => key.startsWith("ink.plugin.tabs.") && key.endsWith(".layout"))![1]) as { groups: { tabs: { id: string }[] }[]; split?: { direction: string; panes: unknown[]; sizes: number[] } });
 
 /** Takes a tab by the mouse and holds it over a point of a group's body, a share of the way across and down it. The button is still down after. */
 async function holdOver(page: Page, from: Locator, body: Locator, across: number, down: number) {
@@ -356,7 +356,7 @@ test("a layout kept before a group could be split down opens as it was, side by 
   await keep(page, "Alpha");
   await page.evaluate(
     ([a, b]) => {
-      const key = Object.keys(localStorage).find((k) => k.startsWith("ink.editor."))!;
+      const key = Object.keys(localStorage).find((k) => k.startsWith("ink.plugin.tabs.") && k.endsWith(".layout"))!;
       localStorage.setItem(key, JSON.stringify({ groups: [{ id: "1", tabs: [{ noteId: a, preview: false }], activeNoteId: a }, { id: "2", tabs: [{ noteId: b, preview: true }], activeNoteId: b }], focusedGroupId: "2" }));
     },
     [alpha!.id, beta!.id],
@@ -490,6 +490,7 @@ const PAGES = [
   ["/history", "History"],
   ["/contacts", "Contacts"],
   ["/uploads", "Uploads"],
+  ["/plugins", "Plugins"],
   ["/agents", "Agents"],
 ] as const;
 
@@ -575,3 +576,184 @@ test("a page's tab is a preview until it is kept, is focused and not opened twic
   await expect(page).toHaveURL(/\/search$/);
   await expect(group(page, 2).getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
 });
+
+test("Plugins keeps to one tab through every plugin's details, at the address of what is showing, across a reload, Back, and a split", async ({ page }) => {
+  await withNotes(page, "Alpha");
+  const more = page.getByRole("navigation", { name: "Modes" });
+
+  await page.goto("/history");
+  await expect(tabs(page)).toHaveText(["History"]);
+  await tab(page, "History").dblclick();
+
+  // A plugin's details are the Plugins page's and open in its tab.
+  await more.getByRole("link", { name: "Plugins" }).click();
+  await page.getByRole("list", { name: "Plugins", exact: true }).getByRole("link", { name: "Note list" }).click();
+  await expect(page).toHaveURL(/\/plugins\/note-list$/);
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await expect(page.getByRole("heading", { name: "Note list", level: 1 })).toBeVisible();
+  await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
+  await tab(page, "Plugins").dblclick();
+
+  // Each tab is at the address it was left at.
+  await tab(page, "History").click();
+  await expect(page).toHaveURL(/\/history$/);
+  await tab(page, "Plugins").click();
+  await expect(page).toHaveURL(/\/plugins\/note-list$/);
+
+  // Back from a plugin's details reached from the list is the list, in the same tab.
+  await more.getByRole("link", { name: "Plugins" }).click();
+  await expect(page).toHaveURL(/\/plugins$/);
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await page.getByRole("list", { name: "Plugins", exact: true }).getByRole("link", { name: "Tabs and splits" }).click();
+  await expect(page).toHaveURL(/\/plugins\/tabs$/);
+  await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/plugins$/);
+  await expect(page.getByRole("list", { name: "Plugins", exact: true })).toBeVisible();
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/plugins\/tabs$/);
+  await expect(page.getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+
+  // Side by side, each is still where it was, and a reload brings both back there.
+  await tab(page, "Plugins").click({ button: "right" });
+  await page.getByRole("menu", { name: "Plugins tab" }).getByRole("menuitem", { name: "Split right" }).click();
+  await expect(tabs(page, 0)).toHaveText(["History"]);
+  await expect(tabs(page, 1)).toHaveText(["Plugins"]);
+  await expect(group(page, 1).getByRole("heading", { name: "History", level: 1 })).toBeVisible();
+  await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "History" })).toHaveCount(1);
+  await expect(page.getByRole("tab", { name: "Plugins" })).toHaveCount(1);
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/plugins\/tabs$/);
+  await expect(tabs(page, 0)).toHaveText(["History"]);
+  await expect(tabs(page, 1)).toHaveText(["Plugins"]);
+  await expect(group(page, 1).getByRole("heading", { name: "History", level: 1 })).toBeVisible();
+  await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
+});
+
+test("a page a plugin adds opens in a tab, with the plugin doing nothing for it", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "fixture",
+        name: "Fixture",
+        activate(host: { views: { register(slot: string, view: unknown): void } }) {
+          host.views.register("page", { id: "fixture-page", path: "/fixture", label: "Fixture page", nav: "primary", component: ({ app }: { app: { path: string } }) => `Fixture at ${app.path}` });
+        },
+      },
+    ];
+  });
+  await withNotes(page, "Alpha");
+  await keep(page, "Alpha");
+
+  await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Fixture page" }).click();
+  // The list of every note was the group's preview, and the page takes its place as the next thing previewed does.
+  await expect(tabs(page)).toHaveText(["Fixture page", "Alpha"]);
+  expect(await italic(page)).toEqual([true, false]);
+  await expect(tab(page, "Fixture page")).toHaveAttribute("aria-selected", "true");
+  await expect(group(page, 1).locator(".page-pane")).toHaveText("Fixture at /fixture");
+
+  await page.goto("/fixture/deeper");
+  await expect(tabs(page)).toHaveText(["Fixture page", "Alpha"]);
+  await expect(group(page, 1).locator(".page-pane")).toHaveText("Fixture at /fixture/deeper");
+  await tab(page, "Alpha").click();
+  await tab(page, "Fixture page").click();
+  await expect(page).toHaveURL(/\/fixture\/deeper$/);
+});
+
+test("a page that only leads somewhere else leaves the editor of a note open beside it as it was: the same one, not one made again", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "fixture",
+        name: "Fixture",
+        activate(host: { views: { register(slot: string, view: unknown): void } }) {
+          host.views.register("page", {
+            id: "fixture-onward",
+            path: "/onward",
+            label: "Onward",
+            nav: "primary",
+            transient: true,
+            component: ({ app }: { app: { show(tab: unknown): void } }) => {
+              setTimeout(() => app.show({ kind: "note", id: (window as unknown as { onwardTo: string }).onwardTo }), 400);
+              return "On the way";
+            },
+          });
+        },
+      },
+    ];
+  });
+  const [, , gamma] = await withNotes(page, "Alpha", "Beta", "Gamma");
+  await page.evaluate((id) => ((window as unknown as { onwardTo: string }).onwardTo = id), gamma!.id);
+  await keep(page, "Alpha");
+  await keep(page, "Beta");
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type("Split editor right");
+  await page.keyboard.press("Enter");
+  await expect(tabs(page, 1)).toHaveText(["Beta"]);
+  const alpha = page.getByRole("region", { name: "Editor group 1" }).locator(".cm-editor");
+  await expect(alpha.locator(".cm-line").first()).toContainText("Alpha");
+  await alpha.evaluate((el) => ((el as HTMLElement & { wasThere?: boolean }).wasThere = true));
+
+  await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Onward" }).click();
+  await expect(page.getByRole("main").getByText("On the way")).toBeVisible();
+  await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
+  await expect(page).toHaveURL(/\/note\/gamma-/);
+  await expect(page.getByRole("main").getByText("On the way")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Onward" })).toHaveCount(0);
+  expect(await alpha.evaluate((el) => (el as HTMLElement & { wasThere?: boolean }).wasThere)).toBe(true);
+});
+
+test("a key sequence begun and given up takes no key from a note: a press elsewhere, a move of focus or a wait ends it", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "fixture",
+        name: "Fixture",
+        activate(host: { commands: { register(command: unknown): void } }) {
+          host.commands.register({ id: "fixture.count", title: "Count", keys: ["g a"], run: () => void (document.body.dataset.ran = String(Number(document.body.dataset.ran ?? 0) + 1)) });
+        },
+      },
+    ];
+  });
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
+  await page.goto(`/note/${note.id}`);
+  const editor = page.getByRole("textbox", { name: "Note text" });
+  const row = page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "All notes", exact: true });
+  const ran = () => page.evaluate(() => document.body.dataset.ran ?? "0");
+  await expect(editor).toContainText("words");
+
+  // The sequence runs its command where nothing is typed.
+  await row.focus();
+  await page.keyboard.press("g");
+  await page.keyboard.press("a");
+  await expect.poll(ran).toBe("1");
+
+  // g waits for the rest. A press in the note ends the wait, so what is typed next arrives in its text.
+  await row.focus();
+  await page.keyboard.press("g");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("xa");
+  await expect(editor.locator(".cm-line").last()).toHaveText("wordsxa");
+
+  // So does focus going there with no press.
+  await row.focus();
+  await page.keyboard.press("g");
+  await editor.focus();
+  await page.keyboard.type("y");
+  await expect(editor.locator(".cm-line").last()).toHaveText("wordsxay");
+
+  // And so does time: an a long after the g finishes nothing.
+  await row.focus();
+  await page.keyboard.press("g");
+  await page.waitForTimeout(1800);
+  await page.keyboard.press("a");
+  expect(await ran()).toBe("1");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plum\n\nwordsxay");
+});
+

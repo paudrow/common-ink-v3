@@ -1,9 +1,11 @@
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import { perform } from "./api.ts";
+import { embedding } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
+import type { Embed } from "./plugin-api.ts";
 import { committed } from "./sync.ts";
 
 interface Props {
@@ -11,6 +13,7 @@ interface Props {
   noteId: string;
   /** The note's latest revision as the workspace knows it. A later one than was read is read in. */
   revision: number | undefined;
+  embeds: readonly Embed[];
 }
 
 /**
@@ -19,9 +22,12 @@ interface Props {
  * written, and what is only for editing, such as vim, is left out of it. Its text is selected and
  * copied as a page's is. It is as tall as its text and scrolls with whatever it is in.
  */
-export function NoteReader({ workspaceId, noteId, revision }: Props) {
+export function NoteReader({ workspaceId, noteId, revision, embeds }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const [embedded] = useState(() => new Compartment());
+  const now = useRef({ embeds });
+  now.current = { embeds };
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -47,6 +53,7 @@ export function NoteReader({ workspaceId, noteId, revision }: Props) {
                 EditorView.editable.of(false),
                 markdown(),
                 noteHighlighting,
+                embedded.of(embedding(now.current.embeds)),
                 EditorView.lineWrapping,
                 EditorView.contentAttributes.of({ "aria-label": "Read-only note", "aria-readonly": "true" }),
               ],
@@ -58,7 +65,7 @@ export function NoteReader({ workspaceId, noteId, revision }: Props) {
     return () => {
       live = false;
     };
-  }, [workspaceId, noteId, revision]);
+  }, [workspaceId, noteId, revision, embedded]);
 
   useEffect(
     () => () => {
@@ -67,6 +74,10 @@ export function NoteReader({ workspaceId, noteId, revision }: Props) {
     },
     [],
   );
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: embedded.reconfigure(embedding(embeds)) });
+  }, [embeds, embedded]);
 
   return (
     <>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pickView } from "../../src/web/inspectorPick.ts";
 
-const history = { id: "history", label: "History", mark: () => "Changes you haven't seen" };
+const history = { id: "history", label: "History", badge: () => "Changes you haven't seen" };
 const backlinks = { id: "backlinks", label: "Backlinks" };
 const info = { id: "info", label: "Info" };
 const folderInfo = { id: "folder-info", label: "Info" };
@@ -14,7 +14,7 @@ describe("the inspector's tab", () => {
     expect(pickView(all, [history, backlinks, info], null)).toBe(info);
   });
 
-  it("is the first with no mark when the one asked for isn't there, never History ahead of it", () => {
+  it("is the first with no badge when the one asked for isn't there, never History ahead of it", () => {
     expect(pickView(all, [history, backlinks], null)).toBe(backlinks);
     expect(pickView(all, [history, backlinks], "info")).toBe(backlinks);
   });

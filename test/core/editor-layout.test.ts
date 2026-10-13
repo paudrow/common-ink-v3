@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_LAYOUT, editorReducer, focused, isEditorLayout, keptLayout, type EditorAction, type EditorLayout, type Opened } from "../../src/web/editorLayout.ts";
+import { EMPTY_LAYOUT, editorReducer, focused, isEditorLayout, keptLayout, type EditorAction, type EditorLayout, type Opened } from "../../src/web/plugins/tabs/editorLayout.ts";
 
 const note = (id: string) => ({ kind: "note" as const, id });
 const folder = (id: string) => ({ kind: "folder" as const, id });

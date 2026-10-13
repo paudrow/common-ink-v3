@@ -5,5 +5,5 @@
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
-  "include": ["src/web", "src/core/protocol.ts", "src/core/text.ts"]
+  "include": ["src/web", "src/core/protocol.ts", "src/core/text.ts", "test/core/plugin-*.test.ts"]
 }

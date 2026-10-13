@@ -1,5 +1,4 @@
-import type { NoteSummary } from "../core/protocol.ts";
-import { ALL_NOTES } from "./folders.ts";
+import { ALL_NOTES, type NoteSummary } from "../plugin-api.ts";
 
 export const titleOf = (note: NoteSummary) => note.title || "Untitled";
 

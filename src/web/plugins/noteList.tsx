@@ -1,40 +1,20 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import type { NoteSummary } from "../core/protocol.ts";
-import { notePath } from "../core/slug.ts";
-import { ALL_NOTES, folderTitle, pathName, type FolderTree as Tree } from "./folders.ts";
-import { Icon } from "./icons.tsx";
-import { SORTS, listReducer, listed, notesIn, titleOf, type ListAction, type ListView, type Sort } from "./noteListView.ts";
-import { ago, useNow } from "./time.ts";
-
-export const NOTE_DRAG = "application/x-common-ink-note";
+import { ALL_NOTES, Icon, NOTE_DRAG, ago, folderTitle, useNow, type App, type FolderProps, type NoteSummary, type Plugin } from "../plugin-api.ts";
+import { INITIAL_VIEW, SORTS, listReducer, listed, notesIn, titleOf, type ListAction, type ListView, type Sort } from "./noteListView.ts";
 
 /** How far below the top of the list a card's head is put when its note is collapsed from further down. */
 const HEAD_GAP = 10;
 
 const withModifier = (e: MouseEvent | KeyboardEvent) => e.metaKey || e.ctrlKey;
 
-export interface Kept {
+interface Kept {
   view: ListView;
   scrollTop: number;
 }
 
-interface Props {
-  /** The folder whose notes to list: a folder's id, or {@link ALL_NOTES}. It may name no folder the member can see. */
-  folderId: string;
-  /** Null while the folders load. */
-  tree: Tree | null;
-  /** Every note the member can see. Null while they load. */
-  notes: readonly NoteSummary[] | null;
-  /** The note in front, when one is. */
-  openId: string | null;
-  canEdit: boolean;
-  /** Draws a note's text to be read and not changed, at its full height with no scrolling of its own. */
-  readNote: (noteId: string) => ReactNode;
+interface Props extends FolderProps {
   /** How the list was left the last time it was drawn for this folder, and where to keep how it is left now. */
   kept: Kept;
-  onNew: (folderId: string) => void;
-  /** Opens a note with the cursor in it, as a preview or in a tab that is kept, or in a kept tab behind the list. */
-  onOpen: (noteId: string, how: "preview" | "keep" | "behind") => void;
 }
 
 /** How tall an expanded card's note is drawn before the rest is asked for. */
@@ -65,7 +45,12 @@ function CardBody({ whole, children, foot }: { whole: boolean; children: ReactNo
   );
 }
 
-export function FolderList({ folderId, tree, notes: all, openId, canEdit, readNote, kept, onNew, onOpen }: Props) {
+/** Where a new note made from a folder's list goes, or null where the member can't make one. */
+function folderForNew(app: App, folderId: string) {
+  return app.canEdit ? ((folderId === ALL_NOTES ? app.folders?.unsortedId : folderId) ?? null) : null;
+}
+
+function FolderList({ app, folderId, readNote, kept }: Props) {
   const ids = useId();
   const now = useNow();
   const [view, setView] = useState(kept.view);
@@ -76,8 +61,8 @@ export function FolderList({ folderId, tree, notes: all, openId, canEdit, readNo
   /** A card just made shorter, whose head is brought back into sight if that left it above the list. */
   const shortened = useRef<string | null>(null);
 
-  const title = tree && folderTitle(tree, folderId);
-  const inFolder = all && notesIn(all, folderId);
+  const title = app.folders && folderTitle(app.folders, folderId);
+  const inFolder = app.notes && notesIn(app.notes, folderId);
   const notes = inFolder ? listed(inFolder, view) : [];
   const count = inFolder ? inFolder.length : 0;
   const ready = !!inFolder && !!title;
@@ -110,12 +95,12 @@ export function FolderList({ folderId, tree, notes: all, openId, canEdit, readNo
     if (above < 0) scroller.current.scrollTop += above - HEAD_GAP;
   });
 
-  if (!tree || !all) return null;
+  if (!app.folders || !app.notes) return null;
   if (!title) return <p className="notice">This folder doesn't exist, or you can't see it.</p>;
 
-  /** Where a new note made from this list goes, or null where the member can't make one. */
-  const newIn = canEdit ? (folderId === ALL_NOTES ? tree.unsortedId : folderId) : null;
-  const open = (note: NoteSummary, how: "preview" | "keep" | "behind") => onOpen(note.id, how);
+  const newIn = folderForNew(app, folderId);
+  const open = (note: NoteSummary, how: "preview" | "keep" | "behind") =>
+    how === "behind" ? app.openNote(note.id, { background: true }) : app.openNote(note.id, { preview: how === "preview", focus: true });
   const collapse = (noteId: string) => {
     shortened.current = noteId;
     act({ type: "collapse", noteId });
@@ -143,7 +128,7 @@ export function FolderList({ folderId, tree, notes: all, openId, canEdit, readNo
   };
 
   const details = (note: NoteSummary): ReactNode[] => [
-    ...(folderId === ALL_NOTES ? [<span key="folder">{pathName(tree, note.folderId)}</span>] : []),
+    ...(folderId === ALL_NOTES ? [<span key="folder">{app.folders!.pathName(note.folderId)}</span>] : []),
     <span key="author">{note.updatedBy.name}</span>,
     <span key="edited">{ago(note.updatedAt, now)}</span>,
     ...(note.openTodos > 0 ? [<span key="todos">{note.openTodos} open</span>] : []),
@@ -169,7 +154,7 @@ export function FolderList({ folderId, tree, notes: all, openId, canEdit, readNo
             {count} {count === 1 ? "note" : "notes"}
           </span>
           {newIn && (
-            <button type="button" className="button primary" onClick={() => onNew(newIn)}>
+            <button type="button" className="button primary" onClick={() => app.createNote(newIn)}>
               <Icon name="plus" />
               New note
             </button>
@@ -200,7 +185,7 @@ export function FolderList({ folderId, tree, notes: all, openId, canEdit, readNo
         </div>
         <nav aria-label="Notes">
           {!notes.length && <p className="empty">{count ? "No notes match." : "No notes in this folder."}</p>}
-          <ul className="cards">
+          <ul className="cards" data-list>
             {notes.map((note, at) => {
               const expanded = view.expanded[note.id];
               const name = titleOf(note);
@@ -230,12 +215,12 @@ export function FolderList({ folderId, tree, notes: all, openId, canEdit, readNo
                     <header className="card-head" onClick={() => expanded && collapse(note.id)}>
                       <div className="card-top">
                         <a
-                          href={notePath(note)}
+                          href={app.notePath(note.id)}
                           className="card-title"
                           id={`${ids}-${note.id}`}
                           title="Open to edit. ⌘-click, Ctrl-click or middle-click opens it in a background tab."
                           draggable={false}
-                          aria-current={note.id === openId ? "page" : undefined}
+                          aria-current={note.id === app.noteId ? "page" : undefined}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (e.shiftKey || e.button !== 0) return;
@@ -315,3 +300,22 @@ export function FolderList({ folderId, tree, notes: all, openId, canEdit, readNo
     </section>
   );
 }
+
+export const noteList: Plugin = {
+  id: "note-list",
+  name: "Note list",
+  description: "A folder's notes as cards, each with its details and its first lines, to sort and to filter.",
+  icon: "list",
+  activate(host) {
+    /** How each folder's list was left, for as long as the app is open. */
+    const kept = new Map<string, Kept>();
+    const keptFor = (folderId: string) => {
+      if (!kept.has(folderId)) kept.set(folderId, { view: INITIAL_VIEW, scrollTop: 0 });
+      return kept.get(folderId)!;
+    };
+    host.views.register("folder", {
+      id: "notes",
+      component: (props) => <FolderList {...props} kept={keptFor(props.folderId)} />,
+    });
+  },
+};

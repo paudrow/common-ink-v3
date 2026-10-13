@@ -4,5 +4,6 @@
     "lib": ["es2024"],
     "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src/worker", "src/core", "test/core", "worker-configuration.d.ts"]
+  "include": ["src/worker", "src/core", "test/core", "worker-configuration.d.ts"],
+  "exclude": ["test/core/plugin-*.test.ts"]
 }

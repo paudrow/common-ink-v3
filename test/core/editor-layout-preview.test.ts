@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_LAYOUT, editorReducer, isEditorLayout, keptLayout, type EditorAction, type EditorLayout, type Opened, type Side } from "../../src/web/editorLayout.ts";
+import { EMPTY_LAYOUT, editorReducer, isEditorLayout, keptLayout, type EditorAction, type EditorLayout, type Opened, type Side } from "../../src/web/plugins/tabs/editorLayout.ts";
 
 const THINGS: Opened[] = [
   ...["a", "b", "c", "d"].map((id) => ({ kind: "note" as const, id })),

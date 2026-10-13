@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NoteSummary } from "../../src/core/protocol.ts";
-import { ALL_NOTES } from "../../src/web/folders.ts";
-import { INITIAL_VIEW, listReducer, listed, notesIn } from "../../src/web/noteListView.ts";
+import { ALL_NOTES } from "../../src/web/plugin-api.ts";
+import { INITIAL_VIEW, listReducer, listed, notesIn } from "../../src/web/plugins/noteListView.ts";
 
 const note = (id: string, over: Partial<NoteSummary> = {}) =>
   ({ id, title: id, snippet: "", folderId: "f", openTodos: 0, createdAt: 0, updatedAt: 0, ...over }) as NoteSummary;

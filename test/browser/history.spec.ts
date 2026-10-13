@@ -102,6 +102,26 @@ test("the inspector's History tab lists the note's changes with a tick each, ove
   await expect(added(pane(panel))).toHaveText(["", "Ada's last word", "", "Typed just now"]);
 });
 
+test("with Note info turned off a member who has picked no tab is shown Backlinks, not History, and the dot is still there", async ({ page }) => {
+  const { id } = await sharedNote(page);
+  await page.goto("/plugins");
+  await page.getByRole("checkbox", { name: "Note info", exact: true }).setChecked(false);
+  await page.goto(`/note/${id}`);
+
+  await expect(inspector(page).getByRole("tab")).toHaveText(["History", "Backlinks"]);
+  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Backlinks");
+  const historyTab = inspector(page).getByRole("tab", { name: "History" });
+  await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
+  // A folder is left with History alone, which is then what shows, and a folder's History counts nothing as seen.
+  await page.goto("/folder/all");
+  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("History");
+  await page.goto(`/note/${id}`);
+  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Backlinks");
+  await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
+  await historyTab.click();
+  await expect(historyTab).toHaveAccessibleDescription("");
+});
+
 test("focus shows no History mark: the way out is its only button, and the dot waits on the inspector's History tab", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const claude = await connectAgent(page, "Claude");

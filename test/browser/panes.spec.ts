@@ -315,7 +315,7 @@ test("a layout kept with an italic tab in each pane opens with one, in the pane 
   await menuItem(page, "Split right").click();
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
   await page.evaluate(() => {
-    const key = Object.keys(localStorage).find((k) => k.startsWith("ink.editor."))!;
+    const key = Object.keys(localStorage).find((k) => k.startsWith("ink.plugin.tabs.") && k.endsWith(".layout"))!;
     const layout = JSON.parse(localStorage.getItem(key)!) as { groups: { tabs: { preview: boolean }[] }[] };
     for (const group of layout.groups) for (const tab of group.tabs) tab.preview = true;
     localStorage.setItem(key, JSON.stringify(layout));
@@ -361,6 +361,63 @@ test("the inspector shows the tab last picked, on whatever has it, and one it do
   await expect(inspector.getByText("2 notes")).toBeVisible();
   await tab(page, "Beta").click();
   await expect(shown()).toHaveText("Info");
+});
+
+test("a page a plugin adds to the sidebar drags into a pane and opens in a split from its menu, with the plugin doing nothing for it", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
+      {
+        id: "fixture",
+        name: "Fixture",
+        activate(host: { views: { register(slot: string, view: unknown): void } }) {
+          host.views.register("page", { id: "fixture-page", path: "/fixture", label: "Fixture page", icon: "info", nav: "primary", component: ({ app }: { app: { path: string } }) => `Fixture at ${app.path}` });
+          host.views.register("page", { id: "fixture-more", path: "/fixture-more", label: "Fixture more", icon: "info", nav: "more", component: () => "More of the fixture" });
+        },
+      },
+    ];
+  });
+  await withNotes(page, "Alpha");
+  await keep(page, "Alpha");
+  await tab(page, "All notes").click({ button: "right" });
+  await menuItem(page, "Close").click();
+  await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+
+  // Dragged to an edge it has a pane of its own on that side, and to the middle it is a kept tab there.
+  await dragOnto(page, modes(page).getByRole("link", { name: "Fixture page" }), body(page, 1), 0.9, 0.5);
+  await expect(tabs(page, 1)).toHaveText(["Fixture page"]);
+  await expect(group(page, 2).locator(".page-pane")).toHaveText("Fixture at /fixture");
+  await expect(page).toHaveURL(/\/fixture$/);
+  await modes(page).getByRole("button", { name: "More" }).click();
+  await dragOnto(page, modes(page).getByRole("link", { name: "Fixture more" }), body(page, 1), 0.5, 0.5);
+  await expect(tabs(page, 0)).toHaveText(["Alpha", "Fixture more"]);
+  expect(await previews(page)).toEqual([]);
+
+  // Its menu opens it in a split, beside or under the pane in front.
+  await tab(page, "Fixture page", 1).click({ button: "right" });
+  await menuItem(page, "Close").click();
+  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(1);
+  await modes(page).getByRole("link", { name: "Fixture page" }).click({ button: "right" });
+  await expect(page.getByRole("menu", { name: "Fixture page actions" }).getByRole("menuitem")).toHaveText(["Open in a split right", "Open in a split down"]);
+  await menuItem(page, "Open in a split down").click();
+  await expect(tabs(page, 1)).toHaveText(["Fixture page"]);
+  await expect(group(page, 2).locator(".page-pane")).toHaveText("Fixture at /fixture");
+  await expect.poll(async () => (await group(page, 2).boundingBox())!.y).toBeGreaterThan((await group(page, 1).boundingBox())!.y);
+
+  // From the closed sidebar's bar it is the same link.
+  await sidebarButton(page).click();
+  const bar = page.getByRole("navigation", { name: "Sidebar bar" });
+  await bar.getByRole("link", { name: "Fixture more" }).click({ button: "right" });
+  await menuItem(page, "Open in a split right").click();
+  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(3);
+  await expect(page.getByRole("region", { name: /^Editor group/ }).filter({ hasText: "More of the fixture" })).toHaveAttribute("data-focused", "true");
+
+  // With no splits to open in, the menu isn't offered.
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type("Disable plugin: Tabs and splits");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(0);
+  await bar.getByRole("link", { name: "Fixture page" }).click({ button: "right" });
+  await expect(page.getByRole("menu")).toHaveCount(0);
 });
 
 test("Back retraces every open in a split, whatever was clicked between them", async ({ page }) => {

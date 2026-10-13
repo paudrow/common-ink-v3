@@ -36,7 +36,7 @@ const places = (page: Page) =>
       scrolled: [...document.querySelectorAll(".folder-list, .note-scroll, .page-pane")].map((el) => el.scrollTop),
       // The layout as it is kept, but for which group is the focused one.
       layout: Object.entries(localStorage)
-        .filter(([key]) => key.startsWith("ink.editor."))
+        .filter(([key]) => key.startsWith("ink.plugin.tabs.") && key.endsWith(".layout"))
         .map(([, kept]) => ({ ...JSON.parse(kept), focusedGroupId: null })),
     };
   });
@@ -169,4 +169,24 @@ test("leaving focus without a reload leaves every group scrolled as it was, and 
   await expect(page.getByRole("region", { name: /^Editor group/ }).filter({ visible: true })).toHaveCount(3);
   await expect(page.getByRole("button", { name: "Focus" })).toHaveCount(3);
   await expect(page.getByRole("button", { name: "Focus" }).first()).toHaveAttribute("aria-pressed", "false");
+});
+
+test("focus hides nothing at an address with nothing there, where there is no group to leave it from", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Draft\n\nA line of the draft.\n" });
+  await page.goto(`/note/${note.id}`);
+  await focusButton(page, 1).click();
+  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
+  await expect(page.getByRole("tree", { name: "Folders" })).toBeHidden();
+
+  await page.goto("/nowhere/at/all");
+  await expect(page.getByText("There's nothing at this address.")).toBeVisible();
+  await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
+  await expect(page.getByRole("tree", { name: "Folders" })).toBeVisible();
+
+  // Focus was not left: back on the note it fills the window as before.
+  await page.goBack();
+  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Focus" }).filter({ visible: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("tree", { name: "Folders" })).toBeHidden();
 });

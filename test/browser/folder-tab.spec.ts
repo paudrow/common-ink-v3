@@ -382,6 +382,40 @@ test("a new note goes in the folder whose list is in front, or the open note's f
   await expect(folderRow(page, "Unsorted")).toHaveAccessibleDescription("2");
 });
 
+test("with the note list off a folder's notes are listed by title, and with tabs off a folder is shown at its address", async ({ page }) => {
+  const { projects, plan } = await withFolders(page);
+
+  await expect(folderRow(page, "Projects")).toBeVisible();
+  await run(page, "Disable plugin: Note list");
+  await folderRow(page, "Projects").click();
+  await expect(tabs(page)).toHaveText(["Projects"]);
+  const plain = page.getByRole("region", { name: "Projects" });
+  await expect(plain.getByRole("link")).toHaveText(["Plan"]);
+  await expect(page.getByRole("searchbox", { name: "Filter notes" })).toHaveCount(0);
+  await plain.getByRole("link", { name: "Plan" }).click();
+  await expect(tabs(page)).toHaveText(["Plan"]);
+  await expect(page.locator(".cm-line").first()).toHaveText("# Plan");
+  await run(page, "Enable plugin: Note list");
+
+  await run(page, "Disable plugin: Tabs and splits");
+  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(0);
+  await folderRow(page, "Projects").click();
+  await expect(page).toHaveURL(new RegExp(`/folder/${projects.id}$`));
+  await expect(heading(page)).toHaveText("Projects");
+  await listedNote(page, "Plan").click();
+  await expect(page).toHaveURL(new RegExp(`/note/plan-${plan.id}$`));
+  await expect(page.locator(".cm-line").first()).toHaveText("# Plan");
+  await page.goBack();
+  await expect(heading(page)).toHaveText("Projects");
+
+  // With no sidebar there is no tree to click, and the command still leads to every note.
+  await run(page, "Disable plugin: Sidebar");
+  await expect(page.getByRole("tree")).toHaveCount(0);
+  await run(page, "Open All notes");
+  await expect(page).toHaveURL(/\/folder\/all$/);
+  await expect(listedNotes(page)).toHaveText(["Monday", "Plan"]);
+});
+
 test("the inspector follows the tab in front: a note's tabs, a folder tab's Info, a page tab's quiet line, and it stays open and in place across them", async ({ page }) => {
   await withFolders(page);
   const inspector = page.getByRole("complementary", { name: "Inspector" });

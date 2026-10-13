@@ -88,7 +88,7 @@ A list of notes and uploads a member can see, matched on title or filename. Arch
 A note, a folder's list or a page open in the editor. Each has at most one tab.
 
 **Page tab**:
-A tab that holds a page, such as History. A page already open is turned to and not opened twice. It is a preview like any other: a note previewed from it takes its place, and Back returns to it.
+A tab that holds a page. It is one tab wherever under the page's address it is, and it keeps the address it is at. A page already open is turned to and not opened twice. It is a preview like any other: a note previewed from it takes its place, and Back returns to it.
 
 **Folder tab**:
 A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
@@ -192,11 +192,32 @@ A name attached to one revision in history. A revision has at most one, and a no
 ## Configuration
 
 **Plugin**:
-A unit of functionality that adds commands, views, data sources, or settings through the public plugin API. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. Built-in plugins are trusted and on by default. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
+A unit of functionality that adds commands, views, embeds, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves on the Plugins page, which takes out everything it added. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
 _Avoid_: Extension, add-on
 
+**Built-in plugin**:
+A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs and splits, and the command palette. It is trusted and on by default, and it uses the same plugin API a third-party plugin does.
+
+**Plugin host**:
+The part of the core that turns plugins on and off, hands each one its reach into the workspace, and keeps what each has contributed.
+
+**Contribution**:
+One thing a plugin adds: a command, a view, or an embed. It is there while its plugin is on.
+
+**View**:
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector tab, a page, the bottom bar, or an overlay.
+_Avoid_: Panel, widget
+
+**Bottom bar**:
+The thin line along the foot of the window where plugins put small things to glance at, such as the word count of the note in front. An item sits at its left or its right end. It is there while any plugin has an item in it, is the same height whatever the items say, and is out of sight in focus.
+_Avoid_: Status bar, footer
+
+**Page**:
+A view with its own address, such as History or Agents, opened in a tab of the editor as a note is.
+_Avoid_: Mode, screen
+
 **Embed**:
-Content rendered inside a note, such as HTML. It cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission.
+Content a plugin draws inside a note where the note says `::name{config}`, such as a stopwatch or HTML. It is handed its config and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written.
 
 **Plugin permission**:
 The capabilities a plugin has in a workspace. One set per plugin applies to every member. An admin sets them and can lock them. A non-admin's yes becomes a request, and the capability stays off until an admin approves. This is not settings.

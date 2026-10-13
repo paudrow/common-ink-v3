@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useId, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
-import type { ListedFolder, OpInput, Role } from "../core/protocol.ts";
-import { perform } from "./api.ts";
-import { carry } from "./dragged.ts";
-import { ALL_NOTES, pathOf, type FolderTree as Tree } from "./folders.ts";
-import { Icon } from "./icons.tsx";
-import { ContextMenu } from "./Menu.tsx";
-import { NOTE_DRAG } from "./NoteList.tsx";
-import { isStrings, useStored } from "./stored.ts";
+import { ALL_NOTES, Icon, NOTE_DRAG, carry, type Folders as Tree, type ListedFolder, type OpInput, type Plugin, type PluginHost, type Role } from "../plugin-api.ts";
+import { useKept } from "./lib/kept.ts";
+import { ContextMenu } from "./lib/Menu.tsx";
+
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((id) => typeof id === "string");
 
 type Editing = { kind: "create"; parentId: string | null } | { kind: "rename"; id: string };
 /** A row's menu. `folder` is left out for a row that is a list and no folder, which can be opened and not changed. */
@@ -15,7 +12,7 @@ type Menu = { id: string; name: string; folder?: ListedFolder; x: number; y: num
 const indent = (depth: number) => ({ "--depth": depth }) as CSSProperties;
 
 interface Props {
-  workspaceId: string;
+  host: PluginHost;
   tree: Tree;
   role: Role;
   /** How many notes there are in all, for the row that lists every one. */
@@ -24,15 +21,15 @@ interface Props {
   selectedId: string | null;
   /** A single click opens a folder's list as a preview; a double click keeps it open. */
   onOpen: (id: string, keep: boolean) => void;
-  /** Opens a folder's list in a group of its own, beside or under the one in front. */
-  onSplit: (id: string, side: "right" | "down") => void;
+  /** Opens a folder's list in a split, right of or under what is in front. Null where the editor area has no splits. */
+  onSplit: ((id: string, side: "right" | "down") => void) | null;
   onChanged: () => void;
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
 }
 
-export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen, onSplit, onChanged, onMoveNote }: Props) {
+function FolderTree({ host, tree, role, total, selectedId, onOpen, onSplit, onChanged, onMoveNote }: Props) {
   const ids = useId();
-  const [expandedList, setExpanded] = useStored(`ink.expanded.${workspaceId}`, isStrings, []);
+  const [expandedList, setExpanded] = useKept(host.storage, "expanded", isStrings, []);
   const expanded = new Set(expandedList);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -46,7 +43,7 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
 
   useEffect(() => {
     if (!selectedId || !tree.byId.has(selectedId)) return;
-    const ancestors = pathOf(tree, selectedId)
+    const ancestors = tree.pathOf(selectedId)
       .slice(0, -1)
       .map((f) => f.id);
     setExpanded((list) => (ancestors.every((id) => list.includes(id)) ? list : [...new Set([...list, ...ancestors])]));
@@ -64,7 +61,7 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
   }
 
   async function run(op: OpInput) {
-    if (await attempt(() => perform(workspaceId, op))) {
+    if (await attempt(() => host.perform(op))) {
       setEditing(null);
       onChanged();
     }
@@ -181,6 +178,7 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
               <button
                 type="button"
                 className="chevron"
+                data-row-toggle
                 data-open={open || undefined}
                 tabIndex={-1}
                 aria-label={`${open ? "Collapse" : "Expand"} ${folder.name}`}
@@ -251,8 +249,12 @@ export function FolderTree({ workspaceId, tree, role, total, selectedId, onOpen,
           y={menu.y}
           onClose={closeMenu}
           items={[
-            { label: "Open in a split right", action: () => onSplit(menu.id, "right") },
-            { label: "Open in a split down", action: () => onSplit(menu.id, "down") },
+            ...(onSplit
+              ? [
+                  { label: "Open in a split right", action: () => onSplit(menu.id, "right") },
+                  { label: "Open in a split down", action: () => onSplit(menu.id, "down") },
+                ]
+              : []),
             ...(canEdit && menu.folder ? [{ label: "New folder inside", action: () => startCreate(menu.id) }] : []),
             ...(!canEdit || !menu.folder || menu.id === tree.unsortedId
               ? []
@@ -297,3 +299,29 @@ function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit:
     />
   );
 }
+
+export const folders: Plugin = {
+  id: "folders",
+  name: "Folders",
+  description: "The folder tree in the sidebar, where notes are filed, moved and found.",
+  icon: "folders",
+  activate(host) {
+    host.views.register("section", {
+      id: "folders",
+      component: ({ app }) =>
+        app.folders && (
+          <FolderTree
+            host={host}
+            tree={app.folders}
+            role={app.workspace.role}
+            total={(app.notes ?? []).length}
+            selectedId={app.folderId}
+            onOpen={(id, keep) => app.openFolder(id, { preview: !keep })}
+            onSplit={app.openBeside && ((id, side) => app.openBeside?.({ kind: "folder", id }, side))}
+            onChanged={app.refresh}
+            onMoveNote={app.moveNote}
+          />
+        ),
+    });
+  },
+};

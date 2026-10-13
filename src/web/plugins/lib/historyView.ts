@@ -1,5 +1,4 @@
-import type { Author, Diff, DiffLine, HistoryEntry, Reverts } from "../core/protocol.ts";
-import { lineHunks } from "../core/text.ts";
+import { lineHunks, type Author, type Diff, type DiffLine, type HistoryEntry, type Reverts } from "../../plugin-api.ts";
 
 /** Saves to one note by one author closer together than this are one row. */
 export const SITTING_MS = 10 * 60_000;

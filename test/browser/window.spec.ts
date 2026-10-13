@@ -210,7 +210,7 @@ test("a closed sidebar leaves a bar with an icon for each thing the sidebar list
 
   // More lists the rest in the bar as it does in the sidebar, between Calendar and Folders.
   await bar.getByRole("button", { name: "More" }).click();
-  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Calendar", "Less", "Contacts", "Uploads", "History", "Folders"]);
+  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Calendar", "Less", "Contacts", "Uploads", "History", "Plugins", "Folders"]);
   await bar.getByRole("button", { name: "Less" }).click();
 
   // Folders has nowhere to go but the sidebar, so it opens it.

@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
-import { MAX_NOTES_AT_ONCE, type Author, type AuthorRef, type Diff, type HistorySummary, type NoteRevertPreview, type OpInput, type Resolve, type RevertConflict, type RevertedNote, type RevertedNotes } from "../core/protocol.ts";
-import { ApiError, perform } from "./api.ts";
-import { useDismiss } from "./dismiss.ts";
+import { Icon, MAX_NOTES_AT_ONCE, useDismiss, type Author, type AuthorRef, type Diff, type HistorySummary, type NoteRevertPreview, type OpInput, type PluginHost, type Resolve, type RevertConflict, type RevertedNote, type RevertedNotes } from "../../plugin-api.ts";
 import { DiffView, Stat } from "./HistoryDiff.tsx";
 import { authorKey, count, titleOf } from "./historyView.ts";
-import { Icon } from "./icons.tsx";
-import { commitTyping, revertMany } from "./sync.ts";
 
 /** One note's revert as it is asked for: of some of its changes, of the note to a revision, or of every change of an author's that still stands. */
 export interface RevertAsk {
@@ -231,10 +227,10 @@ function chunks<T>(all: readonly T[], size: number): T[][] {
 }
 
 /** Whether the server said no, as it does to a revert there is no making, and not that it couldn't be reached. */
-const saidNo = (err: unknown) => err instanceof ApiError && err.status < 500;
+const saidNo = (err: unknown) => typeof (err as { status?: unknown }).status === "number" && (err as { status: number }).status < 500;
 
 interface NoteRevertProps {
-  workspaceId: string;
+  host: PluginHost;
   ask: RevertAsk;
   state: Previewed;
   dispatch: (event: PreviewEvent) => void;
@@ -243,7 +239,7 @@ interface NoteRevertProps {
 }
 
 /** One note of a revert: what it would change, and its conflicts with the choice of how each is settled. */
-function NoteRevert({ workspaceId, ask, state, dispatch, onRefused }: NoteRevertProps) {
+function NoteRevert({ host, ask, state, dispatch, onRefused }: NoteRevertProps) {
   const ids = useId();
   const { preview, choices, diff, diffIs, reading } = state;
   const refused = useRef(onRefused);
@@ -255,7 +251,7 @@ function NoteRevert({ workspaceId, ask, state, dispatch, onRefused }: NoteRevert
     let live = true;
     const timer = setTimeout(
       () =>
-        perform(workspaceId, { type: "history.previewRevert", changes: [{ ...item, at: preview.revision, choices }] }).then(
+        host.perform({ type: "history.previewRevert", changes: [{ ...item, at: preview.revision, choices }] }).then(
           ([settled]) => live && (settled!.refused ? refused.current(settled!.refused) : dispatch({ type: "settled", choices, diff: settled!.diff })),
           (err: Error) => live && refused.current(err.message),
         ),
@@ -265,10 +261,10 @@ function NoteRevert({ workspaceId, ask, state, dispatch, onRefused }: NoteRevert
       live = false;
       clearTimeout(timer);
     };
-  }, [workspaceId, item, preview, choices, diffIs, reading, dispatch]);
+  }, [host, item, preview, choices, diffIs, reading, dispatch]);
 
   const changesNothing = diff !== null && !diff.hunks.length;
-  const readBefore = useCallback(async () => (await perform(workspaceId, { type: "note.read", id: ask.noteId, revision: preview?.revision })).text, [workspaceId, ask.noteId, preview?.revision]);
+  const readBefore = useCallback(async () => (await host.perform({ type: "note.read", id: ask.noteId, revision: preview?.revision })).text, [host, ask.noteId, preview?.revision]);
   return (
     <section className="revert-note" aria-labelledby={`${ids}-note`}>
       <div className="revert-note-head">
@@ -305,7 +301,7 @@ function NoteRevert({ workspaceId, ask, state, dispatch, onRefused }: NoteRevert
 }
 
 interface RevertDialogProps {
-  workspaceId: string;
+  host: PluginHost;
   /** The notes to revert, each named once. */
   asks: RevertAsk[];
   /** Changes when any note does, so the previews are read again. */
@@ -322,7 +318,7 @@ interface RevertDialogProps {
  * with a later change and the choice of how it is settled. Reverting makes one change in each note,
  * says which notes it reverted and which it left, and keeps the ones it left for another try.
  */
-export function RevertDialog({ workspaceId, asks, version, beyond, onReverted, onClose }: RevertDialogProps) {
+export function RevertDialog({ host, asks, version, beyond, onReverted, onClose }: RevertDialogProps) {
   const ids = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const inside = useRef<HTMLDivElement>(null);
@@ -357,12 +353,10 @@ export function RevertDialog({ workspaceId, asks, version, beyond, onReverted, o
     dispatch({ type: "only", noteIds });
     dispatch({ noteIds, event: { type: "reading" } });
     void (async () => {
-      // What is typed and not yet saved would change the note under the preview.
-      await commitTyping(noteIds).catch(() => {});
       for (const part of chunks(wanted, MAX_NOTES_AT_ONCE)) {
         const ofPart = part.map((a) => a.noteId);
         try {
-          const previews = await perform(workspaceId, { type: "history.previewRevert", changes: part.map(itemOf) });
+          const previews = await host.perform({ type: "history.previewRevert", changes: part.map(itemOf) });
           if (!live) return;
           for (const preview of previews) dispatch({ noteIds: [preview.noteId], event: { type: "read", preview } });
         } catch (err) {
@@ -374,7 +368,7 @@ export function RevertDialog({ workspaceId, asks, version, beyond, onReverted, o
     return () => {
       live = false;
     };
-  }, [workspaceId, version, reads]);
+  }, [host, version, reads]);
 
   const states = pending.map((ask) => ({ ask, state: notes.get(ask.noteId) ?? NOT_READ }));
   const read = states.every(({ state }) => state.preview !== null);
@@ -393,7 +387,7 @@ export function RevertDialog({ workspaceId, asks, version, beyond, onReverted, o
     const items = changing.map(({ ask, state }): Item => ({ ...itemOf(ask), at: state.preview!.revision, ...(state.preview!.conflicts.length ? { choices: state.choices } : {}) }));
     try {
       for (const part of chunks(items, MAX_NOTES_AT_ONCE)) {
-        const made = await revertMany(workspaceId, part);
+        const made = await host.perform({ type: "history.revert", changes: part });
         done.reverted.push(...made.reverted);
         done.skipped.push(...made.skipped);
       }
@@ -446,7 +440,7 @@ export function RevertDialog({ workspaceId, asks, version, beyond, onReverted, o
         {drawn.map(({ ask, state }) => (
           <NoteRevert
             key={ask.noteId}
-            workspaceId={workspaceId}
+            host={host}
             ask={ask}
             state={state}
             dispatch={(event) => dispatch({ noteIds: [ask.noteId], event })}
@@ -484,10 +478,10 @@ export function RevertDialog({ workspaceId, asks, version, beyond, onReverted, o
 const MOST_NOTES_BY_AUTHOR = 1000;
 
 /** A revert of everything `author` did that still stands: one ask for each note they changed, the ones changed last when there are more than a revert covers. */
-export async function asksOfAuthor(workspaceId: string, author: AuthorRef): Promise<{ asks: RevertAsk[]; cut: boolean }> {
+export async function asksOfAuthor(host: PluginHost, author: AuthorRef): Promise<{ asks: RevertAsk[]; cut: boolean }> {
   const asks: RevertAsk[] = [];
   for (let before: HistorySummary["next"] | undefined; before !== null && asks.length < MOST_NOTES_BY_AUTHOR; ) {
-    const page = await perform(workspaceId, { type: "history.summary", authors: [author], limit: 100, ...(before && { before }) });
+    const page = await host.perform({ type: "history.summary", authors: [author], limit: 100, ...(before && { before }) });
     asks.push(...page.notes.map((note) => ({ noteId: note.noteId, title: note.noteTitle, author })));
     before = page.next;
     if (before === null) return { asks, cut: false };
@@ -507,7 +501,7 @@ const names = (notes: readonly { noteTitle: string }[]) => {
 };
 
 interface Reverts {
-  workspaceId: string;
+  host: PluginHost;
   /** Changes when any note does. */
   version: number;
   /** Where a revert is found again, as a sentence ends. */
@@ -520,7 +514,7 @@ interface Reverts {
  * Reverting as a page offers it. `ask` opens the preview of a revert, with `beyond` said in it and
  * after it. What a revert did is then said with an Undo. `shown` is to be drawn by the page.
  */
-export function useReverts({ workspaceId, version, found = "in the list", onChanged }: Reverts): { ask: (asks: RevertAsk[], beyond?: string) => void; shown: ReactNode } {
+export function useReverts({ host, version, found = "in the list", onChanged }: Reverts): { ask: (asks: RevertAsk[], beyond?: string) => void; shown: ReactNode } {
   const [asked, setAsked] = useState<{ asks: RevertAsk[]; beyond?: string } | null>(null);
   const [said, say] = useState<Said | null>(null);
   const ask = useCallback((asks: RevertAsk[], beyond?: string) => setAsked({ asks, beyond }), []);
@@ -541,7 +535,7 @@ export function useReverts({ workspaceId, version, found = "in the list", onChan
     try {
       const done = { reverted: [] as RevertedNote[], skipped: [] as { noteTitle: string; why: string }[] };
       for (const some of chunks(made, MAX_NOTES_AT_ONCE)) {
-        const part = await revertMany(workspaceId, some.map((r) => ({ noteId: r.noteId, revisions: [r.revision], at: r.revision })));
+        const part = await host.perform({ type: "history.revert", changes: some.map((r) => ({ noteId: r.noteId, revisions: [r.revision], at: r.revision })) });
         done.reverted.push(...part.reverted);
         done.skipped.push(...part.skipped);
       }
@@ -557,7 +551,7 @@ export function useReverts({ workspaceId, version, found = "in the list", onChan
 
   const shown = (
     <>
-      {asked && <RevertDialog workspaceId={workspaceId} asks={asked.asks} version={version} beyond={asked.beyond} onReverted={reverted} onClose={close} />}
+      {asked && <RevertDialog host={host} asks={asked.asks} version={version} beyond={asked.beyond} onReverted={reverted} onClose={close} />}
       {said && (
         <div className="toast" role="status">
           <span>{said.text}</span>

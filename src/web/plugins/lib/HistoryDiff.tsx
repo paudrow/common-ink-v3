@@ -1,7 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type { Author, Diff } from "../core/protocol.ts";
+import { Icon, type Author, type Diff } from "../../plugin-api.ts";
 import { count, hueOf, initials, pieces, type Piece } from "./historyView.ts";
-import { Icon } from "./icons.tsx";
 
 export function Stat({ added, removed }: { added: number; removed: number }) {
   return (
