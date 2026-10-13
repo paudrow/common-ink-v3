@@ -214,7 +214,7 @@ host.completions.register({
 });
 ```
 
-The embed menu is one of these, in `plugins/embedMenu.ts`: it lists `host.embeds.list()`, so an embed is in the menu as soon as its plugin registers it. The list itself is CodeMirror's autocompletion, which one place in the core configures (`src/web/completing.ts`), so completions from several plugins share one list, one set of keys, and vim's insert mode. A plugin that added its own `autocompletion()` as an editor extension would fight it. A completion that throws offers nothing, and the Plugins page says so.
+The embed menu is one of these, in `plugins/embedMenu.ts`: it lists `host.embeds.list()`, so an embed is in the menu as soon as its plugin registers it. It offers an embed only when what was typed starts its title, a word of its title, or its name (`starting` in `plugins/lib/match.ts`), so `yes /no` and Enter is a new line and not a board. The list itself is CodeMirror's autocompletion, which one place in the core configures (`src/web/completing.ts`), so completions from several plugins share one list, one set of keys, and vim's insert mode. A plugin that added its own `autocompletion()` as an editor extension would fight it. A completion that throws offers nothing, and the Plugins page says so.
 
 ## Editor extensions
 

@@ -109,6 +109,24 @@ test("the menu is moved through with the arrow keys, picked from with a click, a
   await expect.poll(() => read(page, note.id)).toBe("# Tea\n\n::stopwatch{} then /x / y /zzz ::timer{5m}");
 });
 
+test("an ordinary word after a / and Enter or Tab stays as it was typed", async ({ page }) => {
+  const note = await open(page, "# Words\n\n");
+
+  // Each used to match "Kanban board" or "Timer" by scattered letters, and Enter wrote the embed over the word.
+  for (const typed of ["yes /no", "and /or", "km /h", "N /A", "/an", "> /tmr"]) {
+    await page.keyboard.type(typed);
+    await settled(page);
+    await expect(menu(page)).toHaveCount(0);
+    await page.keyboard.press("Enter");
+  }
+  await page.keyboard.type("in /or", { delay: 20 });
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("x /wat");
+  await settled(page);
+  await page.keyboard.press("Tab");
+  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /h\nN /A\n/an\n> /tmr\n> in /or\n> x /wat");
+});
+
 test("/ in the middle of a word, in a URL, in a path, or in code opens nothing", async ({ page }) => {
   const note = await open(page, "# Paths\n\n");
 
