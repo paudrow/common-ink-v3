@@ -966,14 +966,14 @@ describe("reverting an author", () => {
     await perform(env.DB, ada, { type: "note.revert", id: full!, revision: 0 });
     await write(ada, full!, long);
     await write(claude.actor, full!, "short");
-    await write(ada, full!, `short${long}`);
+    await write(ada, full!, `short\n${long}`);
 
     const { reverted, failed, next } = await revertAuthor(ada, claude.ref);
 
-    expect(failed).toEqual([{ noteId: full, title: `${`short${long}`.slice(0, 79)}…`, message: "With the other changes merged in, the note would be over 500000 characters" }]);
+    expect(failed).toEqual([{ noteId: full, title: "short", message: "With the other changes merged in, the note would be over 500000 characters" }]);
     expect(reverted.map((r) => r.note.id).sort()).toEqual(notes.map((n) => n.id).sort().slice(1));
     expect(next).toBeNull();
-    expect(await read(ada, full!)).toBe(`short${long}`);
+    expect(await read(ada, full!)).toBe(`short\n${long}`);
   });
 
   it("keeps to the notes named, and to the one token asked for when two share a name", async () => {
