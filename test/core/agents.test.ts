@@ -125,6 +125,11 @@ describe("MCP protocol", () => {
       "read_note",
       "create_note",
       "write_note",
+      "move_note",
+      "list_folders",
+      "create_folder",
+      "rename_folder",
+      "delete_folder",
       "note_history",
       "change_diff",
       "history_summary",
@@ -136,6 +141,7 @@ describe("MCP protocol", () => {
       "label_revision",
       "revert_note",
       "revert_changes",
+      "revert_author",
       "preview_revert",
       "undo",
       "redo",
@@ -217,6 +223,16 @@ describe("MCP tools", () => {
       ["Claude's", byClaude],
       ["Plan", byClaude],
     ]);
+  });
+
+  it("refuses an argument the tool doesn't take, by name, rather than leaving it out", async () => {
+    const ada = await newPerson();
+    const { token } = await connectAgent(env.DB, ada.personId, "Claude");
+    const folder = await perform(env.DB, { kind: "member", ...ada }, { type: "folder.create", name: "Plans" });
+
+    expect(await tool(token, "create_note", { text: "# Hi", folder_id: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder_id". It takes workspace, text, folderId.' });
+    expect(await tool(token, "list_workspaces", { all: true })).toMatchObject({ isError: true, text: 'invalid: list_workspaces takes no "all". It takes no arguments.' });
+    expect((await tool(token, "list_notes")).json()).toEqual([]);
   });
 
   it("reports a failure as a tool error the agent can read", async () => {

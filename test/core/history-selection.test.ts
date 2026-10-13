@@ -494,6 +494,75 @@ describe("reverting changes of several notes at once", () => {
     const history = await perform(env.DB, ada, { type: "note.history", id: plan });
     expect(history.at(-1)!.author).toMatchObject({ kind: "agent", name: "Claude" });
   });
+
+  it("reverts an author's changes in each note named with `author`: what stands of theirs when the revert is made, whatever they wrote since the preview", async () => {
+    const ada = await newMember();
+    const claude = await agentOf(ada);
+    const author = { kind: "agent" as const, id: (claude.actor as Extract<Actor, { kind: "agent" }>).agentId };
+    const plan = await noteOf(ada, "# Plan");
+    await write(claude.actor, plan, "# Plan\nclaude one");
+    await write(ada, plan, "# Plan\nclaude one\nada");
+    await write(claude.actor, plan, "# Plan\nclaude one\nada\nclaude two");
+    const list = await noteOf(ada, "# List");
+    await write(claude.actor, list, "# List\nmilk");
+    const untouched = await noteOf(ada, "# Log", "# Log\nmonday");
+    const asked = [plan, list, untouched].map((noteId) => ({ noteId, author }));
+
+    const previews = await perform(env.DB, ada, { type: "history.previewRevert", changes: asked });
+    expect(previews.map((p) => [p.noteTitle, p.revision, p.revisions, p.already, p.diff.hunks.length > 0])).toEqual([
+      ["Plan", 4, [2, 4], [], true],
+      ["List", 2, [2], [], true],
+      ["Log", 2, [], [], false],
+    ]);
+    expect(previews[0]).toEqual((await perform(env.DB, ada, { type: "history.previewRevert", changes: [{ noteId: plan, revisions: [2, 4] }] }))[0]);
+
+    // Claude writes on after the preview. Held to the preview's revision the note is skipped, and asked for again it is reverted with the new change in.
+    await write(claude.actor, list, "# List\nmilk\neggs");
+    const held = await perform(env.DB, ada, { type: "history.revert", changes: asked.map((item, i) => ({ ...item, at: previews[i]!.revision })) });
+    expect(held.reverted.map((r) => [r.noteTitle, r.reverted])).toEqual([["Plan", [2, 4]]]);
+    expect(held.skipped.map((s) => [s.noteTitle, s.why])).toEqual([["List", "changed"], ["Log", "nothing"]]);
+    const again = await perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: list, author }] });
+    expect(again.reverted.map((r) => [r.noteTitle, r.reverted])).toEqual([["List", [2, 3]]]);
+    expect([await text(ada, plan), await text(ada, list), await text(ada, untouched)]).toEqual(["# Plan\nada", "# List", "# Log\nmonday"]);
+
+    // Asked twice, nothing more is recorded. Undone, Claude's changes stand and are reverted again as the same ones.
+    expect((await perform(env.DB, ada, { type: "history.revert", changes: asked })).skipped.map((s) => s.why)).toEqual(["nothing", "nothing", "nothing"]);
+    await perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: plan, revisions: [5] }] });
+    expect((await perform(env.DB, ada, { type: "history.previewRevert", changes: [{ noteId: plan, author }] }))[0]!.revisions).toEqual([2, 4]);
+
+    expect(await refusal(perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: plan, author, revisions: [2] }] }))).toContain("pass either revisions");
+    expect(await refusal(perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: plan, author, to: 1 }] }))).toContain("pass either revisions");
+  });
+
+  it("picks for `author` what reverting the author picks, through random histories of edits, undos and reverts by two authors", async () => {
+    for (let run = 0; run < 6; run++) {
+      const ada = await newMember();
+      const claude = await agentOf(ada);
+      const author = { kind: "agent" as const, id: (claude.actor as Extract<Actor, { kind: "agent" }>).agentId };
+      let seed = 7919 * (run + 1);
+      const random = (n: number) => (seed = (seed * 48271) % 2147483647) % n;
+      const id = await noteOf(ada, "# Note\none\ntwo\nthree");
+      for (let step = 0; step < 9; step++) {
+        const actor = random(2) ? ada : claude.actor;
+        const revision = await revisionOf(ada, id);
+        const how = random(4);
+        if (how === 0) await perform(env.DB, actor, { type: "note.undo", id }).catch(() => {});
+        else if (how === 1) await perform(env.DB, actor, { type: "note.revertChanges", id, revisions: [1 + random(revision)] }).catch(() => {});
+        else await write(actor, id, `${await text(ada, id)}\nline ${run}.${step}`);
+      }
+      const [picked] = await perform(env.DB, ada, { type: "history.previewRevert", changes: [{ noteId: id, author }] });
+      const single = await perform(env.DB, ada, { type: "note.previewRevert", id, author });
+      expect([picked!.revisions, picked!.diff], `run ${run}`).toEqual([single.revisions, single.diff]);
+      const twin = await perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: id, author }] });
+      const after = await text(ada, id);
+      if (twin.reverted.length) {
+        // Undone, then reverted by the operation agents use: the same text.
+        await perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: id, revisions: [twin.reverted[0]!.revision] }] });
+        await perform(env.DB, ada, { type: "history.revertAuthor", author, noteIds: [id] });
+        expect(await text(ada, id), `run ${run}`).toBe(after);
+      } else expect(single.revisions.length === 0 || single.diff.hunks.length === 0, `run ${run}`).toBe(true);
+    }
+  });
 });
 
 describe("the changes listed by who made them", () => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
+import { Agents } from "./Agents.tsx";
 import { ApiError, perform } from "./api.ts";
 import { createCommands, type Command } from "./commands.ts";
 import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
@@ -18,7 +19,7 @@ import { INITIAL_VIEW, notesIn } from "./noteListView.ts";
 import { NoteReader } from "./NoteReader.tsx";
 import { Palette } from "./Palette.tsx";
 import { ResizeHandle } from "./resize.tsx";
-import { folderPath, type Navigate, type Route } from "./router.ts";
+import { AGENTS_PATH, folderPath, type Navigate, type Route } from "./router.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { Soon } from "./Soon.tsx";
 import { isBoolean, useStored } from "./stored.ts";
@@ -47,8 +48,11 @@ const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el
 const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 const isAnything = (_: unknown): _ is unknown => true;
 
-/** What a tab can hold besides a note and a folder's list: each mode. */
-const PAGES: readonly { id: string; label: string; icon: IconName; path: string }[] = MODES.map((mode) => ({ id: mode.id, label: mode.label, icon: mode.icon, path: modePath(mode.id) }));
+/** What a tab can hold besides a note and a folder's list: each mode, and Agents. */
+const PAGES: readonly { id: string; label: string; icon: IconName; path: string }[] = [
+  ...MODES.map((mode) => ({ id: mode.id, label: mode.label, icon: mode.icon, path: modePath(mode.id) })),
+  { id: "agents", label: "Agents", icon: "agent", path: AGENTS_PATH },
+];
 
 
 const summaryOf = ({ text: _, ...summary }: Note): NoteSummary => summary;
@@ -124,10 +128,11 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
 
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
+  const notesVersion = useMemo(() => (notes ?? []).reduce((sum, n) => sum + n.revision, 0), [notes]);
   const routeNoteId = route.kind === "note" ? route.id : null;
   const current = (routeNoteId && byId.get(routeNoteId)) || null;
   const routeFolderId = route.kind === "folder" ? route.id : null;
-  const routePage = route.kind === "mode" ? PAGES.find((p) => p.id === route.mode) : undefined;
+  const routePage = route.kind === "mode" ? PAGES.find((p) => p.id === route.mode) : route.kind === "agents" ? PAGES.find((p) => p.id === "agents") : undefined;
   /** What the address names in the editor area: the note, the folder's list or the page in front. */
   const opened = useMemo<Opened | null>(
     () => (routeNoteId ? { kind: "note", id: routeNoteId } : routeFolderId ? { kind: "folder", id: routeFolderId } : routePage ? { kind: "page", id: routePage.id, path: routePage.path } : null),
@@ -347,6 +352,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       { id: "tab.moveToPreviousGroup", title: "Move tab to previous group", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) },
       { id: "tab.menu", title: "Show tab menu", run: showTabMenu },
       ...MODES.map((mode) => ({ id: `go.${mode.id}`, title: `Go to ${mode.label}`, run: () => latest.current.go(modePath(mode.id)) })),
+      { id: "go.agents", title: "Go to Agents", run: () => latest.current.go(AGENTS_PATH) },
     ];
     const unregister = all.map((command) => commands.register(command));
     return () => unregister.forEach((off) => off());
@@ -459,7 +465,9 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     const mode = MODES.find((m) => m.id === pageId);
     return (
       <div className="page-pane" key={pageId}>
-        {pageId === "history" ? (
+        {pageId === "agents" ? (
+          <Agents workspace={workspace} workspaces={me.workspaces} version={notesVersion} onShowChanges={(agent) => openHistory({ label: `By ${agent.name}`, author: { kind: "agent", id: agent.id } })} onReverted={refresh} />
+        ) : pageId === "history" ? (
           <HistoryMode workspaceId={workspaceId} me={me.person.id} notes={notes ?? []} canEdit={canEdit} scope={historyScope} onScope={setHistoryScope} onOpenNote={(id) => openNote(id)} onChanged={refresh} />
         ) : mode ? (
           <ModeView mode={mode.id} />

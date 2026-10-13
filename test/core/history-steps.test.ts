@@ -1,6 +1,6 @@
 import { ChangeSet } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { dayIn, overlapping, rebased, redoTarget, revertedBy, takeBackOut, takeOut, undoTarget, type Recorded, type Step } from "../../src/core/history.ts";
+import { dayIn, overlapping, rebased, redoTarget, revertOfAuthor, revertedBy, takeBackOut, takeOut, undoTarget, type Recorded, type Step } from "../../src/core/history.ts";
 import type { Reverts } from "../../src/core/protocol.ts";
 import { applyChanges, changesBetween } from "../../src/core/text.ts";
 
@@ -25,6 +25,11 @@ function note() {
     edit: (to: string, author = "ada") => record(author, changesBetween(text, to), null),
     take: (revisions: number[], how: Reverts["how"] = "revert", author = "ada", to?: number) =>
       record(author, takeBackOut(history, { how, revisions }), { how, revisions, ...(to === undefined ? {} : { to }) }),
+    /** Reverts everything `of` changed, as `author`. Null when there was nothing to take out. */
+    revertAuthor: (of: string, author = "ada") => {
+      const reverts = revertOfAuthor(history, (c) => c.author === of);
+      return reverts && record(author, takeBackOut(history, reverts), reverts);
+    },
   };
 }
 
@@ -122,7 +127,26 @@ describe("taking changes back out of a note that has been through reverts alread
     expect(n.text()).toBe("start\nthe agent's very long line");
   });
 
-  it("keeps the text true to the record through 300 random runs of edits, reverts, put-backs, undos, and redos by two authors", () => {
+  it("reverts an author again after their changes were put back and they edited more", () => {
+    for (const by of ["ada", "claude"]) {
+      const n = note();
+      n.edit("# Plan", "ada");
+      n.edit("# Plan\n\nClaude's step", "claude");
+      expect(n.revertAuthor("claude", by)).toBe(3);
+      expect(n.text()).toBe("# Plan");
+      n.take([3]);
+      expect(n.text()).toBe("# Plan\n\nClaude's step");
+      n.edit("# Plan\n\nClaude's step\n\nClaude's second", "claude");
+
+      expect(n.revertAuthor("claude", by)).toBe(6);
+      expect(n.history[5]!.reverts!.revisions).toEqual([2, 5]);
+      expect(n.text()).toBe("# Plan");
+      expect(n.revertAuthor("claude", by)).toBeNull();
+      expect(n.history).toHaveLength(6);
+    }
+  });
+
+  it("keeps the text true to the record through 300 random runs of edits, reverts, put-backs, undos, redos, and reverts of an author by two authors", () => {
     let seed = 7;
     const random = (below: number) => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) % below;
     const SLOTS = 8;
@@ -142,7 +166,7 @@ describe("taking changes back out of a note that has been through reverts alread
         const standing = n.history.filter((c) => c.revision > 1 && !reverted.has(c.revision)).map((c) => c.revision);
         const author = random(2) ? "ada" : "claude";
         const mine = n.history.filter((c) => c.author === author);
-        const kind = random(6);
+        const kind = random(7);
         if (kind === 0 && editOf.size < SLOTS) {
           const slot = blank.findIndex((_, i) => !editOf.has(i));
           editOf.set(slot, n.edit(n.text().split("\n").map((line, i) => (i === slot ? `${line}, edited` : line)).join("\n"), author));
@@ -161,6 +185,12 @@ describe("taking changes back out of a note that has been through reverts alread
           const to = 1 + random(n.history.length - 1);
           n.take(n.history.slice(to).map((c) => c.revision), "revert", author, to);
           expect(n.text()).toBe(texts[to]);
+        } else if (kind === 6) {
+          const of = random(2) ? "ada" : "claude";
+          n.revertAuthor(of, author);
+          const out = revertedBy(n.history);
+          expect(n.history.filter((c) => c.author === of && !c.reverts && !out.has(c.revision))).toEqual([]);
+          expect(n.revertAuthor(of, author)).toBeNull();
         }
         texts[n.history.length] = n.text();
         expect(n.text(), `run ${run}, after ${JSON.stringify(n.history.map((c) => c.reverts?.revisions ?? "edit"))}`).toBe(expected());
@@ -424,6 +454,47 @@ describe("which changes still stand", () => {
 
   it("credits the latest change when two took the same one out", () => {
     expect(revertedBy([step(1), step(2, "revert", 1), step(3, "revert", 1, 2)]).get(1)).toBe(3);
+  });
+});
+
+describe("what reverting an author takes out", () => {
+  const agents = (...revisions: number[]) => (s: Step) => revisions.includes(s.revision);
+  const taken = (steps: Step[], isTheirs: (s: Step) => boolean) => revertOfAuthor(steps, isTheirs)?.revisions ?? null;
+
+  it("is every change of theirs, and nobody else's", () => {
+    expect(taken([step(1), step(2), step(3), step(4)], agents(2, 4))).toEqual([2, 4]);
+    expect(taken([step(1), step(2)], agents())).toBeNull();
+  });
+
+  it("leaves out a change somebody else already took out", () => {
+    expect(taken([step(1), step(2), step(3, "revert", 2), step(4)], agents(2, 4))).toEqual([4]);
+    expect(taken([step(1), step(2), step(3, "revert", 2)], agents(2))).toBeNull();
+  });
+
+  it("names their undo along with the change it undid, so the change doesn't come back", () => {
+    expect(taken([step(1), step(2), step(3, "undo", 2), step(4)], agents(2, 3, 4))).toEqual([2, 3, 4]);
+  });
+
+  it("is nothing when all they have left is a change they undid themselves", () => {
+    expect(taken([step(1), step(2), step(3, "undo", 2)], agents(2, 3))).toBeNull();
+  });
+
+  it("names their revert of someone else's change, so that change stands again", () => {
+    expect(taken([step(1), step(2, "revert", 1)], agents(2))).toEqual([2]);
+  });
+
+  it("counts a change as still reverted when it was they who reverted the revert of it", () => {
+    const steps = [step(1), step(2), step(3, "revert", 2), step(4, "revert", 3)];
+    expect(taken(steps, agents(2, 4))).toEqual([4]);
+  });
+
+  it("names a change again when the member who reverted it later reverted that revert", () => {
+    const steps = [step(1), step(2), step(3, "revert", 2), step(4, "revert", 3)];
+    expect(taken(steps, agents(2))).toEqual([2]);
+  });
+
+  it("is nothing the second time, when the author reverted themselves too", () => {
+    expect(taken([step(1), step(2), step(3, "revert", 2)], agents(2, 3))).toBeNull();
   });
 });
 

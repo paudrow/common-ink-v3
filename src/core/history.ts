@@ -299,6 +299,25 @@ function overlappingEdits(parts: readonly Part[], was: ReadonlySet<number>, will
   return overlaps;
 }
 
+/**
+ * What reverting an author records: every change of theirs but the ones somebody else took out and
+ * left out. Their own undos and reverts are named too, so nothing they took out of their own comes
+ * back and what they took out of others' does. Null when the note would hold the same edits after.
+ */
+export function revertOfAuthor<S extends Step>(steps: readonly S[], isTheirs: (step: S) => boolean): Reverts | null {
+  const gone = new Set<number>();
+  for (const step of [...steps].sort((a, b) => b.revision - a.revision)) {
+    if (!step.reverts || gone.has(step.revision) || isTheirs(step)) continue;
+    for (const revision of step.reverts.revisions) gone.add(revision);
+  }
+  const reverts: Reverts = { how: "revert", revisions: steps.filter((s) => isTheirs(s) && !gone.has(s.revision)).map((s) => s.revision).sort((a, b) => a - b) };
+  const edits = (all: readonly Step[]) => {
+    const out = revertedBy(all);
+    return all.filter((s) => !s.reverts && !out.has(s.revision)).map((s) => s.revision).join();
+  };
+  return edits(steps) === edits([...steps, { revision: steps.length + 1, reverts }]) ? null : reverts;
+}
+
 /** One place where a revert and later changes that still stand edited the same lines. Lines are without their line ends. */
 export interface Conflict {
   /** The line of the note after the revert, every later edit kept, that `kept` starts at. Counted from 1. */

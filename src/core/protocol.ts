@@ -36,15 +36,16 @@ const unique = (changes: { noteId: string }[]) => new Set(changes.map((c) => c.n
 /** Some changes of one note. */
 const Selected = z.object({ noteId: Id, revisions: Revisions }).strict();
 /**
- * A revert of one note among several: of the chosen changes, or of the note to the revision `to`.
+ * A revert of one note among several: of the chosen changes, of the note to the revision `to`, or
+ * of every change of `author` that still stands, as `history.revertAuthor` picks them.
  * Changes already reverted are left out and no reason to refuse. `at` is the note's revision the
  * revert was previewed at: a note that has changed since is skipped and said to be. `choices`
  * settles its conflicts as `resolve` does for one note, and needs `at`.
  */
 const Reverted = z
-  .object({ noteId: Id, revisions: Revisions.optional(), to: Revision.optional(), at: Revision.optional(), choices: Resolve.shape.choices.optional() })
+  .object({ noteId: Id, revisions: Revisions.optional(), to: Revision.optional(), author: AuthorRef.optional(), at: Revision.optional(), choices: Resolve.shape.choices.optional() })
   .strict()
-  .refine((r) => (r.revisions === undefined) !== (r.to === undefined), "pass either revisions, the changes to revert, or to, the revision to return to")
+  .refine((r) => [r.revisions, r.to, r.author].filter((given) => given !== undefined).length === 1, "pass either revisions, the changes to revert, or to, the revision to return to, or author, whose changes to revert")
   .refine((r) => r.choices === undefined || r.at !== undefined, "choices settle the conflicts of a preview: pass at, the revision that preview was of");
 const ManyNotes = <T extends z.ZodType<{ noteId: string }>>(item: T) => z.array(item).min(1).max(MAX_NOTES_AT_ONCE).refine(unique, "name each note once");
 
@@ -83,12 +84,16 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions, resolve: Resolve.optional() }),
   /**
    * What a revert would do, with nothing written: of the chosen changes as `note.revertChanges`
-   * reverts them, or of the note to a revision as `note.revert` does. With `resolve`, the diff is of
-   * the revert with its conflicts settled that way.
+   * reverts them, of the note to a revision as `note.revert` does, or of one author's changes
+   * to this note as `history.revertAuthor` does. With `resolve`, the diff is of the revert with its
+   * conflicts settled that way.
    */
   z
-    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional(), resolve: Resolve.optional() })
-    .refine((op) => (op.revisions === undefined) !== (op.to === undefined), "pass either revisions, the changes to revert, or to, the revision to return to"),
+    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional(), author: AuthorRef.optional(), resolve: Resolve.optional() })
+    .refine(
+      (op) => [op.revisions, op.to, op.author].filter((given) => given !== undefined).length === 1,
+      "pass one of revisions, the changes to revert, to, the revision to return to, or author, whose changes to revert",
+    ),
   /** Takes back the author's own latest change that still stands. */
   z.object({ type: z.literal("note.undo"), id: Id }),
   z.object({ type: z.literal("note.redo"), id: Id }),
@@ -120,6 +125,12 @@ export const Op = z.discriminatedUnion("type", [
     diffs: z.boolean().default(true),
   }),
   z.object({ type: z.literal("history.authors") }),
+  /**
+   * Takes back out every change by one author that still stands, as one new change in each note
+   * by whoever asks. It covers a few notes at a time; pass the answer's `next` as `after` for the rest.
+   */
+  /** `resolve` settles the conflicts of the notes it names, by note id, as `note.previewRevert` with `author` listed them. A note it leaves out keeps every later edit. */
+  z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional(), resolve: z.record(Id, Resolve).refine((byNote) => Object.keys(byNote).length <= 200, "resolve names at most 200 notes").optional() }),
   /**
    * What a selection of changes did, note by note: the changes of each note that follow one another
    * are one run with one diff, from the note before the first of them to the note after the last.
@@ -355,6 +366,17 @@ export interface HistorySummary {
   next: { lastAt: number; noteId: string } | null;
 }
 
+export interface AuthorReverted {
+  /** Each note that got a new change, and the author's changes it took back out. */
+  reverted: { note: NoteSummary; revisions: number[] }[];
+  /** The reverted notes left with no text, each under the title it had. There is no deleting a note yet, so they stay. */
+  emptied: { noteId: string; title: string }[];
+  /** Notes that refused the change, such as one it would make too long. They are left as they were. */
+  failed: { noteId: string; title: string; message: string }[];
+  /** Pass as `after` to cover the notes not reached yet; null when every note was. */
+  next: string | null;
+}
+
 export interface Results {
   "note.list": NoteSummary[];
   "note.create": Note;
@@ -372,6 +394,7 @@ export interface Results {
   "history.summary": HistorySummary;
   "history.list": HistoryPage;
   "history.authors": Author[];
+  "history.revertAuthor": AuthorReverted;
   "history.diff": SelectionDiff;
   "history.previewRevert": NoteRevertPreview[];
   "history.revert": RevertedNotes;
@@ -380,6 +403,50 @@ export interface Results {
   "folder.rename": Folder;
   "folder.delete": { id: string };
 }
+
+export const MAX_AGENT_NAME = 60;
+export const DEFAULT_EXPIRY_DAYS = 90;
+export const MAX_EXPIRY_DAYS = 365;
+
+export interface Agent {
+  id: string;
+  name: string;
+  /** The first characters of its token, to tell tokens apart. Not enough to use it. */
+  tokenPrefix: string;
+  createdAt: number;
+  /** After this the token stops working. Null when it never expires. */
+  expiresAt: number | null;
+  lastUsedAt: number | null;
+  revokedAt: number | null;
+  /** The one workspace this token can reach, or null for every workspace its member can reach. */
+  workspaceId: string | null;
+  /** A read-only token can't change anything, whatever its member's role. */
+  readOnly: boolean;
+}
+
+/** What a member may ask for when connecting an agent. */
+/** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
+export const ExpiresIn = z.union([z.number().int().min(1).max(MAX_EXPIRY_DAYS), z.literal("never")]);
+export type ExpiresIn = z.infer<typeof ExpiresIn>;
+
+export const ConnectOptions = z.object({
+  expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
+  workspaceId: Id.optional(),
+  readOnly: z.boolean().default(false),
+});
+export type ConnectOptions = z.input<typeof ConnectOptions>;
+
+/**
+ * What a member changes about an agent they connected: what its token may do, with the token itself
+ * unchanged. A field left out stays as it is. `expiresInDays` counts from the edit, and a null
+ * `workspaceId` lets the token reach every workspace its member can.
+ */
+export const AgentEdit = z.strictObject({
+  expiresInDays: ExpiresIn.optional(),
+  workspaceId: Id.nullable().optional(),
+  readOnly: z.boolean().optional(),
+});
+export type AgentEdit = z.input<typeof AgentEdit>;
 
 export interface WorkspaceSummary {
   id: string;

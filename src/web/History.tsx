@@ -1,26 +1,22 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { MAX_NOTES_AT_ONCE, type ChangedNote, type DiffRun, type HistoryEntry, type HistoryPage, type HistorySummary, type NoteDiff, type NoteSummary, type OpInput, type RevertedNote } from "../core/protocol.ts";
+import { MAX_NOTES_AT_ONCE, type AuthorRef, type ChangedNote, type DiffRun, type HistoryEntry, type HistoryPage, type HistorySummary, type NoteDiff, type NoteSummary, type OpInput } from "../core/protocol.ts";
 import { perform } from "./api.ts";
 import { Avatar, DiffView, Stat } from "./HistoryDiff.tsx";
 import { MOST_OF_A_NOTE, NOTHING, asked, clock, count, dayLabel, did, groupSaves, keyOf, only, picked, sameSelection, sizeOf, titleOf, who as whoOf, within, withRows, type Row, type Selection } from "./historyView.ts";
 import { Icon } from "./icons.tsx";
 import { ContextMenu, type MenuItem } from "./Menu.tsx";
-import { RevertDialog, type RevertAsk } from "./RevertDialog.tsx";
+import { useReverts, type RevertAsk } from "./RevertDialog.tsx";
 import { useStored } from "./stored.ts";
-import { revertMany } from "./sync.ts";
 import { useNow } from "./time.ts";
 
-/** What narrows history: to some notes, and to people's changes or agents'. */
-type Filters = Pick<Extract<OpInput, { type: "history.list" }>, "noteIds" | "by">;
+/** What narrows history: to some notes, to some authors, and to people's changes or agents'. */
+type Filters = Pick<Extract<OpInput, { type: "history.list" }>, "noteIds" | "authors" | "by">;
 
 export type View = "time" | "note";
 type Who = "everyone" | "people" | "agents";
 
-/** Some notes History is narrowed to, under the name they go by: a note's title, or a folder's name. */
-export interface Scope {
-  label: string;
-  noteIds: string[];
-}
+/** What History is narrowed to, under the name it goes by: some notes under a note's title or a folder's name, or one author's changes under the author's name. */
+export type Scope = { label: string; noteIds: string[] } | { label: string; author: AuthorRef };
 
 const CHANGES_A_PAGE = 100;
 const NOTES_A_PAGE = 30;
@@ -417,17 +413,6 @@ function SelectionPane({ workspaceId, selection, counted, canEdit, version, titl
   );
 }
 
-interface Toast {
-  text: string;
-  /** The changes a revert made, which Undo reverts. */
-  undo?: RevertedNote[];
-}
-
-const names = (notes: readonly { noteTitle: string }[]) => {
-  const titles = notes.map((n) => titleOf(n.noteTitle));
-  return titles.length > 3 ? `${titles.slice(0, 3).join(", ")} and ${titles.length - 3} more` : titles.length > 1 ? `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}` : (titles[0] ?? "");
-};
-
 interface PanesProps {
   workspaceId: string;
   /** The member, whose own changes read "You". */
@@ -474,11 +459,8 @@ function HistoryPanes({ workspaceId, me, canEdit, view, filters, layout, version
   const [cursor, setCursor] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [detail, setDetail] = useState(false);
-  const [reverting, setReverting] = useState<RevertAsk[] | null>(null);
-  const [toast, setToast] = useState<Toast | null>(null);
   const [capped, setCapped] = useState(false);
   const listbox = useRef<HTMLDivElement>(null);
-  const stopReverting = useCallback(() => setReverting(null), []);
 
   const loaded = useRef(onLoaded);
   loaded.current = onLoaded;
@@ -639,33 +621,7 @@ function HistoryPanes({ workspaceId, me, canEdit, view, filters, layout, version
     reload((n) => n + 1);
     onChanged();
   };
-  const reverted = (done: { reverted: RevertedNote[] }) => {
-    const total = done.reverted.reduce((sum, r) => sum + r.reverted.length, 0);
-    const [one] = done.reverted;
-    setToast({ text: done.reverted.length === 1 && one ? `Reverted ${count(total, "change")} to ${titleOf(one.noteTitle)}` : `Reverted ${count(total, "change")} in ${count(done.reverted.length, "note")}`, undo: done.reverted });
-    changed();
-  };
-  const undoing = useRef(false);
-  const undo = async (made: RevertedNote[]) => {
-    if (undoing.current) return;
-    undoing.current = true;
-    setToast({ text: "Undoing…" });
-    try {
-      const done = { reverted: [] as RevertedNote[], skipped: [] as { noteTitle: string; why: string }[] };
-      for (let i = 0; i < made.length; i += MAX_NOTES_AT_ONCE) {
-        const part = await revertMany(workspaceId, made.slice(i, i + MAX_NOTES_AT_ONCE).map((r) => ({ noteId: r.noteId, revisions: [r.revision], at: r.revision })));
-        done.reverted.push(...part.reverted);
-        done.skipped.push(...part.skipped);
-      }
-      const back = done.reverted.length === 1 ? `${names(done.reverted)} is as it was before the revert` : `${count(done.reverted.length, "note")} are as they were before the revert`;
-      const stays = done.skipped.length ? `${names(done.skipped)} ${done.skipped.length === 1 ? "has" : "have"} changed since, so ${done.skipped.length === 1 ? "its revert stays" : "their reverts stay"}. Pick ${done.skipped.length === 1 ? "that revert" : "those reverts"} in the list to revert ${done.skipped.length === 1 ? "it" : "them"}.` : "";
-      setToast({ text: done.reverted.length ? `Undone: ${back}.${stays && ` ${stays}`}` : `Nothing was undone. ${stays}` });
-    } catch (err) {
-      setToast({ text: `The undo didn't go through: ${(err as Error).message}`, undo: made });
-    }
-    undoing.current = false;
-    changed();
-  };
+  const reverts = useReverts({ workspaceId, version, onChanged: changed });
 
   const isTree = view === "note";
   let day = "";
@@ -794,24 +750,11 @@ function HistoryPanes({ workspaceId, me, canEdit, view, filters, layout, version
         version={version + reloads}
         titleOfNote={titleOfNote}
         onOpenNote={onOpenNote}
-        onRevert={setReverting}
+        onRevert={reverts.ask}
         onLabeled={() => reload((n) => n + 1)}
         onBack={() => setDetail(false)}
       />
-      {reverting && <RevertDialog workspaceId={workspaceId} asks={reverting} version={version} onReverted={reverted} onClose={stopReverting} />}
-      {toast && (
-        <div className="toast" role="status">
-          <span>{toast.text}</span>
-          {toast.undo && (
-            <button type="button" className="link" onClick={() => void undo(toast.undo!)}>
-              Undo
-            </button>
-          )}
-          <button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setToast(null)}>
-            <Icon name="close" />
-          </button>
-        </div>
-      )}
+      {reverts.shown}
     </div>
   );
 }
@@ -928,8 +871,13 @@ export function HistoryMode({ workspaceId, me, notes, canEdit, scope, onScope, o
   const [view, setView] = useStored<View>(`ink.historyView.${me}`, isView, "time");
   const [who, setWho] = useState<Who>("everyone");
   const version = useMemo(() => notes.reduce((sum, n) => sum + n.revision, 0), [notes]);
-  const scoped = scope?.noteIds.join(",") ?? "";
-  const filters = useMemo<Filters>(() => ({ ...(scoped ? { noteIds: scoped.split(",") } : {}), ...(who === "everyone" ? {} : { by: who }) }), [scoped, who]);
+  const author = scope && "author" in scope ? scope.author : null;
+  const scoped = scope && "noteIds" in scope ? scope.noteIds.join(",") : "";
+  const one = author && `${author.kind}:${author.id}`;
+  const filters = useMemo<Filters>(() => {
+    if (one) return { authors: [{ kind: one.split(":")[0] as AuthorRef["kind"], id: one.split(":")[1]! }] };
+    return { ...(scoped ? { noteIds: scoped.split(",") } : {}), ...(who === "everyone" ? {} : { by: who }) };
+  }, [one, scoped, who]);
   const filtered = who !== "everyone" || scope !== null;
 
   const head = (
@@ -946,17 +894,19 @@ export function HistoryMode({ workspaceId, me, notes, canEdit, scope, onScope, o
             </button>
           ))}
         </div>
-        <div className="segmented" role="radiogroup" aria-label="Whose changes">
-          {WHO.map(([value, label]) => (
-            <button key={value} type="button" role="radio" aria-checked={who === value} onClick={() => setWho(value)}>
-              {label}
-            </button>
-          ))}
-        </div>
+        {!author && (
+          <div className="segmented" role="radiogroup" aria-label="Whose changes">
+            {WHO.map(([value, label]) => (
+              <button key={value} type="button" role="radio" aria-checked={who === value} onClick={() => setWho(value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {scope && (
           <span className="chip hist-scope">
             {scope.label}
-            <button type="button" aria-label="Show every note" title="Show every note" onClick={() => onScope(null)}>
+            <button type="button" aria-label={author ? "Show everyone's changes" : "Show every note"} title={author ? "Show everyone's changes" : "Show every note"} onClick={() => onScope(null)}>
               <Icon name="close" />
             </button>
           </span>

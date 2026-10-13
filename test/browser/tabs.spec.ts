@@ -490,6 +490,7 @@ const PAGES = [
   ["/history", "History"],
   ["/contacts", "Contacts"],
   ["/uploads", "Uploads"],
+  ["/agents", "Agents"],
 ] as const;
 
 test("every page opens in a tab at its own address, and is drawn there", async ({ page }) => {

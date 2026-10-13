@@ -1,7 +1,7 @@
 import { ChangeSet } from "@codemirror/state";
 import { z } from "zod";
 import { lineDiff, textDiff } from "./diff.ts";
-import { dayIn, rebased, redoTarget, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
+import { dayIn, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { newId } from "./ids.ts";
 import { summarize } from "./markdown.ts";
 import {
@@ -154,7 +154,8 @@ function written(ctx: Context, text: string) {
 
 const kindOf = (by: "people" | "agents" | undefined) => (by === "people" ? "member" : by === "agents" ? "agent" : null);
 
-const isBy = (ctx: Context, author: AuthorRef) => author.kind === ctx.actor.kind && author.id === authorId(ctx.actor);
+const sameAuthor = (a: AuthorRef, b: AuthorRef) => a.kind === b.kind && a.id === b.id;
+const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx.actor.kind, id: authorId(ctx.actor) });
 
 async function loadNote(ctx: Context, id: string): Promise<NoteRow> {
   const row = await ctx.db
@@ -215,6 +216,8 @@ async function replay(ctx: Context, id: string, revision: number, current: numbe
 }
 
 const MAX_WRITE_ATTEMPTS = 5;
+/** Reverting an author reads each note's whole record and costs a few queries a note, and a request is allowed only so many. */
+const REVERT_AUTHOR_NOTES = 10;
 const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: changes\./.test(err.message);
 
 /** What a change records beyond its diff. */
@@ -429,7 +432,7 @@ function takingBackOf(row: NoteRow, history: Recorded[], choose: Choose, resolve
   const found: Reverting = reverts ? reverting(history, reverts, row.text) : { changes: ChangeSet.empty(row.text.length), overlaps: [], conflicts: [] };
   const settled = settledRevert(found, row.text, choicesFor(found, resolve));
   // Said of a preview too, so that a revert it shows is one that can be made.
-  if (settled.changes.newLength > MAX_NOTE_LENGTH) throw new OpError("invalid", `With these choices the note would be over ${MAX_NOTE_LENGTH} characters`);
+  if (settled.changes.newLength > MAX_NOTE_LENGTH) throw new OpError("invalid", `With ${resolve ? "these choices" : "the other changes merged in,"} the note would be over ${MAX_NOTE_LENGTH} characters`);
   return { row, history, reverts, found, ...settled };
 }
 
@@ -462,6 +465,11 @@ function chosen(revisions: number[], history: Recorded[]): number[] {
 }
 
 /** Every change after `revision`: the note goes back to how it was then. */
+const revertBy =
+  (author: AuthorRef): Choose =>
+  (history) =>
+    revertOfAuthor(history, (c) => sameAuthor(c.author, author));
+
 const revertTo =
   (revision: number): Choose =>
   (history) => {
@@ -491,7 +499,7 @@ type RevertedItem = Extract<Op, { type: "history.revert" }>["changes"][number];
 
 /** One note's revert among several, as it would be made. */
 function takingBackItem(row: NoteRow, history: Recorded[], item: RevertedItem): TakingBack {
-  const choose = item.to !== undefined ? revertTo(item.to) : revertStanding(item.revisions!);
+  const choose = item.author ? revertBy(item.author) : item.to !== undefined ? revertTo(item.to) : revertStanding(item.revisions!);
   return takingBackOf(row, history, choose, item.choices !== undefined ? { at: item.at!, choices: item.choices } : undefined);
 }
 
@@ -623,7 +631,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     // It shows nothing a viewer can't already read: the note at any revision, and every change's diff.
     needs: "view",
     async run(ctx, op) {
-      const { row, history, reverts, found, changes } = await takingBack(ctx, op.id, op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!), op.resolve);
+      const author = op.author;
+      const choose: Choose = author ? revertBy(author) : op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!);
+      const { row, history, reverts, found, changes } = await takingBack(ctx, op.id, choose, op.resolve);
       const conflicts = found.conflicts.map((c) => ({ ...c, later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })) }));
       return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts };
     },
@@ -801,6 +811,41 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         .bind(ctx.actor.workspaceId)
         .all<Pick<ChangeRow, "author_kind" | "author_id" | "name" | "agent_owner">>();
       return results.map((r) => authorOf(r.author_kind, r.author_id, r.name, r.agent_owner));
+    },
+  },
+
+  "history.revertAuthor": {
+    needs: "edit",
+    async run(ctx, op) {
+      const theirs = (c: { author: AuthorRef }) => sameAuthor(c.author, op.author);
+      // Only this page's notes are named here and read below, however many more the author changed.
+      const { results } = await ctx.db
+        .prepare(
+          `SELECT n.id, n.title FROM notes n
+           WHERE n.workspace_id = ?1
+             AND (?2 IS NULL OR n.id IN (SELECT value FROM json_each(?2)))
+             AND (?3 IS NULL OR n.id > ?3)
+             AND EXISTS (SELECT 1 FROM changes c WHERE c.note_id = n.id AND c.author_kind = ?4 AND c.author_id = ?5)
+           ORDER BY n.id LIMIT ?6`,
+        )
+        .bind(ctx.actor.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.after ?? null, op.author.kind, op.author.id, REVERT_AUTHOR_NOTES + 1)
+        .all<{ id: string; title: string }>();
+      const page = results.slice(0, REVERT_AUTHOR_NOTES);
+
+      const answer: Results["history.revertAuthor"] = { reverted: [], emptied: [], failed: [], next: results.length > page.length ? page.at(-1)!.id : null };
+      for (const { id, title } of page) {
+        let reverts: Reverts | null = null;
+        try {
+          const { text, ...note } = await takeBack(ctx, id, (history) => (reverts = revertOfAuthor(history, theirs)), op.resolve?.[id]);
+          if (!reverts) continue;
+          answer.reverted.push({ note, revisions: (reverts as Reverts).revisions });
+          if (!text.trim()) answer.emptied.push({ noteId: id, title });
+        } catch (err) {
+          // One note that can't take the change doesn't keep it from the notes after, or lose the answer for the notes before.
+          answer.failed.push({ noteId: id, title, message: err instanceof OpError ? err.message : "Common Ink couldn't change this note just now. Try again." });
+        }
+      }
+      return answer;
     },
   },
 
