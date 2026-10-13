@@ -3,15 +3,18 @@ import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { Note, OpInput, Results, RevertedNotes } from "../core/protocol.ts";
 import { changesBetween } from "../core/text.ts";
-import { ApiError, perform } from "./api.ts";
+import { ApiError, perform, session } from "./api.ts";
 
 export const PAUSE_MS = 1000;
 const RETRY_MS = 3000;
 
-export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "rejected";
+export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "signedOut" | "rejected";
 
-/** Sending the same write again can succeed only after a network failure, a server fault, or signing back in. */
-const worthRetrying = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || err.status === 401 || err.status === 429;
+/** Asking the same again by itself can succeed only after a network failure or a server fault. */
+export const worthRetrying = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || err.status === 429;
+
+/** The session ended. The same write succeeds once the member has signed in again, and not before. */
+const signedOut = (err: unknown) => err instanceof ApiError && err.status === 401;
 
 /** Every sync with typing the server may not have, including those whose editor has closed. */
 const unsaved = new Set<NoteSync>();
@@ -20,6 +23,10 @@ addEventListener("pagehide", () => {
 });
 addEventListener("beforeunload", (e) => {
   if (unsaved.size) e.preventDefault();
+});
+
+session.subscribe(() => {
+  if (!session.signedOut()) for (const sync of unsaved) void sync.commit();
 });
 
 /** Settles once typing in this note from editors that have closed has been sent, so a read after it includes that typing. */
@@ -195,8 +202,11 @@ export class NoteSync {
         else unsaved.delete(this);
         this.onState(this.dirty ? "unsaved" : "saved");
       } catch (err) {
-        this.failing = worthRetrying(err);
-        if (this.failing) {
+        this.failing = worthRetrying(err) || signedOut(err);
+        if (signedOut(err)) {
+          // Kept to be sent as it is once the member is signed in again, which the session says.
+          this.onState("signedOut");
+        } else if (this.failing) {
           this.onState("failed");
           this.schedule(RETRY_MS);
         } else {

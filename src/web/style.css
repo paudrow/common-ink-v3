@@ -2346,6 +2346,11 @@ kbd {
   font-size: 13px;
 }
 
+.settings-banner .button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .settings-banner[role="alert"] {
   border-color: var(--danger);
 }
