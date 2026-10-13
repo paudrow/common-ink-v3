@@ -12,7 +12,7 @@ const PAUSE_MS = 200;
 /** How long the list waits before asking again a search the server answered while still indexing. Each ask indexes more. */
 const INDEXING_PAUSE_MS = 1500;
 const STILL_INDEXING = "Still indexing notes. Results may be missing some.";
-const SYNTAX = 'words, "a phrase", #tag, +project';
+const SYNTAX = 'words, "a phrase", #tag';
 
 /** How far below the top of the list a card's head is put when its note is collapsed from further down. */
 const HEAD_GAP = 10;

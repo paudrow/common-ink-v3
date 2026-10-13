@@ -7,22 +7,19 @@ export interface SearchQuery {
   terms: string[][];
   /** Tags the note must have, as they are matched: `#name`. */
   tags: string[];
-  /** Projects a todo of the note must be in, as they are matched: `+name`. */
-  projects: string[];
 }
 
 const WORD = /[\p{L}\p{N}]+/gu;
 const wordsOf = (text: string) => text.match(WORD) ?? [];
 
 /**
- * Reads a search as typed: words, "quoted phrases", `#tag` and `+project`. Nothing else in it means
+ * Reads a search as typed: words, "quoted phrases", and `#tag`. Nothing else in it means
  * anything, so no character typed is ever handed on as syntax. A quote left open reads as words.
  */
 export function parseQuery(typed: string): SearchQuery {
-  const query: SearchQuery = { terms: [], tags: [], projects: [] };
-  for (const [, phrase, marked, name, rest] of typed.matchAll(/"([^"]*)"|(?<![^\s])([#+])([\p{L}\p{N}_-]+)(?![^\s])|([^\s"]+)/gu)) {
-    if (marked === "#") query.tags.push(nameKey(name!));
-    else if (marked === "+") query.projects.push(nameKey(name!));
+  const query: SearchQuery = { terms: [], tags: [] };
+  for (const [, phrase, marked, name, rest] of typed.matchAll(/"([^"]*)"|(?<![^\s])(#)([\p{L}\p{N}_-]+)(?![^\s])|([^\s"]+)/gu)) {
+    if (marked) query.tags.push(nameKey(name!));
     else if (phrase !== undefined) {
       if (wordsOf(phrase).length) query.terms.push(wordsOf(phrase));
     } else if (wordsOf(rest!).length) query.terms.push(wordsOf(rest!));
@@ -30,7 +27,7 @@ export function parseQuery(typed: string): SearchQuery {
   return query;
 }
 
-export const isEmpty = (query: SearchQuery) => !query.terms.length && !query.tags.length && !query.projects.length;
+export const isEmpty = (query: SearchQuery) => !query.terms.length && !query.tags.length;
 
 /**
  * The terms as the full-text index is asked for them: each a quoted string, which the index reads
@@ -55,7 +52,6 @@ function finder(query: SearchQuery): RegExp | null {
   const parts = [
     ...query.terms.map((words) => `${START}${words.map(escaped).join("[^\\p{L}\\p{N}]+")}`),
     ...query.tags.map((tag) => `(?<![^\\s])#${escaped(tag)}(?![\\p{L}\\p{N}_-])`),
-    ...query.projects.map((project) => `(?<![^\\s])\\+${escaped(project)}(?![\\p{L}\\p{N}_-])`),
   ];
   return parts.length ? new RegExp(parts.join("|"), "giu") : null;
 }

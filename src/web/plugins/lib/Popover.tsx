@@ -37,6 +37,9 @@ export function openPopover(anchor: HTMLElement, label: string, content: (close:
   );
 }
 
+/** Closes the panel that is open, if one is. */
+export const closePopover = () => shown?.close();
+
 function Panel({ anchor, label, close, children }: { anchor: HTMLElement; label: string; close: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const from = useRef(anchor);

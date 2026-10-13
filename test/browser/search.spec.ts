@@ -35,12 +35,12 @@ const ERRANDS = "# Errands\n\n- [ ] Call the bank about the mortgage +Home\n";
 const READING = "# Reading\n\nNotes on gardening books #botany\n";
 const SCRAPS = "# Scraps\n\nfence the by, tomatoes later\n";
 
-test("search finds a note by a word of its text, a todo's words, a tag, a project, and a phrase in quotes", async ({ page }) => {
+test("search finds a note by a word of its text, a todo's words, a tag, and a phrase in quotes", async ({ page }) => {
   await searching(page, [GARDEN, ERRANDS, READING, SCRAPS]);
   // With nothing typed it is every note, as the list of All notes is.
   await expect(titles(page)).toHaveText(["Scraps", "Reading", "Errands", "Garden plan"]);
   await expect(status(page)).toHaveText("4 notes");
-  await expect(field(page)).toHaveAttribute("placeholder", 'Search all notes: words, "a phrase", #tag, +project');
+  await expect(field(page)).toHaveAttribute("placeholder", 'Search all notes: words, "a phrase", #tag');
 
   await field(page).fill("tomat");
   await expect(titles(page)).toHaveText(["Scraps", "Garden plan"]);
@@ -60,7 +60,7 @@ test("search finds a note by a word of its text, a todo's words, a tag, a projec
 
   await field(page).fill("+home");
   await expect(titles(page)).toHaveText(["Errands"]);
-  await expect(results(page).locator("mark")).toHaveText(["+Home"]);
+  await expect(results(page).locator("mark")).toHaveText(["Home"]);
 
   await field(page).fill("by the fence");
   await expect(titles(page)).toHaveText(["Scraps", "Garden plan"]);

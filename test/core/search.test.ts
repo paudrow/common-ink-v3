@@ -10,11 +10,11 @@ const create = (by: Actor, text: string, now?: number) => perform(env.DB, by, { 
 const found = async (by: Actor, query: string, more: Omit<Partial<Extract<OpInput, { type: "search" }>>, "type" | "query"> = {}) => (await perform(env.DB, by, { type: "search", query, ...more })).results.map((r) => r.note.title);
 
 describe("a search as typed", () => {
-  it("reads words, quoted phrases, tags and projects, and nothing else", () => {
-    expect(parseQuery('budget "second quarter" #Money +Home')).toEqual({ terms: [["budget"], ["second", "quarter"]], tags: ["money"], projects: ["home"] });
-    expect(parseQuery("foo-bar it's C++ a#b")).toEqual({ terms: [["foo", "bar"], ["it", "s"], ["C"], ["a", "b"]], tags: [], projects: [] });
-    expect(parseQuery('"left open')).toEqual({ terms: [["left"], ["open"]], tags: [], projects: [] });
-    expect(parseQuery('  "" # + * ( ) : ^ -  ')).toEqual({ terms: [], tags: [], projects: [] });
+  it("reads words, quoted phrases and tags, and nothing else: a +name is a word", () => {
+    expect(parseQuery('budget "second quarter" #Money +Home')).toEqual({ terms: [["budget"], ["second", "quarter"], ["Home"]], tags: ["money"] });
+    expect(parseQuery("foo-bar it's C++ a#b")).toEqual({ terms: [["foo", "bar"], ["it", "s"], ["C"], ["a", "b"]], tags: [] });
+    expect(parseQuery('"left open')).toEqual({ terms: [["left"], ["open"]], tags: [] });
+    expect(parseQuery('  "" # + * ( ) : ^ -  ')).toEqual({ terms: [], tags: [] });
   });
 
   it("asks the index for quoted strings alone, whatever was typed", () => {
@@ -29,7 +29,7 @@ describe("a search as typed", () => {
     expect(matchesIn("# Budget\n\nBuy Milk and milkshakes\nthe second  quarter\n- [ ] pay +Home #money\nnothing", query)).toEqual([
       { line: 2, text: "Buy Milk and milkshakes", marks: [[4, 8], [13, 17]] },
       { line: 3, text: "the second  quarter", marks: [[4, 19]] },
-      { line: 4, text: "- [ ] pay +Home #money", marks: [[10, 15], [16, 22]] },
+      { line: 4, text: "- [ ] pay +Home #money", marks: [[11, 15], [16, 22]] },
     ]);
     const [long] = matchesIn(`${"x ".repeat(300)}milk ${"y ".repeat(300)}`, query);
     expect(long!.text).toHaveLength(200);
@@ -38,7 +38,7 @@ describe("a search as typed", () => {
 });
 
 describe("search", () => {
-  it("finds notes by words of their text, of a todo, of a tag and of a project, and by #tag and +project", async () => {
+  it("finds notes by words of their text, of a todo and of a tag, and by #tag", async () => {
     const ada = await newMember();
     await create(ada, "# Budget\n\nThe second quarter was fine.\n\n- [ ] Call the bank +Finances #money");
     await create(ada, "# Recipes\n\nA quarter cup of milk, second to none.");
@@ -228,18 +228,18 @@ describe("search, tags and Trash, asked by someone who sees part of the workspac
   const everything = (): OpInput[] => [
     { type: "search", query: "commonword", includeArchived: true, limit: 50 },
     { type: "search", query: "commonword", includeArchived: "only", limit: 50 },
-    { type: "search", query: "#sharedtag +Sharedproject", includeArchived: true, limit: 50 },
+    { type: "search", query: "#sharedtag sharedtodo", includeArchived: true, limit: 50 },
     { type: "tag.list", includeArchived: true },
     { type: "trash.list" },
     { type: "note.list", includeArchived: true },
     { type: "note.list", tag: "sharedtag", includeArchived: true },
     { type: "todo.filters", includeArchived: true },
   ];
-  /** A workspace with a note in each state that everyone in it sees, and the same three private to Eve, sharing a word, a tag and a project. */
+  /** A workspace with a note in each state that everyone in it sees, and the same three private to Eve, sharing a word, a tag and a todo's word. */
   async function world() {
     const ada = await newMember("Ada Lovelace");
     const eve = await addMember(ada, "editor", "Eve Editor");
-    const text = (title: string, words: string) => `# ${title}\n\ncommonword ${words} #sharedtag\n\n- [ ] do it +Sharedproject`;
+    const text = (title: string, words: string) => `# ${title}\n\ncommonword ${words} #sharedtag\n\n- [ ] do it sharedtodo`;
     const open = { live: await create(ada, text("Open live", "open-words")), archived: await create(ada, text("Open archived", "open-words")), trashed: await create(ada, text("Open trashed", "open-words")) };
     const hidden = { live: await create(eve, text("Hidden-live", "hidden-words #hiddentag")), archived: await create(eve, text("Hidden-archived", "hidden-words #hiddentag")), trashed: await create(eve, text("Hidden-trashed", "hidden-words #hiddentag")) };
     for (const note of Object.values(hidden)) await perform(env.DB, eve, { type: "note.setPrivate", id: note.id, private: true });

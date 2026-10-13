@@ -52,7 +52,7 @@ test("a folder's tab has the app's search bar with that folder selected, and tak
   await folderRow(page, "Projects").click();
   await expect(listedNotes(page)).toHaveText(["Budget", "Plan"]);
   await expect(scope(page)).toHaveText("Projects");
-  await expect(field(page)).toHaveAttribute("placeholder", 'Search this folder: words, "a phrase", #tag, +project');
+  await expect(field(page)).toHaveAttribute("placeholder", 'Search this folder: words, "a phrase", #tag');
   await expect(count(page)).toHaveText("2 notes");
 
   // The folder's own notes are searched, not those of the folders inside it, with the query the Search page takes.
@@ -80,7 +80,7 @@ test("a folder's tab has the app's search bar with that folder selected, and tak
   await expect(tabs(page).filter({ hasText: "All notes" })).toHaveAttribute("aria-selected", "true");
   await expect(scope(page)).toHaveCount(0);
   await expect(field(page)).toHaveValue("heron");
-  await expect(field(page)).toHaveAttribute("placeholder", 'Search all notes: words, "a phrase", #tag, +project');
+  await expect(field(page)).toHaveAttribute("placeholder", 'Search all notes: words, "a phrase", #tag');
   await expect(listedNotes(page)).toHaveText(["Loose", "Monday", "Inner", "Budget", "Plan"]);
   await expect(count(page)).toHaveText("5 of 5 notes");
   expect(asked.at(-1)).toMatchObject({ query: "heron" });

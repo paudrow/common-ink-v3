@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { NoteState } from "./lifecycle.ts";
 import { parseRule } from "./recurrence.ts";
-import { isDay, isProjectName, type LastDone } from "./todos.ts";
+import { isDay, type LastDone } from "./todos.ts";
 
 export const MAX_NOTE_LENGTH = 500_000;
 export const MAX_SETTINGS_LENGTH = 100_000;
@@ -82,9 +82,8 @@ const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
-const ProjectName = z.string().max(100).refine(isProjectName, "not a project's name: a letter, then letters, digits, _ and -");
-/** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done` or `last-fri`. docs/todos.md has every rule. */
-const Recurrence = z.string().max(40).refine((rule) => parseRule(rule) !== null, "not a way to recur, such as 2w, mon,thu, 3d-after-done or last-fri");
+/** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done`, `last-fri`, `mar-1` or `1m-times-5`. docs/todos.md has every rule. */
+const Recurrence = z.string().max(1000).refine((rule) => parseRule(rule) !== null, "not a way to recur, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 or 1m-times-5");
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 /**
  * Whether a listing also covers archived notes, which it leaves out unless asked. Nothing but
@@ -157,7 +156,7 @@ export const Op = z.discriminatedUnion("type", [
   /**
    * The notes the asker can see whose text has every word of `query`. A word matches the start of a
    * word in the note, ignoring case and accents; words in "double quotes" match as a phrase; `#name`
-   * narrows to notes with that tag and `+name` to notes with a todo in that project. Notes whose
+   * narrows to notes with that tag. Notes whose
    * title matches come first, then the latest changed, unless `sort` asks for another order: the
    * latest changed, the latest made, or by title. `folderId` narrows to the notes in one folder,
    * not those of the folders inside it: a folder the asker can't see is no such folder.
@@ -234,7 +233,7 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional(), /** Moves each note the revert left with no text to Trash, such as one the author created. */ trashEmptied: z.boolean().default(false), resolve: z.record(Id, Resolve).refine((byNote) => Object.keys(byNote).length <= 200, "resolve names at most 200 notes").optional() }),
   /**
    * Makes what is derived from the notes' text again, for every note in the workspace: which notes
-   * link to which, and the index of todos, projects and tags. Nothing needs it while every write
+   * link to which, and the index of todos and tags. Nothing needs it while every write
    * keeps them, so it is for a record that was changed some other way. It covers so many notes a
    * call: while the answer's `done` is false, ask again. It is the same operation as todos.rebuild.
    */
@@ -243,12 +242,15 @@ export const Op = z.discriminatedUnion("type", [
    * The todos in the notes the asker can see: open ones, or done ones too with `includeCompleted`.
    * Open ones come first, then by due date with those that have none last, then the most important.
    * `dueFrom` and `dueTo` are days, both included, and leave out todos with no due date; `noDue`
-   * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `project` and `tag`
-   * match ignoring case, and a tag is the note's. Pass the answer's `next` as `offset` for the page after.
+   * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `tag` matches ignoring
+   * case, and is a tag of the todo's note: one written on the todo's own line, or anywhere else in the
+   * note. `folderId` lists the todos of the notes in that folder and in every folder under it; one the
+   * asker can't see is no folder. Pass the answer's `next` as `offset` for the page after. A field it
+   * doesn't know is refused, so a filter it no longer has, such as a project, is never read as no filter.
    */
   z.object({
     type: z.literal("todo.list"),
-    project: z.string().min(1).max(100).optional(),
+    folderId: Id.optional(),
     tag: z.string().min(1).max(100).optional(),
     dueFrom: Day.optional(),
     dueTo: Day.optional(),
@@ -259,8 +261,8 @@ export const Op = z.discriminatedUnion("type", [
     noteId: Id.optional(),
     limit: z.number().int().min(1).max(200).default(100),
     offset: z.number().int().min(0).default(0),
-  }),
-  /** What todo.list can be narrowed by: the projects of the todos, and the tags of the notes that have todos, in notes the asker can see. */
+  }).strict(),
+  /** What todo.list can be narrowed by, besides the folders of folder.list: the tags of the notes that have todos, in notes the asker can see. */
   z.object({ type: z.literal("todo.filters"), includeArchived: IncludeArchived }),
   /**
    * Changes one todo by rewriting its line, as a change to its note by whoever asks. `revision`,
@@ -273,7 +275,13 @@ export const Op = z.discriminatedUnion("type", [
    * `every` sets how it recurs, or with null stops it recurring. Checking off a todo that recurs
    * leaves it open with its next due date and a mark of when it was last done and how many times,
    * and files the checked line on the daily note of whoever asks, or of the member an agent acts
-   * for. `on` is the day that happens on, as it is for note.write.
+   * for. `on` is the day that happens on, as it is for note.write. A rule that ends after so many
+   * times has one fewer left, and its last time, or the last before the day it runs until, checks
+   * the todo off for good.
+   *
+   * `skip` moves a recurring todo's due date to its next one with nothing checked off, recorded or
+   * filed. It counts as one of a rule's times. It is refused for a todo that doesn't recur, for the
+   * last time of a rule that ends, and together with `done`.
    */
   z.object({
     type: z.literal("todo.set"),
@@ -284,11 +292,10 @@ export const Op = z.discriminatedUnion("type", [
     done: z.boolean().optional(),
     importance: ImportanceLevel.optional(),
     due: Day.nullable().optional(),
-    addProject: ProjectName.optional(),
-    removeProject: z.string().min(1).max(100).optional(),
     every: Recurrence.nullable().optional(),
+    skip: z.boolean().optional(),
     on: Day.optional(),
-  }),
+  }).strict(),
   /**
    * Each time a recurring todo was checked off: the day, and who did it, latest first. `revision`,
    * `line` and `text` are the todo as todo.list gave it, and it is found as todo.set finds it. A
@@ -458,7 +465,7 @@ export interface SearchMatch {
 
 export interface SearchResult {
   note: NoteSummary;
-  /** The first few lines that matched. Empty when only the note's tag or project did, or the match can't be shown on one line. */
+  /** The first few lines that matched. Empty when only the note's tag did, or the match can't be shown on one line. */
   matches: SearchMatch[];
 }
 
@@ -502,14 +509,15 @@ export interface ListedTodo {
   importance: 0 | 1 | 2 | 3;
   /** A calendar date, YYYY-MM-DD, or null. */
   due: string | null;
-  projects: string[];
   /** How it recurs, as written after `every:`, or null. */
   every: string | null;
+  /** That rule as a chip says it, such as "every 2 weeks on Mon · 5 left", or null. */
+  recurs: string | null;
   /** When it was last checked off and how many times, for a todo that recurs and has been. */
   lastDone: LastDone | null;
-  /** The tags of the note it is in. */
+  /** The tags of the note it is in. The ones written on its own line are those `text` has. */
   tags: string[];
-  /** The line without its list mark, checkbox, importance, due date and projects. */
+  /** The line without its list mark, checkbox, importance and due date. */
   words: string;
   /** What the one asking may do with its note. With edit, todo.set changes it. */
   access: GrantAccess;
@@ -842,7 +850,7 @@ export interface Results {
   /** `next` is the `offset` of the page after, or null on the last. */
   "todo.list": { todos: ListedTodo[]; next: number | null };
   /** Each name once, ignoring case, as a note writes it. */
-  "todo.filters": { projects: string[]; tags: string[] };
+  "todo.filters": { tags: string[] };
   "todo.set": Written;
   "todo.history": { completions: Completion[] };
   "daily.open": Note;

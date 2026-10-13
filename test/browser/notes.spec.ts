@@ -50,9 +50,10 @@ test("typing is committed as soon as the note loses focus", async ({ page }) => 
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Draft");
 
-  const saved = page.waitForResponse((res) => res.url().endsWith("/ops") && res.request().postDataJSON()?.type === "note.write", { timeout: 600 });
+  // The save leaves well inside the second a pause in typing waits; how long the server takes to answer is not the point.
+  const sent = page.waitForRequest((req) => req.url().endsWith("/ops") && req.postDataJSON()?.type === "note.write", { timeout: 600 });
   await leaveEditor(page);
-  await saved;
+  expect((await (await sent).response())?.ok()).toBe(true);
 
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(await history(page, noteIdIn(page))).toHaveLength(1);

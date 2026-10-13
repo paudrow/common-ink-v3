@@ -1,11 +1,14 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
+import { Annotation, EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { isReading } from "../../plugin-api.ts";
 
 /**
- * Whether the cursor or a selection is on any of `from` to `to`. What is drawn over that text is
- * then shown as written, so it can be changed. It doesn't ask whether the editor has focus: the
+ * Whether the cursor or a selection is on any of `from` to `to`: inside it or at either edge. What
+ * is drawn over that text is then shown as written, so it can be changed. This is the rule for
+ * everything drawn in a line: `from` and `to` are the construct's own, a bold word with its marks,
+ * a link, a formula, a checkbox, and never the line it is on. So one construct is shown as written
+ * at a time and the rest of its line stays drawn. It doesn't ask whether the editor has focus: the
  * note reads the same whichever side of a split the member is typing in. Never in a reading of a
  * note, where a selection is for copying and there is nothing to change.
  */
@@ -19,7 +22,7 @@ export const touched = (state: EditorState, from: number, to: number) => !isRead
 export const within = (state: EditorState, from: number, to: number) =>
   !isReading(state) && state.selection.ranges.some((r) => (r.empty ? r.from > from && r.to < to : r.from >= from && r.to <= to && r.to - r.from < to - from));
 
-/** Whether the cursor or a selection is on the line `pos` is in. */
+/** Whether the cursor or a selection is on the line `pos` is in. For what belongs to its whole line: a heading's mark, a code block's fence. */
 export function lineTouched(state: EditorState, pos: number) {
   const line = state.doc.lineAt(pos);
   return touched(state, line.from, line.to);
@@ -52,6 +55,9 @@ export const ghost = Decoration.mark({ class: "md-ghost" });
 // Not `visibility: hidden`: Chrome won't put the caret in hidden text, and on giving the editor focus again it
 // puts it at the first place it will, which CodeMirror only knows for a reset when that is the note's very start.
 export const ghostLook = EditorView.baseTheme({ ".md-ghost": { opacity: "0" } });
+
+/** On a cursor a drawing puts somewhere itself, such as on the line after a table from its last row. It goes where it says, and is no step of a key. */
+export const placed = Annotation.define<true>();
 
 /** Dispatched to an editor to have what is drawn in it drawn again, when what it is drawn from isn't in the editor's state. */
 export const redraw = StateEffect.define<null>();
@@ -98,10 +104,10 @@ export function drawnInState<T extends readonly { from: number; to: number }[]>(
   /**
    * With `stepsIn`, a key that would step from the line before something drawn to the line after it,
    * or back, steps into it instead, which shows it as written. So the arrow keys and vim's j and k
-   * go through a block of math line by line. A click goes where it was made.
+   * go through a block of math line by line. A click goes where it was made, and so does a cursor that is `placed`.
    */
   const steppingIn = EditorState.transactionFilter.of((tr) => {
-    if (!tr.selection || tr.docChanged || tr.isUserEvent("select.pointer")) return tr;
+    if (!tr.selection || tr.docChanged || tr.isUserEvent("select.pointer") || tr.annotation(placed)) return tr;
     const [was, now] = [tr.startState.selection.main, tr.selection.main];
     const { found, drawn } = tr.startState.field(field);
     if (!was.empty || !now.empty || !drawn.size) return tr;

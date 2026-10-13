@@ -65,7 +65,7 @@ interface World {
 
 const address = () => `${crypto.randomUUID()}@example.com`;
 
-/** Each note has a todo with a project of its own, and a tag of its own, which give the note away as its title does. */
+/** Each note has a todo with words of its own, and a tag of its own, which give the note away as its title does. */
 const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name}`;
 const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
 
@@ -431,6 +431,17 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             expect(found.next, key).toBeNull();
           }
         }
+        // The todos of each folder, with the folder inside it: a folder that isn't there for the actor is no folder, as one that never was is, and no note is listed that they can't see.
+        for (const folder of FOLDERS) {
+          const seen = folderLevelOf(name, folder) !== "-";
+          await run(`todo.list in ${folder}`, "todo.list", { folderId: w.folders[folder], includeCompleted: true }, seen ? "done" : NO_FOLDER);
+          if (!seen) continue;
+          const inside = NOTES.filter((note) => (FOLDER_OF[note] === folder || (folder === "Team" && FOLDER_OF[note] === "Deep")) && levelOf(name, note) !== "-");
+          for (const [includeArchived, covers] of [[false, "live"], [true, "kept"]] as const) {
+            expect((await perform(env.DB, actor, { type: "todo.list", folderId: w.folders[folder], includeArchived })).todos.map((t) => t.noteId).sort(), `todo.list in ${folder}, ${covers}`).toEqual(inside.filter((note) => COVERED[covers].includes(STATE_OF[note])).map((note) => w.notes[note]).sort());
+          }
+        }
+        await run("todo.list in a folder that never was", "todo.list", { folderId: MISSING }, NO_FOLDER);
         // Several notes at once, each answered for itself: a hidden note is answered word for word as one that was never there, and one the actor may only read is not reverted.
         const asMissing = (answer: object, noteId: string) => ({ ...answer, noteId });
         const left = new Set((await env.DB.prepare("SELECT id FROM notes").all<{ id: string }>()).results.map((n) => n.id));
