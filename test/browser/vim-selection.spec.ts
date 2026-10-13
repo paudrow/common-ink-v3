@@ -19,11 +19,22 @@ const LINES = ["above words", "```ts", "const first", "const second", "const thi
 
 type Rgb = [number, number, number];
 
-/** The color painted at each point of the page, read from a picture of it. */
-async function painted(page: Page, points: { x: number; y: number }[]): Promise<Rgb[]> {
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The color painted behind each letter, read from a picture of the page: the color most of the
+ * letter's box has. A letter's ink covers less than half its box in any font, so this is what is
+ * painted under it, whichever letter it is and wherever its strokes fall.
+ */
+async function painted(page: Page, boxes: Box[]): Promise<Rgb[]> {
   const png = (await page.screenshot()).toString("base64");
   return page.evaluate(
-    async ({ png, points }) => {
+    async ({ png, boxes }) => {
       const img = new Image();
       img.src = `data:image/png;base64,${png}`;
       await img.decode();
@@ -31,14 +42,23 @@ async function painted(page: Page, points: { x: number; y: number }[]): Promise<
       [canvas.width, canvas.height] = [img.width, img.height];
       const pen = canvas.getContext("2d")!;
       pen.drawImage(img, 0, 0);
-      return points.map(({ x, y }) => [...pen.getImageData(Math.round(x), Math.round(y), 1, 1).data].slice(0, 3) as [number, number, number]);
+      return boxes.map(({ x, y, width, height }) => {
+        const { data } = pen.getImageData(Math.ceil(x), Math.ceil(y), Math.max(1, Math.floor(width) - 1), Math.max(1, Math.floor(height) - 1));
+        const counts = new Map<string, number>();
+        for (let i = 0; i < data.length; i += 4) {
+          const key = `${data[i]},${data[i + 1]},${data[i + 2]}`;
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        const [most] = [...counts].sort((a, b) => b[1] - a[1])[0]!;
+        return most.split(",").map(Number) as [number, number, number];
+      });
     },
-    { png, points },
+    { png, boxes },
   );
 }
 
-/** A point in the space before the letter at `column` of the line that says `text`, at the very top of its row, where no letter has ink. */
-const pointAt = (page: Page, text: string, column: number) =>
+/** The box of the letter at `column` of the line that says `text`. */
+const letterAt = (page: Page, text: string, column: number) =>
   page.evaluate(
     ({ text, column }) => {
       const line = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.startsWith(text) || el.textContent!.includes(text))!;
@@ -52,8 +72,8 @@ const pointAt = (page: Page, text: string, column: number) =>
       const range = document.createRange();
       range.setStart(node!, at);
       range.setEnd(node!, at + 1);
-      const box = range.getBoundingClientRect();
-      return { x: box.left + box.width / 2, y: box.top + 1.5 };
+      const { x, y, width, height } = range.getBoundingClientRect();
+      return { x, y, width, height };
     },
     { text, column },
   );
@@ -80,10 +100,10 @@ for (const scheme of ["light", "dark"] as const) {
       return [r, g, b] as [number, number, number];
     });
     // The first letter's place on every line, and the tenth's on the three lines of code.
-    const starts = await Promise.all(LINES.map((text) => pointAt(page, text, 0)));
-    const tenths = await Promise.all(LINES.slice(2, 5).map((text) => pointAt(page, text, 10)));
+    const starts = await Promise.all(LINES.map((text) => letterAt(page, text, 0)));
+    const tenths = await Promise.all(LINES.slice(2, 5).map((text) => letterAt(page, text, 10)));
     const plain = await painted(page, [...starts, ...tenths]);
-    for (const [n, color] of plain.entries()) expect(far(color, selection), `nothing is selected yet at point ${n}: ${color}`).toBeGreaterThan(20);
+    for (const [n, color] of plain.entries()) expect(far(color, selection), `nothing is selected yet behind letter ${n}: ${color}`).toBeGreaterThan(20);
 
     /** Which of the points are painted in the selection's color, give or take the tint of the block over it. */
     const selected = async () => (await painted(page, [...starts, ...tenths])).map((color) => far(color, selection) <= 12);
@@ -95,7 +115,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(statusLine(page)).toHaveText("--VISUAL LINE--");
     await expect.poll(selected).toEqual([T, T, T, T, T, T, T, T, T, T]);
     // It stops at the text's margin: the room left of the column, where a heading's marks hang, is not painted.
-    const margin = await painted(page, starts.slice(2, 5).map(({ x, y }) => ({ x: x - 40, y })));
+    const margin = await painted(page, starts.slice(2, 5).map((box) => ({ ...box, x: box.x - 40 })));
     for (const color of margin) expect(far(color, selection), `the margin beside a selected line: ${color}`).toBeGreaterThan(20);
     await keys(page, "Escape");
     await expect.poll(selected).toEqual([F, F, F, F, F, F, F, F, F, F]);

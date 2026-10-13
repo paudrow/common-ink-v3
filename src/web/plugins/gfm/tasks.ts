@@ -16,7 +16,11 @@ export function checkboxIn(line: string, offset = 0): Checkbox[] {
   return [{ from, to: from + 3, checked: match[2] !== " " }];
 }
 
-/** A checkbox that writes `[x]` or `[ ]` when it is clicked. It knows nothing else about the line, which is the todos plugin's to draw (#18). */
+/**
+ * A checkbox that writes `[x]` or `[ ]` when it is clicked. It is drawn over the `[ ]` it stands for, larger than that is wide,
+ * and a press anywhere on its row's height and a little to either side of it is a press on it. It knows nothing else about
+ * the line, which is the todos plugin's to draw (#18).
+ */
 const checkbox: Chip<Checkbox> = {
   id: "task",
   find: checkboxIn,
@@ -28,12 +32,40 @@ const checkbox: Chip<Checkbox> = {
     box.disabled = source.readOnly;
     box.setAttribute("aria-label", token.checked ? "Done" : "Not done");
     box.addEventListener("change", () => source.rewrite(box.checked ? "[x]" : "[ ]"));
-    el.append(box);
+    // The keyboard stays in the note: a box ticked with the pointer is not somewhere the next key goes.
+    el.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      if (event.target !== box) box.click();
+    });
+    // The tick is an element of its own, so it is painted in the theme's ink.
+    el.append(box, document.createElement("i"));
   },
 };
 
 const look = EditorView.baseTheme({
-  ".md-chip-task input": { margin: "0", width: "0.85em", height: "0.85em", accentColor: "var(--accent)", cursor: "pointer" },
+  // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark.
+  ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", cursor: "pointer" },
+  ".md-chip-task input": {
+    appearance: "none",
+    boxSizing: "border-box",
+    flex: "none",
+    margin: "0",
+    width: "1.1em",
+    height: "1.1em",
+    font: "inherit",
+    border: "1.5px solid color-mix(in srgb, var(--muted) 75%, transparent)",
+    borderRadius: "0.28em",
+    backgroundColor: "var(--bg-elev)",
+    cursor: "pointer",
+  },
+  ".md-chip-task:hover input:enabled": { borderColor: "var(--accent)" },
+  ".md-chip-task input:checked": { borderColor: "var(--accent)", backgroundColor: "var(--accent)" },
+  ".md-chip-task i": { display: "none", position: "absolute", left: "50%", top: "50%", width: "0.3em", height: "0.58em", margin: "-0.37em 0 0 -0.15em", boxSizing: "border-box", border: "solid var(--on-accent)", borderWidth: "0 0.13em 0.13em 0", transform: "rotate(45deg)", pointerEvents: "none" },
+  ".md-chip-task input:checked + i": { display: "block" },
+  ".md-chip-task input:focus-visible": { outline: "2px solid var(--accent)", outlineOffset: "2px" },
+  ".md-chip-task input:disabled": { cursor: "default", opacity: "0.7" },
+  ".md-chip-task:has(input:disabled) > :last-child": { cursor: "default" },
 });
 
 export const taskCheckboxes: Extension = [chips(checkbox), look];
