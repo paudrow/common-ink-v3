@@ -29,6 +29,8 @@ const INSPECTOR_KEY = "ink.inspector";
 /** How wide the sidebar and the inspector start, and how far a member can drag each. */
 const SIDEBAR = { start: 216, min: 150, max: 480 };
 const INSPECTOR = { start: 300, min: 180, max: 600 };
+/** How wide the bar of icons is that each folds to. */
+const BAR = 44;
 /** How far an arrow key moves the edge of one. */
 const WIDTH_STEP = 16;
 type Widths = { sidebar?: number; inspector?: number };
@@ -507,6 +509,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     sidebarOpen,
     pages: contributed.views.page,
     sections: null,
+    sectionsOpening: () => null,
     readNote: () => null,
     overlay,
     ...actions,
@@ -519,7 +522,15 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   const bar = useMemo(() => [...contributed.views.bar].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.bar]);
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay);
 
-  app.sections = contributed.views.section.length === 0 ? null : contributed.views.section.map((section) => <Drawn key={section.id} host={host} view={section} />);
+  /** The sections, each told when it opens something if the place they are drawn in wants to know. */
+  const sections = (opened?: () => void) =>
+    contributed.views.section.map((section) => {
+      const telling = <A extends unknown[]>(open: (...args: A) => void) => (...args: A) => (open(...args), opened?.());
+      const as = (its: App): App => ({ ...its, openNote: telling(its.openNote), openFolder: telling(its.openFolder), openBeside: its.openBeside && telling(its.openBeside), go: telling(its.go) });
+      return <Drawn key={section.id} host={host} view={section} as={opened && as} />;
+    });
+  app.sections = contributed.views.section.length === 0 ? null : sections();
+  app.sectionsOpening = sections;
   const inspectorViews = contributed.views.inspector;
   /** What is in front, for the inspector to be about. Null while it loads. */
   const subject = ((): Subject | null => {
@@ -533,7 +544,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     return inFront ? { kind: "page", props: { page: inFront } } : { kind: "nothing" };
   })();
 
-  const renderNote = (noteId: string, { onEdit }: { onEdit?: () => void } = {}) => {
+  const renderNote = (noteId: string, { onEdit, focus, onFocused }: { onEdit?: () => void; focus?: boolean; onFocused?: () => void } = {}) => {
     const note = byId.get(noteId);
     return (
       <NoteEditor
@@ -548,8 +559,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
           onEdit?.();
         }}
         notice={stuck?.noteId === noteId ? stuck.message : null}
-        focus={toFocus === noteId}
-        onFocused={() => setToFocus(null)}
+        focus={toFocus === noteId || !!focus}
+        onFocused={() => {
+          setToFocus(null);
+          onFocused?.();
+        }}
         canEdit={canEdit}
         embeds={embeds}
         completions={contributed.completions}
@@ -557,14 +571,13 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         extensions={extensions}
         onExtensionRefused={host.fail}
         meta={
-          note && (
-            <>
-              <span className="crumbs">{tree?.pathName(note.folderId)}</span>
-              <span>
-                edited {ago(note.updatedAt, now)} by {note.updatedBy.name}
-              </span>
-            </>
-          )
+          // Both are there from the start, empty until they are known, so the bar is as tall while they load as after.
+          <>
+            <span className="crumbs" title={(note && tree?.pathName(note.folderId)) || undefined}>
+              {note && tree?.pathName(note.folderId)}
+            </span>
+            <span>{note && `edited ${ago(note.updatedAt, now)} by ${note.updatedBy.name}`}</span>
+          </>
         }
       />
     );
@@ -597,22 +610,6 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     );
   };
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
-  /** The buttons that act on the window and on no one note, together where the sidebar meets the editor area: before the first tab of the top left group. Each is there while there is something for it to open. */
-  const controls = (
-    <div className="window-controls" role="group" aria-label="Window">
-      {contributed.views.column.length > 0 && (
-        <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
-          <Icon name="sidebar" />
-        </button>
-      )}
-      {inspectorViews.length > 0 && (
-        <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
-          <Icon name="inspector" />
-        </button>
-      )}
-    </div>
-  );
-
   /**
    * What the address names alone, for when no plugin fills the editor area or the one that does
    * throws. At `/` it is every note, so there is a way to a note whatever is turned off.
@@ -621,7 +618,6 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     <div className="groups" data-focus-mode={focusMode || undefined}>
       <section className="group" data-front="">
         <div className="tab-row">
-          {controls}
           <button type="button" className="icon-button focus-button" aria-label="Focus" title={`${focusMode ? "Leave focus" : "Focus"} (${shortcut("view.toggleFocus")})`} aria-pressed={focusMode} onClick={toggleFocus}>
             <Icon name="focus" />
           </button>
@@ -641,7 +637,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       {contributed.views.column.map((column) => (
         <Drawn key={column.id} host={host} view={column} />
       ))}
-      {sidebarOpen && contributed.views.column.length > 0 && (
+      {contributed.views.column.length > 0 && (
         <ResizeHandle
           label="Resize sidebar"
           orientation="vertical"
@@ -650,6 +646,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
           step={WIDTH_STEP}
           onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
           onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
+          fold={{ folded: !sidebarOpen, size: BAR, onFold: (folded) => setSidebarOpen(!folded) }}
         />
       )}
 
@@ -662,52 +659,54 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         {/* The editor area stays as it is under a page that only leads somewhere else, out of sight, so no open editor or embed is made again. */}
         {editorArea ? (
           <div className="editor-area" data-under={passing ? "" : undefined}>
-            <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} controls={controls} fallback={loneEditor} />
+            <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} fallback={loneEditor} />
           </div>
         ) : (
           !passing && loneEditor
         )}
       </main>
 
-      {inspectorViews.length > 0 &&
-        (inspectorOpen ? (
-          <>
-            <ResizeHandle
-              label="Resize inspector"
-              orientation="vertical"
-              value={inspectorWidth}
-              {...INSPECTOR}
-              step={WIDTH_STEP}
-              perPixel={() => -1}
-              onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
-              onReset={() => setWidths(({ inspector: _, ...w }) => w)}
-            />
+      {inspectorViews.length > 0 && (
+        <>
+          <ResizeHandle
+            label="Resize inspector"
+            orientation="vertical"
+            value={inspectorWidth}
+            {...INSPECTOR}
+            step={WIDTH_STEP}
+            perPixel={() => -1}
+            onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
+            onReset={() => setWidths(({ inspector: _, ...w }) => w)}
+            fold={{ folded: !inspectorOpen, size: BAR, onFold: (folded) => setInspectorOpen(!folded) }}
+          />
+          {inspectorOpen ? (
             <Inspector host={host} views={inspectorViews} app={app} subject={subject} picked={picked} onPick={setPicked} />
-          </>
-        ) : (
-          <nav className="rail" aria-label="Inspector bar">
-            {viewsFor(inspectorViews, subject).map((v) => {
-              const badge = v.badge?.(app) ?? null;
-              return (
-                <button
-                  key={v.id}
-                  type="button"
-                  className="icon-button"
-                  aria-label={v.label}
-                  title={v.label}
-                  aria-description={badge ?? undefined}
-                  onClick={() => {
-                    setPicked(v.id);
-                    setInspectorOpen(true);
-                  }}
-                >
-                  <Icon name={v.icon} />
-                  {badge && <span className="unseen-dot" />}
-                </button>
-              );
-            })}
-          </nav>
-        ))}
+          ) : (
+            <nav className="rail" aria-label="Inspector bar">
+              {viewsFor(inspectorViews, subject).map((v) => {
+                const badge = v.badge?.(app) ?? null;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    className="icon-button"
+                    aria-label={v.label}
+                    title={v.label}
+                    aria-description={badge ?? undefined}
+                    onClick={() => {
+                      setPicked(v.id);
+                      setInspectorOpen(true);
+                    }}
+                  >
+                    <Icon name={v.icon} />
+                    {badge && <span className="unseen-dot" />}
+                  </button>
+                );
+              })}
+            </nav>
+          )}
+        </>
+      )}
       {bar.length > 0 && (
         <div className="bar" role="group" aria-label="Bottom bar">
           {(["left", "right"] as const).map((side) => (

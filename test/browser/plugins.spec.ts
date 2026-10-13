@@ -96,8 +96,8 @@ test("turning the sidebar off takes the workspace menu, the page links, and the 
   await listedNote(page, "Alpha").click();
   await writes(page, note.id, "written with the sidebar off");
 
-  // With no sidebar there is nothing to close to a bar, so its button and its key do nothing here.
-  await expect(page.getByRole("button", { name: "Sidebar", exact: true })).toHaveCount(0);
+  // With no sidebar there is nothing to close to a bar, so it has no edge to drag and its key does nothing here.
+  await expect(page.getByRole("separator", { name: "Resize sidebar" })).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+\\");
   await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+\\");

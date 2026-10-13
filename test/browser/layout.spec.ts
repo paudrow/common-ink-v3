@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });
@@ -263,10 +263,10 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(folder(page, "Projects")).toHaveAccessibleDescription("1");
   await expect(folder(page, "Common Ink")).toHaveAccessibleDescription("0");
 
-  await page.getByRole("button", { name: "Inspector", exact: true }).click();
+  await toggleInspector(page);
   await expect(inspector).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole("button", { name: "Inspector", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
   await expect(inspector).toHaveCount(0);
 });
 
@@ -301,8 +301,9 @@ test("focus shows neither bar when the sidebar and the inspector were closed, on
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
   await page.goto(`/note/draft-${note.id}`);
-  await page.getByRole("button", { name: "Sidebar", exact: true }).click();
-  await page.getByRole("button", { name: "Inspector", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("Draft");
+  await toggleSidebar(page);
+  await toggleInspector(page);
   await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
   expect(await width(page)).toBe(1280 - 44 - 44);
@@ -361,7 +362,7 @@ test("the inspector stays open whatever is in front and shows what belongs to it
   await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
   await expect(inspector).toHaveText("Nothing to show for this view");
   await expect(inspector.getByRole("tab")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Inspector", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toHaveCount(0);
   expect(await inspector.boundingBox()).toEqual(place);
 
   await page.goto("/folder/nosuchfolder");

@@ -203,10 +203,11 @@ export interface Slots {
   /**
    * A column left of the editor: the sidebar. It is drawn closed too, when `app.sidebarOpen` is
    * false, and is then to be a narrow bar of icons (`<nav class="rail">`) for what it lists when
-   * open, with a way back to open (`app.toggleSidebar`). In focus it is still drawn, out of sight.
+   * open. Its edge is the member's way back to open, and `app.toggleSidebar` is the view's own.
+   * In focus it is still drawn, out of sight.
    */
   column: { id: string; component: View };
-  /** A section of the sidebar, such as the folder tree. A column places them with `app.sections`, while it is open. */
+  /** A section of the sidebar, such as the folder tree. A column places them with `app.sections` while it is open, and may show them over the page from its bar with `app.sectionsOpening`. */
   section: { id: string; component: View };
   /** What fills the editor area when a note, a folder's list, a page, or nothing is open. The last one registered is used; with none, the app shows what the address names alone. */
   editor: {
@@ -305,21 +306,18 @@ export interface FolderProps extends ViewProps {
 }
 
 export interface EditorProps extends ViewProps {
-  /** Draws the editor for a note. `onEdit` is called on each change typed or pasted. */
-  renderNote: (noteId: string, options?: { onEdit?: () => void }) => ReactNode;
+  /**
+   * Draws the editor for a note. `onEdit` is called on each change typed or pasted. With `focus`
+   * the editor takes the cursor once the note is there, and then calls `onFocused`: for a note the
+   * view moved to another part of itself, where its editor is drawn anew.
+   */
+  renderNote: (noteId: string, options?: { onEdit?: () => void; focus?: boolean; onFocused?: () => void }) => ReactNode;
   /** Draws a folder's list of notes, with whatever is in the `folder` slot. */
   renderFolder: (folderId: string) => ReactNode;
   /** Draws a page at the address it is at, which is {@link Opened}'s `path`. One no plugin has registered any more is drawn as nothing being there. */
   renderPage: (pageId: string, path: string) => ReactNode;
   /** What to show where nothing is open: a line saying to pick a note. */
   empty: ReactNode;
-  /**
-   * The buttons that act on the window and on no one note: the sidebar's and the inspector's, as
-   * one group. Put it once, where it stays whatever is open beneath: at the top left corner of the
-   * editor area, before the first tab. Focus is not among them. It belongs to whatever fills the
-   * window, so the view draws its own button for it from `app.focus` and `app.setFocus`.
-   */
-  controls: ReactNode;
 }
 
 /**
@@ -529,6 +527,12 @@ export interface App {
   pages: readonly PageInfo[];
   /** What plugins put in the `section` slot, for the column that shows them. Null when there is nothing in it. */
   sections: ReactNode;
+  /**
+   * The same sections, for a place that goes away once something is opened from it, as the closed
+   * sidebar's folder tree over the page does. `opened` is called each time one of them opens a
+   * note, a folder's list or a page, or goes to an address.
+   */
+  sectionsOpening: (opened: () => void) => ReactNode;
   /** Draws a note's text to be read and not changed, as {@link FolderProps.readNote} does, for a page that lists notes. */
   readNote: (noteId: string) => ReactNode;
   /** The overlay that is open. */

@@ -106,11 +106,14 @@ _Avoid_: Pane
 **Split**:
 Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
 
-**Window buttons**:
-The buttons that act on the window and on no one note, whatever is open: the sidebar's and the inspector's, together before the first tab of the top left editor group, where the sidebar meets the editor area.
+**Edge**:
+The line where the sidebar or the inspector meets the editor area, with a short grip half way down it. Dragged, it resizes its side. Dragged in well past the side's least width, the side folds to its bar; the bar's edge dragged out, or pressed, opens it again, as wide as it was, and it follows the pointer only once the pointer is out that far. It is the one control for it on the page: there are no buttons for the sidebar or the inspector, and the commands Toggle sidebar (⌘\) and Toggle inspector do the same.
 
 **Sidebar bar**, **Inspector bar**:
-What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
+What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the folder picker. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
+
+**Folder picker**:
+The sidebar's folder tree shown over the page beside the sidebar bar, from the bar's Folders icon, while the sidebar stays closed. Nothing under it moves. It goes when a folder is opened from it, on Escape, and on a press outside it.
 
 **Inspector**:
 The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line. A note has History, Backlinks and Info; a folder's list has History and Info. Its History tab is History itself, narrowed to what is in front and with what is selected under the list: a note's changes by time, a folder's by time or by note.

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Me, Note, OpInput } from "../../src/core/protocol.ts";
-import { connectAgent, listedNote, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, listedNote, openAllNotes, perform, signInAsNewPerson, toggleInspector } from "./helpers.ts";
 
 const UNSEEN = "Changes you haven't seen";
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -166,11 +166,11 @@ test("a note someone else changed while the member was away shows the dot when i
   const historyTab = inspector(page).getByRole("tab", { name: "History" });
   await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Info");
   await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
-  await page.getByRole("button", { name: "Inspector", exact: true }).click();
+  await toggleInspector(page);
   const icon = page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button", { name: "History" });
   await expect(icon).toHaveAccessibleDescription(UNSEEN);
   await expect(icon.locator(".unseen-dot")).toBeVisible();
-  await page.getByRole("button", { name: "Inspector", exact: true }).click();
+  await toggleInspector(page);
   await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
   await historyTab.click();
   await expect(rows(inspector(page))).toHaveCount(3);

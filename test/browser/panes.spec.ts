@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { folderRow, noteCard, openAllNotes, perform, runCommand, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
 
 const tabBar = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group);
 const tabs = (page: Page, group = 0) => tabBar(page, group).getByRole("tab");
@@ -115,8 +115,6 @@ test("in a split down, a folder's list, a note and a page are each as tall as th
   await expect.poll(() => fit(page, 2)).toMatchObject(ENDS_WITH_ITS_PANE);
 });
 
-const sidebarButton = (page: Page) => page.getByRole("group", { name: "Window" }).getByRole("button", { name: "Sidebar" });
-
 test("a mode or a folder dragged from the sidebar lands in a pane as a tab does: the middle adds a kept tab there, an edge splits", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta");
   await perform(page, { type: "folder.create", name: "Plans" });
@@ -172,7 +170,7 @@ test("a mode or a folder dragged from the sidebar lands in a pane as a tab does:
   await expect.poll(() => previews(page)).toEqual(["Search"]);
 
   // The sidebar closed to its bar: its icons drag the same way.
-  await sidebarButton(page).click();
+  await toggleSidebar(page);
   const bar = page.getByRole("navigation", { name: "Sidebar bar" });
   await dragOnto(page, bar.getByRole("link", { name: "Calendar" }), body(page, 2), 0.1, 0.5);
   await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(3);
@@ -180,7 +178,7 @@ test("a mode or a folder dragged from the sidebar lands in a pane as a tab does:
   await expect(page).toHaveURL(/\/calendar$/);
 
   // A folder's row dropped on the tree goes nowhere, and a note still moves to a folder dropped on its row.
-  await sidebarButton(page).click();
+  await toggleSidebar(page);
   const before = await page.getByRole("tab").count();
   await folderRow(page, "Plans").dragTo(folderRow(page, "Unsorted"));
   expect(await page.getByRole("tab").count()).toBe(before);
@@ -405,7 +403,7 @@ test("a page a plugin adds to the sidebar drags into a pane and opens in a split
   await expect.poll(async () => (await group(page, 2).boundingBox())!.y).toBeGreaterThan((await group(page, 1).boundingBox())!.y);
 
   // From the closed sidebar's bar it is the same link.
-  await sidebarButton(page).click();
+  await toggleSidebar(page);
   const bar = page.getByRole("navigation", { name: "Sidebar bar" });
   await bar.getByRole("link", { name: "Fixture more" }).click({ button: "right" });
   await menuItem(page, "Open in a split right").click();
@@ -461,14 +459,56 @@ test("Back retraces every open in a split, whatever was clicked between them", a
   await expect(tab(page, "Projects", 1)).toHaveAttribute("aria-selected", "true");
 });
 
-/** Runs a command by its title from the command palette, with the keyboard alone. */
-async function run(page: Page, title: string) {
-  await page.keyboard.press("ControlOrMeta+Shift+P");
-  const palette = page.getByRole("dialog", { name: "Commands" });
-  await palette.getByRole("combobox").fill(title);
-  await expect(palette.getByRole("option").first()).toHaveText(new RegExp(`^${title}`));
-  await page.keyboard.press("Enter");
-  await expect(palette).toHaveCount(0);
+const run = runCommand;
+
+for (const vim of [false, true]) {
+  test(`a split from the palette or from a tab's menu leaves the cursor in the new pane's tab in front${vim ? ", a note in vim's normal mode" : ""}`, async ({ page }) => {
+    await withNotes(page, "Alpha", "Beta");
+    if (vim) {
+      await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
+      await page.reload();
+    }
+    await keep(page, "Alpha");
+    await keep(page, "Beta");
+    await expect(tabs(page)).toHaveText(["All notes", "Alpha", "Beta"]);
+    const text = (n: number) => group(page, n).getByRole("textbox", { name: "Note text" });
+    /** What is typed lands in the note that has the cursor, on a line after its last. With vim on that takes `o` first, which in insert mode would be typed too. */
+    const typesInto = async (n: number, word: string) => {
+      await expect(text(n)).toBeFocused();
+      if (vim) {
+        await expect(group(page, n).locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+        await page.keyboard.press("Shift+G");
+        await page.keyboard.press("o");
+      } else {
+        await page.keyboard.press("ControlOrMeta+End");
+        await page.keyboard.press("Enter");
+      }
+      await page.keyboard.type(word);
+      await expect(text(n)).toContainText(word);
+      if (vim) await page.keyboard.press("Escape");
+    };
+
+    for (const side of ["right", "down"]) {
+      await run(page, `Split editor ${side}`);
+      await expect(tabs(page, 1)).toHaveText(["Beta"]);
+      await typesInto(2, `to the ${side} `);
+      await run(page, "Move tab to previous group");
+      await expect(tabs(page)).toHaveText(["All notes", "Alpha", "Beta"]);
+      await typesInto(1, `back from the ${side} `);
+    }
+
+    await tab(page, "Beta").click({ button: "right" });
+    await menuItem(page, "Split down").click();
+    await expect(tabs(page, 1)).toHaveText(["Beta"]);
+    await typesInto(2, "by the menu ");
+
+    // A folder's list or a page has no text to put the cursor in: its tab has it.
+    await tab(page, "All notes").click();
+    await run(page, "Split editor right");
+    await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(3);
+    await expect(page.getByRole("tab", { name: "All notes" })).toBeFocused();
+    await expect(page.locator(".group[data-focused]").getByRole("tab")).toHaveText(["All notes"]);
+  });
 }
 
 test("a tab's menu opens from the keyboard, and a tab moves to the next pane and back by a command", async ({ page }) => {

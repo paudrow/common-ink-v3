@@ -963,6 +963,22 @@ button.link:hover {
   background: var(--accent);
 }
 
+/* The edge of a side that folds has a short grip half way down it, so there is something to see where it is taken hold of. */
+.resize-handle[data-folds]::before {
+  position: absolute;
+  top: calc(50% - 14px);
+  left: 1px;
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.resize-handle[data-folds]:is(:hover, [data-dragging], :focus-visible)::before {
+  background: var(--accent);
+}
+
 .resize-handle:focus-visible {
   outline: none;
 }
@@ -1033,15 +1049,6 @@ button.link:hover {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
-}
-
-/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
-.window-controls {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  padding: 0 6px;
 }
 
 /* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
@@ -1257,7 +1264,7 @@ button.link:hover {
   text-overflow: ellipsis;
 }
 
-/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
+/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. The folder has a line and the last edit has the next, each there before it has anything to say, so the bar is as tall while they load as after. */
 @container note (max-width: 520px) {
   .note-bar {
     flex-wrap: wrap;
@@ -1268,16 +1275,23 @@ button.link:hover {
   }
 
   .note-meta {
-    flex-wrap: wrap;
-    row-gap: 2px;
+    flex-direction: column;
+    gap: 2px;
     overflow: visible;
     white-space: normal;
   }
 
   .note-meta > * {
     max-width: 100%;
+    min-height: 1lh;
     overflow: visible;
     overflow-wrap: anywhere;
+  }
+
+  /* The folder's path arrives after the note and is as long as its folders' names: it has its one line and is cut short at the end of it. */
+  .note-meta > .crumbs {
+    overflow: hidden;
+    white-space: nowrap;
   }
 }
 
@@ -2988,6 +3002,36 @@ kbd {
 
 .rail:not(:first-child) {
   border-left: 1px solid var(--line);
+}
+
+/* The sidebar's sections over the page, beside its bar. */
+.sidebar-picker {
+  position: fixed;
+  z-index: 30;
+  top: 8px;
+  left: 50px;
+  width: 248px;
+  max-width: calc(100vw - 58px);
+  max-height: calc(100vh - 16px);
+  padding: 2px 6px 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  transition: opacity 0.12s;
+}
+
+.sidebar-picker .section-head {
+  margin-top: 6px;
+}
+
+.sidebar-picker[data-leaving] {
+  opacity: 0;
+}
+
+.sidebar-picker[data-dragging] {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .rail-brand {

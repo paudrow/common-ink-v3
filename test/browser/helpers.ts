@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Me, OpInput, Results } from "../../src/core/protocol.ts";
 
 export async function signInAsNewPerson(page: Page, name: string) {
@@ -61,3 +61,18 @@ export const listedNote = (page: Page, title: string) => listedNotes(page).filte
 
 /** A note's card in the folder's list that is showing: its title, its details, and its text once expanded. */
 export const noteCard = (page: Page, title: string) => page.getByRole("navigation", { name: "Notes" }).getByRole("article", { name: title, exact: true });
+
+/** Runs a command by its title from the command palette, with the keyboard alone. */
+export async function runCommand(page: Page, title: string) {
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  const palette = page.getByRole("dialog", { name: "Commands" });
+  await palette.getByRole("combobox").fill(title);
+  await expect(palette.getByRole("option").first()).toHaveText(new RegExp(`^${title}`));
+  await page.keyboard.press("Enter");
+  await expect(palette).toHaveCount(0);
+}
+
+/** Closes the sidebar to its bar, or opens it, by its command: no button does it. */
+export const toggleSidebar = (page: Page) => runCommand(page, "Toggle sidebar");
+/** Closes the inspector to its bar, or opens it, by its command: no button does it. */
+export const toggleInspector = (page: Page) => runCommand(page, "Toggle inspector");
