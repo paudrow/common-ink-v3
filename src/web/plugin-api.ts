@@ -1,6 +1,6 @@
 /**
  * The plugin API. A plugin is a value with an id, a name, and an `activate` function, which is
- * handed a {@link PluginHost} and uses it to add commands, views, embeds, and editor extensions.
+ * handed a {@link PluginHost} and uses it to add commands, views, embeds, completions, and editor extensions.
  *
  * Everything a plugin can do comes through the host it is handed. A plugin imports this module
  * and nothing else from the app. The built-in plugins in `plugins/` follow the same rule, which
@@ -20,6 +20,8 @@ export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE
 export { lineHunks } from "../core/text.ts";
 
 export { dismissing, useDismiss } from "./dismiss.ts";
+/** Whether an editor state is that of a reading of a note, where nothing is shown as written whatever is selected. */
+export { isReading } from "./readOnly.ts";
 export { ResizeHandle } from "./resize.tsx";
 export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
@@ -120,6 +122,11 @@ export interface PluginHost {
   };
   readonly embeds: {
     register(embed: Embed): Dispose;
+    /** Every embed from every plugin that is on, as a menu would offer them. */
+    list(): EmbedInfo[];
+  };
+  readonly completions: {
+    register(completion: Completion): Dispose;
   };
   readonly editorExtensions: {
     register(extension: EditorExtension): Dispose;
@@ -316,16 +323,125 @@ export interface EditorProps extends ViewProps {
 }
 
 /**
- * Content drawn inside a note where the note says `::name{config}`. It is handed its own config
- * and an element to draw in, and nothing about the note, the workspace, or the member.
+ * Content drawn inside a note where the note says `::name{config}`, or for a block embed where it
+ * says `:::name{config}` on a line, then the embed's body as markdown, then `:::` on a line. It is
+ * handed what the note says of it, an element to draw in, and a way to rewrite itself, and nothing
+ * else about the note, the workspace, or the member.
  */
 export interface Embed {
   /** The name a note writes it by: lowercase letters, digits, and `-`. */
   name: string;
   /** What a person sees it called. */
   title: string;
-  /** Draws into `el`. May return a function that stops whatever it started. */
-  render(el: HTMLElement, embed: { config: string }): void | (() => void);
+  /** Whether it is written as a block, with a body. One embed is written one way. */
+  block?: boolean;
+  /** What a new one is written with when it is picked from the embed menu. With none, an empty config and an empty body. */
+  starts?: { config?: string; body?: string };
+  /**
+   * Draws into `el`, once, all of it before returning, so the embed is never seen half drawn. May
+   * return a function that stops whatever it started, or a {@link Drawn}. An embed is registered
+   * while its plugin starts, not later, so a note never shows it as written first.
+   */
+  render(el: HTMLElement, embed: Embedded): void | (() => void) | Drawn;
+  /**
+   * What a member can adjust about it without reading its config. The host draws one options button
+   * in the embed's card, and opens beneath the card a field for each of these. An embed that has
+   * none, or gives none for what the note says of it now, has no button, and neither has a member
+   * who can't change the note.
+   */
+  options?: EmbedOptions;
+}
+
+/**
+ * An embed's options. Both are given what the note says of the embed now and nothing else, so they
+ * are as pure as `render`'s reading of it. What `set` returns is written as {@link Embedded.update}
+ * writes: one change by the member, saved, recorded, undone and seen by everyone else as typing is.
+ */
+export interface EmbedOptions {
+  /** The fields to show, each with its value as the note has it. None for one that can't be read. */
+  fields(written: { config: string; body: string }): readonly EmbedField[];
+  /** The embed with the field `id` set to `value`, or a sentence saying why that value can't be taken, which is shown under the fields. */
+  set(written: { config: string; body: string }, id: string, value: string): { config?: string; body?: string } | string;
+}
+
+/**
+ * One thing to adjust: text that is typed and taken on Enter or when the keyboard leaves it, or one
+ * of a few choices. A choice with a `swatch` is drawn as a dot of that colour and not as its label:
+ * one of {@link SWATCHES}, or `""` for no colour.
+ */
+export type EmbedField =
+  | { id: string; label: string; kind: "text"; value: string; placeholder?: string; hint?: string }
+  | { id: string; label: string; kind: "choice"; value: string; choices: readonly { value: string; label: string; swatch?: Swatch | "" }[] };
+
+/** The colours an embed can ask for by name. Each is drawn to suit the theme, light or dark, as `--swatch` on an element with `data-colour`. */
+export const SWATCHES = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "gray"] as const;
+export type Swatch = (typeof SWATCHES)[number];
+
+/** What an embed can give back from `render`. */
+export interface Drawn {
+  /**
+   * Changes what was drawn to fit what the note says of the embed now, in the elements already
+   * there. Without it the embed's element is emptied and `render` is called on it again, and focus
+   * goes to the element whose `data-focus` is that of the one that had it.
+   */
+  update?(embed: Embedded): void;
+  /** Stops whatever the embed started. */
+  stop?(): void;
+}
+
+/** What an embed is handed about one place a note writes it. */
+export interface Embedded {
+  config: string;
+  /** A block embed's body: the note's lines between its opening and closing lines, each with its line break. Empty for an inline embed. */
+  body: string;
+  /** Whether the member can't change the note. `update` then does nothing, so an embed draws what it shows without the controls that would call it. */
+  readOnly: boolean;
+  /**
+   * Rewrites this embed in the note as an edit by the member, which is saved, recorded, and undone
+   * as typing is. What isn't given stays as it is. It does nothing once the note says something else
+   * of the embed than what this was drawn from, or once the embed is no longer drawn, and throws for a config holding `{`, `}`, or a line
+   * break, and for a body holding a line that is only `:::`. Called while the embed is being drawn, it is carried out
+   * right after, since the note can't be changed in the middle of drawing it.
+   */
+  update(next: { config?: string; body?: string }): void;
+  /**
+   * Puts the cursor in the embed as the note writes it, to be changed there, as moving the cursor
+   * onto it does. The embed stays drawn, the element it was, and its text is shown above its
+   * drawing for as long as the cursor is in it: an inline embed's in rows of their own above its
+   * line, a block's lines above its card. For a block, `at` is how far into its body the cursor goes,
+   * as a board puts it on the line of the card that was pressed. Without it the cursor goes in the config.
+   */
+  edit(at?: number): void;
+}
+
+export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts">;
+
+/**
+ * A list offered at the cursor while the member types after a trigger, such as the embed menu on
+ * `/`. It opens where the trigger starts a line or follows a space, and not inside code, so a `/`
+ * in a path or a date opens nothing. Completions whose triggers both fit share one list, each
+ * one's items in the order of their plugins.
+ */
+export interface Completion {
+  id: string;
+  /** What is typed to open it, such as `/`, `@`, or `[[`. */
+  trigger: string;
+  /** Whether what is typed after the trigger may hold spaces, as a note's title does. Without it a space closes the list. */
+  spaces?: boolean;
+  /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
+  items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
+}
+
+export interface CompletionItem {
+  label: string;
+  /** Said after the label, more quietly. */
+  detail?: string;
+  /** What takes the place of the trigger and what was typed after it. */
+  insert: string;
+  /** The part of `insert` left selected, as offsets into it, such as a value to type over. Without it the cursor goes after. */
+  select?: readonly [from: number, to: number];
+  /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after. */
+  block?: boolean;
 }
 
 /**

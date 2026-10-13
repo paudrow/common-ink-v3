@@ -701,7 +701,7 @@ test("za expands and collapses the selected row: a note's card in a folder's lis
 test("inside what an embed draws in a note, vim's list, search and tab keys do nothing: focus there is the embed's, and so are the keys", async ({ page }) => {
   await signIn(page);
   await perform(page, { type: "note.create", text: "# Plum\n\nwords" });
-  const note = await perform(page, { type: "note.create", text: "# Laps\n\nTime ::stopwatch{} here\n\nend" });
+  const note = await perform(page, { type: "note.create", text: "# Plan\n\nabove\n:::kanban{}\n## To do\n- write\n- review\n\n## Doing\n- build\n:::\nbelow\n" });
   await open(page, "/folder/all");
   await page.locator(".cards > li").first().waitFor();
   // A note opened from a previewed list takes the list's place, so the list is kept first.
@@ -709,19 +709,15 @@ test("inside what an embed draws in a note, vim's list, search and tab keys do n
   await page.goto(`/note/${note.id}`);
   await expect(page.locator("html[data-vim-keys]")).toHaveCount(1);
   await expect(page.getByRole("tablist", { name: "Open notes" }).getByRole("tab")).toHaveCount(2);
-  const embed = page.locator(".cm-content .embed");
-  await expect(embed).toBeVisible();
-  // The embed is given a list of its own, as a board or a table of an embed's would be.
-  await embed.evaluate((el) => {
-    const list = Object.assign(document.createElement("ul"), { ariaLabel: "Laps" });
-    for (const name of ["One", "Two"]) list.append(Object.assign(document.createElement("li"), {}).appendChild(Object.assign(document.createElement("button"), { textContent: name, type: "button" })).parentElement!);
-    el.append(list);
-  });
-  const one = embed.getByRole("button", { name: "One" });
-  await one.focus();
-  for (const press of [["j"], ["Shift+G"], ["g", "g"], ["/"], ["g", "t"], ["l"]]) {
+  // A board's column is a named list of cards, which outside a note vim's keys would move through and open.
+  const cards = page.locator(".cm-content .embed").getByRole("list", { name: "To do cards" }).getByRole("listitem");
+  await expect(cards).toHaveText(["write", "review"]);
+  // The pointer puts focus on one of the board's own buttons, which is in the same column as the list.
+  const colour = page.locator(".cm-content .embed").getByRole("button", { name: "Colour of To do: no colour" });
+  await colour.focus();
+  for (const press of [["Shift+G"], ["g", "g"], ["Control+d"], ["/"], ["g", "t"], ["j"], ["k"]]) {
     await keys(page, ...press);
-    await expect(one, `${press.join(" ")} leaves focus where it was`).toBeFocused();
+    await expect(colour, `${press.join(" ")} leaves focus where it was`).toBeFocused();
     await expect(page.locator("[data-vim-at]"), `${press.join(" ")} selects no row`).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`${note.id}$`));
   }

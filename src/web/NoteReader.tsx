@@ -4,9 +4,10 @@ import { EditorView } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
-import { embedding } from "./embedding.ts";
+import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import type { EditorExtension, Embed } from "./plugin-api.ts";
+import { reading } from "./readOnly.ts";
 import { committed } from "./sync.ts";
 
 interface Props {
@@ -46,7 +47,7 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
           setFailed(false);
           const view = viewRef.current;
           if (view) {
-            if (view.state.doc.toString() !== note.text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: note.text } });
+            if (view.state.doc.toString() !== note.text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: note.text }, filter: false });
             return;
           }
           viewRef.current = new EditorView({
@@ -54,12 +55,12 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
             state: EditorState.create({
               doc: note.text,
               extensions: [
-                EditorState.readOnly.of(true),
-                EditorView.editable.of(false),
+                reading,
                 added.of(now.current.extensions),
                 markdown(),
                 noteHighlighting,
-                embedded.of(embedding(now.current.embeds)),
+                embedding,
+                embedded.of(embedsAre(now.current.embeds)),
                 EditorView.lineWrapping,
                 EditorView.contentAttributes.of({ "aria-label": "Read-only note", "aria-readonly": "true" }),
               ],
@@ -86,7 +87,7 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
   }, [extensions, added]);
 
   useEffect(() => {
-    viewRef.current?.dispatch({ effects: embedded.reconfigure(embedding(embeds)) });
+    viewRef.current?.dispatch({ effects: embedded.reconfigure(embedsAre(embeds)) });
   }, [embeds, embedded]);
 
   return (

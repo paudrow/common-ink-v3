@@ -545,7 +545,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         notice={stuck?.noteId === noteId ? stuck.message : null}
         focus={toFocus === noteId}
         onFocused={() => setToFocus(null)}
+        canEdit={canEdit}
         embeds={embeds}
+        completions={contributed.completions}
+        onContributionFailed={host.fail}
         extensions={extensions}
         onExtensionRefused={host.fail}
         meta={

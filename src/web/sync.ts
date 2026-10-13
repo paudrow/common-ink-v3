@@ -215,7 +215,8 @@ export class NoteSync {
     if (changes.empty) return;
     if (this.closedDoc) this.closedDoc = changes.apply(this.closedDoc);
     // Kept out of the editor's undo stack, so the member's undo never takes back someone else's change.
-    else this.view?.dispatch({ changes, annotations: [fromServer.of(true), Transaction.addToHistory.of(false)] });
+    // Not filtered, so it reaches the editor of a member who can't change the note themselves.
+    else this.view?.dispatch({ changes, filter: false, annotations: [fromServer.of(true), Transaction.addToHistory.of(false)] });
   }
 
   /** Undoes or redoes in the editor alone. False when the step belongs to the note's history instead. */

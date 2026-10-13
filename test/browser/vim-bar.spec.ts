@@ -40,7 +40,7 @@ async function withVim(page: Page, text: string, settings: Record<string, unknow
 
 const LONG = "A long line that wraps onto more rows because it has so very many words in it, far more than fit in one row of a note's column however wide the window, so it wraps at least twice and then goes on a little more to be sure of it.";
 
-test("vim's mode bar is at the foot of the note's pane, and nothing above it moves as what it says changes", async ({ page }) => {
+test("vim's mode bar is at the foot of the note's pane, right above the app's bottom bar, and nothing above it moves as what it says changes", async ({ page }) => {
   await withVim(page, "# Short\n\nOne line of text.");
   const pane = await box(page, ".note");
   const bar = await box(page, ".cm-vim-panel");
@@ -50,6 +50,8 @@ test("vim's mode bar is at the foot of the note's pane, and nothing above it mov
   expect(Math.abs(bar.y + bar.height - (pane.y + pane.height)), "the bar's bottom is the pane's bottom").toBeLessThanOrEqual(1);
   expect(Math.abs(bar.width - pane.width), "the bar is as wide as the pane").toBeLessThanOrEqual(1);
   expect(bar.y - (last.top + last.height), "the bar is not right under the text").toBeGreaterThan(200);
+  const app = (await page.getByRole("group", { name: "Bottom bar" }).boundingBox())!;
+  expect(Math.abs(app.y - (bar.y + bar.height)), "the app's bar is right under vim's").toBeLessThanOrEqual(1);
 
   // The bar is one height whatever it says, and the text stays put: insert mode, a count and an operator half typed, the : prompt, a search.
   const steady = async (when: string) => {

@@ -45,7 +45,8 @@ const notes: Plugin = {
     host.commands.register({ id: "note.new", title: "New note", run: () => {}, keys: ["mod+n"] });
     host.views.register("column", { id: "list", component: View });
     host.views.register("page", { id: "todos", path: "/todos", label: "Todos", component: View });
-    host.embeds.register({ name: "timer", title: "Timer", render: () => {} });
+    host.embeds.register({ name: "timer", title: "Timer", starts: { config: "5m" }, render: () => {} });
+    host.completions.register({ id: "embeds", trigger: "/", items: () => host.embeds.list().map((e) => ({ label: e.title, insert: `::${e.name}{${e.starts?.config ?? ""}}` })) });
   },
 };
 
@@ -70,6 +71,30 @@ describe("plugin host", () => {
     expect(views.overlay.map((v) => v.id)).toEqual(["commands"]);
     expect(views.inspector).toEqual([]);
     expect(embeds.map((e) => e.name)).toEqual(["timer"]);
+  });
+
+  it("lists the embeds to a plugin as a menu would offer them, and takes a completion out with its plugin", async () => {
+    const board: Plugin = { id: "board", name: "Board", activate: (h) => void h.embeds.register({ name: "kanban", title: "Kanban board", block: true, render: () => {} }) };
+    const { host } = hostWith([notes, board]);
+    const [menu] = host.contributions().completions;
+
+    expect([menu!.id, menu!.trigger]).toEqual(["embeds", "/"]);
+    expect(await menu!.items("")).toEqual([
+      { label: "Timer", insert: "::timer{5m}" },
+      { label: "Kanban board", insert: "::kanban{}" },
+    ]);
+
+    host.setEnabled("board", false);
+    expect(await menu!.items("")).toEqual([{ label: "Timer", insert: "::timer{5m}" }]);
+    host.setEnabled("notes", false);
+    expect(host.contributions().completions).toEqual([]);
+  });
+
+  it("holds a completion that threw against its plugin", () => {
+    const { host } = hostWith([notes]);
+
+    host.fail(host.contributions().completions[0]!, new Error("The menu broke"));
+    expect(host.contributions().plugins.find((p) => p.id === "notes")!.error).toBe("The menu broke");
   });
 
   it("runs a command by its id, and says so when nobody registered it", () => {
@@ -679,7 +704,7 @@ describe("what the host says of each plugin", () => {
     expect(stateOf(host, "palette")).toMatchObject({ description: null, icon: null, screenshots: [] });
   });
 
-  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot, its embeds and editor extensions", () => {
+  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot, its embeds, completions and editor extensions", () => {
     const editing: Plugin = { id: "editing", name: "Editing", activate: (host) => void host.editorExtensions.register({ id: "editing.keys", extension: {} }) };
     const { host } = hostWith([notes, palette, editing]);
 
@@ -692,10 +717,11 @@ describe("what the host says of each plugin", () => {
         { slot: "column", id: "list", label: null },
         { slot: "page", id: "todos", label: "Todos" },
       ],
-      embeds: [{ name: "timer", title: "Timer" }],
+      embeds: [{ name: "timer", title: "Timer", block: false }],
+      completions: [{ id: "embeds", trigger: "/" }],
       editorExtensions: [],
     });
-    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [], editorExtensions: [] });
+    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [], completions: [], editorExtensions: [] });
     expect(stateOf(host, "editing").adds?.editorExtensions).toEqual(["editing.keys"]);
   });
 

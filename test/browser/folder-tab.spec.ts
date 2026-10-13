@@ -206,6 +206,29 @@ test("a card expands to its note drawn to be read, which nothing in it changes, 
   await expect(card).toContainText("2 open");
 });
 
+test("a card expanded beside its note's editor is only a reading of it: what follows the editor still does", async ({ page }) => {
+  await withFolders(page);
+  const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
+  const words = page.getByRole("group", { name: "Bottom bar" });
+  await folderRow(page, "Projects").dblclick();
+  await listedNote(page, "Plan").click();
+  await tab(page, "Projects").dragTo(group(1), { targetPosition: { x: 40, y: 300 } });
+  await group(2).getByRole("textbox", { name: "Note text" }).click();
+  await expect(words).toContainText("6 words");
+
+  const card = group(1).getByRole("article", { name: "Plan" });
+  await card.getByRole("button", { name: "Expand Plan" }).click();
+  await expect(card.locator(".cm-line").first()).toHaveText("# Plan");
+  await card.getByRole("button", { name: "Collapse Plan" }).click();
+  await expect(card.locator(".cm-line")).toHaveCount(0);
+
+  await group(2).getByRole("textbox", { name: "Note text" }).click();
+  await expect(words).toContainText("6 words");
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("two more");
+  await expect(words).toContainText("8 words");
+});
+
 test("a card's title and its pencil open the note with the cursor in it, the title as a preview", async ({ page }) => {
   await withFolders(page);
   await openAllNotes(page);
