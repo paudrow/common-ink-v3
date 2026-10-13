@@ -467,3 +467,22 @@ test("the command palette goes to Agents, in focus too", async ({ page }) => {
   await expect(page).toHaveURL(/\/agents$/);
   await expect(agentsView(page).getByRole("heading", { name: "Connect an agent" })).toBeVisible();
 });
+
+test("the Agents page lists the agents when who has written can't be read, with no error left uncaught", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (err) => errors.push(err.message));
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await connectAgent(page, "Claude");
+  await page.route("**/ops", async (route) => {
+    if ((route.request().postDataJSON() as { type: string }).type !== "history.authors") return route.continue();
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "unknown", message: "Broke" }) });
+  });
+
+  await page.goto("/agents");
+
+  await expect(connected(page)).toHaveCount(1);
+  await expect(connected(page)).toContainText("Claude");
+  // Time for a rejection nobody handles to be reported.
+  await page.waitForTimeout(500);
+  expect(errors).toEqual([]);
+});
