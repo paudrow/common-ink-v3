@@ -8,7 +8,7 @@ import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction, type EditorLayout, type Group, type Opened } from "./editorLayout.ts";
 import { ALL_NOTES, folderTitle, folderTree, pathName, type FolderTree as Tree } from "./folders.ts";
 import { FolderTree } from "./FolderTree.tsx";
-import { HistoryMode } from "./History.tsx";
+import { HistoryMode, type Scope } from "./History.tsx";
 import { Icon, type IconName } from "./icons.tsx";
 import { Inspector, markOf, viewsFor, type Subject } from "./Inspector.tsx";
 import { FIELD_COMMANDS, KEYBINDINGS, advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
@@ -126,8 +126,6 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const [palette, setPalette] = useState<"commands" | "notes" | null>(null);
   /** An undo or redo that didn't happen, and why, shown on its note until the member's next step. */
   const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
-  /** An author History mode is asked to show the changes of, until it has. */
-  const [historyAuthor, showHistoryOf] = useState<string | null>(null);
 
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
   const notesVersion = useMemo(() => (notes ?? []).reduce((sum, n) => sum + n.revision, 0), [notes]);
@@ -268,6 +266,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const closePalette = useCallback(() => setPalette(null), []);
 
   const go = navigate;
+  /** The notes the History page is narrowed to, when it was opened from a note's or a folder's History tab. */
+  const [historyScope, setHistoryScope] = useState<Scope | null>(null);
+  const openHistory = (scope: Scope | null) => {
+    setHistoryScope(scope);
+    go(modePath("history"));
+  };
 
   /** The note whose editor is to take the cursor once it is there. */
   const [toFocus, setToFocus] = useState<string | null>(null);
@@ -415,12 +419,13 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   );
   /** What is in front, for the inspector to be about: the tab in front of the focused group. Null while it loads. */
   const subject = ((): Subject | null => {
-    if (routeNoteId) return current && tree ? { kind: "note", workspaceId, note: current, tree, canEdit, onMove: moveNote, unseen, onSeen: markSeen, onChanged: remember } : null;
+    if (routeNoteId)
+      return current && tree ? { kind: "note", workspaceId, me: me.person.id, note: current, tree, canEdit, onMove: moveNote, unseen, onSeen: markSeen, onReverted: refresh, onOpenNote: (id) => openNote(id), onOpenHistory: openHistory } : null;
     if (!routeFolderId) return { kind: "page" };
     if (!tree || !notes) return null;
     const name = folderTitle(tree, routeFolderId);
     if (name === null) return { kind: "page" };
-    return { kind: "folder", workspaceId, name, notes: notesIn(notes, routeFolderId), whole: routeFolderId === ALL_NOTES, canEdit, onOpenNote: (id) => openNote(id), onChanged: remember };
+    return { kind: "folder", workspaceId, me: me.person.id, name, notes: notesIn(notes, routeFolderId), whole: routeFolderId === ALL_NOTES, canEdit, onOpenNote: (id) => openNote(id), onReverted: refresh, onOpenHistory: openHistory };
   })();
   const pick = setPicked;
   const activeMode = route.kind === "mode" ? route.mode : null;
@@ -461,27 +466,9 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     return (
       <div className="page-pane" key={pageId}>
         {pageId === "agents" ? (
-          <Agents
-            workspace={workspace}
-            workspaces={me.workspaces}
-            version={notesVersion}
-            onShowChanges={(agentId) => {
-              showHistoryOf(`agent:${agentId}`);
-              go(modePath("history"));
-            }}
-            onReverted={refresh}
-          />
+          <Agents workspace={workspace} workspaces={me.workspaces} version={notesVersion} onShowChanges={(agent) => openHistory({ label: `By ${agent.name}`, author: { kind: "agent", id: agent.id } })} onReverted={refresh} />
         ) : pageId === "history" ? (
-          <HistoryMode
-            workspaceId={workspaceId}
-            notes={notes ?? []}
-            canEdit={canEdit}
-            showAuthor={historyAuthor}
-            onShownAuthor={() => showHistoryOf(null)}
-            onOpenNote={(id) => openNote(id)}
-            onChanged={remember}
-            onReverted={refresh}
-          />
+          <HistoryMode workspaceId={workspaceId} me={me.person.id} notes={notes ?? []} canEdit={canEdit} scope={historyScope} onScope={setHistoryScope} onOpenNote={(id) => openNote(id)} onChanged={refresh} />
         ) : mode ? (
           <ModeView mode={mode.id} />
         ) : (
