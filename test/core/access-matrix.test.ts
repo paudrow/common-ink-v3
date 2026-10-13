@@ -144,6 +144,10 @@ type Plan<K extends OpType> =
   /** For whoever holds a link, and refused to everyone else. */
   | { on: "link"; args: (w: World) => Args<K> };
 
+const MISSING = "zzzzzzzzzzzz";
+/** One change of every note there is, and of one that was never there. */
+const everyNote = (w: World, revision: number) => ({ changes: [...Object.values(w.notes), MISSING].map((noteId) => ({ noteId, revisions: [revision] })) });
+
 const EVERYONE = ["admin", "editor", "viewer", "guest"] as const;
 const MEMBERS = ["admin", "editor", "viewer"] as const;
 const ADMINS = ["admin"] as const;
@@ -167,6 +171,10 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "history.list": { on: "everything", args: () => ({}) },
   "history.authors": { on: "everything", args: () => ({}) },
   "history.revertAuthor": { on: "workspace", who: ["admin", "editor", "guest"], args: () => ({ author: { kind: "agent", id: "aaaaaaaaaaaa" } }) },
+  "history.diff": { on: "note", needs: "V", args: (noteId) => ({ changes: [{ noteId, revisions: [1] }] }) },
+  // These two answer note by note, and a note the actor can't see is one of the answers: each is asked of every note at once, and one that was never there.
+  "history.previewRevert": { on: "everything", args: (w) => everyNote(w, 1) },
+  "history.revert": { on: "workspace", who: ["admin", "editor", "guest"], args: (w) => everyNote(w, 99) },
   "links.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
   "folder.list": { on: "everything", args: () => ({}) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
@@ -213,7 +221,7 @@ const enough = (level: Level, needs: "V" | "E") => level === "E" || (level === "
 const sharesNote = (name: ActorName, note: NoteName) => OWNER[note] === name || (ACTORS[name].shares && personLevelOf(name, note) === "E");
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "links.rebuild", "folder.delete"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "folder.delete"];
 const AGENTS = [
   "their agent",
   "their read-only agent",
@@ -234,7 +242,6 @@ const NO_NOTE: Outcome = "not_found: No such note";
 const NO_FOLDER: Outcome = "not_found: No such folder";
 const NO_CHANGE: Outcome = "not_found: The note has no change 99";
 const NO_GRANT: Outcome = "not_found: No such grant";
-const MISSING = "zzzzzzzzzzzz";
 
 // Each actor's test asks every operation of every note, so it grows with each operation added and has outgrown the default five seconds on CI.
 describe("every operation, by every actor", { timeout: 30_000 }, () => {
@@ -275,7 +282,9 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
           got[key] = letThrough && outcome.startsWith("not_found") ? "done" : outcome;
           const changes = readOnly && (CHANGES.includes(type) || ((PLANS[type] as Plan<OpType>).on === "note" || (PLANS[type] as Plan<OpType>).on === "folder" ? (PLANS[type] as { needs: string }).needs === "E" : false));
           expected[key] = kept || changes ? "forbidden" : expectation;
-          if (answer !== undefined) answers.push(answer);
+          // A note that isn't there for the actor is answered with the id they asked by and nothing more, which is checked below against one that was never there.
+          const told = () => (type === "history.previewRevert" ? (answer as { refused?: string; noteTitle: string }[]).filter((p) => !(p.refused === "No such note" && p.noteTitle === "")) : type === "history.revert" ? (answer as { skipped: { message: string; noteTitle: string }[] }).skipped.filter((s) => !(s.message === "No such note" && s.noteTitle === "")) : answer);
+          if (answer !== undefined) answers.push(told());
         };
 
         for (const type of Object.keys(PLANS) as OpType[]) {
@@ -294,7 +303,8 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             }
             // The same operation on a note that was never there: what a hidden note has to look like.
             if (type !== "grant.revoke") {
-              const missing = await ask(actor, { type, ...plan.args(MISSING, w, "open"), ...(type === "grant.list" || type === "grant.set" ? { noteId: MISSING } : { id: MISSING }) } as OpInput);
+              const named = type === "history.diff" ? {} : type === "grant.list" || type === "grant.set" ? { noteId: MISSING } : { id: MISSING };
+              const missing = await ask(actor, { type, ...plan.args(MISSING, w, "open"), ...named } as OpInput);
               const hidden = NOTES.filter((note) => levelOf(name, note) === "-" && got[`${type} ${note}`] !== "forbidden").map((note) => got[`${type} ${note}`]);
               expect(hidden.every((outcome) => outcome === missing.outcome), `${type}: a hidden note and a missing one`).toBe(true);
             }
@@ -314,7 +324,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             await run(type, type, plan.args(w), "done");
           } else if (plan.on === "workspace") {
             let allowed = (plan.who as readonly string[]).includes(role);
-            if (type === "history.revertAuthor" && role === "guest") allowed = ACTORS[name].notes.includes("E");
+            if ((type === "history.revertAuthor" || type === "history.revert") && role === "guest") allowed = ACTORS[name].notes.includes("E");
             // The one admin can't leave, and nobody here asks to: leaving is checked in members.test.ts.
             if (type === "member.leave") continue;
             // Who is in the workspace is told to whoever sees all of it.
@@ -335,6 +345,21 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         expect((await perform(env.DB, actor, { type: "history.summary", authors: [{ kind: "agent", id: w.secretAgent.id }] })).notes.map((n) => [n.noteId, n.changes])).toEqual(levelOf(name, "secret") === "-" ? [] : [[w.notes.secret, 1]]);
         await run("history.revertAuthor narrowed", "history.revertAuthor", { author: { kind: "agent", id: "aaaaaaaaaaaa" }, noteIds: every }, role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")) ? "forbidden" : "done");
         await run("note.list in a hidden folder", "note.list", { folderId: w.folders.Open }, "done");
+        // Several notes at once, each answered for itself: a hidden note is answered word for word as one that was never there, and one the actor may only read is not reverted.
+        const asMissing = (answer: object, noteId: string) => ({ ...answer, noteId });
+        const previews = await perform(env.DB, actor, { type: "history.previewRevert", ...everyNote(w, 1) });
+        for (const [i, note] of NOTES.entries()) {
+          if (levelOf(name, note) === "-") expect(previews[i], `history.previewRevert ${note}`).toEqual(asMissing(previews.at(-1)!, w.notes[note]));
+          else expect(previews[i], `history.previewRevert ${note}`).toMatchObject({ noteId: w.notes[note], noteTitle: `Title-${note}`, revisions: [1] });
+        }
+        expect(previews.at(-1)).toMatchObject({ noteTitle: "", refused: "No such note" });
+        if (got["history.revert"] === "done") {
+          const { reverted, skipped } = await perform(env.DB, actor, { type: "history.revert", ...everyNote(w, 99) });
+          expect(reverted).toEqual([]);
+          const told = (note: NoteName) => (levelOf(name, note) === "-" ? "No such note" : levelOf(name, note) === "V" ? "You can read this note, and not change it" : "The note has no change 99");
+          expect(Object.fromEntries(skipped.map((s) => [s.noteId, s.message]))).toEqual(Object.fromEntries([...NOTES.map((note) => [w.notes[note], told(note)]), [MISSING, "No such note"]]));
+          for (const note of NOTES) if (levelOf(name, note) === "-") expect(skipped.find((s) => s.noteId === w.notes[note])).toEqual(asMissing(skipped.at(-1)!, w.notes[note]));
+        }
         // Every grant in the workspace is an admin's to see, and nobody else's.
         await run("grant.list of the workspace", "grant.list", {}, role === "admin" ? "done" : "forbidden");
         expect(got).toEqual(expected);
@@ -350,6 +375,25 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         expect(seen.filter((note) => !said.includes(`Title-${note}`))).toEqual([]);
       });
     }
+  }
+
+  for (const name of Object.keys(ACTORS) as ActorName[]) {
+    it(`${name} reverts, of every note at once, exactly the ones the table lets them change, by changes, by revision and by author`, async () => {
+      const ways = { revisions: (w: World, note: NoteName) => ({ revisions: [note === "secret" ? 2 : 1] }), to: () => ({ to: 0 }), author: (w: World) => ({ author: { kind: "member" as const, id: w.actors["Ada, an admin"].personId } }) };
+      for (const [way, of] of Object.entries(ways)) {
+        const w = await world();
+        const before = Object.fromEntries(await Promise.all(NOTES.map(async (note) => [note, (await env.DB.prepare("SELECT revision FROM notes WHERE id = ?").bind(w.notes[note]).first<{ revision: number }>())!.revision] as const)));
+        const { outcome, answer } = await ask(w.actors[name], { type: "history.revert", changes: NOTES.map((note) => ({ noteId: w.notes[note], ...of(w, note) })) });
+        const after = Object.fromEntries(await Promise.all(NOTES.map(async (note) => [note, (await env.DB.prepare("SELECT revision FROM notes WHERE id = ?").bind(w.notes[note]).first<{ revision: number }>())!.revision] as const)));
+        const moved = NOTES.filter((note) => after[note] !== before[note]);
+        const may = NOTES.filter((note) => personLevelOf(name, note) === "E");
+        // By author it is Ada's changes that go: she wrote every note but the two private ones.
+        const has = way === "author" ? may.filter((note) => note !== "secret" && note !== "vpriv") : may;
+        expect(moved, `${way}: the notes changed`).toEqual(outcome === "forbidden" ? [] : has);
+        if (outcome === "forbidden") expect(may.length === 0 || roleOf(name) === "viewer", `${way}: refused outright only with nothing to change`).toBe(true);
+        else expect((answer as { reverted: { noteId: string }[] }).reverted.map((r) => r.noteId).sort(), `${way}: the notes said to be reverted`).toEqual(has.map((note) => w.notes[note]).sort());
+      }
+    });
   }
 
   it("lets a grant that waited for its email take effect only if its maker may still share the item, by the same table", async () => {

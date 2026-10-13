@@ -7,12 +7,13 @@ import type { GrantAccess, Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { completing } from "./completing.ts";
+import { dismissing } from "./dismiss.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import { readOnly } from "./readOnly.ts";
 import { TITLE_MARK } from "./titleMark.ts";
 import { openNote } from "./openNotes.ts";
-import type { Completion, EditorExtension, Embed } from "./plugin-api.ts";
+import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
@@ -64,7 +65,7 @@ interface Props {
   /** Called when the server won't take what was typed, which may mean the member's access changed. */
   onRejected: () => void;
   /** What plugins have registered to draw inside a note. */
-  embeds: readonly Embed[];
+  embeds: readonly (Embed | AddressEmbed)[];
   /** The lists plugins offer at the cursor, such as the embed menu. */
   completions: readonly Completion[];
   /** Called for a completion that threw while being asked what it offers. */
@@ -155,8 +156,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
           }),
         });
         sync.attach(view);
-        // A note that took a while to load doesn't take the cursor from a field the member has since gone to.
-        if (!note.text || (now.current.focus && !typingIn(document.activeElement))) view.focus();
+        // A note that took a while to load doesn't take the cursor from a field the member has since gone to, or from a menu opened meanwhile.
+        if (!dismissing() && (!note.text || (now.current.focus && !typingIn(document.activeElement)))) view.focus();
         if (now.current.focus) now.current.onFocused();
       },
       (err) => {

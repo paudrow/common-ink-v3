@@ -241,7 +241,7 @@ test("a closed inspector leaves a bar with an icon for each of its tabs for what
 
   await bar.getByRole("button", { name: "History" }).click();
   await expect(inspector(page).getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
-  await expect(inspector(page).getByRole("tabpanel").getByRole("list", { name: "Changes" }).getByRole("listitem")).toHaveCount(1);
+  await expect(inspector(page).getByRole("tabpanel").getByRole("listbox", { name: "Changes" }).getByRole("option")).toHaveCount(1);
   await expect(bar).toHaveCount(0);
   await expect(windowButtons(page).getByRole("button", { name: "Inspector" })).toHaveAttribute("aria-pressed", "true");
 

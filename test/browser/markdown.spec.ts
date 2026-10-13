@@ -373,7 +373,7 @@ test("a formula can't make a link, load an image, or put markup in the page", as
   expect(requests.filter((url) => new URL(url).hostname !== new URL(page.url()).hostname)).toEqual([]);
 });
 
-test("a code block has its language's colors, a Copy button, and a Wrap toggle that is remembered", async ({ page, context }) => {
+test("a code block has its language's colors and two icons shown while the pointer is over it: Copy, and a toggle for wrapping that says which way it is and is remembered", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const long = "const greeting = 'hello'; // " + "long ".repeat(60);
   const text = `# Code\n\n\`\`\`ts\n${long}\nexport default greeting;\n\`\`\`\n\n\`\`\`python\ndef f():\n    return 1\n\`\`\`\n\n\`\`\`nosuchlanguage\nplain text\n\`\`\`\n`;
@@ -386,17 +386,39 @@ test("a code block has its language's colors, a Copy button, and a Wrap toggle t
   await expect(line(page, "plain text").locator("[class^=tok-]")).toHaveCount(0);
   await expect(first).toHaveCSS("font-family", /mono/i);
   // Off the cursor's line a fence isn't painted, and the language is the block's label.
-  await expectShown(lines(page).nth(2), /^\s*ts\s*Copy\s*Wrap\s*$/);
+  await expectShown(lines(page).nth(2), /^\s*ts\s*$/);
 
-  await editor(page).getByRole("button", { name: "Copy" }).first().click();
-  await expect(editor(page).getByRole("button", { name: "Copied" })).toBeVisible();
+  // The icons are the block's, seen while the pointer is over any line of it and not otherwise, and no other block's are.
+  const tools = editor(page).locator(".code-tools");
+  await expect(tools).toHaveCount(3);
+  await page.mouse.move(5, 5);
+  await expect(tools.nth(0)).toHaveCSS("opacity", "0");
+  await line(page, "export default").hover({ position: { x: 60, y: 8 } });
+  await expect(tools.nth(0)).toHaveCSS("opacity", "1");
+  await expect(tools.nth(1)).toHaveCSS("opacity", "0");
+  await expect(tools.nth(0).getByRole("button")).toHaveCount(2);
+
+  await editor(page).getByRole("button", { name: "Copy code" }).first().click();
+  await expect(editor(page).getByRole("button", { name: "Copied" })).toHaveText("Copied");
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`${long}\nexport default greeting;`);
+  await expect(editor(page).getByRole("button", { name: "Copy code" })).toHaveCount(3);
 
-  const wrap = editor(page).getByRole("button", { name: "Wrap" }).first();
+  // A toggle: pressed while long lines wrap and not while they scroll, and it looks and reads differently in the two.
+  const wrap = editor(page).getByRole("button", { name: "Wrap long lines" }).first();
+  const look = () => wrap.evaluate((el) => `${getComputedStyle(el).backgroundColor} ${getComputedStyle(el).color}`);
   await expect(wrap).toHaveAttribute("aria-pressed", "true");
+  await expect(wrap).toHaveAttribute("title", "Long lines wrap. Press to scroll them instead.");
+  await expect(wrap).toHaveText("");
+  await page.mouse.move(5, 5);
+  const pressed = await look();
+  const turning = await wrap.innerHTML();
   const wrapped = (await first.boundingBox())!.height;
   await wrap.click();
-  await expect(editor(page).getByRole("button", { name: "Wrap" }).first()).toHaveAttribute("aria-pressed", "false");
+  await expect(wrap).toHaveAttribute("aria-pressed", "false");
+  await expect(wrap).toHaveAttribute("title", "Long lines scroll. Press to wrap them.");
+  await page.mouse.move(5, 5);
+  expect(await look()).not.toBe(pressed);
+  expect(await wrap.innerHTML(), "its icon is another one").not.toBe(turning);
   await expect(first).toHaveCSS("white-space", "pre");
   await expect.poll(async () => (await first.boundingBox())!.height).toBeLessThan(wrapped / 2);
   // Every block follows the one toggle, and prose still wraps.
@@ -412,10 +434,10 @@ test("a code block has its language's colors, a Copy button, and a Wrap toggle t
   // that finds its line redrawn under it is tried again with the whole of that line scrolled to, which is far off to the side.
   await expect(line(page, "export default").locator(".tok-keyword").first()).toHaveText("export");
   await line(page, "export default").click({ position: { x: 60, y: 8 } });
-  await expectShown(lines(page).nth(2), /^\s*ts\s*Copy\s*Wrap\s*$/);
+  await expectShown(lines(page).nth(2), /^\s*ts\s*$/);
   await expect(line(page, "const greeting").locator(".tok-keyword")).toHaveText("const");
   await keys(page, "ArrowUp", "ArrowUp");
-  await expectShown(lines(page).nth(2), /^```ts\s*Copy\s*Wrap\s*$/);
+  await expectShown(lines(page).nth(2), /^```ts\s*$/);
   // Naming another language on the fence colors the code as that language.
   await page.keyboard.press("End");
   await keys(page, "Backspace", "Backspace");

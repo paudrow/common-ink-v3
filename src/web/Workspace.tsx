@@ -267,6 +267,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const embeds = useMemo(
     () =>
       contributed.embeds.map((embed) => {
+        if ("claims" in embed) return embed;
         const guard: Embed = guarded.get(embed) ?? {
           ...embed,
           render(el, written) {
@@ -429,7 +430,6 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const canCreateNote = !!newNoteFolderId && tree?.byId.get(newNoteFolderId)?.access === "edit";
 
   const go = navigate;
-
   /** The note whose editor is to take the cursor once it is there. */
   const [toFocus, setToFocus] = useState<string | null>(null);
   const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean } = {}) => {

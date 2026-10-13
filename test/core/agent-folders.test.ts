@@ -138,6 +138,22 @@ describe("an agent limited to folders", () => {
       }
     }
 
+    // History's tools that take several notes at once answer each note for itself: one outside is answered word for word as one that was never there.
+    for (const id of [w.outside.id, w.loose.id]) {
+      expect(await claude.call("history_diff", { changes: [{ noteId: id, revisions: [1] }] })).toEqual(NO_NOTE);
+      expect(await claude.call("history_diff", { changes: [{ noteId: MISSING, revisions: [1] }] })).toEqual(NO_NOTE);
+      // Named beside a note of its own, it still gives nothing of either away.
+      expect(await claude.call("history_diff", { changes: [{ noteId: w.deep.id, revisions: [1] }, { noteId: id, revisions: [1] }] })).toEqual(NO_NOTE);
+      const ways: Record<string, unknown>[] = [{ revisions: [2] }, { to: 1 }, { author: { kind: "agent", id: w.scribe.agent.id } }];
+      for (const way of ways) {
+        const previews = await claude.json<{ noteId: string; noteTitle: string; refused?: string }[]>("preview_reverts", { changes: [{ noteId: id, ...way }, { noteId: MISSING, ...way }, { noteId: w.deep.id, ...way }] });
+        expect(previews[0], `preview_reverts ${JSON.stringify(way)}`).toEqual({ ...previews[1], noteId: id });
+        expect(previews[1]).toMatchObject({ noteTitle: "", refused: "No such note" });
+        expect(previews[2]).toMatchObject({ noteId: w.deep.id, noteTitle: "Q3 plan" });
+        expect(previews[2]!.refused).toBeUndefined();
+      }
+    }
+
     // What changed, by whom and when, is of its own notes only: the scribe wrote on both sides, the ghost only outside.
     const summary = await claude.json<{ notes: { noteId: string }[] }>("history_summary", { limit: 100 });
     expect(summary.notes.map((n) => n.noteId).sort()).toEqual([w.deep.id, w.inside.id].sort());
@@ -190,6 +206,12 @@ describe("an agent limited to folders", () => {
     const reverted = await claude.json<{ reverted: { note: { id: string } }[]; failed: unknown[] }>("revert_author", { author: { kind: "agent", id: w.scribe.agent.id }, noteIds: [w.outside.id, w.deep.id] });
     expect(reverted.reverted.map((r) => r.note.id)).toEqual([w.deep.id]);
     expect(reverted.failed).toEqual([]);
+    // And reverting several notes at once: the ones outside are skipped as notes that were never there, by changes, by revision and by author.
+    for (const way of [{ revisions: [2] }, { to: 1 }, { author: { kind: "agent", id: w.scribe.agent.id } }] as Record<string, unknown>[]) {
+      const many = await claude.json<{ reverted: unknown[]; skipped: { noteId: string }[] }>("revert_many", { changes: [w.outside.id, w.loose.id, MISSING].map((noteId) => ({ noteId, ...way })) });
+      expect(many.reverted).toEqual([]);
+      expect(many.skipped).toEqual([w.outside.id, w.loose.id, MISSING].map((noteId) => ({ noteId, noteTitle: "", why: "refused", message: "No such note" })));
+    }
     // Rebuilding the record of links covers the notes it can see, and counts no other.
     expect(await claude.json("rebuild_links")).toEqual({ notes: 2, next: null });
 
