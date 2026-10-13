@@ -10,8 +10,8 @@ const RETRY_MS = 3000;
 
 export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "signedOut" | "rejected";
 
-/** Asking the same again by itself can succeed only after a network failure or a server fault. */
-export const worthRetrying = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || err.status === 429;
+/** Asking the same again by itself can succeed only after a network failure, a server fault, or a write that lost to too many others at once. */
+export const worthRetrying = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || err.status === 429 || err.status === 409;
 
 /** The session ended. The same write succeeds once the member has signed in again, and not before. */
 const signedOut = (err: unknown) => err instanceof ApiError && err.status === 401;

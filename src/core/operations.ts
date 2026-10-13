@@ -220,7 +220,9 @@ async function replay(ctx: Context, id: string, revision: number, current: numbe
   return { text, since };
 }
 
-const MAX_WRITE_ATTEMPTS = 5;
+const MAX_WRITE_ATTEMPTS = 12;
+/** The longest wait before a write's second attempt. Each later attempt may wait as much again. */
+const WRITE_RETRY_MS = 15;
 /** Reverting an author reads each note's whole record and costs a few queries a note, and a request is allowed only so many. */
 const REVERT_AUTHOR_NOTES = 10;
 const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: changes\./.test(err.message);
@@ -302,13 +304,19 @@ async function record(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevisi
   return next;
 }
 
-/** Runs a write again from the note as it now stands, each time another write took its revision. */
+/**
+ * Runs a write again from the note as it now stands, each time another write took its revision.
+ * Writers that lost to the same one wait for different lengths of time, so they don't all meet
+ * again. One that still can't get in is told so as a conflict: nothing of it was written, and the
+ * same request sent again is merged as any other.
+ */
 async function settle<T>(write: () => Promise<T | null>): Promise<T> {
   for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
     const done = await write();
     if (done !== null) return done;
+    if (attempt < MAX_WRITE_ATTEMPTS) await new Promise((resume) => setTimeout(resume, Math.random() * WRITE_RETRY_MS * attempt));
   }
-  throw new Error("The note changed under every attempt to write it");
+  throw new OpError("conflict", "The note was being changed by others too fast for this change to be written. Nothing of it was: send it again");
 }
 
 interface ChangeRow {
