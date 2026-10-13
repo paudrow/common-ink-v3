@@ -564,6 +564,7 @@ Word count, Quick timer and Backlinks come with Common Ink and run shut off from
 | Common Ink's own that needs the editor or the app's layout | in the page, compiled in, as the member | Built-in, full access |
 | Common Ink's own that needs nothing of the page | shut off, in frames | Built-in, sandboxed |
 | A workspace's | shut off, in frames | Third-party |
+| A workspace's that asks for `full-trust` | in the page, for each member who turned it on, while an admin's grant of that exact code stands. Otherwise not at all | Third-party, full trust |
 
 What sets the three apart from a workspace's plugin, and all of it is decided by the app from where the plugin was read, never from anything a manifest or a record says:
 
@@ -594,6 +595,35 @@ What moving the three cost, which is what a workspace's plugin lives with:
 Tab does reach into a frame in the inspector, and Enter there opens a backlink.
 
 **A member's copy of one** runs in its place for them alone ("Edit a copy" on its page, as for a workspace's plugin). It has what the original declares and its own manifest still asks for, never more, its name may stay, and since it is no longer the app's code everything of it is marked `<name> plugin:`. It is never published over the original: an admin installs its two files as a workspace's plugin under another name.
+
+### Full trust
+
+A manifest asks for it as a capability:
+
+```json
+{ "name": "Deep Keys", "capabilities": [{ "name": "full-trust", "reason": "It adds keys to the editor." }] }
+```
+
+It runs in the page for a member only while both hold: an admin's grant of the code it is now stands (`plugin.permit`, the Allow on its permission row, which names the code's hash), and that member has turned it on for themself (`plugin.trust`, the plugin's own switch, behind a warning). Otherwise none of it runs, shut off or in the page, and its page says why in one line. ADR 11 has the whole of it.
+
+- **Any change ends it for everyone, for good.** An update to its code, or to how it asks for full trust, ends the grant and every member's turning on in the batch that makes the change. Putting the old code back restores neither. Only a fresh grant and each member's own fresh turning on start it again.
+- **An admin's decision starts it from nobody.** Taking the grant back turns everyone off. Granting again turns nobody back on.
+- **Nobody turns it on for anyone else.** `plugin.trust` names no person. It is refused to agents, to plugins and to guests, and it is refused for code no admin granted.
+- **Stopping loads the app again.** Code that has run in a page can't be taken out of it, so turning it off, a change to it, and going to another workspace each send what is typed and load the app again. A window open elsewhere does so when it next reads the record: when it is come back to, and every 15 seconds while it is in front. A window that is hidden reads nothing until it is shown. This ends honest code. Code that means harm can get in the way of it in a window it is already in, since it shares the page: what ends it there is closing the window. A window loaded after it was turned off, or after the grant ended, never runs it, because the app decides that from the record before any of the plugin's code runs.
+- **The app hashes the code itself** and runs it only when that is the granted hash. A draft that asks for full trust never runs.
+
+Its code is the body of a function handed `host`, the `PluginHost` on this page, and `modules`: the app's own `react`, `@codemirror/state`, `@codemirror/view` and `@codemirror/language`, since a second copy of either would not work with the app's. It may return a function that stops what it started. What its manifest lists as commands, views and embeds is not registered for it: it registers them itself through `host`, as a built-in does.
+
+```js
+const { keymap } = modules["@codemirror/view"];
+host.editorExtensions.register({ id: "deep.keys", extension: keymap.of([{ key: "Ctrl-j", run: () => (host.commands.run("note.new"), true) }]) });
+```
+
+It is handed what the app's own plugins are: `host.agents`, `host.members`, `host.sharing`, `host.uploads`, and every operation `host.perform` takes from them. `host.perform` goes to the plugin's address, so what it writes is recorded as the plugin's, for the member, and the server answers it as it answers that member (uploads and mentions included), refusing only what is a member's alone to ask. Three things about whose it is stay as for any plugin a workspace installed: its embeds are written `::x-name{}`, its name can't be one of Common Ink's own, and it can't take the page at `/`.
+
+**What it can do** in the session of a member who turned it on: anything that member can do in Common Ink. Read and change every note they can open, private ones included; see what they type; read and change their settings and drafts; and call the server with their session directly, which the `host` object does not limit. That reaches every workspace the member belongs to, not only the one that granted it, because the session is the same in all of them. Some of it outlasts the switch: it can create an agent token in the member's name and share their notes by link, and both keep working after it is turned off. In an admin's session it can also invite people, change roles, and install and approve plugins, including approving a new version of itself or another plugin and turning that on for that admin, with no warning shown: `plugin.trust` is the admin's to call, and the code calls it as them. That holds in any workspace where the member is an admin, not only this one. It can't turn anything on for anyone else. The warning a member reads before turning it on says this, an admin is shown the admin's part, and the grant an admin gives says that the code can act as any member who turns it on.
+
+**What it can't**: see a note its member can't, do an admin's work in a non-admin's session, or run for anyone who hasn't turned it on themself. The server decides those by who the member is.
 
 ### The built-ins that stay in the page, and what each needs
 
@@ -670,10 +700,11 @@ if (ink.context.kind === "embed") ink.root.textContent = "Counting: " + ink.cont
 | `todos.read` | `todo.list` |
 | `members.read` | `member.list`: names and roles, never emails |
 | `network` | no operation: the sites its frames may load from and send to |
+| `full-trust` | no operation: where the code runs. See "Full trust" above |
 
-An operation in no row is refused to every plugin, whatever it was permitted: settings, members and invites, sharing, uploads, data sources, History and its reverts and labels, agents, the plugin record itself, and what a member keeps for their own dashboard, their pins and how far they have read the changes (`pin.*`, `visit.*`). A plugin that could mark the changes read would hide from the member what they haven't seen, and no capability covers pins: they are the member's own arrangement, as settings are. `daily.open` is refused too, since it makes a note. A new operation is refused to plugins until a row lists it.
+An operation in no row is refused to every plugin that runs shut off, whatever it was permitted: settings, members and invites, sharing, uploads, data sources, History and its reverts and labels, agents, the plugin record itself, and what a member keeps for their own dashboard, their pins and how far they have read the changes (`pin.*`, `visit.*`). A plugin that could mark the changes read would hide from the member what they haven't seen, and no capability covers pins: they are the member's own arrangement, as settings are. `daily.open` is refused too, since it makes a note. A new operation is refused to plugins until a row lists it.
 
-A plugin acts for the member whose app it runs in and never has more than they do: a viewer's plugin with `notes.write` allowed is still refused the write, and a note the member can't see is not found. What it is answered is narrowed too: `note.read` comes without the uploads and members the note refers to.
+A plugin acts for the member whose app it runs in and never has more than they do: a viewer's plugin with `notes.write` allowed is still refused the write, and a note the member can't see is not found. What it is answered is narrowed too: `note.read` comes without the uploads and members the note refers to. A plugin running with full trust is the exception to both: it is answered as its member is, and asks anything that isn't a member's alone to ask.
 
 ### Installing, permitting, asking
 
@@ -686,11 +717,11 @@ The workspace keeps a record of its plugins (`src/core/pluginRecord.ts`, migrati
 - **A change voids what it changes.** The code is named by its SHA-256. An approval records the code and the capability as declared (`approvalOf`), and stands only while the plugin is still that: new code voids every approval, and a capability declared with another reason or other sites voids its own. The page shows a voided permission as off, saying the plugin changed. Allowing names the code: `plugin.permit` is refused without the hash the admin was shown (`codeHash`), and refused if the plugin was replaced since.
 - **Uninstall** takes the plugin's permissions and requests with it. The server refuses the plugin from that moment, and an app that is open loses its commands, views and frames the next time it reads the record: when its window is come back to, every 15 seconds, and at once when the server refuses the plugin. History still names the plugin for the changes it made.
 
-Operations: `plugin.list`, `plugin.read`, `plugin.install`, `plugin.uninstall`, `plugin.permit`, `plugin.request`, `plugin.frame`.
+Operations: `plugin.list`, `plugin.read`, `plugin.install`, `plugin.uninstall`, `plugin.permit`, `plugin.request`, `plugin.frame`, and `plugin.trust` for a plugin that asks for full trust.
 
 ### Where the code runs
 
-Never in the app's page. Each running piece of a plugin is a frame of its own: the shell the Worker serves at `/embed-frame`, and inside it a frame with no address, an origin no other document has, `sandbox="allow-scripts"`, and a policy of `default-src 'none'`. It is the frame an HTML embed runs in, described under [Frames](#frames). So a plugin's code can't read the app's page, the member's session, cookies, or anything the browser keeps, can't fetch from the app or anywhere else, can't navigate itself, the shell or the app, and can't open a window.
+Never in the app's page, unless it asks for full trust and has it (see "Full trust"). Each running piece of a plugin is a frame of its own: the shell the Worker serves at `/embed-frame`, and inside it a frame with no address, an origin no other document has, `sandbox="allow-scripts"`, and a policy of `default-src 'none'`. It is the frame an HTML embed runs in, described under [Frames](#frames). So a plugin's code can't read the app's page, the member's session, cookies, or anything the browser keeps, can't fetch from the app or anywhere else, can't navigate itself, the shell or the app, and can't open a window.
 
 A plugin runs in up to three kinds of frame, each with all of its code and an `ink.context` saying which it is:
 
@@ -740,11 +771,11 @@ The frame's look follows the app's theme as it was when the frame was made, with
 
 ## What a plugin in the page that isn't Common Ink's own is refused
 
-Third-party plugins don't run in the page, so this is about fixture plugins and about defence in depth. The host is told its own plugins as the values it was built with (`trusted` in `createPluginHost`), so a plugin can't become one by the id or name it gives itself. Any other plugin:
+A third-party plugin runs in the page only with full trust, which lifts the first two of these. So this is about fixture plugins and about defence in depth. The host is told its own plugins as the values it was built with (`trusted` in `createPluginHost`), and which of a workspace's runs with full trust by the app's own runtime (`inPage` on what `createInstaller` lists), so a plugin can't become either by the id or name it gives itself. Any other plugin:
 
 - is handed `host.agents`, `host.members` and `host.sharing` with every method refusing, and a `host.uploads` that knows no upload, answers `about:blank` for every address and refuses `send`;
 - is refused, through `host.perform`, the member's data sources (`source.*`, `event.*`, `contact.*`, `record.*`), every `upload.*` operation, every `plugin.*` operation, and the member's pins and their last visit (`pin.*`, `visit.*`): one that could mark the summary read would hide from the member what they haven't seen;
 - can't register a page with `home`, and so can't take over `/`;
 - is refused, as every plugin is, settings, changes to who is in the workspace, sharing, an upload's bytes, and installing, permitting or reading plugins.
 
-These are refusals by the host's own objects, and not a boundary: code in the page can read the page. That is why third-party code is not in it.
+These are refusals by the host's own objects, and not a boundary: code in the page can read the page. That is why third-party code is not in it unless an admin granted it full trust and the member turned it on.

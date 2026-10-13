@@ -3,13 +3,14 @@ import type { InstalledPlugin, Permission, PluginRecord } from "../../src/core/p
 import type { PluginState } from "../../src/web/pluginHost.ts";
 import { listPlugins, matchesPlugin, waitingOn } from "../../src/web/pluginList.ts";
 
-const state = (id: string, name: string, more: Partial<PluginState> = {}): PluginState => ({ id, name, enabled: true, required: false, builtIn: true, error: null, installed: false, description: null, icon: null, screenshots: [], adds: null, ...more });
+const state = (id: string, name: string, more: Partial<PluginState> = {}): PluginState => ({ id, name, enabled: true, required: false, builtIn: true, error: null, installed: false, inPage: false, description: null, icon: null, screenshots: [], adds: null, ...more });
 const permission = (askedBy: string[]): Permission => ({ capability: "notes.read", reason: "To count", origins: [], state: "off", locked: false, decidedBy: null, voided: false, requests: askedBy.map((id) => ({ by: { id, name: id }, at: 1, origins: [] })) });
 const installed = (id: string, name: string, more: Partial<InstalledPlugin> = {}, manifest: object = {}): InstalledPlugin => ({
   id,
   thirdParty: true,
   manifest: { name, version: "1", capabilities: [], commands: [], views: [], embeds: [], settings: {}, ...manifest },
   codeHash: "abc",
+  fullTrust: null,
   installedBy: "Ada",
   installedAt: 1,
   updatedAt: 1,

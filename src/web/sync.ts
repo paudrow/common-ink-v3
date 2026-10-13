@@ -36,6 +36,8 @@ const open = new Map<string, NoteSync>();
 
 /** Sends what's typed in a note now, without waiting for a pause. */
 export const saveNow = (noteId: string) => open.get(noteId)?.commit();
+/** Sends what is typed in every open note and not yet saved, before the app is loaded again. */
+export const saveAll = (): Promise<unknown> => Promise.allSettled([...open.values()].map((sync) => sync.commit()));
 
 const filing = new Set<() => void>();
 
@@ -68,11 +70,11 @@ async function settle(answer: Reached): Promise<void> {
 type HistoryOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.undo" | "note.redo" | "todo.set" }>;
 
 /** Moves a note through its history, or rewrites a todo in it. What's typed is saved first, and the note's editor takes the result if it's open. */
-export async function moveThroughHistory(workspaceId: string, op: HistoryOp): Promise<Note> {
+export async function moveThroughHistory(workspaceId: string, op: HistoryOp, by: typeof perform = perform): Promise<Note> {
   const sync = open.get(op.id);
   await sync?.commit();
   // A todo is completed on the member's own day, which the server can't know.
-  const note: Written = await perform(workspaceId, op.type === "todo.set" && op.on === undefined ? { ...op, on: today() } : op);
+  const note: Written = await by(workspaceId, op.type === "todo.set" && op.on === undefined ? { ...op, on: today() } : op);
   await sync?.take(note);
   await settle(note);
   return note;
@@ -84,9 +86,9 @@ export const commitTyping = (noteIds: readonly string[]) => Promise.all(noteIds.
 type RevertMany = Extract<OpInput, { type: "history.revert" }>;
 
 /** Reverts changes of several notes. What's typed in them is saved first, and each reverted note's editor takes the result if it's open. */
-export async function revertMany(workspaceId: string, changes: RevertMany["changes"]): Promise<RevertedNotes> {
+export async function revertMany(workspaceId: string, changes: RevertMany["changes"], by: typeof perform = perform): Promise<RevertedNotes> {
   await commitTyping(changes.map((c) => c.noteId));
-  const done = await perform(workspaceId, { type: "history.revert", changes });
+  const done = await by(workspaceId, { type: "history.revert", changes });
   await Promise.all(done.reverted.map((r) => open.get(r.noteId)?.pull(r.revision)));
   for (const r of done.reverted) await settle({ id: r.noteId, unfiled: r.unfiled });
   return done;
@@ -97,22 +99,23 @@ const MOVES: ReadonlySet<string> = new Set<HistoryOp["type"]>(["note.revert", "n
 /**
  * Performs an operation and keeps the open editors true to it. Before one that moves notes through
  * history or rewrites a todo, or previews a revert, what's typed is saved, and each open editor takes
- * its note's result.
+ * its note's result. `by` is how the operation reaches the server, for one that isn't sent as the
+ * member's own.
  */
-export async function performInSync<T extends OpInput>(workspaceId: string, op: T): Promise<Results[T["type"]]> {
-  if (MOVES.has(op.type)) return moveThroughHistory(workspaceId, op as HistoryOp) as Promise<Results[T["type"]]>;
+export async function performInSync<T extends OpInput>(workspaceId: string, op: T, by: typeof perform = perform): Promise<Results[T["type"]]> {
+  if (MOVES.has(op.type)) return moveThroughHistory(workspaceId, op as HistoryOp, by) as Promise<Results[T["type"]]>;
   // A todo's history is asked for by its line, which the server has only once what is typed is saved.
   // A note goes to Trash with what was typed in it, which it wouldn't take afterwards.
   if (op.type === "todo.history" || op.type === "note.trash") await open.get(op.id)?.commit();
-  if (op.type === "history.revert") return revertMany(workspaceId, op.changes) as Promise<Results[T["type"]]>;
+  if (op.type === "history.revert") return revertMany(workspaceId, op.changes, by) as Promise<Results[T["type"]]>;
   if (op.type === "history.previewRevert") {
     // What is typed and not yet saved would change the note under the preview.
     await commitTyping(op.changes.map((c) => c.noteId)).catch(() => {});
-    return perform(workspaceId, op);
+    return by(workspaceId, op);
   }
-  if (op.type !== "history.revertAuthor") return perform(workspaceId, op);
+  if (op.type !== "history.revertAuthor") return by(workspaceId, op);
   await Promise.all([...open.values()].map((sync) => sync.commit()));
-  const result = await perform(workspaceId, op);
+  const result = await by(workspaceId, op);
   for (const { note } of (result as Results["history.revertAuthor"]).reverted) {
     await open.get(note.id)?.pull(note.revision);
     await settle(note);

@@ -1,5 +1,5 @@
 import { newId } from "./ids.ts";
-import { draftsOfTheGone } from "./pluginRecord.ts";
+import { draftsOfTheGone, trustOfTheGone } from "./pluginRecord.ts";
 import { NO_SUCH_WORKSPACE, OpError, type Invite, type Member, type Results, type Role } from "./protocol.ts";
 
 /** Who is asking for a change to a workspace's members, and when. */
@@ -103,6 +103,8 @@ export async function removeMember(asking: Asking, memberId: string): Promise<{ 
     released(asking, memberId, "uploads"),
     // Their drafts of plugins were theirs alone, so nobody is left to read them, and they are not waiting if the person is added again.
     draftsOfTheGone(db, workspaceId, memberId),
+    // Nor is anything they turned on: added again, they decide again.
+    trustOfTheGone(db, workspaceId, memberId),
   ]);
   if (!removed!.meta.changes) throw await refusal(asking, "member.remove", memberId);
   return { memberId };
@@ -129,6 +131,7 @@ export async function leave(asking: Asking): Promise<{ memberId: string }> {
     // A private upload doesn't hold them here either. It goes to the workspace as their daily notes do.
     released(asking, personId, "uploads"),
     draftsOfTheGone(db, workspaceId, personId),
+    trustOfTheGone(db, workspaceId, personId),
   ]);
   if (!left!.meta.changes) throw await refusal(asking, "member.leave", personId, "member");
   return { memberId: personId };

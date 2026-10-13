@@ -44,7 +44,7 @@ import {
   type Written,
 } from "./protocol.ts";
 import { ownSandboxed } from "./ownPlugins.ts";
-import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, listPlugins, permitPlugin, readDraft, readPlugin, requestPlugin, saveDraft, uninstallPlugin } from "./pluginRecord.ts";
+import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, listPlugins, permitPlugin, readDraft, readPlugin, requestPlugin, saveDraft, trustPlugin, uninstallPlugin } from "./pluginRecord.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
 import { NO_FILES, archiveUpload, createUpload, listUploads, moveUpload, openUpload, purgeUpload, readUpload, referred, restoreUpload, trashUpload, trashedUploads, type Files } from "./uploads.ts";
@@ -66,7 +66,9 @@ export type Actor =
    * A plugin installed in the workspace, running in `personId`'s browser. It acts as them and within
    * what the workspace permits it, so it has no more than either. `pluginId` is the install the app
    * made the plugin's frame for, and never anything the plugin said. With `draft` it is that
-   * person's own copy of the plugin, which runs for nobody else.
+   * person's own copy of the plugin, which runs for nobody else. One an admin granted full trust,
+   * and that this person turned on, runs inside the app: it may perform what the member may, as
+   * them, except what is the member's alone.
    */
   | { kind: "plugin"; pluginId: string; personId: string; workspaceId: string; draft?: boolean };
 
@@ -105,6 +107,8 @@ export interface Context {
   db: D1Database;
   actor: Actor | Visitor;
   author: Author;
+  /** True for a plugin that runs shut off from the app, which is told only what its permissions name: nothing of uploads or of who a mention means. One running with full trust is told what its member is. */
+  shutOff: boolean;
   workspaceId: string;
   /** The person acting, or the person an agent acts for. Null for whoever opened a link. */
   personId: string | null;
@@ -169,7 +173,8 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   if (actor.kind === "plugin") {
     if (!plugin) throw new OpError("forbidden", `A ${standing.as} runs no plugins: they are for the workspace's members`);
     if ("refused" in plugin) throw new OpError("forbidden", plugin.refused);
-    if (handler.by === "member" || !plugin.allowed.has(op.type)) throw new OpError("forbidden", `${plugin.name} isn't permitted to ${op.type}`);
+    // What is the member's alone is no plugin's, full trust or not: it is asked in the member's own name, where their role is what is checked.
+    if (handler.by === "member" || (plugin.allowed !== "all" && !plugin.allowed.has(op.type))) throw new OpError("forbidden", `${plugin.name} isn't permitted to ${op.type}`);
   }
   if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
 
@@ -179,7 +184,8 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
     author = { kind: "agent", agentId: actor.agentId, name: agent?.name ?? "An agent", onBehalfOf: actor.personId };
   }
   if (actor.kind === "plugin") author = { kind: "plugin", pluginId: actor.pluginId, name: (plugin as { name: string }).name, onBehalfOf: actor.personId };
-  const ctx: Context = { db, actor, author, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
+  const shutOff = plugin !== null && "allowed" in plugin && plugin.allowed !== "all";
+  const ctx: Context = { db, actor, author, shutOff, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
   return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
 }
 
@@ -449,7 +455,7 @@ type Member = { id: string; name: string };
  */
 async function membersMeant(ctx: Context, targets: readonly string[]): Promise<{ byId: Map<string, Member>; byName: Map<string, Member[]> }> {
   const asked = [...new Set(targets)];
-  if (!seesEveryFolder(ctx.sight) || ctx.author.kind === "plugin" || !asked.length) return { byId: new Map(), byName: new Map() };
+  if (!seesEveryFolder(ctx.sight) || ctx.shutOff || !asked.length) return { byId: new Map(), byName: new Map() };
   // Each name as written and in lower case: the database folds case for unaccented letters only.
   const { results } = await ctx.db
     .prepare(
@@ -1390,7 +1396,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       if (op.revision !== undefined && op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
       const note = op.revision === undefined || op.revision === row.revision ? toNote(ctx, row) : toNote(ctx, row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
       // Reading notes is not reading uploads: a plugin is told nothing of the ones a note refers to. Its mentions are as written, by `membersMeant`.
-      return { ...note, links: await linksOf(ctx, note.text, "any"), mentions: await mentionsOf(ctx, note.text), uploads: ctx.author.kind === "plugin" ? [] : await referred(ctx, note.text, "any") };
+      return { ...note, links: await linksOf(ctx, note.text, "any"), mentions: await mentionsOf(ctx, note.text), uploads: ctx.shutOff ? [] : await referred(ctx, note.text, "any") };
     },
   },
 
@@ -2230,7 +2236,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         )
         .bind(ctx.workspaceId, ctx.sight.bind)
         .all<FolderRow & { note_count: number; upload_count: number }>();
-      return { unsortedId: results.find((row) => row.unsorted)?.id ?? null, folders: results.map((row) => ({ ...toFolder(ctx, row), noteCount: row.note_count, uploadCount: ctx.author.kind === "plugin" ? 0 : row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view" })) };
+      return { unsortedId: results.find((row) => row.unsorted)?.id ?? null, folders: results.map((row) => ({ ...toFolder(ctx, row), noteCount: row.note_count, uploadCount: ctx.shutOff ? 0 : row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view" })) };
     },
   },
 
@@ -2446,6 +2452,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   // A viewer asks too, so this needs no more than belonging to the workspace.
   "plugin.request": { needs: "view", by: "member", members: true, run: (ctx, op) => requestPlugin(ctx, op) },
   "plugin.frame": { needs: "view", by: "member", members: true, run: (ctx, op) => framePlugin(ctx, op.id) },
+  // Running a plugin inside the app is each member's own decision, for their own session. Nobody makes it for them: not an admin, an agent, or a plugin.
+  "plugin.trust": { needs: "view", by: "member", members: true, run: (ctx, op) => trustPlugin(ctx, op) },
   // A draft is its author's alone, beside their settings, and what it holds is code that runs in their browser. Only the member, signed in, reads or writes one: see NOT_FOR_AGENTS.
   "draft.list": { needs: "view", by: "member", members: true, run: (ctx) => listDrafts(ctx) },
   "draft.read": { needs: "view", by: "member", members: true, run: (ctx, op) => readDraft(ctx, op.id) },

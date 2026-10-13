@@ -302,7 +302,7 @@ _Avoid_: Extension, add-on
 A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs and splits, and the command palette. One that needs the editor or the app's own layout is compiled into the app and runs inside it with everything the member has: "Built-in, full access". One that needs nothing of the page is a sandboxed plugin, declared in the manifest a third-party plugin is: "Built-in, sandboxed", as Word count, Quick timer and Backlinks are. It is on by default unless it says it starts off, as Vim mode does.
 
 **Sandboxed plugin**:
-A plugin that runs shut off from the app in frames of its own and does only what its capabilities allow, checked by the app and again by the server. Every third-party plugin is one, and so are the built-in plugins that need nothing of the page. Both go through the same broker, port and address on the server.
+A plugin that runs shut off from the app in frames of its own and does only what its capabilities allow, checked by the app and again by the server. Every third-party plugin is one unless it asks for full trust, and so are the built-in plugins that need nothing of the page. Both go through the same broker, port and address on the server.
 
 **Plugin host**:
 The part of the core that turns plugins on and off, hands each one its reach into the workspace, and keeps what each has contributed.
@@ -364,7 +364,11 @@ Something a plugin adds to the editor of every note, such as keys or a status li
 _Avoid_: Extension on its own, which reads as plugin
 
 **Third-party plugin**:
-A plugin a member wrote and an admin installed in a workspace: a manifest and code, kept in the workspace. It is available once installed, and off for each member until they turn it on. Its code runs in frames shut off from the app, never in the app's page, and reaches the workspace only through the operations its permissions allow. It adds commands, views in the inspector, the bottom bar and on pages, embeds drawn below their line, and options. It is known everywhere by the id the workspace gave it when it was installed.
+A plugin a member wrote and an admin installed in a workspace: a manifest and code, kept in the workspace. It is available once installed, and off for each member until they turn it on. Its code runs in frames shut off from the app and reaches the workspace only through the operations its permissions allow, unless it asks for full trust. It adds commands, views in the inspector, the bottom bar and on pages, embeds drawn below their line, and options. It is known everywhere by the id the workspace gave it when it was installed.
+
+**Full trust**:
+What a third-party plugin's manifest asks for to run inside the app's page instead of sandboxed, with everything its member can see and do. It runs for a member only while an admin's grant of exactly that code stands and that member turned it on for themself after a warning. Any change to its code, or to how it asks for full trust, ends the grant and everyone's turning on for good, and a draft never has it.
+_Avoid_: Trusted plugin (a built-in is not "trusted", it comes with the app), unsandboxed
 
 **Manifest**:
 What a sandboxed plugin says of itself, as JSON: its name, the capabilities it asks for with a reason each, and the commands, views, embeds and options it adds. A third-party plugin's is kept in the workspace, and a sandboxed built-in's is in the app (`src/core/ownPlugins.ts`). The app lists all of it without running the plugin's code.
@@ -373,7 +377,7 @@ What a sandboxed plugin says of itself, as JSON: its name, the capabilities it a
 A member's own copy of a sandboxed plugin's source, an installed one's or a built-in's, kept beside their settings. Only its author can read or change it, admins included, and it is gone when they leave the workspace. It can run in the original's place for its author alone, sandboxed, with what the original is allowed and never more. An admin publishes one of a third-party plugin by installing it, which every approval has to follow again. One of a built-in is never published over it.
 
 **Capability**:
-One named thing a plugin can be permitted, which opens a fixed list of operations: read notes, write notes, read todos, read members' names, use the network for listed sites. An operation no capability lists is refused to every plugin.
+One named thing a plugin can be permitted, which opens a fixed list of operations: read notes, write notes, read todos, read members' names, use the network for listed sites. Full trust is one too, and opens no operation: it is where the code runs. An operation no capability lists is refused to every plugin.
 
 **Plugin record**:
 What a workspace keeps of its plugins: which are installed, what each is permitted, and the requests waiting. Every member reads it and only an admin changes it. It is not settings.

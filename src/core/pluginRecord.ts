@@ -4,10 +4,12 @@ import type { Context } from "./operations.ts";
 import { ownSandboxed } from "./ownPlugins.ts";
 import {
   BUILT_IN_SUBJECTS,
+  FULL_TRUST,
   HTML_EMBEDS,
   MAX_PLUGIN_MANIFEST,
   Manifest,
   approvalOf,
+  asksFullTrust,
   codeHash,
   opsAllowedBy,
   readManifest,
@@ -16,6 +18,7 @@ import {
   type DeclaredCapability,
   type Draft,
   type DraftSummary,
+  type FullTrust,
   type InstalledPlugin,
   type Permission,
   type PluginRecord,
@@ -52,6 +55,14 @@ interface PermissionRow {
   approved: string | null;
   origins: string | null;
   decided_by_name: string | null;
+}
+
+interface TrustRow {
+  plugin_id: string;
+  person_id: string;
+  code_hash: string;
+  at: number;
+  name: string;
 }
 
 interface RequestRow {
@@ -97,7 +108,7 @@ const HTML_MANIFEST: Manifest = { ...Manifest.parse({ name: "Embeds of HTML" }),
 
 /** The record, as anyone in the workspace is told of it. */
 export async function listPlugins(ctx: Context): Promise<PluginRecord> {
-  const [installs, permissions, requests] = await ctx.db.batch<Record<string, unknown>>([
+  const [installs, permissions, requests, trusting] = await ctx.db.batch<Record<string, unknown>>([
     ctx.db
       .prepare(`SELECT i.id, i.manifest, i.code_hash, p.name AS installed_by_name, i.installed_at, i.updated_at FROM plugin_installs i LEFT JOIN people p ON p.id = i.installed_by WHERE i.${INSTALLED} ORDER BY i.installed_at, i.id`)
       .bind(ctx.workspaceId),
@@ -112,25 +123,50 @@ export async function listPlugins(ctx: Context): Promise<PluginRecord> {
          WHERE r.workspace_id = ? ORDER BY r.at, r.requested_by`,
       )
       .bind(ctx.workspaceId),
+    // Who has each full-trust plugin on, among those still in the workspace. Told whole to an admin, and to anyone else only of themself.
+    ctx.db
+      .prepare(
+        `SELECT t.plugin_id, t.person_id, t.code_hash, t.at, p.name FROM plugin_trust t
+         JOIN members m ON m.workspace_id = t.workspace_id AND m.person_id = t.person_id JOIN people p ON p.id = t.person_id
+         WHERE t.workspace_id = ? ORDER BY t.at, t.person_id`,
+      )
+      .bind(ctx.workspaceId),
   ]);
+  // Whether full trust was asked for, whether it was granted and who has it on are told to members, signed in. An agent or a plugin reads a record in which nothing asks for it.
+  const member = ctx.author.kind === "member";
+  const canManage = member && ctx.role === "admin";
+  const turnedOn = trusting!.results as unknown as TrustRow[];
+  const fullTrust = (id: string, hash: string, permission: Permission | undefined): FullTrust | null => {
+    if (!member || !permission) return null;
+    const on = turnedOn.filter((row) => row.plugin_id === id && row.code_hash === hash);
+    const granted = permission.state === "allowed";
+    return { grantedHash: granted ? hash : null, changedSince: permission.voided, on: granted && on.some((row) => row.person_id === ctx.personId), turnedOnBy: canManage ? (granted ? on : []).map((row) => ({ name: row.name, at: row.at })) : null };
+  };
   const key = (subject: string, capability: string) => `${subject} ${capability}`;
   const decided = new Map((permissions!.results as unknown as PermissionRow[]).map((row) => [key(row.subject, row.capability), row]));
   const asked = Map.groupBy(requests!.results as unknown as RequestRow[], (row) => key(row.subject, row.capability));
   const html = decided.get(key(HTML_EMBEDS, HTML.capability));
   return {
-    canManage: ctx.author.kind === "member" && ctx.role === "admin",
+    canManage,
     plugins: [
       ...(installs!.results as unknown as InstallRow[]).map((row): InstalledPlugin => {
-        const manifest = JSON.parse(row.manifest) as Manifest;
+        const stored = JSON.parse(row.manifest) as Manifest;
+        const manifest = member ? stored : { ...stored, capabilities: stored.capabilities.filter((c) => c.name !== FULL_TRUST) };
+        const permissions = manifest.capabilities.map((c) => toPermission(c.name, c.reason, c.origins ?? [], approvalOf(c, row.code_hash), decided.get(key(row.id, c.name)), asked.get(key(row.id, c.name)) ?? []));
         return {
           id: row.id,
           thirdParty: true,
           manifest,
           codeHash: row.code_hash,
+          fullTrust: fullTrust(
+            row.id,
+            row.code_hash,
+            permissions.find((p) => p.capability === FULL_TRUST),
+          ),
           installedBy: row.installed_by_name,
           installedAt: row.installed_at,
           updatedAt: row.updated_at,
-          permissions: manifest.capabilities.map((c) => toPermission(c.name, c.reason, c.origins ?? [], approvalOf(c, row.code_hash), decided.get(key(row.id, c.name)), asked.get(key(row.id, c.name)) ?? [])),
+          permissions,
         };
       }),
       {
@@ -138,6 +174,7 @@ export async function listPlugins(ctx: Context): Promise<PluginRecord> {
         thirdParty: false,
         manifest: HTML_MANIFEST,
         codeHash: null,
+        fullTrust: null,
         installedBy: null,
         installedAt: null,
         updatedAt: null,
@@ -157,16 +194,26 @@ async function installed(db: D1Database, workspaceId: string, id: string): Promi
   return row && { manifest: JSON.parse(row.manifest) as Manifest, codeHash: row.code_hash };
 }
 
+/** What a plugin acting for a member may perform: the operations its permissions name, or for one running with full trust everything its member may that isn't the member's alone. */
+export type Reach = ReadonlySet<OpType> | "all";
+
+/** What a grant of full trust is of once the plugin it was given to has changed: nothing a plugin can be. */
+const ENDED = "ended";
+
 export const NOT_INSTALLED = "That plugin isn't installed in this workspace";
 export const NO_DRAFT_RUNNING = "You have no draft of that plugin that is running";
+export const DRAFT_ASKS_FULL_TRUST = "A draft that asks for full trust doesn't run. Full trust is granted by an admin to the exact code they read, so publish the draft and have that code granted.";
+export const fullTrustOff = (name: string) => `${name} asks for full trust, so it runs only while an admin's grant of this exact code stands and you have turned it on for yourself`;
 
 /**
  * What a plugin acting for `personId` in a workspace is called and may perform there, or why it
  * performs nothing: never installed, uninstalled, or another workspace's. `draft` is for that
  * person's own copy of the plugin, which is read by their id and so is never anyone else's: it may
- * perform what the original is allowed and its own manifest still asks for, and never more.
+ * perform what the original is allowed and its own manifest still asks for, and never more: a draft
+ * that asks for full trust performs nothing. A plugin that asks for full trust performs nothing
+ * until an admin's grant of the code it is now stands and this person turned it on for that code.
  */
-export async function actingPlugin(db: D1Database, workspaceId: string, pluginId: string, personId: string, draft = false): Promise<{ name: string; allowed: ReadonlySet<OpType> } | { refused: string }> {
+export async function actingPlugin(db: D1Database, workspaceId: string, pluginId: string, personId: string, draft = false): Promise<{ name: string; allowed: Reach } | { refused: string }> {
   // One of Common Ink's own is allowed what its manifest declares, from the start: it comes with the app, so there is nobody to ask. No row in any workspace is read for it, or can change it.
   const own = ownSandboxed(pluginId);
   const plugin = own ? null : await installed(db, workspaceId, pluginId);
@@ -178,12 +225,19 @@ export async function actingPlugin(db: D1Database, workspaceId: string, pluginId
     const { results } = await db.prepare("SELECT subject, capability, state, locked, approved, origins, NULL AS decided_by_name FROM plugin_permissions WHERE workspace_id = ? AND subject = ?").bind(workspaceId, pluginId).all<PermissionRow>();
     standing = manifest.capabilities.filter((c) => stands(results.find((row) => row.capability === c.name), approvalOf(c, plugin!.codeHash))).map((c) => c.name);
   }
-  if (!draft) return { name: manifest.name, allowed: opsAllowedBy(standing) };
-  const mine = await db.prepare("SELECT manifest FROM plugin_drafts WHERE workspace_id = ? AND person_id = ? AND plugin_id = ? AND running = 1").bind(workspaceId, personId, pluginId).first<{ manifest: string }>();
-  const read = mine && readManifest(mine.manifest, own !== null);
-  if (!read || "reason" in read) return { refused: NO_DRAFT_RUNNING };
-  const asks = new Set(read.manifest.capabilities.map((c) => c.name));
-  return { name: read.manifest.name, allowed: opsAllowedBy(standing.filter((capability) => asks.has(capability))) };
+  if (draft) {
+    const mine = await db.prepare("SELECT manifest FROM plugin_drafts WHERE workspace_id = ? AND person_id = ? AND plugin_id = ? AND running = 1").bind(workspaceId, personId, pluginId).first<{ manifest: string }>();
+    const read = mine && readManifest(mine.manifest, own !== null);
+    if (!read || "reason" in read) return { refused: NO_DRAFT_RUNNING };
+    // No admin read a draft's code, so the grant of the original's is no grant of it.
+    if (asksFullTrust(read.manifest)) return { refused: DRAFT_ASKS_FULL_TRUST };
+    const asks = new Set(read.manifest.capabilities.map((c) => c.name));
+    return { name: read.manifest.name, allowed: opsAllowedBy(standing.filter((capability) => asks.has(capability))) };
+  }
+  if (!asksFullTrust(manifest)) return { name: manifest.name, allowed: opsAllowedBy(standing) };
+  // Both, asked now: the grant that stands is of this code, and so is this person's own row. Whoever asks has been found to be a member before this is reached.
+  const on = standing.includes(FULL_TRUST) && (await db.prepare("SELECT 1 FROM plugin_trust WHERE workspace_id = ? AND plugin_id = ? AND person_id = ? AND code_hash = ?").bind(workspaceId, pluginId, personId, plugin!.codeHash).first());
+  return on ? { name: manifest.name, allowed: "all" } : { refused: fullTrustOff(manifest.name) };
 }
 
 export async function readPlugin(ctx: Context, id: string): Promise<Results["plugin.read"]> {
@@ -199,9 +253,21 @@ export async function installPlugin(ctx: Context, op: Extract<Op, { type: "plugi
   const hash = await codeHash(op.code);
   const id = op.replaces ?? newId();
   if (op.replaces) {
-    // What was permitted is left as it is: each allowance says what it was of, and stands or not by that.
-    const { meta } = await ctx.db.prepare(`UPDATE plugin_installs SET manifest = ?3, code = ?4, code_hash = ?5, updated_at = ?6 WHERE id = ?1 AND workspace_id = ?2 AND removed_at IS NULL`).bind(id, ctx.workspaceId, manifest, op.code, hash, ctx.now).run();
-    if (!meta.changes) throw new OpError("not_found", NO_SUCH_PLUGIN);
+    const declared = read.manifest.capabilities.find((c) => c.name === FULL_TRUST);
+    const approval = declared ? approvalOf(declared, hash) : null;
+    const [, , updated] = await ctx.db.batch([
+      // Full trust is of exactly one code, and ends for good when the plugin becomes anything else: the grant is marked as of nothing, so putting the old code back restores neither it nor anyone's turning it on.
+      ctx.db.prepare(`UPDATE plugin_permissions SET approved = '${ENDED}' WHERE workspace_id = ?1 AND subject = ?2 AND capability = '${FULL_TRUST}' AND state = 'allowed' AND approved IS NOT ?3`).bind(ctx.workspaceId, id, approval),
+      ctx.db
+        .prepare(
+          `DELETE FROM plugin_trust WHERE workspace_id = ?1 AND plugin_id = ?2 AND (?3 IS NULL OR code_hash <> ?4 OR NOT EXISTS (
+             SELECT 1 FROM plugin_permissions WHERE workspace_id = ?1 AND subject = ?2 AND capability = '${FULL_TRUST}' AND state = 'allowed' AND approved = ?3))`,
+        )
+        .bind(ctx.workspaceId, id, approval, hash),
+      // What else was permitted is left as it is: each allowance says what it was of, and stands or not by that.
+      ctx.db.prepare(`UPDATE plugin_installs SET manifest = ?3, code = ?4, code_hash = ?5, updated_at = ?6 WHERE id = ?1 AND workspace_id = ?2 AND removed_at IS NULL`).bind(id, ctx.workspaceId, manifest, op.code, hash, ctx.now),
+    ]);
+    if (!updated!.meta.changes) throw new OpError("not_found", NO_SUCH_PLUGIN);
   } else {
     // One statement, so two installs at once can't both take the last place.
     const { meta } = await ctx.db
@@ -222,6 +288,7 @@ export async function uninstallPlugin(ctx: Context, id: string): Promise<PluginR
     ctx.db.prepare("UPDATE plugin_installs SET removed_at = COALESCE(removed_at, ?3), code = '' WHERE id = ?1 AND workspace_id = ?2").bind(id, ctx.workspaceId, ctx.now),
     ctx.db.prepare("DELETE FROM plugin_permissions WHERE subject = ?1 AND workspace_id = ?2 AND EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?1 AND workspace_id = ?2)").bind(id, ctx.workspaceId),
     ctx.db.prepare("DELETE FROM plugin_requests WHERE subject = ?1 AND workspace_id = ?2 AND EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?1 AND workspace_id = ?2)").bind(id, ctx.workspaceId),
+    ctx.db.prepare("DELETE FROM plugin_trust WHERE plugin_id = ?1 AND workspace_id = ?2").bind(id, ctx.workspaceId),
     // A copy of a plugin that is gone has nothing to run in the place of, or to be published over.
     ctx.db.prepare("DELETE FROM plugin_drafts WHERE plugin_id = ?1 AND workspace_id = ?2").bind(id, ctx.workspaceId),
   ]);
@@ -276,15 +343,21 @@ export async function permitPlugin(ctx: Context, op: Extract<Op, { type: "plugin
     if (!op.codeHash) throw new OpError("invalid", NAME_THE_CODE);
     if ((await installed(ctx.db, ctx.workspaceId, op.id))?.codeHash !== op.codeHash) throw new OpError("conflict", CHANGED_SINCE);
   }
-  await ctx.db.batch([
+  const [decided] = await ctx.db.batch([
+    // A plugin's is written only while the plugin is still there, and an allowance only while its code is still the code named: said in the statement, so a decision that crosses an update or an uninstall decides nothing.
     ctx.db
       .prepare(
-        `INSERT INTO plugin_permissions (workspace_id, subject, capability, state, locked, approved, origins, decided_by, decided_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        `INSERT INTO plugin_permissions (workspace_id, subject, capability, state, locked, approved, origins, decided_by, decided_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+         WHERE ?2 = '${HTML_EMBEDS}' OR EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?2 AND workspace_id = ?1 AND removed_at IS NULL AND (?4 = 'off' OR code_hash = ?10))
          ON CONFLICT (workspace_id, subject, capability) DO UPDATE SET state = excluded.state, locked = excluded.locked, approved = excluded.approved, origins = excluded.origins, decided_by = excluded.decided_by, decided_at = excluded.decided_at`,
       )
-      .bind(ctx.workspaceId, op.id, op.capability, op.allowed ? "allowed" : "off", (op.locked ?? row?.locked === 1) ? 1 : 0, op.allowed ? approval : null, sites, ctx.personId, ctx.now),
+      .bind(ctx.workspaceId, op.id, op.capability, op.allowed ? "allowed" : "off", (op.locked ?? row?.locked === 1) ? 1 : 0, op.allowed ? approval : null, sites, ctx.personId, ctx.now, op.codeHash ?? null),
     ctx.db.prepare("DELETE FROM plugin_requests WHERE workspace_id = ? AND subject = ? AND capability = ?").bind(ctx.workspaceId, op.id, op.capability),
+    // A decision on full trust, either way, starts it from nobody: taking it back turns everyone off, and granting it turns nobody on. Saying again what already stands, as locking it does, decides nothing.
+    ...(op.capability === FULL_TRUST && (!op.allowed || !stands(row, approval)) ? [ctx.db.prepare("DELETE FROM plugin_trust WHERE workspace_id = ? AND plugin_id = ?").bind(ctx.workspaceId, op.id)] : []),
   ]);
+  if (!decided!.meta.changes) throw new OpError("conflict", CHANGED_SINCE);
   return listPlugins(ctx);
 }
 
@@ -349,6 +422,42 @@ export async function redeemFrame(db: D1Database, token: string, now: number): P
   return row && originsIn(row.origins);
 }
 
+export const NOT_GRANTED = "No admin's grant of full trust stands for this code, so it can't be turned on";
+
+/**
+ * A member turning a full-trust plugin on for themself, or off. Turning on is one statement, which
+ * keeps a row only if, as it runs, the asker is a member, the plugin's code is the code they named
+ * and an admin's grant of that code stands. So no row is ever of code nobody granted, whatever
+ * changes beside it. Nothing here takes a person: the only one it can be for is whoever asks.
+ */
+export async function trustPlugin(ctx: Context, op: Extract<Op, { type: "plugin.trust" }>): Promise<PluginRecord> {
+  const plugin = await installed(ctx.db, ctx.workspaceId, op.id);
+  if (!plugin) throw new OpError("not_found", NO_SUCH_PLUGIN);
+  const declared = plugin.manifest.capabilities.find((c) => c.name === FULL_TRUST);
+  if (!declared) throw new OpError("invalid", `${plugin.manifest.name} doesn't ask for full trust. It runs shut off from the app, and is turned on in your settings.`);
+  if (!op.on) await ctx.db.prepare("DELETE FROM plugin_trust WHERE workspace_id = ? AND plugin_id = ? AND person_id = ?").bind(ctx.workspaceId, op.id, ctx.personId).run();
+  else {
+    if (plugin.codeHash !== op.codeHash) throw new OpError("conflict", CHANGED_SINCE);
+    const { meta } = await ctx.db
+      .prepare(
+        `INSERT INTO plugin_trust (workspace_id, plugin_id, person_id, code_hash, at)
+         SELECT ?1, ?2, ?3, ?4, ?5
+         WHERE EXISTS (SELECT 1 FROM members WHERE workspace_id = ?1 AND person_id = ?3)
+           AND EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?2 AND workspace_id = ?1 AND removed_at IS NULL AND code_hash = ?4)
+           AND EXISTS (SELECT 1 FROM plugin_permissions WHERE workspace_id = ?1 AND subject = ?2 AND capability = '${FULL_TRUST}' AND state = 'allowed' AND approved = ?6)
+         ON CONFLICT (workspace_id, plugin_id, person_id) DO UPDATE SET code_hash = excluded.code_hash, at = excluded.at`,
+      )
+      .bind(ctx.workspaceId, op.id, ctx.personId, op.codeHash, ctx.now, approvalOf(declared, plugin.codeHash))
+      .run();
+    if (!meta.changes) throw new OpError("conflict", NOT_GRANTED);
+  }
+  return listPlugins(ctx);
+}
+
+/** A person's turning on of full-trust plugins in a workspace they are no longer a member of, removed: said in the batch that takes them out, after the statement that does. Added again, they have turned nothing on. */
+export const trustOfTheGone = (db: D1Database, workspaceId: string, personId: string): D1PreparedStatement =>
+  db.prepare("DELETE FROM plugin_trust WHERE workspace_id = ?1 AND person_id = ?2 AND NOT EXISTS (SELECT 1 FROM members WHERE workspace_id = ?1 AND person_id = ?2)").bind(workspaceId, personId);
+
 interface DraftRow {
   plugin_id: string;
   manifest: string;
@@ -379,7 +488,7 @@ export async function readDraft(ctx: Context, id: string): Promise<Draft> {
 
 /**
  * Keeps the asker's copy of a plugin's source as it is now. What is kept may not be a manifest yet,
- * since it is being written. To run, it has to be one.
+ * since it is being written. To run, it has to be one, and one that doesn't ask for full trust.
  */
 export async function saveDraft(ctx: Context, op: Extract<Op, { type: "draft.save" }>): Promise<DraftSummary> {
   const own = ownSandboxed(op.id) !== null;
@@ -388,6 +497,7 @@ export async function saveDraft(ctx: Context, op: Extract<Op, { type: "draft.sav
   if (op.running) {
     const read = readManifest(op.manifest, own);
     if ("reason" in read) throw new OpError("invalid", read.reason);
+    if (asksFullTrust(read.manifest)) throw new OpError("invalid", DRAFT_ASKS_FULL_TRUST);
   }
   const hash = await codeHash(op.code);
   // Kept only while its author is a member and the plugin is installed or is one of the app's own, said in the statement itself: a save that crosses their removal, or the plugin's, keeps nothing for either to leave behind.

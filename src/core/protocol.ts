@@ -600,6 +600,13 @@ export const Op = z.discriminatedUnion("type", [
    */
   z.object({ type: z.literal("plugin.frame"), id: PluginSubject }),
   /**
+   * A member turning a plugin that asks for full trust on for themself, or off. Such a plugin runs
+   * inside the app, in the session of each member who turned it on and nobody else's, and only while
+   * an admin's grant of that exact code stands. `codeHash` is the code the member was shown. Nothing
+   * here names a person: it is for whoever asks, signed in, and for nobody else.
+   */
+  z.object({ type: z.literal("plugin.trust"), id: Id, on: z.boolean(), codeHash: CodeHash.optional() }).refine((op) => !op.on || op.codeHash !== undefined, "Say which code you are turning on: codeHash, as plugin.list answers it"),
+  /**
    * The asker's own copies of plugins' source. A draft is kept beside its author's settings and is
    * theirs alone: no operation reads or changes another member's, an admin's included, and none takes
    * a person. It is no note, so it is in no folder, search or history.
@@ -1234,6 +1241,7 @@ export interface Results {
   "plugin.permit": PluginRecord;
   "plugin.request": PluginRecord;
   "plugin.frame": { token: string | null; origins: string[] };
+  "plugin.trust": PluginRecord;
   "draft.list": { drafts: DraftSummary[] };
   "draft.read": Draft;
   "draft.save": DraftSummary;

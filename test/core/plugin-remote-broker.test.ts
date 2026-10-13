@@ -13,6 +13,7 @@ function installed(allowed: Capability[], off: Capability[] = []): InstalledPlug
     thirdParty: true,
     manifest: { name: "Word counter", version: "1", capabilities: [...allowed, ...off].map((name) => ({ name, reason: "Because" })), commands: [], views: [], embeds: [], settings: {} },
     codeHash: "0".repeat(64),
+    fullTrust: null,
     installedBy: "Ada",
     installedAt: 1,
     updatedAt: 1,

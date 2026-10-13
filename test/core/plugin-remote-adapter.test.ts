@@ -22,6 +22,7 @@ const installed: InstalledPlugin = {
     settings: {},
   },
   codeHash: "0".repeat(64),
+  fullTrust: null,
   installedBy: "Ada",
   installedAt: 1,
   updatedAt: 1,

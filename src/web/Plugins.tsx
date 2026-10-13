@@ -2,7 +2,8 @@ import { useState, useSyncExternalStore } from "react";
 import { Icon } from "./icons.tsx";
 import { PluginDetails, type PluginsProps } from "./PluginDetails.tsx";
 import { InstallForm } from "./PluginInstall.tsx";
-import { PLUGINS_PATH, kindLabel, listPlugins, matchesPlugin, waitingOn, within } from "./pluginList.ts";
+import { whyNotTrusted } from "./pluginRun.ts";
+import { PLUGINS_PATH, asksTrust, kindLabel, listPlugins, matchesPlugin, waitingOn, within } from "./pluginList.ts";
 
 /**
  * Where a member sees every plugin there is, each a card like a note in a folder's list, turns each
@@ -63,7 +64,7 @@ export function Plugins(props: PluginsProps) {
                     {name}
                   </a>
                   {(plugin.kind === "third-party" || state?.builtIn) && (
-                    <span className="badge" data-kind={plugin.kind}>
+                    <span className="badge" data-kind={plugin.kind} data-trust={asksTrust(plugin) || undefined}>
                       {kindLabel(plugin)}
                     </span>
                   )}
@@ -85,7 +86,12 @@ export function Plugins(props: PluginsProps) {
                   </span>
                 )}
               </div>
-              <input type="checkbox" className="switch" aria-label={name} checked={state?.enabled ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
+              {asksTrust(plugin) ? (
+                // Turning one on is decided on its own page, where what it means is said first. Its switch here goes there.
+                <input type="checkbox" className="switch" aria-label={name} checked={(state?.enabled ?? false) && whyNotTrusted(plugin.record!) === null} disabled={!state} onChange={() => go(`${PLUGINS_PATH}/${encodeURIComponent(id)}`)} />
+              ) : (
+                <input type="checkbox" className="switch" aria-label={name} checked={state?.enabled ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
+              )}
             </li>
           );
         })}

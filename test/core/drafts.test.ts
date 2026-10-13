@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { authenticateAgent, connectAgent } from "../../src/core/agents.ts";
 import { agentActor, perform, type Actor } from "../../src/core/operations.ts";
-import { NO_DRAFT_RUNNING } from "../../src/core/pluginRecord.ts";
+import { DRAFT_ASKS_FULL_TRUST, NO_DRAFT_RUNNING } from "../../src/core/pluginRecord.ts";
 import { codeHash, type Capability } from "../../src/core/plugins.ts";
 import type { OpInput } from "../../src/core/protocol.ts";
 import worker from "../../src/worker/index.ts";
@@ -114,15 +114,15 @@ describe("a draft is its author's own copy", () => {
     expect(await outcome(mine, { type: "note.read", id: shared })).toBe("forbidden: Deep Keys isn't permitted to note.read");
   });
 
-  it("asking for what no manifest may ask is kept as text and never run, even were it marked as running", async () => {
+  it("asking for full trust, or under a name of the app's own, is kept as text and never run, even were it marked as running", async () => {
     const { ada, eve, shared } = await team();
     const id = await install(ada, [READ]);
     await grant(ada, id, "notes.read");
     const asks = manifest([READ, { name: "full-trust", reason: "To do anything." }]);
-    expect(await outcome(eve, { type: "draft.save", id, manifest: asks, code: "draft", running: true })).toMatch(/^invalid: /);
+    expect(await outcome(eve, { type: "draft.save", id, manifest: asks, code: "draft", running: true })).toBe(`invalid: ${DRAFT_ASKS_FULL_TRUST}`);
     await perform(env.DB, eve, { type: "draft.save", id, manifest: asks, code: "draft", running: false });
     await env.DB.prepare("UPDATE plugin_drafts SET running = 1 WHERE plugin_id = ?").bind(id).run();
-    expect(await outcome(pluginOf(eve, id, true), { type: "note.read", id: shared })).toBe(`forbidden: ${NO_DRAFT_RUNNING}`);
+    expect(await outcome(pluginOf(eve, id, true), { type: "note.read", id: shared })).toBe(`forbidden: ${DRAFT_ASKS_FULL_TRUST}`);
     // A name that is Common Ink's own is no manifest either, so a draft can't act under one.
     await perform(env.DB, eve, { type: "draft.save", id, manifest: manifest([READ], "Tabs and splits"), code: "draft", running: false });
     await env.DB.prepare("UPDATE plugin_drafts SET running = 1 WHERE plugin_id = ?").bind(id).run();

@@ -5,7 +5,7 @@ import { connectAgent } from "../../src/core/agents.ts";
 import { IN_TRASH, type Covering, type NoteState, type Trashed } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
 import { OWN_SANDBOXED, type OwnSandboxedId } from "../../src/core/ownPlugins.ts";
-import { opsAllowedBy, type Capability } from "../../src/core/plugins.ts";
+import { codeHash, opsAllowedBy, type Capability } from "../../src/core/plugins.ts";
 import { Op, OpError, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
 import { UPLOAD_IN_TRASH } from "../../src/core/uploads.ts";
 import { NOT_FOR_AGENTS } from "../../src/worker/mcp/tools.ts";
@@ -86,10 +86,15 @@ interface World {
  * told nothing of the workspace's plugins, and theirs is refused whatever it asks.
  */
 const DECLARED: readonly Capability[] = ["notes.read", "notes.write"];
+const FULL: readonly Capability[] = ["full-trust"];
 const PLUGINS = {
   "their plugin, permitted to read and write notes": { permitted: DECLARED, installed: true },
   "their plugin, permitted nothing": { permitted: [], installed: true },
   "their plugin, uninstalled after it was permitted to read and write notes": { permitted: DECLARED, installed: false },
+  "their plugin, granted full trust and turned on by them": { declares: FULL, permitted: FULL, installed: true, on: true },
+  "their plugin, granted full trust, which they have not turned on": { declares: FULL, permitted: FULL, installed: true },
+  "their plugin, asking for full trust that no admin granted, which they tried to turn on": { declares: FULL, permitted: [], installed: true, on: true },
+  "their plugin, granted full trust and turned on by them, whose code was changed after": { declares: FULL, permitted: FULL, installed: true, on: true, changed: true },
   "their own draft of the plugin permitted to read and write notes, asking to read notes and todos": { permitted: DECLARED, installed: true, draft: ["notes.read", "todos.read"] },
   "Common Ink's own Word count, run shut off, which declares reading notes": { permitted: ["notes.read"], installed: true, own: "word-count" },
   "Common Ink's own Quick timer, run shut off, which declares nothing": { permitted: [], installed: true, own: "quick-timer" },
@@ -99,11 +104,17 @@ const PLUGINS = {
  * `draft` is the actor's own copy of the plugin, running, and what its manifest asks for: some of
  * what the original was allowed, and something it was not. `own` is one of the plugins that come
  * with the app and run shut off: nobody installs it, `permitted` is what its manifest declares, and
- * a guest's app runs it too, as the guest.
+ * a guest's app runs it too, as the guest. `declares` is what an installed one asks for, when that
+ * isn't reading and writing notes. `on` is for a plugin that asks for full trust: the actor turning
+ * it on for themself, which is kept only when an admin granted it. `changed` is its code being
+ * replaced after that, which ends the grant and the turning on alike.
  */
 interface PluginRow {
+  declares?: readonly Capability[];
   permitted: readonly Capability[];
   installed: boolean;
+  on?: boolean;
+  changed?: boolean;
   draft?: readonly Capability[];
   own?: OwnSandboxedId;
 }
@@ -182,7 +193,7 @@ async function world(): Promise<World> {
       plugins[name] = row.own;
       continue;
     }
-    const manifest = manifestOf(DECLARED);
+    const manifest = manifestOf(row.declares ?? DECLARED);
     const made = await perform(env.DB, ada, { type: "plugin.install", manifest, code: "" });
     const { id } = made;
     const codeHash = made.plugins.find((p) => p.id === id)!.codeHash!;
@@ -370,7 +381,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   // An admin is let through to be told that an admin decides, and asks nothing.
   "plugin.request": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", capability: "notes.read" }) },
   "plugin.frame": { on: "workspace", who: MEMBERS, args: () => ({ id: "html" }) },
-  // A draft is each member's own. Each is asked of a plugin that isn't there.
+  // Turning a full-trust plugin on, and a draft, are each member's own. Each is asked of a plugin that isn't there.
+  "plugin.trust": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", on: false }) },
   "draft.list": { on: "workspace", who: MEMBERS, args: () => ({}) },
   "draft.read": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa" }) },
   "draft.save": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", manifest: "{}", code: "", running: false }) },
@@ -477,14 +489,25 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         const runs = plugin && plugin.installed && (role !== "guest" || (plugin.own !== undefined && !plugin.draft));
         // A guest keeps no draft: they are refused it as they are refused the plugin.
         if (plugin && runs && plugin.draft) await perform(env.DB, person, { type: "draft.save", id: actor.kind === "plugin" ? actor.pluginId : "", manifest: manifestOf(plugin.draft), code: "mine", running: true });
-        const permitted = plugin && opsAllowedBy(runs ? plugin.permitted.filter((capability) => !plugin.draft || plugin.draft.includes(capability)) : []);
-        const mayAsk = (type: OpType) => !permitted || permitted.has(type);
+        // A guest is refused it, as they are refused the plugin: turning one on is a member's. And a member is refused it for code no admin granted.
+        if (plugin?.on) {
+          const id = w.plugins[as as PluginName];
+          const turned = await ask(person, { type: "plugin.trust", id, on: true, codeHash: await codeHash("") });
+          expect(turned.outcome).toBe(role === "guest" ? "forbidden" : "done");
+          // Kept only when an admin granted the code: asked without that, it was refused for the grant and not for who asked.
+          if (role !== "guest") expect((await perform(env.DB, person, { type: "plugin.list" })).plugins.find((p) => p.id === id)!.fullTrust!.on).toBe(plugin.permitted === FULL);
+          if (plugin.changed) await perform(env.DB, w.actors["Ada, an admin"], { type: "plugin.install", manifest: manifestOf(FULL), code: "other", replaces: id });
+        }
+        /** A plugin with full trust that runs may ask what its member's agent may, as its member: everything that isn't the member's alone. */
+        const full = !!plugin && !!runs && plugin.permitted === FULL && !!plugin.on && !plugin.changed;
+        const permitted = plugin && !full && opsAllowedBy(runs && plugin.declares !== FULL ? plugin.permitted.filter((capability) => !plugin.draft || plugin.draft.includes(capability)) : []);
+        const mayAsk = (type: OpType) => (full ? NOT_FOR_AGENTS[type] === undefined : !permitted || permitted.has(type));
         // What is told as a number gives a note away as surely as its title: a folder's count, and an author's changes by day.
         if (mayAsk("folder.list")) {
           const { folders: listed } = await perform(env.DB, actor, { type: "folder.list" });
           const counted = (folder: FolderName) => NOTES.filter((note) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-" && STATE_OF[note] === "live").length;
           // A plugin is told of no upload, by a count either.
-          expect(listed.map((f) => f.uploadCount)).toEqual(listed.map((f) => (plugin ? 0 : f.noteCount)));
+          expect(listed.map((f) => f.uploadCount)).toEqual(listed.map((f) => (plugin && !full ? 0 : f.noteCount)));
           expect(Object.fromEntries(listed.map((f) => [f.name, f.noteCount]))).toEqual(Object.fromEntries(FOLDERS.filter((f) => folderLevelOf(name, f) !== "-").map((f) => [`${f}-folder`, counted(f)]).concat(role === "guest" || within ? [] : [["Unsorted", 0]])));
         }
 
@@ -634,7 +657,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         // A plugin is told of the notes when it may list them, and of the uploads never: no permission names an operation on one.
         const seen = NOTES.filter((note) => levelOf(name, note) !== "-");
         expect(seen.filter((note) => (mayAsk("note.list") && !said.includes(`Title-${note}`)) || (mayAsk("upload.list") && !said.includes(`File-${note}`)))).toEqual([]);
-        if (plugin) expect(NOTES.flatMap((note) => [w.uploads[note], `File-${note}`].filter((mark) => said.includes(mark)))).toEqual([]);
+        if (plugin && !full) expect(NOTES.flatMap((note) => [w.uploads[note], `File-${note}`].filter((mark) => said.includes(mark)))).toEqual([]);
         // And a plugin that may ask nothing was told nothing at all.
         if (permitted && !permitted.size) expect(answers).toEqual([]);
 

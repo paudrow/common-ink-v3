@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { ownSandboxed } from "../core/ownPlugins.ts";
-import type { InstalledPlugin, Manifest, PluginRecord } from "../core/plugins.ts";
+import { asksFullTrust, type InstalledPlugin, type Manifest, type PluginRecord } from "../core/plugins.ts";
 import type { IconName } from "./icons.tsx";
 import type { PluginState } from "./pluginHost.ts";
 
@@ -32,8 +32,15 @@ export interface Listed {
   own: Manifest | null;
 }
 
-/** What kind a plugin is, and for one that comes with the app where it runs: inside the app with everything the member has, or shut off from it with what its manifest declares. */
-export const kindLabel = (plugin: Pick<Listed, "kind" | "own">): string => (plugin.kind === "third-party" ? "Third-party" : plugin.own ? "Built-in, sandboxed" : "Built-in, full access");
+/**
+ * What kind a plugin is, and where it runs: for one that comes with the app, inside it with
+ * everything the member has or shut off from it with what its manifest declares. A workspace's is
+ * never called built-in, whatever it asks for: one that asks to run inside the app says so.
+ */
+export const kindLabel = (plugin: Pick<Listed, "kind" | "own" | "record">): string => (plugin.kind === "third-party" ? (asksTrust(plugin) ? "Third-party, full trust" : "Third-party") : plugin.own ? "Built-in, sandboxed" : "Built-in, full access");
+
+/** Whether a plugin is a workspace's that asks to run inside the app. Read from the record's manifest, which is what an admin is shown. */
+export const asksTrust = (plugin: Pick<Listed, "kind" | "record">): boolean => plugin.kind === "third-party" && plugin.record !== null && asksFullTrust(plugin.record.manifest);
 
 /**
  * Every plugin a member can turn on or off: the ones that come with the app, in their order, then

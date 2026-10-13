@@ -7431,3 +7431,78 @@ button.dash-row:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* Full trust: the one badge that says a workspace's plugin asks to run inside the app, why it isn't running, and the warning before it is turned on. */
+
+.badge[data-kind="third-party"][data-trust] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.trust-switch {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.trust-switch .error {
+  margin: 0;
+  max-width: 280px;
+  text-align: right;
+}
+
+.trust-reason {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.trust-dialog {
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 0;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.trust-dialog::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.trust-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.trust-dialog h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.trust-dialog ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.trust-dialog p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.trust-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}

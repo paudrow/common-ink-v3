@@ -16,7 +16,7 @@ import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Fold
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
-import { createInstaller } from "./pluginRuntime.ts";
+import { createInstaller, loadAgain } from "./pluginRuntime.ts";
 import { referredUploads } from "./referredUploads.ts";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, type Navigate, type Place } from "./router.ts";
@@ -24,7 +24,7 @@ import { documentOf } from "./settings.ts";
 import { Settings } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
-import { onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
+import { onFiled, performInSync, saveAll, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
 const FOCUS_KEY = "ink.focus";
@@ -218,10 +218,21 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const draftsNow = useRef(drafts);
   draftsNow.current = drafts;
   const reread = useRef(() => {});
-  const [installer] = useState(() => createInstaller({ workspaceId, record: () => recordNow.current, drafts: () => draftsNow.current, reread: () => reread.current() }));
+  const relist = useRef(() => {});
+  const [installer] = useState(() =>
+    createInstaller({
+      workspaceId,
+      record: () => recordNow.current,
+      drafts: () => draftsNow.current,
+      reread: () => reread.current(),
+      changed: () => relist.current(),
+      // Code that ran in the page is ended only by loading the app again. What is typed is sent first.
+      ended: () => loadAgain(saveAll),
+    }),
+  );
   const [host] = useState(() => {
     let created: Host;
-    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} />;
+    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} adminElsewhere={me.workspaces.some((w) => w.id !== workspaceId && w.role === "admin")} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
       id: "core",
@@ -333,6 +344,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       ),
     [workspaceId],
   );
+  relist.current = () => host.setInstalled(installer.list());
   useEffect(() => host.setInstalled(installer.list()), [host, installer, record, drafts]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   /** The page the address names: the one at exactly that address, or else the one whose path it is under. */

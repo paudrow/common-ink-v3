@@ -71,6 +71,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "plugin.permit": PLUGINS,
   "plugin.request": "A request is a member saying they want a plugin to have a permission, for an admin to decide. An agent that was talked into it could ask in its member's name for what the member never wanted. The member asks themself, on the Plugins page.",
   "plugin.frame": "A frame's token opens, once, the frame the app runs a plugin or an HTML embed in, in the member's own browser. An agent runs neither.",
+  "plugin.trust": "Turning a full-trust plugin on runs its code inside the member's own session, with everything the member can see and do. Each member decides that for themself, in the app, after reading what it means. An agent that was talked into it would hand its member's session to whoever wrote the plugin.",
   "draft.list": DRAFTS,
   "draft.read": DRAFTS,
   "draft.save": DRAFTS,

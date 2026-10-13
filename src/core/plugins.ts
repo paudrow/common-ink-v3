@@ -24,7 +24,21 @@ export const CAPABILITIES = {
   "todos.read": { title: "Read todos", detail: "The todos in the notes you can see.", ops: ["todo.list"] },
   "members.read": { title: "Read members' names", detail: "The names and roles of the workspace's members. Never their emails.", ops: ["member.list"] },
   network: { title: "Use the network", detail: "Load from and send to the sites it lists, and no other.", ops: [] },
+  /**
+   * Not a reach into the workspace but where the code runs: inside the app's page, handed the plugin
+   * host the app's own plugins are handed. It names no operation, because nothing in the page can be
+   * held to a list. What its member may do is the only limit there is.
+   */
+  "full-trust": {
+    title: "Full trust",
+    detail:
+      "Run inside Common Ink and not shut off from it. In the session of each member who turns it on it can see and do anything that member can: every note they can open, private ones included, their settings, and what they type. Granting it means this code can act as any member who turns it on, and as you if you turn it on.",
+    ops: [],
+  },
 } as const;
+
+/** The capability that asks to run in the app's page. */
+export const FULL_TRUST = "full-trust";
 
 export type Capability = keyof typeof CAPABILITIES;
 export const CAPABILITY_NAMES = Object.keys(CAPABILITIES) as [Capability, ...Capability[]];
@@ -213,6 +227,9 @@ export const Manifest = z
   .refine((manifest) => manifest.icon === undefined && manifest.views.every((view) => view.icon === undefined), "icon is for the plugins that come with Common Ink: a plugin a workspace installs is drawn under the plugin picture");
 export type Manifest = z.output<typeof Manifest>;
 
+/** Whether a manifest asks to run in the app's page. Then it runs there or not at all: none of it runs shut off. */
+export const asksFullTrust = (manifest: Pick<Manifest, "capabilities">): boolean => manifest.capabilities.some((c) => c.name === FULL_TRUST);
+
 /** The manifest written in `text`, or why it isn't one. `own` is for a copy of one of Common Ink's own plugins, which may keep its name. */
 export function readManifest(text: string, own = false): { manifest: Manifest } | { reason: string } {
   if (text.length > MAX_PLUGIN_MANIFEST) return { reason: `A manifest is at most ${MAX_PLUGIN_MANIFEST} characters` };
@@ -281,10 +298,27 @@ export interface InstalledPlugin {
   manifest: Manifest;
   /** The name of its code. Null for HTML embeds. */
   codeHash: string | null;
+  /** For a plugin that asks for full trust, what stands between it and running for whoever asked. Null for every other, and for an agent or a plugin that asks, who are told nothing of it. */
+  fullTrust: FullTrust | null;
   installedBy: string | null;
   installedAt: number | null;
   updatedAt: number | null;
   permissions: Permission[];
+}
+
+/**
+ * The two things a full-trust plugin runs by, as the one who asked is told of them. It runs in their
+ * session only while `grantedHash` is the name of the code it is now and `on` is true.
+ */
+export interface FullTrust {
+  /** The code an admin's grant that stands is of. Null when none stands: never granted, taken back, or ended by a change to the plugin. */
+  grantedHash: string | null;
+  /** True when a grant was ended by a change to the plugin, and nobody has decided since. */
+  changedSince: boolean;
+  /** Whether the one asking turned it on for themself, for the code it is now. */
+  on: boolean;
+  /** For an admin: every member who has it on for the code it is now. Null for anyone else. */
+  turnedOnBy: { name: string; at: number }[] | null;
 }
 
 /** A member's own copy of a plugin's source, as they are told of it without its code. */

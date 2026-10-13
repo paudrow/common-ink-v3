@@ -20,6 +20,8 @@ export interface PluginState {
   adds: Added | null;
   /** Whether it is one a workspace's admin installed, and not one that comes with Common Ink. */
   installed: boolean;
+  /** Whether it is a workspace's plugin running inside the app with full trust, for this member, now. */
+  inPage: boolean;
 }
 
 /** What one plugin has registered, read from the host's own tables and never from what the plugin says of itself. */
@@ -46,6 +48,13 @@ export interface Installed {
   origin?: "own" | "installed";
   /** For one of the app's own: the built-in plugin its contributions come after. Any other comes after them all. */
   after?: string;
+  /**
+   * Set for code that runs in the page: a workspace's plugin an admin granted full trust for exactly
+   * this code, which this member turned on. The app says so, of code it hashed itself, and only then
+   * is the plugin handed what the app's own plugins are. `perform` is how its operations reach the
+   * server: at the plugin's address, so each is the plugin's in History and is checked there again.
+   */
+  inPage?: { perform: Provided["perform"] };
 }
 
 /** Everything the plugins that are on have added, in the order of the plugins and then of their registering. */
@@ -209,6 +218,8 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
     const told = about(plugin);
     return told !== undefined && told.origin !== "own";
   };
+  /** Whether a plugin is handed what the app's own are: one of them, or code the app vouches was granted full trust and turned on. */
+  const trusts = (plugin: Plugin) => trusted.includes(plugin) || about(plugin)?.inPage !== undefined;
   const misnamed = (plugin: Plugin) => (theirs(plugin) ? takenName(plugin.name, ownNames) : null);
   const placeOf = (plugin: Plugin) => places.get(plugin.id)!;
   const commands = new Map<string, Owned<Command>>();
@@ -269,7 +280,8 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
 
   function hostFor(plugin: Plugin, index: number, mine: Set<Dispose>): PluginHost {
     const given = provide({ id: plugin.id, name: plugin.name });
-    const provided = trusted.includes(plugin) ? given : { ...given, ...withheld(plugin, given), uploads: noUploads(plugin) };
+    const reach = { ...given, perform: about(plugin)?.inPage?.perform ?? given.perform };
+    const provided = trusts(plugin) ? reach : { ...reach, ...withheld(plugin, given), uploads: noUploads(plugin) };
     const keep = (dispose: Dispose) => {
       mine.add(dispose);
       return dispose;
@@ -282,7 +294,7 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
       // This is the one way a plugin performs an operation of its own choosing, so it is where a plugin is refused.
       perform(op) {
         const { type } = op as OpInput;
-        const why = keptFromPerform(type) ?? (trusted.includes(plugin) ? null : ownOnly(type));
+        const why = keptFromPerform(type) ?? (trusts(plugin) ? null : ownOnly(type));
         return why ? Promise.reject(new Error(`${plugin.name} can't ${type}: ${why}`)) : provided.perform(op);
       },
       settings: {
@@ -546,6 +558,7 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
         required: required.includes(p.id),
         builtIn: cameWith.includes(p.id) || about(p)?.origin === "own",
         installed: theirs(p),
+        inPage: about(p)?.inPage !== undefined,
         error: errors.get(p.id) ?? misnamed(p),
         description: p.description ?? null,
         icon: p.icon ?? null,

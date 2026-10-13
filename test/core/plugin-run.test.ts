@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { Manifest, type DraftSummary, type InstalledPlugin, type Permission } from "../../src/core/plugins.ts";
-import { OWN_RECORDS, decideRun } from "../../src/web/pluginRun.ts";
+import { Manifest, type DraftSummary, type FullTrust, type InstalledPlugin, type Permission } from "../../src/core/plugins.ts";
+import { CHANGED_SINCE_GRANT, DRAFT_FULL_TRUST, NOT_GRANTED, NOT_TURNED_ON, OWN_RECORDS, decideRun, whyNotTrusted } from "../../src/web/pluginRun.ts";
 
 const HASH = "a".repeat(64);
 const OTHER = "b".repeat(64);
 const permission = (capability: Permission["capability"], state: Permission["state"], origins: string[] = []): Permission => ({ capability, reason: "Because", origins, state, locked: false, decidedBy: null, voided: false, requests: [] });
-const plugin = (capabilities: Permission[]): InstalledPlugin => ({
+const plugin = (capabilities: Permission[], fullTrust: FullTrust | null = null): InstalledPlugin => ({
   id: "plugin000001",
   thirdParty: true,
   manifest: Manifest.parse({ name: "Tally", capabilities: capabilities.map((p) => ({ name: p.capability, reason: p.reason, ...(p.capability === "network" && { origins: p.origins }) })) }),
   codeHash: HASH,
+  fullTrust,
   installedBy: "Ada",
   installedAt: 1,
   updatedAt: 1,
@@ -45,8 +46,49 @@ describe("what an installed plugin runs as", () => {
   it("runs nothing of a draft whose manifest isn't one, the original included, and says why", () => {
     const tally = plugin([permission("notes.read", "allowed")]);
     expect(decideRun(tally, draft([], { manifest: "{ not json" }))).toEqual({ as: "refused", plugin: tally, why: "Your draft's manifest can't be read, so it isn't running: The manifest isn't JSON" });
-    expect(decideRun(tally, draft([asks("full-trust")]))).toMatchObject({ as: "refused", plugin: tally });
+    expect(decideRun(tally, draft([asks("full-trust")]))).toEqual({ as: "refused", plugin: tally, why: DRAFT_FULL_TRUST });
     expect(decideRun(tally, draft([], { manifest: JSON.stringify({ name: "Tabs and splits" }) }))).toMatchObject({ as: "refused", plugin: tally });
+  });
+});
+
+describe("what a plugin that asks for full trust runs as", () => {
+  const trust = (more: Partial<FullTrust> = {}): FullTrust => ({ grantedHash: HASH, changedSince: false, on: true, turnedOnBy: null, ...more });
+  const deep = (fullTrust: FullTrust | null, more: Permission[] = []) => plugin([permission("full-trust", fullTrust?.grantedHash ? "allowed" : "off"), ...more], fullTrust);
+
+  it("is in the page only with an admin's grant of the code it is now and the member's own turning it on", () => {
+    expect(decideRun(deep(trust()), undefined)).toEqual({ as: "full-trust", plugin: deep(trust()), grantedHash: HASH });
+    expect(whyNotTrusted(deep(trust()))).toBeNull();
+  });
+
+  it("is nowhere otherwise, with one line that says which of the two is missing, and none of it runs shut off instead", () => {
+    const cases: [FullTrust | null, string][] = [
+      [trust({ grantedHash: null, on: false }), NOT_GRANTED],
+      [trust({ grantedHash: null, on: true }), NOT_GRANTED],
+      [trust({ grantedHash: null, changedSince: true, on: false }), CHANGED_SINCE_GRANT],
+      [trust({ on: false }), NOT_TURNED_ON],
+      // A grant of other code than the record says the plugin is, whatever else the record says.
+      [trust({ grantedHash: OTHER }), NOT_GRANTED],
+      // A record that says nothing of full trust for a plugin that asks for it, as an agent's would.
+      [null, NOT_GRANTED],
+    ];
+    for (const [state, why] of cases) {
+      const asking = deep(state, [permission("notes.read", "allowed")]);
+      expect(decideRun(asking, undefined), why).toEqual({ as: "refused", plugin: asking, why });
+      expect(whyNotTrusted(asking)).toBe(why);
+    }
+    expect(whyNotTrusted(plugin([permission("notes.read", "allowed")]))).toBeNull();
+  });
+
+  it("never runs a draft that asks for it, of a plugin that has it or of one that doesn't, and runs a draft that doesn't ask shut off without it", () => {
+    const granted = deep(trust(), [permission("notes.read", "allowed")]);
+    for (const original of [granted, plugin([permission("notes.read", "allowed")])]) {
+      expect(decideRun(original, draft([asks("notes.read"), asks("full-trust")]))).toEqual({ as: "refused", plugin: original, why: DRAFT_FULL_TRUST });
+    }
+    const mine = decideRun(granted, draft([asks("notes.read")]));
+    expect(mine).toMatchObject({ as: "draft", plugin: { fullTrust: null } });
+    expect(allowedIn(mine)).toEqual([["notes.read", []]]);
+    // And one that isn't running leaves the original as it is.
+    expect(decideRun(granted, draft([asks("full-trust")], { running: false })).as).toBe("full-trust");
   });
 });
 

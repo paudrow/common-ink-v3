@@ -5,7 +5,8 @@ import { chordFor, chordLabel } from "./keybindings.ts";
 import type { Slots } from "./plugin-api.ts";
 import { INSTALLED_EMBED, type Added, type Contributions, type Host } from "./pluginHost.ts";
 import { InstallForm } from "./PluginInstall.tsx";
-import { PLUGINS_PATH, kindLabel, within, type Listed } from "./pluginList.ts";
+import { PLUGINS_PATH, asksTrust, kindLabel, within, type Listed } from "./pluginList.ts";
+import { FullTrustLead, FullTrustReason, FullTrustSwitch } from "./PluginTrust.tsx";
 import { PermissionRow, sitesIn, useRecordChanges, type RecordChanges } from "./PluginPermissions.tsx";
 import { PluginSource } from "./PluginSource.tsx";
 import { SettingRow } from "./SettingRow.tsx";
@@ -13,6 +14,8 @@ import { statusLabel, type SettingsStore } from "./settingsStore.ts";
 
 export interface PluginsProps {
   host: Host;
+  /** Whether the member is an admin of a workspace other than this one, which the warning before full trust says the reach of. */
+  adminElsewhere: boolean;
   /** The member's settings as they are kept, for whether they have been read yet. */
   store: SettingsStore;
   workspaceId: string;
@@ -74,13 +77,15 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  * options, which are changed here as they are in Settings, its source to read, and its switch. For a third-party plugin
  * an admin decides its permissions here, and updates and uninstalls it.
  */
-export function PluginDetails({ plugin, contributed, host, store, workspaceId, personId, mac, record, onRecord, drafts, onDrafts, go }: Props) {
+export function PluginDetails({ plugin, contributed, host, store, workspaceId, personId, adminElsewhere, mac, record, onRecord, drafts, onDrafts, go }: Props) {
   const changes = useRecordChanges(workspaceId, onRecord);
   const [updating, setUpdating] = useState(false);
   const [removing, setRemoving] = useState(false);
   const { id, name, state } = plugin;
   const admin = record?.canManage ?? false;
   const theirs = plugin.kind === "third-party" ? plugin.record : null;
+  /** A workspace's plugin that asks to run inside the app, which is turned on with a warning and not by the switch every other has. */
+  const trusting = asksTrust(plugin) ? theirs : null;
   const adds = theirs ? declaredBy(theirs) : (state?.adds ?? null);
   const { settings } = contributed;
   const options = settings.declared.filter((d) => d.group.id === id && !d.switch);
@@ -102,7 +107,7 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
           <h1>{name}</h1>
           {(theirs || state?.builtIn) && (
             <p className="plugin-meta">
-              <span className="badge" data-kind={plugin.kind}>
+              <span className="badge" data-kind={plugin.kind} data-trust={asksTrust(plugin) || undefined}>
                 {kindLabel(plugin)}
               </span>
               {drafts.some((draft) => draft.pluginId === id && draft.running) && (
@@ -121,12 +126,17 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
             </p>
           )}
         </div>
-        <label className="plugin-switch">
-          <span>{state?.enabled ? "On" : "Off"}</span>
-          <input type="checkbox" className="switch" aria-label={name} checked={state?.enabled ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
-        </label>
+        {trusting ? (
+          <FullTrustSwitch plugin={trusting} host={host} workspaceId={workspaceId} enabled={state?.enabled ?? false} admin={admin} adminElsewhere={adminElsewhere} onRecord={onRecord} />
+        ) : (
+          <label className="plugin-switch">
+            <span>{state?.enabled ? "On" : "Off"}</span>
+            <input type="checkbox" className="switch" aria-label={name} checked={state?.enabled ?? false} disabled={!state} onChange={(e) => host.setEnabled(id, e.target.checked)} />
+          </label>
+        )}
       </header>
       {plugin.description && <p className="plugin-lead">{plugin.description}</p>}
+      {trusting && <FullTrustReason plugin={trusting} />}
       {state?.error && (
         <p role="alert" className="error">
           {theirs ? state.error : `Failed: ${state.error}`}
@@ -177,7 +187,7 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
       <Section title="Permissions">
         {theirs ? (
           <>
-            <p className="soon">It runs shut off from the app, and does only what is allowed here. An admin decides each.</p>
+            {trusting ? <FullTrustLead plugin={trusting} /> : <p className="soon">It runs shut off from the app, and does only what is allowed here. An admin decides each.</p>}
             {theirs.permissions.length === 0 ? (
               <p className="permission-detail">It asks for nothing: it can't read or change anything in the workspace.</p>
             ) : (

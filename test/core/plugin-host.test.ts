@@ -154,7 +154,7 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, installed: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, installed: false, inPage: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
   });
 
   it("says which plugins came with the app, and no others", () => {
@@ -1145,6 +1145,41 @@ describe("the plugins a workspace installed, which change while the app runs", (
     expect(errorOf("aaaaaaaaaaaa")).toBeNull();
     expect(host.contributions().embeds.map((e) => e.name)).toEqual(["x-timer"]);
     expect(errorOf("reaching")).toBe("Only an installed plugin's embed has a name that starts with x-, and this one is x-counter");
+  });
+
+  it("hands a workspace's plugin what the app's own are only when the app's runtime says it runs in the page, and never by anything the plugin says of itself", async () => {
+    const hosts = new Map<string, PluginHost>();
+    const { host, performed } = hostWith([], { settings: { ...on("aaaaaaaaaaaa"), ...on("bbbbbbbbbbbb") } });
+    host.settingsChanged({ ...on("aaaaaaaaaaaa"), ...on("bbbbbbbbbbbb") });
+    const atItsAddress: OpInput[] = [];
+    const claims = { inPage: { perform: async () => ({}) }, runs: "full-trust", origin: "own", trusted: true };
+    host.setInstalled([
+      { version: "1", plugin: { id: "aaaaaaaaaaaa", name: "Deep", enabledByDefault: false, activate: (h) => void hosts.set("deep", h) }, inPage: { perform: async (op) => (atItsAddress.push(op as OpInput), {}) as never } },
+      { version: "1", plugin: { id: "bbbbbbbbbbbb", name: "Pretender", enabledByDefault: false, ...claims, activate: (h: PluginHost) => void hosts.set("pretender", h) } as never },
+    ]);
+    expect(host.contributions().plugins.map((p) => [p.id, p.installed, p.builtIn, p.inPage])).toEqual([
+      ["aaaaaaaaaaaa", true, false, true],
+      ["bbbbbbbbbbbb", true, false, false],
+    ]);
+    const deep = hosts.get("deep")!;
+    const pretender = hosts.get("pretender")!;
+    // The one in the page performs at its own address, uploads and the record included, and is handed the members, sharing and agents the app's own are.
+    await deep.perform({ type: "upload.list" } as never);
+    await deep.perform({ type: "plugin.list" });
+    expect(atItsAddress.map((op) => op.type)).toEqual(["upload.list", "plugin.list"]);
+    await expect(deep.members.invite("grace@example.com", "editor")).resolves.toEqual({});
+    expect(deep.uploads.address("u1")).toBe("/files/u1");
+    expect(performed, "nothing of its own choosing went as the member's own").toEqual([]);
+    // What is every plugin's to be refused, it is refused too, and whose it is said to be doesn't change.
+    await expect(deep.perform({ type: "settings.read" } as never)).rejects.toThrow("can't read or change the member's settings");
+    await expect(deep.perform({ type: "plugin.permit", id: "aaaaaaaaaaaa", capability: "full-trust", allowed: true } as never)).rejects.toThrow("is decided on the Plugins page");
+    expect(() => deep.views.register("page", { id: "home", path: "/home", label: "Home", home: true, component: () => null })).toThrow("Only Common Ink's own plugins add the page shown at /");
+    expect(() => deep.embeds.register({ name: "timer", title: "Timer", component: () => null } as never)).toThrow("An installed plugin's embed has a name that starts with x-");
+    // One that only says so is handed what any workspace's plugin is.
+    await expect(pretender.members.invite("mallory@example.com", "admin")).rejects.toThrow("Pretender isn't given host.members.invite");
+    await expect(pretender.perform({ type: "upload.list" } as never)).rejects.toThrow("only by Common Ink's own plugins");
+    expect(pretender.uploads.address("u1")).toBe("about:blank");
+    expect(performed).toEqual([]);
   });
 
   it("refuses an installed plugin the record of plugins whole, and every plugin the operations that change it", async () => {
