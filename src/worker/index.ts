@@ -1,6 +1,6 @@
 import { whoAmI } from "../core/accounts.ts";
 import { perform } from "../core/operations.ts";
-import { OpError, type OpErrorCode } from "../core/protocol.ts";
+import { BROKE, OpError, type OpErrorCode } from "../core/protocol.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
@@ -39,6 +39,16 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   return json({ error: "not_found" }, 404);
 }
 
+/** A fault that is no request's doing is logged, and answered in the shape its client reads: a bare 500 is a page of HTML to a client that asked for JSON. */
+async function answered(what: string, answer: () => Promise<Response>, broke: () => Response): Promise<Response> {
+  try {
+    return await answer();
+  } catch (err) {
+    console.error(`${what} broke`, err);
+    return broke();
+  }
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -46,9 +56,10 @@ export default {
     if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
     if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
     if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
-    if (url.pathname === "/mcp") return handleMcp(req, env);
-    if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return handleAgentsApi(req, env, url);
-    if (url.pathname.startsWith("/api/")) return handleApi(req, env, url);
+    if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
+    const broke = () => json({ error: "unknown", message: BROKE }, 500);
+    if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(url.pathname, () => handleAgentsApi(req, env, url), broke);
+    if (url.pathname.startsWith("/api/")) return answered(url.pathname, () => handleApi(req, env, url), broke);
     return env.ASSETS.fetch(req);
   },
 } satisfies ExportedHandler<Env>;

@@ -58,6 +58,9 @@ Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from C
 
 export class UsageError extends Error {}
 
+/** The server couldn't be reached or didn't do it, which no other way of asking would change. */
+class Failed extends Error {}
+
 /** Flags that take no value. */
 const SWITCHES = new Set(["--preview"]);
 
@@ -310,14 +313,23 @@ export async function run(argv: string[], io: Io): Promise<number> {
 
     const base = (io.env.INK_URL ?? "https://commonink.app").replace(/\/+$/, "");
     const call = async (name: string, given: Record<string, unknown>): Promise<{ answer: string; failed: boolean }> => {
-      const res = await io.fetch(`${base}/mcp`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { ...given, ...workspace } } }),
-      });
+      const res = await io
+        .fetch(`${base}/mcp`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { ...given, ...workspace } } }),
+        })
+        .catch((err: unknown) => {
+          throw new Failed(`Couldn't reach ${base}: ${err instanceof Error ? err.message : String(err)}`);
+        });
       if (res.status === 401) throw new UsageError("Common Ink doesn't know that token: it was mistyped or the agent was disconnected");
-      const body = (await res.json()) as { result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { message: string } };
-      if (body.error) throw new UsageError(body.error.message);
+      type Answer = { result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { code?: number; message?: string } | string; message?: string };
+      const body = await (res.json() as Promise<Answer | null>).catch(() => {
+        throw new Failed(`${base} answered ${res.status}${res.statusText ? ` ${res.statusText}` : ""}, and not with JSON`);
+      });
+      // What isn't a JSON-RPC answer, such as a body too large, says what was wrong as a word and sometimes a sentence.
+      if (typeof body?.error === "string" || !body || (!res.ok && !body.error)) throw new Failed(`${base} answered ${res.status}: ${body?.message ?? (typeof body?.error === "string" ? body.error : res.statusText)}`);
+      if (body.error) throw new (body.error.code === -32603 ? Failed : UsageError)(body.error.message ?? "Common Ink refused that, and didn't say why");
       return { answer: (body.result?.content ?? []).map((c) => c.text).join("\n"), failed: body.result?.isError === true };
     };
 
@@ -358,6 +370,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (err instanceof UsageError) {
       io.out(`ink: ${err.message}`);
       return 2;
+    }
+    if (err instanceof Failed) {
+      io.out(`ink: ${err.message}`);
+      return 1;
     }
     throw err;
   }

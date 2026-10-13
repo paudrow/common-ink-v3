@@ -501,6 +501,9 @@ export interface Me {
 
 export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict";
 
+/** What a client is told of a fault that is no request's doing. The fault's own words stay in the server's log: they can name tables and rows. */
+export const BROKE = "Common Ink broke while doing that. Nothing says it was done: try again";
+
 export class OpError extends Error {
   constructor(
     readonly code: OpErrorCode,
