@@ -52,7 +52,7 @@ _Avoid_: Folder, tag
 A note for one calendar date, belonging to one member. Its heading is that date in that member's timezone. Which member it belongs to is stored outside the note. The folder comes from that member's settings, and the default is Daily. Changing that setting leaves daily notes already created where they are. An agent files a completion on the connecting member's daily note.
 
 **Kanban board**:
-A block embed whose body is markdown: each heading is a column and each list item under it is a card. Anything else in the body is kept and not shown. A column's colour is written at the end of its heading, `## Doing {.blue}`. The cursor goes into a board from the lines around it, and its cards are moved through and moved with the keyboard.
+A block embed whose body is markdown: each heading is a column and each list item under it is a card. Anything else in the body is kept and not shown. A column's colour is written at the end of its heading, `## Doing {.blue}`. The cursor goes into a board's markdown from the lines around it, and the markdown is shown above the board while the cursor is in it. Cards are dragged on the board, and a press on one puts the cursor on its line.
 
 **Kanban card**:
 A list item inside a kanban block in a note. Moving it on the board moves its lines in the note, as a change by the member who moved it.
@@ -193,12 +193,21 @@ An author that is not a person. A member connects it. It acts with that member's
 _Avoid_: Bot
 
 **History**:
-The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as the notes that changed, each with the lines its changes added and removed, then a note's changes, then one change's diff. The diff of the open note and the workspace history are this same record.
+The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as a list of changes, by time or by note, beside what the selected ones did. The history of the open note, of a folder, and of the workspace are this same record.
 _Avoid_: Log, timeline, versions
 
 **Revert**:
 A new change that takes the effect of earlier changes out of a note and keeps every other change. Reverting a note to a revision reverts every change after it. A revert is a change like any other, so reverting it has the changes it reverted stand again, and that is the only way to have them again.
 _Avoid_: Restore, rollback, put back, reapply, take back out
+
+**Selection**:
+The changes picked in History, of one note or of many, to read together and to revert together. Reverting a selection makes one revert in each note it has changes of. A selected change that was already reverted is left as it is, and one selected together with the revert that reverted it stays reverted while that revert goes: the note is as if neither had been made.
+
+**Run**:
+A note's selected changes that follow one another, read as one diff: from the note before the first of them to the note after the last. A change left out between two selected ones ends a run, and the next run says how many were skipped.
+
+**Sitting**:
+One author's edits to one note that follow one another less than ten minutes apart. History lists a sitting as one row, which is selected and reverted as a whole.
 
 **Revert preview**:
 What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Every revert in the app is shown as one first, an author's changes note by note. Anyone who can read the note's history can ask for one.
@@ -246,10 +255,10 @@ A view with its own address, such as History or Agents, opened in a tab of the e
 _Avoid_: Mode, screen
 
 **Embed**:
-Content a plugin draws inside a note where the note says `::name{config}`, such as a timer or HTML. It is handed what the note says of it and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Everything it knows is in the note, so it can rewrite its own config and body, which is a change by the member who was using it. A timer or stopwatch keeps when it started there, so it runs the same for everyone reading the note. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written. An inline embed is shown as written while the cursor is on it. One whose drawing is doing something, as a running clock is, stays drawn then too, with its text after it, so the cursor never stops or resets it. A block embed's markdown is shown under it only when the member asks to edit it, from its options.
+Content a plugin draws inside a note where the note says `::name{config}`, such as a timer or HTML. It is handed what the note says of it and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Everything it knows is in the note, so it can rewrite its own config and body, which is a change by the member who was using it. A timer or stopwatch keeps when it started there, so it runs the same for everyone reading the note. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written. An embed is drawn in a card and stays drawn, the element it was, so the cursor never stops or resets it. While the cursor is on it, it is shown as written too, above its drawing: an inline embed's text in rows above its line, a block embed's markdown lines above its card.
 
 **Embed options**:
-What a member adjusts about an embed without reading its config, from the options button at the embed's top corner: a timer's length, a board's column colours. Setting one rewrites the embed in the note, as the member's change. "Edit as markdown" is always among them.
+What a member adjusts about an embed without reading its config, from the one options button in the embed's card, which opens them beneath the card: a timer's length, a board's column colours. Setting one rewrites the embed in the note, as the member's change. An embed with nothing to adjust has no button.
 
 **Block embed**:
 An embed written on lines of its own: `:::name{config}`, then its body as markdown, then `:::`. A kanban board is one.
@@ -265,13 +274,16 @@ A timer started from the command palette that belongs to no note. It shows in th
 Where an embed keeps what it shows that is more than a word in the line: a video, a post, an HTML embed's frame. Room is kept for it under the line that writes it, whether or not the cursor is on that line, and what fills the room is drawn once and left alone while the rest of the note is written. The room's size is read from the note alone.
 
 **Media embed**:
-Something from another site shown below the line that names it: a YouTube video, or a post on X or Bluesky. It is written as its web address alone on a line, with no syntax of its own, and the line stays the link it is. Room for it and a button are there as soon as the address is, and nothing is loaded from the other site until the member presses the button. An address inside a paragraph is only a link. `::youtube{address}`, `::social{address}` and `::link{address title}` are how notes used to write these: a note that has one still shows it, and nothing offers or writes them.
+Something from another site shown below the line that names it: a YouTube video, or a post on X or Bluesky. It is written as its web address alone on a line, with no syntax of its own. A video is its picture and its title with a play button, and its player loads when play is pressed. A post is shown at once, in the app's theme. An address inside a paragraph is only a link.
+
+**Address line**:
+The line that holds a media embed's address. It is a caption's size and out of sight until the pointer is on it or on the media, or the cursor is on it, and it keeps its room either way.
 
 **HTML embed**:
 A block embed (`:::html{}`) whose body is HTML, run below the block when the member presses Run, in a frame with an origin of its own. It can't read the app, the member's session, or anything the browser or the server keeps, can't fetch or send anything, and can't send its frame anywhere. The one way out it has is a WebRTC connection, which browsers give no way to refuse.
 
 **Run**:
-What a member does to start what a frame holds: a video, a post, an HTML embed. Nothing in a frame runs because a note was opened, and an embed that has changed since it was run asks again.
+What a member does to start an HTML embed. Its HTML runs nothing because a note was opened, and one that has changed since it was run asks again.
 
 **Embed menu**:
 The list of embeds that opens at the cursor when a member types `/` at the start of a line or after a space. Typing filters it, and picking one writes that embed into the note.

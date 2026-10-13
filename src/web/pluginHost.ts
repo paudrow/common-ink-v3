@@ -1,5 +1,5 @@
 import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
-import type { App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
+import type { AddressEmbed, App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
 export interface PluginState {
@@ -23,7 +23,8 @@ export interface PluginState {
 export interface Added {
   commands: readonly { id: string; title: string }[];
   views: readonly { slot: keyof Slots; id: string; label: string | null }[];
-  embeds: readonly { name: string; title: string; block: boolean }[];
+  /** `address` is on one a note writes as a web address alone on a line, and not as `::name{}`. */
+  embeds: readonly { name: string; title: string; block: boolean; address?: true }[];
   completions: readonly { id: string; trigger: string }[];
   editorExtensions: readonly string[];
 }
@@ -35,7 +36,7 @@ export interface Contributions {
   keybindings: Readonly<Record<string, string>>;
   settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
-  embeds: readonly Embed[];
+  embeds: readonly (Embed | AddressEmbed)[];
   completions: readonly Completion[];
   editorExtensions: readonly EditorExtension[];
   plugins: readonly PluginState[];
@@ -113,7 +114,7 @@ const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.pl
 
 export function createPluginHost({ plugins, required = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
-  const embeds = new Map<string, Owned<Embed>>();
+  const embeds = new Map<string, Owned<Embed | AddressEmbed>>();
   const completions = new Map<string, Owned<Completion>>();
   const editorExtensions = new Map<string, Owned<EditorExtension>>();
   const views = new Map<keyof Slots, Map<string, Owned<Slots[keyof Slots]>>>(SLOTS.map((slot) => [slot, new Map()]));
@@ -225,7 +226,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
         },
         list: () =>
           contributions()
-            .embeds.filter((e) => e.menu !== false)
+            .embeds.filter((e): e is Embed => !("claims" in e))
             .map(({ name, title, block, starts }) => ({ name, title, block, starts })),
       },
       completions: {
@@ -369,7 +370,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
     return {
       commands: mine(commands.values()).map(({ id, title }) => ({ id, title })),
       views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: "label" in view ? view.label : null }))),
-      embeds: mine(embeds.values()).map(({ name, title, block }) => ({ name, title, block: block ?? false })),
+      embeds: mine(embeds.values()).map((e) => ("claims" in e ? { name: e.name, title: e.title, block: false, address: true as const } : { name: e.name, title: e.title, block: e.block ?? false })),
       completions: mine(completions.values()).map(({ id, trigger }) => ({ id, trigger })),
       editorExtensions: mine(editorExtensions.values()).map((extension) => extension.id),
     };

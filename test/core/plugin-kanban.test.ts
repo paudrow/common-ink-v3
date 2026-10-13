@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCard, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard } from "../../src/web/plugins/kanban/board.ts";
+import { addCard, cardEnd, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard } from "../../src/web/plugins/kanban/board.ts";
 
 const titles = (body: string) => parseBoard(body).columns.map((c) => [c.title, cardsOf(c).map((card) => card.text)]);
 const moved = (body: string, from: [number, number], to: [number, number]) => serializeBoard(moveCard(parseBoard(body), { column: from[0], card: from[1] }, { column: to[0], card: to[1] }));
@@ -168,5 +168,21 @@ describe("a column's colour", () => {
     const body = "## To do {.red}\n- write\n\n## Done {.green}\n";
     expect(moved(body, [0, 0], [1, 0])).toBe("## To do {.red}\n\n## Done {.green}\n- write\n");
     expect(serializeBoard(addCard(parseBoard(body), 1, "ship"))).toBe("## To do {.red}\n- write\n\n## Done {.green}\n- ship\n");
+  });
+});
+
+describe("where a card is written", () => {
+  const body = "intro\n## To do\n\n- write\n  - the intro\n- review\n\n## Done\n- plan\n";
+  const board = parseBoard(body);
+
+  it("is the end of the card's own line, counted from the start of the board's markdown", () => {
+    expect(body.slice(0, cardEnd(board, { column: 0, card: 0 })!)).toBe("intro\n## To do\n\n- write");
+    expect(body.slice(0, cardEnd(board, { column: 0, card: 1 })!)).toBe("intro\n## To do\n\n- write\n  - the intro\n- review");
+    expect(body.slice(0, cardEnd(board, { column: 1, card: 0 })!)).toBe("intro\n## To do\n\n- write\n  - the intro\n- review\n\n## Done\n- plan");
+  });
+
+  it("is nowhere for a place with no card", () => {
+    expect(cardEnd(board, { column: 1, card: 1 })).toBeNull();
+    expect(cardEnd(board, { column: 2, card: 0 })).toBeNull();
   });
 });

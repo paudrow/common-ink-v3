@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, ago, useNow, type Agent, type AgentEdit, type ExpiresIn, type PluginHost, type WorkspaceSummary } from "../../plugin-api.ts";
-import { RevertAuthor } from "../lib/RevertAuthor.tsx";
+import { asksOfAuthor, useReverts } from "../lib/RevertDialog.tsx";
 
 const DAY_MS = 86_400_000;
 const EXPIRIES = [30, DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS];
@@ -63,8 +63,8 @@ interface Props {
   /** Changes when the workspace's notes do, so which agents have changed one is read again. */
   version: number;
   /** Left out when there is nowhere to show them. */
-  onShowChanges?: (agentId: string) => void;
-  /** Called once an agent's changes were reverted, so the notes are read again. */
+  onShowChanges?: (agent: Agent) => void;
+  /** Called once an agent's changes were reverted, or that was undone, so the notes are read again. */
   onReverted: () => void;
 }
 
@@ -130,6 +130,9 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canEdit = workspace.role !== "viewer";
+  /** The agent whose changes are being read for a revert. */
+  const [reading, setReading] = useState<string | null>(null);
+  const reverts = useReverts({ host, version, found: "in History", onChanged: onReverted });
 
   const load = useCallback(() => host.agents.list().then(setAgents, (err: Error) => setError(err.message)), [host]);
   useEffect(() => {
@@ -187,6 +190,24 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
     }
   };
 
+  const revert = async (agent: Agent) => {
+    // Not `disabled` meanwhile, so the button keeps the focus the dialog gives back when it closes.
+    if (reading !== null) return;
+    setError(null);
+    setReading(agent.id);
+    try {
+      const { asks, cut } = await asksOfAuthor(host, { kind: "agent", id: agent.id });
+      const beyond = [
+        cut && `${agent.name} changed more notes than one revert covers: these are the ones it changed last. History reaches the others.`,
+        agent.workspaceId === null && workspaces.length > 1 && `Your other workspaces aren't covered. Switch to each one to revert ${agent.name}'s changes there.`,
+      ].filter(Boolean);
+      reverts.ask(asks, beyond.join(" ") || undefined);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+    setReading(null);
+  };
+
   const reach = (agent: Agent) => (agent.workspaceId ? `only ${workspaces.find((w) => w.id === agent.workspaceId)?.name ?? "a workspace you have left"}` : "every workspace you're in");
   const ends = (agent: Agent) => {
     if (agent.revokedAt !== null) return `disconnected ${ago(agent.revokedAt, now)}`;
@@ -210,20 +231,14 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
         {wrote.has(agent.id) ? (
           <>
             {onShowChanges && (
-              <button type="button" className="button small" onClick={() => onShowChanges(agent.id)}>
+              <button type="button" className="button small" onClick={() => onShowChanges(agent)}>
                 See its changes
               </button>
             )}
             {canEdit && (
-              <RevertAuthor
-                host={host}
-                author={{ kind: "agent", id: agent.id }}
-                name={agent.name}
-                where={`in ${workspace.name}`}
-                version={version}
-                beyond={agent.workspaceId === null && workspaces.length > 1 ? `Your other workspaces aren't covered. Switch to each one to revert ${agent.name}'s changes there.` : undefined}
-                onReverted={onReverted}
-              />
+              <button type="button" className="button small" aria-disabled={reading !== null} onClick={() => void revert(agent)}>
+                Revert {agent.name}'s changes…
+              </button>
             )}
           </>
         ) : (
@@ -316,6 +331,7 @@ export function Agents({ host, workspace, workspaces, version, onShowChanges, on
           </ul>
         </>
       )}
+      {reverts.shown}
     </section>
   );
 }

@@ -7,8 +7,6 @@ export interface Options {
   fields: readonly EmbedField[];
   /** Sets a field. A string is why the value wasn't taken. */
   set(id: string, value: string): string | void;
-  /** Shows the embed as the note writes it, with the cursor in it. */
-  edit(): void;
 }
 
 const GAP = 4;
@@ -83,7 +81,7 @@ const shapeOf = (fields: readonly EmbedField[]) => JSON.stringify(fields.map((f)
  * given their values, so a field isn't taken from under the keyboard or the pointer when setting
  * another one changes the note.
  */
-function fill(panel: HTMLElement, options: Options, read: () => Options | null, close: () => void) {
+function fill(panel: HTMLElement, options: Options, read: () => Options | null) {
   const shape = shapeOf(options.fields);
   if (panel.dataset.shape !== shape) {
     panel.dataset.shape = shape;
@@ -96,16 +94,7 @@ function fill(panel: HTMLElement, options: Options, read: () => Options | null, 
       error.hidden = !why;
     };
     const set = (id: string, value: string) => said(read()?.set(id, value));
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "embed-option-edit";
-    edit.textContent = "Edit as markdown";
-    edit.addEventListener("click", () => {
-      const now = read();
-      close();
-      now?.edit();
-    });
-    panel.replaceChildren(...options.fields.map((field) => fieldOf(field, set)), error, edit);
+    panel.replaceChildren(...options.fields.map((field) => fieldOf(field, set)), error);
   }
   panel.setAttribute("aria-label", `Options for ${options.title}`);
   for (const field of options.fields) {
@@ -120,11 +109,12 @@ function fill(panel: HTMLElement, options: Options, read: () => Options | null, 
 }
 
 /**
- * Opens an embed's options under its options button, laid over the app so nothing in the note moves,
- * or closes them if they are open from that button. One is open at a time. It closes on Escape, on a
- * press outside it, and when `read` has nothing to give, as when the embed is gone.
+ * Opens an embed's options beneath `under`, the embed's card, from its left edge, laid over the app
+ * so nothing in the note moves, or closes them if they are open from `anchor`, the options button.
+ * One is open at a time. It closes on Escape, on a press outside it, and when `read` has nothing to
+ * give, as when the embed is gone or has no options left.
  */
-export function toggleOptions(anchor: HTMLElement, read: () => Options | null): void {
+export function toggleOptions(anchor: HTMLElement, under: HTMLElement, read: () => Options | null): void {
   const again = shown?.anchor === anchor;
   shown?.close();
   const options = again ? null : read();
@@ -135,12 +125,13 @@ export function toggleOptions(anchor: HTMLElement, read: () => Options | null): 
   panel.setAttribute("role", "dialog");
   const place = () => {
     if (!anchor.isConnected) return close();
-    const at = anchor.getBoundingClientRect();
     const { width, height } = panel.getBoundingClientRect();
-    const below = at.bottom + GAP;
-    const top = below + height > innerHeight - EDGE && at.top - GAP - height >= EDGE ? at.top - GAP - height : below;
-    panel.style.left = `${Math.max(EDGE, Math.min(at.right - width, innerWidth - EDGE - width))}px`;
-    panel.style.top = `${Math.max(EDGE, top)}px`;
+    const fits = (top: number) => top >= EDGE && top + height <= innerHeight - EDGE;
+    const [card, button] = [under.getBoundingClientRect(), anchor.getBoundingClientRect()];
+    // Beneath the card where that is in the window. A card taller than the window has its foot out of sight, and the options are then beneath their button.
+    const [at, top] = fits(card.bottom + GAP) ? [card.left, card.bottom + GAP] : [button.right - width, fits(button.bottom + GAP) ? button.bottom + GAP : button.top - GAP - height];
+    panel.style.left = `${Math.max(EDGE, Math.min(at, innerWidth - EDGE - width))}px`;
+    panel.style.top = `${Math.max(EDGE, Math.min(top, innerHeight - EDGE - height))}px`;
   };
   const undismiss = dismissOn(() => close(), () => [panel, anchor]);
   const close = () => {
@@ -158,19 +149,18 @@ export function toggleOptions(anchor: HTMLElement, read: () => Options | null): 
   };
   shown = { anchor, panel, read, close, place };
   anchor.setAttribute("aria-expanded", "true");
-  fill(panel, options, read, close);
+  fill(panel, options, read);
   place();
   addEventListener("scroll", place, true);
   addEventListener("resize", place);
   panel.querySelector<HTMLElement>("input, button")?.focus();
 }
 
-/** Shows what the note says now in the options open from `anchor`, if any are, and closes them if the embed has none left. */
-export function refreshOptions(anchor: HTMLElement): void {
+/** Shows `options`, which are what the note says now, in the options open from `anchor`, if any are, and closes them if the embed has none left. */
+export function refreshOptions(anchor: HTMLElement, options: Options | null): void {
   if (shown?.anchor !== anchor) return;
-  const options = shown.read();
-  if (!options) return shown.close();
-  fill(shown.panel, options, shown.read, shown.close);
+  if (!options || !options.fields.length) return shown.close();
+  fill(shown.panel, options, shown.read);
   shown.place();
 }
 

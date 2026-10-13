@@ -51,8 +51,8 @@ for (const settings of [{ "vim.enabled": true, "lineNumbers.enabled": true }, {}
     await page.keyboard.press("ControlOrMeta+c");
     await expect.poll(async () => (await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe("last line");
 
-    // What is drawn below a line is there as on a shared page: the video's room and its button, with nothing loaded.
-    await expect(reading.locator('.embed-below[data-embed="youtube"]').getByRole("button", { name: /Play video/ })).toBeVisible();
+    // What is drawn below a line is there as on a shared page: the video's picture and its play button, with its player not loaded.
+    await expect(reading.locator('.embed-below[data-embed="video"]').getByRole("button", { name: /Play video/ })).toBeVisible();
     expect(page.frames().filter((f) => /youtube/.test(f.url()))).toEqual([]);
 
     await expect.poll(() => text(page, note.id)).toBe(body);

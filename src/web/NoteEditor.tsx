@@ -12,7 +12,7 @@ import { noteHighlighting } from "./highlight.ts";
 import { readOnly } from "./readOnly.ts";
 import { TITLE_MARK } from "./titleMark.ts";
 import { openNote } from "./openNotes.ts";
-import type { Completion, EditorExtension, Embed } from "./plugin-api.ts";
+import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
@@ -56,7 +56,7 @@ interface Props {
   /** Whether the member can change the note. When they can't, nothing in the editor does: not typing, not an embed, not a plugin's keys. */
   canEdit: boolean;
   /** What plugins have registered to draw inside a note. */
-  embeds: readonly Embed[];
+  embeds: readonly (Embed | AddressEmbed)[];
   /** The lists plugins offer at the cursor, such as the embed menu. */
   completions: readonly Completion[];
   /** Called for a completion that threw while being asked what it offers. */

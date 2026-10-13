@@ -26,11 +26,15 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   folder-delete ID                    delete an empty folder
   history ID                          a note's changes and who made them
   diff ID --change N                  what one change did to its note, as a line diff
-  changed [--note ID,ID] [--author KIND:ID] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
+  changed [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
                                       the notes that changed, latest first, with the lines added and removed in each
-  changes [--note ID,ID] [--author KIND:ID] [--from TIME] [--to TIME] [--limit N] [--before NEXT] [--diffs false]
+  changes [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT] [--diffs false]
                                       changes across the workspace, newest first, with diffs
   authors                             everyone who has changed a note
+  diffs ID:N,N [ID:N,N ...]           what a selection of changes did, note by note: changes that follow one another as one diff
+  revert-many ID:N,N[@AT] [ID:N,N[@AT] ...] [--preview] [--resolve keep|back]
+                                      revert changes of several notes, each note as one new change. --preview writes nothing and
+                                      prints each note's revision: pass it back as @AT and a note changed since is skipped, not reverted
   label ID --revision N [--name NAME] name a revision, or take its name away without --name
   revert ID --revision N              put a note back to a revision, as a new change
   revert ID --changes N,N             revert chosen changes, as one new change; revert a revert to have its changes again
@@ -93,6 +97,14 @@ function choices(value: string): unknown {
     // Said below.
   }
   throw new UsageError('--resolve must be keep, back, or a JSON list with "keep", "back" or {"text": "..."} for each conflict');
+}
+
+/** One note's changes of a selection, written ID:N,N, with @AT for the revision its revert was previewed at. */
+function selected(value: string, resolve?: string): Record<string, unknown> {
+  const found = /^([^:@]+):([\d,]+)(?:@(\d+))?$/.exec(value);
+  if (!found) throw new UsageError(`${value} isn't a note's changes: write ID:N,N, or ID:N,N@AT`);
+  const at = found[3] === undefined ? {} : { at: Number(found[3]) };
+  return { noteId: found[1], revisions: integers("a change", found[2]!), ...at, ...(resolve !== undefined && found[3] !== undefined ? { choices: resolve } : {}) };
 }
 
 const time = (name: string, value: string): number => {
@@ -204,13 +216,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "changed":
         tool = "history_summary";
-        args = given({ noteIds: ["note", ids], authors: ["author", (_, value) => [authorRef(value)]], from: ["from", time], to: ["to", time], limit: ["limit", integer], before: ["before", json] });
+        args = given({ noteIds: ["note", ids], authors: ["author", (_, value) => [authorRef(value)]], by: ["by"], from: ["from", time], to: ["to", time], limit: ["limit", integer], before: ["before", json] });
         break;
       case "changes":
         tool = "history";
         args = given({
           noteIds: ["note", ids],
           authors: ["author", (_, value) => [authorRef(value)]],
+          by: ["by"],
           from: ["from", time],
           to: ["to", time],
           limit: ["limit", integer],
@@ -221,6 +234,19 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "authors":
         tool = "history_authors";
         break;
+      case "diffs":
+        if (!id) throw new UsageError("diffs needs a note's changes, as ID:N,N");
+        tool = "history_diff";
+        args = { changes: positional.map((value) => selected(value)) };
+        break;
+      case "revert-many": {
+        if (!id) throw new UsageError("revert-many needs a note's changes, as ID:N,N");
+        const resolve = flags.get("resolve");
+        if (resolve !== undefined && resolve !== "keep" && resolve !== "back") throw new UsageError("revert-many takes --resolve keep or --resolve back, for the notes given with @AT");
+        tool = flags.has("preview") ? "preview_reverts" : "revert_many";
+        args = { changes: positional.map((value) => selected(value, resolve)) };
+        break;
+      }
       case "label":
         if (!flags.has("revision")) throw new UsageError("label needs --revision");
         tool = "label_revision";
