@@ -1,7 +1,7 @@
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Extension, type Range, type Text } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
-import { drawnInView, lineTouched, writable } from "../lib/live.ts";
+import { drawnInView, touched, writable } from "../lib/live.ts";
 import { mathBlocksIn, type Formula } from "../math/syntax.ts";
 import { indent, itemAt, move, outdent, type Edit, type Item, type Lines } from "./outline.ts";
 
@@ -169,7 +169,7 @@ class Toggle extends WidgetType {
 /** The mark stays in the line and a dot is painted over it, so a bullet's text is where it is when the mark is shown. */
 const dot = Decoration.mark({ class: "bullet-dot" });
 
-/** A dot for each bullet's mark, except on the cursor's line, and a fold toggle beside each bullet with something under it. */
+/** A dot for each bullet's mark, except the mark the cursor is on, and a fold toggle beside each bullet with something under it. */
 const bullets = drawnInView((view) => {
   const { state } = view;
   const drawn: Range<Decoration>[] = [];
@@ -183,7 +183,7 @@ const bullets = drawnInView((view) => {
         const line = state.doc.lineAt(node.from);
         const item = bulletAt(state, line.number - 1);
         if (item && item.end - item.line > 1) drawn.push(Decoration.widget({ widget: new Toggle(isFolded.has(line.from)), side: -1 }).range(node.from));
-        if (node.node.parent?.parent?.name === "BulletList" && !lineTouched(state, node.from)) drawn.push(dot.range(node.from, node.to));
+        if (node.node.parent?.parent?.name === "BulletList" && !touched(state, node.from, node.to)) drawn.push(dot.range(node.from, node.to));
       },
     });
   }
