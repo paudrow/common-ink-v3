@@ -6,6 +6,9 @@ import { land, toward, type Move, type Side } from "./moving.ts";
  * marked `data-list`. Its rows are its tree items, options and menu items, or what is marked
  * `data-row`, or else its children. A region is the sidebar, the inspector, a side of a split, or
  * anything marked `data-region`.
+ *
+ * A list that takes focus itself keeps its own cursor and has its own keys for it, as History's
+ * does. Vim's keys go as far as that list and no further: its rows are the list's to move through.
  */
 const LIST = '[data-list], [role="tree"], [role="listbox"], [role="list"], [role="menu"], ul[aria-label], ol[aria-label], ul[aria-labelledby], ol[aria-labelledby]';
 const ROW = '[data-row], [role="treeitem"], [role="option"], [role^="menuitem"]';
@@ -25,6 +28,9 @@ const active = () => (document.activeElement instanceof HTMLElement ? document.a
 /** Whether a letter pressed here is typed, or chooses: a field, a select, or text that can be edited. */
 export const typing = (el: Element | null) =>
   el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLInputElement && !TEXTLESS.has(el.type)) || (el instanceof HTMLElement && el.isContentEditable);
+
+/** Whether the list takes focus itself, and so moves through its rows with keys of its own. */
+const ownKeys = (list: Element | null): list is HTMLElement => list instanceof HTMLElement && list.matches("[tabindex]") && list.tabIndex >= 0;
 
 const rowsOf = (list: Element) => {
   const marked = [...list.querySelectorAll<HTMLElement>(ROW)].filter((row) => row.closest(LIST) === list);
@@ -151,6 +157,8 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
   };
   const select = (row: HTMLElement | undefined) => {
     if (!row) return;
+    const list = row.closest(LIST);
+    if (ownKeys(list)) return list.focus();
     restOf(row).focus();
     row.scrollIntoView({ block: "nearest" });
   };
@@ -178,7 +186,7 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
 
   return {
     on: {
-      list: () => !drawn() && !typing(active()) && !!listNear(),
+      list: () => !drawn() && !typing(active()) && !ownKeys(active().closest(LIST)) && !!listNear(),
       row() {
         const list = drawn() ? null : active().closest(LIST);
         const row = list && !typing(active()) ? rowAt(list) : undefined;
