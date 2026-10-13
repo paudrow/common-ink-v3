@@ -44,7 +44,7 @@ describe("how a recurring todo is written", () => {
     const todo = parseTodo("- [ ] Water the plants due:2026-10-10 every:mon,thu done:2026-10-08x12 +Home")!;
     expect(todo.every).toMatchObject({ written: "mon,thu", rule: { kind: "weekdays", days: [1, 4] } });
     expect(todo.lastDone).toMatchObject({ on: "2026-10-08", times: 12 });
-    expect(todo.words).toBe("Water the plants");
+    expect(todo.words).toBe("Water the plants +Home");
     expect(parseTodo("- [ ] Stretch every:1d done:2026-10-08")!.lastDone).toMatchObject({ on: "2026-10-08", times: 1 });
   });
 
@@ -382,7 +382,7 @@ describe("checking off a recurring todo", () => {
     const { todos } = await perform(env.DB, ada, { type: "todo.list", noteId: note.id });
 
     expect(todos.map((t) => [t.words, t.every, t.lastDone, t.due])).toEqual([
-      ["Water the plants", "1w", { on: SUNDAY, times: 1 }, "2026-10-17"],
+      ["Water the plants +Home", "1w", { on: SUNDAY, times: 1 }, "2026-10-17"],
       ["Plain", null, null, null],
     ]);
   });

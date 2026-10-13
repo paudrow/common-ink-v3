@@ -4,7 +4,7 @@ A todo is a checkbox line in a note. There is no other record of it: the note's 
 
 ## How a todo is written
 
-    - [ ] !! Call the bank due:2026-10-14 +Home #money
+    - [ ] !! Call the bank due:2026-10-14 #money
 
 | Part | Written | Rule |
 | --- | --- | --- |
@@ -13,10 +13,9 @@ A todo is a checkbox line in a note. There is no other record of it: the note's 
 | Due date | `due:2026-10-14` | A real calendar date as `YYYY-MM-DD`. No time and no time zone. The first one on the line counts; a second is words. |
 | Recurrence | `every:2w` | One of the rules below. The first one that can be read counts. |
 | Last done | `done:2026-10-10x12` | The day a recurring todo was last checked off, and how many times it has been. With no `x12` it was once. Checking the todo off writes it. |
-| Project | `+Home` | A letter, then letters, digits, `_` and `-`. A todo can be in several. Matched ignoring case. |
 | Tag | `#money` | Letters, digits, `_`, `-` and `/`, with something besides digits, so `#12` is not a tag. It tags the whole note, on a todo's line as on any other. Matched ignoring case. |
 
-A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `C++`, `a+b`, `1 + 2` and `+1` are not projects, and `a#b` is not a tag. Text in inline code, in a link to a note (`[[…]]`), and in a link's address (`](…)`) is never a token.
+A token stands alone: it follows a space, and is followed by a space, the end of the line, or one of `.,;:!?)`. So `a#b` is not a tag. Text in inline code, in a link to a note (`[[…]]`), and in a link's address (`](…)`) is never a token.
 
 Where issue 1 was silent, the choices were made for text that is plain to read and to type, that parses one way, and that an agent can write without asking:
 
@@ -24,10 +23,18 @@ Where issue 1 was silent, the choices were made for text that is plain to read a
 | --- | --- | --- |
 | How is a due date written? | `due:YYYY-MM-DD` and nothing else. | Issue 1 says "`due:` followed by a date". One form sorts as text, means the same everywhere, and needs no locale. `due:tomorrow` would mean a different day each day it is read. |
 | Does a due date have a time? | No. | `CONTEXT.md`: "A due date is a calendar date". A time needs a zone, and a note has none. |
-| Can a todo be in several projects? | Yes. | Nothing says otherwise, and `+A +B` already reads that way. |
 | What is a todo line inside a quote, or with no list mark? | Not a todo. | It is not a task list item in GitHub-flavored markdown either, and the note list has never counted it. |
 | What does removing an option do to the line? | Takes the token and the one space before it. | The line reads as if the token had never been typed. |
-| Where does a new option go? | Importance right after the checkbox. A due date, a recurrence, a last-done mark or a project at the end of the line. | Importance is defined by its place. The others are easiest to find at the end. |
+| Where does a new option go? | Importance right after the checkbox. A due date, a recurrence or a last-done mark at the end of the line. | Importance is defined by its place. The others are easiest to find at the end. |
+
+## Tags and folders, and no projects
+
+A todo is grouped two ways, both of them the note's own. There is nothing else to learn:
+
+- **Tags.** The `#tags` of todos are the `#tags` of notes. A todo counts as tagged with the tags written on its own line and with every tag of its note, wherever in the note that tag is written. So `#work` in a note's title tags each todo in the note, and a list narrowed to `#work` shows them all. The Todos page shows a tag on a todo's card only where the todo's own line writes it. A todo listed for its note's tag has that tag beside its note's name instead, which says why it is there.
+- **Folders.** A todo is in the folder its note is in. `todo.list` takes `folderId` and lists the todos of that folder and of every folder under it.
+
+There are no projects. Todos once had a `+Name` token for one. It read like a tag, nothing said how it differed from one, and it was a third way to group beside the two a note already has, so it was taken out. A `+Home` already written on a todo stays in the note as it is, as words of the todo: nothing rewrites it, no chip is drawn for it, and nothing lists by it. To keep such a grouping, write it as a tag.
 
 `rewriteTodo(line, change)` makes a change to a line. It replaces the one token's own characters and leaves every other character of the line as it was, which `test/core/todos-line.test.ts` checks token by token.
 
@@ -77,11 +84,12 @@ The one place the server does work out a day is a completion with no day given. 
 
 ## The index
 
-Three tables hold what the Todos page lists, so that no note's text is read to list todos:
+Two tables hold what the Todos page lists, so that no note's text is read to list todos:
 
 - `todos`: one row for each todo, with its note, its line counted from 0, whether it is done, its importance, its due date, and the line as written.
-- `todo_projects`: one row for each project of each todo, as a key in lower case and the name as written.
-- `note_tags`: one row for each tag of each note, the same way. #21 lists notes by tag from here.
+- `note_tags`: one row for each tag of each note, as a key in lower case and the name as first written. #21 lists notes by tag from here.
+
+Migration `0034` drops the table `todo_projects`, which held the projects. The other two hold what they held, so nothing is made again for it.
 
 They are written in the same batch as every change to a note's text (`indexing` in `src/core/operations.ts`, beside `linking`): creating a note, a write, a revert, an undo, a redo, and reverting an author all go through `record`. So the index never says anything the text doesn't. A part that a change leaves the same is not rewritten.
 
@@ -100,7 +108,7 @@ The index mends itself. Each note carries `indexed`, which is 0 until its links 
 | `daily.open` | `daily_note` | `daily` | a member who can make notes, and their agent unless it is limited to folders |
 | `todos.rebuild` | `rebuild_todos` | `todos-rebuild` | admin |
 
-`todo.list` lists open todos, or done ones too with `includeCompleted`, from the notes the asker can see: open first, then the soonest due with undated ones last, then the most important. It narrows by `project`, by `tag` (the note's), by `dueFrom` and `dueTo` (both included), by `noDue`, by `importance` (the levels wanted), and by `noteId`. `todo.filters` gives the projects and tags there are to narrow by. Both carry `SEEN`: a todo in a note the asker can't see is not listed, not counted, and its project and tag names are not offered.
+`todo.list` lists open todos, or done ones too with `includeCompleted`, from the notes the asker can see: open first, then the soonest due with undated ones last, then the most important. It narrows by `folderId` (that folder and every folder under it), by `tag` (a tag of the todo's note, which a tag on the todo's own line is), by `dueFrom` and `dueTo` (both included), by `noDue`, by `importance` (the levels wanted), and by `noteId`. `todo.filters` gives the tags there are to narrow by, and `folder.list` the folders. Both carry `SEEN`: a todo in a note the asker can't see is not listed, not counted, and its tag names are not offered. The folder narrows inside that and never widens it: it is read by `loadFolder`, so a folder the asker can't see, an agent's folder limit included, is "No such folder" as one that was never there is, and a private note inside a folder they can see is still not listed.
 
 `todo.set` rewrites one todo's line as a change to its note by whoever asks. It takes the todo as `todo.list` gave it: `id`, the note's `revision`, `line` and `text`. The line the caller was shown is followed through every change recorded since that revision, by mapping its place through each change, so it is found wherever it has moved to. What a line says never decides which line it is, so another todo that reads the same is never taken for it. When the line itself was changed or deleted since, the call is refused as a conflict and nothing is written. The same call made twice is done once: the second finds the line already reading as asked.
 
@@ -111,10 +119,23 @@ Checking a todo off through `todo.set` goes through `completeTodo`, and `every` 
 
 ## In the editor
 
-The todos plugin (`src/web/plugins/todos/`) draws six chips on a todo's line: the checkbox, importance, the due date, the recurrence, the last-done mark, and each project. Each is drawn over the width of its own token (`keepsWidth`), so the line is the same width drawn and as written, and nothing moves when the cursor comes to the line. `test/browser/todos.spec.ts` measures it at two column widths, with a todo that wraps. `test/browser/recurrence.spec.ts` does the same for the recurrence and last-done chips. On the cursor's line the tokens are text, and vim's motions and operators go over them as text.
+The todos plugin (`src/web/plugins/todos/`) draws five chips on a todo's line: the checkbox, importance, the due date, the recurrence, and the last-done mark. Each is drawn over the width of its own token (`keepsWidth`), so the line is the same width drawn and as written. A chip is shown as written only while the cursor is on that one token, inside it or at its edge. The cursor anywhere else on the line changes nothing: the box stays a box and the date stays a chip. `test/browser/todos.spec.ts` walks the cursor along every todo's line a letter at a time, at two column widths with a todo that wraps, and checks that one token at most is as written and that nothing else moves. `test/browser/recurrence.spec.ts` measures the recurrence and last-done chips. The token the cursor is on is text, and vim's motions and operators go over it as text. A tag is not a chip: it is the note's text as written.
 
-A chip is the browser's own control laid over what it says: a select for importance and for the project, with the projects there are in the notes the member can see, and a date field for the due date. Changing one rewrites the token as the member's edit. A viewer's are disabled. Typing `due:` offers the days of the week ahead.
+A chip is the browser's own control laid over what it says: a select for importance, and a date field for the due date. Changing one rewrites the token as the member's edit. A viewer's are disabled. Typing `due:` offers the days of the week ahead.
+
+The recurrence chip says `↻` and the rule as written, and opens a form to set it: the common rules first, then every kind under Advanced, and a way to stop it recurring. The last-done chip says the day and the count, and opens the todo's history from `todo.history`. Checking the box of a recurring todo in the editor writes `[x]` as any typing would. About a second later, when that is saved, the server completes it and the line comes back open with its next due date.
+
+## The Todos page
+
+Each todo is a card, in the look of the Plugins page and of a folder's notes. A card has two things to press: its checkbox, and its words, which open its note with the cursor on its line. Everything else is in one menu, from the card's "…" button, a right-click on the card, or the menu key or Shift+F10 with the keyboard in the card: open the note, open it to the side, set importance, set, pick or clear the due date, and **Recurrence…**, which opens the form that sets how it recurs. A todo that has been checked off as a recurring one has **Completions** there too, which lists each time, and which someone who can only read the note has as well. Importance, the due date, the recurrence and the last-done mark are shown on the card as plain chips when they are set, and a todo with none shows none.
+
+The list is narrowed by folder, tag, due date and importance, and to completed ones too. The filters are kept in the browser, so the page opens as it was left.
+
+## Undo
+
+Checking a todo off, on the Todos page or with a note's checkbox, shows a toast for eight seconds: "Completed", the todo's words, **Undo**, and a button to dismiss it. One is shown at a time, and it is laid over the app, so nothing moves. Opening a todo again shows none, and neither does checking off a recurring todo, which stays open.
+
+Undo opens the todo again as an ordinary change, by the path the tick took. On the Todos page it is `todo.set` with `done: false`, for the line the tick left at the revision it made. In a note it is an edit to the line, which the editor has followed through every change since the tick, so Ctrl+Z takes it back as it does typing. If that editor is gone by then, it is `todo.set`. Either way it is in History as a change of its own. When the line no longer reads as the tick left it, nothing is written and the toast says the todo was changed.
 
 The editor draws a todo on exactly the lines `todosIn` finds in the whole text, which is what the server indexes. So a checkbox nested three deep is a todo in both, though the editor's own parse takes a line indented that far for code.
 
-The recurrence chip says `↻` and the rule as written, and opens a form to set it: the common rules first, then every kind under Advanced, and a way to stop it recurring. The last-done chip says the day and the count, and opens the todo's history from `todo.history`. Checking the box of a recurring todo in the editor writes `[x]` as any typing would. About a second later, when that is saved, the server completes it and the line comes back open with its next due date.

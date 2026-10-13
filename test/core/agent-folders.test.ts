@@ -271,7 +271,7 @@ describe("an agent limited to folders", () => {
     expect((await listAgents(env.DB, w.ada.personId)).find((a) => a.id === agent.id)!.folderIds).toEqual([w.plans]);
   });
 
-  it("lists the todos, projects and tags of its own notes only, and sets no todo outside", async () => {
+  it("lists the todos and tags of its own notes only, learns nothing of a folder outside by asking for its todos, and sets no todo outside", async () => {
     const w = await world();
     const todo = "- [ ] buy-outside +proj-outside";
     await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Chores-outside\n\n${todo}\n\n#tag-outside` });
@@ -281,14 +281,18 @@ describe("an agent limited to folders", () => {
 
     const listed = await claude.json<{ todos: { text: string }[] }>("list_todos", { includeCompleted: true });
     expect(listed.todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
-    expect((await claude.json<{ todos: unknown[] }>("list_todos", { project: "proj-outside" })).todos).toEqual([]);
+    // Narrowed to a folder: one inside its limit with the folders under it, and a folder outside is no folder, as one that never was.
+    expect((await claude.json<{ todos: { text: string }[] }>("list_todos", { folderId: w.projects })).todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
+    expect((await claude.json<{ todos: { text: string }[] }>("list_todos", { folderId: w.plans })).todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
+    expect(await claude.call("list_todos", { folderId: w.journal })).toEqual(NO_FOLDER);
+    expect(await claude.call("list_todos", { folderId: w.journal, includeCompleted: true, tag: "tag-outside" })).toEqual(await claude.call("list_todos", { folderId: MISSING, includeCompleted: true, tag: "tag-outside" }));
     expect((await claude.json<{ todos: unknown[] }>("list_todos", { tag: "tag-outside" })).todos).toEqual([]);
-    expect(await claude.json("todo_filters")).toEqual({ projects: ["proj-inside"], tags: ["tag-inside"] });
+    expect(await claude.json("todo_filters")).toEqual({ tags: ["tag-inside"] });
     const set = (id: string) => claude.call("set_todo", { id, revision: 1, line: 3, text: todo, done: true });
     expect(await set(chores.id)).toEqual(NO_NOTE);
     expect(await set(MISSING)).toEqual(NO_NOTE);
     expect((await perform(env.DB, w.ada, { type: "note.read", id: chores.id })).text).toContain(todo);
-    expect(claude.said.join("\n")).not.toMatch(/buy-outside|proj-outside|tag-outside|Chores-outside/);
+    expect(claude.said.join("\n")).not.toMatch(/buy-outside|proj-outside|tag-outside|Chores-outside|Journal/);
   });
 
   it("completes a recurring todo inside its folders and files nothing on a daily note outside them, makes no daily folder, and is told of no daily note", async () => {

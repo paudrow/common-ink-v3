@@ -23,7 +23,7 @@ export { lineHunks } from "../core/text.ts";
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+export { changeTodo, completeTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
 
 /** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
 export { WEEKDAYS, describeRule, nextDue, parseRule, writeRule, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";

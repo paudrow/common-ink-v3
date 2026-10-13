@@ -14,9 +14,22 @@ const read = async (page: Page, id: string) => (await perform(page, { type: "not
 const todosPage = (page: Page) => page.getByRole("region", { name: "Todos" });
 const rows = (page: Page) => todosPage(page).getByRole("list", { name: "Todos" }).getByRole("listitem");
 const row = (page: Page, text: string | RegExp) => rows(page).filter({ hasText: text });
-const cursorLine = (page: Page) => page.evaluate(() => getSelection()!.anchorNode?.parentElement?.closest(".cm-line")?.textContent);
+/** The line the cursor is on as the note writes it: each chip's token, without what the chip says over it. */
+const cursorLine = (page: Page) =>
+  page.evaluate(() => {
+    const copy = getSelection()!.anchorNode?.parentElement?.closest(".cm-line")?.cloneNode(true) as HTMLElement | undefined;
+    copy?.querySelectorAll(".md-chip-sized > :not(:first-child)").forEach((said) => said.remove());
+    return copy?.textContent;
+  });
 const recurrence = (page: Page) => page.getByRole("dialog", { name: "Recurrence" });
 const completions = (page: Page) => page.getByRole("dialog", { name: "Completions" });
+const more = (page: Page, text: string | RegExp) => row(page, text).getByRole("button", { name: /^More for / });
+const menu = (page: Page) => page.getByRole("menu", { name: /^More for / });
+/** Picks from a todo's one menu on the Todos page, which is where everything but its checkbox and its words is. */
+const pick = async (page: Page, text: string | RegExp, item: string) => {
+  await more(page, text).click();
+  await menu(page).getByRole("menuitem", { name: item, exact: true }).click();
+};
 const modes = (page: Page) => page.getByRole("navigation", { name: "Modes" });
 
 /** Today on the page's own clock, which is the day the app completes a todo on. */
@@ -26,6 +39,11 @@ const localDay = (page: Page) =>
     return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
   });
 const addDays = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+/** How a due date more than a week off is said beside today. */
+const dateSaid = (day: string, now: string) => {
+  const short = new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  return day.slice(0, 4) === now.slice(0, 4) ? short : `${short}, ${day.slice(0, 4)}`;
+};
 
 /** What a line shows: its text without the marks that are there but not painted. */
 const shownIn = (el: Element) => {
@@ -97,7 +115,14 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await page.goto("/todos");
   const bins = row(page, "Take out the bins");
   await expect(bins.locator(".todo-every")).toHaveText("↻ 2w");
+  await expect(bins.locator(".todo-every")).toHaveAttribute("title", "Recurs: Every 2 weeks");
   await expect(bins.locator(".todo-done")).toHaveCount(0);
+  // The chips say it and are nothing to press: the card has its checkbox, its words and its one menu.
+  await expect(bins.getByRole("button")).toHaveCount(2);
+  await more(page, "Take out the bins").click();
+  await expect(menu(page).getByRole("menuitem", { name: "Recurrence…", exact: true })).toBeEnabled();
+  await expect(menu(page).getByRole("menuitem", { name: "Completions", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
 
   await bins.getByRole("checkbox").dblclick();
 
@@ -107,25 +132,34 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(bins.getByRole("checkbox")).not.toBeChecked();
   await expect(bins.getByRole("checkbox")).toBeEnabled();
   await expect(bins.locator(".todo-done")).toHaveText("✓ Today ×1");
-  await expect(bins.getByLabel("Due date")).toHaveValue(addDays(today, 14));
+  await expect(bins.locator(".todo-done")).toHaveAttribute("title", "Last done Today, 1 time");
+  await expect(bins.locator(".todo-due")).toHaveText(dateSaid(addDays(today, 14), today));
   await expect.poll(async () => (await perform(page, { type: "todo.list", noteId: note.id })).todos.find((t) => t.line === 2)?.text).toBe(rolled);
   await expect.poll(async () => (await dailyNote(page, today)).note.text).toBe(`# ${today}\n\n- [x] Take out the bins due:${today} [[${note.id}]]\n`);
 
   // The same history as the editor's chip opens, with the daily note a click away.
-  await bins.getByRole("button", { name: "Last done Today, 1 time" }).click();
+  await pick(page, "Take out the bins", "Completions");
   await expect(completions(page).getByRole("listitem")).toHaveText(["TodayAda Lovelace"]);
   await page.keyboard.press("Escape");
   await expect(completions(page)).toHaveCount(0);
 
-  // Its recurrence is set and cleared from the row, with the form the editor's chip opens.
-  await bins.getByRole("button", { name: "Recurs: Every 2 weeks" }).click();
+  // Its recurrence is set and cleared from the card's menu, with the form the editor's chip opens.
+  await pick(page, "Take out the bins", "Recurrence…");
+  await expect(recurrence(page).getByRole("button", { name: "Every 2 weeks", exact: true })).toHaveAttribute("aria-pressed", "true");
   await recurrence(page).getByRole("button", { name: "Every month" }).click();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(rolled.replace("every:2w", "every:1m"));
   await expect(bins.locator(".todo-every")).toHaveText("↻ 1m");
-  await bins.getByRole("button", { name: "Recurs: Every month" }).click();
+  await expect(bins.locator(".todo-every")).toHaveAttribute("title", "Recurs: Every month");
+  // A panel open under the card's button gives way to the next one asked for there.
+  await pick(page, "Take out the bins", "Completions");
+  await expect(completions(page)).toBeVisible();
+  await pick(page, "Take out the bins", "Recurrence…");
+  await expect(completions(page)).toHaveCount(0);
   await recurrence(page).getByRole("button", { name: "Doesn't recur" }).click();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(rolled.replace(" every:2w", ""));
-  await row(page, "Plain one").getByRole("button", { name: "Doesn't recur" }).click();
+  await expect(bins.locator(".todo-every")).toHaveCount(0);
+  await expect(row(page, "Plain one").locator(".todo-every")).toHaveCount(0);
+  await pick(page, "Plain one", "Recurrence…");
   await recurrence(page).getByRole("button", { name: "Every day" }).click();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[3]).toBe("- [ ] Plain one every:1d");
 });
@@ -338,8 +372,14 @@ test("a viewer sees the recurrence and last-done chips, can list the completions
   await page.keyboard.press("Escape");
 
   await page.goto("/todos");
-  await expect(row(page, "Feed the cat").getByRole("button", { name: "Recurs: Every day" })).toBeDisabled();
+  await expect(row(page, "Feed the cat").locator(".todo-every")).toHaveAttribute("title", "Recurs: Every day");
   await expect(row(page, "Feed the cat").getByRole("checkbox")).toBeDisabled();
+  // The card's menu has no way to set how it recurs, and still lists the completions.
+  await more(page, "Feed the cat").click();
+  await expect(menu(page).getByRole("menuitem", { name: "Recurrence…", exact: true })).toHaveCount(0);
+  await menu(page).getByRole("menuitem", { name: "Completions", exact: true }).click();
+  await expect(completions(page)).toContainText("Done 3 times");
+  await page.keyboard.press("Escape");
   // A viewer has no daily note, and is told so in the server's words.
   await modes(page).getByRole("link", { name: "Today" }).click();
   await expect(page.getByRole("region", { name: "Today" }).getByRole("alert")).not.toBeEmpty();
@@ -382,11 +422,21 @@ const LAYOUT = [
   "",
   "Below words.",
 ].join("\n");
+/** The recurrence and last-done tokens that are chips, where they are in LAYOUT: the first of each on a todo's line. */
+const TOKENS = LAYOUT.split("\n").flatMap((text, i, all) => {
+  const start = all.slice(0, i).join("\n").length + (i ? 1 : 0);
+  if (!/^\s*(?:[-*+]|\d+[.)]) \[ \] /.test(text)) return [];
+  return [/(?<=\s)every:\S+/, /(?<=\s)done:\S+/].flatMap((token) => {
+    const found = token.exec(text);
+    return found ? [{ text: found[0], from: start + found.index, to: start + found.index + found[0].length }] : [];
+  });
+}).sort((a, b) => a.from - b.from);
 const MEASURED = ["Above words", "First todo", "trailing words", "Nested todo", "nested tail", "A long todo", "and then some more", "wrap again", "Numbered todo", "numbered tail", "Below words"];
 
 /** The column is 720px wide in the first and 314px in the second, where the long todo wraps over several rows. */
 for (const width of [1600, 1100]) {
-  test(`nothing moves when the cursor comes to a line with a recurrence and a last-done chip, each as wide as its token (${width}px window)`, async ({ page }) => {
+  test(`nothing moves when the cursor comes to a recurrence or a last-done chip, which alone is then shown as written, each as wide as its token (${width}px window)`, async ({ page }) => {
+    test.setTimeout(120_000);
     await page.setViewportSize({ width, height: 2000 });
     await open(page, LAYOUT);
     await expect(editor(page).getByRole("button", { name: /^Last done/ })).toHaveCount(4);
@@ -402,31 +452,43 @@ for (const width of [1600, 1100]) {
     const cut = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".cm-content .md-chip-every > .md-todo-chip, .cm-content .md-chip-done > .md-todo-chip")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
     expect(cut).toEqual([]);
 
-    for (const word of ["First todo", "Nested todo", "A long todo", "Numbered todo"]) {
-      const at = await page.evaluate((w) => {
-        const el = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((l) => l.textContent!.includes(w))!;
-        const box = el.getBoundingClientRect();
-        return { x: box.right - 4, y: box.bottom - 6 };
-      }, word);
-      await page.mouse.click(at.x, at.y);
-      await expect.poll(() => cursorLine(page), `the cursor is on "${word}"`).toContain(word);
-      await expect(line(page, word).locator(".md-chip-sized")).toHaveCount(0);
+    // Down to the first todo's first letter, then right one letter at a time to the last todo's end, looking around each token.
+    for (let down = 0; down < 4; down++) await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Home");
+    const [first, last] = [LAYOUT.indexOf("- [ ] !! First"), LAYOUT.indexOf("\n\nBelow words.")];
+    const looks = new Set(TOKENS.flatMap((t) => [t.from - 1, t.from, t.from + 3, t.to, t.to + 1]));
+    const stops = new Set<number>();
+    for (let at = first; at <= last; at++) {
+      if (at > first) await page.keyboard.press("ArrowRight");
+      if (!looks.has(at)) continue;
+      const on = TOKENS.filter((t) => t.from <= at && at <= t.to);
+      const when = `with the cursor at "${LAYOUT.slice(Math.max(0, at - 4), at)}|${LAYOUT.slice(at, at + 4)}"`.replaceAll("\n", "\u23ce");
+      expect(on.length, `the cursor is never on two tokens: ${when}`).toBeLessThanOrEqual(1);
+      on.forEach((t) => stops.add(t.from));
+      // Only the token the cursor is on is shown as written: every other chip stays drawn, where it was and as wide.
+      const rest = TOKENS.filter((t) => !on.includes(t)).map((t) => t.text);
+      await expect.poll(async () => (await chipBoxes()).filter((c) => /^md-chip-(every|done)$/.test(c[0] as string)).map((c) => c[1]), `the chips drawn ${when}`).toEqual(rest);
+      for (const [kind, text, x, wide] of await chipBoxes()) {
+        const was = drawn.find((c) => c[0] === kind && c[1] === text && Math.abs((c[2] as number) - (x as number)) <= 1);
+        expect(was, `the chip "${text}" at ${x} ${when} is where it was: ${JSON.stringify(drawn.filter((c) => c[1] === text))}`).toBeDefined();
+        expect(Math.abs((was![3] as number) - (wide as number)), `the width of the chip "${text}" ${when}`).toBeLessThanOrEqual(1);
+      }
       const now = await places(page, MEASURED);
       for (const [measured, was] of Object.entries(before)) {
-        for (const side of ["x", "y", "top", "height"] as const) expect(Math.abs(now[measured]![side] - was[side]), `${side} of "${measured}" with the cursor on "${word}": ${was[side]} -> ${now[measured]![side]}`).toBeLessThanOrEqual(1);
+        for (const side of ["x", "y", "top", "height"] as const) expect(Math.abs(now[measured]![side] - was[side]), `${side} of "${measured}" ${when}: ${was[side]} -> ${now[measured]![side]}`).toBeLessThanOrEqual(1);
       }
-      // Each token written is where its chip was, as wide as it was.
-      const written = await page.evaluate((w) => {
-        const el = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((l) => l.textContent!.includes(w))!;
-        return [...el.querySelectorAll<HTMLElement>(".md-todo-token")].map((t) => [t.textContent, Math.round(t.getBoundingClientRect().x), Math.round(t.getBoundingClientRect().width)]);
-      }, word);
-      expect(written.filter(([text]) => /^(every|done):/.test(text as string)).length, `the tokens of "${word}"`).toBe(2);
+      // The token written is where its chip was, as wide as it was.
+      const written = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".cm-content .md-todo-token")].map((t) => [t.textContent, Math.round(t.getBoundingClientRect().x), Math.round(t.getBoundingClientRect().width)]));
+      expect(written.map(([text]) => text).filter((text) => /^(every|done):/.test(text as string)), `what is kept in one piece ${when}`).toEqual(on.map((t) => t.text));
       for (const [text, x, wide] of written) {
         const chip = drawn.find((c) => c[1] === text && Math.abs((c[2] as number) - (x as number)) <= 1);
-        expect(chip, `"${text}" at ${x} on "${word}" stands where a chip stood: ${JSON.stringify(drawn.filter((c) => c[1] === text))}`).toBeDefined();
+        expect(chip, `"${text}" at ${x} ${when} stands where a chip stood: ${JSON.stringify(drawn.filter((c) => c[1] === text))}`).toBeDefined();
         expect(Math.abs((chip![3] as number) - (wide as number)), `the width of "${text}"`).toBeLessThanOrEqual(1);
       }
     }
+    // The walk went over every recurrence and last-done token there is.
+    expect(stops.size).toBe(TOKENS.length);
+    await expect.poll(() => cursorLine(page)).toContain("numbered tail");
     await page.keyboard.press("ControlOrMeta+Home");
     await expect.poll(() => chipBoxes()).toEqual(drawn);
 
