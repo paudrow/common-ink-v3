@@ -304,7 +304,7 @@ The built-in plugins are trusted, and the host gives them more than an untrusted
 
 - `host.perform` runs as the member with the member's whole access, and the server records the member, not the plugin, as the author.
 - `host.agents.connect` mints a token that acts as the member.
-- `host.commands.run` runs any command, including `plugins.disable.<another plugin>`. That command writes the member's settings, so it is a way around the refusal in `host.perform`. The palette needs it to run what the member picks.
+- `host.commands.run` runs any command, including `plugins.toggle.<another plugin>`. That command writes the member's settings, so it is a way around the refusal in `host.perform`. The palette needs it to run what the member picks.
 - `Embed.render` is handed a real element inside the note, so it can reach the rest of the page from there.
 - `Embedded.update` changes the note as the member, recorded as the member's change. It can only rewrite the embed's own config and body, but an untrusted embed could do that without the member touching it.
 - A completion's `items` is told what the member types after its trigger, and what an item inserts is written into the note as the member.

@@ -373,7 +373,8 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
       .filter((p) => !required.includes(p.id))
       .map((p): Command => {
         const enable = off.has(p.id);
-        return { id: `plugins.${enable ? "enable" : "disable"}.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
+        // One id whichever way it goes, so a key given to it turns the plugin off and then on again. Only its title says which.
+        return { id: `plugins.toggle.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
       });
     const all = [...inOrder(commands.values()), ...toggles];
     const declared = declare(all);

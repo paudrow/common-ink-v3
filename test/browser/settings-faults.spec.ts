@@ -144,7 +144,7 @@ test("a plugin that names a command or a page as the app's own are named is left
     (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
       command("go.settings"),
       command("go.plugins"),
-      command("plugins.enable.sidebar"),
+      command("plugins.toggle.sidebar"),
       { id: "squat-page", name: "Squatter of the page", activate: (host: Handed) => host.views.register("page", { id: "mine", path: "/settings", label: "Mine", component: () => "Not the settings" }) },
     ];
   });
@@ -162,7 +162,7 @@ test("a plugin that names a command or a page as the app's own are named is left
   const row = (name: string) => page.getByRole("list", { name: "Plugins" }).getByRole("listitem").filter({ hasText: name });
   await expect(row("Squatter of go.settings")).toContainText("Only Common Ink adds a command whose id starts with go., and this one is go.settings");
   await expect(row("Squatter of go.plugins")).toContainText("this one is go.plugins");
-  await expect(row("Squatter of plugins.enable.sidebar")).toContainText("starts with plugins., and this one is plugins.enable.sidebar");
+  await expect(row("Squatter of plugins.toggle.sidebar")).toContainText("starts with plugins., and this one is plugins.toggle.sidebar");
   await expect(row("Squatter of the page")).toContainText("There's already a page at /settings");
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
