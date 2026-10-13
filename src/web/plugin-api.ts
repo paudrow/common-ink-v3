@@ -15,7 +15,9 @@ import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS } from "../core/protocol.ts";
+export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE } from "../core/protocol.ts";
+/** Where two lists of lines differ, for a view that marks what changed inside a line. */
+export { lineHunks } from "../core/text.ts";
 
 export { useDismiss } from "./dismiss.ts";
 export { ResizeHandle } from "./resize.tsx";
@@ -120,7 +122,7 @@ export interface PluginHost {
   app(): App;
   /**
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
-   * is saved before an operation that moves a note through its history, and the editors take the result.
+   * is saved before an operation that moves a note through its history or previews that, and the editors take the result.
    * A settings operation is refused.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;

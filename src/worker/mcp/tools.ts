@@ -53,13 +53,14 @@ const choice = {
     { type: "object", properties: { text: { type: "string", description: "The lines to have there, typed out; an empty string for no lines" } }, required: ["text"], additionalProperties: false },
   ],
 };
+const choices = { anyOf: [{ type: "string", enum: ["keep", "back"] }, { type: "array", items: choice }] };
 const resolve = {
   type: "object",
   description:
     'How to settle the conflicts preview_revert lists: places where later changes edited lines this revert changes. "keep" keeps the later edits (what a revert does when this is left out), "back" returns the lines to how they were before the reverted changes and drops the later edits to them, and { text } puts the lines given there. Pass one choice for all of them, or a list with one for each conflict in the order preview_revert lists them.',
   properties: {
     at: { type: "integer", minimum: 0, description: "The revision preview_revert answered with. The revert is refused when the note has changed since: preview again" },
-    choices: { anyOf: [{ type: "string", enum: ["keep", "back"] }, { type: "array", items: choice }] },
+    choices,
   },
   required: ["at", "choices"],
   additionalProperties: false,
@@ -78,6 +79,25 @@ const author = {
   additionalProperties: false,
 };
 const noteIds = (description: string) => ({ type: "array", items: { type: "string" }, minItems: 1, description });
+const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
+const selected = (item: Record<string, unknown>, required: string[], description: string) => ({
+  type: "array",
+  minItems: 1,
+  maxItems: 40,
+  description,
+  items: { type: "object", properties: { noteId, ...item }, required: ["noteId", ...required], additionalProperties: false },
+});
+const reverted = selected(
+  {
+    revisions,
+    to: { type: "integer", minimum: 0, description: "Instead of revisions: the revision to return the note to" },
+    author: { ...author, description: "Instead of revisions: the member or agent whose changes to this note that still stand are reverted, as revert_author picks them" },
+    at: { type: "integer", minimum: 0, description: "The note's revision that preview_reverts answered with. The note is skipped when it has changed since" },
+    choices: { ...choices, description: "How to settle this note's conflicts, as resolve.choices of revert_changes does. Needs at" },
+  },
+  [],
+  "The notes to revert, each named once: up to 40, each with revisions (its changes to revert), to (the revision to return to) or author (whose changes to revert)",
+);
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
 
 export const TOOLS: Tool[] = [
@@ -169,6 +189,7 @@ export const TOOLS: Tool[] = [
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
+      by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),
       before: { type: "object", description: "The next of the page before" },
@@ -183,6 +204,7 @@ export const TOOLS: Tool[] = [
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
+      by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),
       before: { type: "object", description: "The next of the page before" },
@@ -196,6 +218,27 @@ export const TOOLS: Tool[] = [
     description: "Everyone who has changed a note in the workspace: members by person id and agents by agent id, each with a name.",
     inputSchema: object({}),
     op: "history.authors",
+  },
+  {
+    name: "history_diff",
+    description:
+      "What a selection of changes did, note by note, across up to 40 notes. A note's selected changes that follow one another are one run with one line diff, from the note before the first of them to the note after the last, so a line written and taken out again within a run shows in neither. A change left out in between starts a new run, which says how many were skipped. Each run has its revisions (from, to), how many changes it is (saves), who made them, when, and the lines it added and removed. An answer holds about 2000 diff lines: a run past them has diff null, and asking for its note alone returns it. A run's diff shows at most 200 lines and counts the rest in omitted.",
+    inputSchema: object({ changes: selected({ revisions }, ["revisions"], "The selection: each note once, with the revisions of its changes") }, ["changes"]),
+    op: "history.diff",
+  },
+  {
+    name: "preview_reverts",
+    description:
+      "What revert_many would do to each note, with nothing written: for each, the note's revision it was worked out at (pass it back as at), the changes that would be reverted (revisions), the ones left out because something already reverted them (already), the diff from the note as it is to the note after, and its conflicts as preview_revert lists them. A change selected together with the change that reverted it stays reverted and that revert goes too. An empty diff means the note would not change.",
+    inputSchema: object({ changes: reverted }, ["changes"]),
+    op: "history.previewRevert",
+  },
+  {
+    name: "revert_many",
+    description:
+      "Revert changes of up to 40 notes at once, each note as one new change under your agent's name. Each note is reverted or skipped whole, by itself: the answer lists reverted (each with the revision the revert made and the changes it reverted) and skipped (each with why: changed, when the note is no longer at the revision passed as at; nothing, when the revert would change nothing; refused, with the reason). Call preview_reverts first and pass each note's revision back as at. To undo a revert, revert the revision it made, with at set to that revision: the note is skipped if it has been changed since. Needs the editor or admin role.",
+    inputSchema: object({ changes: reverted }, ["changes"]),
+    op: "history.revert",
   },
   {
     name: "label_revision",
