@@ -148,15 +148,6 @@ interface Listed {
 
 const LISTS: Listed[] = [
   {
-    name: "History's changes",
-    path: "/history",
-    list: (page) => page.getByRole("list", { name: "Notes that changed" }),
-    opened: async (page) => {
-      await expect(page).toHaveURL(/\/note\//);
-      await expect(editor(page)).toBeFocused();
-    },
-  },
-  {
     name: "the Plugins list",
     path: "/plugins",
     list: (page) => page.getByRole("list", { name: "Plugins", exact: true }),
@@ -202,25 +193,48 @@ for (const listed of LISTS) {
   });
 }
 
-test("History's list of notes to show moves with Ctrl-j from its field, and with j once in it", async ({ page }) => {
+test("History's list of changes keeps its own keys with vim mode on: j goes to the list, and there j, k, x and Enter are History's", async ({ page }) => {
   await signIn(page);
   for (let n = 0; n < 4; n++) await perform(page, { type: "note.create", text: `# Plum ${n}` });
   await open(page, "/history");
-  await page.getByRole("button", { name: "All notes" }).click();
-  const menu = page.getByRole("group", { name: "Notes to show" });
-  await expect(menu.getByRole("searchbox")).toBeFocused();
-  const all = menu.locator("ul > li");
-  // The notes arrive a moment after the menu opens, and a key pressed before then has no list to go into.
-  await expect(all).toHaveCount(4);
-  await page.keyboard.press("Control+j");
-  await expectSelected(all.nth(0), "the first note");
+  const list = page.getByRole("listbox", { name: "Changes" });
+  const changes = list.getByRole("option");
+  await expect(changes).toHaveCount(4);
+  const cursor = () => list.evaluate((el) => [...el.querySelectorAll('[role="option"]')].findIndex((o) => o.id === el.getAttribute("aria-activedescendant")));
+  const shown = page.locator(".hist-main .hist-file");
+
+  // The newest change is selected as the page opens. j from the page goes to the list, not onto a row of it.
+  await expect(changes.nth(0)).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("j");
-  await expectSelected(all.nth(1), "the second note");
-  await page.keyboard.press("Shift+G");
-  await expectSelected(all.nth(3), "the last note");
-  // Escape is still the menu's, which closes.
-  await page.keyboard.press("Escape");
-  await expect(menu).toHaveCount(0);
+  await expect(list).toBeFocused();
+  await expect(page.locator("[data-vim-at]"), "no row is marked as vim's").toHaveCount(0);
+  await expect.poll(cursor).toBe(0);
+
+  // From here the keys are History's: j and k move its cursor and show that change, and x ticks one more.
+  await page.keyboard.press("j");
+  await expect.poll(cursor).toBe(1);
+  await expect(changes.nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(changes.nth(0)).toHaveAttribute("aria-selected", "false");
+  await expect(shown).toHaveCount(1);
+  await expect(shown).toContainText("Plum 2");
+  await keys(page, "j", "k", "k");
+  await expect.poll(cursor).toBe(0);
+  await expect(shown).toContainText("Plum 3");
+  await keys(page, "j", "j", "x");
+  await expect.poll(cursor).toBe(2);
+  await expect(changes.nth(2)).toHaveAttribute("aria-selected", "false");
+  await page.keyboard.press("x");
+  await expect(changes.nth(2)).toHaveAttribute("aria-selected", "true");
+  await expect(list).toBeFocused();
+  // Vim's keys for a list that History has none of move nothing.
+  await keys(page, "Shift+G", "Control+d");
+  await expect.poll(cursor).toBe(2);
+  await expect(list).toBeFocused();
+
+  // Enter is History's too: it opens the change's note, which vim has in normal mode.
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/note\//);
+  await expect(editor(page)).toContainText("Plum 1");
 });
 
 test("in Settings, Enter on a setting goes to its field and Escape comes back to the row; / is the search box; and vim's keys are among the keyboard shortcuts while vim mode is on", async ({ page }) => {
@@ -287,8 +301,8 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
   await expect.poll(stored).toEqual({ "vim.enabled": true, "keybindings.vim.list.first": ["g n"] });
   await expect(page.getByRole("list", { name: "Problems" })).toHaveCount(0);
 
-  await open(page, "/history");
-  const changed = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
+  await open(page, "/folder/all");
+  const changed = page.locator(".cards > li");
   await expect(changed).toHaveCount(4);
   await keys(page, "j", "Shift+G");
   await expectSelected(changed.nth(3), "the last note");
@@ -299,7 +313,7 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
 
   // In the JSON a vim key may be one letter, and one that begins another's sequence is flagged and still runs.
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true, "keybindings.vim.list.down": ["n"], "keybindings.vim.list.last": ["g"] }), baseRevision: 2 });
-  await open(page, "/history");
+  await open(page, "/folder/all");
   await expect(changed).toHaveCount(4);
   await keys(page, "n", "n");
   await expectSelected(changed.nth(1), "the second note, with n");
@@ -316,16 +330,16 @@ test("a vim key is given a sequence by pressing its keys one after another, whic
 test("with vim mode off, none of vim's keys do anything and none are listed", async ({ page }) => {
   await signIn(page, {});
   for (let n = 0; n < 3; n++) await perform(page, { type: "note.create", text: `# Plum ${n}\n\n- [ ] pick plum ${n}\n` });
-  await page.goto("/history");
-  const all = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
+  await page.goto("/folder/all");
+  const all = page.locator(".cards > li");
   await expect(all).toHaveCount(3);
   await keys(page, "j", "Shift+G", "g", "g", "Control+d", "/", "Control+w", "h", "g", "t");
   await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
   await expect.poll(() => page.evaluate(() => "vimKeys" in document.documentElement.dataset)).toBe(false);
-  await all.nth(0).getByRole("button").first().focus();
+  await all.nth(0).locator(".card").focus();
   await keys(page, "j", "l");
-  await expect(all.nth(0).getByRole("button").first()).toBeFocused();
-  await expect(page).toHaveURL(/\/history/);
+  await expect(all.nth(0).locator(".card")).toBeFocused();
+  await expect(page).toHaveURL(/\/folder\/all/);
   await expect.poll(() => all.nth(0).evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
 
   await page.goto("/settings/keyboard");
@@ -565,8 +579,8 @@ test("the selected row is marked in light and in dark", async ({ page }) => {
   for (const theme of ["light", "dark"]) {
     await signIn(page, { "vim.enabled": true, "core.theme": theme });
     for (let n = 0; n < 3; n++) await perform(page, { type: "note.create", text: `# Plum ${n}\n\n- [ ] pick plum ${n}\n` });
-    await open(page, "/history");
-    const all = page.getByRole("list", { name: "Notes that changed" }).locator("> li");
+    await open(page, "/folder/all");
+    const all = page.locator(".cards > li");
     await expect(all).toHaveCount(3);
     await keys(page, "j", "j");
     await expectSelected(all.nth(1), `the second note, in ${theme}`);
@@ -574,12 +588,12 @@ test("the selected row is marked in light and in dark", async ({ page }) => {
     expect(colors.width).toBe("2px");
     expect(colors.other, "only the selected row is marked").toBe("none");
     // Held with Control a key is no sign to the browser that keys are in use, so the mark is the app's own.
-    await all.nth(0).click({ position: { x: 2, y: 2 } });
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
     await keys(page, "Control+d", "Control+d");
     await expectSelected(all.nth(2), `the last note, in ${theme}`);
     expect(colors.accent).toBe(theme === "light" ? "#5b5bd6" : "#8f8ff0");
     expect(colors.outline).toBe(theme === "light" ? "rgb(91, 91, 214)" : "rgb(143, 143, 240)");
-    await page.screenshot({ path: test.info().outputPath(`history-${theme}.png`) });
+    await page.screenshot({ path: test.info().outputPath(`list-${theme}.png`) });
   }
 });
 

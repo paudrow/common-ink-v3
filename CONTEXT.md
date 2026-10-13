@@ -175,12 +175,21 @@ An author that is not a person. A member connects it. It acts with that member's
 _Avoid_: Bot
 
 **History**:
-The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as the notes that changed, each with the lines its changes added and removed, then a note's changes, then one change's diff. The diff of the open note and the workspace history are this same record.
+The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as a list of changes, by time or by note, beside what the selected ones did. The history of the open note, of a folder, and of the workspace are this same record.
 _Avoid_: Log, timeline, versions
 
 **Revert**:
 A new change that takes the effect of earlier changes out of a note and keeps every other change. Reverting a note to a revision reverts every change after it. A revert is a change like any other, so reverting it has the changes it reverted stand again, and that is the only way to have them again.
 _Avoid_: Restore, rollback, put back, reapply, take back out
+
+**Selection**:
+The changes picked in History, of one note or of many, to read together and to revert together. Reverting a selection makes one revert in each note it has changes of. A selected change that was already reverted is left as it is, and one selected together with the revert that reverted it stays reverted while that revert goes: the note is as if neither had been made.
+
+**Run**:
+A note's selected changes that follow one another, read as one diff: from the note before the first of them to the note after the last. A change left out between two selected ones ends a run, and the next run says how many were skipped.
+
+**Sitting**:
+One author's edits to one note that follow one another less than ten minutes apart. History lists a sitting as one row, which is selected and reverted as a whole.
 
 **Revert preview**:
 What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Every revert in the app is shown as one first, an author's changes note by note. Anyone who can read the note's history can ask for one.

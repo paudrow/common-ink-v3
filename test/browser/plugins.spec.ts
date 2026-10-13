@@ -251,19 +251,21 @@ test("the author Agents hands to History is shown once, and not again on Back or
   await agent.tool("write_note", { id: note.id, text: "# Alpha\nby robo\n", baseRevision: note.revision, writeId: crypto.randomUUID() });
   await page.goto("/agents");
   await page.getByRole("button", { name: "See its changes" }).click();
-  const robo = page.getByRole("group", { name: "Authors" }).getByRole("button", { name: /Robo/ });
-  await expect(robo).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(robo).toHaveAttribute("aria-pressed", "false");
+  const chip = page.getByRole("region", { name: "History" }).locator(".hist-scope");
+  await expect(chip).toHaveText("By Robo");
+  await page.getByRole("button", { name: "Show everyone's changes" }).click();
+  await expect(chip).toHaveCount(0);
 
   await openNote(page, "Alpha");
   await expect(text(page)).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/folder\/all$/);
   await page.goBack();
-  await expect(robo).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("listbox", { name: "Changes" }).getByRole("option")).toHaveCount(2);
+  await expect(chip).toHaveCount(0);
   await page.reload();
-  await expect(robo).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("listbox", { name: "Changes" }).getByRole("option")).toHaveCount(2);
+  await expect(chip).toHaveCount(0);
 });
 
 test("Back and then Forward each turn the folder tree to the note's folder", async ({ page }) => {

@@ -80,13 +80,13 @@ test("a running stopwatch is the same element, still counting, with the cursor o
     const rows = (await source(page).count()) ? (await boxOf(sourceRows(page))).height : 0;
     if (rows) shown++;
     // The rows of its text are all that is added: the card and the line after are lower by them, and nothing is anywhere else.
-    expect(await now()).toEqual({ before: off.before, line: { ...off.line, height: off.line.height + rows }, card: lower(off.card, rows), after: lower(off.after, rows) });
+    await expect.poll(() => now()).toEqual({ before: off.before, line: { ...off.line, height: off.line.height + rows }, card: lower(off.card, rows), after: lower(off.after, rows) });
   }
   // The cursor was on the embed from its first character to its last, and on nothing before or after.
   expect(shown).toBe(written.indexOf("}") - written.indexOf("::") + 2);
   await expect(source(page)).toHaveCount(0);
   await expect(line(page, "Lap")).not.toContainText("::stopwatch");
-  expect(await now()).toEqual(off);
+  await expect.poll(() => now()).toEqual(off);
 
   await page.keyboard.press("ArrowLeft");
   for (let i = 0; i < 8; i++) await page.keyboard.press("ArrowLeft");
@@ -109,7 +109,7 @@ test("a running stopwatch is the same element, still counting, with the cursor o
   await expect.poll(() => read(page, note.id)).toMatch(/before typed above\nLap ::stopwatch\{since=[^}]+\} here\. And on its own line\.\nafter typed below\n/);
   await expect.poll(() => marked(page)).toEqual({ same: true, removed: 0 });
   await expect(source(page)).toHaveCount(0);
-  expect((await now()).card).toEqual(off.card);
+  await expect.poll(async () => (await now()).card).toEqual(off.card);
 
   // It never stopped: it shows at least the time that has gone by since the cursor first came, and is still running.
   const gone = Math.floor((Date.now() - started) / 1000);
@@ -149,7 +149,7 @@ test("an embed's text takes as many rows above its line as it needs at the width
   await editor(page).getByRole("button", { name: "Pause timer" }).click();
   await expect(editor(page).getByRole("button", { name: "Start timer" })).toBeFocused();
   await expect(source(page)).toHaveText(/^::timer\{25m at=\d+m\d+s\}$/);
-  expect(await boxOf(cards.nth(0))).toEqual(shown);
+  await expect.poll(() => boxOf(cards.nth(0))).toEqual(shown);
 
   // In a narrow window the same text takes more rows, and the rows are still exactly what it takes.
   await page.keyboard.press("ControlOrMeta+z");
@@ -528,8 +528,8 @@ test("a note that starts with an embed opens with it drawn, the first press on t
   await line(page, "Some words").click({ position: { x: 40, y: 8 } });
   await expect(source(page)).toHaveCount(0);
   await expect(lines(page).filter({ hasText: ":::kanban" })).toHaveCount(0);
-  expect(await boxOf(line(page, "Some words"))).toEqual(words);
-  expect(await page.evaluate(() => getSelection()!.isCollapsed)).toBe(true);
+  await expect.poll(() => boxOf(line(page, "Some words"))).toEqual(words);
+  await expect.poll(() => page.evaluate(() => getSelection()!.isCollapsed)).toBe(true);
   await page.keyboard.press("Home");
   await page.keyboard.type("X");
   await expect.poll(() => read(page, note.id)).toContain(":::\n\nXSome words here.\n");
@@ -554,7 +554,7 @@ test("an embed's text in a heading is the size its rows were made for, and a lon
   const [text, rows, plain] = [await boxOf(source(page)), await boxOf(sourceRows(page)), await boxOf(line(page, "words"))];
   expect({ y: text.y, height: text.height }).toEqual({ y: rows.y, height: rows.height });
   expect(rows.height).toBeLessThan(plain.height);
-  expect(await source(page).evaluate((el) => [...el.querySelectorAll("*")].map((child) => getComputedStyle(child).fontSize))).toEqual(await source(page).evaluate((el) => [...el.querySelectorAll("*")].map(() => getComputedStyle(el).fontSize)));
+  await expect.poll(() => source(page).evaluate((el) => [...el.querySelectorAll("*")].map((child) => getComputedStyle(child).fontSize))).toEqual(await source(page).evaluate((el) => [...el.querySelectorAll("*")].map(() => getComputedStyle(el).fontSize)));
 
   // The board is taller than the window, so its foot is out of sight: its options are under their button.
   await editor(page).getByRole("button", { name: "Options for Kanban board" }).click();

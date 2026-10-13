@@ -382,5 +382,5 @@ test("a line with a clock, and a board, have the same room above and below them 
 
   await page.keyboard.press("ControlOrMeta+End");
   await expect(line(":::kanban")).toHaveCount(0);
-  expect(await measure()).toEqual(off);
+  await expect.poll(() => measure()).toEqual(off);
 });
