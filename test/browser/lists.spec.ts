@@ -116,8 +116,8 @@ for (const width of [1280, 760]) {
         const at = getSelection()!.anchorNode;
         return (at instanceof Element ? at : at?.parentElement)?.closest(".cm-line")?.textContent;
       })).toContain(word);
-      // Shown as written: the mark's own letters are painted.
-      if (mark.includes("[")) await expect(line.getByRole("checkbox")).toHaveCount(0);
+      // The cursor is on the item's words, not on its box: the box stays drawn.
+      if (mark.includes("[")) await expect(line.getByRole("checkbox")).toHaveCount(1);
       const now = await all(page);
       for (const [, other] of [...ITEMS, CLOCK]) {
         const [was, is] = [drawn[other]!, now[other]!];
