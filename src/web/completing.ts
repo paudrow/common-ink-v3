@@ -1,6 +1,7 @@
-import { autocompletion, type Completion as Option, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, type Completion as Option, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
-import type { Extension } from "@codemirror/state";
+import { Prec, type Extension } from "@codemirror/state";
+import { keymap } from "@codemirror/view";
 import { placed, typedAfter } from "./completionSyntax.ts";
 import type { Completion, CompletionItem } from "./plugin-api.ts";
 
@@ -68,5 +69,9 @@ export function completing(completions: readonly Completion[], onFail: (completi
   });
 
   // No delays: a member who types `/timer` and Enter without a pause means the timer.
-  return autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0 });
+  return [
+    autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0 }),
+    // Tab picks what is highlighted, as Enter does. With no list open it is whatever Tab is elsewhere.
+    Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
+  ];
 }

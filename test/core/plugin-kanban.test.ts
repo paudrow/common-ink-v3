@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCard, cardsOf, moveCard, parseBoard, serializeBoard } from "../../src/web/plugins/kanban/board.ts";
+import { addCard, cardEnd, cardsOf, colourColumn, moveCard, parseBoard, serializeBoard } from "../../src/web/plugins/kanban/board.ts";
 
 const titles = (body: string) => parseBoard(body).columns.map((c) => [c.title, cardsOf(c).map((card) => card.text)]);
 const moved = (body: string, from: [number, number], to: [number, number]) => serializeBoard(moveCard(parseBoard(body), { column: from[0], card: from[1] }, { column: to[0], card: to[1] }));
@@ -129,5 +129,60 @@ describe("adding a card", () => {
     const board = parseBoard(BOARD);
     expect(addCard(board, 0, "  ")).toBe(board);
     expect(addCard(board, 7, "x")).toBe(board);
+  });
+});
+
+describe("a column's colour", () => {
+  const coloured = (body: string, column: number, colour: Parameters<typeof colourColumn>[2]) => serializeBoard(colourColumn(parseBoard(body), column, colour));
+
+  it("is read from the end of its heading, and is not part of its title", () => {
+    expect(parseBoard("## Doing {.blue}\n- build\n# Done{.green} #\n").columns.map((c) => [c.title, c.colour, cardsOf(c).length])).toEqual([
+      ["Doing", "blue", 1],
+      ["Done", "green", 0],
+    ]);
+  });
+
+  it("leaves braces that name no colour in the title", () => {
+    expect(parseBoard("## Doing {.teal}\n## {.blue} first\n## Later {blue}\n").columns.map((c) => [c.title, c.colour])).toEqual([
+      ["Doing {.teal}", null],
+      ["{.blue} first", null],
+      ["Later {blue}", null],
+    ]);
+  });
+
+  it("is set, changed and taken away by rewriting the end of the heading and nothing else", () => {
+    expect(coloured(BOARD, 1, "blue")).toBe(BOARD.replace("## Doing\n", "## Doing {.blue}\n"));
+    expect(coloured(BOARD.replace("## Doing\n", "## Doing {.blue}\n"), 1, "red")).toBe(BOARD.replace("## Doing\n", "## Doing {.red}\n"));
+    expect(coloured(BOARD.replace("## Doing\n", "## Doing {.blue}\n"), 1, null)).toBe(BOARD);
+    expect(coloured("#  One ##  \n- a\n", 0, "pink")).toBe("#  One {.pink} ##  \n- a\n");
+    expect(coloured("## Doing {.teal}\n", 0, "gray")).toBe("## Doing {.teal} {.gray}\n");
+  });
+
+  it("changes nothing for the colour a column has or a column that isn't there", () => {
+    const board = parseBoard(BOARD);
+    expect(colourColumn(board, 0, null)).toBe(board);
+    expect(colourColumn(board, 9, "blue")).toBe(board);
+  });
+
+  it("stays with its column when a card is moved or added", () => {
+    const body = "## To do {.red}\n- write\n\n## Done {.green}\n";
+    expect(moved(body, [0, 0], [1, 0])).toBe("## To do {.red}\n\n## Done {.green}\n- write\n");
+    expect(serializeBoard(addCard(parseBoard(body), 1, "ship"))).toBe("## To do {.red}\n- write\n\n## Done {.green}\n- ship\n");
+  });
+});
+
+describe("where a card is written", () => {
+  const body = "intro\n## To do\n\n- write\n  - the intro\n- review\n\n## Done\n- plan\n";
+  const board = parseBoard(body);
+
+  it("is the end of the card's own line, counted from the start of the board's markdown", () => {
+    expect(body.slice(0, cardEnd(board, { column: 0, card: 0 })!)).toBe("intro\n## To do\n\n- write");
+    expect(body.slice(0, cardEnd(board, { column: 0, card: 1 })!)).toBe("intro\n## To do\n\n- write\n  - the intro\n- review");
+    expect(body.slice(0, cardEnd(board, { column: 1, card: 0 })!)).toBe("intro\n## To do\n\n- write\n  - the intro\n- review\n\n## Done\n- plan");
+  });
+
+  it("is nowhere for a place with no card", () => {
+    expect(cardEnd(board, { column: 1, card: 1 })).toBeNull();
+    expect(cardEnd(board, { column: 2, card: 0 })).toBeNull();
   });
 });

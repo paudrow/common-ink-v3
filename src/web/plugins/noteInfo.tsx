@@ -1,11 +1,26 @@
 import { useRef, useState } from "react";
-import { tagsIn, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../plugin-api.ts";
+import { ago, tagsIn, useNow, type Inspected, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../plugin-api.ts";
 import { lifecycle } from "./lib/lifecycle.ts";
 import { openNotes, type OpenNotes } from "./lib/openNotes.ts";
 import { tagPath } from "./tags/path.ts";
 import { SharingSummary } from "./sharing/Summary.tsx";
 
-function Info({ host, open, app, note }: ViewProps & { host: PluginHost; open: OpenNotes; note: NoteSummary }) {
+function FolderInfo({ name, notes }: Inspected["folder"]) {
+  const now = useNow();
+  const last = notes.reduce<NoteSummary | null>((latest, n) => (latest && latest.updatedAt >= n.updatedAt ? latest : n), null);
+  return (
+    <dl className="info">
+      <dt>Folder</dt>
+      <dd>{name}</dd>
+      <dt>Notes</dt>
+      <dd>{notes.length === 1 ? "1 note" : `${notes.length} notes`}</dd>
+      <dt>Last changed</dt>
+      <dd>{last ? `${ago(last.updatedAt, now)} by ${last.updatedBy.name}` : "Nothing in it yet"}</dd>
+    </dl>
+  );
+}
+
+function Info({ host, open, app, note }: ViewProps & Inspected["note"] & { host: PluginHost; open: OpenNotes }) {
   // The tags the note's text has now, as it is typed, read the way the server reads them.
   const tags = tagsIn(open.useText(note.id) ?? "");
   const tree = app.folders;
@@ -112,8 +127,11 @@ function Info({ host, open, app, note }: ViewProps & { host: PluginHost; open: O
 export const noteInfo: Plugin = {
   id: "note-info",
   name: "Note info",
+  description: "The details of the note or the folder in front, in the inspector.",
+  icon: "info",
   activate(host) {
     const open = openNotes(host);
-    host.views.register("inspector", { id: "info", label: "Info", icon: "info", component: (props) => <Info host={host} open={open} {...props} /> });
+    host.views.register("inspector", { id: "info", label: "Info", icon: "info", for: "note", component: (props) => <Info host={host} open={open} {...props} /> });
+    host.views.register("inspector", { id: "folder-info", label: "Info", icon: "info", for: "folder", component: FolderInfo });
   },
 };

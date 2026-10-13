@@ -165,7 +165,7 @@ test("contacts connect the same way, are searched as typed, and disconnecting ta
   await page.goto("/contacts");
   await expect(source(page, "Sample contacts")).toContainText("Not connected");
   await expect(contacts(page)).not.toContainText("Grace Hopper");
-  expect((await perform(page, { type: "source.list" })).sources.filter((s) => s.provider === "Sample data").map((s) => s.state)).toEqual(["not_connected", "not_connected"]);
+  await expect.poll(async () => (await perform(page, { type: "source.list" })).sources.filter((s) => s.provider === "Sample data").map((s) => s.state)).toEqual(["not_connected", "not_connected"]);
 });
 
 test("a member's events and contacts are shown to them and to no other member of the workspace", async ({ page }) => {
@@ -185,12 +185,12 @@ test("a member's events and contacts are shown to them and to no other member of
   await expect(grace.locator("body")).not.toContainText("Okafor");
 
   // Asked in Ada's workspace, where Grace is an admin, the server still answers for Grace alone.
-  expect((await listed(grace, workspaceId)).length).toBe(0);
-  expect((await perform(grace, { type: "contact.list" }, workspaceId)).contacts).toEqual([]);
-  expect((await perform(grace, { type: "source.list" }, workspaceId)).sources.every((s) => s.state === "not_connected" && s.account === null)).toBe(true);
+  await expect.poll(async () => (await listed(grace, workspaceId)).length).toBe(0);
+  await expect.poll(async () => (await perform(grace, { type: "contact.list" }, workspaceId)).contacts).toEqual([]);
+  await expect.poll(async () => (await perform(grace, { type: "source.list" }, workspaceId)).sources.every((s) => s.state === "not_connected" && s.account === null)).toBe(true);
   const lunch = await eventNamed(page, "Lunch with Sam");
-  expect((await answer(grace, { type: "event.update", sourceId: lunch.sourceId, id: lunch.id, etag: lunch.etag, title: "Grace was here" }, workspaceId)).status).toBe(409);
-  expect((await eventNamed(page, "Lunch with Sam")).etag).toBe(lunch.etag);
+  await expect.poll(async () => (await answer(grace, { type: "event.update", sourceId: lunch.sourceId, id: lunch.id, etag: lunch.etag, title: "Grace was here" }, workspaceId)).status).toBe(409);
+  await expect.poll(async () => (await eventNamed(page, "Lunch with Sam")).etag).toBe(lunch.etag);
 });
 
 for (const timezoneId of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
@@ -201,7 +201,7 @@ for (const timezoneId of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
       await signInAsNewPerson(page, "Ada Lovelace");
       await connectSample(page);
       await openCalendar(page);
-      expect(await zoneOf(page)).toBe(timezoneId);
+      await expect.poll(() => zoneOf(page)).toBe(timezoneId);
       await expect(calendar(page)).toContainText(`Times are in your time zone, ${timezoneId.replace(/_/g, " ")}.`);
       const week = await weekOn(page);
       // The sample call is at 23:30 UTC on the Thursday, so the day it is on depends on where it is read.
@@ -267,7 +267,7 @@ test("an event the member may change is changed where it is kept, and a read-onl
   const holiday = await eventNamed(page, "Company holiday");
   const refused = await answer(page, { type: "event.update", sourceId: holiday.sourceId, id: holiday.id, etag: holiday.etag, title: "Work day" });
   expect([refused.status, refused.body.error]).toEqual([403, "forbidden"]);
-  expect((await eventNamed(page, "Company holiday")).etag).toBe(holiday.etag);
+  await expect.poll(async () => (await eventNamed(page, "Company holiday")).etag).toBe(holiday.etag);
 });
 
 test("a change made from a stale reading is refused, says so, and overwrites nothing", async ({ page }) => {
@@ -339,8 +339,8 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await expect(chips(grace)).toHaveText(["Lunch with Sam"]);
   await expect(chips(grace)).toHaveAttribute("data-state", "private");
   await expect(chips(grace)).toHaveAttribute("title", "Only the member who referenced this event sees its details");
-  expect(await isMuted(chips(grace))).toBe(true);
-  expect(await isMuted(chips(page))).toBe(false);
+  await expect.poll(() => isMuted(chips(grace))).toBe(true);
+  await expect.poll(() => isMuted(chips(page))).toBe(false);
   await expect(grace.locator("body")).not.toContainText("Samira");
   await expect(grace.locator("body")).not.toContainText("Cafe Lula");
   const ref = /\{([a-z0-9]{12}) /.exec(written)![1]!;
@@ -382,11 +382,11 @@ test("a reference to a contact shows its owner the contact, and every other memb
   await expect(chips(grace)).toHaveText(["Sam Okafor"]);
   await expect(chips(grace)).toHaveAttribute("data-state", "private");
   await expect(chips(grace)).toHaveAttribute("title", "Only the member who referenced this contact sees its details");
-  expect(await isMuted(chips(grace))).toBe(true);
+  await expect.poll(() => isMuted(chips(grace))).toBe(true);
   await expect(grace.locator("body")).not.toContainText("555 0142");
   await expect(grace.locator("body")).not.toContainText("Okafor Plumbing");
   const ref = /\{([a-z0-9]{12}) /.exec(written)![1]!;
-  expect((await answer(grace, { type: "record.read", ref }, workspaceId)).status).toBe(404);
+  await expect.poll(async () => (await answer(grace, { type: "record.read", ref }, workspaceId)).status).toBe(404);
 });
 
 interface Place {
@@ -416,7 +416,7 @@ test("whoever opens a link to a note sees a reference as its label, in gray, and
   await expect(editor(anyone)).not.toContainText(lunch.ref);
   for (const chip of await chips(anyone).all()) {
     await expect(chip).toHaveAttribute("data-state", "private");
-    expect(await isMuted(chip)).toBe(true);
+    await expect.poll(() => isMuted(chip)).toBe(true);
     await expect(chip).not.toHaveAttribute("role", "button");
   }
   expect(asked.filter((path) => !path.startsWith("/api/shared/"))).toEqual([]);
@@ -450,7 +450,7 @@ function expectUnmoved(now: Record<string, Place>, before: Record<string, Place>
   }
 }
 
-test("a reference's line is as tall drawn as written, and nothing around it moves when its details arrive or the cursor comes and goes", async ({ page }) => {
+test("nothing moves when a reference's details arrive or the cursor comes to its line, and with the cursor in it it stays drawn, with what the note says above it", async ({ page }) => {
   // Wide enough that a line still fits on one row with its reference shown as written, which is longer than the chip.
   await page.setViewportSize({ width: 1700, height: 900 });
   await signInAsNewPerson(page, "Ada Lovelace");
@@ -476,7 +476,6 @@ test("a reference's line is as tall drawn as written, and nothing around it move
   await expect(chips(page).first()).toHaveAttribute("data-state", "reading");
   const fixed = ["plain line above", "Before", "Second", "next line", "last line"];
   const reading = await places(page, fixed);
-  expect(reading["Before"]!.height, "a line with references in it is as tall as one without").toBe(reading["plain line above"]!.height);
 
   release();
   await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
@@ -490,23 +489,26 @@ test("a reference's line is as tall drawn as written, and nothing around it move
   await expect(chips(page)).toHaveCount(3);
   expectUnmoved(await places(page, [...fixed, "trailing"]), drawn, "with the cursor on the line");
 
-  // The cursor on the first reference: it is shown as written, and the line keeps its place and height.
+  // The cursor in the first reference: it stays drawn, what the note says of it is shown above the line, and nothing before it moves or shifts sideways.
   await page.keyboard.press("Home");
-  for (let i = 0; i < "Before ".length; i++) await page.keyboard.press("ArrowRight");
-  await expect(editor(page).locator(".cm-line").filter({ hasText: "Before" })).toContainText(lunch.text);
-  await expect(chips(page)).toHaveCount(2);
-  expectUnmoved(await places(page, fixed), reading, "with the first reference shown as written");
+  for (let i = 0; i < "Before ::".length; i++) await page.keyboard.press("ArrowRight");
+  await expect(editor(page).locator(".embed-source")).toHaveText(lunch.text);
+  await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
+  const written = await places(page, [...fixed, "trailing"]);
+  expectUnmoved({ "plain line above": written["plain line above"]! }, { "plain line above": drawn["plain line above"]! }, "with the first reference shown as written above its line");
+  for (const word of [...fixed, "trailing"]) expect(Math.abs(written[word]!.x - drawn[word]!.x), `x of "${word}" with the first reference shown as written above its line`).toBeLessThanOrEqual(0.5);
 
   await page.keyboard.press("ControlOrMeta+End");
   await expect(chips(page)).toHaveText(["Lunch with Sam", "Sam Okafor", "Lunch with Sam"]);
   expectUnmoved(await places(page, [...fixed, "trailing"]), drawn, "with the cursor gone again");
   expect(reads, "drawing a reference again asks nothing").toBe(2);
 
-  // Narrow enough that the references wrap: they break as words do, and the line is whole rows of the height of any other.
-  await page.setViewportSize({ width: 720, height: 900 });
-  const row = reading["plain line above"]!.height;
-  await expect.poll(async () => (await places(page, ["plain line above", "Before"]))["Before"]!.height / row).toBeGreaterThan(1.5);
-  const narrow = await places(page, ["plain line above", "Before"]);
-  const rows = narrow["Before"]!.height / row;
-  expect(Math.abs(rows - Math.round(rows)), `a wrapped line of ${narrow["Before"]!.height}px is whole rows of ${row}px`).toBeLessThan(0.02);
+  // Narrow enough that the line of two references wraps: each card goes to a row of its own whole, and none is wider than the note.
+  await page.setViewportSize({ width: 560, height: 900 });
+  await expect.poll(async () => (await places(page, ["Second"]))["Second"]!.height).toBeGreaterThan(drawn["Second"]!.height * 1.5);
+  const edges = await page.evaluate(() => {
+    const text = document.querySelector<HTMLElement>(".cm-content")!.getBoundingClientRect();
+    return [...document.querySelectorAll<HTMLElement>(".cm-content .embed-card")].map((card) => ({ left: card.getBoundingClientRect().left - text.left, over: card.getBoundingClientRect().right - text.right }));
+  });
+  for (const edge of edges) expect(edge.left >= 0 && edge.over <= 0.5, `a card ${edge.left}px in from the note's left edge and ${edge.over}px past its right`).toBe(true);
 });

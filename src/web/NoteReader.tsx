@@ -6,7 +6,7 @@ import { perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
-import type { EditorExtension, Embed } from "./plugin-api.ts";
+import type { EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { reading } from "./readOnly.ts";
 import { committed } from "./sync.ts";
 
@@ -15,7 +15,7 @@ interface Props {
   noteId: string;
   /** The note's latest revision as the workspace knows it. A later one than was read is read in. */
   revision: number | undefined;
-  embeds: readonly Embed[];
+  embeds: readonly (Embed | AddressEmbed)[];
   extensions: readonly EditorExtension[];
 }
 

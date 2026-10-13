@@ -69,7 +69,7 @@ test("archive is one action on the open note, which stays editable and says it i
 
   await expect(bar(page)).toContainText("Archived");
   await expect.poll(() => stateOf(page, note.id)).toBe("archived");
-  expect(await top()).toBe(before);
+  await expect.poll(() => top()).toBe(before);
   // Kept, so its tab is still there once a list is opened: a list from the tree takes a preview's place.
   await tab(page, "Old plan").dblclick();
   await listShows(page, []);
@@ -83,7 +83,7 @@ test("archive is one action on the open note, which stays editable and says it i
   await bar(page).getByRole("button", { name: "Unarchive" }).click();
   await expect(bar(page)).not.toContainText("Archived");
   await expect.poll(() => stateOf(page, note.id)).toBe("live");
-  expect(await top()).toBe(before);
+  await expect.poll(() => top()).toBe(before);
   await expect(inspector(page).getByRole("button", { name: "Archive", exact: true })).toBeEnabled();
   await listShows(page, ["Old plan"]);
 });
@@ -269,7 +269,7 @@ test("an open note that someone else moves to Trash turns read-only, with a bann
 
   await expect(banner(page)).toContainText("This note is in Trash");
   await expect(banner(page)).toContainText("It is removed for good in 30 days.");
-  expect((await top()) - before).toBe((await banner(page).boundingBox())!.height);
+  await expect.poll(async () => (await top()) - before).toBe((await banner(page).boundingBox())!.height);
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await editor(page).click();
   await page.keyboard.type("more");
@@ -279,7 +279,7 @@ test("an open note that someone else moves to Trash turns read-only, with a bann
 
   await expect(banner(page)).toHaveCount(0);
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-  expect(await top()).toBe(before);
+  await expect.poll(() => top()).toBe(before);
   await expect.poll(() => stateOf(page, note.id)).toBe("live");
 });
 
@@ -300,7 +300,7 @@ test("typing in a note that turns out to be in Trash is kept and said to be unsa
   await expect(banner(page)).toBeVisible();
   await expect(bar(page).getByRole("status")).toHaveText(UNSAVED_IN_TRASH);
   await expect(lines(page).last()).toHaveText("first and second");
-  expect((await perform(page, { type: "note.read", id: note.id })).text).toBe("# Draft\n\nfirst");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Draft\n\nfirst");
 
   await banner(page).getByRole("button", { name: "Restore" }).click();
 
@@ -357,13 +357,13 @@ test("a save refused because someone else moved the note to Trash says so at onc
   await expect(banner(page)).toContainText("This note is in Trash");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(lines(page).last()).toHaveText("first and second");
-  expect((await said()).filter((text) => text.includes("Couldn't save"))).toEqual([]);
+  await expect.poll(async () => (await said()).filter((text) => text.includes("Couldn't save"))).toEqual([]);
 
   await banner(page).getByRole("button", { name: "Restore" }).click();
 
   await expect(bar(page).getByRole("status")).toHaveText("Saved");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Draft\n\nfirst and second");
-  expect((await said()).filter((text) => text.includes("Couldn't save"))).toEqual([]);
+  await expect.poll(async () => (await said()).filter((text) => text.includes("Couldn't save"))).toEqual([]);
 });
 
 test("delete forever asks first and names the note, and then a link to it reads as gone", async ({ page }) => {
@@ -388,9 +388,9 @@ test("delete forever asks first and names the note, and then a link to it reads 
   await banner(page).getByRole("button", { name: "Delete forever" }).click();
   const ask = page.getByRole("group", { name: "Delete Doomed forever" });
   await expect(ask).toContainText("Delete “Doomed” forever? The note and its history are removed now, and can't be brought back.");
-  expect(await stateOf(page, doomed.id)).toBe("trashed");
+  await expect.poll(() => stateOf(page, doomed.id)).toBe("trashed");
   await ask.getByRole("button", { name: "Cancel" }).click();
-  expect(await stateOf(page, doomed.id)).toBe("trashed");
+  await expect.poll(() => stateOf(page, doomed.id)).toBe("trashed");
 
   await banner(page).getByRole("button", { name: "Delete forever" }).click();
   await ask.getByRole("button", { name: "Delete forever" }).click();
@@ -408,7 +408,7 @@ test("an editor who didn't make a note is told plainly that they can't delete it
   const { workspaceId } = await join(page, admin, "editor");
   const note = await perform(admin, { type: "note.create", text: "# Hers" });
   await perform(admin, { type: "note.trash", id: note.id });
-  expect((await me(page)).workspaces.some((w) => w.id === workspaceId)).toBe(true);
+  await expect.poll(async () => (await me(page)).workspaces.some((w) => w.id === workspaceId)).toBe(true);
   await page.goto(`/note/${note.id}`);
   await expect(banner(page)).toBeVisible();
 
@@ -416,7 +416,7 @@ test("an editor who didn't make a note is told plainly that they can't delete it
   await page.getByRole("group", { name: "Delete Hers forever" }).getByRole("button", { name: "Delete forever" }).click();
 
   await expect(banner(page).getByRole("alert")).toHaveText("Only an admin or the member who made a note can delete it for good");
-  expect((await perform(admin, { type: "trash.list" })).map((n) => n.id)).toEqual([note.id]);
+  await expect.poll(async () => (await perform(admin, { type: "trash.list" })).map((n) => n.id)).toEqual([note.id]);
 });
 
 test("quick open leaves out archived and trashed notes, and finds archived ones when they are included", async ({ page }) => {

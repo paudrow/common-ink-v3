@@ -189,4 +189,22 @@ describe("removing notes from Trash", () => {
     expect((await perform(env.DB, ada, { type: "trash.list" })).map((n) => n.title)).toEqual(["Waiting"]);
     await expect(perform(env.DB, ada, { type: "note.read", id: due.id })).rejects.toMatchObject({ code: "not_found" });
   });
+
+  it("leaves no word of a removed note in the search index's own pages, removed by the clock or by a member", async () => {
+    const ada = await newMember();
+    const held = async (word: string) => (await env.DB.prepare("SELECT COUNT(*) AS n FROM note_search_data WHERE instr(block, CAST(?1 AS BLOB)) > 0").bind(word).first<{ n: number }>())!.n;
+    const doomed = await perform(env.DB, ada, { type: "note.create", text: "# Doomed\n\nxyzzyplughword" }, 1000);
+    const shredded = await perform(env.DB, ada, { type: "note.create", text: "# Shredded\n\nqwertyfrobword" }, 1000);
+    await perform(env.DB, ada, { type: "note.create", text: "# Kept\n\nstayingword" }, 1000);
+    await perform(env.DB, ada, { type: "note.trash", id: doomed.id }, 2000);
+    await perform(env.DB, ada, { type: "note.trash", id: shredded.id }, 2000);
+    expect(await held("xyzzyplughword")).toBeGreaterThan(0);
+
+    await perform(env.DB, ada, { type: "note.purge", id: shredded.id }, 3000);
+    expect(await held("qwertyfrobword")).toBe(0);
+    expect((await purgeTrash(env.DB, 2000 + TRASH_MS)).removed).toBe(1);
+    expect(await held("xyzzyplughword")).toBe(0);
+    expect((await perform(env.DB, ada, { type: "search", query: "stayingword" })).results.map((r) => r.note.title)).toEqual(["Kept"]);
+  });
+
 });

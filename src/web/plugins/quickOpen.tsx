@@ -24,6 +24,8 @@ function QuickOpen({ app, close }: ViewProps & { close: () => void }) {
 export const quickOpen: Plugin = {
   id: "quick-open",
   name: "Quick open",
+  description: "Go to a note by typing part of its title.",
+  icon: "search",
   activate(host) {
     host.commands.register({ id: "notes.quickOpen", title: "Go to note…", keys: ["mod+p"], run: () => host.app().toggleOverlay("notes") });
     host.views.register("overlay", { id: "notes", component: QuickOpen });

@@ -1,19 +1,43 @@
-import type { Embed } from "../../plugin-api.ts";
-import { finished, readClock, shown, toggled, writeClock } from "./clock.ts";
+import type { Embed, EmbedOptions } from "../../plugin-api.ts";
+import { durationOf, durationText, elapsedOf, finished, readClock, shown, toggled, writeClock } from "./clock.ts";
 
 const KINDS = {
-  stopwatch: { title: "Stopwatch", hint: "Start or stop the stopwatch", example: "::stopwatch{}" },
-  timer: { title: "Timer", hint: "Start or pause the timer", example: "::timer{5m}" },
+  stopwatch: { title: "Stopwatch", hint: "Start or stop the stopwatch", example: "::stopwatch{}", stop: "Stop" },
+  timer: { title: "Timer", hint: "Start or pause the timer", example: "::timer{5m}", stop: "Pause" },
 } as const;
 
+const HOW = "Write it like 25m, 1h30m or 90s.";
+
+/** What a member sets from a clock's options: a timer's length, and how long a stopwatch has run. */
+export function clockOptions(kind: keyof typeof KINDS): EmbedOptions {
+  return {
+    fields({ config }) {
+      const clock = readClock(config, kind);
+      if (!clock) return [];
+      if (clock.length !== null) return [{ id: "length", label: "Length", kind: "text", value: clock.length, hint: HOW }];
+      return [{ id: "time", label: "Time so far", kind: "text", value: durationText(elapsedOf(clock.run, Date.now())), hint: HOW }];
+    },
+    set({ config }, id, value) {
+      const clock = readClock(config, kind);
+      const length = durationOf(value.trim());
+      if (!clock || length === null || (id === "length" && !length)) return HOW;
+      if (id === "length") return { config: writeClock({ ...clock, length: value.trim() }) };
+      // A running stopwatch runs on from the time it is set to.
+      const run = clock.run.is === "running" ? ({ is: "running", since: Date.now() - length } as const) : length ? ({ is: "stopped", elapsed: length } as const) : ({ is: "idle" } as const);
+      return { config: writeClock({ ...clock, run }) };
+    },
+  };
+}
+
 /**
- * A stopwatch or a timer drawn in a note: a button that starts and stops it, and one that sets it
- * back. Each press rewrites the embed's config, which is where its time is kept, and the buttons
- * are changed where they stand, so nothing in the line moves. A member who can't change the note
- * sees the time and can't press it.
+ * A stopwatch or a timer drawn in a note: its time, a button that starts and stops it, and one that
+ * sets it back, each saying what it does. The time is a button too, which starts and stops it as the
+ * one beside it does. Each press rewrites the embed's config, which is where its time is kept, and
+ * the buttons are changed where they stand, so nothing in the line moves. A member who can't change
+ * the note sees the time and can't press it.
  */
 export function clockEmbed(kind: keyof typeof KINDS): Embed["render"] {
-  const { title, hint, example } = KINDS[kind];
+  const { title, hint, example, stop } = KINDS[kind];
   return (el, first) => {
     let embed = first;
     let clock = readClock(embed.config, kind);
@@ -26,9 +50,16 @@ export function clockEmbed(kind: keyof typeof KINDS): Embed["render"] {
     toggle.disabled = embed.readOnly;
     toggle.addEventListener("click", () => clock && embed.update({ config: writeClock(toggled(clock, Date.now())) }));
 
+    const press = document.createElement("button");
+    press.type = "button";
+    press.className = "clock-press";
+    press.addEventListener("click", () => clock && embed.update({ config: writeClock(toggled(clock, Date.now())) }));
+
     const reset = document.createElement("button");
     reset.type = "button";
     reset.className = "clock-reset";
+    // What each button says is drawn from this and not written in it, so the time is the only text a clock adds to its line.
+    reset.dataset.label = "Reset";
     reset.title = reset.ariaLabel = `Reset ${title.toLowerCase()}`;
     reset.addEventListener("click", () => {
       if (!clock) return;
@@ -49,14 +80,21 @@ export function clockEmbed(kind: keyof typeof KINDS): Embed["render"] {
       toggle.classList.toggle("done", done);
       toggle.setAttribute("aria-label", `${title}, ${done ? "finished" : kind === "timer" ? `${toggle.textContent} left` : toggle.textContent}`);
       toggle.setAttribute("aria-pressed", String(clock.run.is === "running" && !done));
+      const running = clock.run.is === "running" && !done;
+      if (press.dataset.label !== (running ? stop : "Start")) {
+        press.dataset.label = running ? stop : "Start";
+        press.title = press.ariaLabel = `${press.dataset.label} ${title.toLowerCase()}`;
+      }
+      // A timer that has run out has nothing to start or stop until it is set back.
+      press.disabled = done;
       if (done) clearInterval(ticking);
     };
     const fit = () => {
       clearInterval(ticking);
       ticking = clock?.run.is === "running" ? setInterval(show, 250) : undefined;
-      // The button that sets it back keeps its place while there is nothing to set back, so starting the clock moves nothing after it.
+      // The button that sets it back is there, and can't be pressed, while there is nothing to set back, so starting the clock moves nothing after it.
       reset.disabled = !clock || clock.run.is === "idle";
-      const parts = clock ? (embed.readOnly ? [toggle] : [toggle, reset]) : [unread];
+      const parts = clock ? (embed.readOnly ? [toggle] : [toggle, press, reset]) : [unread];
       if (parts.some((part, i) => el.childNodes[i] !== part) || el.childNodes.length !== parts.length) el.replaceChildren(...parts);
       show();
     };
