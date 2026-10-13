@@ -31,6 +31,8 @@ interface Place {
   x: number;
   top: number;
   height: number;
+  /** The top of the row that first letter is on, which is the line's top unless the line wraps before it. */
+  rowTop: number;
 }
 
 /**
@@ -55,7 +57,8 @@ const places = (page: Page, words: readonly string[]) =>
       range.setStart(node!, start);
       range.setEnd(node!, start + 1);
       const line = box.getBoundingClientRect();
-      found[word] = { x: range.getBoundingClientRect().x, top: line.top, height: line.height };
+      const letter = range.getBoundingClientRect();
+      found[word] = { x: letter.x, top: line.top, height: line.height, rowTop: letter.top };
     }
     return found;
   }, words);
@@ -186,16 +189,21 @@ for (const width of [1600, 820]) {
     await settled(page);
     const before = await places(page, WORDS);
 
-    /** Puts the cursor on the line that says `word`, by a click just inside the line's right edge. */
+    /**
+     * Puts the cursor on the line that says `word`, by a click just inside the line's right edge on
+     * the row the word is on: a line with a clock in it is three rows in the narrow column, and a
+     * click beside the clock would show the clock's text above it, which is a row more by design.
+     */
     const clickOn = async (word: string) => {
-      const at = await page.evaluate((w) => {
-        const line = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes(w))!;
-        const box = line.getBoundingClientRect();
-        return { x: box.right - 4, y: box.top + 8 };
-      }, word);
-      await page.mouse.click(at.x, at.y);
+      const row = (await places(page, [word]))[word]!;
+      const right = await page.evaluate((w) => [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes(w))!.getBoundingClientRect().right, word);
+      await page.mouse.click(right - 4, row.rowTop + 8);
     };
-    const cursorLine = () => page.evaluate(() => getSelection()!.anchorNode?.parentElement?.closest(".cm-line")?.textContent);
+    const cursorLine = () =>
+      page.evaluate(() => {
+        const at = getSelection()!.anchorNode;
+        return (at instanceof Element ? at : at?.parentElement)?.closest(".cm-line")?.textContent;
+      });
     const lineOf = (word: string) => page.locator(".cm-line").filter({ hasText: word });
 
     for (const word of LINES) {

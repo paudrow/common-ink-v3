@@ -1384,53 +1384,95 @@ button.link:hover {
   display: inline-block;
 }
 
-.embed-block {
-  display: block;
-  padding: 6px 0;
-}
-
-/* The host's own element around each drawn embed: the drawing, then its options button where it has one, which stays on the drawing's row. */
-.embed-frame.with-options {
-  white-space: nowrap;
-}
-
-/* A block's options button has a narrow column of its own at the block's top corner, so it is never laid over what the embed draws. */
-.embed-frame-block {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  white-space: normal;
-}
-
-.embed-options {
-  margin-block: -1px;
-  margin-left: 3px;
-  padding: 0 5px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: none;
-  color: var(--faint);
-  font: inherit;
-  cursor: pointer;
-}
-
-.embed-frame-block > .embed-options {
-  margin: 6px 0 0 4px;
-  padding: 1px 6px;
+/*
+ * Each drawn embed is in a card of the host's: a border, the embed's title, what the embed draws,
+ * and its options button where it has options. The title is drawn from the card's `data-title` and
+ * is not text in the note.
+ */
+.embed-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: 0 1px 2px rgb(30 24 12 / 0.05);
   font-family: var(--prose);
   font-size: 14px;
   line-height: 1.4;
 }
 
-/* Drawn here and not written in the button, so it adds no text to its line. */
+.embed-frame.embed-card::before,
+.embed-head::before {
+  content: attr(data-title);
+  color: var(--muted);
+  font: 650 10.5px/1 var(--prose);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: text;
+}
+
+/* An inline embed's card stands on its line, with a third of a line above and below it, whether or not the cursor is on it. */
+.embed-frame.embed-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin-block: 0.45em;
+  padding: 3px 4px 3px 10px;
+  vertical-align: middle;
+}
+
+/* On one row where there is room. In a note narrower than the card, the card is as wide as the note and its buttons go to a second row. */
+.embed-frame.embed-card > .embed {
+  white-space: normal;
+}
+
+/* A block's card has half a line above and below it, and starts where the text of a line does. Padding, since CodeMirror measures a block by its own box. */
+.embed-frame-block {
+  padding: 0.8em 2px 0.8em 6px;
+  white-space: normal;
+}
+
+.embed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+  padding: 6px 6px 0 12px;
+}
+
+.embed-block {
+  display: block;
+  padding: 8px 12px 12px;
+}
+
+.embed-options {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* Three sliders, drawn here and not written in the button, so it adds no text to its line. */
 .embed-options::before {
-  content: "⋯";
+  content: "";
+  width: 15px;
+  height: 15px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 .embed-options:hover,
 .embed-options[aria-expanded="true"] {
-  border-color: var(--line);
-  background: var(--bg-side);
+  background: var(--hover);
   color: var(--ink);
 }
 
@@ -1439,9 +1481,63 @@ button.link:hover {
   outline-offset: 1px;
 }
 
-/* An inline embed as the note writes it, shown after its drawing while the cursor is on it. */
+/*
+ * An inline embed as the note writes it, shown while the cursor is on it in rows of its own at the
+ * top of its line. The rows are made by an unseen copy of the text, and the text is laid over them,
+ * under the rows of any embed before it on the line, which it is told of in `data-above`. Both wrap
+ * the same way at the same width, so the rows are as tall as the text needs at any width and in any font.
+ */
+.cm-line.embed-sourced {
+  position: relative;
+}
+
+.embed-source-rows,
+.embed-source,
+.cm-line.embed-source-line {
+  font: 12.5px/1.6 var(--mono);
+  letter-spacing: 0;
+  text-indent: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A block's lines, shown above its card while the cursor is in them, are drawn as an inline embed's text is. */
+.cm-line.embed-source-line {
+  color: var(--accent);
+}
+
+/* Whatever the text would be drawn as in the note, a heading or bold, as written it is all one size, the size its rows were made for. */
+.embed-source *,
+.cm-line.embed-source-line * {
+  font: inherit !important;
+  color: inherit !important;
+  letter-spacing: inherit;
+  text-decoration: none;
+}
+
+.embed-source-rows {
+  display: block;
+  visibility: hidden;
+}
+
+.embed-source-rows::before {
+  content: attr(data-rows);
+}
+
 .embed-source {
-  color: var(--muted);
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  box-sizing: border-box;
+  padding: inherit;
+  color: var(--accent);
+}
+
+.embed-source::before {
+  content: attr(data-above);
+  display: block;
+  visibility: hidden;
 }
 
 .embed-options-panel {
@@ -1528,23 +1624,6 @@ button.link:hover {
   outline-offset: 1px;
 }
 
-.embed-option-edit {
-  align-self: flex-start;
-  padding: 3px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  cursor: pointer;
-}
-
-.embed-option-edit:hover,
-.embed-option-edit:focus-visible {
-  background: var(--hover);
-  color: var(--ink);
-}
-
 /* The colours an embed asks for by name. One value serves both themes: what is tinted with it is mixed into the theme's own surface. */
 [data-colour="red"] {
   --swatch: #e5484d;
@@ -1578,22 +1657,25 @@ button.link:hover {
   --swatch: #8b8d98;
 }
 
+/* A clock's time, which is a button, and the buttons beside it, each as tall as the others and a steady gap apart. */
 .clock,
 .clock-press,
 .clock-reset {
-  /* The border is taken back out of the line's height, so a line with a clock in it is as tall as one without. */
-  margin-block: -1px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg-side);
-  color: inherit;
+  height: 26px;
+  border-radius: 7px;
   font: inherit;
   cursor: pointer;
 }
 
 .clock {
-  padding: 0 8px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 16px;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 .clock:disabled {
@@ -1601,26 +1683,39 @@ button.link:hover {
 }
 
 .clock[aria-pressed="true"] {
-  border-color: var(--accent);
   color: var(--accent);
 }
 
 .clock.done {
-  border-color: var(--danger);
   color: var(--danger);
+}
+
+.embed-card:has(> .embed > .clock[aria-pressed="true"]) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
 .clock-press,
 .clock-reset {
-  margin-left: 3px;
-  padding: 0 6px;
-  color: var(--muted);
-  font-size: 0.85em;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
-/* As wide whichever of its words it says, so starting the clock moves nothing after it. */
+.clock-reset {
+  margin-left: 6px;
+}
+
+/* As wide whichever of its words it says, in any font, so starting the clock moves nothing after it. */
 .clock-press {
-  min-width: 4em;
+  width: 5.2em;
+  padding: 0;
+  margin-left: 4px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
   text-align: center;
 }
 
@@ -1629,6 +1724,13 @@ button.link:hover {
 .clock-reset:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.clock:focus-visible,
+.clock-press:focus-visible,
+.clock-reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* Drawn here and not written in the button, so the time is the only text a clock adds to its line. */
@@ -1761,7 +1863,6 @@ button.link:hover {
   overflow-wrap: anywhere;
 }
 
-.kanban-card:focus-visible,
 .kanban-add:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -2993,64 +3094,7 @@ kbd {
   right: -9px;
 }
 
-.changes {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-}
-
-.changes .error,
-.changes .empty {
-  margin: 0;
-}
-
-.changes .empty {
-  text-align: left;
-}
-
-.changed-notes,
-.change-list {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.changed-note,
-.change {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 8px 0;
-}
-
-.changed-note + .changed-note,
-.change + .change {
-  border-top: 1px solid var(--line);
-}
-
-.changed-note-toggle,
-.change-toggle {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.changed-note-toggle:hover .changed-note-title,
-.change-toggle:hover .change-author {
-  text-decoration: underline;
-}
+/* History: a list of changes with a tick each, beside what everything picked did */
 
 .caret {
   flex: none;
@@ -3067,86 +3111,819 @@ kbd {
   transform: rotate(90deg);
 }
 
-.changed-note-title {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* The page is the container its panes are laid out by: a pane can be narrow in a wide window, beside the sidebar and in a split. */
+.history-mode {
+  container: history / inline-size;
+  height: 100%;
+  min-height: 0;
 }
 
-.changed-note-toggle .change-stat {
-  flex: none;
-  min-width: 9ch;
-  margin-left: 0;
+.history-panes {
+  height: 100%;
+  min-height: 0;
+  font-size: 13px;
 }
 
-.changed-note-about,
-.changed-note-total,
-.change-meta {
+/* The page's two panes fill it side by side and each scrolls by itself. */
+.history-panes.page {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.history-panes.page > .hist-side {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.history-panes.page > .hist-main {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.hist-side {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.history-panes.page .hist-side {
+  border-right: 1px solid var(--line);
+}
+
+.hist-head {
+  padding: 22px 18px 4px;
+}
+
+.hist-head h1 {
   margin: 0;
+  font-size: 22px;
+}
+
+.hist-sub {
+  margin: 4px 0 0;
   color: var(--muted);
   font-size: 12px;
 }
 
-.changed-note-about,
-.change-meta,
-.change-body {
-  padding-left: 14px;
+.hist-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
 }
 
-.changed-note-about button.link,
-.change-meta button.link,
-.change-actions button.link {
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--hover);
+}
+
+.segmented button {
+  padding: 2px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.segmented button[aria-checked="true"] {
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.hist-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: default;
+}
+
+.hist-scope button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.hist-scope button svg {
+  width: 10px;
+  height: 10px;
+}
+
+.hist-open-page {
+  align-self: flex-start;
+  margin-bottom: 6px;
   text-decoration: underline;
 }
 
-.changed-note-total .change-stat {
-  margin-left: 0;
-}
-
-.changed-note .note-changes {
-  padding: 4px 0 0 14px;
-}
-
-.note-changes {
+.hist-all {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  min-width: 0;
+  padding: 8px 18px 6px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.note-changes > .button {
+.hist-all-tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Room for the sticky day heading, so the arrow keys don't move a row under it. */
+.hist-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0 8px 12px;
+  overflow-y: auto;
+  scroll-padding-top: 36px;
+}
+
+.hist-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.hist-list .empty {
+  padding: 24px 10px;
+}
+
+.hist-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 12px 10px 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.hist-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.hist-row:hover {
+  background: var(--hover);
+}
+
+.hist-row.selected {
+  background: var(--accent-soft);
+}
+
+.hist-list:focus .hist-row.focused,
+.hist-row.focused {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.hist-row[aria-level="2"] {
+  margin-left: 26px;
+}
+
+.hist-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--bg-elev);
+}
+
+.hist-all-tick .hist-check {
+  margin-top: 0;
+}
+
+.hist-row:hover .hist-check,
+.hist-all-tick:hover .hist-check {
+  border-color: var(--muted);
+}
+
+.hist-row.selected .hist-check,
+.hist-check.all,
+.hist-check.some {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.hist-row.selected .hist-check::after,
+.hist-check.all::after {
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border: solid var(--on-accent);
+  border-width: 0 0 2px 2px;
+  transform: rotate(-45deg);
+  content: "";
+}
+
+.hist-check.some::after {
+  width: 8px;
+  height: 2px;
+  margin: 0;
+  border: 0;
+  background: var(--on-accent);
+  transform: none;
+  content: "";
+}
+
+.hist-caret {
+  margin-top: 6px;
   align-self: flex-start;
 }
 
-.change-list-head {
-  display: flex;
+.hist-note-row .hist-caret {
+  padding: 0;
 }
 
-/* The tick has a column of its own, so a change that can't be ticked lines up with one that can. */
-.change-list.pickable .change {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  column-gap: 8px;
+.avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: hsl(var(--hue) 75% 91%);
+  color: hsl(var(--hue) 50% 36%);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
 }
 
-.change-list.pickable .change > * {
-  grid-column: 2;
+.avatar.agent {
+  border-radius: 30%;
 }
 
-.change-list.pickable .change > .change-pick {
-  grid-row: 1;
-  grid-column: 1;
-  align-self: center;
+.avatar svg {
   width: 14px;
   height: 14px;
+}
+
+:root[data-theme="dark"] .avatar {
+  background: hsl(var(--hue) 35% 24%);
+  color: hsl(var(--hue) 85% 80%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .avatar {
+    background: hsl(var(--hue) 35% 24%);
+    color: hsl(var(--hue) 85% 80%);
+  }
+}
+
+.hist-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hist-line {
+  color: var(--muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.hist-line b,
+.hist-note {
+  color: var(--ink);
+}
+
+.hist-line b {
+  font-weight: 600;
+}
+
+.hist-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hist-reverted {
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 99px;
+}
+
+.hist-row.reverted .hist-line b,
+.hist-row.reverted .hist-note {
+  color: var(--muted);
+}
+
+.hist-more {
+  padding: 6px 18px 12px;
+}
+
+.hist-more .link {
+  text-decoration: underline;
+}
+
+.hist-main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.hist-summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.hist-sum-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
   margin: 0;
-  accent-color: var(--accent);
+  color: var(--muted);
+}
+
+.hist-sum-text b {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.hist-files {
+  display: grid;
+  gap: 16px;
+  padding: 18px 24px 64px;
+  transition: opacity 0.15s;
+}
+
+.hist-files.loading {
+  opacity: 0.55;
+}
+
+.hist-files > .button {
+  justify-self: start;
+}
+
+.hist-hint {
+  margin: 0;
+  padding: 64px 20px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.hist-file {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
+}
+
+.hist-file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-side) 55%, var(--bg-elev));
+}
+
+.hist-file-name {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.hist-file-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.hist-naming {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.hist-naming input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.hist-file > .error {
+  margin: 8px 14px;
+}
+
+.hist-run + .hist-run {
+  border-top: 1px dashed var(--line-strong);
+}
+
+.hist-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 14px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hist-skip {
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: color-mix(in srgb, #d9a400 18%, transparent);
+  color: var(--ink);
+  font-weight: 550;
+}
+
+.hist-run .diff {
+  padding: 8px 0 10px;
+}
+
+/* A narrow page shows one pane at a time, and these lead from one to the other. */
+.hist-back,
+.hist-open {
+  display: none;
+}
+
+.hist-back {
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.hist-open {
+  padding: 8px 18px 12px;
+}
+
+@container history (max-width: 720px) {
+  .history-panes.page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 46%) minmax(0, 1fr);
+  }
+
+  .history-panes.page > .hist-main {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .history-panes.page .hist-side {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .history-panes.page .hist-head {
+    padding-top: 12px;
+  }
+
+  .history-panes.page .hist-sub {
+    display: none;
+  }
+}
+
+@container history (max-width: 480px) {
+  .history-panes.page {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .history-panes.page > .hist-main,
+  .history-panes.page.detail > .hist-side {
+    display: none;
+  }
+
+  .history-panes.page.detail > .hist-main {
+    display: block;
+    grid-row: 1;
+  }
+
+  .history-panes.page .hist-back {
+    display: inline-flex;
+  }
+
+  .history-panes.page .hist-open {
+    display: block;
+  }
+
+  .history-panes.page .hist-summary,
+  .history-panes.page .hist-files {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}
+
+/* In the inspector the list stands over what it picked, and the panel scrolls the two as one. */
+.history-panes.panel {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  margin: -14px;
+}
+
+.history-panes.panel .hist-side {
+  padding-top: 10px;
+}
+
+.history-panes.panel .hist-open-page {
+  margin: 0 14px 2px;
+}
+
+.history-panes.panel .hist-all {
+  padding: 6px 14px;
+}
+
+.history-panes.panel .hist-list {
+  flex: none;
+  max-height: 44vh;
+  padding: 0 6px 8px;
+}
+
+.history-panes.panel .hist-row {
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.history-panes.panel .hist-row[aria-level="2"] {
+  margin-left: 14px;
+}
+
+.history-panes.panel .hist-more {
+  padding: 2px 14px 8px;
+}
+
+.history-panes.panel .hist-main {
+  overflow: visible;
+  border-top: 1px solid var(--line);
+}
+
+.history-panes.panel .hist-summary {
+  position: static;
+  min-height: 0;
+  padding: 8px 14px;
+  background: none;
+}
+
+.history-panes.panel .hist-files {
+  gap: 10px;
+  padding: 10px 10px 24px;
+}
+
+.history-panes.panel .hist-hint {
+  padding: 24px 14px;
+  font-size: 13px;
+}
+
+.history-panes.panel .diff {
+  --diff-gutter: 22px;
+  font-size: 13px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 8px 8px 8px 14px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.toast .link {
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+}
+
+.toast .icon-button {
+  color: inherit;
+}
+
+.change-stat {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.hist-sum-text .change-stat,
+.hist-file-head .change-stat {
+  font-size: 12px;
+}
+
+.added {
+  color: var(--added);
+}
+
+.removed {
+  color: var(--danger);
+}
+
+.badge,
+.label-chip {
+  padding: 0 6px;
+  border-radius: 99px;
+  font-size: 11px;
+}
+
+.badge {
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+}
+
+.label-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* A diff, read as prose. Each line's marker is part of the line, so it scrolls with it and sits on its first row when the text wraps. */
+.diff {
+  --diff-gutter: 34px;
+  font-family: var(--prose);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.diff-line {
+  position: relative;
+  display: block;
+  min-height: 1.65em;
+  padding: 1px 18px 1px var(--diff-gutter);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.diff-line.same {
+  color: var(--muted);
+}
+
+.diff-line.add {
+  background: var(--added-soft);
+}
+
+.diff-line.del {
+  background: var(--removed-soft);
+  color: var(--muted);
+}
+
+.diff-line.del .diff-text {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+.diff-line.mod {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.diff-mark {
+  position: absolute;
+  top: 1px;
+  left: calc(var(--diff-gutter) - 20px);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: calc(14px * 1.65);
+  user-select: none;
+}
+
+.diff-line.add .diff-mark {
+  color: var(--added);
+}
+
+.diff-line.del .diff-mark {
+  color: var(--danger);
+}
+
+.diff-line.mod .diff-mark {
+  color: var(--accent);
+}
+
+.diff-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-text ins {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--added) 24%, transparent);
+  text-decoration: none;
+}
+
+.diff-text del {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--muted);
+  text-decoration-color: color-mix(in srgb, var(--danger) 70%, transparent);
+}
+
+.diff-fold {
+  display: block;
+  width: 100%;
+  padding: 3px 18px 3px var(--diff-gutter);
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: var(--prose);
+  font-size: 12px;
+  text-align: left;
+}
+
+button.diff-fold {
+  cursor: pointer;
+}
+
+button.diff-fold:hover {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+.diff-none {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.diff-none .link {
+  text-decoration: underline;
 }
 
 .revert-dialog {
@@ -3195,14 +3972,7 @@ kbd {
   color: var(--muted);
 }
 
-.revert-more {
-  padding: 6px 8px;
-  border-left: 3px solid var(--danger);
-  border-radius: 4px;
-  background: var(--removed-soft);
-}
-
-.revert-dialog :is(h3, h4) {
+.revert-dialog h3 {
   margin: 0;
   font-size: 13px;
 }
@@ -3334,38 +4104,6 @@ kbd {
   opacity: 0.6;
 }
 
-.revert-notes {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 50vh;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-
-.revert-notes li {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.revert-notes h3 {
-  margin: 0;
-  font-size: 13px;
-}
-
-.revert-note-count {
-  color: var(--muted);
-  font-weight: 400;
-}
-
-.revert-notes .diff {
-  max-height: none;
-  overflow-y: visible;
-}
-
 /* The buttons stay in reach under a preview taller than the window. */
 .revert-dialog-actions {
   position: sticky;
@@ -3379,209 +4117,55 @@ kbd {
   box-shadow: 0 -1px 0 var(--line);
 }
 
-.change-author {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.revert-dialog {
+  width: min(680px, calc(100% - 32px));
 }
 
-.change-toggle .badge,
-.change-toggle time {
-  flex: none;
-}
-
-.change-revert {
-  margin-left: auto;
-}
-
-.change-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  padding-top: 4px;
-}
-
-.change-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-}
-
-.badge,
-.label-chip {
-  padding: 0 6px;
-  border-radius: 99px;
-  font-size: 11px;
-}
-
-.badge {
-  border: 1px solid var(--line-strong);
-  color: var(--muted);
-}
-
-.label-chip {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.change time,
-.change-actions {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.change-stat {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
-
-.added {
-  color: var(--added);
-}
-
-.removed {
-  color: var(--danger);
-}
-
-.change-actions input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-}
-
-.diff {
-  overflow: hidden;
+.revert-dialog .diff {
+  --diff-gutter: 26px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.5;
+  border-radius: 8px;
+  font-size: 13px;
 }
 
-.hunk-head {
-  padding: 1px 8px;
-  background: var(--hover);
-  color: var(--faint);
-}
-
-/* The marker is a cell of its line's own row, so it scrolls with the line and sits on the first row when the text wraps. */
-.diff-line {
-  display: grid;
-  grid-template-columns: 2ch minmax(0, 1fr);
-  align-items: start;
-  padding: 0 8px 0 4px;
-  text-decoration: none;
-}
-
-ins.diff-line {
-  background: var(--added-soft);
-}
-
-del.diff-line {
-  background: var(--removed-soft);
-}
-
-.diff-mark {
-  color: var(--muted);
-  text-align: center;
-  user-select: none;
-}
-
-.diff-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.diff-none {
+.revert-dialog h4 {
   margin: 0;
-  padding: 2px 8px;
-  color: var(--faint);
-  font-size: 12px;
+  font-size: 13px;
 }
 
-.history-mode {
+.revert-lead,
+.revert-beyond,
+.revert-already,
+.revert-nothing,
+.revert-unchanged {
+  color: var(--muted);
+}
+
+.revert-said {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+.revert-note {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  max-width: 54rem;
-  height: 100%;
-  margin: 0 auto;
-  padding: 2rem 2rem 3rem;
-  overflow-y: auto;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 
-.history-mode h1 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.history-filters {
+.revert-note-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  color: var(--muted);
-  font-size: 12px;
+  align-items: baseline;
+  gap: 10px;
 }
 
-.history-filters input[type="date"] {
-  padding: 2px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
-}
-
-.note-scope {
-  position: relative;
-}
-
-.note-scope-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 260px;
-  max-height: 320px;
-  padding: 8px;
-}
-
-.note-scope-menu ul {
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-
-.note-scope-menu label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 2px;
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.note-scope-menu label span {
+.revert-note-head h3 {
+  min-width: 0;
   overflow: hidden;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3726,7 +4310,7 @@ del.diff-line {
   list-style: none;
 }
 
-.agent {
+.agent-list > .agent {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3737,7 +4321,6 @@ del.diff-line {
 
 .agent-head,
 .agent-actions,
-.revert-author,
 .confirm {
   display: flex;
   flex-wrap: wrap;
@@ -3755,8 +4338,7 @@ del.diff-line {
   font-size: 12px;
 }
 
-.confirm,
-.said {
+.confirm {
   font-size: 12px;
 }
 
@@ -3767,12 +4349,14 @@ del.diff-line {
   border-radius: 8px;
 }
 
-.said {
-  color: var(--muted);
+.revert-dialog-body > .button {
+  align-self: flex-start;
 }
 
-.said.failed {
-  color: var(--danger);
+.hist-cut {
+  margin: 2px 10px 6px 36px;
+  color: var(--muted);
+  font-size: 11.5px;
 }
 
 /* The row vim's keys are on, in any list. A card's row has the card's corners, so its mark does too. */
