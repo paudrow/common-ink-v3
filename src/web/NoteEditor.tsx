@@ -7,11 +7,13 @@ import type { GrantAccess, Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { completing } from "./completing.ts";
+import { dismissing } from "./dismiss.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import { readOnly } from "./readOnly.ts";
 import { TITLE_MARK } from "./titleMark.ts";
-import type { Completion, EditorExtension, Embed } from "./plugin-api.ts";
+import { openNote } from "./openNotes.ts";
+import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, type SaveState } from "./sync.ts";
 
 const UNSAVED_IN_TRASH = "Your last changes aren't saved: this note is in Trash. Restore it to save them.";
@@ -71,7 +73,7 @@ interface Props {
   /** Called when the server won't take what was typed: `rejected` may mean the member's access changed, and `inTrash` that the note went to Trash without the workspace hearing. */
   onRejected: (why: "rejected" | "inTrash") => void;
   /** What plugins have registered to draw inside a note. */
-  embeds: readonly Embed[];
+  embeds: readonly (Embed | AddressEmbed)[];
   /** The lists plugins offer at the cursor, such as the embed menu. */
   completions: readonly Completion[];
   /** Called for a completion that threw while being asked what it offers. */
@@ -83,10 +85,9 @@ interface Props {
   meta: ReactNode;
   /** What plugins say of the note above its text, such as that it is in Trash. */
   above: ReactNode;
-  actions: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta, above, actions }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta, above }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const foot = useRef<HTMLDivElement>(null);
   const syncRef = useRef<NoteSync | null>(null);
@@ -160,6 +161,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               EditorView.contentAttributes.of({ "aria-label": "Note text" }),
               placeholder("# Title"),
               sync.extension,
+              openNote(noteId),
               EditorView.updateListener.of((u) => {
                 if (u.transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent))) edited.current();
               }),
@@ -167,8 +169,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
           }),
         });
         sync.attach(view);
-        // A note that took a while to load doesn't take the cursor from a field the member has since gone to.
-        if (!note.text || (now.current.focus && !typingIn(document.activeElement))) view.focus();
+        // A note that took a while to load doesn't take the cursor from a field the member has since gone to, or from a menu opened meanwhile.
+        if (!dismissing() && (!note.text || (now.current.focus && !typingIn(document.activeElement)))) view.focus();
         if (now.current.focus) now.current.onFocused();
       },
       (err) => {
@@ -238,7 +240,6 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         <div className="save-state" role="status">
           {notice ?? (trashed && saveState !== "saved" ? UNSAVED_IN_TRASH : SAVE_LABEL[saveState])}
         </div>
-        {actions}
       </header>
       {above}
       <div className="note-scroll" onMouseDown={toEnd}>

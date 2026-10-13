@@ -284,7 +284,7 @@ export async function purgeUpload(ctx: Context, id: string): Promise<{ id: strin
   if (ctx.role !== "admin" && row.created_by !== ctx.personId && row.private_owner !== ctx.personId) throw new OpError("forbidden", "Only an admin or the member who uploaded a file can delete it for good");
   if (row.state !== "trashed") throw new OpError("invalid", "Only an upload in Trash can be deleted for good. Move it to Trash first.");
   if (!ctx.files.bucket) throw new OpError("unavailable", NO_BUCKET);
-  await removeUpload(ctx.db, ctx.files.bucket, row.id);
+  if (!(await removeUpload(ctx.db, ctx.files.bucket, row.id))) throw new OpError("conflict", "This upload was restored a moment ago, so it wasn't deleted");
   return { id: row.id };
 }
 

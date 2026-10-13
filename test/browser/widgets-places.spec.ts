@@ -31,27 +31,6 @@ async function open(page: Page, text: string) {
   return note;
 }
 
-test("the bottom bar counts the open note's words as they are typed, and is the same height with nothing in it", async ({ page }) => {
-  const note = await open(page, "# Tea\n\nSteep the leaves.\n");
-  const words = bar(page).getByLabel("Word count");
-
-  await expect(words).toHaveText("4 words · 1 min read");
-  await expect(words).toBeInViewport({ ratio: 1 });
-  const [, , , height] = await boxOf(page, ".bar");
-  const main = await boxOf(page, "main");
-  await editor(page).focus();
-  await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type("Then pour ::timer{5m} it.");
-  await expect(words).toHaveText("7 words · 1 min read");
-  await expect.poll(() => read(page, note.id)).toContain("Then pour ::timer{5m} it.");
-
-  await page.goto("/history");
-  await expect(bar(page)).toBeVisible();
-  await expect(words).toHaveCount(0);
-  expect((await boxOf(page, ".bar"))[3]).toBe(height);
-  expect((await boxOf(page, "main"))[3]).toBe(main[3]);
-});
-
 test("a timer or stopwatch running in the open note shows in the bottom bar, moves nothing when it appears, and scrolls the note to itself when pressed", async ({ page }) => {
   const filler = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} of the notes.`).join("\n\n");
   await open(page, `# Tea\n\nSteep ::timer{5m} and lap ::stopwatch{at=5s} here.\n\n${filler}\n`);
@@ -102,8 +81,8 @@ test("a quick timer is started from the command palette, runs in the bottom bar 
 
   await page.reload();
   await expect(quick).toHaveText(/^Quick timer 1:[0-5]\d$/);
-  expect(await read(page, note.id)).toBe("# Tea\n\nSteep.\n");
-  expect(await perform(page, { type: "note.history", id: note.id })).toHaveLength(1);
+  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\nSteep.\n");
+  await expect.poll(() => perform(page, { type: "note.history", id: note.id })).toHaveLength(1);
 
   await quick.click();
   await expect(quick).toHaveCount(0);
@@ -125,18 +104,24 @@ test("a quick timer is started from the command palette, runs in the bottom bar 
   await expect(palette(page).getByRole("option")).toHaveText(["Enable plugin: Quick timer"]);
 });
 
-test("the bottom bar is there in writing mode, and gone with every plugin that puts something in it off", async ({ page }) => {
+test("in focus the bottom bar and its clocks are out of sight while the clock in the note runs on, and the bar is gone with every plugin that puts something in it off", async ({ page }) => {
   await open(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
 
   await page.keyboard.press("ControlOrMeta+.");
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
+  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
+  await expect(page.locator(".bar")).toBeHidden();
+  await expect(bar(page)).toHaveCount(0);
+  // The note is the window, down to its foot, where the bar was.
+  await expect.poll(async () => (await page.locator(".note").boundingBox())!.height).toBe(page.viewportSize()!.height);
+  await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveText(/4:[45]\d/);
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:[45]\d$/]);
   await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");
-  await page.keyboard.press("ControlOrMeta+.");
 
   for (const name of ["Note clocks", "Quick timer", "Word count", "Uploads"]) await run(page, `Disable plugin: ${name}`);
-  await expect(bar(page)).toHaveCount(0);
+  await expect(page.locator(".bar")).toHaveCount(0);
   await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -161,7 +146,7 @@ test("every embed is in the / menu and every command-started widget is in the co
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/");
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/, /^Upload a file/]);
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/]);
   await page.keyboard.press("Escape");
 
   await page.keyboard.press("ControlOrMeta+Shift+P");

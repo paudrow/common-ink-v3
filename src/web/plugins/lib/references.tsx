@@ -62,7 +62,6 @@ export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, tit
   return {
     name: kind,
     title,
-    menu: false,
     render(el, first) {
       let drawnFor: string | null = null;
 

@@ -3,8 +3,11 @@ import { sizeIn, type BelowBox, type UploadEmbed, type UploadKind } from "../../
 /** The tallest a picture or a video is drawn in a note, in pixels. A taller one is drawn smaller, at its own shape. */
 export const TALLEST = 480;
 
+/** The widest one is drawn, in pixels. */
+const WIDEST = 640;
+
 /** The room kept for a picture or a video whose embed gives no size. */
-export const UNSIZED: BelowBox = { ratio: 16 / 9, width: 480 };
+export const UNSIZED: BelowBox = { ratio: 16 / 9, maxWidth: 480 };
 
 /** As tall as a browser's own audio controls, with a little room around them. */
 export const AUDIO_HEIGHT = 56;
@@ -23,7 +26,7 @@ export function boxFor(embed: UploadEmbed, config: string): BelowBox | null {
   const size = sizeIn(config);
   if (!size) return UNSIZED;
   const scale = Math.min(1, TALLEST / size.height);
-  return { ratio: size.width / size.height, width: Math.max(1, Math.round(size.width * scale)) };
+  return { ratio: size.width / size.height, maxWidth: Math.min(WIDEST, Math.max(1, Math.round(size.width * scale))) };
 }
 
 const UNITS = ["KB", "MB", "GB"] as const;

@@ -1,9 +1,11 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { signIn, whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { inOrder, within } from "../../src/core/events.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type CalendarEvent, type Contact, type OpInput } from "../../src/core/protocol.ts";
+import { namedReferences } from "../../src/core/references.ts";
 import { SourceError, contactMatches, writtenReference, type CalendarSource, type ContactsSource, type DataSource, type Sources } from "../../src/core/sources.ts";
 import worker from "../../src/worker/index.ts";
 import { sign } from "../../src/worker/session.ts";
@@ -332,6 +334,8 @@ describe("a reference to a record", () => {
   it("is written so a label can't end the embed or start another", () => {
     expect(writtenReference("event", "aaaaaaaaaaaa", "Plan {Q4}\n::html{x}")).toBe("::event{aaaaaaaaaaaa Plan Q4 ::html x}");
     expect(writtenReference("contact", "aaaaaaaaaaaa", "  ")).toBe("::contact{aaaaaaaaaaaa}");
+    // Nor can the title of an event someone else sent write a link or code into the note of whoever references it.
+    expect(writtenReference("event", "aaaaaaaaaaaa", "Lunch [[Board minutes]] `x` [[y|z]]")).toBe("::event{aaaaaaaaaaaa Lunch Board minutes x y|z}");
   });
 
   it("stays the person's own in a note other members read: the note holds the label, and they can follow nothing", async () => {
@@ -345,6 +349,95 @@ describe("a reference to a record", () => {
     expect(read.text).toContain(`::event{${ref} Lunch with Sam}`);
     expect(JSON.stringify(read)).not.toMatch(/Cafe Lula|Bring the contract|a1"/);
     expect(await refusal(w.ask(eve, { type: "record.read", ref }))).toBe("not_found: No such record");
+  });
+});
+
+describe("a reference in a note, asked about by everyone it doesn't belong to", () => {
+  const PRIVATE = /Cafe-Lula-private|contract-private|sam-private@example\.com|555-0100|Okafor-Works-private|"a1"|people\/c1/;
+  const NEVER_MADE = "aaaaaaaaaaaa";
+
+  it("is a reference that was never made to an admin, an editor, a viewer, a guest, each one's agents and whoever holds a link, and the note tells them its label alone", async () => {
+    const w = world();
+    const olga = await newMember("Olga Owner");
+    const ada = await addMember(olga, "editor", "Ada");
+    const others: Record<string, Actor> = { admin: olga, editor: await addMember(olga, "editor", "Eve"), viewer: await addMember(olga, "viewer", "Vic") };
+    w.events.set(ada.personId, [event("a1", "Lunch with Sam", { location: "Cafe-Lula-private", description: "contract-private" })]);
+    w.contacts.set(ada.personId, [contact("people/c1", "Sam Okafor", { emails: ["sam-private@example.com"], phones: ["555-0100"], organization: "Okafor-Works-private" })]);
+    const lunch = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
+    const sam = await w.ask(ada, { type: "record.refer", sourceId: "people", id: "people/c1" });
+    const note = await w.ask(ada, { type: "note.create", text: `# Plans\n\n${lunch.text} with ${sam.text}\n` });
+    const guestEmail = `${crypto.randomUUID()}@example.com`;
+    await w.ask(olga, { type: "grant.set", noteId: note.id, email: guestEmail, access: "edit" });
+    others.guest = { kind: "member", personId: (await signIn(env.DB, { email: guestEmail, name: "Gus Guest" })).personId, workspaceId: olga.workspaceId };
+    for (const [name, person] of Object.entries({ ...others })) {
+      others[`${name}'s agent`] = await agentOf(person);
+      others[`${name}'s read-only agent`] = await agentOf(person, { readOnly: true });
+    }
+    expect((await w.ask(ada, { type: "record.read", ref: lunch.ref })).kind).toBe("event");
+    const askedForAda = w.asked.filter((id) => id === ada.personId).length;
+
+    for (const [name, actor] of Object.entries(others)) {
+      const said: unknown[] = [];
+      const read = await w.ask(actor, { type: "note.read", id: note.id });
+      expect(read.text, name).toContain(`::event{${lunch.ref} Lunch with Sam} with ::contact{${sam.ref} Sam Okafor}`);
+      said.push(read, await w.ask(actor, { type: "source.list" }), await w.ask(actor, { type: "event.list", ...WEEK }), await w.ask(actor, { type: "contact.list" }), await w.ask(actor, { type: "contact.list", query: "sam" }));
+      expect((said[2] as { events: unknown[] }).events, name).toEqual([]);
+      expect((said[3] as { contacts: unknown[] }).contacts, name).toEqual([]);
+      const readOnly = actor.kind === "agent" && actor.scope?.readOnly;
+      for (const ref of [lunch.ref, sam.ref]) expect(await refusal(w.ask(actor, { type: "record.read", ref })), name).toBe(await refusal(w.ask(actor, { type: "record.read", ref: NEVER_MADE })));
+      expect(await refusal(w.ask(actor, { type: "record.read", ref: lunch.ref })), name).toBe("not_found: No such record");
+      // The record's own id is no way in either: it names a record of the asker's, and they have none by it.
+      expect(await refusal(w.ask(actor, { type: "record.refer", sourceId: "cal", id: "a1" })), name).toBe(readOnly ? "forbidden: A read-only token can't record.refer" : "not_found: No such record");
+      expect(await refusal(w.ask(actor, { type: "event.update", sourceId: "cal", id: "a1", etag: "e1", title: "Taken" })), name).toBe(readOnly ? "forbidden: A read-only token can't event.update" : "not_found: No such event");
+      expect(JSON.stringify(said), name).not.toMatch(PRIVATE);
+    }
+    // Whoever may write a note copies the reference into one of their own, and it is still Ada's.
+    const copied = await w.ask(others.editor!, { type: "note.create", text: `# Mine\n\n::event{${lunch.ref} Lunch with Sam}\n` });
+    expect(copied.text).toContain(lunch.ref);
+    expect(await refusal(w.ask(others.editor!, { type: "record.read", ref: lunch.ref }))).toBe("not_found: No such record");
+    // Nor does it lead to a record of their own that goes by the same id where it is kept, as an event two people are both at does.
+    w.events.set(others.editor!.personId, [event("a1", "Eve's own lunch")]);
+    expect(await refusal(w.ask(others.editor!, { type: "record.read", ref: lunch.ref }))).toBe("not_found: No such record");
+
+    const link = await w.ask(olga, { type: "grant.link", noteId: note.id, link: "public" });
+    const token = link!.to.kind === "link" ? link!.to.token : "";
+    for (const personId of [null, others.editor!.personId, ada.personId]) {
+      const visitor = { kind: "visitor", token, personId } as const;
+      const shared = await perform(env.DB, visitor, { type: "shared.read", id: note.id }, T0, w.sources);
+      expect(shared.text).toContain(`::event{${lunch.ref} Lunch with Sam}`);
+      expect(JSON.stringify(shared)).not.toMatch(PRIVATE);
+      for (const op of [{ type: "record.read", ref: lunch.ref }, { type: "contact.list" }, { type: "source.list" }] as const) expect(await refusal(perform(env.DB, visitor, op, T0, w.sources))).toBe(`forbidden: A link can't ${op.type}`);
+    }
+
+    expect(w.updates).toEqual([]);
+    expect(w.events.get(ada.personId)![0]!.title).toBe("Lunch with Sam");
+    // Nobody's question was ever put to Ada's data sources but her own.
+    expect(w.asked.filter((id) => id === ada.personId)).toHaveLength(askedForAda);
+  });
+
+  it("stays its member's when they are removed from the workspace, and is nobody's there", async () => {
+    const w = world();
+    const olga = await newMember("Olga Owner");
+    const ada = await addMember(olga, "editor", "Ada");
+    w.events.set(ada.personId, [event("a1", "Lunch with Sam", { location: "Cafe-Lula-private" })]);
+    const { ref, text } = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
+    const note = await w.ask(ada, { type: "note.create", text: `# Plans\n\n${text}\n` });
+    await w.ask(olga, { type: "member.remove", memberId: ada.personId });
+    expect(await refusal(w.ask(ada, { type: "record.read", ref }))).toBe("not_found: No such workspace");
+    expect(await refusal(w.ask(olga, { type: "record.read", ref }))).toBe("not_found: No such record");
+    expect(JSON.stringify(await w.ask(olga, { type: "note.read", id: note.id }))).not.toMatch(PRIVATE);
+    // In a workspace of their own it is still theirs: the reference is beside the person, not in the workspace they left.
+    const own = (await whoAmI(env.DB, ada.personId)).workspaces.find((s) => s.id !== olga.workspaceId)!;
+    expect((await w.ask({ ...ada, workspaceId: own.id } as Actor, { type: "record.read", ref })).kind).toBe("event");
+  });
+});
+
+describe("a record named where a reference would be", () => {
+  it("is found outside code, with where it is written, and one that holds a reference already is left", () => {
+    const text = ["# Try", "", "::event{Lunch with Sam} with ::contact{ Sam Okafor }.", "Typed as `::event{Not this}`, and ::event{abcdefghij12 Lunch} is a reference already, as ::contact{abcdefghij12} is.", "```", "::event{Nor this}", "```", "::event{} and ::timer{5m} name nothing."].join("\n");
+    const named = namedReferences(text);
+    expect(named.map(({ kind, name }) => [kind, name])).toEqual([["event", "Lunch with Sam"], ["contact", "Sam Okafor"]]);
+    expect(named.map(({ from, to }) => text.slice(from, to))).toEqual(["::event{Lunch with Sam}", "::contact{ Sam Okafor }"]);
   });
 });
 

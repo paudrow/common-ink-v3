@@ -80,11 +80,13 @@ test("vim's mode bar is at the foot of the note's pane, right above the app's bo
   await steady("in visual mode");
   await page.keyboard.press("Escape");
 
-  // Writing mode: still the foot of the pane.
-  await run(page, "Toggle writing mode");
+  // In focus the pane is the window, and the bar is at the foot of both.
+  await run(page, "Toggle focus");
+  await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
   await editor(page).click();
-  const writing = { pane: await box(page, ".note"), bar: await box(page, ".cm-vim-panel") };
-  expect(Math.abs(writing.bar.y + writing.bar.height - (writing.pane.y + writing.pane.height))).toBeLessThanOrEqual(1);
+  const height = page.viewportSize()!.height;
+  await expect.poll(async () => { const b = await box(page, ".cm-vim-panel"); return Math.abs(b.y + b.height - height); }, "the bar's bottom is the window's").toBeLessThanOrEqual(1);
+  await expect.poll(async () => { const b = await box(page, ".cm-vim-panel"); const pane = await box(page, ".note"); return Math.abs(b.y + b.height - (pane.y + pane.height)); }, "the bar's bottom is the pane's").toBeLessThanOrEqual(1);
 });
 
 test("a long note scrolls under the mode bar, which stays at the foot of the pane", async ({ page }) => {
@@ -96,43 +98,77 @@ test("a long note scrolls under the mode bar, which stays at the foot of the pan
   };
   expect(Math.abs(await at())).toBeLessThanOrEqual(1);
   await page.keyboard.press("Shift+G");
-  await expect(page.locator(".cm-line").filter({ hasText: /^Line 199$/ })).toBeVisible();
-  // The editor goes on measuring its lines after the jump and scrolls again as it does, so each place is read until it has settled.
+  // The editor scrolls to the cursor a frame after G moves it, and goes on measuring its lines and scrolling after that, so each place is read until it has settled.
+  await expect(page.locator(".cm-line").filter({ hasText: /^Line 199$/ })).toBeInViewport();
   await expect.poll(async () => Math.abs(await at())).toBeLessThanOrEqual(1);
   // The last line is above the bar, not behind it.
-  await expect
-    .poll(async () => {
-      const last = await placeOf(page, "Line 199");
-      return last.top + last.height - (await box(page, ".cm-vim-panel")).y;
-    })
-    .toBeLessThanOrEqual(1);
+  const under = async () => {
+    const last = await placeOf(page, "Line 199");
+    return last.top + last.height - (await box(page, ".cm-vim-panel")).y;
+  };
+  await expect.poll(under, "the last line's bottom is above the bar's top").toBeLessThanOrEqual(1);
 });
 
-test("each side of a split has its own mode bar at its own foot", async ({ page }) => {
-  await withVim(page, "# Left\n\nShort.");
-  await perform(page, { type: "note.create", text: "# Right\n\nShort too." });
-  await run(page, "Keep tab open");
-  await page.keyboard.press("ControlOrMeta+p");
-  await page.keyboard.type("Right");
-  await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText("Right");
-  await page.keyboard.press("Enter");
-  await run(page, "Split editor right");
-  await expect(editor(page, 1)).toContainText("Right");
-  await expect(page.locator(".cm-vim-panel")).toHaveCount(2);
-  for (const n of [0, 1]) {
-    const pane = await box(page, ".note", n);
-    const bar = await box(page, ".cm-vim-panel", n);
-    expect(Math.abs(bar.y + bar.height - (pane.y + pane.height)), `pane ${n}: the bar's bottom is the pane's`).toBeLessThanOrEqual(1);
-    expect(Math.abs(bar.x - pane.x), `pane ${n}: the bar starts at the pane's left`).toBeLessThanOrEqual(1);
-    expect(Math.abs(bar.width - pane.width), `pane ${n}: the bar is as wide as the pane`).toBeLessThanOrEqual(1);
-  }
-  // Each says its own editor's mode.
-  await editor(page, 1).click();
-  await page.keyboard.press("i");
-  await expect(statusLine(page, 1)).toHaveText("--INSERT--");
-  await expect(statusLine(page, 0)).toHaveText("--NORMAL--");
-  await expect(group(page, 2)).toBeVisible();
-});
+for (const side of ["right", "down"] as const) {
+  test(`each side of a split ${side} has its own mode bar at its own foot`, async ({ page }) => {
+    await withVim(page, "# Left\n\nShort.");
+    await perform(page, { type: "note.create", text: "# Right\n\nShort too." });
+    await run(page, "Keep tab open");
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.keyboard.type("Right");
+    await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText("Right");
+    await page.keyboard.press("Enter");
+    await run(page, `Split editor ${side}`);
+    await expect(editor(page, 1)).toContainText("Right");
+    await expect(page.locator(".cm-vim-panel")).toHaveCount(2);
+    const main = await box(page, "main");
+    for (const n of [0, 1]) {
+      const pane = await box(page, ".note", n);
+      const bar = await box(page, ".cm-vim-panel", n);
+      const group = await box(page, '[aria-label^="Editor group"]', n);
+      expect(Math.abs(pane.y + pane.height - (group.y + group.height)), `pane ${n}: the note ends where its side of the split does`).toBeLessThanOrEqual(1);
+      if (side === "down") expect(group.height, `pane ${n}: its side is about half the window's height`).toBeLessThan(main.height * 0.6);
+      expect(Math.abs(bar.y + bar.height - (pane.y + pane.height)), `pane ${n}: the bar's bottom is the pane's`).toBeLessThanOrEqual(1);
+      expect(Math.abs(bar.x - pane.x), `pane ${n}: the bar starts at the pane's left`).toBeLessThanOrEqual(1);
+      expect(Math.abs(bar.width - pane.width), `pane ${n}: the bar is as wide as the pane`).toBeLessThanOrEqual(1);
+    }
+    // Each says its own editor's mode.
+    await editor(page, 1).click();
+    await page.keyboard.press("i");
+    await expect(statusLine(page, 1)).toHaveText("--INSERT--");
+    await expect(statusLine(page, 0)).toHaveText("--NORMAL--");
+    await expect(group(page, 2)).toBeVisible();
+
+    // Focus on one side: its bar is the only one seen, at the window's foot, and vim's keys are that editor's.
+    await page.keyboard.press("Escape");
+    await expect(statusLine(page, 1)).toHaveText("--NORMAL--");
+    await page.keyboard.press("ControlOrMeta+.");
+    await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
+    const seen = page.locator(".cm-vim-panel").filter({ visible: true });
+    await expect(seen).toHaveCount(1);
+    await expect(seen).toHaveText("--NORMAL--");
+    const height = page.viewportSize()!.height;
+    await expect.poll(async () => { const b = (await seen.boundingBox())!; return Math.abs(b.y + b.height - height); }, "in focus the bar's bottom is the window's").toBeLessThanOrEqual(1);
+    await keys(page, "g", "g", "x");
+    await expect(page.getByRole("textbox", { name: "Note text" })).toHaveCount(1);
+    await expect(editor(page).locator(".cm-line").first()).toHaveText(/^ Right$/);
+    await keys(page, ":");
+    await expect(seen.locator("input")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(editor(page)).toBeFocused();
+
+    // Leaving puts each bar back at its own foot.
+    await page.keyboard.press("ControlOrMeta+.");
+    await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
+    await expect(page.locator(".cm-vim-panel").filter({ visible: true })).toHaveCount(2);
+    await expect(editor(page, 0).locator(".cm-line").first()).toHaveText("# Left");
+    await expect(editor(page, 1).locator(".cm-line").first()).toHaveText(/^ Right$/);
+    for (const n of [0, 1]) {
+      await expect.poll(async () => { const b = await box(page, ".cm-vim-panel", n); const pane = await box(page, ".note", n); return Math.abs(b.y + b.height - (pane.y + pane.height)); }, `pane ${n}: out of focus the bar's bottom is the pane's`).toBeLessThanOrEqual(1);
+      if (side === "down") await expect.poll(async () => (await box(page, '[aria-label^="Editor group"]', n)).height, `pane ${n}: its side is about half the window again`).toBeLessThan(main.height * 0.6);
+    }
+  });
+}
 
 for (const vim of [true, false]) {
   test(`a click in the empty room below a note's text puts the cursor at the note's end${vim ? ", in vim mode" : ""}`, async ({ page }) => {
@@ -170,7 +206,7 @@ test("with the setting on, j and k move by the rows on screen and dj still takes
   await expect.poll(cursorTop, "j goes to the second row of the wrapped line").toBeGreaterThan(first + 10);
   await expect(page.locator(".cm-fat-cursor")).not.toHaveText("");
   const second = await cursorTop();
-  expect((await placeOf(page, "A long line")).height).toBeGreaterThan(second - first + 10);
+  await expect.poll(async () => (await placeOf(page, "A long line")).height).toBeGreaterThan(second - first + 10);
   await page.keyboard.press("k");
   await expect.poll(cursorTop, "k goes back up a row").toBe(first);
 
@@ -183,8 +219,8 @@ test("with the setting on, j and k move by the rows on screen and dj still takes
   // Off, which is the default: one j passes the whole wrapped line. It reaches the open editor without a reload.
   const settings = await perform(page, { type: "settings.read" });
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: settings.revision });
-  await page.goto("/settings");
-  await expect(page.getByRole("tabpanel").getByRole("region", { name: "Vim mode", exact: true })).toContainText("j and k move by the rows on screen");
+  await page.goto("/settings/plugins/vim");
+  await expect(page.getByRole("region", { name: "Vim mode", exact: true })).toContainText("j and k move by the rows on screen");
   await page.goBack();
   await expect(statusLine(page)).toHaveText("--NORMAL--");
   await editor(page).click();
@@ -204,9 +240,8 @@ test("line numbers are shown by a setting, beside the text and off the text's ow
   const off = await places();
   await expect(page.locator(".cm-lineNumbers")).toHaveCount(0);
 
-  await page.goto("/settings");
-  const setting = page.getByRole("tabpanel").getByRole("region", { name: "Line numbers", exact: true });
-  await setting.getByRole("checkbox", { name: "On" }).check();
+  await page.goto("/plugins");
+  await page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "Line numbers", exact: true }).check();
   await page.goBack();
   await expect(page.locator(".cm-lineNumbers .cm-gutterElement").filter({ hasText: /^12$/ })).toBeVisible();
   const on = await places();

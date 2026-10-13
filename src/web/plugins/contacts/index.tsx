@@ -10,14 +10,17 @@ import { ContactsPage } from "./Contacts.tsx";
 export const contacts: Plugin = {
   id: "contacts",
   name: "Contacts",
+  description: "Shows the people in the contacts you connect, which nobody else in the workspace sees, and lets a note reference one.",
+  icon: "contacts",
   activate(host) {
-    host.views.register("page", { id: "contacts", path: "/contacts", label: "Contacts", icon: "contacts", nav: "more", component: (props) => <ContactsPage host={host} {...props} /> });
+    host.views.register("page", { id: "contacts", path: "/contacts", label: "Contacts", // First under More, wherever this plugin is among the others: its place there sets where Contact is in the / menu.
+      icon: "contacts", nav: "more", order: 10, component: (props) => <ContactsPage host={host} {...props} /> });
     host.embeds.register(
       referenceEmbed({
         host,
         kind: "contact",
         title: "Contact",
-        hint: "copy a reference from a contact on the Contacts page, and paste it here",
+        hint: "copy a reference from a contact on the Contacts page, and paste it over this",
         shown: ({ contact }) => ({ text: contact.name || "No name", title: [contact.organization, ...contact.emails, ...contact.phones].filter(Boolean).join(" · ") || "Contact" }),
         details: ({ contact }) => (
           <dl className="ref-details">

@@ -47,9 +47,11 @@ const shapeOf = (path: string) =>
  */
 function unreached(err: unknown, method: string, to: URL): SourceError {
   const { name, message } = err instanceof Error ? err : { name: "Unknown", message: String(err) };
-  console.warn(`Google request failed: ${name}: ${message} (${method} ${to.host}${shapeOf(to.pathname)})`);
+  // The error's name and not its message, which is the runtime's to word and could quote what was sent.
+  const crowded = /too many subrequests/i.test(message);
+  console.warn(`Google request failed: ${name}${crowded ? ", too many subrequests" : ""} (${method} ${to.host}${shapeOf(to.pathname)})`);
   if (name === "TimeoutError" || name === "AbortError") return new SourceError("busy", "Google took too long to answer. Try again in a moment.");
-  if (/too many subrequests/i.test(message)) return new SourceError("busy", "There is too much in Google to fetch at once. Show fewer calendars in Google Calendar, or look at a shorter span.");
+  if (crowded) return new SourceError("busy", "There is too much in Google to fetch at once. Show fewer calendars in Google Calendar, or look at a shorter span.");
   return new SourceError("busy", "Common Ink couldn't reach Google. Try again in a moment.");
 }
 
@@ -189,7 +191,8 @@ class Session {
       res = await this.send(url, init, next);
       if (res.status === 401) return this.broken();
     }
-    if (res.ok) return res.json();
+    // An answer that isn't JSON is no answer: what it says instead is not passed on.
+    if (res.ok) return res.json().catch(() => Promise.reject(new SourceError("busy", "Google answered with something Common Ink couldn't read. Try again in a moment.")));
     if (res.status === 404 || res.status === 410) return null;
     if (res.status === 412) throw new SourceError("stale", "It was changed in Google since you opened it. Open it again, then make your change.");
     if (res.status === 403) {
@@ -256,9 +259,13 @@ function whenOf(event: GoogleEvent): EventWhen | null {
 
 /** A record's id is the calendar's id and the event's, which have no space in them. */
 const eventId = (calendarId: string, id: string) => `${calendarId} ${id}`;
+const DOTS = /^\.{1,2}$/;
 function partsOf(id: string): { calendarId: string; eventId: string } | null {
   const at = id.indexOf(" ");
-  return at > 0 && at < id.length - 1 && !id.includes(" ", at + 1) ? { calendarId: id.slice(0, at), eventId: id.slice(at + 1) } : null;
+  if (at <= 0 || at === id.length - 1 || id.includes(" ", at + 1)) return null;
+  const parts = { calendarId: id.slice(0, at), eventId: id.slice(at + 1) };
+  // Percent-encoding leaves a dot segment as it is, and an address then drops it and the segment before it.
+  return DOTS.test(parts.calendarId) || DOTS.test(parts.eventId) ? null : parts;
 }
 
 /** Only Google Calendar's own page for an event is linked to. */

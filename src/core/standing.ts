@@ -35,8 +35,10 @@ const MOST: Record<Role, Standing["most"]> = { admin: "manage", editor: "edit", 
 /**
  * Where a person stands in a workspace: as a member with a role, or as a guest, whom at least one
  * grant names. Null for anyone else, and that says nothing about whether there is such a workspace.
+ * `limit` is the folders an agent acting for them is limited to: its sight is theirs, less what is
+ * outside those.
  */
-export async function standingIn(db: D1Database, personId: string, workspaceId: string): Promise<Standing | null> {
+export async function standingIn(db: D1Database, personId: string, workspaceId: string, limit: readonly string[] | null = null): Promise<Standing | null> {
   const [who, granted] = await db.batch<{ name: string; role: Role | null } & GrantRow>([
     db.prepare("SELECT p.name, m.role FROM people p LEFT JOIN members m ON m.person_id = p.id AND m.workspace_id = ?2 WHERE p.id = ?1").bind(personId, workspaceId),
     db.prepare("SELECT note_id, folder_id, upload_id, access FROM grants WHERE workspace_id = ?2 AND person_id = ?1 AND kind = 'person'").bind(personId, workspaceId),
@@ -46,7 +48,7 @@ export async function standingIn(db: D1Database, personId: string, workspaceId: 
   if (!person || (!person.role && !grants.length)) return null;
   const { role, name } = person;
   // A member with no grant on a folder sees every folder, so there is nothing to work out from them.
-  const parents = !role || grants.some((g) => g.folder_id !== null) ? await folderParents(db, workspaceId) : new Map<string, string | null>();
+  const parents = !role || limit || grants.some((g) => g.folder_id !== null) ? await folderParents(db, workspaceId) : new Map<string, string | null>();
   return {
     workspaceId,
     personId,
@@ -54,7 +56,7 @@ export async function standingIn(db: D1Database, personId: string, workspaceId: 
     role,
     most: role ? MOST[role] : grants.some((g) => g.access === "edit") ? "edit" : "view",
     as: role ?? "guest",
-    sight: sightOf({ personId, role }, grants.map(reaching), parents),
+    sight: sightOf({ personId, role }, grants.map(reaching), parents, limit),
   };
 }
 

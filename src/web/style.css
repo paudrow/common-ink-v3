@@ -11,6 +11,7 @@
   --on-accent: #ffffff;
   --selection: #dcdcf7;
   --bg-side: #f4f2ee;
+  --code-bg: rgb(31 30 28 / 0.035);
   --line-strong: #d9d4ca;
   --faint: #a8a39b;
   --danger: #c2410c;
@@ -43,6 +44,7 @@
     --on-accent: #10101a;
     --selection: #34345c;
     --bg-side: #1d1c1b;
+    --code-bg: rgb(232 230 227 / 0.026);
     --line-strong: #403e3b;
     --faint: #6b6762;
     --danger: #f08a5d;
@@ -66,6 +68,7 @@
   --on-accent: #10101a;
   --selection: #34345c;
   --bg-side: #1d1c1b;
+  --code-bg: rgb(232 230 227 / 0.026);
   --line-strong: #403e3b;
   --faint: #6b6762;
   --danger: #f08a5d;
@@ -207,7 +210,8 @@ button.link:hover {
   font-size: 12px;
 }
 
-.button:disabled {
+.button:disabled,
+.button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
@@ -230,11 +234,13 @@ button.link:hover {
 
 /* Folders column */
 
+/* The sidebar and the inspector are as wide as the member dragged them, and give way down to their least widths before the editor area goes under its own. */
 .sidebar {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   flex-direction: column;
-  width: 216px;
+  width: var(--sidebar-width, 216px);
+  min-width: 150px;
   min-height: 0;
   padding: 8px 6px;
   overflow-y: auto;
@@ -396,6 +402,14 @@ button.link:hover {
   color: var(--muted);
 }
 
+.more-toggle svg {
+  transition: transform 0.12s;
+}
+
+.more-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
 .mode:hover {
   background: var(--hover);
 }
@@ -552,7 +566,7 @@ button.link:hover {
 .folder-column {
   max-width: 780px;
   margin: 0 auto;
-  padding: 30px clamp(14px, 5%, 32px) 50vh;
+  padding: 30px clamp(14px, 5%, 32px);
 }
 
 .folder-head {
@@ -1051,12 +1065,66 @@ button.link:hover {
 
 /* Editor */
 
+/* 330px is the least the sidebar and the inspector take together, so in a window too narrow for all three the editor area has what is left. */
 .main {
   position: relative;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: min(320px, 100% - 330px);
   min-height: 0;
   overflow-y: auto;
+}
+
+/* A page that only leads somewhere else has the editor area's place for that moment, with the editor area kept under it and not shown. */
+.passing {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+}
+
+.editor-area {
+  display: contents;
+}
+
+.editor-area[data-under] {
+  visibility: hidden;
+}
+
+/* An edge dragged to resize what is either side of it. It lies over the edge and takes no room of its own, so nothing is narrower for it. */
+.resize-handle {
+  position: relative;
+  z-index: 6;
+  flex: none;
+  width: 6px;
+  margin: 0 -3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle[aria-orientation="horizontal"] {
+  width: auto;
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+}
+
+.resize-handle::after {
+  position: absolute;
+  inset: 0 2px;
+  content: "";
+}
+
+.resize-handle[aria-orientation="horizontal"]::after {
+  inset: 2px 0;
+}
+
+.resize-handle:hover::after,
+.resize-handle[data-dragging]::after,
+.resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
+.resize-handle:focus-visible {
+  outline: none;
 }
 
 .groups {
@@ -1064,25 +1132,130 @@ button.link:hover {
   height: 100%;
 }
 
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split[data-direction="column"] {
+  flex-direction: column;
+}
+
+.pane {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Between two panes the edge is also the line that parts them, and that line is the one pixel of room it takes. */
+.split > .resize-handle {
+  width: 7px;
+}
+
+.split > .resize-handle[aria-orientation="horizontal"] {
+  width: auto;
+  height: 7px;
+}
+
+.split > .resize-handle::before {
+  position: absolute;
+  inset: 0 3px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.split > .resize-handle[aria-orientation="horizontal"]::before {
+  inset: 3px 0;
+}
+
 .group {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
-.group + .group {
-  border-left: 1px solid var(--line-strong);
+.tab-row {
+  display: flex;
+  flex: none;
+  height: 34px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-side);
 }
 
 .tab-bar {
   display: flex;
-  flex: none;
-  height: 34px;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-side);
   scrollbar-width: none;
+}
+
+/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
+.window-controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+
+/* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
+.focus-button {
+  align-self: center;
+  margin: 0 6px 0 auto;
+}
+
+.group:not([data-front]) .focus-button {
+  opacity: 0.45;
+}
+
+/* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
+.app[data-focus-mode] > :is(.sidebar, .rail, .inspector, .resize-handle, .bar),
+.groups[data-focus-mode] .group:not([data-front]),
+.groups[data-focus-mode] .resize-handle {
+  visibility: hidden;
+}
+
+.groups[data-focus-mode] .group[data-front] {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  z-index: 1;
+  height: auto;
+  border: 0;
+  background: none;
+}
+
+.groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
+  display: none;
+}
+
+/* A note's bar ends short of the way out, so its save state is not under it. */
+.groups[data-focus-mode] .note-bar {
+  padding-right: 40px;
+}
+
+.groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
+  background: none;
+  opacity: 0.45;
+}
+
+/* A page in a tab scrolls by itself, as it did when it had the editor area to itself. */
+.page-pane {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .tab {
@@ -1184,34 +1357,38 @@ button.link:hover {
   min-height: 0;
 }
 
+/* Where a dragged tab would land: over the whole group for the middle, which adds it there, and over the half a split would give it for an edge. */
 .drop-zone {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 20;
-  width: 50%;
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 2px var(--accent);
   pointer-events: none;
 }
 
-.drop-zone[data-side="left"],
-.drop-zone[data-side="whole"] {
-  left: 0;
+.drop-zone[data-zone="left"] {
+  right: 50%;
 }
 
-.drop-zone[data-side="right"] {
-  right: 0;
+.drop-zone[data-zone="right"] {
+  left: 50%;
 }
 
-.drop-zone[data-side="whole"] {
-  width: 100%;
+.drop-zone[data-zone="up"] {
+  bottom: 50%;
+}
+
+.drop-zone[data-zone="down"] {
+  top: 50%;
 }
 
 .note {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Its height is a measure too: the room under a note's last line is a share of its own pane, not of the window. */
+  container: note / size;
 }
 
 .note-bar {
@@ -1240,6 +1417,30 @@ button.link:hover {
   text-overflow: ellipsis;
 }
 
+/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
+@container note (max-width: 520px) {
+  .note-bar {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    height: auto;
+    min-height: 38px;
+    padding-block: 6px;
+  }
+
+  .note-meta {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .note-meta > * {
+    max-width: 100%;
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+}
+
 .crumbs {
   color: var(--ink);
 }
@@ -1266,7 +1467,7 @@ button.link:hover {
   max-width: 46rem;
   min-height: 100%;
   margin: 0 auto;
-  padding: 2rem 2rem 30vh;
+  padding: 2rem 2rem 30cqh;
 }
 
 /* What an editor extension keeps under a note, such as vim's mode: at the foot of the note's pane, as wide as the pane. */
@@ -1325,6 +1526,17 @@ button.link:hover {
   background: var(--selection) !important;
 }
 
+/* A selection the editor draws itself stops at the text's own margin, and doesn't run out into the room kept for hanging marks. */
+.editor .cm-selectionLayer {
+  /* The layer has no size of its own, so the right and bottom edges are pushed out as far as a note can reach. */
+  clip-path: inset(0 -100000px -100000000px 3rem);
+}
+
+/* The cursor the editor draws itself, which it does with vim on, is the color the browser's own is. */
+.editor .cm-cursor {
+  border-left-color: var(--accent);
+}
+
 .editor .cm-placeholder {
   color: var(--muted);
 }
@@ -1344,26 +1556,298 @@ button.link:hover {
   display: inline-block;
 }
 
-.embed-block {
-  display: block;
-  padding: 6px 0;
+/*
+ * Each drawn embed is in a card of the host's: a border, the embed's title, what the embed draws,
+ * and its options button where it has options. The title is drawn from the card's `data-title` and
+ * is not text in the note.
+ */
+.embed-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: 0 1px 2px rgb(30 24 12 / 0.05);
+  font-family: var(--prose);
+  font-size: 14px;
+  line-height: 1.4;
 }
 
-.clock,
-.clock-reset {
-  /* The border is taken back out of the line's height, so a line with a clock in it is as tall as one without. */
-  margin-block: -1px;
-  border: 1px solid var(--line);
+.embed-frame.embed-card::before,
+.embed-head::before {
+  content: attr(data-title);
+  color: var(--muted);
+  font: 650 10.5px/1 var(--prose);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: text;
+}
+
+/* An inline embed's card stands on its line, with a third of a line above and below it, whether or not the cursor is on it. */
+.embed-frame.embed-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin-block: 0.45em;
+  padding: 3px 4px 3px 10px;
+  vertical-align: middle;
+}
+
+/* On one row where there is room. In a note narrower than the card, the card is as wide as the note and its buttons go to a second row. */
+.embed-frame.embed-card > .embed {
+  white-space: normal;
+}
+
+/* A block's card has half a line above and below it, and starts where the text of a line does. Padding, since CodeMirror measures a block by its own box. */
+.embed-frame-block {
+  padding: 0.8em 2px 0.8em 6px;
+  white-space: normal;
+}
+
+.embed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+  padding: 6px 6px 0 12px;
+}
+
+.embed-block {
+  display: block;
+  padding: 8px 12px 12px;
+}
+
+.embed-options {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* Three sliders, drawn here and not written in the button, so it adds no text to its line. */
+.embed-options::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.embed-options:hover,
+.embed-options[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.embed-options:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
+ * An inline embed as the note writes it, shown while the cursor is on it in rows of its own at the
+ * top of its line. The rows are made by an unseen copy of the text, and the text is laid over them,
+ * under the rows of any embed before it on the line, which it is told of in `data-above`. Both wrap
+ * the same way at the same width, so the rows are as tall as the text needs at any width and in any font.
+ */
+.cm-line.embed-sourced {
+  position: relative;
+}
+
+.embed-source-rows,
+.embed-source,
+.cm-line.embed-source-line {
+  font: 12.5px/1.6 var(--mono);
+  letter-spacing: 0;
+  text-indent: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A block's lines, shown above its card while the cursor is in them, are drawn as an inline embed's text is. */
+.cm-line.embed-source-line {
+  color: var(--accent);
+}
+
+/* Whatever the text would be drawn as in the note, a heading or bold, as written it is all one size, the size its rows were made for. */
+.embed-source *,
+.cm-line.embed-source-line * {
+  font: inherit !important;
+  color: inherit !important;
+  letter-spacing: inherit;
+  text-decoration: none;
+}
+
+.embed-source-rows {
+  display: block;
+  visibility: hidden;
+}
+
+.embed-source-rows::before {
+  content: attr(data-rows);
+}
+
+.embed-source {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  box-sizing: border-box;
+  padding: inherit;
+  color: var(--accent);
+}
+
+.embed-source::before {
+  content: attr(data-above);
+  display: block;
+  visibility: hidden;
+}
+
+.embed-options-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 12rem;
+  font-family: var(--prose);
+}
+
+.embed-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.embed-option-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.embed-option input {
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: var(--bg-side);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.embed-option input:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.embed-option-hint {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.embed-option-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.embed-option-choices,
+.kanban-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.embed-option-choice {
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: none;
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
 
+.embed-option-choice.swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--swatch, transparent);
+}
+
+/* No colour: a ring with a line through it. */
+.embed-option-choice.swatch:not([data-colour]) {
+  background: linear-gradient(to top right, transparent calc(50% - 1px), var(--faint) calc(50% - 1px), var(--faint) calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+.embed-option-choice[aria-checked="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.embed-option-choice:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+/* The colours an embed asks for by name. One value serves both themes: what is tinted with it is mixed into the theme's own surface. */
+[data-colour="red"] {
+  --swatch: #e5484d;
+}
+
+[data-colour="orange"] {
+  --swatch: #f76b15;
+}
+
+[data-colour="yellow"] {
+  --swatch: #e2b100;
+}
+
+[data-colour="green"] {
+  --swatch: #30a46c;
+}
+
+[data-colour="blue"] {
+  --swatch: #3e8ee6;
+}
+
+[data-colour="purple"] {
+  --swatch: #8e4ec6;
+}
+
+[data-colour="pink"] {
+  --swatch: #d6409f;
+}
+
+[data-colour="gray"] {
+  --swatch: #8b8d98;
+}
+
+/* A clock's time, which is a button, and the buttons beside it, each as tall as the others and a steady gap apart. */
+.clock,
+.clock-press,
+.clock-reset {
+  height: 26px;
+  border-radius: 7px;
+  font: inherit;
+  cursor: pointer;
+}
+
 .clock {
-  padding: 0 8px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 16px;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 .clock:disabled {
@@ -1371,34 +1855,63 @@ button.link:hover {
 }
 
 .clock[aria-pressed="true"] {
-  border-color: var(--accent);
   color: var(--accent);
 }
 
 .clock.done {
-  border-color: var(--danger);
   color: var(--danger);
 }
 
-.clock-reset {
-  margin-left: 3px;
-  padding: 0 6px;
-  color: var(--muted);
+.embed-card:has(> .embed > .clock[aria-pressed="true"]) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
-/* Drawn here and not written in the button, so the time is the only text a stopwatch adds to its line. */
-/* Kept in its place and out of sight, so the line is as wide before the clock starts as after. Not hidden outright, which the caret is lost beside. */
+.clock-press,
+.clock-reset {
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.clock-reset {
+  margin-left: 6px;
+}
+
+/* As wide whichever of its words it says, in any font, so starting the clock moves nothing after it. */
+.clock-press {
+  width: 5.2em;
+  padding: 0;
+  margin-left: 4px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  text-align: center;
+}
+
+/* Kept in its place while it can't be pressed, so the line is as wide before the clock starts as after. */
+.clock-press:disabled,
 .clock-reset:disabled {
-  opacity: 0;
+  opacity: 0.45;
   cursor: default;
 }
 
-.clock-reset::before {
-  content: "↺";
+.clock:focus-visible,
+.clock-press:focus-visible,
+.clock-reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
-.clock-unread,
-.embed-unread {
+/* Drawn here and not written in the button, so the time is the only text a clock adds to its line. */
+.clock-press::before,
+.clock-reset::before {
+  content: attr(data-label);
+}
+
+.clock-unread {
   color: var(--muted);
   font-size: 0.85em;
 }
@@ -1413,14 +1926,46 @@ button.link:hover {
   pointer-events: none;
 }
 
+/* One box with one radius, and what is drawn in it is cut to that: nothing of another site's own frame shows past it. */
 .embed-below {
   position: absolute;
   box-sizing: border-box;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg-side);
+  border-radius: 10px;
+  background: var(--bg);
   pointer-events: auto;
+}
+
+/* A post's site draws the post's own border and corners. The box is cut to the same corners and adds nothing, so there is one edge and it is the post's. */
+.embed-below[data-embed="post"] {
+  border: 0;
+  border-radius: 12px;
+  background: none;
+}
+
+/* The rest of a block's card: the card above has the top corners and this has the bottom ones. */
+.embed-below-joined {
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+}
+
+.embed-joined.embed-frame-block {
+  padding-bottom: 0;
+}
+
+.embed-joined > .embed-card {
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  box-shadow: none;
+}
+
+.embed-joined .embed-head {
+  padding-bottom: 6px;
+}
+
+.embed-joined .embed {
+  display: none;
 }
 
 /* As far in as a line's own text. */
@@ -1431,6 +1976,20 @@ button.link:hover {
 .embed-below-room > div {
   width: 100%;
   max-width: 40rem;
+}
+
+.embed-below-room-joined > div {
+  max-width: none;
+}
+
+/* The line of an address that is shown as media: a caption's size, and seen only with the pointer on it or on the media, or the cursor on it. It keeps its room either way, so nothing moves. */
+.cm-line.embed-address {
+  font-size: 0.8125rem;
+  transition: opacity 120ms;
+}
+
+.cm-line.embed-address:not(.embed-address-seen):not(:hover) {
+  opacity: 0;
 }
 
 .embed-below-drawn {
@@ -1485,23 +2044,83 @@ button.link:hover {
   text-align: center;
 }
 
+/* A frame whose page is in another colour scheme than the element is given an opaque backdrop by the browser, which would show as white corners round a dark post. */
 .embed-below iframe {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
+  background: none;
+  color-scheme: normal;
 }
 
-.media-name {
-  border-radius: 4px;
-  padding: 0 4px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-family: var(--prose);
-  font-size: 0.9em;
-  cursor: text;
+/* A video before it is played: its picture, what it is called along the top, and a play mark in the middle. */
+.media-play {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: #000;
+  cursor: pointer;
 }
 
+.media-play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.media-poster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-title {
+  position: absolute;
+  inset: 0 0 auto;
+  overflow: hidden;
+  padding: 12px 16px 28px;
+  background: linear-gradient(rgb(0 0 0 / 0.7), transparent);
+  color: #fff;
+  font: 600 15px/1.3 var(--prose);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-title:empty {
+  display: none;
+}
+
+.media-play-mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 64px;
+  height: 44px;
+  translate: -50% -50%;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.72);
+}
+
+.media-play-mark::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -40% -50%;
+  border-block: 9px solid transparent;
+  border-left: 15px solid #fff;
+}
+
+.media-play:hover .media-play-mark {
+  background: var(--accent);
+}
+
+/* What a frame asks before it runs anything. */
 .media-load {
   display: flex;
   flex-direction: column;
@@ -1535,48 +2154,6 @@ button.link:hover {
   font-size: 12px;
 }
 
-.link-card {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  max-width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0 8px;
-  background: var(--bg-side);
-  color: inherit;
-  font-family: var(--prose);
-  text-decoration: none;
-  vertical-align: top;
-}
-
-.link-card:hover {
-  border-color: var(--line-strong);
-}
-
-.link-card-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.link-card-site {
-  color: var(--muted);
-  font-size: 0.8em;
-}
-
-.html-embed-edit {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0 8px;
-  background: var(--bg-side);
-  color: var(--muted);
-  font: inherit;
-  font-family: var(--mono);
-  font-size: 0.8em;
-  cursor: pointer;
-}
-
 .kanban {
   font-family: var(--prose);
   font-size: 14px;
@@ -1600,6 +2177,12 @@ button.link:hover {
   background: var(--bg-side);
 }
 
+/* A coloured column is tinted with its colour over the theme's own surface, so it reads in light and dark. */
+.kanban-column[data-colour] {
+  border-color: color-mix(in srgb, var(--swatch) 45%, var(--line));
+  background: color-mix(in srgb, var(--swatch) 14%, var(--bg-side));
+}
+
 .kanban-column.drop {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -1612,6 +2195,40 @@ button.link:hover {
   margin: 0 2px 8px;
   font-size: 13px;
   font-weight: 600;
+}
+
+.kanban-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.kanban-column[data-colour] .kanban-title {
+  color: color-mix(in srgb, var(--swatch) 55%, var(--ink));
+}
+
+.kanban-colour {
+  flex: none;
+  align-self: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--swatch, transparent);
+  cursor: pointer;
+}
+
+.kanban-colour[data-colour] {
+  border-color: transparent;
+}
+
+.kanban-colour:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.kanban-palette {
+  padding: 2px;
 }
 
 .kanban-count {
@@ -1638,9 +2255,7 @@ button.link:hover {
   overflow-wrap: anywhere;
 }
 
-.kanban-card:focus-visible,
-.kanban-add:focus-visible,
-.kanban-edit:focus-visible {
+.kanban-add:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -1657,8 +2272,7 @@ button.link:hover {
   white-space: pre-wrap;
 }
 
-.kanban-add,
-.kanban-edit {
+.kanban-add {
   border: 0;
   border-radius: 6px;
   background: none;
@@ -1666,9 +2280,6 @@ button.link:hover {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-}
-
-.kanban-add {
   width: 100%;
   margin-top: 6px;
   padding: 4px 8px;
@@ -1679,8 +2290,7 @@ button.link:hover {
   content: "+ ";
 }
 
-.kanban-add:hover,
-.kanban-edit:hover {
+.kanban-add:hover {
   background: var(--hover);
   color: var(--ink);
 }
@@ -1698,64 +2308,31 @@ button.link:hover {
   outline: none;
 }
 
-.kanban-edit {
-  margin-top: 2px;
-  padding: 2px 6px;
-}
-
 .kanban-empty p {
   margin: 0;
   color: var(--muted);
 }
 
-/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
-.app[data-bar] {
-  box-sizing: border-box;
-  padding-bottom: 26px;
+/* A clock in the bottom bar is a button that fills its item, so the item's own padding is the button's. */
+.bar-item:has(> .bar-clock) {
+  padding: 0;
 }
 
-.bar {
-  position: absolute;
-  inset: auto 0 0 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 10px;
-  border-top: 1px solid var(--line);
-  background: var(--bg-side);
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.bar-item {
+.bar-clock {
   padding: 1px 8px;
   border: 0;
   border-radius: 5px;
   background: none;
+  color: var(--accent);
+  font: inherit;
   font-variant-numeric: tabular-nums;
-}
-
-.bar-end {
-  margin-left: auto;
-}
-
-button.bar-item {
   cursor: pointer;
 }
 
-button.bar-item:hover,
-button.bar-item:focus-visible {
+.bar-clock:hover,
+.bar-clock:focus-visible {
   background: var(--hover);
-  color: var(--ink);
   outline: none;
-}
-
-.bar-clock {
-  color: var(--accent);
 }
 
 .bar-clock[data-done] {
@@ -1802,14 +2379,6 @@ button.bar-item:focus-visible {
   color: var(--ink);
 }
 
-.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-accent .cm-completionLabel {
-  color: var(--accent);
-}
-
-.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-muted .cm-completionLabel {
-  color: var(--muted);
-}
-
 .cm-editor .cm-tooltip-autocomplete .cm-completionDetail {
   margin-left: 1em;
   color: var(--muted);
@@ -1818,22 +2387,343 @@ button.bar-item:focus-visible {
   font-style: normal;
 }
 
-.plugins {
-  display: grid;
-  gap: 8px;
+/* The Plugins page: every plugin there is, and one plugin's details. */
+.plugins-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plugins-page h2 {
   margin: 18px 0 0;
+  font-size: 14px;
+}
+
+.plugins-page .error {
+  margin: 0;
+}
+
+.plugins-page > .filter {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.plugin-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
 }
 
-.plugins label {
-  display: inline-flex;
-  gap: 8px;
+.plugin-row,
+.plugin-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* A plugin's card, in the look of a note's card in a folder's list. Its name is a link laid over the whole of it, and its switch lies above the link. */
+.plugin-card {
+  position: relative;
+  align-items: center;
+  padding: 12px 14px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
+}
+
+.plugin-card:hover {
+  border-color: var(--line-strong);
+}
+
+.plugin-card:has(.plugin-name:focus-visible) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.plugin-card .plugin-name {
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  outline: none;
+}
+
+.plugin-card .plugin-name::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  content: "";
+}
+
+.plugin-card :is(.switch, .error) {
+  position: relative;
+  z-index: 1;
+}
+
+.plugin-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.plugin-row[data-off] .plugin-icon {
+  background: var(--hover);
+  color: var(--muted);
+}
+
+.plugin-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.plugin-head .plugin-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.plugin-head .plugin-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.plugin-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.plugin-line,
+.plugin-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   align-items: center;
 }
 
-.plugins .error {
-  margin-left: 8px;
+.plugin-name {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.plugin-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.plugin-about,
+.plugin-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.plugin-head {
+  align-items: center;
+  margin-top: 4px;
+}
+
+.plugin-head h1 {
+  margin: 0;
+}
+
+.plugin-switch {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plugin-back {
+  align-self: flex-start;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.plugin-back::before {
+  content: "\2190\00a0";
+}
+
+.plugin-back:hover {
+  color: var(--ink);
+}
+
+.plugin-lead {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+.plugin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 2px;
+  border-top: 1px solid var(--line);
+}
+
+.plugin-section .soon {
+  margin: 0;
+}
+
+.plugin-section a.button {
+  align-self: flex-start;
+  text-decoration: none;
+}
+
+.plugin-shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 12px;
+}
+
+.plugin-shots figure {
+  margin: 0;
+}
+
+.plugin-shots img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.plugin-shots figcaption {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* A picture taken in each theme: the one for the theme the app is in is the one shown. */
+.plugin-shots .shot-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .plugin-shots .shot-light {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .plugin-shots .shot-dark {
+    display: block;
+  }
+}
+
+:root[data-theme="dark"] .plugin-shots .shot-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .plugin-shots .shot-dark {
+  display: block;
+}
+
+.plugin-adds {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.plugin-adds dt {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.plugin-adds dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.plugin-adds code,
+.shortcuts code {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+/* A plugin's options on its own page are the rows Settings draws, in a frame with no border of its own. */
+.plugin-options {
+  min-width: 0;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+}
+
+/* A switch is a checkbox drawn as one, so it is still a checkbox to the keyboard and to a screen reader. */
+.switch {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 18px;
+  margin: 2px 0 0;
+  border-radius: 99px;
+  background: var(--line-strong);
+  cursor: pointer;
+  transition: background 0.12s;
+  appearance: none;
+}
+
+.switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  content: "";
+  transition: transform 0.12s;
+}
+
+.switch:checked {
+  background: var(--accent);
+}
+
+.switch:checked::after {
+  transform: translateX(12px);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.switch:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+kbd {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--bg-elev);
+  font-family: var(--prose);
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
 .settings-banner {
@@ -1858,17 +2748,198 @@ button.bar-item:focus-visible {
   border-color: var(--danger);
 }
 
-.settings-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 14px;
-  border-bottom: 1px solid var(--line);
+.mode-view.settings {
+  max-width: 62rem;
+  container-type: inline-size;
 }
 
-.settings-bar .tabs {
-  padding: 0;
-  border-bottom: 0;
+.settings-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.settings-head h1 {
+  margin: 0;
+}
+
+/* Saved and Saving… take the same room, so the head wraps the same way through a save and nothing under it moves. */
+.settings-head .save-state {
+  flex: 1;
+  min-width: 4.5rem;
+}
+
+.settings-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.settings-tools .filter {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-tools [aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.settings-body {
+  display: grid;
+  grid-template-columns: 12.5rem minmax(0, 1fr);
+  gap: 0 28px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav a {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.settings-nav a:hover {
+  background: var(--hover);
+}
+
+.settings-nav a[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-nav h2 {
+  margin: 12px 0 2px;
+  padding: 0 10px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-count {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.settings-pick {
+  display: none;
+  grid-column: 1 / -1;
+  margin-bottom: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Too narrow to keep the categories beside the settings: they are a menu above them. */
+@container (max-width: 40rem) {
+  .settings-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    display: none;
+  }
+
+  .settings-pick {
+    display: block;
+  }
+}
+
+/* The table of shortcuts is rows of cells only where its own pane has room for the four columns. In less, each command is a card. */
+@container settings-pane (max-width: 38rem) {
+  /* The column names are out of sight and still read out, as the cells keep their order. */
+  .shortcuts thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .shortcuts,
+  .shortcuts tbody,
+  .shortcuts tr {
+    display: block;
+  }
+
+  /* A row is its command, with where its keys are from at the end of that line, and under it the keys and the buttons. The buttons' column is as wide whatever is in it, so the keys' is too. */
+  .shortcuts tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 4px 10px;
+    align-items: center;
+  }
+
+  .shortcuts tr > .shortcut-from {
+    grid-area: 1 / 2;
+    justify-self: end;
+    align-self: start;
+    width: 48px;
+    text-align: right;
+  }
+
+  .shortcuts tr > .shortcut-keys {
+    grid-area: 2 / 1;
+  }
+
+  .shortcuts tr > .shortcut-actions {
+    grid-area: 2 / 2;
+  }
+
+  .shortcuts tr > th,
+  .shortcuts tr > td {
+    padding: 0;
+    border: 0;
+  }
+
+  .shortcuts tr {
+    padding: 8px 0 8px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+/* In a pane narrower than the buttons and a key side by side, a card is one column: the command, its keys, where they are from, the buttons. */
+@container settings-pane (max-width: 18rem) {
+  .shortcuts tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shortcuts tr > :is(.shortcut-from, .shortcut-keys, .shortcut-actions) {
+    grid-area: auto;
+    justify-self: stretch;
+    width: auto;
+    text-align: left;
+  }
+
+  .shortcuts .shortcut-buttons {
+    grid-template-columns: 50px 38px 48px;
+    justify-content: start;
+  }
 }
 
 .settings-problems {
@@ -1891,21 +2962,208 @@ button.bar-item:focus-visible {
   font-size: 13px;
 }
 
-.settings .filter {
-  width: 100%;
-  margin-top: 14px;
-  box-sizing: border-box;
-}
-
-.settings-groups {
+.settings-pane {
+  container: settings-pane / inline-size;
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
 }
 
+.settings-pane > .soon {
+  margin-top: 0;
+}
+
+.settings-group:first-child h2 {
+  margin-top: 0;
+}
+
 .settings-group h2 {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
   margin: 22px 0 4px;
-  font-size: 14px;
+  font-size: 15px;
+}
+
+.settings-about-plugin {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* The columns have widths of their own, not their content's, so a key added to one row moves no other. */
+.shortcuts {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+@container settings-pane (width > 38rem) {
+  .shortcuts thead th:nth-child(2) {
+    width: 216px;
+  }
+
+  .shortcuts thead th:nth-child(3) {
+    width: 60px;
+  }
+
+  .shortcuts thead th:nth-child(4) {
+    width: 188px;
+  }
+}
+
+.shortcuts th,
+.shortcuts td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.shortcuts thead th {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.shortcuts tbody th {
+  border-left: 2px solid transparent;
+}
+
+/* A command's id is one long word, and the pane may be narrower than it, with both sidebars open or in a split. So it has a line of its own under the title and breaks where it must. */
+.shortcuts code {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.shortcuts tr[data-modified] th {
+  border-left-color: var(--accent);
+}
+
+.shortcut-title {
+  margin-right: 8px;
+}
+
+.shortcuts .error {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+/* A command's keys are one line whatever their number and their length, so a key added grows no row: those past the column's width are scrolled to, and the cell's title names them all. */
+.shortcut-chords {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-height: 22px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shortcut-chords > * {
+  flex: none;
+}
+
+.shortcut-keys kbd button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.shortcut-keys kbd button:hover {
+  color: var(--danger);
+}
+
+.shortcut-none,
+.shortcut-from {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shortcut-buttons {
+  display: grid;
+  grid-template-columns: 58px 44px 54px;
+  gap: 4px;
+  justify-content: end;
+}
+
+.shortcut-buttons .button {
+  grid-row: 1;
+  grid-column: 1;
+  padding-inline: 0;
+}
+
+.shortcut-buttons [data-does="add"] {
+  grid-column: 2;
+}
+
+.shortcut-buttons [data-does="reset"] {
+  grid-column: 3;
+}
+
+.recorder-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: start center;
+  padding-top: 18vh;
+  background: rgb(0 0 0 / 0.25);
+}
+
+.recorder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(26rem, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.recorder p {
+  margin: 0;
+}
+
+.recorder-keys {
+  display: grid;
+  place-items: center;
+  min-height: 3.25rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  outline: none;
+}
+
+.recorder-keys:focus {
+  border-color: var(--accent);
+  border-style: solid;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.recorder-keys kbd {
+  padding: 2px 10px;
+  font-size: 15px;
+}
+
+.recorder-says {
+  min-height: 2.5em;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recorder-warning {
+  color: var(--danger);
 }
 
 .setting {
@@ -2009,9 +3267,10 @@ button.bar-item:focus-visible {
 
 .inspector {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   flex-direction: column;
-  width: 300px;
+  width: var(--inspector-width, 300px);
+  min-width: 180px;
   min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--bg-side);
@@ -2109,7 +3368,7 @@ button.bar-item:focus-visible {
   font-size: 11.5px;
 }
 
-/* Writing mode */
+/* A closed sidebar and a closed inspector: a bar of icons, one for each thing the open one lists. */
 
 .rail {
   display: flex;
@@ -2141,44 +3400,15 @@ button.bar-item:focus-visible {
   padding: 0;
 }
 
-.popover {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  z-index: 30;
-  display: flex;
-  overflow: hidden;
-  border-radius: 10px;
-  background: var(--bg-elev);
-  box-shadow: var(--shadow);
+.rail .new-note svg {
+  color: var(--accent);
 }
 
-.popover.left {
-  left: 50px;
-}
-
-.popover.right {
-  right: 50px;
-  flex-direction: column;
-  width: 340px;
-}
-
-.popover-folders {
-  width: 216px;
-  padding: 0 6px 8px;
-  overflow-y: auto;
-  background: var(--bg-side);
-}
-
-.popover.right h2 {
+.inspector-empty {
   margin: 0;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13px;
-}
-
-.popover.right > :not(h2) {
-  margin: 14px;
+  padding: 14px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* Command palette and quick open */
@@ -2266,71 +3496,7 @@ button.bar-item:focus-visible {
   right: -9px;
 }
 
-.changes {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-}
-
-.popover.right > .changes {
-  flex: 1;
-  margin: 0;
-  padding: 14px;
-  overflow-y: auto;
-}
-
-.changes .error,
-.changes .empty {
-  margin: 0;
-}
-
-.changes .empty {
-  text-align: left;
-}
-
-.changed-notes,
-.change-list {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.changed-note,
-.change {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 8px 0;
-}
-
-.changed-note + .changed-note,
-.change + .change {
-  border-top: 1px solid var(--line);
-}
-
-.changed-note-toggle,
-.change-toggle {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.changed-note-toggle:hover .changed-note-title,
-.change-toggle:hover .change-author {
-  text-decoration: underline;
-}
+/* History: a list of changes with a tick each, beside what everything picked did */
 
 .caret {
   flex: none;
@@ -2347,93 +3513,700 @@ button.bar-item:focus-visible {
   transform: rotate(90deg);
 }
 
-.changed-note-title {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* The page is the container its panes are laid out by: a pane can be narrow in a wide window, beside the sidebar and in a split. */
+.history-mode {
+  container: history / inline-size;
+  height: 100%;
+  min-height: 0;
 }
 
-.changed-note-toggle .change-stat {
-  flex: none;
-  min-width: 9ch;
-  margin-left: 0;
+.history-panes {
+  height: 100%;
+  min-height: 0;
+  font-size: 13px;
 }
 
-.changed-note-about,
-.changed-note-total,
-.change-meta {
+/* The page's two panes fill it side by side and each scrolls by itself. */
+.history-panes.page {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.history-panes.page > .hist-side {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.history-panes.page > .hist-main {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.hist-side {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.history-panes.page .hist-side {
+  border-right: 1px solid var(--line);
+}
+
+.hist-head {
+  padding: 22px 18px 4px;
+}
+
+.hist-head h1 {
   margin: 0;
+  font-size: 22px;
+}
+
+.hist-sub {
+  margin: 4px 0 0;
   color: var(--muted);
   font-size: 12px;
 }
 
-.changed-note-about,
-.change-meta,
-.change-body {
-  padding-left: 14px;
-}
-
-.changed-note-about button.link,
-.change-meta button.link,
-.change-actions button.link {
-  text-decoration: underline;
-}
-
-.changed-note-total .change-stat {
-  margin-left: 0;
-}
-
-.changed-note .note-changes {
-  padding: 4px 0 0 14px;
-}
-
-.note-changes {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
-.note-changes > .button {
-  align-self: flex-start;
-}
-
-.change-author {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.change-toggle .badge,
-.change-toggle time {
-  flex: none;
-}
-
-.change-revert {
-  margin-left: auto;
-}
-
-.change-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  padding-top: 4px;
-}
-
-.change-actions {
+.hist-filters {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 6px;
+  padding-top: 10px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--hover);
+}
+
+.segmented button {
+  padding: 2px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.segmented button[aria-checked="true"] {
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.hist-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: default;
+}
+
+.hist-scope button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.hist-scope button svg {
+  width: 10px;
+  height: 10px;
+}
+
+.hist-open-page {
+  align-self: flex-start;
+  margin-bottom: 6px;
+  text-decoration: underline;
+}
+
+.hist-all {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 18px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hist-all-tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Room for the sticky day heading, so the arrow keys don't move a row under it. */
+.hist-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0 8px 12px;
+  overflow-y: auto;
+  scroll-padding-top: 36px;
+}
+
+.hist-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.hist-list .empty {
+  padding: 24px 10px;
+}
+
+.hist-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 12px 10px 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.hist-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.hist-row:hover {
+  background: var(--hover);
+}
+
+.hist-row.selected {
+  background: var(--accent-soft);
+}
+
+.hist-list:focus .hist-row.focused,
+.hist-row.focused {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.hist-row[aria-level="2"] {
+  margin-left: 26px;
+}
+
+.hist-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--bg-elev);
+}
+
+.hist-all-tick .hist-check {
+  margin-top: 0;
+}
+
+.hist-row:hover .hist-check,
+.hist-all-tick:hover .hist-check {
+  border-color: var(--muted);
+}
+
+.hist-row.selected .hist-check,
+.hist-check.all,
+.hist-check.some {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.hist-row.selected .hist-check::after,
+.hist-check.all::after {
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border: solid var(--on-accent);
+  border-width: 0 0 2px 2px;
+  transform: rotate(-45deg);
+  content: "";
+}
+
+.hist-check.some::after {
+  width: 8px;
+  height: 2px;
+  margin: 0;
+  border: 0;
+  background: var(--on-accent);
+  transform: none;
+  content: "";
+}
+
+.hist-caret {
+  margin-top: 6px;
+  align-self: flex-start;
+}
+
+.hist-note-row .hist-caret {
+  padding: 0;
+}
+
+.avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: hsl(var(--hue) 75% 91%);
+  color: hsl(var(--hue) 50% 36%);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.avatar.agent {
+  border-radius: 30%;
+}
+
+.avatar svg {
+  width: 14px;
+  height: 14px;
+}
+
+:root[data-theme="dark"] .avatar {
+  background: hsl(var(--hue) 35% 24%);
+  color: hsl(var(--hue) 85% 80%);
+}
+
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-accent .cm-completionLabel {
+  color: var(--accent);
+}
+
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-muted .cm-completionLabel {
+  color: var(--muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .avatar {
+    background: hsl(var(--hue) 35% 24%);
+    color: hsl(var(--hue) 85% 80%);
+  }
+}
+
+.hist-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hist-line {
+  color: var(--muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.hist-line b,
+.hist-note {
+  color: var(--ink);
+}
+
+.hist-line b {
+  font-weight: 600;
+}
+
+.hist-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hist-reverted {
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 99px;
+}
+
+.hist-row.reverted .hist-line b,
+.hist-row.reverted .hist-note {
+  color: var(--muted);
+}
+
+.hist-more {
+  padding: 6px 18px 12px;
+}
+
+.hist-more .link {
+  text-decoration: underline;
+}
+
+.hist-main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.hist-summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.hist-sum-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.hist-sum-text b {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.hist-files {
+  display: grid;
+  gap: 16px;
+  padding: 18px 24px 64px;
+  transition: opacity 0.15s;
+}
+
+.hist-files.loading {
+  opacity: 0.55;
+}
+
+.hist-files > .button {
+  justify-self: start;
+}
+
+.hist-hint {
+  margin: 0;
+  padding: 64px 20px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.hist-file {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
+}
+
+.hist-file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-side) 55%, var(--bg-elev));
+}
+
+.hist-file-name {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.hist-file-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.hist-naming {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.hist-naming input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.hist-file > .error {
+  margin: 8px 14px;
+}
+
+.hist-run + .hist-run {
+  border-top: 1px dashed var(--line-strong);
+}
+
+.hist-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 14px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hist-skip {
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: color-mix(in srgb, #d9a400 18%, transparent);
+  color: var(--ink);
+  font-weight: 550;
+}
+
+.hist-run .diff {
+  padding: 8px 0 10px;
+}
+
+/* A narrow page shows one pane at a time, and these lead from one to the other. */
+.hist-back,
+.hist-open {
+  display: none;
+}
+
+.hist-back {
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.hist-open {
+  padding: 8px 18px 12px;
+}
+
+@container history (max-width: 720px) {
+  .history-panes.page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 46%) minmax(0, 1fr);
+  }
+
+  .history-panes.page > .hist-main {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .history-panes.page .hist-side {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .history-panes.page .hist-head {
+    padding-top: 12px;
+  }
+
+  .history-panes.page .hist-sub {
+    display: none;
+  }
+}
+
+@container history (max-width: 480px) {
+  .history-panes.page {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .history-panes.page > .hist-main,
+  .history-panes.page.detail > .hist-side {
+    display: none;
+  }
+
+  .history-panes.page.detail > .hist-main {
+    display: block;
+    grid-row: 1;
+  }
+
+  .history-panes.page .hist-back {
+    display: inline-flex;
+  }
+
+  .history-panes.page .hist-open {
+    display: block;
+  }
+
+  .history-panes.page .hist-summary,
+  .history-panes.page .hist-files {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}
+
+/* In the inspector the list stands over what it picked, and the panel scrolls the two as one. */
+.history-panes.panel {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  margin: -14px;
+}
+
+.history-panes.panel .hist-side {
+  padding-top: 10px;
+}
+
+.history-panes.panel .hist-open-page {
+  margin: 0 14px 2px;
+}
+
+.history-panes.panel .hist-all {
+  padding: 6px 14px;
+}
+
+.history-panes.panel .hist-list {
+  flex: none;
+  max-height: 44vh;
+  padding: 0 6px 8px;
+}
+
+.history-panes.panel .hist-row {
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.history-panes.panel .hist-row[aria-level="2"] {
+  margin-left: 14px;
+}
+
+.history-panes.panel .hist-more {
+  padding: 2px 14px 8px;
+}
+
+.history-panes.panel .hist-main {
+  overflow: visible;
+  border-top: 1px solid var(--line);
+}
+
+.history-panes.panel .hist-summary {
+  position: static;
+  min-height: 0;
+  padding: 8px 14px;
+  background: none;
+}
+
+.history-panes.panel .hist-files {
+  gap: 10px;
+  padding: 10px 10px 24px;
+}
+
+.history-panes.panel .hist-hint {
+  padding: 24px 14px;
+  font-size: 13px;
+}
+
+.history-panes.panel .diff {
+  --diff-gutter: 22px;
+  font-size: 13px;
+}
+
+.toast,
+.told {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 8px 8px 8px 14px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.toast .link,
+.told .link {
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+}
+
+.toast .icon-button,
+.told .icon-button {
+  color: inherit;
+}
+
+.change-stat {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.hist-sum-text .change-stat,
+.hist-file-head .change-stat {
+  font-size: 12px;
+}
+
+.added {
+  color: var(--added);
+}
+
+.removed {
+  color: var(--danger);
 }
 
 .badge,
@@ -2454,75 +4227,66 @@ button.bar-item:focus-visible {
   font-weight: 600;
 }
 
-.change time,
-.change-actions {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.change-stat {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
-
-.added {
-  color: var(--added);
-}
-
-.removed {
-  color: var(--danger);
-}
-
-.change-actions input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-}
-
+/* A diff, read as prose. Each line's marker is part of the line, so it scrolls with it and sits on its first row when the text wraps. */
 .diff {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.5;
+  --diff-gutter: 34px;
+  font-family: var(--prose);
+  font-size: 14px;
+  line-height: 1.65;
 }
 
-.hunk-head {
-  padding: 1px 8px;
-  background: var(--hover);
-  color: var(--faint);
-}
-
-/* The marker is a cell of its line's own row, so it scrolls with the line and sits on the first row when the text wraps. */
 .diff-line {
-  display: grid;
-  grid-template-columns: 2ch minmax(0, 1fr);
-  align-items: start;
-  padding: 0 8px 0 4px;
+  position: relative;
+  display: block;
+  min-height: 1.65em;
+  padding: 1px 18px 1px var(--diff-gutter);
+  color: var(--ink);
   text-decoration: none;
 }
 
-ins.diff-line {
+.diff-line.same {
+  color: var(--muted);
+}
+
+.diff-line.add {
   background: var(--added-soft);
 }
 
-del.diff-line {
+.diff-line.del {
   background: var(--removed-soft);
+  color: var(--muted);
+}
+
+.diff-line.del .diff-text {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+.diff-line.mod {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
 .diff-mark {
+  position: absolute;
+  top: 1px;
+  left: calc(var(--diff-gutter) - 20px);
   color: var(--muted);
-  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: calc(14px * 1.65);
   user-select: none;
+}
+
+.diff-line.add .diff-mark {
+  color: var(--added);
+}
+
+.diff-line.del .diff-mark {
+  color: var(--danger);
+}
+
+.diff-line.mod .diff-mark {
+  color: var(--accent);
 }
 
 .diff-text {
@@ -2530,83 +4294,291 @@ del.diff-line {
   overflow-wrap: anywhere;
 }
 
+.diff-text ins {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--added) 24%, transparent);
+  text-decoration: none;
+}
+
+.diff-text del {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--muted);
+  text-decoration-color: color-mix(in srgb, var(--danger) 70%, transparent);
+}
+
+.diff-fold {
+  display: block;
+  width: 100%;
+  padding: 3px 18px 3px var(--diff-gutter);
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: var(--prose);
+  font-size: 12px;
+  text-align: left;
+}
+
+button.diff-fold {
+  cursor: pointer;
+}
+
+button.diff-fold:hover {
+  background: var(--hover);
+  color: var(--accent);
+}
+
 .diff-none {
   margin: 0;
-  padding: 2px 8px;
-  color: var(--faint);
-  font-size: 12px;
+  padding: 10px 14px;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
-.history-mode {
+.diff-none .link {
+  text-decoration: underline;
+}
+
+.revert-dialog {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.revert-dialog::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.revert-dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  max-width: 54rem;
-  height: 100%;
-  margin: 0 auto;
-  padding: 2rem 2rem 3rem;
-  overflow-y: auto;
+  gap: 10px;
+  padding: 16px;
+  font-size: 13px;
 }
 
-.history-mode h1 {
+.revert-dialog h2,
+.revert-dialog p {
   margin: 0;
-  font-size: 22px;
 }
 
-.history-filters {
+.revert-dialog h2 {
+  font-size: 15px;
+}
+
+.revert-dialog .diff {
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.revert-dialog button.link {
+  text-decoration: underline;
+}
+
+.revert-started-over {
+  color: var(--muted);
+}
+
+.revert-dialog h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.conflicts,
+.conflicts ol,
+.conflict,
+.revert-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conflicts ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conflicts-all {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
+  gap: 8px;
+}
+
+.conflict {
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.conflict dl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.conflict dt,
+.conflict-after > span {
   color: var(--muted);
   font-size: 12px;
 }
 
-.history-filters input[type="date"] {
-  padding: 2px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
+.conflict dd {
+  margin: 0 0 2px;
 }
 
-.note-scope {
-  position: relative;
-}
-
-.note-scope-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+.conflict-lines {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 260px;
-  max-height: 320px;
-  padding: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
-.note-scope-menu ul {
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
+.conflict-lines.now {
+  background: var(--removed-soft);
 }
 
-.note-scope-menu label {
+.conflict-lines.after {
+  background: var(--added-soft);
+}
+
+.conflict-none {
+  color: var(--muted);
+  font-family: var(--prose);
+  font-style: italic;
+}
+
+.conflict-choices {
   display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.conflict-choices label {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 2px;
-  color: var(--ink);
+  padding: 2px 0;
   cursor: pointer;
 }
 
-.note-scope-menu label span {
+.conflict-choices input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.conflict-after {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conflict-typed {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.revert-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.revert-result output {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.revert-result[aria-busy="true"] .diff {
+  opacity: 0.6;
+}
+
+/* The buttons stay in reach under a preview taller than the window. */
+.revert-dialog-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 -16px -16px;
+  padding: 10px 16px 16px;
+  background: var(--bg-elev);
+  box-shadow: 0 -1px 0 var(--line);
+}
+
+.revert-dialog {
+  width: min(680px, calc(100% - 32px));
+}
+
+.revert-dialog .diff {
+  --diff-gutter: 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.revert-dialog h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.revert-lead,
+.revert-beyond,
+.revert-already,
+.revert-nothing,
+.revert-unchanged {
+  color: var(--muted);
+}
+
+.revert-said {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+.revert-note {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.revert-note-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.revert-note-head h3 {
+  min-width: 0;
   overflow: hidden;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2697,6 +4669,56 @@ del.diff-line {
   justify-self: start;
 }
 
+.folder-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.folder-limit legend {
+  margin-bottom: 3px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.folder-limit .hint {
+  margin: 0;
+}
+
+.folder-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 14rem;
+  margin: 0;
+  padding: 8px 10px;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.folder-picks .check {
+  padding-left: calc(var(--depth) * 18px);
+}
+
+.agent-edit {
+  margin-top: 4px;
+  background: var(--bg);
+}
+
+.agent-edit .hint,
+.agent-edit .agent-actions {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .new-token {
   display: flex;
   flex-direction: column;
@@ -2783,7 +4805,7 @@ del.diff-line {
   list-style: none;
 }
 
-.agent {
+.agent-list > .agent {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2794,7 +4816,6 @@ del.diff-line {
 
 .agent-head,
 .agent-actions,
-.revert-author,
 .confirm {
   display: flex;
   flex-wrap: wrap;
@@ -2812,8 +4833,7 @@ del.diff-line {
   font-size: 12px;
 }
 
-.confirm,
-.said {
+.confirm {
   font-size: 12px;
 }
 
@@ -2824,12 +4844,14 @@ del.diff-line {
   border-radius: 8px;
 }
 
-.said {
-  color: var(--muted);
+.revert-dialog-body > .button {
+  align-self: flex-start;
 }
 
-.said.failed {
-  color: var(--danger);
+.hist-cut {
+  margin: 2px 10px 6px 36px;
+  color: var(--muted);
+  font-size: 11.5px;
 }
 
 .members .agent-head {
@@ -3865,25 +5887,16 @@ del.diff-line {
 
 .toasts {
   position: fixed;
-  bottom: 40px;
+  bottom: 20px;
   left: 50%;
   z-index: 60;
   transform: translateX(-50%);
   pointer-events: none;
 }
 
-.toast {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: min(32rem, calc(100vw - 32px));
-  padding: 8px 8px 8px 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--bg-elev);
-  box-shadow: var(--shadow);
-  color: var(--ink);
-  font-size: 13px;
+.toasts .told {
+  position: static;
+  transform: none;
   pointer-events: auto;
 }
 
@@ -3906,6 +5919,68 @@ del.diff-line {
 }
 
 /* Archive and Trash: end */
+
+/* The row vim's keys are on, in any list. A card's row has the card's corners, so its mark does too. */
+.cards > li {
+  border-radius: 12px;
+}
+
+
+[data-vim-at] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background-color: var(--accent-soft);
+}
+
+/* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */
+.app[data-bar] {
+  box-sizing: border-box;
+  padding-bottom: 26px;
+}
+
+.bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-side);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.bar-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* In a window too narrow for both ends, the left end is the one cut short. */
+.bar-side[data-side="right"] {
+  flex: none;
+  max-width: 100%;
+}
+
+.bar-item {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An item with nothing to say takes no room. */
+.bar-item:empty {
+  display: none;
+}
 
 /* Calendar and Contacts */
 
@@ -4427,14 +6502,9 @@ del.diff-line {
 }
 
 /*
- * A reference to an event or a contact in a note. It is text in the line's own face and size with a
- * tint behind it, and wraps as words do, so the line is as tall with it as without and nothing
- * around it moves when what it says is read.
+ * A reference to an event or a contact in a note: its label in the embed's card, with a tint behind
+ * it. The card is as tall whatever the label says, so nothing around it moves when the record is read.
  */
-.embed[data-embed="event"],
-.embed[data-embed="contact"] {
-  display: inline;
-}
 
 .ref-chip {
   border-radius: 4px;
@@ -4461,9 +6531,7 @@ del.diff-line {
 /* Uploads */
 
 /* A picture, a video or a recording below its line. It fills the room the note keeps for it, and the room never follows it. */
-.embed-below[data-embed="image"],
-.embed-below[data-embed="video"],
-.embed-below[data-embed="audio"] {
+.embed-below:has(> .upload-image, > .upload-video, > .upload-audio, > .upload-missing) {
   display: flex;
 }
 

@@ -73,7 +73,19 @@ async function remove(db: D1Database, ids: readonly string[], due: number): Prom
  * is all or nothing, so when one fails its notes are removed one at a time: the note that can't be
  * removed is left whole and named, and the rest go.
  */
+/**
+ * Rewrites the search index without what removed rows held. Deleting a row marks its words as gone
+ * and leaves them in the index's own pages until those are merged, which this does at once.
+ */
+export const forgetRemoved = (db: D1Database) => db.prepare("INSERT INTO note_search (note_search) VALUES ('optimize')").run();
+
 export async function purgeTrash(db: D1Database, now: number, log: (message: string) => void = console.error): Promise<Purged> {
+  const purged = await purgeDue(db, now, log);
+  if (purged.removed) await forgetRemoved(db).catch((err: unknown) => log(`Couldn't merge the search index after removing notes: ${err instanceof Error ? err.message : String(err)}`));
+  return purged;
+}
+
+async function purgeDue(db: D1Database, now: number, log: (message: string) => void): Promise<Purged> {
   const due = now - TRASH_MS;
   const purged: Purged = { removed: 0, failed: [], more: true };
   for (let batch = 0; batch < PURGE_BATCHES; batch++) {
