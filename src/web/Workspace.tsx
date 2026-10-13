@@ -3,6 +3,7 @@ import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.t
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, signOut } from "./api.ts";
 import { Drawn } from "./Drawn.tsx";
+import { usable } from "./editorExtensions.ts";
 import { folderTree } from "./folders.ts";
 import { Icon } from "./icons.tsx";
 import { Inspector, viewsFor, type Subject } from "./Inspector.tsx";
@@ -19,7 +20,7 @@ import { documentOf } from "./settings.ts";
 import { Settings } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
-import { performInSync, undoOrRedo } from "./sync.ts";
+import { performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
 const FOCUS_KEY = "ink.focus";
@@ -39,7 +40,9 @@ const REFRESH_MS = 5000;
 
 const isAnything = (_: unknown): _ is unknown => true;
 const isRevisions = (v: unknown): v is Record<string, number> => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number");
-const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+/** A note's editor is not one: undo there is the app's, through the note's history. */
+const inField = (el: EventTarget | null) =>
+  el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable && !el.closest(".note"));
 
 /** How long the first keys of a sequence wait for the rest. */
 /** What acts on Enter or Space itself when it has focus and isn't a field. A bare key bound to a command is left to it. */
@@ -149,7 +152,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
 
   const appNow = useRef<App>(null!);
   /** What the app's own commands do, as of the latest render. */
-  const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
+  const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
   const [host] = useState(() => {
     let created: Host;
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
@@ -166,6 +169,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         if (canEdit) {
           h.commands.register({ id: "note.new", title: "New note", run: () => h.app().createNote() });
           h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], leaveToFields: true, run: () => inner.current.step("note.undo") });
+          h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], run: () => inner.current.save() });
           h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], leaveToFields: true, run: () => inner.current.step("note.redo") });
         }
         h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], run: () => inner.current.toggleFocus() });
@@ -248,6 +252,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       }),
     [host, guarded, contributed.embeds],
   );
+  /** The editor extensions that can go to editors. A value CodeMirror won't take is left out and held against its plugin, where it would have stopped every editor. */
+  const { taken: extensions, refused } = useMemo(() => usable(contributed.editorExtensions), [contributed.editorExtensions]);
+  useEffect(() => {
+    for (const [added, err] of refused) host.fail(added, err);
+  }, [host, refused]);
   const theme = contributed.settings.values["core.theme"] as string;
   useEffect(() => {
     if (theme === "system") delete document.documentElement.dataset.theme;
@@ -398,9 +407,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       (err: Error) => setStuck({ noteId: routeNoteId, message: err instanceof ApiError ? err.message : `Couldn't ${type === "note.undo" ? "undo" : "redo"}. Common Ink can't be reached.` }),
     );
   };
-  inner.current = { step, toggleFocus, toggleSidebar, toggleInspector };
+  inner.current = { step, save: () => routeNoteId && void saveNow(routeNoteId), toggleFocus, toggleSidebar, toggleInspector };
 
   useEffect(() => {
+    // A keybinding is the app's before it is anyone else's: a key press that was taken reaches no editor and no row's own handler.
     let pending = "";
     /** What had focus when the sequence was begun. */
     let begunAt: EventTarget | null = null;
@@ -415,7 +425,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       // A press in the keyboard shortcuts table's recorder is a key to write down, not one to run.
       if (e.target instanceof Element && e.target.closest("[data-records-keys]")) return;
       const { keybindings, commands } = host.contributions();
-      const chord = chordOf(e);
+      const chord = chordOf(e, MAC);
       const begun = pending;
       giveUp();
       const press = pressing(chord);
@@ -424,11 +434,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       const ready = Object.keys(keybindings).filter((keys) => {
         if (keys !== chord && !keys.startsWith(`${chord} `) && !(begun && keys.startsWith(`${begun} `))) return false;
         const command = commandFor(keys)!;
-        // Keys that would type are left to what is being typed in.
-        if (typed(keys) && (inField(e.target) || (e.target instanceof HTMLElement && e.target.isContentEditable))) return false;
+        // Keys that would type are left to what is being typed in, unless their command says for itself when it runs.
+        if (!command.when && typed(keys) && (inField(e.target) || (e.target instanceof HTMLElement && e.target.isContentEditable))) return false;
         // Enter and Space are a button's, a link's or a checkbox's own while it has focus.
-        if (pressesIt && (keys === chord || keys.startsWith(`${chord} `))) return false;
-        return !(inField(e.target) && command.leaveToFields);
+        if (!command.when && pressesIt && (keys === chord || keys.startsWith(`${chord} `))) return false;
+        return !(inField(e.target) && command.leaveToFields) && command.when?.() !== false;
       });
       const next = advance(begun, chord, ready);
       if (!next) return;
@@ -441,17 +451,19 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         waiting = setTimeout(giveUp, SEQUENCE_MS);
       } else if (!host.run(commandFor(next.run)!.id)) return;
       e.preventDefault();
+      e.stopPropagation();
     };
-    addEventListener("keydown", onKey);
+    addEventListener("keydown", onKey, true);
     addEventListener("focusin", giveUp, true);
     addEventListener("pointerdown", giveUp, true);
     return () => {
       giveUp();
-      removeEventListener("keydown", onKey);
+      removeEventListener("keydown", onKey, true);
       removeEventListener("focusin", giveUp, true);
       removeEventListener("pointerdown", giveUp, true);
     };
   }, [host]);
+  useEffect(() => host.navigated(), [host, place.path]);
 
   const actions = useLatest({
     go,
@@ -534,6 +546,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         focus={toFocus === noteId}
         onFocused={() => setToFocus(null)}
         embeds={embeds}
+        extensions={extensions}
+        onExtensionRefused={host.fail}
         meta={
           note && (
             <>
@@ -549,7 +563,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   };
 
   const readNote = (noteId: string) => (
-    <NoteReader key={noteId} workspaceId={workspaceId} noteId={noteId} revision={byId.get(noteId)?.revision} embeds={embeds} />
+    <NoteReader key={noteId} workspaceId={workspaceId} noteId={noteId} revision={byId.get(noteId)?.revision} embeds={embeds} extensions={extensions} />
   );
   app.readNote = readNote;
   const folderView = contributed.views.folder.at(-1);

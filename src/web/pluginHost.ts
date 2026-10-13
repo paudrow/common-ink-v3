@@ -1,5 +1,5 @@
-import { bind, chordFor, chordLabel } from "./keybindings.ts";
-import type { App, Command, CommandInfo, Dispose, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
+import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
+import type { App, Command, CommandInfo, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
 export interface PluginState {
@@ -24,6 +24,7 @@ export interface Added {
   commands: readonly { id: string; title: string }[];
   views: readonly { slot: keyof Slots; id: string; label: string | null }[];
   embeds: readonly { name: string; title: string }[];
+  editorExtensions: readonly string[];
 }
 
 /** Everything the plugins that are on have added, in the order of the plugins and then of their registering. */
@@ -34,6 +35,7 @@ export interface Contributions {
   settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
   embeds: readonly Embed[];
+  editorExtensions: readonly EditorExtension[];
   plugins: readonly PluginState[];
 }
 
@@ -77,7 +79,7 @@ export interface Host {
   setEnabled(pluginId: string, enabled: boolean): void;
   /** The app as the plugin that registered a view is given it. */
   appFor(view: object): App;
-  /** Records against its plugin that a view or embed threw while being drawn. */
+  /** Records against its plugin that a view or embed threw while being drawn, or that an editor extension couldn't be used. */
   fail(contribution: object, error: unknown): void;
   /** Turns every plugin off without forgetting which are on. They start again the next time contributions are read. */
   dispose(): void;
@@ -85,6 +87,8 @@ export interface Host {
   setSetting(key: string, value: SettingValue | undefined): void;
   /** Tells the host the member's document is now this one. Plugins it turns on or off start and stop. */
   settingsChanged(document: SettingsDocument): void;
+  /** Tells the host the app has arrived at an address. */
+  navigated(): void;
 }
 
 /** The setting that turns a plugin on and off. */
@@ -106,6 +110,7 @@ const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.pl
 export function createPluginHost({ plugins, required = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed>>();
+  const editorExtensions = new Map<string, Owned<EditorExtension>>();
   const views = new Map<keyof Slots, Map<string, Owned<Slots[keyof Slots]>>>(SLOTS.map((slot) => [slot, new Map()]));
   /** What each running plugin registered, to take back out when it is turned off. */
   const running = new Map<string, Set<Dispose>>();
@@ -113,8 +118,12 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
   /** What each plugin had registered when contributions were last read with it on. */
   const added = new Map<string, Added>();
   let document = settings;
-  const isOff = (id: string) => !required.includes(id) && document[enabledKey(id)] === false;
-  const off = new Set(plugins.filter((p) => isOff(p.id)).map((p) => p.id));
+  /** A switch that isn't true or false reads as its default, as any setting does. */
+  const isOff = (p: Plugin) => {
+    const written = document[enabledKey(p.id)];
+    return !required.includes(p.id) && !(typeof written === "boolean" ? written : (p.enabledByDefault ?? true));
+  };
+  const off = new Set(plugins.filter(isOff).map((p) => p.id));
   const listeners = new Set<() => void>();
   /** Which plugin registered a view or an embed, and the reach that plugin was given. */
   const owners = new WeakMap<object, { id: string; app: () => App }>();
@@ -123,6 +132,9 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
   let starting = false;
   /** The plugins that asked to hear when settings change. */
   const watching = new Set<() => void>();
+  /** The plugins that asked to hear when the app arrives somewhere. */
+  const arriving = new Set<() => void>();
+  let arrived = false;
   let seq = 0;
   let snapshot: Contributions | null = null;
 
@@ -205,6 +217,23 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
           return dispose;
         },
       },
+      editorExtensions: {
+        register(extension) {
+          const dispose = keep(add(editorExtensions, extension.id, extension, index, "an editor extension with the id"));
+          owners.set(extension, owner);
+          return dispose;
+        },
+      },
+      report(error) {
+        if (running.get(plugin.id) === mine) record(plugin.id, error);
+      },
+      onNavigate(listener) {
+        const heard = () => listener();
+        arriving.add(heard);
+        // A plugin turned on after the app arrived hears where it is, once it has finished starting.
+        if (arrived) queueMicrotask(() => arriving.has(heard) && heard());
+        return keep(() => void arriving.delete(heard));
+      },
     };
   }
 
@@ -249,13 +278,18 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
     starting = false;
   }
 
+  /** Holds a failure against a plugin, once however often it happens, until the plugin is turned off or on again. */
+  function record(pluginId: string, error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    const known = errors.get(pluginId);
+    if (known?.split("; ").includes(message)) return;
+    errors.set(pluginId, known ? `${known}; ${message}` : message);
+    changed();
+  }
+
   function fail(contribution: object, error: unknown) {
     const owner = owners.get(contribution);
-    const message = error instanceof Error ? error.message : String(error);
-    const known = owner && errors.get(owner.id);
-    if (!owner || known?.split("; ").includes(message)) return;
-    errors.set(owner.id, known ? `${known}; ${message}` : message);
-    changed();
+    if (owner) record(owner.id, error);
   }
 
   function dispose() {
@@ -279,7 +313,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
   function settingsChanged(next: SettingsDocument) {
     document = next;
     plugins.forEach((plugin, index) => {
-      if (isOff(plugin.id) === off.has(plugin.id)) return;
+      if (isOff(plugin) === off.has(plugin.id)) return;
       if (off.delete(plugin.id)) {
         if (started) start(plugin, index);
       } else {
@@ -298,7 +332,8 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
       const active = running.has(p.id);
       const own = Object.entries(p.settings ?? {}).map(([name, setting]): Declared => ({ key: `${p.id}.${name}`, setting, group, active }));
       if (required.includes(p.id)) return own;
-      const enabled: Declared = { switch: true, key: enabledKey(p.id), setting: { type: "boolean", default: true, title: "On", description: `Turn ${p.name} off and what it adds goes away.` }, group, active: true };
+      const on = p.enabledByDefault ?? true;
+      const enabled: Declared = { switch: true, key: enabledKey(p.id), setting: { type: "boolean", default: on, title: "On", description: on ? `Turn ${p.name} off and what it adds goes away.` : `${p.name} is off until you turn it on here.` }, group, active: true };
       return [enabled, ...own];
     });
     const group = { id: "keybindings", name: "Keybindings" };
@@ -312,6 +347,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
       commands: mine(commands.values()).map(({ id, title }) => ({ id, title })),
       views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: "label" in view ? view.label : null }))),
       embeds: mine(embeds.values()).map(({ name, title }) => ({ name, title })),
+      editorExtensions: mine(editorExtensions.values()).map((extension) => extension.id),
     };
   }
 
@@ -330,13 +366,14 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
     const all = [...inOrder(commands.values()), ...toggles];
     const declared = declare(all);
     const { values, problems, chosen } = resolve(declared, document);
-    const { keybindings, conflicts } = bind(all.map((c) => ({ id: c.id, title: c.title, chords: values[KEYBINDING + c.id] as readonly string[], chosen: chosen.has(KEYBINDING + c.id) })));
+    const { keybindings, conflicts } = bind(all.map((c) => ({ id: c.id, title: c.title, chords: [...new Set((values[KEYBINDING + c.id] as readonly string[]).map((chord) => onPlatform(chord, mac)))], chosen: chosen.has(KEYBINDING + c.id) })));
     return (snapshot = {
       commands: all,
       keybindings,
       settings: { declared, values, problems: [...problems, ...conflicts.map(({ commandId, reason }): Problem => ({ key: KEYBINDING + commandId, kind: "conflict", reason }))], document },
       views: Object.fromEntries(SLOTS.map((slot) => [slot, inOrder(views.get(slot)!.values())])) as unknown as Contributions["views"],
       embeds: inOrder(embeds.values()),
+      editorExtensions: inOrder(editorExtensions.values()),
       plugins: plugins.map((p) => ({
         id: p.id,
         name: p.name,
@@ -365,5 +402,9 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
     dispose,
     setSetting,
     settingsChanged,
+    navigated() {
+      arrived = true;
+      for (const heard of [...arriving]) heard();
+    },
   };
 }

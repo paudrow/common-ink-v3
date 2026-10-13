@@ -1,4 +1,4 @@
-import { chordLabel, overlap } from "./keybindings.ts";
+import { chordLabel, onPlatform, overlap } from "./keybindings.ts";
 import type { MemberSettings } from "./pluginHost.ts";
 import { KEYBINDING, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
@@ -103,15 +103,16 @@ export function filterLayout({ categories, shortcuts }: Layout, { needle, modifi
 }
 
 /** The other commands a chord already runs or is written for, which recording it for `commandId` would take it from or share it with. */
-export const holdersOf = (chord: string, shortcuts: readonly Shortcut[], commandId: string): Shortcut[] => shortcuts.filter((s) => s.commandId !== commandId && s.chords.includes(chord));
+export const holdersOf = (chord: string, shortcuts: readonly Shortcut[], commandId: string, mac: boolean): Shortcut[] =>
+  shortcuts.filter((s) => s.commandId !== commandId && s.chords.some((held) => onPlatform(held, mac) === onPlatform(chord, mac)));
 
 /** The other commands whose keys these would begin, or go on from: where both can run, only the shorter keys ever do. */
-export const overlapsOf = (keys: string, shortcuts: readonly Shortcut[], commandId: string): { shortcut: Shortcut; keys: string; how: "begins" | "follows" }[] =>
+export const overlapsOf = (keys: string, shortcuts: readonly Shortcut[], commandId: string, mac: boolean): { shortcut: Shortcut; keys: string; how: "begins" | "follows" }[] =>
   shortcuts
     .filter((s) => s.commandId !== commandId)
     .flatMap((shortcut) =>
       shortcut.chords.flatMap((held) => {
-        const how = overlap(keys, held);
+        const how = overlap(onPlatform(keys, mac), onPlatform(held, mac));
         return how === "begins" || how === "follows" ? [{ shortcut, keys: held, how }] : [];
       }),
     );

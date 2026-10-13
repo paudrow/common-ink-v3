@@ -1302,9 +1302,42 @@ button.link:hover {
 }
 
 .editor {
+  box-sizing: border-box;
   max-width: 46rem;
+  min-height: 100%;
   margin: 0 auto;
   padding: 2rem 2rem 30cqh;
+}
+
+/* What an editor extension keeps under a note, such as vim's mode: at the foot of the note's pane, as wide as the pane. */
+.note-foot {
+  flex: none;
+}
+
+.note-foot .cm-panels {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+/* One row of one height whatever it says, so the text above never moves as the mode or a half-typed command changes. */
+.note-foot .cm-vim-panel {
+  box-sizing: border-box;
+  height: 1.75rem;
+  padding: 0 16px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.75rem;
+  white-space: nowrap;
+}
+
+.note-foot .cm-vim-panel input {
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
 }
 
 .editor .cm-editor {
@@ -3723,6 +3756,18 @@ button.diff-fold:hover {
   margin: 2px 10px 6px 36px;
   color: var(--muted);
   font-size: 11.5px;
+}
+
+/* The row vim's keys are on, in any list. A card's row has the card's corners, so its mark does too. */
+.cards > li {
+  border-radius: 12px;
+}
+
+
+[data-vim-at] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background-color: var(--accent-soft);
 }
 
 /* The bottom bar is laid over the foot of the app, which is kept clear for it, so the columns above need not know it is there. */

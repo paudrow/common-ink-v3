@@ -61,6 +61,9 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 - `host.commands` registers commands, lists every command, and runs one by id. A command's `keys` are its default chords.
 - `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `editor`, `folder`, `inspector`, `page`, `bar`, and `overlay`. A page gets a `go.<id>` command. A page is also shown at every address under its path, so the Plugins page at `/plugins` is the page at `/plugins/tabs` too, and reads which from `app.path`. A page registered at exactly that address wins. A page is opened in the editor area as a note is, which with Tabs and splits on is in a tab, and it does nothing for that: see [Pages are tabs](#pages-are-tabs).
 - `host.embeds` registers an embed, drawn wherever a note says `::name{config}`.
+- `host.editorExtensions` registers an editor extension, added to the editor of every note. It is a value, or a function of the editor that is told its note.
+- `host.onNavigate(listener)` calls the listener each time the app arrives at an address.
+- `host.report(error)` says on the Plugins page that the plugin is on and something it is for didn't work.
 - `host.app()` is the app as it is now: the open note, the notes and folders, and what can be done about them. A view is handed the same thing as its `app` prop.
 - `host.perform(op)` performs a workspace operation as the member. The operations are the ones in `src/core/protocol.ts`, except the two on settings.
 - `host.settings` reads the plugin's own options.
@@ -88,7 +91,7 @@ Three optional fields are what the Plugins page shows of a plugin. Every built-i
 - `icon`: one of the app's own icons, by name (`IconName`). Without one the plugin stands under the picture every plugin has.
 - `screenshots`: pictures of it at work, shown in its details: each `{ src, dark?, alt }`. `src` is a file the app serves, `dark` is the same picture taken in the dark theme and is shown in its place there, and `alt` says what the picture shows and is its caption.
 
-Nothing else on the Plugins page is written by hand. A plugin's details list what it adds from what it registered: its commands, its views by slot, its embeds and its settings (`PluginState.adds` in `src/web/pluginHost.ts`). A plugin that is off is listed with what it added when it was last on, and one that hasn't been on since the app loaded says so, since nothing but running `activate` could tell.
+Nothing else on the Plugins page is written by hand. A plugin's details list what it adds from what it registered: its commands, its views by slot, its embeds, its editor extensions and its settings (`PluginState.adds` in `src/web/pluginHost.ts`). A plugin that is off is listed with what it added when it was last on, and one that hasn't been on since the app loaded says so, since nothing but running `activate` could tell.
 
 ## Options
 
@@ -104,14 +107,79 @@ Some names are the app's. A command whose id starts with `go.`, `plugins.`, or `
 
 The name `enabled` is taken. Every plugin that can be turned off has the setting `<id>.enabled`, and a plugin that declares its own doesn't start.
 
+## Editor extensions
+
+`host.editorExtensions.register({ id, extension })` adds a CodeMirror 6 extension to the editor of every note, including notes already open, in every editor group. Turning the plugin off takes it back out the same way. The settings JSON editor doesn't get them.
+
+```ts
+import { EditorView } from "@codemirror/view";
+
+host.editorExtensions.register({ id: "wide-caret", extension: EditorView.theme({ ".cm-cursor": { borderLeftWidth: "3px" } }) });
+```
+
+The plugin builds the extension from its own imports of `@codemirror/*`, which are packages and not the app, so the boundary test allows them. The API types `extension` as `object` to keep CodeMirror out of the plugin API's own imports. The app checks the value when it is added: one CodeMirror won't take is left out, and the Plugins page says so.
+
+An extension that needs to know its editor is given as a function. It is handed the editor's context, which carries the id of the note the editor holds, and returns the extension for that editor:
+
+```ts
+host.editorExtensions.register({ id: "note-links", extension: ({ noteId }) => linksFrom(noteId) });
+```
+
+The function is called once for each editor, when the editor is made or when the extension is added to one already open. Two sides of a split each get their own call with their own note, and an editor holds one note for as long as it lasts. What the function returns is checked the way a value is. If it throws, or returns what CodeMirror won't take, the extension is left out of that editor, the note still opens, and the Plugins page says so. That is known only once an editor has been made, so a broken function shows on the Plugins page after a note has been open and not before.
+
+A note is also drawn where it is only read: an expanded card in a folder's list. That drawing gets the same extensions, called with `{ noteId, reading: true }`, and it can be there beside the note's editor, more than once. So an extension that keeps a note's editor by the note's id (to read its text, or to put the cursor in it) leaves a reading out. Nothing a reading does changes the note. `isReading(state)` from the plugin API says whether a state is a reading's, and `touched` and `lineTouched` in `plugins/lib/live.ts` answer false there, so nothing in a reading is shown as written whatever is selected. A link's shared page is a reading too. `TITLE_MARK` is the `# ` an empty note is opened with in its editor, which vim reads to start such a note in insert mode. A reading is not an editor: an extension that is only for editing, as vim and line numbers are, gives a reading nothing (`(editor) => (editor.reading ? [] : extension)`), so it has no cursor, no mode bar and no keys, and its text is selected and copied as a page's is.
+
+A panel an extension shows under the text (`showPanel`, as vim's mode bar is) is put at the foot of the note's pane by the editor, outside the scrolling text and as wide as the pane, one for each editor. It is styled in `style.css` under `.note-foot`, since it is no longer inside `.cm-editor` for an editor theme to reach.
+
+Plugins' extensions come before the editor's own, in the order of the plugins, so a plugin's keys are tried before the editor's. Wrap one in `Prec` to place it more exactly. An extension given as a value is shared by every editor. Keep what belongs to one editor in a `StateField` or a `ViewPlugin`, or give a function.
+
+A plugin whose editing is heavy loads it when it starts, as Vim mode does with `import("./editing.ts")`, and registers the extension when the import settles unless it was turned off meanwhile. If the import fails it calls `host.report(error)`, which shows the reason against the plugin on the Plugins page.
+
+One limit, for #11 to weigh:
+
+- Only the check when an extension is added, or made for an editor, reaches the Plugins page. An extension that throws later, while an editor is running, is CodeMirror's to log, and nothing holds it against its plugin.
+
 ## Keybindings
 
-A command's `keys` are its default chords. The member's are settings too: `keybindings.<command id>` holds a list of chords, and an empty list unbinds the command. The member changes them in the Keyboard shortcuts category of the Settings page, a table of every command with its keys and whether they are the default or the member's: Record takes the keys wanted as they are pressed, one after another for a sequence, with Start over to take them back, and Reset goes back to the default. It warns when another command already has the keys, or has keys that these begin or go on from. A press in the recorder is written down and runs nothing. Enter saves there and Escape cancels, so those two alone are bound in the JSON. A member's keys are whatever the app can run a command on: one chord, with a modifier or bare, or a sequence. Keys that would type, whose first chord has no `mod` or `alt` and is neither Escape nor an F key, are left to a field or a note's text while one has focus. So no key that types in a note runs a command. Enter and Space, alone or with Shift, are also left to a button, a link, a checkbox or another control that acts on them while it has focus. The palette shows the chord that runs a command now. A plugin does nothing to take part.
+In a chord, `mod` is ⌘ on a Mac and Ctrl elsewhere. `ctrl` is the Control key: on a Mac it is its own key, and elsewhere it is the same key as `mod`, so `ctrl+o` and `mod+o` are one chord there.
 
-A command's default `keys` may be a sequence: chords pressed one after another, written with spaces between them, such as `g g` or `mod+k l`. The keys that begin a sequence are taken only while a command that can run now goes on from them, so `g` is nobody's key in a text field. A key that doesn't go on from what was begun runs what it runs by itself, and otherwise goes nowhere. A sequence that was begun is given up when focus moves, when the pointer is pressed, or after a second and a half, and then the next key is whatever it would have been with nothing begun. A default may also be a bare key such as `j`: it is never run while something is being typed in. Don't give one command a key that begins another's sequence: the shorter keys run on their last press and the longer never do. A member who does is told so, in Settings.
+The app tries a keybinding before the editor or anything else with focus sees the key, and a key that ran a command goes no further: not to the editor, and not to a key handler of the element that has focus. A command that should stand aside at times gives `when`, a function that answers whether its keys run it now. While it answers false the key is left to whatever has focus. Vim mode's `vim.back` answers false in a text field and in a note in insert mode, where `ctrl+o` is the field's or vim's own.
 
+A command's `keys` are its default chords. The member's are settings too: `keybindings.<command id>` holds a list of chords, and an empty list unbinds the command. The member changes them in the Keyboard shortcuts category of the Settings page, a table of every command with its keys and whether they are the default or the member's: Record takes the keys wanted as they are pressed, one after another for a sequence, with Start over to take them back, and Reset goes back to the default. It warns when another command already has the keys, or has keys that these begin or go on from. A press in the recorder is written down and runs nothing. Enter saves there and Escape cancels, so those two alone are bound in the JSON. A member's keys are whatever the app can run a command on: one chord, with a modifier or bare, or a sequence. Keys that would type, whose first chord has no `mod`, `ctrl`, or `alt` and is neither Escape nor an F key, are left to a field or a note's text while one has focus, unless their command gives a `when` and so says for itself where it runs. So no key that types in a note runs a command that didn't ask to be run there. Enter and Space, alone or with Shift, are likewise left to a button, a link, a checkbox or another control that acts on them while it has focus, unless their command gives a `when`. The palette shows the chord that runs a command now. A plugin does nothing to take part.
+
+A command's default `keys` may be a sequence: chords pressed one after another, written with spaces between them, such as `g g` or `ctrl+w h`. The keys that begin a sequence are taken only while a command that can run now goes on from them, so `g` is nobody's key in a text field. A key that doesn't go on from what was begun runs what it runs by itself, and otherwise goes nowhere. A sequence that was begun is given up when focus moves, when the pointer is pressed, or after a second and a half, and then the next key is whatever it would have been with nothing begun. A default may also be a bare key such as `j`: give such a command a `when` that answers false wherever the key would be typed, since a command with a `when` is trusted with it and one without is never run by such a key while something is being typed in. Don't give one command a key that begins another's sequence: the shorter keys run on their last press and the longer never do. A member who does is told so, in Settings.
+
+### Lists, rows and regions: vim's keys outside a note
+
+With Vim mode on, vim's keys work outside a note's text. They are one table in `plugins/vim/keys.ts`: each row is a surface, the keys, and the command they run, and every row is registered as a command under `vim.`, so the keys are listed in Settings among the keyboard shortcuts and a member can change or remove them. In what an embed draws in a note, the list, row, search and tab surfaces answer no: the keys there are the embed's. Ctrl-w still leaves it. A surface is a question about where focus is, answered by `plugins/vim/surfaces.ts`, and it is the command's `when`.
+
+| Surface | Keys | What they do |
+| --- | --- | --- |
+| A list, when nothing is being typed | `j` `k`, `g g` `G`, `ctrl+d` `ctrl+u` | next and previous row, first and last, half a page down and up |
+| The selected row | `enter` or `l`, `z a`, `h` | open it; expand or collapse it, by its `data-row-toggle` or its button with `aria-expanded`; collapse it, or go to its parent |
+| Anywhere a search box is in reach, when nothing is being typed | `/` | go to the search box |
+| A text field with a list in reach | `ctrl+j` or `ctrl+n`, `ctrl+k` or `ctrl+p` | next and previous row of the list the field is for |
+| A search box, or the field of a row | `escape` | back to the list |
+| Anywhere but a text field or a note in insert mode | `ctrl+w` then `h` `j` `k` `l` | the region on that side |
+| Anywhere but a note or a text field | `g t`, `g T` | next and previous tab |
+
+In a note in normal mode `gt` and `gT` are mapped in vim itself, to the same commands, since `g` begins many of vim's own keys there.
+
+None of this names a plugin or a page. The keys find lists, rows and regions by what the page says they are, so a plugin's view takes part by saying so:
+
+- **A list** is an element with `role="tree"`, `role="listbox"`, `role="list"` or `role="menu"`, a `<ul>` or `<ol>` with an `aria-label` or `aria-labelledby`, or anything with `data-list`.
+- **Its rows** are its `role="treeitem"`, `role="option"` and `role="menuitem…"` elements and anything inside it with `data-row`. A list that has none of those has its children as rows.
+- **The selected row** is the one with focus in it. Focus rests on the row when the row can take it, and otherwise on the first thing in it that can be pressed. A row that begins with a text field is given focus itself, so nothing is typed into the field until the member opens the row. The row is marked with `data-vim-at`, which `style.css` draws, and scrolled into view.
+- **A list with its own keys** is one that takes focus itself (it has a `tabindex`) and keeps its own cursor, as History's list of changes does with `aria-activedescendant`. Vim's `j` and Ctrl-w put focus on that list and from there every key is the list's own: none of vim's list or row keys run while focus is on it.
+- **Opening a row** clicks what the row marks `data-row-open`, or else the row when it is itself the thing pressed, or its first link, or goes into the field it begins with, or clicks what it rests on. Mark the opener when a row has a checkbox before it, as a todo has. A note that comes to the front because of it takes focus in normal mode.
+- **`h`** clicks the `data-row-toggle` of a row whose `aria-expanded` is true. Otherwise it goes to the row before it with a lower `aria-level`, or to the row a nested list is in.
+- **A list a field is for**: `ctrl+j` and `ctrl+k` are sent to the field as the arrow keys Down and Up, so a field that already answers those needs nothing. A field that doesn't answer them sends focus to the first or last row of the nearest list.
+- **A region** is an `<aside>`, `<main>`, or anything with `data-region`; of two that nest, the inner one. Going to a region puts focus where it last was there, or in its note's text, or on its list's row. `data-focused` marks the region to start from when focus is nowhere.
+- **Tabs** are the `role="tab"` elements of the first `role="tablist"` in the region, and the one in front has `aria-selected="true"`.
 
 ## Turning plugins off
+
+A plugin with `enabledByDefault: false` is off until the member turns it on. Its setting `<id>.enabled` then defaults to false, and only `true` is kept in the member's document.
 
 A member turns a plugin off on the Plugins page, on the plugin's card or in its details, or from the palette (`Disable plugin: Tabs and splits`). Both write the setting `tabs.enabled`, so the choice follows the member to another browser. The Settings page has no switch for a plugin: it shows the setting only as a line of the JSON.
 
@@ -129,5 +197,6 @@ The built-in plugins are trusted, and the host gives them more than an untrusted
 - `host.agents.connect` mints a token that acts as the member.
 - `host.commands.run` runs any command, including `plugins.disable.<another plugin>`. That command writes the member's settings, so it is a way around the refusal in `host.perform`. The palette needs it to run what the member picks.
 - `Embed.render` is handed a real element inside the note, so it can reach the rest of the page from there.
+- An editor extension runs inside the editor with the note's text, every key typed, and the page. It must also be built from the app's own copy of `@codemirror/state`, which a plugin loaded from elsewhere doesn't have.
 - `host.storage` is the browser's localStorage under a prefix, which any script on the page can read.
 - A view is handed `app`, which carries the member's email, every note's title and first lines, `signOut`, and `switchWorkspace`. Each view is drawn with the `app` its own plugin is given (`provide` in `Workspace.tsx`), so that is the one place to narrow it.

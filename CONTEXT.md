@@ -121,11 +121,24 @@ A named action with an id that doesn't change, run from the command palette or b
 _Avoid_: Action
 
 **Keybinding**:
-The chords that run a command. A command comes with its default chords, and a member changes them in settings, under the command's id: other chords, or none. The Settings page lists every command's keybinding as a keyboard shortcut, and records a new one from its keys as they are pressed. A chord the member gives to one command is taken from a command that only had it by default, and is flagged while two commands have it. A keybinding may be one chord, with or without mod or alt in it, or a sequence of chords pressed one after another, such as `g g`. Keys that would type, which begin with no mod or alt and with neither Escape nor an F key, run a command only where nothing is being typed. Keys a member gives a command that are the first keys of another's sequence, or go on from another's keys, are flagged too.
+The chords that run a command. In a chord, `mod` is ⌘ on a Mac and Ctrl elsewhere, and `ctrl` is the Control key on both. A keybinding is tried before the editor sees the key. A command comes with its default chords, and a member changes them in settings, under the command's id: other chords, or none. The Settings page lists every command's keybinding as a keyboard shortcut, and records a new one from its keys as they are pressed. A chord the member gives to one command is taken from a command that only had it by default, and is flagged while two commands have it. A keybinding may be one chord, with or without mod, ctrl, or alt in it, or a sequence of chords pressed one after another, such as `g g`. Keys that would type, which begin with no mod, ctrl, or alt and with neither Escape nor an F key, run a command only where nothing is being typed, unless the command says for itself when it runs. Keys a member gives a command that are the first keys of another's sequence, or go on from another's keys, are flagged too.
 _Avoid_: Shortcut, hotkey
 
 **Command palette**:
 The list of commands, narrowed by typing.
+
+**Vim mode**:
+A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
+
+**Selected row**:
+The row of a list that vim's keys are on. It has focus, is marked, and is kept in view.
+
+**Region**:
+A part of the window that `ctrl+w` moves between: the sidebar, each editor group, the inspector.
+
+**Jumplist**:
+The notes a member has been to since Vim mode started in this browser, in order, and which one they are at. `ctrl+o` and `ctrl+i` step back and forward along it, across tabs and editor groups. Going to a note after stepping back drops what was ahead.
+_Avoid_: History, which is the record of changes
 
 ## Access
 
@@ -196,17 +209,17 @@ A name attached to one revision in history. A revision has at most one, and a no
 ## Configuration
 
 **Plugin**:
-A unit of functionality that adds commands, views, embeds, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves on the Plugins page, which takes out everything it added, and the choice is kept in their settings. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
+A unit of functionality that adds commands, views, embeds, editor extensions, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves on the Plugins page, which takes out everything it added, and the choice is kept in their settings. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
 _Avoid_: Extension, add-on
 
 **Built-in plugin**:
-A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs and splits, and the command palette. It is trusted and on by default, and it uses the same plugin API a third-party plugin does.
+A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs and splits, and the command palette. It is trusted, and it uses the same plugin API a third-party plugin does. It is on by default unless it says it starts off, as Vim mode does.
 
 **Plugin host**:
 The part of the core that turns plugins on and off, hands each one its reach into the workspace, and keeps what each has contributed.
 
 **Contribution**:
-One thing a plugin adds: a command, a view, or an embed. It is there while its plugin is on.
+One thing a plugin adds: a command, a view, an embed, or an editor extension. It is there while its plugin is on.
 
 **View**:
 Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector tab, a page, the bottom bar, or an overlay.
@@ -222,6 +235,10 @@ _Avoid_: Mode, screen
 
 **Embed**:
 Content a plugin draws inside a note where the note says `::name{config}`, such as a stopwatch or HTML. It is handed its config and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written.
+
+**Editor extension**:
+Something a plugin adds to the editor of every note, such as keys or a status line. It applies to notes already open, and not to the settings JSON.
+_Avoid_: Extension on its own, which reads as plugin
 
 **Plugin permission**:
 The capabilities a plugin has in a workspace. One set per plugin applies to every member. An admin sets them and can lock them. A non-admin's yes becomes a request, and the capability stays off until an admin approves. This is not settings.

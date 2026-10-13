@@ -9,6 +9,9 @@ addEventListener("keydown", (e) => {
   }
 });
 
+/** Whether Escape has something to close. An editor that has its own use for Escape leaves the key alone while it does. */
+export const dismissing = () => open.length > 0;
+
 /** Calls `onDismiss` on Escape or a press outside every element `inside` gives, until what it returns is called. */
 export function dismissOn(onDismiss: () => void, inside: () => readonly (HTMLElement | null | undefined)[]): () => void {
   const onPointerDown = (e: PointerEvent) => {

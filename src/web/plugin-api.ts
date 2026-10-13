@@ -1,6 +1,6 @@
 /**
  * The plugin API. A plugin is a value with an id, a name, and an `activate` function, which is
- * handed a {@link PluginHost} and uses it to add commands, views, and embeds.
+ * handed a {@link PluginHost} and uses it to add commands, views, embeds, and editor extensions.
  *
  * Everything a plugin can do comes through the host it is handed. A plugin imports this module
  * and nothing else from the app. The built-in plugins in `plugins/` follow the same rule, which
@@ -19,8 +19,9 @@ export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE
 /** Where two lists of lines differ, for a view that marks what changed inside a line. */
 export { lineHunks } from "../core/text.ts";
 
-export { useDismiss } from "./dismiss.ts";
+export { dismissing, useDismiss } from "./dismiss.ts";
 export { ResizeHandle } from "./resize.tsx";
+export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
 export { ago, useNow } from "./time.ts";
 /** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
@@ -56,6 +57,8 @@ export interface Plugin {
    * function that stops it.
    */
   activate(host: PluginHost): void | Dispose;
+  /** False for a plugin that is off until the member turns it on. */
+  enabledByDefault?: boolean;
 }
 
 /** A picture of a plugin at work. `dark` is the same picture taken in the dark theme, shown in its place there. */
@@ -118,6 +121,16 @@ export interface PluginHost {
   readonly embeds: {
     register(embed: Embed): Dispose;
   };
+  readonly editorExtensions: {
+    register(extension: EditorExtension): Dispose;
+  };
+  /**
+   * Tells the member that the plugin is on and something it is for didn't work, such as a part of it
+   * that couldn't be loaded. It is shown on the Plugins page until the plugin is turned off or on again.
+   */
+  report(error: unknown): void;
+  /** Calls `listener` each time the app arrives at an address, and once for the address it is at when the plugin starts later than the app. */
+  onNavigate(listener: () => void): Dispose;
   /** The app as it is now. A view is handed this as `app`; a command reads it when it runs. It isn't there yet during `activate`. */
   app(): App;
   /**
@@ -153,8 +166,13 @@ export interface Command {
   id: string;
   title: string;
   run: () => void;
-  /** The chords that run it unless the member's keybindings say otherwise, such as `mod+shift+p`. `mod` is ⌘ or Ctrl. */
+  /**
+   * The chords that run it unless the member's keybindings say otherwise, such as `mod+shift+p`.
+   * `mod` is ⌘ on a Mac and Ctrl elsewhere. `ctrl` is the Control key on both.
+   */
   keys?: readonly string[];
+  /** Whether its keys run it now. While it answers false, a press of them is left to whatever has focus. The palette runs it either way. */
+  when?: () => boolean;
   /** A text field has its own answer to this command, so its keys are left to a field that has focus. */
   leaveToFields?: boolean;
 }
@@ -308,6 +326,31 @@ export interface Embed {
   title: string;
   /** Draws into `el`. May return a function that stops whatever it started. */
   render(el: HTMLElement, embed: { config: string }): void | (() => void);
+}
+
+/**
+ * Something added to the editor of every note: keys, decorations, a panel. `extension` is a
+ * CodeMirror 6 `Extension`, built from the plugin's own imports of `@codemirror/*`, or a function
+ * that makes one for each editor from what it is told about that editor. This module doesn't name
+ * CodeMirror's type, so one that isn't an extension is left out, a value when it is added and what a
+ * function makes in the editor it was made for, and its plugin is told so. So is a function that
+ * throws. Extensions come before the editor's own, in the order of their plugins.
+ */
+export interface EditorExtension {
+  id: string;
+  extension: object | ((editor: EditorContext) => object);
+}
+
+/** What an editor extension given as a function is told about the editor it is being made for. */
+export interface EditorContext {
+  /** The note the editor holds. An editor holds one note for as long as it lasts. */
+  noteId: string;
+  /**
+   * True for a drawing of the note that is only read, such as an expanded card in a folder's list.
+   * It may be there beside the note's editor, and there may be several, so whatever keeps the
+   * note's editor by the note's id leaves a reading out.
+   */
+  reading?: boolean;
 }
 
 /** A workspace's folders, indexed for drawing the tree and naming a folder's path. */

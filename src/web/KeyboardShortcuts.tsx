@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { chordLabel, chordOf, pressing, readKeys, typed } from "./keybindings.ts";
+import { chordLabel, chordOf, onPlatform, pressing, readKeys, typed } from "./keybindings.ts";
 import { holdersOf, overlapsOf, type Shortcut } from "./settingsLayout.ts";
 
 interface Props {
@@ -142,9 +142,9 @@ function Recorder({ shortcut, add, all, mac, onSave, onClose }: RecorderProps) {
   const read = pressed.length ? readKeys(pressed.join(" ")) : null;
   const chord = read && "keys" in read ? read.keys : null;
   const label = chord && chordLabel(chord, mac);
-  const holders = chord ? holdersOf(chord, all, shortcut.commandId) : [];
-  const overlaps = chord ? overlapsOf(chord, all, shortcut.commandId) : [];
-  const has = chord !== null && shortcut.chords.includes(chord);
+  const holders = chord ? holdersOf(chord, all, shortcut.commandId, mac) : [];
+  const overlaps = chord ? overlapsOf(chord, all, shortcut.commandId, mac) : [];
+  const has = chord !== null && shortcut.chords.some((held) => onPlatform(held, mac) === onPlatform(chord, mac));
   const names = holders.map((h) => h.title).join(" and ");
   const press = chord === null ? null : pressing(chord);
 
@@ -157,7 +157,7 @@ function Recorder({ shortcut, add, all, mac, onSave, onClose }: RecorderProps) {
     e.stopPropagation();
     if (bare && !e.shiftKey && e.key === "Escape") return onClose();
     if (bare && !e.shiftKey && e.key === "Enter") return void (chord && onSave(chord));
-    setPressed([...pressed, chordOf(e)]);
+    setPressed([...pressed, chordOf(e, mac)]);
   };
 
   return (

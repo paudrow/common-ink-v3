@@ -103,7 +103,7 @@ test("editing the JSON changes the options and the app, and editing the options 
 
 test("a plugin's options are listed under it with their schema and apply without a reload, and its switch is on the Plugins page and not among them", async ({ page }) => {
   await openSettings(page);
-  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list"]);
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list", "Vim mode"]);
   const noteList = await category(page, "Note list");
 
   await expect(noteList.getByRole("checkbox")).toHaveCount(1);
@@ -139,7 +139,7 @@ test("a value the schema refuses and a key it doesn't know are flagged in the JS
 
   await expect(problems(page)).toHaveText([
     "core.editorTextSize Expected 200 or less, not 500. The default is used.",
-    'keybindings.view.toggleFocus "cmd" in "cmd+y" isn\'t a modifier. Use mod, alt, or shift, then one key. The default is used.',
+    'keybindings.view.toggleFocus "cmd" in "cmd+y" isn\'t a modifier. Use mod, ctrl, alt, or shift, then one key. The default is used.',
     "core.theem There's no setting by this name. It may belong to a plugin that isn't installed.",
   ]);
   await expect(page.locator(".settings-json .cm-lintRange-error")).toHaveText(["500", '["cmd+y"]']);
@@ -295,7 +295,7 @@ test("a keybinding is recorded by pressing it, warned of when another command ha
 // The widest is the table as rows of cells under its column names, and the others each command as a card, as the pane has room for: at 560px a card of one column.
 for (const width of [1700, 1280, 900, 560]) {
   test(`recording, adding, removing or resetting a key moves nothing in the table of keyboard shortcuts: every row keeps its box and the page its scroll, at ${width}px`, async ({ page }) => {
-    // Keys are named as they are off a Mac, which is longer: Ctrl+Shift+Y for ⇧⌘Y.
+    // Keys are named as they are off a Mac, which is longer: Ctrl+Shift+Y for ⇧⌘Y. Off a Mac the modifier is Control whatever machine runs the test.
     await page.addInitScript(() => Object.defineProperty(navigator, "platform", { get: () => "Linux x86_64" }));
     await page.setViewportSize({ width, height: 480 });
     await openSettings(page);
@@ -340,18 +340,18 @@ for (const width of [1700, 1280, 900, 560]) {
     expect(layout).toBe({ 1700: "cells", 1280: "card of 2", 900: "card of 2", 560: "card of 1" }[width]);
     expect(before.rows.length).toBeGreaterThan(8);
 
-    await record("Record a key for", "ControlOrMeta+Shift+Y");
+    await record("Record a key for", "Control+Shift+Y");
     await expect(row.getByRole("cell").nth(1)).toHaveText("Yours");
     await expect(row.locator("kbd")).toHaveCount(1);
     await expect.poll(() => places()).toEqual(before);
 
-    await record("Add another key for", "ControlOrMeta+Shift+U");
+    await record("Add another key for", "Control+Shift+U");
     await expect(row.locator("kbd")).toHaveCount(2);
     await expect.poll(() => places()).toEqual(before);
     // A third, and a long one: two keys pressed one after the other.
     await row.getByRole("button", { name: "Add another key for Toggle inspector" }).click();
-    await page.keyboard.press("ControlOrMeta+Shift+K");
-    await page.keyboard.press("ControlOrMeta+Shift+S");
+    await page.keyboard.press("Control+Shift+K");
+    await page.keyboard.press("Control+Shift+S");
     await page.keyboard.press("Enter");
     await expect(row.locator("kbd")).toHaveText([/^Ctrl\+Shift\+Y/, /^Ctrl\+Shift\+U/, /^Ctrl\+Shift\+K Ctrl\+Shift\+S/]);
     await expect.poll(() => places()).toEqual(before);

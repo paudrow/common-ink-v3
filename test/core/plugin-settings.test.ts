@@ -48,7 +48,7 @@ describe("a setting's value", () => {
     expect(reasonFor(keys, "mod+k")).toBe('Expected a list of keys, such as ["mod+k"], not "mod+k"');
     expect(reasonFor(keys, ["mod+k", 3])).toBe('Expected a list of keys, such as ["mod+k"], not ["mod+k",3]');
     expect(reasonFor(keys, ["mod+"])).toBe('"mod+" has no key after its modifiers');
-    expect(readSetting(keys, ["G G", "g g", "mod+w H", "j"])).toEqual({ value: ["g g", "mod+w h", "j"] });
+    expect(readSetting(keys, ["G G", "g g", "ctrl+w H", "j"])).toEqual({ value: ["g g", "ctrl+w h", "j"] });
   });
 });
 
@@ -63,6 +63,7 @@ describe("a command's keys as a member writes them", () => {
     expect(readKeys("mod+enter")).toEqual({ keys: "mod+enter" });
     expect(readKeys("alt+arrowup")).toEqual({ keys: "alt+arrowup" });
     expect(readKeys("mod+,")).toEqual({ keys: "mod+," });
+    expect(readKeys("Ctrl+O")).toEqual({ keys: "ctrl+o" });
     expect(readKeys("mod+space")).toEqual({ keys: "mod+space" });
   });
 
@@ -73,7 +74,7 @@ describe("a command's keys as a member writes them", () => {
 
   it("may be several chords pressed one after another, written with spaces between them", () => {
     expect(readKeys("g g")).toEqual({ keys: "g g" });
-    expect(readKeys("Mod+W h")).toEqual({ keys: "mod+w h" });
+    expect(readKeys("Ctrl+W h")).toEqual({ keys: "ctrl+w h" });
     expect(readKeys("  G   Shift + T ")).toEqual({ keys: "g shift+t" });
     expect(readKeys("mod+k l")).toEqual({ keys: "mod+k l" });
     expect(readKeys("mod+k shift+mod+l escape")).toEqual({ keys: "mod+k mod+shift+l escape" });
@@ -83,17 +84,17 @@ describe("a command's keys as a member writes them", () => {
     expect(readKeys("")).toEqual({ reason: '"" has no key after its modifiers' });
     expect(readKeys("   ")).toEqual({ reason: '"   " has no key after its modifiers' });
     expect(readKeys("mod+shift")).toEqual({ reason: '"mod+shift" has no key after its modifiers' });
-    expect(readKeys("ctrl+k")).toEqual({ reason: '"ctrl" in "ctrl+k" isn\'t a modifier. Use mod, alt, or shift, then one key' });
+    expect(readKeys("cmd+k")).toEqual({ reason: '"cmd" in "cmd+k" isn\'t a modifier. Use mod, ctrl, alt, or shift, then one key' });
     expect(readKeys("mod+mod+k")).toEqual({ reason: '"mod+mod+k" names a modifier twice' });
     expect(readKeys("g mod+")).toEqual({ reason: '"mod+" in "g mod+" has no key after its modifiers' });
-    expect(readKeys("mod+w cmd+h")).toEqual({ reason: '"cmd" in "mod+w cmd+h" isn\'t a modifier. Use mod, alt, or shift, then one key' });
+    expect(readKeys("ctrl+w cmd+h")).toEqual({ reason: '"cmd" in "ctrl+w cmd+h" isn\'t a modifier. Use mod, ctrl, alt, or shift, then one key' });
   });
 
   it("are read the same as the keys pressed for them are written, whatever is pressed", () => {
-    const press = (key: string, held: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) => chordOf({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...held });
+    const press = (key: string, held: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) => chordOf({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...held }, true);
     const pressed = [press("g"), press("G", { shiftKey: true }), press("w", { ctrlKey: true }), press(" "), press("+", { shiftKey: true }), press("ArrowUp", { altKey: true }), press("/")];
 
-    expect(pressed).toEqual(["g", "shift+g", "mod+w", "space", "shift+plus", "alt+arrowup", "/"]);
+    expect(pressed).toEqual(["g", "shift+g", "ctrl+w", "space", "shift+plus", "alt+arrowup", "/"]);
     for (const chord of pressed) expect(readKeys(chord), chord).toEqual({ keys: chord });
     expect(readKeys(pressed.join(" "))).toEqual({ keys: pressed.join(" ") });
   });

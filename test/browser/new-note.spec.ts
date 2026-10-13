@@ -26,8 +26,8 @@ test("a new note starts with the mark of its title and the cursor after it, so t
   page.on("request", (request) => /"note\.write"/.test(request.postData() ?? "") && sent.push(request.postData()!));
   await tabs(page).first().focus();
   await page.waitForTimeout(1500);
-  expect(await read(page, id)).toMatchObject({ text: "", title: "", snippet: "", revision: 0 });
-  expect(await perform(page, { type: "note.history", id })).toEqual([]);
+  await expect.poll(() => read(page, id)).toMatchObject({ text: "", title: "", snippet: "", revision: 0 });
+  await expect.poll(() => perform(page, { type: "note.history", id })).toEqual([]);
   expect(sent).toEqual([]);
   await expect(page.getByRole("status")).toHaveText("Saved");
   await expect(tabs(page).last()).toHaveText("Untitled");
@@ -37,7 +37,7 @@ test("a new note starts with the mark of its title and the cursor after it, so t
   await expect(page.locator(".cm-line").first()).toHaveText("# Groceries");
   await expect.poll(async () => (await read(page, id)).text).toBe("# Groceries");
   // The mark and the title are the note's one change.
-  expect((await perform(page, { type: "note.history", id })).map((c) => c.revision)).toEqual([1]);
+  await expect.poll(async () => (await perform(page, { type: "note.history", id })).map((c) => c.revision)).toEqual([1]);
   await expect(tabs(page).last()).toHaveText("Groceries");
   await expect(page).toHaveURL(/\/note\/groceries-/);
 });
@@ -88,4 +88,24 @@ test("a note with no heading is titled by its first words: in its tab, its addre
 
   await openAllNotes(page);
   await expect(listedNote(page, "Shopping for the week")).toBeVisible();
+});
+
+test("with vim on, a new note starts in insert mode after the mark, so the title is typed at once there too", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
+  await page.reload();
+  await openAllNotes(page);
+  await page.getByRole("main").getByRole("button", { name: "New note" }).click();
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--INSERT--");
+  await expect(editor(page)).toBeFocused();
+  const id = noteIdIn(page);
+  await page.keyboard.type("Groceries");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+  await expect.poll(async () => (await read(page, id)).text).toBe("# Groceries");
+
+  // A note with words in it opens in normal mode, as before.
+  await page.goto(`/note/${id}`);
+  await expect(page.locator(".cm-line").first()).toHaveText("# Groceries");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
 });

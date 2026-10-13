@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { advance, bind, chordFor, chordLabel, chordOf, overlap, pressing, typed } from "../../src/web/keybindings.ts";
+import { advance, bind, chordFor, chordLabel, chordOf, onPlatform, overlap, pressing, typed } from "../../src/web/keybindings.ts";
 import { matching } from "../../src/web/plugins/lib/match.ts";
 
 describe("keybindings", () => {
-  const press = (key: string, held: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}) =>
-    chordOf({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...held });
+  const press = (key: string, held: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}, mac = false) =>
+    chordOf({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...held }, mac);
 
-  it("writes a key press as a chord, with ⌘ and Ctrl both as mod", () => {
-    expect(press("P", { metaKey: true, shiftKey: true })).toBe("mod+shift+p");
+  it("writes a key press as a chord, with Ctrl as mod off a Mac", () => {
+    expect(press("P", { ctrlKey: true, shiftKey: true })).toBe("mod+shift+p");
     expect(press("p", { ctrlKey: true })).toBe("mod+p");
-    expect(press(".", { metaKey: true })).toBe("mod+.");
+    expect(press(".", { ctrlKey: true })).toBe("mod+.");
+    expect(press("o", { metaKey: true })).toBe("meta+o");
     expect(press("p")).toBe("p");
     expect(press("k", { ctrlKey: true, altKey: true })).toBe("mod+alt+k");
   });
@@ -22,7 +23,7 @@ describe("keybindings", () => {
 
   it("knows the keys that would otherwise type, by the chord they begin with", () => {
     for (const keys of ["j", "shift+g", "g g", "enter", "space", "/", "backspace", "j mod+k"]) expect(typed(keys), keys).toBe(true);
-    for (const keys of ["mod+j", "mod+w h", "alt+shift+g", "escape", "shift+escape", "f2", "f12 j", "mod+k l"]) expect(typed(keys), keys).toBe(false);
+    for (const keys of ["mod+j", "ctrl+w h", "alt+shift+g", "escape", "shift+escape", "f2", "f12 j", "mod+k l"]) expect(typed(keys), keys).toBe(false);
   });
 
   it("knows the keys a button, a link or a checkbox acts on itself: Enter and Space, alone or with Shift", () => {
@@ -34,7 +35,7 @@ describe("keybindings", () => {
   it("says how two commands' keys stand to each other: the same, or one the first keys of the other", () => {
     expect(overlap("g g", "g g")).toBe("same");
     expect(overlap("g", "g g")).toBe("begins");
-    expect(overlap("mod+w", "mod+w h")).toBe("begins");
+    expect(overlap("ctrl+w", "ctrl+w h")).toBe("begins");
     expect(overlap("g g", "g")).toBe("follows");
     expect(overlap("g g j", "g g")).toBe("follows");
     expect(overlap("g", "g+g")).toBeNull();
@@ -56,7 +57,22 @@ describe("keybindings", () => {
     ]);
     // Defaults that overlap are the app's own to keep apart, and nobody's mistake to be told of.
     expect(bind([first, { id: "note.new", title: "New note", chords: ["g"], chosen: false }]).conflicts).toEqual([]);
-    expect(bind([first, tab, down, { id: "note.new", title: "New note", chords: ["g n", "mod+w h"], chosen: true }]).conflicts).toEqual([]);
+    expect(bind([first, tab, down, { id: "note.new", title: "New note", chords: ["g n", "ctrl+w h"], chosen: true }]).conflicts).toEqual([]);
+  });
+
+  it("tells ⌘ from Control on a Mac, so ⌘O is not Control+O", () => {
+    expect(press("P", { metaKey: true, shiftKey: true }, true)).toBe("mod+shift+p");
+    expect(press("o", { metaKey: true }, true)).toBe("mod+o");
+    expect(press(".", { metaKey: true }, true)).toBe("mod+.");
+    expect(press("o", { ctrlKey: true }, true)).toBe("ctrl+o");
+    expect(press("k", { metaKey: true, ctrlKey: true, shiftKey: true }, true)).toBe("mod+ctrl+shift+k");
+  });
+
+  it("reads a ctrl chord as mod off a Mac, where they are one key, and leaves it on a Mac", () => {
+    expect(onPlatform("ctrl+o", false)).toBe("mod+o");
+    expect(onPlatform("mod+ctrl+shift+k", false)).toBe("mod+shift+k");
+    expect(onPlatform("ctrl+o", true)).toBe("ctrl+o");
+    expect(onPlatform("mod+shift+p", false)).toBe("mod+shift+p");
   });
 
   it("finds the chord bound to a command", () => {
@@ -70,12 +86,17 @@ describe("keybindings", () => {
     expect(chordLabel("mod+shift+p", true)).toBe("⇧⌘P");
     expect(chordLabel("mod+shift+p", false)).toBe("Ctrl+Shift+P");
     expect(chordLabel("mod+.", true)).toBe("⌘.");
+    expect(chordLabel("ctrl+o", true)).toBe("⌃O");
+    expect(chordLabel("ctrl+o", false)).toBe("Ctrl+O");
   });
 
-  it("labels keys pressed one after another, chord by chord", () => {
+  it("reads and labels keys pressed one after another, chord by chord", () => {
+    expect(onPlatform("ctrl+w h", false)).toBe("mod+w h");
+    expect(onPlatform("ctrl+w h", true)).toBe("ctrl+w h");
+    expect(onPlatform("g shift+t", false)).toBe("g shift+t");
     expect(chordLabel("g g", true)).toBe("G G");
-    expect(chordLabel("mod+w h", true)).toBe("⌘W H");
-    expect(chordLabel("mod+w h", false)).toBe("Ctrl+W H");
+    expect(chordLabel("ctrl+w h", true)).toBe("⌃W H");
+    expect(chordLabel("ctrl+w h", false)).toBe("Ctrl+W H");
     expect(chordLabel("g shift+t", false)).toBe("G Shift+T");
   });
 
