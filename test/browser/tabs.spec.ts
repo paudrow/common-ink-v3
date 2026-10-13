@@ -477,9 +477,9 @@ test("the edge between two halves of a split is dragged, moved with the arrow ke
   const before = await boxOf(group(page, 1));
   await level.focus();
   await page.keyboard.press("ArrowDown");
-  expect((await boxOf(group(page, 1))).height).toBeGreaterThan(before.height);
+  await expect.poll(async () => (await boxOf(group(page, 1))).height).toBeGreaterThan(before.height);
   await page.keyboard.press("Enter");
-  expect(Math.abs((await boxOf(group(page, 1))).height - before.height)).toBeLessThanOrEqual(1);
+  await expect.poll(async () => Math.abs((await boxOf(group(page, 1))).height - before.height)).toBeLessThanOrEqual(1);
 });
 
 const PAGES = [

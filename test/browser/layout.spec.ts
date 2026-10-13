@@ -137,7 +137,7 @@ test("a folder is renamed in place", async ({ page }) => {
   await expect(tree(page).getByRole("treeitem")).toHaveText([/^All notes/, /^Unsorted/, /^Work/]);
 });
 
-test("More expands and collapses Contacts, Uploads, and History, and each mode names what builds it", async ({ page }) => {
+test("More expands and collapses Contacts, Uploads, and History, and a mode not built yet names what builds it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const modes = page.getByRole("navigation", { name: "Modes" });
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar"]);
@@ -151,7 +151,8 @@ test("More expands and collapses Contacts, Uploads, and History, and each mode n
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
-  await expect(editorPane(page).locator(".mode-view")).toHaveText("HistoryHistory arrives with #5.");
+  await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");
+  await expect(editorPane(page)).toContainText("Nothing has been written in this workspace yet.");
 
   await less.click();
   await expect(more).toHaveAttribute("aria-expanded", "false");
@@ -238,9 +239,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
-  // No tab is a default: with none picked yet the first shows, and Info once it is picked.
-  await expect(inspector.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
-  await inspector.getByRole("tab", { name: "Info" }).click();
+  // With no tab picked yet, Info shows.
   await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
   const panel = inspector.getByRole("tabpanel");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
@@ -254,7 +253,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(panel.getByRole("button", { name: "Archive" })).toBeDisabled();
 
   await inspector.getByRole("tab", { name: "History" }).click();
-  await expect(panel).toHaveText("Who changed this note and how arrives with #5.");
+  await expect(panel.getByRole("listbox", { name: "Changes" }).getByRole("option")).toContainText("You wrote");
   await inspector.getByRole("tab", { name: "Backlinks" }).click();
   await expect(panel).toHaveText("Notes that link here arrive with #13.");
 
@@ -337,20 +336,19 @@ test("the inspector stays open whatever is in front and shows what belongs to it
   await inspector.getByRole("tab", { name: "Info" }).click();
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
   const place = await inspector.boundingBox();
-  await inspector.getByRole("tab", { name: "History" }).click();
 
   await folder(page, "Projects").click();
   await expect(listHeading(page)).toHaveText("Projects");
-  await expect(inspector.getByRole("tab")).toHaveText(["Info"]);
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Notes", "Last changed"]);
   await expect(panel.getByRole("definition")).toHaveText(["Projects", "2 notes", "just now by Ada Lovelace"]);
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
   await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveCount(0);
   expect(await inspector.boundingBox()).toEqual(place);
 
-  // The tab picked for a note is the one a note comes back to.
+  // The tab picked on a note is the one a folder showed, and the one a note comes back to.
   await page.goBack();
-  await expect(inspector.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
   expect(await inspector.boundingBox()).toEqual(place);
 
   await openAllNotes(page);

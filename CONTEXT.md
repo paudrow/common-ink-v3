@@ -110,7 +110,7 @@ The buttons that act on the window and on no one note, whatever is open: the sid
 What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
 
 **Inspector**:
-The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line.
+The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line. A note has History, Backlinks and Info; a folder's list has History, the folder's notes that changed as History mode lists them, and Info.
 
 **Focus**:
 One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
@@ -155,15 +155,39 @@ An author that is not a person. A member connects it. It acts with that member's
 _Avoid_: Bot
 
 **History**:
-The ordered record of every change in a workspace. Undo, redo, revert, and applying a selection move through it. The diff of the open note and the workspace history are this same record.
+The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as a list of changes, by time or by note, beside what the selected ones did. The history of the open note, of a folder, and of the workspace are this same record.
 _Avoid_: Log, timeline, versions
 
-**Activity**:
-A view of history showing how many changes a member authored on each day, in that member's timezone. An agent's changes belong to the agent.
-_Avoid_: Contributions, streak
+**Revert**:
+A new change that takes the effect of earlier changes out of a note and keeps every other change. Reverting a note to a revision reverts every change after it. A revert is a change like any other, so reverting it has the changes it reverted stand again, and that is the only way to have them again.
+_Avoid_: Restore, rollback, put back, reapply, take back out
+
+**Selection**:
+The changes picked in History, of one note or of many, to read together and to revert together. Reverting a selection makes one revert in each note it has changes of. A selected change that was already reverted is left as it is, and one selected together with the revert that reverted it stays reverted while that revert goes: the note is as if neither had been made.
+
+**Run**:
+A note's selected changes that follow one another, read as one diff: from the note before the first of them to the note after the last. A change left out between two selected ones ends a run, and the next run says how many were skipped.
+
+**Sitting**:
+One author's edits to one note that follow one another less than ten minutes apart. History lists a sitting as one row, which is selected and reverted as a whole.
+
+**Revert preview**:
+What a revert would do, worked out and not recorded: the changes it would revert and the note's lines it would remove and add. Anyone who can read the note's history can ask for one.
+
+**Overlap**:
+A later change that still stands and edited a line a revert changes. A preview names each one. A line added or removed whole next to such a line is not an overlap.
+
+**Conflict**:
+A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
+
+**Undo**:
+Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
+
+**Unseen change**:
+A change to a note by anyone but the member, their own agent included, made since the member last looked at that note's history.
 
 **Label**:
-A name attached to one revision in history.
+A name attached to one revision in history. A revision has at most one, and a note uses a name once.
 
 ## Configuration
 

@@ -4,7 +4,50 @@ export const MAX_NOTE_LENGTH = 500_000;
 
 export const Id = z.string().regex(/^[a-z0-9]{12}$/, "not an id");
 const Revision = z.number().int().min(0);
-const NoteText = z.string().max(MAX_NOTE_LENGTH);
+/** Line endings as a note keeps them and no half of a character pair: what the database and a recorded change would each make of them differs, and the text stored must be the text its changes replay to. */
+const normalized = (text: string) => text.replace(/\r\n?/g, "\n").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+const NoteText = z.string().max(MAX_NOTE_LENGTH).transform(normalized);
+const LabelName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(60)
+  .regex(/^\P{Cc}*$/u, "can't contain control characters");
+const Time = z.number().int().min(0);
+/** Revisions of one note that a change made, so never 0. */
+const Revisions = z.array(Revision.min(1)).min(1).max(500);
+/** What becomes of one conflict of a revert: the later edits kept, the lines as they were before, or the lines given (no text is no lines). */
+const Choice = z.union([z.literal("keep"), z.literal("back"), z.object({ text: NoteText }).strict()]);
+/**
+ * How a revert's conflicts are settled: one choice for all of them, or one for each in the order
+ * `note.previewRevert` lists them. `at` is the note's revision that preview was worked out at; the
+ * revert is refused when the note has changed since.
+ */
+const Resolve = z.object({ at: Revision, choices: z.union([z.literal("keep"), z.literal("back"), z.array(Choice).max(1000)]) }).strict();
+export type Resolve = z.output<typeof Resolve>;
+const AuthorRef = z.object({ kind: z.enum(["member", "agent", "plugin"]), id: Id });
+export type AuthorRef = z.output<typeof AuthorRef>;
+/** Whose changes: people's, or agents'. */
+const By = z.enum(["people", "agents"]);
+
+/** As many notes as one request reads the changes of or reverts. A larger selection is sent in parts. */
+export const MAX_NOTES_AT_ONCE = 40;
+const unique = (changes: { noteId: string }[]) => new Set(changes.map((c) => c.noteId)).size === changes.length;
+/** Some changes of one note. */
+const Selected = z.object({ noteId: Id, revisions: Revisions }).strict();
+/**
+ * A revert of one note among several: of the chosen changes, or of the note to the revision `to`.
+ * Changes already reverted are left out and no reason to refuse. `at` is the note's revision the
+ * revert was previewed at: a note that has changed since is skipped and said to be. `choices`
+ * settles its conflicts as `resolve` does for one note, and needs `at`.
+ */
+const Reverted = z
+  .object({ noteId: Id, revisions: Revisions.optional(), to: Revision.optional(), at: Revision.optional(), choices: Resolve.shape.choices.optional() })
+  .strict()
+  .refine((r) => (r.revisions === undefined) !== (r.to === undefined), "pass either revisions, the changes to revert, or to, the revision to return to")
+  .refine((r) => r.choices === undefined || r.at !== undefined, "choices settle the conflicts of a preview: pass at, the revision that preview was of");
+const ManyNotes = <T extends z.ZodType<{ noteId: string }>>(item: T) => z.array(item).min(1).max(MAX_NOTES_AT_ONCE).refine(unique, "name each note once");
+
 const FolderName = z
   .string()
   .trim()
@@ -13,7 +56,8 @@ const FolderName = z
   .regex(/^[^/\p{Cc}]*$/u, "can't contain / or control characters");
 
 export const Op = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("note.list"), folderId: Id.optional() }),
+  /** `updatedSince` leaves out notes whose text hasn't changed since that time. */
+  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional() }),
   z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional() }),
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
   z.object({
@@ -25,7 +69,69 @@ export const Op = z.discriminatedUnion("type", [
     writeId: z.string().min(1).max(64).optional(),
   }),
   z.object({ type: z.literal("note.history"), id: Id }),
+  /** What one change did to its note, as a line diff. */
+  z.object({ type: z.literal("note.diff"), id: Id, revision: Revision.min(1) }),
   z.object({ type: z.literal("note.move"), id: Id, folderId: Id }),
+  /** Names a revision, or takes its name away when `name` is null. */
+  z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
+  /** Puts the note back to how it was at `revision`, as a new change. */
+  z.object({ type: z.literal("note.revert"), id: Id, revision: Revision, resolve: Resolve.optional() }),
+  /**
+   * Reverts the chosen changes and keeps the rest, as one new change. Reverting a change that was
+   * itself a revert, an undo, or a redo has what it reverted stand again.
+   */
+  z.object({ type: z.literal("note.revertChanges"), id: Id, revisions: Revisions, resolve: Resolve.optional() }),
+  /**
+   * What a revert would do, with nothing written: of the chosen changes as `note.revertChanges`
+   * reverts them, or of the note to a revision as `note.revert` does. With `resolve`, the diff is of
+   * the revert with its conflicts settled that way.
+   */
+  z
+    .object({ type: z.literal("note.previewRevert"), id: Id, revisions: Revisions.optional(), to: Revision.optional(), resolve: Resolve.optional() })
+    .refine((op) => (op.revisions === undefined) !== (op.to === undefined), "pass either revisions, the changes to revert, or to, the revision to return to"),
+  /** Takes back the author's own latest change that still stands. */
+  z.object({ type: z.literal("note.undo"), id: Id }),
+  z.object({ type: z.literal("note.redo"), id: Id }),
+  /** The notes that changed, latest change first, each with how many changes it had and the lines they added and removed. */
+  z.object({
+    type: z.literal("history.summary"),
+    noteIds: z.array(Id).min(1).max(200).optional(),
+    authors: z.array(AuthorRef).min(1).max(50).optional(),
+    by: By.optional(),
+    /** Only changes made at or after this time, and before `to`, are counted. */
+    from: Time.optional(),
+    to: Time.optional(),
+    /** The `next` of the page before this one. */
+    before: z.object({ lastAt: Time, noteId: Id }).optional(),
+    limit: z.number().int().min(1).max(100).default(30),
+  }),
+  z.object({
+    type: z.literal("history.list"),
+    /** One note, several, or every note in the workspace when left out. */
+    noteIds: z.array(Id).min(1).max(200).optional(),
+    authors: z.array(AuthorRef).min(1).max(50).optional(),
+    by: By.optional(),
+    /** Changes made at or after this time, and before `to`. */
+    from: Time.optional(),
+    to: Time.optional(),
+    /** The `next` of the page before this one. */
+    before: z.object({ createdAt: Time, noteId: Id, revision: Revision }).optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+    diffs: z.boolean().default(true),
+  }),
+  z.object({ type: z.literal("history.authors") }),
+  /**
+   * What a selection of changes did, note by note: the changes of each note that follow one another
+   * are one run with one diff, from the note before the first of them to the note after the last.
+   */
+  z.object({ type: z.literal("history.diff"), changes: ManyNotes(Selected) }),
+  /** What `history.revert` would do to each note, with nothing written. */
+  z.object({ type: z.literal("history.previewRevert"), changes: ManyNotes(Reverted) }),
+  /**
+   * Reverts changes of several notes, each note as one new change. A note is reverted or skipped
+   * whole and by itself: the answer names each note of both kinds, and why one was skipped.
+   */
+  z.object({ type: z.literal("history.revert"), changes: ManyNotes(Reverted) }),
   z.object({ type: z.literal("folder.list") }),
   z.object({ type: z.literal("folder.create"), name: FolderName, parentId: Id.optional() }),
   z.object({ type: z.literal("folder.rename"), id: Id, name: FolderName }),
@@ -71,11 +177,182 @@ export type Author =
   /** A connected agent, named as its member named it; `onBehalfOf` is that member. */
   | { kind: "agent"; agentId: string; name: string; onBehalfOf: string };
 
+/** The changes a change reverted. `to` is the revision a revert put the note back to. */
+export interface Reverts {
+  how: "undo" | "redo" | "revert";
+  revisions: number[];
+  to?: number;
+}
+
 export interface ChangeEntry {
   revision: number;
   baseRevision: number;
   author: Author;
   createdAt: number;
+  /** The label on the revision this change made. */
+  label: string | null;
+  /** Null for an edit. */
+  reverts: Reverts | null;
+  /** The later change that reverted this one and still stands. */
+  revertedBy: number | null;
+  /** Lines this change added and removed. */
+  added: number;
+  removed: number;
+  /** How many of the changes it reverted were themselves reverts, undos or redos: what those took out stands again. */
+  restores: number;
+}
+
+export interface DiffLine {
+  kind: "same" | "add" | "del";
+  text: string;
+}
+
+/** A run of changed lines with the unchanged lines around it. Line numbers start at 1. */
+export interface Hunk {
+  oldStart: number;
+  newStart: number;
+  lines: DiffLine[];
+}
+
+export interface Diff {
+  hunks: Hunk[];
+  added: number;
+  removed: number;
+  /** Lines left out of `hunks` because the change is long. */
+  omitted: number;
+  /** How many lines the text had before. */
+  lines: number;
+}
+
+/** Changes of one note that follow one another, as one: from the note before the first to the note after the last. */
+export interface DiffRun {
+  from: number;
+  to: number;
+  /** How many changes it is. */
+  saves: number;
+  /** Changes of the note between the run before and this one that were not asked for. */
+  skipped: number;
+  firstAt: number;
+  lastAt: number;
+  /** Who made them, in the order they first did. */
+  authors: Author[];
+  /** The label on the revision the run ends at. */
+  label: string | null;
+  added: number;
+  removed: number;
+  /** Null when the answer already holds as many lines as one answer does: ask for this note again, alone. */
+  diff: Diff | null;
+}
+
+export interface NoteDiff {
+  noteId: string;
+  noteTitle: string;
+  /** The note's latest revision. */
+  revision: number;
+  /** Earliest first. */
+  runs: DiffRun[];
+  /** Lines its runs added and removed: what the selection came to, so a line written and then taken out counts for nothing within a run. */
+  added: number;
+  removed: number;
+}
+
+export interface SelectionDiff {
+  /** The note whose selected changes are the latest first. */
+  notes: NoteDiff[];
+}
+
+/** What a revert would do to one note of several. */
+export interface NoteRevertPreview extends RevertPreview {
+  noteId: string;
+  noteTitle: string;
+  /** Changes asked for that were already reverted, so the revert leaves them be. */
+  already: number[];
+  /** Why this note's revert can't be made, when it can't: the rest of the preview is then empty, and the other notes' stand. */
+  refused?: string;
+}
+
+export interface RevertedNote {
+  noteId: string;
+  noteTitle: string;
+  /** The change the revert made: the note's revision now. */
+  revision: number;
+  /** The changes it reverted. */
+  reverted: number[];
+}
+
+export interface SkippedNote {
+  noteId: string;
+  noteTitle: string;
+  /** `changed`: the note is no longer at the revision the revert was previewed at. `nothing`: the revert would change nothing. `refused`: it can't be made, for the reason in `message`. */
+  why: "changed" | "nothing" | "refused";
+  message: string;
+}
+
+export interface RevertedNotes {
+  reverted: RevertedNote[];
+  skipped: SkippedNote[];
+}
+
+export interface RevertPreview {
+  /** The note's revision the preview was worked out at. */
+  revision: number;
+  /** The changes that would be reverted. */
+  revisions: number[];
+  /** From the note's text as it is to its text after the revert, its conflicts settled as asked: every later edit kept when nothing was asked. */
+  diff: Diff;
+  /** Later changes that still stand and edited lines the revert changes. */
+  overlaps: number[];
+  /** Each place those changes edited lines the revert changes, top of the note first. A revert settles each with a choice. */
+  conflicts: RevertConflict[];
+}
+
+/** Lines are without their line ends. */
+export interface RevertConflict {
+  /** The line of the note after the revert, with every later edit kept, that `kept` starts at. Counted from 1. */
+  line: number;
+  /** The lines as they were before the reverted changes, with the later edits to them out too: what "back" leaves. */
+  before: string[];
+  /** The lines as the note has them now. */
+  now: string[];
+  /** What "keep" leaves: the revert, and the later edits kept. */
+  kept: string[];
+  /** The later changes that edited these lines. */
+  later: Array<{ revision: number; author: Author }>;
+}
+
+export interface HistoryEntry extends ChangeEntry {
+  noteId: string;
+  noteTitle: string;
+  /** Null when the listing was asked for without diffs. */
+  diff: Diff | null;
+}
+
+export interface HistoryPage {
+  /** Newest first. */
+  changes: HistoryEntry[];
+  /** Pass as `before` for the next page; null on the last. */
+  next: { createdAt: number; noteId: string; revision: number } | null;
+}
+
+/** A note's changes, counted: all of them, or the ones a listing was narrowed to. */
+export interface ChangedNote {
+  noteId: string;
+  noteTitle: string;
+  changes: number;
+  /** Lines the changes added and removed, each change counted on its own. */
+  added: number;
+  removed: number;
+  firstAt: number;
+  lastAt: number;
+  /** Who made them, whoever changed the note latest first. */
+  authors: Author[];
+}
+
+export interface HistorySummary {
+  /** Latest change first. */
+  notes: ChangedNote[];
+  /** Pass as `before` for the next page; null on the last. */
+  next: { lastAt: number; noteId: string } | null;
 }
 
 export interface Results {
@@ -85,6 +362,19 @@ export interface Results {
   "note.write": Note;
   "note.history": ChangeEntry[];
   "note.move": Note;
+  "note.label": { id: string; revision: number; label: string | null };
+  "note.revert": Note;
+  "note.revertChanges": Note;
+  "note.previewRevert": RevertPreview;
+  "note.undo": Note;
+  "note.redo": Note;
+  "note.diff": Diff;
+  "history.summary": HistorySummary;
+  "history.list": HistoryPage;
+  "history.authors": Author[];
+  "history.diff": SelectionDiff;
+  "history.previewRevert": NoteRevertPreview[];
+  "history.revert": RevertedNotes;
   "folder.list": { unsortedId: string; folders: ListedFolder[] };
   "folder.create": Folder;
   "folder.rename": Folder;

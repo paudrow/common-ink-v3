@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
-import { perform } from "./api.ts";
+import { ApiError, perform } from "./api.ts";
 import { createCommands, type Command } from "./commands.ts";
 import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction, type EditorLayout, type Group, type Opened } from "./editorLayout.ts";
 import { ALL_NOTES, folderTitle, folderTree, pathName, type FolderTree as Tree } from "./folders.ts";
 import { FolderTree } from "./FolderTree.tsx";
+import { HistoryMode, type Scope } from "./History.tsx";
 import { Icon, type IconName } from "./icons.tsx";
-import { Inspector, viewsFor, type Subject } from "./Inspector.tsx";
-import { KEYBINDINGS, advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
+import { Inspector, markOf, viewsFor, type Subject } from "./Inspector.tsx";
+import { FIELD_COMMANDS, KEYBINDINGS, advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
 import { MODES, modePath, type ModeId } from "./modes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { FolderList, type Kept } from "./NoteList.tsx";
@@ -21,6 +22,7 @@ import { folderPath, type Navigate, type Route } from "./router.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { Soon } from "./Soon.tsx";
 import { isBoolean, useStored } from "./stored.ts";
+import { undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
 const FOCUS_KEY = "ink.focus";
@@ -35,7 +37,10 @@ type Widths = { sidebar?: number; inspector?: number };
 const isWidths = (v: unknown): v is Widths => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number" && n > 0);
 const within = ({ min, max }: { min: number; max: number }, width: number) => Math.min(max, Math.max(min, width));
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+/** How often the notes changed since the last look are listed, so an agent's or another member's change shows up. */
+const REFRESH_MS = 5000;
 
+const isRevisions = (v: unknown): v is Record<string, number> => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number");
 const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 
 /** A layout is kept as it was written, and read by `keptLayout`, which knows the shape it had before a folder could have a tab. */
@@ -115,6 +120,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const [keptLists] = useState(() => new Map<string, Kept>());
   const [commands] = useState(createCommands);
   const [palette, setPalette] = useState<"commands" | "notes" | null>(null);
+  /** An undo or redo that didn't happen, and why, shown on its note until the member's next step. */
+  const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
 
   const byId = useMemo(() => new Map((notes ?? []).map((n) => [n.id, n])), [notes]);
   const routeNoteId = route.kind === "note" ? route.id : null;
@@ -147,6 +154,24 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     void loadFolders();
     setListVersion((v) => v + 1);
   }, [loadFolders]);
+
+  const listedNotes = useRef(notes);
+  listedNotes.current = notes;
+  useEffect(() => {
+    const relist = async () => {
+      const known = listedNotes.current;
+      if (document.visibilityState !== "visible" || !known) return;
+      const changed = await perform(workspaceId, { type: "note.list", updatedSince: Math.max(0, ...known.map((n) => n.updatedAt)) }).catch(() => []);
+      const later = changed.filter((n) => (known.find((k) => k.id === n.id)?.revision ?? -1) < n.revision);
+      if (later.length) setNotes((all) => all && [...newest(later, all, new Map()), ...all.filter((n) => !later.some((l) => l.id === n.id))]);
+    };
+    const timer = setInterval(relist, REFRESH_MS);
+    document.addEventListener("visibilitychange", relist);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", relist);
+    };
+  }, [workspaceId]);
 
   const remember = useCallback(
     (note: Note) => {
@@ -197,6 +222,32 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     if (route.kind === "home" && tab) navigate(addressOf(shown.current.byId, tab), { replace: true });
   }, [route.kind, navigate]);
 
+  /** The latest revision of each note the member has been shown the changes up to. It is kept in this browser. */
+  const [seen, setSeen] = useStored(`ink.seen.${workspaceId}.${me.person.id}`, isRevisions, {});
+  const markSeen = useCallback((noteId: string, revision: number) => setSeen((s) => ((s[noteId] ?? 0) >= revision ? s : { ...s, [noteId]: revision })), [setSeen]);
+  /** The open note's latest change by anyone but the member, such as their agent. */
+  const [others, setOthers] = useState<{ noteId: string; revision: number } | null>(null);
+  const currentId = current?.id;
+  const currentRevision = current?.revision;
+  const byMe = current?.updatedBy.kind === "member" && current.updatedBy.personId === me.person.id;
+  const checked = useRef<{ noteId: string; revision: number } | null>(null);
+  useEffect(() => {
+    if (!currentId || currentRevision === undefined) return;
+    const last = checked.current;
+    checked.current = { noteId: currentId, revision: currentRevision };
+    // The member's own next change can't be someone else's, so there is nothing new to look for.
+    if (last?.noteId === currentId && currentRevision === last.revision + 1 && byMe) return;
+    let live = true;
+    perform(workspaceId, { type: "history.list", noteIds: [currentId], diffs: false, limit: 100 }).then(({ changes }) => {
+      const theirs = changes.find((c) => c.author.kind !== "member" || c.author.personId !== me.person.id);
+      if (live) setOthers({ noteId: currentId, revision: theirs?.revision ?? 0 });
+    });
+    return () => {
+      live = false;
+    };
+  }, [workspaceId, currentId, currentRevision, me.person.id]);
+  const unseen = !!current && others?.noteId === current.id && others.revision > (seen[current.id] ?? 0);
+
   /** Asked for on a group, focus turns to that group first, so what fills the window is its tab in front. */
   const toggleFocus = useCallback(
     (groupId?: string) => {
@@ -210,6 +261,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   const closePalette = useCallback(() => setPalette(null), []);
 
   const go = navigate;
+  /** The notes the History page is narrowed to, when it was opened from a note's or a folder's History tab. */
+  const [historyScope, setHistoryScope] = useState<Scope | null>(null);
+  const openHistory = (scope: Scope | null) => {
+    setHistoryScope(scope);
+    go(modePath("history"));
+  };
 
   /** The note whose editor is to take the cursor once it is there. */
   const [toFocus, setToFocus] = useState<string | null>(null);
@@ -249,16 +306,33 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     [workspaceId, refresh],
   );
 
-  const latest = useRef({ createNote, openFolder, go });
-  latest.current = { createNote, openFolder, go };
+  const latest = useRef({ createNote, openFolder, go, routeNoteId });
+  latest.current = { createNote, openFolder, go, routeNoteId };
   useEffect(() => {
     const show = (which: "commands" | "notes") => () => setPalette((p) => (p === which ? null : which));
     const onTab = (action: (at: { groupId: string; tab: Opened }) => EditorAction) => () => {
       const tab = focused(shown.current.editor);
       if (tab) dispatch(action({ groupId: shown.current.editor.focusedGroupId, tab }));
     };
+    const step = (type: "note.undo" | "note.redo") => () => {
+      const id = latest.current.routeNoteId;
+      if (!id) return;
+      undoOrRedo(workspaceId, { type, id }).then(
+        (note) => {
+          setStuck(null);
+          if (note) remember(note);
+        },
+        (err: Error) => setStuck({ noteId: id, message: err instanceof ApiError ? err.message : `Couldn't ${type === "note.undo" ? "undo" : "redo"}. Common Ink can't be reached.` }),
+      );
+    };
     const all: Command[] = [
-      ...(canEdit ? [{ id: "note.new", title: "New note", run: () => void latest.current.createNote() }] : []),
+      ...(canEdit
+        ? [
+            { id: "note.new", title: "New note", run: () => void latest.current.createNote() },
+            { id: "history.undo", title: "Undo", run: step("note.undo") },
+            { id: "history.redo", title: "Redo", run: step("note.redo") },
+          ]
+        : []),
       { id: "notes.quickOpen", title: "Go to note…", run: show("notes") },
       { id: "notes.all", title: "Open All notes", run: () => latest.current.openFolder(ALL_NOTES) },
       { id: "commands.show", title: "Show all commands", run: show("commands") },
@@ -276,7 +350,7 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     ];
     const unregister = all.map((command) => commands.register(command));
     return () => unregister.forEach((off) => off());
-  }, [commands, canEdit, dispatch, toggleFocus, toggleSidebar, toggleInspector]);
+  }, [commands, canEdit, dispatch, toggleFocus, toggleSidebar, toggleInspector, workspaceId, remember]);
 
   useEffect(() => {
     let pending = "";
@@ -288,7 +362,8 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
       const ready = Object.keys(KEYBINDINGS).filter((keys) => {
         if (keys !== chord && !keys.startsWith(`${chord} `) && !(begun && keys.startsWith(`${begun} `))) return false;
         // Keys that would type are left to what is being typed in.
-        return !(typed(keys) && (inField(e.target) || (e.target instanceof HTMLElement && e.target.isContentEditable)));
+        if (typed(keys) && (inField(e.target) || (e.target instanceof HTMLElement && e.target.isContentEditable))) return false;
+        return !(inField(e.target) && FIELD_COMMANDS.has(KEYBINDINGS[keys]!));
       });
       const next = advance(begun, chord, ready);
       if (!next) return;
@@ -338,11 +413,13 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
   );
   /** What is in front, for the inspector to be about: the tab in front of the focused group. Null while it loads. */
   const subject = ((): Subject | null => {
-    if (routeNoteId) return current && tree ? { kind: "note", note: current, tree, canEdit, onMove: moveNote } : null;
+    if (routeNoteId)
+      return current && tree ? { kind: "note", workspaceId, me: me.person.id, note: current, tree, canEdit, onMove: moveNote, unseen, onSeen: markSeen, onReverted: refresh, onOpenNote: (id) => openNote(id), onOpenHistory: openHistory } : null;
     if (!routeFolderId) return { kind: "page" };
     if (!tree || !notes) return null;
     const name = folderTitle(tree, routeFolderId);
-    return name === null ? { kind: "page" } : { kind: "folder", name, notes: notesIn(notes, routeFolderId) };
+    if (name === null) return { kind: "page" };
+    return { kind: "folder", workspaceId, me: me.person.id, name, notes: notesIn(notes, routeFolderId), whole: routeFolderId === ALL_NOTES, canEdit, onOpenNote: (id) => openNote(id), onReverted: refresh, onOpenHistory: openHistory };
   })();
   const pick = setPicked;
   const activeMode = route.kind === "mode" ? route.mode : null;
@@ -356,7 +433,12 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
         noteId={noteId}
         onLoaded={remember}
         onSaved={remember}
-        onEdit={() => dispatch({ type: "pin", groupId: group.id, tab: { kind: "note", id: noteId } })}
+        revision={note?.revision}
+        onEdit={() => {
+          if (stuck) setStuck(null);
+          dispatch({ type: "pin", groupId: group.id, tab: { kind: "note", id: noteId } });
+        }}
+        notice={stuck?.noteId === noteId ? stuck.message : null}
         focus={toFocus === noteId}
         onFocused={() => setToFocus(null)}
         meta={
@@ -377,7 +459,9 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
     const mode = MODES.find((m) => m.id === pageId);
     return (
       <div className="page-pane" key={pageId}>
-        {mode ? (
+        {pageId === "history" ? (
+          <HistoryMode workspaceId={workspaceId} me={me.person.id} notes={notes ?? []} canEdit={canEdit} scope={historyScope} onScope={setHistoryScope} onOpenNote={(id) => openNote(id)} onChanged={refresh} />
+        ) : mode ? (
           <ModeView mode={mode.id} />
         ) : (
           <p className="notice">There's nothing at this address.</p>
@@ -465,12 +549,14 @@ export function Workspace({ me, workspace, route, navigate, onSwitch }: Props) {
               className="icon-button"
               aria-label={v.label}
               title={v.label}
+              aria-description={markOf(v, subject)}
               onClick={() => {
                 pick(v.id);
                 setInspectorOpen(true);
               }}
             >
               <Icon name={v.icon} />
+              {markOf(v, subject) && <span className="unseen-dot" />}
             </button>
           ))}
         </nav>

@@ -2,14 +2,45 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import type { NoteSummary } from "../core/protocol.ts";
 import { notePath } from "../core/slug.ts";
 import { pathName, type FolderTree } from "./folders.ts";
+import { FolderHistory, NoteHistory, type Scope } from "./History.tsx";
 import type { IconName } from "./icons.tsx";
+import { pickView } from "./inspectorPick.ts";
 import { Soon } from "./Soon.tsx";
 import { ago, useNow } from "./time.ts";
 
 /** What the inspector is about: the thing in front. A page is anything that is neither a note nor a folder's list. */
 export type Subject =
-  | { kind: "note"; note: NoteSummary; tree: FolderTree; canEdit: boolean; onMove: (noteId: string, folderId: string) => Promise<void> }
-  | { kind: "folder"; name: string; notes: readonly NoteSummary[] }
+  | {
+      kind: "note";
+      workspaceId: string;
+      /** The member, by their person id. */
+      me: string;
+      note: NoteSummary;
+      tree: FolderTree;
+      canEdit: boolean;
+      onMove: (noteId: string, folderId: string) => Promise<void>;
+      /** Whether the note has changes by someone else that the member hasn't been shown. */
+      unseen: boolean;
+      onSeen: (noteId: string, revision: number) => void;
+      /** History reverted the note. */
+      onReverted: () => void;
+      onOpenNote: (noteId: string) => void;
+      /** Opens the History page on some notes, or on all of them. */
+      onOpenHistory: (scope: Scope | null) => void;
+    }
+  | {
+      kind: "folder";
+      workspaceId: string;
+      me: string;
+      name: string;
+      notes: readonly NoteSummary[];
+      /** Whether its notes are every note of the workspace: All notes. */
+      whole: boolean;
+      canEdit: boolean;
+      onOpenNote: (noteId: string) => void;
+      onReverted: () => void;
+      onOpenHistory: (scope: Scope | null) => void;
+    }
   | { kind: "page" };
 
 type Kind = Subject["kind"];
@@ -22,29 +53,43 @@ interface InspectorView<K extends Kind = Kind> {
   icon: IconName;
   for: K;
   render: (subject: SubjectOf<K>) => ReactNode;
+  /** What its tab is marked with, by a dot and these words, while there is something in it the member hasn't seen. */
+  mark?: (subject: SubjectOf<K>) => string | undefined;
 }
+
+export const UNSEEN = "Changes you haven't seen";
 
 const view = <K extends Kind>(v: InspectorView<K>) => v as unknown as InspectorView;
 
 const INSPECTOR_VIEWS: readonly InspectorView[] = [
-  view({ id: "history", label: "History", icon: "history", for: "note", render: () => <Soon issue={5}>Who changed this note and how arrives with</Soon> }),
+  view({
+    id: "history",
+    label: "History",
+    icon: "history",
+    for: "note",
+    render: (s) => <NoteHistory workspaceId={s.workspaceId} me={s.me} note={s.note} canEdit={s.canEdit} onChanged={s.onReverted} onOpenNote={s.onOpenNote} onOpenHistory={s.onOpenHistory} onSeen={s.onSeen} />,
+    mark: (s) => (s.unseen ? UNSEEN : undefined),
+  }),
   view({ id: "backlinks", label: "Backlinks", icon: "backlinks", for: "note", render: () => <Soon issue={13}>Notes that link here arrive with</Soon> }),
   view({ id: "info", label: "Info", icon: "info", for: "note", render: (subject) => <Info {...subject} /> }),
+  view({
+    id: "folder-history",
+    label: "History",
+    icon: "history",
+    for: "folder",
+    render: (s) => <FolderHistory workspaceId={s.workspaceId} me={s.me} name={s.name} notes={s.notes} whole={s.whole} canEdit={s.canEdit} onOpenNote={s.onOpenNote} onOpenHistory={s.onOpenHistory} onChanged={s.onReverted} />,
+  }),
   view({ id: "folder-info", label: "Info", icon: "info", for: "folder", render: (subject) => <FolderInfo {...subject} /> }),
 ];
+
+/** What a view's tab or icon is marked with for what is in front, if anything. */
+export const markOf = (v: InspectorView, subject: Subject | null) => (subject ? v.mark?.(subject) : undefined);
 
 /** The tabs the inspector has for what is in front, in order. None for a page, which has nothing to show there yet. */
 export const viewsFor = (subject: Subject | null) => INSPECTOR_VIEWS.filter((v) => v.for === subject?.kind);
 
-/**
- * The tab that shows: the one the member last picked, or the one of the same name where what is in
- * front has its own, as a folder has its own Info. Where it has neither, the first of the tabs it
- * does have shows, and the pick is as it was for the next thing that has it. No tab is a default.
- */
-export const shownView = (views: readonly InspectorView[], picked: string | null) => {
-  const label = INSPECTOR_VIEWS.find((v) => v.id === picked)?.label;
-  return views.find((v) => v.id === picked) ?? views.find((v) => v.label === label) ?? views[0];
-};
+/** The tab that shows for what is in front, by the rule in `inspectorPick.ts`. */
+export const shownView = (views: readonly InspectorView[], picked: string | null) => pickView(INSPECTOR_VIEWS, views, picked);
 
 interface Props {
   /** Null while what is in front is still loading: the inspector keeps its place and shows nothing. */
@@ -64,8 +109,18 @@ export function Inspector({ subject, picked, onPick }: Props) {
         <>
           <div role="tablist" className="tabs">
             {views.map((v) => (
-              <button key={v.id} type="button" role="tab" id={`${ids}-${v.id}`} aria-selected={v === shown} aria-controls={`${ids}-panel`} onClick={() => onPick(v.id)}>
+              <button
+                key={v.id}
+                type="button"
+                role="tab"
+                id={`${ids}-${v.id}`}
+                aria-selected={v === shown}
+                aria-controls={`${ids}-panel`}
+                aria-description={markOf(v, subject)}
+                onClick={() => onPick(v.id)}
+              >
                 {v.label}
+                {markOf(v, subject) && <span className="unseen-dot" />}
               </button>
             ))}
           </div>

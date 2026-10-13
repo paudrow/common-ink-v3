@@ -333,15 +333,15 @@ test("the inspector shows the tab last picked, on whatever has it, and one it do
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const shown = () => inspector.getByRole("tab", { selected: true });
 
-  // Nothing picked yet: the first tab the note has.
-  await expect(shown()).toHaveText("History");
+  // Nothing picked yet: Info.
+  await expect(shown()).toHaveText("Info");
   await inspector.getByRole("tab", { name: "Backlinks" }).click();
   await expect(shown()).toHaveText("Backlinks");
 
   // A folder has no Backlinks: it shows what it has, and the note after it shows Backlinks again, as another note does.
   await tab(page, "All notes").click();
-  await expect(shown()).toHaveText("Info");
-  await expect(inspector.getByRole("tab")).toHaveText(["Info"]);
+  await expect(shown()).toHaveText("History");
+  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
   await tab(page, "Beta").click();
   await expect(shown()).toHaveText("Backlinks");
   await tab(page, "Alpha").click();

@@ -29,6 +29,19 @@ describe("notes", () => {
     expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).revision).toBe(2);
   });
 
+  it("lists only the notes changed at or after a time when asked to", async () => {
+    const ada = await newMember();
+    await perform(env.DB, ada, { type: "note.create", text: "# Old" }, 1000);
+    const edited = await perform(env.DB, ada, { type: "note.create", text: "# Edited" }, 2000);
+    await perform(env.DB, ada, { type: "note.write", id: edited.id, baseRevision: 1, text: "# Edited again" }, 5000);
+    await perform(env.DB, ada, { type: "note.create", text: "# New" }, 6000);
+    const titles = async (updatedSince?: number) => (await perform(env.DB, ada, { type: "note.list", updatedSince })).map((n) => n.title);
+
+    expect(await titles(5000)).toEqual(["New", "Edited again"]);
+    expect(await titles(6001)).toEqual([]);
+    expect(await titles()).toEqual(["New", "Edited again", "Old"]);
+  });
+
   it("records each save as a change with its author and the revision it was based on", async () => {
     const ada = await newMember("Ada Lovelace");
     const note = await perform(env.DB, ada, { type: "note.create", text: "# Plan" });
@@ -85,6 +98,33 @@ describe("notes", () => {
     const merged = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "mine too" });
 
     expect(merged.text).toBe("mine too\n\ntheirs");
+  });
+
+  it("keeps a history that works for a note created with Windows line endings or half a character pair", async () => {
+    const ada = await newMember();
+    for (const [given, kept] of [
+      ["# Plan\r\n\r\n- [ ] one\r\n- [ ] two\rthree", "# Plan\n\n- [ ] one\n- [ ] two\nthree"],
+      ["# Plan \uD83D\n\n- [ ] one \uDE00", "# Plan �\n\n- [ ] one �"],
+      ["# Plan 😀\r\n", "# Plan 😀\n"],
+    ] as const) {
+      const note = await perform(env.DB, ada, { type: "note.create", text: given });
+      expect(note.text).toBe(kept);
+      expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe(kept);
+
+      const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `${given}\r\n- [ ] more \uDC00` });
+      expect(written.text).toBe(`${kept}\n- [ ] more �`);
+      expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe(written.text);
+      expect((await perform(env.DB, ada, { type: "note.read", id: note.id, revision: 1 })).text).toBe(kept);
+      expect((await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `intro\r\n${given}` })).text).toBe(`intro\n${written.text}`);
+
+      expect((await perform(env.DB, ada, { type: "note.undo", id: note.id })).text).toBe(written.text);
+      expect((await perform(env.DB, ada, { type: "note.redo", id: note.id })).text).toBe(`intro\n${written.text}`);
+      expect((await perform(env.DB, ada, { type: "note.revertChanges", id: note.id, revisions: [2] })).text).toBe(`intro\n${kept}`);
+      expect((await perform(env.DB, ada, { type: "note.revert", id: note.id, revision: 1 })).text).toBe(kept);
+      expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).text).toBe(kept);
+      expect(await perform(env.DB, ada, { type: "note.history", id: note.id })).toHaveLength(7);
+      expect((await perform(env.DB, ada, { type: "history.list", noteIds: [note.id] })).changes).toHaveLength(7);
+    }
   });
 
   it("records a retried write once, even after newer changes", async () => {

@@ -119,7 +119,27 @@ describe("MCP protocol", () => {
     expect(note.status).toBe(202);
 
     const list = (await (await call(token, rpc("tools/list"))).json()) as any;
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(["list_workspaces", "list_notes", "read_note", "create_note", "write_note", "note_history"]);
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "list_workspaces",
+      "list_notes",
+      "read_note",
+      "create_note",
+      "write_note",
+      "note_history",
+      "change_diff",
+      "history_summary",
+      "history",
+      "history_authors",
+      "history_diff",
+      "preview_reverts",
+      "revert_many",
+      "label_revision",
+      "revert_note",
+      "revert_changes",
+      "preview_revert",
+      "undo",
+      "redo",
+    ]);
     for (const t of list.result.tools) expect(t.inputSchema.type).toBe("object");
   });
 
