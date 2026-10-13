@@ -36,7 +36,8 @@ export function embedPolicy({ network, ancestors }: { network: boolean; ancestor
 const DOCUMENT = `<!doctype html>
 <meta charset="utf-8">
 <title>HTML embed</title>
-<style>html, body { height: 100%; margin: 0; background: #fff; } iframe { display: block; width: 100%; height: 100%; border: 0; }</style>
+<meta name="color-scheme" content="light dark">
+<style>html, body { height: 100%; margin: 0; } iframe { display: block; width: 100%; height: 100%; border: 0; }</style>
 <script>
 if (parent !== window) {
   addEventListener("message", function take(event) {

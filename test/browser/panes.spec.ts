@@ -470,6 +470,24 @@ async function run(page: Page, title: string) {
   await expect(palette).toHaveCount(0);
 }
 
+test("a note that loads after a tab's menu has opened leaves the keyboard with the menu", async ({ page }) => {
+  await withNotes(page, "Alpha", "Beta");
+  await keep(page, "Alpha");
+  let arrived = () => {};
+  const held = new Promise<void>((done) => (arrived = done));
+  await page.route("**/api/**", async (route) => {
+    if (route.request().postData()?.includes('"note.read"')) await held;
+    await route.fallback();
+  });
+  await keep(page, "Beta");
+  await run(page, "Show tab menu");
+  const close = page.getByRole("menu", { name: "Beta tab" }).getByRole("menuitem", { name: "Close", exact: true });
+  await expect(close).toBeFocused();
+  arrived();
+  await expect(group(page, 1).getByRole("textbox", { name: "Note text" })).toContainText("About Beta.");
+  await expect(close).toBeFocused();
+});
+
 test("a tab's menu opens from the keyboard, and a tab moves to the next pane and back by a command", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta");
   await keep(page, "Alpha");
