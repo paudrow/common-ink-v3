@@ -41,6 +41,8 @@ const SHARING =
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
  * tool below, and test/core/agent-parity.test.ts fails when one has neither.
  */
+const DRAFTS = "A draft is a member's own copy of a plugin's source, kept beside their settings and run only in their browser. Nobody else reads or writes it, an admin included, and an agent that could write one would be writing code that runs in its member's session.";
+
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
   "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
@@ -69,6 +71,10 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "plugin.permit": PLUGINS,
   "plugin.request": "A request is a member saying they want a plugin to have a permission, for an admin to decide. An agent that was talked into it could ask in its member's name for what the member never wanted. The member asks themself, on the Plugins page.",
   "plugin.frame": "A frame's token opens, once, the frame the app runs a plugin or an HTML embed in, in the member's own browser. An agent runs neither.",
+  "draft.list": DRAFTS,
+  "draft.read": DRAFTS,
+  "draft.save": DRAFTS,
+  "draft.discard": DRAFTS,
   "upload.purge": "Removing an upload from Trash for good removes its bytes, and nothing brings them back: not Trash, and no note that showed it. An agent reads notes other people wrote, so one that was talked into it could destroy files past recovery. An agent moves an upload to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
 };
 

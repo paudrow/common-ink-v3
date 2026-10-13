@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore, type ReactNode } from "react";
-import { HTML_EMBEDS, type InstalledPlugin, type PluginRecord } from "../core/plugins.ts";
+import { HTML_EMBEDS, type DraftSummary, type InstalledPlugin, type PluginRecord } from "../core/plugins.ts";
 import { Icon } from "./icons.tsx";
 import { chordFor, chordLabel } from "./keybindings.ts";
 import type { Slots } from "./plugin-api.ts";
@@ -23,6 +23,10 @@ export interface PluginsProps {
   record: PluginRecord | null;
   /** Told what the record is now, after a change made here. */
   onRecord: (record: PluginRecord) => void;
+  /** The member's own drafts of plugins, as last read. */
+  drafts: readonly DraftSummary[];
+  /** Told the member's drafts are now these, after one was saved, set running or not, or discarded. */
+  onDrafts: (drafts: readonly DraftSummary[]) => void;
   /** The address the app is at: `/plugins`, or `/plugins/<plugin id>` for one plugin's details. */
   path: string;
   go: (path: string) => void;
@@ -70,7 +74,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  * options, which are changed here as they are in Settings, its source to read, and its switch. For a third-party plugin
  * an admin decides its permissions here, and updates and uninstalls it.
  */
-export function PluginDetails({ plugin, contributed, host, store, workspaceId, personId, mac, record, onRecord, go }: Props) {
+export function PluginDetails({ plugin, contributed, host, store, workspaceId, personId, mac, record, onRecord, drafts, onDrafts, go }: Props) {
   const changes = useRecordChanges(workspaceId, onRecord);
   const [updating, setUpdating] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -101,6 +105,11 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
               <span className="badge" data-kind={plugin.kind}>
                 {KIND_LABEL[plugin.kind]}
               </span>
+              {drafts.some((draft) => draft.pluginId === id && draft.running) && (
+                <span className="badge" data-state="draft">
+                  Running your draft
+                </span>
+              )}
               {theirs ? (
                 <>
                   <span>version {theirs.manifest.version}</span>
@@ -229,7 +238,7 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
       </Section>
 
       <Section title="Source">
-        <PluginSource plugin={plugin} workspaceId={workspaceId} />
+        <PluginSource plugin={plugin} workspaceId={workspaceId} admin={admin} drafts={drafts} onDrafts={onDrafts} onRecord={onRecord} />
       </Section>
     </section>
   );

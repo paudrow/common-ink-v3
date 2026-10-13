@@ -18,6 +18,13 @@ const GREETER: Written = {
 };
 const GREETER_CODE = `ink.onCommand("greet", () => ink.notify("Hello"));\n`;
 
+/** Installs a plugin as the admin on `page`, and has the app on that page read the record again, so its card is there without waiting on the next reading. */
+async function installed(page: Page, ...args: Parameters<typeof install> extends [Page, ...infer Rest] ? Rest : never) {
+  const id = await install(page, ...args);
+  await relist(page);
+  return id;
+}
+
 /** The Source section of the details that are open, scrolled to, which is when its files are fetched. */
 async function source(page: Page) {
   const section = page.getByRole("region", { name: "Source" });
@@ -87,7 +94,7 @@ test("a third-party plugin shows its manifest and its code as the workspace has 
 
 test("the source shown follows an update of the plugin, with its page left open", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  const id = await install(page, GREETER, GREETER_CODE);
+  const id = await installed(page, GREETER, GREETER_CODE);
   await openPlugins(page);
   await openDetails(page, "Greeter");
   const section = await source(page);

@@ -73,10 +73,11 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   }
 
   // A plugin's operations come from the app too, which says in the address which install it made the frame for. Nothing the plugin sent names it.
-  const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})(?:\/plugins\/([a-z0-9]{12}))?\/ops$/.exec(url.pathname);
+  // `/draft` is the member's own copy of that plugin: whose draft is never said, since it is the session's person's.
+  const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})(?:\/plugins\/([a-z0-9]{12})(\/draft)?)?\/ops$/.exec(url.pathname);
   if (opsRoute && req.method === "POST") {
-    const [, workspaceId, pluginId] = opsRoute as unknown as [string, string, string | undefined];
-    const actor: Actor = pluginId ? { kind: "plugin", pluginId, personId, workspaceId } : { kind: "member", personId, workspaceId };
+    const [, workspaceId, pluginId, draft] = opsRoute as unknown as [string, string, string | undefined, string | undefined];
+    const actor: Actor = pluginId ? { kind: "plugin", pluginId, personId, workspaceId, draft: draft !== undefined } : { kind: "member", personId, workspaceId };
     if (req.headers.get("Origin") !== url.origin || !req.headers.get("Content-Type")?.startsWith("application/json")) {
       return json({ error: "forbidden", message: "Operations come as JSON from Common Ink itself" }, 403);
     }

@@ -14,7 +14,7 @@ import { KIND_LABEL, PLUGINS_PATH, listPlugins, matchesPlugin, waitingOn, within
  * plugin's manifest is drawn as text.
  */
 export function Plugins(props: PluginsProps) {
-  const { host, record, path, go } = props;
+  const { host, record, drafts, path, go } = props;
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   /** What is typed in the search box. It is kept here so it is still there on the way back from a plugin's details. */
   const [typed, setTyped] = useState("");
@@ -65,6 +65,11 @@ export function Plugins(props: PluginsProps) {
                   {(plugin.kind === "third-party" || state?.builtIn) && (
                     <span className="badge" data-kind={plugin.kind}>
                       {KIND_LABEL[plugin.kind]}
+                    </span>
+                  )}
+                  {drafts.some((draft) => draft.pluginId === id && draft.running) && (
+                    <span className="badge" data-state="draft">
+                      Running your draft
                     </span>
                   )}
                   {waiting > 0 && (

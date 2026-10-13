@@ -52,15 +52,24 @@ async function reachedFrom(entry: string): Promise<SourceFile[]> {
   return files;
 }
 
-/** Every file of a plugin's source: an installed plugin's manifest and code as the workspace has them, or a built-in's entry file and what it imports. */
-export async function sourceOf(plugin: Listed, workspaceId: string): Promise<SourceFile[]> {
-  if (plugin.kind === "third-party" && plugin.record) {
-    const { code } = await perform(workspaceId, { type: "plugin.read", id: plugin.id });
-    return [
-      { path: MANIFEST_FILE, text: `${JSON.stringify(plugin.record.manifest, null, 2)}\n` },
-      { path: CODE_FILE, text: code },
-    ];
-  }
+/** The two files a plugin that can be copied and changed is made of. */
+export interface Editable {
+  manifest: string;
+  code: string;
+  /** The name of `code`. */
+  codeHash: string;
+}
+
+/** The plugin as the two files it can be copied and changed as, or null for one that is compiled into the app. */
+export async function editableOf(plugin: Listed, workspaceId: string): Promise<Editable | null> {
+  if (plugin.kind !== "third-party" || !plugin.record) return null;
+  const { code, codeHash } = await perform(workspaceId, { type: "plugin.read", id: plugin.id });
+  return { manifest: `${JSON.stringify(plugin.record.manifest, null, 2)}\n`, code, codeHash };
+}
+
+/** Every file of a plugin's source: the two files of one that can be copied, or a built-in's entry file and what it imports. */
+export async function sourceOf(plugin: Listed, editable: Editable | null): Promise<SourceFile[]> {
+  if (editable) return [{ path: MANIFEST_FILE, text: editable.manifest }, { path: CODE_FILE, text: editable.code }];
   const entry = SOURCE_OF.get(plugin.id);
   return entry ? reachedFrom(ROOT + entry) : [];
 }

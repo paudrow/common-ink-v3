@@ -4,6 +4,7 @@ import type { Context } from "./operations.ts";
 import {
   BUILT_IN_SUBJECTS,
   HTML_EMBEDS,
+  MAX_PLUGIN_MANIFEST,
   Manifest,
   approvalOf,
   codeHash,
@@ -12,6 +13,8 @@ import {
   readOrigin,
   type Capability,
   type DeclaredCapability,
+  type Draft,
+  type DraftSummary,
   type InstalledPlugin,
   type Permission,
   type PluginRecord,
@@ -153,16 +156,26 @@ async function installed(db: D1Database, workspaceId: string, id: string): Promi
   return row && { manifest: JSON.parse(row.manifest) as Manifest, codeHash: row.code_hash };
 }
 
+export const NOT_INSTALLED = "That plugin isn't installed in this workspace";
+export const NO_DRAFT_RUNNING = "You have no draft of that plugin that is running";
+
 /**
- * What a plugin acting in a workspace is called and may perform there, or null when it isn't
- * installed in that workspace: never installed, uninstalled, or another workspace's.
+ * What a plugin acting for `personId` in a workspace is called and may perform there, or why it
+ * performs nothing: never installed, uninstalled, or another workspace's. `draft` is for that
+ * person's own copy of the plugin, which is read by their id and so is never anyone else's: it may
+ * perform what the original is allowed and its own manifest still asks for, and never more.
  */
-export async function actingPlugin(db: D1Database, workspaceId: string, pluginId: string): Promise<{ name: string; allowed: ReadonlySet<OpType> } | null> {
+export async function actingPlugin(db: D1Database, workspaceId: string, pluginId: string, personId: string, draft = false): Promise<{ name: string; allowed: ReadonlySet<OpType> } | { refused: string }> {
   const plugin = await installed(db, workspaceId, pluginId);
-  if (!plugin) return null;
+  if (!plugin) return { refused: NOT_INSTALLED };
   const { results } = await db.prepare("SELECT subject, capability, state, locked, approved, origins, NULL AS decided_by_name FROM plugin_permissions WHERE workspace_id = ? AND subject = ?").bind(workspaceId, pluginId).all<PermissionRow>();
-  const effective = plugin.manifest.capabilities.filter((c) => stands(results.find((row) => row.capability === c.name), approvalOf(c, plugin.codeHash))).map((c) => c.name);
-  return { name: plugin.manifest.name, allowed: opsAllowedBy(effective) };
+  const standing = plugin.manifest.capabilities.filter((c) => stands(results.find((row) => row.capability === c.name), approvalOf(c, plugin.codeHash))).map((c) => c.name);
+  if (!draft) return { name: plugin.manifest.name, allowed: opsAllowedBy(standing) };
+  const mine = await db.prepare("SELECT manifest FROM plugin_drafts WHERE workspace_id = ? AND person_id = ? AND plugin_id = ? AND running = 1").bind(workspaceId, personId, pluginId).first<{ manifest: string }>();
+  const read = mine && readManifest(mine.manifest);
+  if (!read || "reason" in read) return { refused: NO_DRAFT_RUNNING };
+  const asks = new Set(read.manifest.capabilities.map((c) => c.name));
+  return { name: read.manifest.name, allowed: opsAllowedBy(standing.filter((capability) => asks.has(capability))) };
 }
 
 export async function readPlugin(ctx: Context, id: string): Promise<Results["plugin.read"]> {
@@ -201,6 +214,8 @@ export async function uninstallPlugin(ctx: Context, id: string): Promise<PluginR
     ctx.db.prepare("UPDATE plugin_installs SET removed_at = COALESCE(removed_at, ?3), code = '' WHERE id = ?1 AND workspace_id = ?2").bind(id, ctx.workspaceId, ctx.now),
     ctx.db.prepare("DELETE FROM plugin_permissions WHERE subject = ?1 AND workspace_id = ?2 AND EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?1 AND workspace_id = ?2)").bind(id, ctx.workspaceId),
     ctx.db.prepare("DELETE FROM plugin_requests WHERE subject = ?1 AND workspace_id = ?2 AND EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?1 AND workspace_id = ?2)").bind(id, ctx.workspaceId),
+    // A copy of a plugin that is gone has nothing to run in the place of, or to be published over.
+    ctx.db.prepare("DELETE FROM plugin_drafts WHERE plugin_id = ?1 AND workspace_id = ?2").bind(id, ctx.workspaceId),
   ]);
   if (!removed!.meta.changes) throw new OpError("not_found", NO_SUCH_PLUGIN);
   return listPlugins(ctx);
@@ -325,3 +340,67 @@ export async function redeemFrame(db: D1Database, token: string, now: number): P
   const row = await db.prepare("UPDATE frame_grants SET used_at = ?2 WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2 RETURNING origins").bind(await hashToken(token), now).first<{ origins: string }>();
   return row && originsIn(row.origins);
 }
+
+interface DraftRow {
+  plugin_id: string;
+  manifest: string;
+  code?: string;
+  code_hash: string;
+  base_hash: string | null;
+  running: number;
+  updated_at: number;
+}
+
+const toDraft = (row: DraftRow): DraftSummary => ({ pluginId: row.plugin_id, manifest: row.manifest, codeHash: row.code_hash, baseHash: row.base_hash, running: row.running === 1, updatedAt: row.updated_at });
+
+/** Every statement about drafts names the asker, and no operation takes anyone else: a draft is its author's and nobody's besides. */
+const MINE = "workspace_id = ? AND person_id = ?";
+
+export async function listDrafts(ctx: Context): Promise<{ drafts: DraftSummary[] }> {
+  const { results } = await ctx.db.prepare(`SELECT plugin_id, manifest, code_hash, base_hash, running, updated_at FROM plugin_drafts WHERE ${MINE} ORDER BY plugin_id`).bind(ctx.workspaceId, ctx.personId).all<DraftRow>();
+  return { drafts: results.map(toDraft) };
+}
+
+const NO_DRAFT = "You have no draft of that plugin";
+
+export async function readDraft(ctx: Context, id: string): Promise<Draft> {
+  const row = await ctx.db.prepare(`SELECT plugin_id, manifest, code, code_hash, base_hash, running, updated_at FROM plugin_drafts WHERE ${MINE} AND plugin_id = ?`).bind(ctx.workspaceId, ctx.personId, id).first<DraftRow>();
+  if (!row) throw new OpError("not_found", NO_DRAFT);
+  return { ...toDraft(row), code: row.code! };
+}
+
+/**
+ * Keeps the asker's copy of a plugin's source as it is now. What is kept may not be a manifest yet,
+ * since it is being written. To run, it has to be one.
+ */
+export async function saveDraft(ctx: Context, op: Extract<Op, { type: "draft.save" }>): Promise<DraftSummary> {
+  if (!(await installed(ctx.db, ctx.workspaceId, op.id))) throw new OpError("not_found", NO_SUCH_PLUGIN);
+  if (op.manifest.length > MAX_PLUGIN_MANIFEST) throw new OpError("invalid", `A manifest is at most ${MAX_PLUGIN_MANIFEST} characters`);
+  if (op.running) {
+    const read = readManifest(op.manifest);
+    if ("reason" in read) throw new OpError("invalid", read.reason);
+  }
+  const hash = await codeHash(op.code);
+  // Kept only while its author is a member and the plugin is installed, said in the statement itself: a save that crosses their removal, or the plugin's, keeps nothing for either to leave behind.
+  const { meta } = await ctx.db
+    .prepare(
+      `INSERT INTO plugin_drafts (workspace_id, person_id, plugin_id, manifest, code, code_hash, base_hash, running, updated_at)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+       WHERE EXISTS (SELECT 1 FROM members WHERE workspace_id = ?1 AND person_id = ?2) AND EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?3 AND workspace_id = ?1 AND removed_at IS NULL)
+       ON CONFLICT (workspace_id, person_id, plugin_id) DO UPDATE SET manifest = excluded.manifest, code = excluded.code, code_hash = excluded.code_hash, base_hash = excluded.base_hash, running = excluded.running, updated_at = excluded.updated_at`,
+    )
+    .bind(ctx.workspaceId, ctx.personId, op.id, op.manifest, op.code, hash, op.baseHash ?? null, op.running ? 1 : 0, ctx.now)
+    .run();
+  if (!meta.changes) throw new OpError("not_found", NO_SUCH_PLUGIN);
+  return { pluginId: op.id, manifest: op.manifest, codeHash: hash, baseHash: op.baseHash ?? null, running: op.running, updatedAt: ctx.now };
+}
+
+/** Done twice, it changes nothing more. */
+export async function discardDraft(ctx: Context, id: string): Promise<{ drafts: DraftSummary[] }> {
+  await ctx.db.prepare(`DELETE FROM plugin_drafts WHERE ${MINE} AND plugin_id = ?`).bind(ctx.workspaceId, ctx.personId, id).run();
+  return listDrafts(ctx);
+}
+
+/** A person's drafts in a workspace they are no longer a member of, removed: said in the batch that takes them out, after the statement that does. */
+export const draftsOfTheGone = (db: D1Database, workspaceId: string, personId: string): D1PreparedStatement =>
+  db.prepare("DELETE FROM plugin_drafts WHERE workspace_id = ?1 AND person_id = ?2 AND NOT EXISTS (SELECT 1 FROM members WHERE workspace_id = ?1 AND person_id = ?2)").bind(workspaceId, personId);

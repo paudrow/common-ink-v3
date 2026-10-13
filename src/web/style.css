@@ -7243,7 +7243,7 @@ button.dash-row:hover {
   color: var(--danger);
 }
 
-/* Plugin source */
+/* Plugin source and drafts */
 
 .plugin-source {
   display: flex;
@@ -7343,4 +7343,61 @@ button.dash-row:hover {
 .source-count {
   flex: none;
   color: var(--faint);
+}
+
+.plugin-source > .button {
+  align-self: flex-start;
+}
+
+.plugin-source .error,
+.plugin-source .said {
+  margin: 0;
+}
+
+.source-code[data-editable] {
+  border-color: var(--line-strong);
+}
+
+.source-code[hidden] {
+  display: none;
+}
+
+.source-code[data-editable] .cm-editor {
+  min-height: 12rem;
+}
+
+.source-code[data-editable]:focus-within {
+  border-color: var(--accent);
+}
+
+.source-behind {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.source-changes h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.source-changes .diff {
+  position: relative;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.plugin-source .plugin-switch {
+  flex: 0 1 auto;
+}
+
+
+.badge[data-state="draft"] {
+  border-color: var(--accent);
+  color: var(--accent);
 }

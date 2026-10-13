@@ -43,7 +43,7 @@ import {
   type Visit,
   type Written,
 } from "./protocol.ts";
-import { actingPlugin, framePlugin, installPlugin, listPlugins, permitPlugin, readPlugin, requestPlugin, uninstallPlugin } from "./pluginRecord.ts";
+import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, listPlugins, permitPlugin, readDraft, readPlugin, requestPlugin, saveDraft, uninstallPlugin } from "./pluginRecord.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
 import { NO_FILES, archiveUpload, createUpload, listUploads, moveUpload, openUpload, purgeUpload, readUpload, referred, restoreUpload, trashUpload, trashedUploads, type Files } from "./uploads.ts";
@@ -64,9 +64,10 @@ export type Actor =
   /**
    * A plugin installed in the workspace, running in `personId`'s browser. It acts as them and within
    * what the workspace permits it, so it has no more than either. `pluginId` is the install the app
-   * made the plugin's frame for, and never anything the plugin said.
+   * made the plugin's frame for, and never anything the plugin said. With `draft` it is that
+   * person's own copy of the plugin, which runs for nobody else.
    */
-  | { kind: "plugin"; pluginId: string; personId: string; workspaceId: string };
+  | { kind: "plugin"; pluginId: string; personId: string; workspaceId: string; draft?: boolean };
 
 /** Whoever holds a link, signed in or not. The link says which workspace, and what in it they can read. */
 export interface Visitor {
@@ -161,10 +162,10 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   if (actor.kind === "agent" && actor.scope?.readOnly && (handler.needs !== "view" || handler.changes)) throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if ((handler.members || handler.own) && standing.sight.within) throw new OpError("forbidden", `An agent limited to folders can't ${op.type}`);
   // A plugin is refused everything but what a permission it was given names. Members run plugins, so a guest's is refused whatever it asks, before anything is said of the plugin.
-  const plugin = actor.kind === "plugin" && standing.role ? await actingPlugin(db, standing.workspaceId, actor.pluginId) : null;
+  const plugin = actor.kind === "plugin" && standing.role ? await actingPlugin(db, standing.workspaceId, actor.pluginId, actor.personId, actor.draft) : null;
   if (actor.kind === "plugin") {
-    if (!standing.role) throw new OpError("forbidden", `A ${standing.as} runs no plugins: they are for the workspace's members`);
-    if (!plugin) throw new OpError("forbidden", "That plugin isn't installed in this workspace");
+    if (!plugin) throw new OpError("forbidden", `A ${standing.as} runs no plugins: they are for the workspace's members`);
+    if ("refused" in plugin) throw new OpError("forbidden", plugin.refused);
     if (handler.by === "member" || !plugin.allowed.has(op.type)) throw new OpError("forbidden", `${plugin.name} isn't permitted to ${op.type}`);
   }
   if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
@@ -174,7 +175,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
     const agent = await db.prepare("SELECT name FROM agents WHERE id = ?").bind(actor.agentId).first<{ name: string }>();
     author = { kind: "agent", agentId: actor.agentId, name: agent?.name ?? "An agent", onBehalfOf: actor.personId };
   }
-  if (actor.kind === "plugin") author = { kind: "plugin", pluginId: actor.pluginId, name: plugin!.name, onBehalfOf: actor.personId };
+  if (actor.kind === "plugin") author = { kind: "plugin", pluginId: actor.pluginId, name: (plugin as { name: string }).name, onBehalfOf: actor.personId };
   const ctx: Context = { db, actor, author, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources, files };
   return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
 }
@@ -2442,4 +2443,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   // A viewer asks too, so this needs no more than belonging to the workspace.
   "plugin.request": { needs: "view", by: "member", members: true, run: (ctx, op) => requestPlugin(ctx, op) },
   "plugin.frame": { needs: "view", by: "member", members: true, run: (ctx, op) => framePlugin(ctx, op.id) },
+  // A draft is its author's alone, beside their settings, and what it holds is code that runs in their browser. Only the member, signed in, reads or writes one: see NOT_FOR_AGENTS.
+  "draft.list": { needs: "view", by: "member", members: true, run: (ctx) => listDrafts(ctx) },
+  "draft.read": { needs: "view", by: "member", members: true, run: (ctx, op) => readDraft(ctx, op.id) },
+  "draft.save": { needs: "view", by: "member", members: true, run: (ctx, op) => saveDraft(ctx, op) },
+  "draft.discard": { needs: "view", by: "member", members: true, run: (ctx, op) => discardDraft(ctx, op.id) },
 };

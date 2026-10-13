@@ -89,7 +89,15 @@ const PLUGINS = {
   "their plugin, permitted to read and write notes": { permitted: DECLARED, installed: true },
   "their plugin, permitted nothing": { permitted: [], installed: true },
   "their plugin, uninstalled after it was permitted to read and write notes": { permitted: DECLARED, installed: false },
-} as const satisfies Record<string, { permitted: readonly Capability[]; installed: boolean }>;
+  "their own draft of the plugin permitted to read and write notes, asking to read notes and todos": { permitted: DECLARED, installed: true, draft: ["notes.read", "todos.read"] },
+} as const satisfies Record<string, PluginRow>;
+/** `draft` is the actor's own copy of the first plugin, running, and what its manifest asks for: some of what the original was allowed, and something it was not. */
+interface PluginRow {
+  permitted: readonly Capability[];
+  installed: boolean;
+  draft?: readonly Capability[];
+}
+const manifestOf = (capabilities: readonly Capability[]) => JSON.stringify({ name: "Matrix plugin", capabilities: capabilities.map((capability) => ({ name: capability, reason: "To be asked everything." })) });
 type PluginName = keyof typeof PLUGINS;
 const PLUGIN_NAMES = Object.keys(PLUGINS) as PluginName[];
 
@@ -158,7 +166,7 @@ async function world(): Promise<World> {
 
   const plugins = {} as World["plugins"];
   for (const name of PLUGIN_NAMES) {
-    const manifest = JSON.stringify({ name: "Matrix plugin", capabilities: DECLARED.map((capability) => ({ name: capability, reason: "To be asked everything." })) });
+    const manifest = manifestOf(DECLARED);
     const made = await perform(env.DB, ada, { type: "plugin.install", manifest, code: "" });
     const { id } = made;
     const codeHash = made.plugins.find((p) => p.id === id)!.codeHash!;
@@ -346,6 +354,11 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   // An admin is let through to be told that an admin decides, and asks nothing.
   "plugin.request": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", capability: "notes.read" }) },
   "plugin.frame": { on: "workspace", who: MEMBERS, args: () => ({ id: "html" }) },
+  // A draft is each member's own. Each is asked of a plugin that isn't there.
+  "draft.list": { on: "workspace", who: MEMBERS, args: () => ({}) },
+  "draft.read": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa" }) },
+  "draft.save": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", manifest: "{}", code: "", running: false }) },
+  "draft.discard": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa" }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
   "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
   "upload.purge": { on: "upload", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
@@ -424,7 +437,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
       it(`${name}, as ${as}`, async () => {
         const w = await world();
         const person = w.actors[name];
-        const plugin = (PLUGIN_NAMES as readonly string[]).includes(as) ? PLUGINS[as as PluginName] : null;
+        const plugin: PluginRow | null = (PLUGIN_NAMES as readonly string[]).includes(as) ? PLUGINS[as as PluginName] : null;
         const within = as === "themself" || plugin ? undefined : LIMITED[as as (typeof AGENTS)[number]];
         const scope =
           as === "their read-only agent"
@@ -439,13 +452,16 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
           as === "themself"
             ? person
             : plugin
-              ? { kind: "plugin", pluginId: w.plugins[as as PluginName], personId: person.personId, workspaceId: person.workspaceId }
+              ? { kind: "plugin", pluginId: w.plugins[plugin.draft ? "their plugin, permitted to read and write notes" : (as as PluginName)], personId: person.personId, workspaceId: person.workspaceId, draft: !!plugin.draft }
               : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope };
         const agent = as !== "themself" && !plugin;
         const readOnly = agent && as.includes("read-only");
         const role = roleOf(name);
         /** Whether whoever asks is let as far as their member is. A plugin is for what its permissions name, when it is installed and its member is one. */
-        const permitted = plugin && opsAllowedBy(plugin.installed && role !== "guest" ? plugin.permitted : []);
+        const runs = plugin && plugin.installed && role !== "guest";
+        // A guest keeps no draft: they are refused it as they are refused the plugin.
+        if (plugin && runs && plugin.draft) await perform(env.DB, person, { type: "draft.save", id: actor.kind === "plugin" ? actor.pluginId : "", manifest: manifestOf(plugin.draft), code: "mine", running: true });
+        const permitted = plugin && opsAllowedBy(runs ? plugin.permitted.filter((capability) => !plugin.draft || plugin.draft.includes(capability)) : []);
         const mayAsk = (type: OpType) => !permitted || permitted.has(type);
         // What is told as a number gives a note away as surely as its title: a folder's count, and an author's changes by day.
         if (mayAsk("folder.list")) {

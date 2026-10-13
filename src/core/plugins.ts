@@ -248,6 +248,24 @@ export interface InstalledPlugin {
   permissions: Permission[];
 }
 
+/** A member's own copy of a plugin's source, as they are told of it without its code. */
+export interface DraftSummary {
+  /** The plugin it is a copy of: an install's id. */
+  pluginId: string;
+  /** The manifest as the member wrote it, which may not be one yet. */
+  manifest: string;
+  codeHash: string;
+  /** The name of the original's code when the copy was made, to say whether the original has changed since. */
+  baseHash: string | null;
+  /** Whether it runs in the original's place, for its author alone. */
+  running: boolean;
+  updatedAt: number;
+}
+
+export interface Draft extends DraftSummary {
+  code: string;
+}
+
 /** The record of a workspace's plugins. Members read it; only an admin changes it. */
 export interface PluginRecord {
   /** Whether the one asking is an admin, and so decides. */

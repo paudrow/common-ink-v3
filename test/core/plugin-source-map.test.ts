@@ -21,17 +21,17 @@ describe("where each built-in plugin's source starts", () => {
   const builtIn = (id: string) => ({ id, kind: "built-in", record: null }) as unknown as Listed;
 
   it("leads to every file of the plugins' folder the plugin imports, each once, the first file first", async () => {
-    const vim = (await sourceOf(builtIn("vim"), "w")).map((file) => file.path);
+    const vim = (await sourceOf(builtIn("vim"), null)).map((file) => file.path);
     expect(vim[0]).toBe("vim/index.ts");
     // `import("./editing.ts")` is followed as `from "./keys.ts"` is, and what those import in turn.
     expect([...vim].sort()).toEqual(["vim/editing.ts", "vim/index.ts", "vim/jumplist.ts", "vim/keys.ts", "vim/moving.ts", "vim/surfaces.ts"]);
-    const todos = await sourceOf(builtIn("todos"), "w");
+    const todos = await sourceOf(builtIn("todos"), null);
     expect(todos.map((file) => file.path)).toContain("lib/openTodo.ts");
     expect(todos.every((file) => !file.path.startsWith(".") && file.text.length > 0)).toBe(true);
     expect(new Set(todos.map((file) => file.path)).size).toBe(todos.length);
   });
 
   it("is nothing for a plugin that didn't come with the app", async () => {
-    expect(await sourceOf(builtIn("put-here-by-a-test"), "w")).toEqual([]);
+    expect(await sourceOf(builtIn("put-here-by-a-test"), null)).toEqual([]);
   });
 });

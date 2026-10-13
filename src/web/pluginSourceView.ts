@@ -48,13 +48,13 @@ export function codeView(parent: HTMLElement, { path, text, label, onChange, onS
       ],
     }),
   });
-  // The app takes Mod-s for itself before the editor is asked, and CodeMirror leaves alone a press already taken, so it is listened for here.
-  if (onSave)
-    view.dom.addEventListener("keydown", (e) => {
-      if (e.key.toLowerCase() !== "s" || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
-      e.preventDefault();
-      onSave();
-    });
+  // The app takes Mod-s for itself on the window, before the editor is asked, and stops it there. So it is listened for there too.
+  const saving = (e: KeyboardEvent) => {
+    if (e.key.toLowerCase() !== "s" || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || !(e.target instanceof Node) || !view.dom.contains(e.target)) return;
+    e.preventDefault();
+    onSave?.();
+  };
+  if (onSave) addEventListener("keydown", saving, true);
   let destroyed = false;
   const description = path.endsWith(".json") ? null : LanguageDescription.matchFilename(languages, path);
   // A grammar that can't be fetched leaves the file in one color, which is still the file.
@@ -68,6 +68,7 @@ export function codeView(parent: HTMLElement, { path, text, label, onChange, onS
     },
     destroy: () => {
       destroyed = true;
+      removeEventListener("keydown", saving, true);
       view.destroy();
     },
   };

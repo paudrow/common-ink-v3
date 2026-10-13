@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { signIn } from "../../src/core/accounts.ts";
 import { authenticateAgent, connectAgent, editAgent, listAgents } from "../../src/core/agents.ts";
-import { perform, type Actor } from "../../src/core/operations.ts";
-import { MAX_AGENT_FOLDERS, type Note } from "../../src/core/protocol.ts";
+import { agentActor, perform, type Actor } from "../../src/core/operations.ts";
+import { MAX_AGENT_FOLDERS, type Note, type OpInput } from "../../src/core/protocol.ts";
 import type { Sources } from "../../src/core/sources.ts";
 import { callTool } from "../../src/worker/mcp/tools.ts";
 import { sign } from "../../src/worker/session.ts";
@@ -857,6 +857,15 @@ describe("changing what an agent is limited to", () => {
     // No way in for a token acts as a plugin: the address that does takes a member's session alone.
     const asPlugin = await worker.fetch(new Request(`https://ink.test/api/workspaces/${w.ada.workspaceId}/plugins/${id}/ops`, { method: "POST", headers: { Authorization: `Bearer ${w.limited.token}`, Origin: "https://ink.test", "Content-Type": "application/json" }, body: JSON.stringify({ type: "note.list" }) }), env as never);
     expect(asPlugin.status).toBe(401);
+    // Nor as a member's draft of one. Ada's draft is hers, in no folder, and nothing an agent of hers is told of or reaches.
+    await perform(env.DB, w.ada, { type: "draft.save", id, manifest: JSON.stringify({ name: "Draft-outside" }), code: "draft-words-outside", running: true });
+    const asDraft = await worker.fetch(new Request(`https://ink.test/api/workspaces/${w.ada.workspaceId}/plugins/${id}/draft/ops`, { method: "POST", headers: { Authorization: `Bearer ${w.limited.token}`, Origin: "https://ink.test", "Content-Type": "application/json" }, body: JSON.stringify({ type: "note.list" }) }), env as never);
+    expect(asDraft.status).toBe(401);
+    const limitedActor = agentActor((await authenticateAgent(env.DB, w.limited.token))!, w.ada.workspaceId);
+    for (const op of [{ type: "draft.list" }, { type: "draft.read", id }, { type: "draft.save", id, manifest: "{}", code: "", running: false }, { type: "draft.discard", id }] satisfies OpInput[]) {
+      await expect(perform(env.DB, limitedActor, op)).rejects.toMatchObject({ code: "forbidden" });
+    }
+    expect((await perform(env.DB, w.ada, { type: "draft.read", id })).code).toBe("draft-words-outside");
     // The agent that reaches everything is the control: the record was there to be told.
     const scribe = await asAgent(w.scribe.token);
     expect((await scribe.json<{ plugins: { id: string }[] }>("list_plugins")).plugins.map((p) => p.id)).toContain(id);

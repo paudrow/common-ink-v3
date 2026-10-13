@@ -366,6 +366,9 @@ A plugin a member wrote and an admin installed in a workspace: a manifest and co
 **Manifest**:
 What a third-party plugin says of itself, as JSON: its name, the capabilities it asks for with a reason each, and the commands, views, embeds and options it adds. The app lists all of it without running the plugin's code.
 
+**Draft**:
+A member's own copy of an installed plugin's source, kept beside their settings. Only its author can read or change it, admins included, and it is gone when they leave the workspace. It can run in the original's place for its author alone, sandboxed, with what the original is allowed and never more. An admin publishes one by installing it, which every approval has to follow again.
+
 **Capability**:
 One named thing a plugin can be permitted, which opens a fixed list of operations: read notes, write notes, read todos, read members' names, use the network for listed sites. An operation no capability lists is refused to every plugin.
 

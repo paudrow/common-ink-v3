@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { UploadKind } from "./filetypes.ts";
 import type { NoteState } from "./lifecycle.ts";
 import { readableName } from "./mentions.ts";
-import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Origins, type PluginRecord } from "./plugins.ts";
+import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Origins, type Draft, type DraftSummary, type PluginRecord } from "./plugins.ts";
 import { parseRule } from "./recurrence.ts";
 import { isDay, isProjectName, type LastDone } from "./todos.ts";
 
@@ -79,6 +79,7 @@ const FileName = z.string().min(1).max(1000);
 /** What a permission is of: a plugin installed in the workspace, or HTML embeds. */
 const PluginSubject = z.union([Id, z.literal(HTML_EMBEDS)]);
 const CapabilityName = z.enum(CAPABILITY_NAMES);
+const CodeHash = z.string().regex(/^[0-9a-f]{64}$/);
 
 const FolderName = z
   .string()
@@ -595,6 +596,20 @@ export const Op = z.discriminatedUnion("type", [
    * `token` is null when its network isn't allowed.
    */
   z.object({ type: z.literal("plugin.frame"), id: PluginSubject }),
+  /**
+   * The asker's own copies of plugins' source. A draft is kept beside its author's settings and is
+   * theirs alone: no operation reads or changes another member's, an admin's included, and none takes
+   * a person. It is no note, so it is in no folder, search or history.
+   */
+  z.object({ type: z.literal("draft.list") }),
+  z.object({ type: z.literal("draft.read"), id: Id }),
+  /**
+   * Keeps the asker's draft of a plugin as it is now. `baseHash` is the original's code when the
+   * copy was made. With `running` it runs in the original's place for its author alone, shut off
+   * from the app, with what the original is permitted and never more.
+   */
+  z.object({ type: z.literal("draft.save"), id: Id, manifest: z.string().max(MAX_PLUGIN_MANIFEST), code: z.string().max(MAX_PLUGIN_CODE), baseHash: CodeHash.nullable().optional(), running: z.boolean() }),
+  z.object({ type: z.literal("draft.discard"), id: Id }),
 ]);
 export type Op = z.output<typeof Op>;
 export type OpInput = z.input<typeof Op>;
@@ -1216,6 +1231,10 @@ export interface Results {
   "plugin.permit": PluginRecord;
   "plugin.request": PluginRecord;
   "plugin.frame": { token: string | null; origins: string[] };
+  "draft.list": { drafts: DraftSummary[] };
+  "draft.read": Draft;
+  "draft.save": DraftSummary;
+  "draft.discard": { drafts: DraftSummary[] };
 }
 
 export type SourceKind = "calendar" | "contacts";

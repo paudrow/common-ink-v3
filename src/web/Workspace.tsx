@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import type { PluginRecord } from "../core/plugins.ts";
+import type { DraftSummary, PluginRecord } from "../core/plugins.ts";
 import type { Me, Note, NoteSummary, Results, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
-import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, performAsPlugin, sendUpload, signOut, uploadAddress } from "./api.ts";
+import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, sendUpload, signOut, uploadAddress } from "./api.ts";
 import { Drawn } from "./Drawn.tsx";
 import { usable } from "./editorExtensions.ts";
 import { folderTree } from "./folders.ts";
@@ -16,8 +16,8 @@ import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Fold
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
+import { createInstaller } from "./pluginRuntime.ts";
 import { referredUploads } from "./referredUploads.ts";
-import { adapt, versionOf } from "./remote/adapter.tsx";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
@@ -211,8 +211,14 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     recordAsked.current++;
     setRecord(now);
   }, []);
-  const pluginsPage = useRef<{ record: PluginRecord | null; onRecord: (record: PluginRecord) => void }>({ record, onRecord: takeRecord });
-  pluginsPage.current = { record, onRecord: takeRecord };
+  /** The member's own drafts of plugins, as last read. */
+  const [drafts, setDrafts] = useState<readonly DraftSummary[]>([]);
+  const pluginsPage = useRef({ record, onRecord: takeRecord, drafts, onDrafts: setDrafts });
+  pluginsPage.current = { record, onRecord: takeRecord, drafts, onDrafts: setDrafts };
+  const draftsNow = useRef(drafts);
+  draftsNow.current = drafts;
+  const reread = useRef(() => {});
+  const [installer] = useState(() => createInstaller({ workspaceId, record: () => recordNow.current, drafts: () => draftsNow.current, reread: () => reread.current() }));
   const [host] = useState(() => {
     let created: Host;
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} workspaceId={workspaceId} personId={me.person.id} mac={MAC} {...pluginsPage.current} path={app.path} go={app.go} />;
@@ -314,38 +320,19 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     );
   }, [workspaceId]);
   useEffect(readRecord, [readRecord]);
-  /** Each installed plugin's code, by the name of the code, so a plugin that starts again for another reason doesn't ask for it again. */
-  const [codes] = useState(() => new Map<string, Promise<string>>());
+  reread.current = readRecord;
+  // A guest keeps no drafts, and is refused the asking.
+  useEffect(
+    () =>
+      void perform(workspaceId, { type: "draft.list" }).then(
+        (mine) => setDrafts(mine.drafts),
+        () => {},
+      ),
+    [workspaceId],
+  );
   useEffect(() => {
-    if (!record) return;
-    host.setInstalled(
-      record.plugins
-        .filter((p) => p.thirdParty)
-        .map((installed) => ({
-          version: versionOf(installed),
-          plugin: adapt(installed, {
-            record: () => recordNow.current?.plugins.find((p) => p.id === installed.id && p.thirdParty) ?? null,
-            code() {
-              const key = `${installed.id}/${installed.codeHash}`;
-              const known = codes.get(key);
-              if (known) return known;
-              const asked = perform(workspaceId, { type: "plugin.read", id: installed.id }).then((read) => {
-                // Other code than the record named was approved for other things, if for anything. It isn't run: the record is read again.
-                if (read.codeHash === installed.codeHash) return read.code;
-                readRecord();
-                throw new Error(`${installed.manifest.name} has changed. It starts again in a moment.`);
-              });
-              codes.set(key, asked);
-              asked.catch(() => codes.delete(key));
-              return asked;
-            },
-            perform: (op) => performAsPlugin(workspaceId, installed.id, op),
-            grant: () => perform(workspaceId, { type: "plugin.frame", id: installed.id }).then((frame) => frame.token),
-            refused: readRecord,
-          }),
-        })),
-    );
-  }, [host, record, workspaceId, codes, readRecord]);
+    if (record) host.setInstalled(installer.list());
+  }, [host, installer, record, drafts]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   /** The page the address names: the one at exactly that address, or else the one whose path it is under. */
   const routePage = route.kind === "page" ? (contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`))) : undefined;
