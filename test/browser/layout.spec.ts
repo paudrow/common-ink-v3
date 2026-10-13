@@ -253,7 +253,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(panel.getByRole("button", { name: "Archive" })).toBeDisabled();
 
   await inspector.getByRole("tab", { name: "History" }).click();
-  await expect(panel.getByRole("list", { name: "Changes" }).getByRole("listitem")).toHaveAccessibleName("Change 1 by Ada Lovelace");
+  await expect(panel.getByRole("listbox", { name: "Changes" }).getByRole("option")).toContainText("You wrote");
   await inspector.getByRole("tab", { name: "Backlinks" }).click();
   await expect(panel).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
 

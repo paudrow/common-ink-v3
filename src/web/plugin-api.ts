@@ -15,7 +15,9 @@ import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS } from "../core/protocol.ts";
+export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE } from "../core/protocol.ts";
+/** Where two lists of lines differ, for a view that marks what changed inside a line. */
+export { lineHunks } from "../core/text.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
@@ -25,6 +27,9 @@ export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, pa
 
 export { dismissing, useDismiss } from "./dismiss.ts";
 export { sandboxed } from "./htmlFrame.ts";
+export { askSite } from "./otherSites.ts";
+/** The theme the app is drawn in, for what is drawn by someone else and has to be asked for in one: another site's frame. */
+export { onTheme, themeNow, type Theme } from "./theme.ts";
 /** Whether an editor state is that of a reading of a note, where nothing is shown as written whatever is selected. */
 export { isReading } from "./readOnly.ts";
 export { ResizeHandle } from "./resize.tsx";
@@ -149,8 +154,8 @@ export interface PluginHost {
     register<S extends keyof Slots>(slot: S, view: Slots[S]): Dispose;
   };
   readonly embeds: {
-    register(embed: Embed): Dispose;
-    /** Every embed from every plugin that is on, as a menu would offer them, so without those that say `menu: false`. */
+    register(embed: Embed | AddressEmbed): Dispose;
+    /** Every embed from every plugin that is on, as a menu would offer them. An {@link AddressEmbed} is not among them: nothing writes one but its address. */
     list(): EmbedInfo[];
   };
   readonly completions: {
@@ -172,7 +177,7 @@ export interface PluginHost {
   app(): App;
   /**
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
-   * is saved before an operation that moves a note through its history, and the editors take the result.
+   * is saved before an operation that moves a note through its history or previews that, and the editors take the result.
    * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites,
    * and one that reads or changes who a note or folder is shared with.
    */
@@ -400,8 +405,6 @@ export interface Embed {
   block?: boolean;
   /** What a new one is written with when it is picked from the embed menu. With none, an empty config and an empty body. */
   starts?: { config?: string; body?: string };
-  /** False for one no menu writes: it is a way of writing that notes are no longer started with and is still drawn where a note has it. `host.embeds.list()` leaves it out. */
-  menu?: boolean;
   /**
    * Draws into `el`, once, all of it before returning, so the embed is never seen half drawn. May
    * return a function that stops whatever it started, or a {@link Drawn}. An embed is registered
@@ -411,25 +414,12 @@ export interface Embed {
   /** What it keeps below the line that writes it, such as a video. */
   below?: Below;
   /**
-   * For an inline embed whose drawing is doing something a member would lose if it were taken out,
-   * as a clock is running. With the cursor on it, it then stays drawn, the same element in the same
-   * place, and the embed's text is shown after it. Any other inline embed is taken out while the
-   * cursor is on it and shown as written alone, so its line is no longer than it was written.
-   */
-  live?: boolean;
-  /**
-   * What a member can adjust about it without reading its config. The host draws an options button
-   * at the embed's top corner, and under it a field for each of these and "Edit as markdown". A
-   * block has the button whether or not it has options, for "Edit as markdown" alone. A member who
-   * can't change the note has no button.
+   * What a member can adjust about it without reading its config. The host draws one options button
+   * in the embed's card, and opens beneath the card a field for each of these. An embed that has
+   * none, or gives none for what the note says of it now, has no button, and neither has a member
+   * who can't change the note.
    */
   options?: EmbedOptions;
-  /**
-   * For a block whose drawing takes the keyboard: the arrow keys, and vim's j and k, then go from
-   * the line above or below it into the drawing, by {@link Drawn.enter}, and not over it. The
-   * drawing gives the keyboard back with {@link Embedded.leave}.
-   */
-  entered?: boolean;
 }
 
 /**
@@ -467,12 +457,6 @@ export interface Drawn {
   update?(embed: Embedded): void;
   /** Stops whatever the embed started. */
   stop?(): void;
-  /**
-   * For an embed registered as `entered`: takes the keyboard as the cursor comes into the block from
-   * the line above or below it, by focusing something it drew, and says whether it did. When it
-   * didn't, as a board with nothing to focus doesn't, the cursor goes over the block.
-   */
-  enter?(from: "above" | "below"): boolean;
 }
 
 /**
@@ -499,19 +483,32 @@ export interface Below {
    * Draws into `el`, which is as large as the room. May return a function that stops whatever it
    * started. `update` rewrites the embed in the note as {@link Embedded.update} does, which is how
    * what is only known once it has loaded, such as a picture's size, gets into the note for `box` to
-   * read: the room is worked out from the note alone, and `render` can't change it any other way.
+   * read. `resize` is for what the note can't hold, such as how tall a post turned out to be once it
+   * had loaded: it gives the room that height in pixels, which moves what is under it once, and does
+   * nothing for a room sized by a ratio.
    */
-  render(el: HTMLElement, embed: Pick<Embedded, "config" | "body" | "readOnly" | "update">): void | (() => void);
-  /**
-   * Whether a web address written alone on a line, with no embed's syntax around it, is this embed's
-   * to show below that line, such as a video's address. It is then kept and drawn as if the note said
-   * `::name{address}`, with the address as its config, and the line stays the link it is. `update`
-   * does nothing for one: an address has no config to rewrite. The first embed to say so has it.
-   */
-  ofAddress?(address: string): boolean;
+  render(el: HTMLElement, embed: Pick<Embedded, "config" | "body" | "readOnly" | "update"> & { resize(height: number): void }): void | (() => void);
 }
 
-export type BelowBox = { ratio: number } | { height: number };
+/** The room kept below a line. `maxWidth` is a limit in pixels narrower than the host's own, for what is drawn no wider, such as a post. */
+export type BelowBox = ({ ratio: number } | { height: number }) & { maxWidth?: number };
+
+/**
+ * Something shown below a line that is one https address and nothing else: a video, a post. It has
+ * no syntax of its own and is in no menu. Pasting or typing the address is the only way to write
+ * one. The address is its config, and `update` does nothing for it. The line stays in the note, as
+ * small as a caption, and its text is seen only with the pointer over the line or over what is shown
+ * below it, or with the cursor on the line. So the address comes and goes and nothing moves.
+ */
+export interface AddressEmbed {
+  /** A name of its own among the embeds. A note that says `::name{}` is not this, and stays text. */
+  name: string;
+  /** What a person sees it called. */
+  title: string;
+  /** Whether `address` is this one's to show. The first registered to say so has it. */
+  claims(address: string): boolean;
+  below: Below;
+}
 
 /** What an embed is handed about one place a note writes it. */
 export interface Embedded {
@@ -529,17 +526,13 @@ export interface Embedded {
    */
   update(next: { config?: string; body?: string }): void;
   /**
-   * Puts the cursor in the embed as the note writes it, to be changed there. An inline embed is
-   * shown as written while the cursor is on it, after its drawing if it is `live`. A block stays
-   * drawn, with its lines shown under its drawing until the cursor leaves them. For a block this is the
-   * only way into them, and the host offers it as "Edit as markdown" in the block's options.
+   * Puts the cursor in the embed as the note writes it, to be changed there, as moving the cursor
+   * onto it does. The embed stays drawn, the element it was, and its text is shown above its
+   * drawing for as long as the cursor is in it: an inline embed's in rows of their own above its
+   * line, a block's lines above its card. For a block, `at` is how far into its body the cursor goes,
+   * as a board puts it on the line of the card that was pressed. Without it the cursor goes in the config.
    */
-  edit(): void;
-  /**
-   * Gives the keyboard back to the note, with the cursor on the line above or below this block. It
-   * does nothing where the note has no such line, so the keyboard stays where it is.
-   */
-  leave(to: "above" | "below"): void;
+  edit(at?: number): void;
 }
 
 export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts">;

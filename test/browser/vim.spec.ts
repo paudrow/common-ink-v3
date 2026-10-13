@@ -328,10 +328,15 @@ test("moving through a note in a preview tab leaves it a preview, and an edit ke
   await expect.poll(() => italic(page)).toEqual([false]);
 });
 
-test("the cursor moves across an embed, which stays drawn and is shown as written after its drawing while the cursor is on it", async ({ page }) => {
+test("the cursor moves across an embed, which stays drawn and is shown as written above its line while the cursor is on it", async ({ page }) => {
   const [note] = await withVim(page, "# Laps\nTime ::stopwatch{} here\nend");
-  await edit(page, note!.id);
+  await page.goto(`/note/${note!.id}`);
+  await expect(statusLine(page)).toHaveText("--NORMAL--");
+  // Not a click, which could land on the embed's own buttons.
+  await editor(page).focus();
+  await keys(page, "g", "g");
   const watch = page.getByRole("button", { name: /^Stopwatch/ });
+  const written = page.locator(".embed-source");
 
   await page.keyboard.press("j");
   await expect(watch).toBeVisible();
@@ -339,10 +344,13 @@ test("the cursor moves across an embed, which stays drawn and is shown as writte
   await expect(page.locator(".cm-fat-cursor")).toHaveText("T");
   const drawn = await watch.elementHandle();
   await page.keyboard.press("w");
-  await expect(lines(page).nth(1)).toHaveText("Time 0:00::stopwatch{} here");
+  await expect(written).toHaveText("::stopwatch{}");
   await expect(page.locator(".cm-fat-cursor")).toHaveText(":");
+  // The cursor is drawn where the text is: in the row above the stopwatch.
+  expect((await page.locator(".cm-fat-cursor").boundingBox())!.y).toBeLessThan((await watch.boundingBox())!.y);
   expect(await watch.evaluate((el, was) => el === was, drawn)).toBe(true);
   await page.keyboard.press("$");
+  await expect(written).toHaveCount(0);
   await expect(lines(page).nth(1)).toHaveText("Time 0:00 here");
   expect(await watch.evaluate((el, was) => el === was, drawn)).toBe(true);
   await expect(page.locator(".cm-fat-cursor")).toHaveText("e");

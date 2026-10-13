@@ -28,9 +28,9 @@ describe("the plugin boundary", () => {
     expect(reaching).toEqual([]);
   });
 
-  it("builds the plugin API from the operations protocol, how a link and a todo are written, and nine small helpers, so widening it is a choice", () => {
+  it("builds the plugin API from the operations protocol, how a link and a todo are written, one function of the text module and eleven small helpers, so widening it is a choice", () => {
     const api = files.find((f) => f.path === API)!;
 
-    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/links.ts", "../core/protocol.ts", "../core/todos.ts", "./dismiss.ts", "./dragged.ts", "./htmlFrame.ts", "./icons.tsx", "./inspectorPick.ts", "./openNotes.ts", "./readOnly.ts", "./resize.tsx", "./time.ts", "./titleMark.ts", "react"]);
+    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/links.ts", "../core/protocol.ts", "../core/text.ts", "../core/todos.ts", "./dismiss.ts", "./dragged.ts", "./htmlFrame.ts", "./icons.tsx", "./inspectorPick.ts", "./openNotes.ts", "./otherSites.ts", "./readOnly.ts", "./resize.tsx", "./theme.ts", "./time.ts", "./titleMark.ts", "react"]);
   });
 });

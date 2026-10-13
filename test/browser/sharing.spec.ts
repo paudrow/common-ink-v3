@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, folderRow, join, listedNote, listedNotes, me, openAllNotes, perform, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, connectAgent, folderRow, join, listedNote, listedNotes, me, openAllNotes, perform, signInAsNewPerson, visitor } from "./helpers.ts";
+import { standIns } from "./media-helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
@@ -94,7 +95,7 @@ test("a guest given a folder to edit sees what is in it, edits a note, sees its 
   await expect.poll(async () => (await perform(page, { type: "note.read", id: kickoff.id })).text).toContain("Grace adds a line.");
 
   await inspector(grace).getByRole("tab", { name: "History" }).click();
-  await expect(inspector(grace).getByRole("list", { name: "Changes" }).getByRole("listitem").first()).toContainText("Grace Hopper");
+  await expect(inspector(grace).getByRole("listbox", { name: "Changes" }).getByRole("option").first()).toContainText("You edited");
 
   await folderRow(grace, "Projects").click();
   await expect(listedNotes(grace)).toHaveText(["Kickoff"]);
@@ -209,14 +210,15 @@ test("a public link made in the Share dialog shows the note read-only to someone
 
 test("a link's page draws the note as the app does, and runs nothing in it until the visitor asks", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
-  const text = "# Demo\n\nSome **bold** words.\n\n:::html{}\n<p>Hello from HTML.</p>\n:::\n\nWatch ::youtube{https://youtu.be/dQw4w9WgXcQ} here.\n";
+  const text = "# Demo\n\nSome **bold** words.\n\n:::html{}\n<p>Hello from HTML.</p>\n:::\n\nWatch this.\n\nhttps://youtu.be/dQw4w9WgXcQ\n";
   const note = await perform(page, { type: "note.create", text });
   const link = await perform(page, { type: "grant.link", noteId: note.id, link: "public" });
   if (link?.to.kind !== "link") throw new Error("no link was made");
   const anyone = await visitor(page);
-  const elsewhere: string[] = [];
+  const played = await standIns(anyone);
+  const elsewhere = new Set<string>();
   anyone.on("request", (request) => {
-    if (new URL(request.url()).origin !== new URL(page.url()).origin) elsewhere.push(request.url());
+    if (new URL(request.url()).origin !== new URL(page.url()).origin) elsewhere.add(new URL(request.url()).host);
   });
 
   await anyone.goto(`/s/${link.to.token}`);
@@ -225,10 +227,12 @@ test("a link's page draws the note as the app does, and runs nothing in it until
   await expect(anyone.getByRole("button", { name: /^Run HTML/ })).toBeVisible();
   await expect(anyone.getByRole("button", { name: /^Play video/ })).toBeVisible();
   await expect(anyone.locator("iframe")).toHaveCount(0);
-  expect(elsewhere, "nothing is loaded from anywhere else until asked").toEqual([]);
+  // The video's picture and what it is called are asked of YouTube as the app asks them, with no player: nothing of another site runs.
+  await expect.poll(() => [...elsewhere].sort(), "a picture and a title, and no more, until asked").toEqual(["i.ytimg.com", "www.youtube.com"]);
+  expect(played, "no player until play is pressed").toEqual([]);
 
   await anyone.getByRole("button", { name: /^Run HTML/ }).click();
-  await expect(anyone.locator('.embed-below[data-embed="html"] iframe')).toHaveAttribute("sandbox", /.*/);
+  await expect(anyone.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
   await expect(editor(anyone)).toHaveAttribute("contenteditable", "false");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(text);
 });
@@ -493,4 +497,27 @@ test("a plugin that isn't Common Ink's own can't share, change members, or conne
   await expect.poll(() => perform(page, { type: "grant.list", noteId: note.id })).toMatchObject({ grants: [] });
   await expect.poll(() => perform(page, { type: "invite.list" })).toEqual([]);
   expect(await page.evaluate(async () => ((await (await fetch("/api/agents")).json()) as { agents: unknown[] }).agents)).toEqual([]);
+});
+
+test("reverting an agent's changes from the Agents page takes the notes the member may change, and says which are left out", async ({ page }) => {
+  await signInAsNewPerson(page, "Ed Editor");
+  const admin = await anotherPerson(page, "Ada Lovelace");
+  const { workspaceId } = await join(page, admin, "editor");
+  const claude = await connectAgent(page, "Claude");
+  const [mine, shown] = [await perform(admin, { type: "note.create", text: "# Mine to change" }), await perform(admin, { type: "note.create", text: "# Shown to me" })];
+  for (const n of [mine, shown]) await claude.tool("write_note", { workspace: workspaceId, id: n.id, baseRevision: 1, text: `# ${n.title}\n\nClaude's line.` });
+  await perform(admin, { type: "grant.set", noteId: shown.id, email: (await me(page)).person.email, access: "view" });
+
+  // Opening a note of Ada's workspace shows that workspace, whose notes the agent changed.
+  await page.goto(`/note/${mine.id}`);
+  await expect(editor(page)).toContainText("Claude's line.");
+  await page.goto("/agents");
+  await page.getByRole("button", { name: "Revert Claude's changes…" }).click();
+  const dialog = page.getByRole("dialog", { name: /^Revert/ });
+  await expect(dialog).toContainText("1 note you can read and not change is left out.");
+  await expect(dialog).toContainText("Mine to change");
+  await expect(dialog).not.toContainText("Shown to me");
+  await dialog.getByRole("button", { name: /^Revert/ }).click();
+  await expect.poll(async () => (await perform(admin, { type: "note.read", id: mine.id })).revision).toBe(3);
+  await expect.poll(async () => (await perform(admin, { type: "note.read", id: shown.id })).revision).toBe(2);
 });
