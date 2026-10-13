@@ -4,6 +4,7 @@
   --bg-elev: #ffffff;
   --ink: #1f1e1c;
   --muted: #6f6b66;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%236f6b66' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   --line: #e7e4df;
   --hover: rgb(31 30 28 / 0.06);
   --accent: #5b5bd6;
@@ -37,6 +38,7 @@
     --bg-elev: #22211f;
     --ink: #e8e6e3;
     --muted: #9a958f;
+    --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%239a958f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
     --line: #2c2b29;
     --hover: rgb(232 230 227 / 0.08);
     --accent: #8f8ff0;
@@ -61,6 +63,7 @@
   --bg-elev: #22211f;
   --ink: #e8e6e3;
   --muted: #9a958f;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%239a958f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   --line: #2c2b29;
   --hover: rgb(232 230 227 / 0.08);
   --accent: #8f8ff0;
@@ -112,6 +115,24 @@ body,
 
 .button.primary:hover {
   filter: brightness(1.08);
+}
+
+/* Every dropdown: the app's own arrow, as far from the right edge as the words are from the left. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-right: 24px;
+  padding-left: 8px;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
+}
+
+@media (forced-colors: active) {
+  select:not([multiple]):not([size]) {
+    appearance: auto;
+    background-image: none;
+  }
 }
 
 button.link {
