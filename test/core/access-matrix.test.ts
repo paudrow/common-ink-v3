@@ -593,3 +593,138 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
     }
   });
 });
+
+/*
+ * Every filter of the query language, asked by every kind of actor. What each filter is true of is
+ * written out below, of the same notes; what an actor is answered is then exactly those of them the
+ * table above lets that actor see, in the states the query covers. A filter with no row fails the
+ * first test.
+ */
+type Truth = readonly NoteName[] | ((who: { name: ActorName; agent: boolean; sees: (note: NoteName) => boolean }) => readonly NoteName[]);
+const LIVE = NOTES.filter((note) => STATE_OF[note] === "live");
+const BY_ADA = NOTES.filter((note) => !MAKER[note]);
+/** A filter that names something: `needs` is what must be there for the actor, and without it the query is refused as one naming nothing is. */
+interface Row {
+  query: string;
+  finds: Truth;
+  needs?: { folder: FolderName } | { note: NoteName } | { anyOf: readonly NoteName[] };
+  /** The same query naming something that was never there. */
+  missing?: string;
+}
+const NOTE_FILTERS: Record<string, Row[]> = {
+  folder: [
+    { query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" },
+    { query: "folder:TEAM-FOLDER is:trashed", finds: ["bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder is:trashed" },
+    { query: "-folder:Open-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Open" }, missing: "-folder:Nope-folder" },
+  ],
+  tag: [{ query: "tag:tag-team", finds: ["team"] }, { query: "#TAG-deep OR #tag-arch OR #tag-bin", finds: ["deep"] }, { query: "-tag:tag-open", finds: NOTES.filter((note) => note !== "open") }],
+  updated: [{ query: "updated:>=2020-01-01", finds: NOTES }, { query: "updated:<2020-01-01", finds: [] }, { query: "updated:today", finds: NOTES }, { query: "-updated:today", finds: [] }],
+  created: [{ query: "created:2020-01-01..*", finds: NOTES }, { query: "created:yesterday", finds: [] }, { query: "created:>=7d", finds: NOTES }],
+  editor: [
+    { query: 'editor:"Zed-agent"', finds: ["secret"], needs: { note: "secret" }, missing: 'editor:"Nobody-agent"' },
+    { query: 'edited-by:"eve editor"', finds: ["secret"], needs: { note: "secret" }, missing: 'edited-by:"nobody editor"' },
+    { query: "editor:@me", finds: ({ name, agent }) => (agent ? [] : name === "Ada, an admin" ? BY_ADA : NOTES.filter((note) => MAKER[note] === name)) },
+  ],
+  author: [
+    { query: 'author:"Vera Viewer"', finds: ["vpriv"], needs: { note: "vpriv" }, missing: 'author:"Nobody Viewer"' },
+    { query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"' },
+    { query: "-author:@me", finds: ({ name, agent }) => (agent ? NOTES : name === "Ada, an admin" ? NOTES.filter((note) => MAKER[note]) : NOTES.filter((note) => MAKER[note] !== name)) },
+  ],
+  is: [
+    { query: "is:open", finds: LIVE },
+    { query: "is:archived", finds: ["arch"] },
+    { query: "is:trashed", finds: ["bin"] },
+    { query: "is:archived OR is:trashed OR is:open", finds: NOTES },
+    { query: "is:private", finds: ["secret", "vpriv"] },
+    // Every note has a grant of its own. Which of them an actor is told are shared is which they may list the grants of.
+    { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
+    { query: "-is:shared", finds: ({ name, agent }) => NOTES.filter((note) => agent || !sharesNote(name, note)) },
+  ],
+  has: [
+    { query: "has:todo", finds: NOTES },
+    { query: "has:task has:open-task", finds: NOTES },
+    { query: "no:open-todo", finds: [] },
+    { query: "has:tag", finds: NOTES },
+    { query: "has:link", finds: ["secret"] },
+    // `open` is linked to from `secret` alone, so it has a backlink only for someone who can see `secret`.
+    { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) },
+    { query: "no:backlink", finds: ({ sees }) => NOTES.filter((note) => note !== "open" || !sees("secret")) },
+  ],
+  in: [{ query: "Title in:title", finds: NOTES }, { query: "body in:title", finds: [] }, { query: "body in:body -Title-team", finds: NOTES.filter((note) => note !== "team") }],
+  sort: [{ query: "body sort:title-desc", finds: NOTES }],
+};
+const TODO_FILTERS: Record<string, Row[]> = {
+  folder: [{ query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" }],
+  tag: [{ query: "tag:tag-team OR #tag-lone", finds: ["team", "lone"] }],
+  updated: [{ query: "updated:>=yesterday", finds: NOTES }],
+  created: [{ query: "created:<2020-01-01", finds: [] }],
+  editor: [{ query: 'editor:"Zed-agent"', finds: ["secret"], needs: { note: "secret" }, missing: 'editor:"Nobody-agent"' }],
+  author: [{ query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"' }],
+  is: [
+    { query: "is:open", finds: NOTES },
+    { query: "is:done", finds: [] },
+    { query: "is:open OR is:done", finds: NOTES },
+    { query: "is:archived", finds: ["arch"] },
+    { query: "is:trashed", finds: ["bin"] },
+    { query: "is:private", finds: ["secret", "vpriv"] },
+    { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
+  ],
+  has: [{ query: "has:due", finds: [] }, { query: "no:due", finds: NOTES }, { query: "has:recurrence", finds: [] }, { query: "no:recurrence has:tag", finds: NOTES }, { query: "has:link", finds: ["secret"] }, { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) }],
+  due: [{ query: "due:<today", finds: [] }, { query: "-due:<today", finds: NOTES }, { query: "due:2020-01-01..2030-01-01", finds: [] }],
+  importance: [{ query: "importance:0", finds: NOTES }, { query: "importance:>=1", finds: [] }, { query: "importance:0..3", finds: NOTES }],
+  in: [{ query: "todo-team", finds: ["team"] }, { query: "Title-team", finds: [] }, { query: "Title-team in:title", finds: ["team"] }, { query: "body-team in:body", finds: [] }],
+  sort: [{ query: "sort:importance-desc", finds: NOTES }],
+};
+
+describe("every filter, by every actor", { timeout: 30_000 }, () => {
+  it("has a row for every filter of each scope, so one added later can't go unasked", async () => {
+    const { keysFor } = await import("../../src/core/query.ts");
+    expect(Object.keys(NOTE_FILTERS).sort()).toEqual([...keysFor("notes")].sort());
+    expect(Object.keys(TODO_FILTERS).sort()).toEqual([...keysFor("todos")].sort());
+  });
+
+  for (const name of Object.keys(ACTORS) as ActorName[]) {
+    for (const as of ["themself", "their agent", "their agent limited to the folder Team", "their agent limited to the folder Open"] as const) {
+      it(`${name}, as ${as}`, async () => {
+        const w = await world();
+        const person = w.actors[name];
+        const within = as === "themself" ? undefined : LIMITED[as];
+        const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope: within && { folderIds: [w.folders[within[0]!]] } };
+        const sees = (note: NoteName) => !(within && !within.includes(FOLDER_OF[note])) && personLevelOf(name, note) !== "-";
+        const seesFolder = (folder: FolderName) => !(within && !within.includes(folder)) && personFolderLevelOf(name, folder) !== "-";
+        const today = new Date().toISOString().slice(0, 10);
+        const covered = (query: string): Covering => (query.includes("is:trashed") ? "any" : query.includes("is:archived") ? "kept" : "live");
+        const said = async (input: OpInput) => perform(env.DB, actor, input).then((answer) => JSON.stringify(answer), (err: unknown) => (err instanceof OpError ? `${err.code}: ${err.message}` : Promise.reject(err)));
+
+        for (const [type, rows] of [["search", NOTE_FILTERS], ["todo.list", TODO_FILTERS]] as const) {
+          for (const row of Object.values(rows).flat()) {
+            const key = `${type} ${row.query}`;
+            const input: OpInput = type === "search" ? { type, query: row.query, today, limit: 50 } : { type, query: row.query, today };
+            const there = !row.needs || ("folder" in row.needs ? seesFolder(row.needs.folder) : "note" in row.needs ? sees(row.needs.note) : row.needs.anyOf.some(sees));
+            if (row.missing) {
+              // Naming what the actor can't see is answered in the words naming what was never there is, with the name alone different.
+              const blank = (text: string) => text.replace(/"[^"]*"/g, '"…"').replace(/of the query: .*\)$/, "");
+              const missing = await said({ ...input, query: row.missing } as OpInput);
+              expect(missing, `${key}: what was never there`).toMatch(/^invalid: (No folder named|Nobody named) "/);
+              if (!there) {
+                expect(blank(await said(input)), `${key}: hidden`).toBe(blank(missing));
+                continue;
+              }
+            }
+            const answer = await perform(env.DB, actor, input);
+            const truth = typeof row.finds === "function" ? row.finds({ name, agent: as !== "themself", sees }) : row.finds;
+            const expected = truth.filter((note) => sees(note) && COVERED[covered(row.query)].includes(STATE_OF[note])).map((note) => w.notes[note]).sort();
+            const found = "results" in answer ? answer.results.map((r) => r.note.id) : answer.todos.map((t) => t.noteId);
+            expect([...found].sort(), key).toEqual(expected);
+            // What it is told beside the notes says no more: nothing left to page to, and nothing still to be read in.
+            expect(answer.next, `${key}: next`).toBeNull();
+            if ("results" in answer) expect(answer.indexing, `${key}: indexing`).toBe(false);
+            const hidden = [...NOTES.filter((note) => !sees(note)), ...FOLDERS.filter((folder) => !seesFolder(folder))];
+            const written = sees("secret") ? [`open: ${w.notes.open}`] : [];
+            expect(hidden.flatMap((item) => w.marks[item].filter((mark) => JSON.stringify(answer).includes(mark)).map((mark) => `${item}: ${mark}`)).filter((mark) => !written.includes(mark)), `${key}: says nothing of what is hidden`).toEqual([]);
+          }
+        }
+      });
+    }
+  }
+});

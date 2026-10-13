@@ -135,7 +135,8 @@ test("an archived note leaves the note list and Todos, and comes back when archi
   await expect(todosPage(page)).toContainText("water plants");
   await expect(todosPage(page)).not.toContainText("file taxes");
 
-  await todosPage(page).getByRole("checkbox", { name: "Include archived" }).check();
+  // The Todos page lists the todos of archived notes when its query names them.
+  await todosPage(page).getByRole("searchbox", { name: "Filter todos" }).fill("is:archived");
   await expect(todosPage(page)).toContainText("file taxes");
   expect(kept.state).toBe("live");
 });

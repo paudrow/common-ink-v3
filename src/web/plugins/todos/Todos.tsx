@@ -1,51 +1,17 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Icon, changeTodo, nameKey, parseTodo, ruleLabel, tagsOn, useNow, type App, type Folders, type Importance, type ListedTodo, type OpInput, type PluginHost, type Results, type TodoChange, type TodoCompletion } from "../../plugin-api.ts";
+import { Icon, MAX_SEARCH_LENGTH, changeTodo, nameKey, parseQuery, parseTodo, ruleLabel, soughtIn, tagsOn, useNow, type App, type ListedTodo, type PluginHost, type Results, type TodoChange, type TodoCompletion } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
+import { QueryBar } from "../lib/QueryBar.tsx";
 import { IMPORTANCE } from "./chips.ts";
 import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
-import { DUE_FILTERS, addDays, dayOf, dueLabel, dueRange, dueState, type DueFilter } from "./dates.ts";
+import { addDays, dayOf, dueLabel, dueState, savedQuery } from "./dates.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { RuleEditor } from "./RuleEditor.tsx";
 
-/** What the list is narrowed to. Kept in this browser, so the page opens the way it was left. */
-interface Filters {
-  /** A folder's id, for its notes and those of every folder under it, or "" for every folder. */
-  folder: string;
-  tag: string;
-  due: DueFilter;
-  /** A level, or "" for any. */
-  importance: string;
-  completed: boolean;
-  /** Whether todos in archived notes are listed too. */
-  archived: boolean;
-}
-
-const EVERYTHING: Filters = { folder: "", tag: "", due: "any", importance: "", completed: false, archived: false };
-
-const stored = (value: unknown): Filters => {
-  const kept = typeof value === "object" && value !== null ? (value as Partial<Record<keyof Filters, unknown>>) : {};
-  return {
-    folder: typeof kept.folder === "string" ? kept.folder : "",
-    tag: typeof kept.tag === "string" ? kept.tag : "",
-    due: typeof kept.due === "string" && kept.due in DUE_FILTERS ? (kept.due as DueFilter) : "any",
-    importance: typeof kept.importance === "string" && /^[0-3]?$/.test(kept.importance) ? kept.importance : "",
-    completed: kept.completed === true,
-    archived: kept.archived === true,
-  };
-};
-
-type Query = Omit<Extract<OpInput, { type: "todo.list" }>, "type">;
-
-const queryOf = (filters: Filters, now: string): Query => ({
-  ...(filters.folder && { folderId: filters.folder }),
-  ...(filters.tag && { tag: filters.tag }),
-  ...(filters.importance && { importance: [Number(filters.importance) as Importance] }),
-  ...dueRange(filters.due, now),
-  includeCompleted: filters.completed,
-  includeArchived: filters.archived,
-});
+/** How long typing rests before the list is asked for, so a word is one ask and not one a letter. */
+const PAUSE_MS = 200;
 
 const keyOf = (todo: Pick<ListedTodo, "noteId" | "line">) => `${todo.noteId}/${todo.line}`;
 
@@ -66,19 +32,6 @@ function changed(todo: ListedTodo, change: TodoChange, on: string): ListedTodo {
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
 const comesAround = (todo: ListedTodo, on: string) => !todo.done && changeTodo(todo.text, { done: true }, on).filed !== null;
-
-/** Every folder the member sees, outermost first and each before the folders under it, by its path. */
-function folderChoices(folders: Folders | null): { id: string; path: string }[] {
-  const found: { id: string; path: string }[] = [];
-  const visit = (parentId: string | null) => {
-    for (const folder of folders?.childrenOf(parentId) ?? []) {
-      found.push({ id: folder.id, path: folders!.pathName(folder.id) });
-      visit(folder.id);
-    }
-  };
-  visit(null);
-  return found;
-}
 
 /** A todo's words with the tags written on its line drawn as tags. */
 function Words({ words }: { words: string }) {
@@ -272,53 +225,76 @@ interface Props {
 }
 
 export function TodosPage({ host, app, onOpen }: Props) {
-  const [filters, setFilters] = useState(() => stored(host.storage.get("filters")));
+  /** The query the page's address names with `?q=`, as a link to the page does. */
+  const linked = useMemo(() => new URLSearchParams(app.query).get("q")?.trim() ?? null, [app.query]);
+  /** What is in the bar, and the query the list is of: the same once typing rests. It is kept in this browser, so the page opens the way it was left. */
+  const [typed, setTyped] = useState(() => (linked ?? savedQuery(host.storage.get("query"), host.storage.get("filters"))).slice(0, MAX_SEARCH_LENGTH));
+  const [query, setQuery] = useState(typed);
   const [page, setPage] = useState<Results["todo.list"] | null>(null);
-  const [tags, setTags] = useState<readonly string[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
+  /** What the server said of a query that reads and can't be answered, and the query it said it of. */
+  const [unanswered, setUnanswered] = useState<{ query: string; message: string } | null>(null);
   const [asked, setAsked] = useState(0);
   /** The recurring todos whose completion is on its way. Checked again before it lands, one would be completed twice. */
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
-  /** The changes on their way to the server, one at a time, how many there are, and the revision each note they changed is at now. */
   /** The todos as the page shows them now, for an Undo pressed after more was changed. */
   const shown = useRef<readonly ListedTodo[]>([]);
   shown.current = page?.todos ?? [];
+  /** The changes on their way to the server, one at a time, how many there are, and the revision each note they changed is at now. */
   const sending = useRef({ last: Promise.resolve(), count: 0, revisions: new Map<string, number>() });
   // Today is the member's own: the day it is in this browser, looked at again each minute.
   const now = dayOf(new Date(useNow()));
-  const folders = useMemo(() => folderChoices(app.folders), [app.folders]);
-  // A folder the member left the list narrowed to may be gone since, or theirs to see no longer: the list is then of every folder.
-  const folder = app.folders && !app.folders.byId.has(filters.folder) ? "" : filters.folder;
-  const query = useMemo(() => queryOf({ ...filters, folder }, now), [filters, folder, now]);
-  // Whether the folder the list was left narrowed to is still there isn't known until the folders are.
-  const waiting = filters.folder !== "" && !app.folders;
+  const read = useMemo(() => parseQuery(query, "todos"), [query]);
+  const ask = useMemo(() => ({ query, today: now, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }), [query, now]);
+  /** The tag the list is narrowed to, which a todo listed for its note's tag says beside the note. */
+  const tag = (read.ok && soughtIn(read.query).tags[0]) || "";
   // The list is read again whenever a note the member can see changes, by anyone, or is archived, trashed, or brought back.
   const version = useMemo(() => (app.notes ?? []).map((n) => `${n.id}:${n.revision}:${n.state}`).join(","), [app.notes]);
 
+  const run = (text: string) => {
+    setQuery(text);
+    setProblem(null);
+    host.storage.set("query", text);
+  };
+  // A link's query is the one the page is left at, whether the link opened the page or was followed while it was open.
+  const followed = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (waiting) return;
+    if (linked === followed.current) return;
+    followed.current = linked;
+    if (linked === null) return;
+    setTyped(linked.slice(0, MAX_SEARCH_LENGTH));
+    run(linked.slice(0, MAX_SEARCH_LENGTH));
+  }, [linked]);
+  const wanted = typed.trim();
+  useEffect(() => {
+    if (wanted === query) return;
+    const timer = setTimeout(() => run(wanted), PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [wanted, query]);
+
+  useEffect(() => {
+    // A query that can't be read is said so under the bar, and the list stays as it was.
+    if (!read.ok) return;
     let stale = false;
-    Promise.all([host.perform({ type: "todo.list", ...query }), host.perform({ type: "todo.filters", includeArchived: query.includeArchived })]).then(
-      ([listed, narrowing]) => {
+    host.perform({ type: "todo.list", ...ask }).then(
+      (listed) => {
         // A list read while changes are on their way doesn't have them yet. It is read again when they have landed.
         if (stale || sending.current.count) return;
         sending.current.revisions.clear();
         setPage(listed);
-        setTags(narrowing.tags);
+        setUnanswered(null);
       },
-      (err: unknown) => !stale && setProblem(err instanceof Error ? err.message : "The todos couldn't be read."),
+      (err: unknown) => {
+        if (stale) return;
+        // What was listed answered another query, so it is not left under why this one wasn't answered.
+        setPage(null);
+        setUnanswered({ query: ask.query, message: err instanceof Error ? err.message : "The todos couldn't be read." });
+      },
     );
     return () => {
       stale = true;
     };
-  }, [host, query, version, asked, waiting]);
-
-  const narrow = (change: Partial<Filters>) => {
-    const next = { ...filters, ...change };
-    setFilters(next);
-    setProblem(null);
-    host.storage.set("filters", next);
-  };
+  }, [host, ask, read.ok, version, asked]);
 
   /** Makes a change to a todo, after the ones before it. It answers with the todo's note as the change left it, or with why it was refused. */
   const send = useCallback(
@@ -376,79 +352,38 @@ export function TodosPage({ host, app, onOpen }: Props) {
 
   const more = () => {
     if (page?.next == null) return;
-    void host.perform({ type: "todo.list", ...query, offset: page.next }).then((next) => setPage((had) => (had ? { todos: [...had.todos, ...next.todos], next: next.next } : next)));
+    void host.perform({ type: "todo.list", ...ask, offset: page.next }).then((next) => setPage((had) => (had ? { todos: [...had.todos, ...next.todos], next: next.next } : next)));
   };
-
-  // A filter the member left on names something that may be gone since; it stays choosable so it can be seen and taken off.
-  const offered = (names: readonly string[], chosen: string) => (chosen && !names.some((n) => n.toLowerCase() === chosen.toLowerCase()) ? [...names, chosen] : names);
-  const narrowed = JSON.stringify({ ...filters, folder }) !== JSON.stringify(EVERYTHING);
 
   return (
     <section className="todos-page" aria-label="Todos">
       <h1>Todos</h1>
-      <div className="todo-filters" role="group" aria-label="Filters">
-        <label>
-          Folder
-          <select value={folder} onChange={(e) => narrow({ folder: e.target.value })}>
-            <option value="">All folders</option>
-            {folders.map(({ id, path }) => (
-              <option key={id} value={id}>
-                {path}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Tag
-          <select value={filters.tag} onChange={(e) => narrow({ tag: e.target.value })}>
-            <option value="">All tags</option>
-            {offered(tags, filters.tag).map((name) => (
-              <option key={name} value={name}>
-                #{name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Due
-          <select value={filters.due} onChange={(e) => narrow({ due: e.target.value as DueFilter })}>
-            {Object.entries(DUE_FILTERS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Importance
-          <select value={filters.importance} onChange={(e) => narrow({ importance: e.target.value })}>
-            <option value="">Any</option>
-            {[3, 2, 1, 0].map((level) => (
-              <option key={level} value={level}>
-                {IMPORTANCE[level]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="todo-completed">
-          <input type="checkbox" checked={filters.completed} onChange={(e) => narrow({ completed: e.target.checked })} />
-          Include completed
-        </label>
-        <label className="todo-completed">
-          <input type="checkbox" checked={filters.archived} onChange={(e) => narrow({ archived: e.target.checked })} />
-          Include archived
-        </label>
-      </div>
+      <QueryBar
+        host={host}
+        app={app}
+        scope="todos"
+        value={typed}
+        label="Filter todos"
+        placeholder="Filter todos: words, #tag, due:<today, is:done"
+        problem={unanswered?.query === query ? unanswered.message : null}
+        onChange={(text, how) => {
+          setTyped(text);
+          if (how === "set" || !text.trim()) run(text.trim());
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && wanted !== query) run(wanted);
+        }}
+      />
       {problem && (
         <p className="notice" role="alert">
           {problem}
         </p>
       )}
-      {page && page.todos.length === 0 && <p className="todo-none">{narrowed ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}</p>}
+      {page && page.todos.length === 0 && <p className="todo-none">{query ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}</p>}
       {page && page.todos.length > 0 && (
         <ul className="cards" aria-label="Todos">
           {page.todos.map((todo) => (
-            <Row key={keyOf(todo)} todo={todo} now={now} tag={filters.tag} app={app} completing={completing.has(keyOf(todo))} onChange={change} onOpen={onOpen} completions={completions} />
+            <Row key={keyOf(todo)} todo={todo} now={now} tag={tag} app={app} completing={completing.has(keyOf(todo))} onChange={change} onOpen={onOpen} completions={completions} />
           ))}
         </ul>
       )}

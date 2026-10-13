@@ -1,3 +1,5 @@
+import { syntaxText } from "../src/core/query.ts";
+
 // The `ink` command's logic, for an agent working from a shell. It is a thin client of the /mcp endpoint,
 // so it does what the MCP tools do and nothing more. scripts/ink.ts runs it on this machine.
 export interface Io {
@@ -14,8 +16,12 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   members                             everyone in a workspace, with their role
   notes [--folder ID] [--since TIME] [--tag NAME] [--archived true|only]
                                       the notes in a workspace, in one folder, with a tag, or changed since a time
-  search QUERY [--folder ID] [--archived true|only] [--has-todos true] [--sort match|recent|created|title] [--limit N] [--offset N]
-                                      the notes whose text has every word; "a phrase" and #tag narrow it
+  search QUERY [--today DAY] [--zone ZONE] [--folder ID] [--archived true|only] [--has-todos true]
+        [--sort match|recent|created|title] [--limit N] [--offset N]
+                                      the notes a query finds: words, "a phrase", and filters such as
+                                      folder:Plans, #tag, editor:@me, updated:>=7d, is:archived, has:link,
+                                      with -, OR, NOT and ( ). "ink syntax" lists every one. --today and
+                                      --zone are this machine's unless given
   tags [--archived true]              the tags of the notes you can see, and how many notes have each
   archive ID                          archive a note: kept, and left out of listings
   unarchive ID                        bring an archived note back
@@ -29,9 +35,12 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       replace a note's text (from stdin if --text is left out)
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
-  todos [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY] [--no-due true] [--importance N,N]
-        [--completed true] [--archived true] [--note ID] [--limit N] [--offset N]
-                                      the todos in the notes you can see, open ones unless --completed
+  todos [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY]
+        [--no-due true] [--importance N,N] [--completed true] [--archived true] [--note ID] [--limit N] [--offset N]
+                                      the todos a query finds, such as "due:<today importance:>=2", or every
+                                      open one with none; --query QUERY is the same. "ink syntax todos" lists
+                                      what a query can say
+  syntax [todos]                      the query language of search, or of todos
   todo-filters [--archived true]      the tags that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none]
         [--every RULE|none] [--skip true] [--on DAY]
@@ -192,8 +201,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
       io.out(USAGE);
       return command ? 0 : 1;
     }
-    if (!token) throw new UsageError("Set INK_TOKEN to an agent token from Common Ink");
     const id = positional[0];
+    // What a query can say is the same for everyone, so it is said with no token.
+    if (command === "syntax") {
+      if (id !== undefined && id !== "todos") throw new UsageError("syntax takes nothing, or todos");
+      io.out(syntaxText(id === "todos" ? "todos" : "notes"));
+      return 0;
+    }
+    if (!token) throw new UsageError("Set INK_TOKEN to an agent token from Common Ink");
     const need = (what: string) => id ?? (() => { throw new UsageError(`${command} needs ${what}`); })();
     const needId = () => need("a note id");
     const needFlag = (name: string) => flags.get(name) ?? (() => { throw new UsageError(`${command} needs --${name}`); })();
@@ -204,6 +219,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const author = (_: string, value: string) => authorRef(value);
     const truth = (_: string, value: string) => value !== "false";
     const archivedToo = (_: string, value: string) => (value === "only" ? "only" : value !== "false");
+
+    /** What a query's days are read by: this machine's day and zone, unless they are given. */
+    const days = () => {
+      const now = new Date();
+      const local = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      return { today: flags.get("today") ?? local, zone: flags.get("zone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone };
+    };
 
     let tool: string;
     let args: Record<string, unknown> = {};
@@ -220,7 +242,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "search":
         tool = "search";
-        args = { query: need("what to find"), ...given({ folderId: ["folder"], includeArchived: ["archived", archivedToo], hasTodos: ["has-todos", truth], sort: ["sort"], limit: ["limit", integer], offset: ["offset", integer] }) };
+        args = { query: need("what to find"), ...days(), ...given({ folderId: ["folder"], includeArchived: ["archived", archivedToo], hasTodos: ["has-todos", truth], sort: ["sort"], limit: ["limit", integer], offset: ["offset", integer] }) };
         break;
       case "tags":
         tool = "list_tags";
@@ -261,19 +283,26 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "todos":
         tool = "list_todos";
-        args = given({
-          folderId: ["folder"],
-          tag: ["tag"],
-          dueFrom: ["due-from"],
-          dueTo: ["due-to"],
-          noDue: ["no-due", truth],
-          importance: ["importance", integers],
-          includeCompleted: ["completed", truth],
-          includeArchived: ["archived", truth],
-          noteId: ["note"],
-          limit: ["limit", integer],
-          offset: ["offset", integer],
-        });
+        if (id !== undefined && flags.has("query")) throw new UsageError("todos takes its query once: after the command, or as --query");
+        args = {
+          ...(id !== undefined && { query: id }),
+          ...days(),
+          ...given({
+            query: ["query"],
+            folderId: ["folder"],
+            tag: ["tag"],
+            dueFrom: ["due-from"],
+            dueTo: ["due-to"],
+            noDue: ["no-due", truth],
+            importance: ["importance", integers],
+            includeCompleted: ["completed", truth],
+            includeArchived: ["archived", truth],
+            noteId: ["note"],
+            limit: ["limit", integer],
+            offset: ["offset", integer],
+  
+          }),
+        };
         break;
       case "todo-filters":
         tool = "todo_filters";

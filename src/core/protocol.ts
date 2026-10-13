@@ -1,7 +1,11 @@
 import { z } from "zod";
 import type { NoteState } from "./lifecycle.ts";
 import { parseRule } from "./recurrence.ts";
+import { dayIn } from "./history.ts";
+import { MAX_SEARCH_LENGTH } from "./query.ts";
 import { isDay, type LastDone } from "./todos.ts";
+
+export { MAX_SEARCH_LENGTH };
 
 export const MAX_NOTE_LENGTH = 500_000;
 export const MAX_SETTINGS_LENGTH = 100_000;
@@ -82,6 +86,25 @@ const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
+/** A time zone by its name, such as Europe/Paris. */
+const Zone = z
+  .string()
+  .max(64)
+  .refine((zone) => {
+    try {
+      dayIn(zone);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "not a time zone, such as Europe/Paris");
+/**
+ * What a query's days are read by. `today` is the day it is for the asker, which `today`, `yesterday`,
+ * `tomorrow`, `7d` and `+7d` are counted from: the server never works it out, so a query with one of
+ * them and no `today` is refused. `zone` is where a day begins and ends for `updated:` and `created:`.
+ * Left out, it is the zone the member's settings name, or UTC.
+ */
+const Days = { today: Day.optional(), zone: Zone.optional() };
 /** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done`, `last-fri`, `mar-1` or `1m-times-5`. docs/todos.md has every rule. */
 const Recurrence = z.string().max(1000).refine((rule) => parseRule(rule) !== null, "not a way to recur, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 or 1m-times-5");
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
@@ -95,7 +118,6 @@ const Archived = z.union([z.boolean(), z.literal("only")]).default(false);
 /** The orders a search answers in. `match` is notes whose title matches first, then the latest changed. */
 export const SEARCH_SORTS = ["match", "recent", "created", "title"] as const;
 export type SearchSort = (typeof SEARCH_SORTS)[number];
-export const MAX_SEARCH_LENGTH = 200;
 
 export const Op = z.discriminatedUnion("type", [
   /**
@@ -154,14 +176,19 @@ export const Op = z.discriminatedUnion("type", [
   /** The tags of the notes the asker can see, each with how many of those notes have it. */
   z.object({ type: z.literal("tag.list"), includeArchived: IncludeArchived }),
   /**
-   * The notes the asker can see whose text has every word of `query`. A word matches the start of a
-   * word in the note, ignoring case and accents; words in "double quotes" match as a phrase; `#name`
-   * narrows to notes with that tag. Notes whose
-   * title matches come first, then the latest changed, unless `sort` asks for another order: the
-   * latest changed, the latest made, or by title. `folderId` narrows to the notes in one folder,
-   * not those of the folders inside it: a folder the asker can't see is no such folder.
-   * `hasTodos` narrows to notes with an open todo, and `includeArchived: "only"` to archived notes.
-   * Pass the answer's `next` as `offset` for more.
+   * The notes the asker can see that `query` finds, written in the query language of docs/search.md:
+   * words, each matching the start of a word in the note, ignoring case and accents; "a phrase"; filters
+   * such as `folder:`, `tag:` or `#name`, `updated:`, `editor:`, `is:`, `has:`; `-` and `NOT`, `OR`, and
+   * parentheses. A query that can't be read is refused as invalid, saying where and why, and so is a
+   * `folder:` or an `editor:` that names nothing the asker can see. A query with no words and no filter
+   * finds nothing. Notes whose title matches come first, then the latest changed, unless the query's
+   * `sort:` or else `sort` asks for another order. Archived notes are left out unless the query says
+   * `is:archived`, and notes in Trash unless it says `is:trashed`.
+   *
+   * The fields beside `query` are from before it could say them, and narrow it further: `folderId` to
+   * the notes in one folder, not those of the folders inside it, where a folder the asker can't see is
+   * no such folder; `hasTodos` to notes with an open todo; `includeArchived` to cover archived notes
+   * too, or with `"only"` them alone. Pass the answer's `next` as `offset` for more.
    */
   z.object({
     type: z.literal("search"),
@@ -170,6 +197,7 @@ export const Op = z.discriminatedUnion("type", [
     includeArchived: Archived,
     hasTodos: z.boolean().default(false),
     sort: z.enum(SEARCH_SORTS).default("match"),
+    ...Days,
     limit: z.number().int().min(1).max(50).default(20),
     offset: z.number().int().min(0).default(0),
   }),
@@ -239,17 +267,24 @@ export const Op = z.discriminatedUnion("type", [
    */
   z.object({ type: z.literal("links.rebuild") }),
   /**
-   * The todos in the notes the asker can see: open ones, or done ones too with `includeCompleted`.
-   * Open ones come first, then by due date with those that have none last, then the most important.
-   * `dueFrom` and `dueTo` are days, both included, and leave out todos with no due date; `noDue`
-   * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `tag` matches ignoring
-   * case, and is a tag of the todo's note: one written on the todo's own line, or anywhere else in the
-   * note. `folderId` lists the todos of the notes in that folder and in every folder under it; one the
-   * asker can't see is no folder. Pass the answer's `next` as `offset` for the page after. A field it
-   * doesn't know is refused, so a filter it no longer has, such as a project, is never read as no filter.
+   * The todos in the notes the asker can see that `query` finds, in the same language as search's:
+   * words are looked for in the todo's own line, and `is:done`, `due:`, `importance:`, `has:due` and
+   * `has:recurrence` are of the todo. With no query it is every open todo. Done ones are listed when
+   * the query says `is:done`, and both with `is:open OR is:done`. Open ones come first, then by due
+   * date with those that have none last, then the most important, unless the query's `sort:` says otherwise.
+   *
+   * The fields beside `query` are from before it could say them, and narrow it further. `dueFrom` and
+   * `dueTo` are days, both included, and leave out todos with no due date; `noDue` lists only those.
+   * `importance` lists the levels wanted, 0 for normal to 3. `tag` matches ignoring case, and is a tag
+   * of the todo's note: one written on the todo's own line, or anywhere else in the note. `folderId`
+   * lists the todos of the notes in that folder and in every folder under it; one the asker can't see
+   * is no folder. Pass the answer's `next` as `offset` for the page after. A field it doesn't know is
+   * refused, so a filter it no longer has, such as a project, is never read as no filter.
    */
   z.object({
     type: z.literal("todo.list"),
+    query: z.string().max(MAX_SEARCH_LENGTH).default(""),
+    ...Days,
     folderId: Id.optional(),
     tag: z.string().min(1).max(100).optional(),
     dueFrom: Day.optional(),

@@ -94,7 +94,7 @@ An agent's completion is filed on the daily note of the member it acts for, as t
 
 ## Today
 
-A due date is a day, and whether it is today depends on who is looking. The browser works out today from its own clock and time zone (`src/web/plugins/todos/dates.ts`). The server never works out today: `todo.list` takes `dueFrom` and `dueTo` as days, so "overdue" is asked for as "due on or before yesterday", with yesterday said by the asker. An agent passes the days it means.
+A due date is a day, and whether it is today depends on who is looking. The browser works out today from its own clock and time zone (`src/web/plugins/todos/dates.ts`). The server never works out today: `todo.list` takes `today`, the asker's day, and a query's `due:<today` is counted from it. A query that counts a day from today and comes with no `today` is refused. `dueFrom` and `dueTo` are days as they always were. An agent passes the days it means.
 
 The one place the server does work out a day is a completion with no day given. `todo.set`, `note.write` and `daily.open` take `on`, the completer's day, and the app always sends it. An agent that leaves it out gets today in the zone its member's setting `daily.timeZone` names, or in UTC when it names none. The server reads those three settings of the member's to file a completion. It tells an agent none of them.
 
@@ -102,7 +102,7 @@ The one place the server does work out a day is a completion with no day given. 
 
 Two tables hold what the Todos page lists, so that no note's text is read to list todos:
 
-- `todos`: one row for each todo, with its note, its line counted from 0, whether it is done, its importance, its due date, and the line as written.
+- `todos`: one row for each todo, with its note, its line counted from 0, whether it is done, its importance, its due date, the line as written, whether it recurs, and the line's words alone in small letters without accents (`words`), which a word of a query is found in by its start, as the search index finds a note's.
 - `note_tags`: one row for each tag of each note, as a key in lower case and the name as first written. #21 lists notes by tag from here.
 
 Migration `0034` drops the table `todo_projects`, which held the projects. The other two hold what they held, so nothing is made again for it.
@@ -124,7 +124,7 @@ The index mends itself. Each note carries `indexed`, which is 0 until its links 
 | `daily.open` | `daily_note` | `daily` | a member who can make notes, and their agent unless it is limited to folders |
 | `todos.rebuild` | `rebuild_todos` | `todos-rebuild` | admin |
 
-`todo.list` lists open todos, or done ones too with `includeCompleted`, from the notes the asker can see: open first, then the soonest due with undated ones last, then the most important. It narrows by `folderId` (that folder and every folder under it), by `tag` (a tag of the todo's note, which a tag on the todo's own line is), by `dueFrom` and `dueTo` (both included), by `noDue`, by `importance` (the levels wanted), and by `noteId`. `todo.filters` gives the tags there are to narrow by, and `folder.list` the folders. Both carry `SEEN`: a todo in a note the asker can't see is not listed, not counted, and its tag names are not offered. The folder narrows inside that and never widens it: it is read by `loadFolder`, so a folder the asker can't see, an agent's folder limit included, is "No such folder" as one that was never there is, and a private note inside a folder they can see is still not listed.
+`todo.list` lists the todos its `query` finds, in the query language of `docs/search.md`: words of the todo's own line, `is:done`, `due:`, `importance:`, `has:due`, `has:recurrence`, and the filters of its note, `folder:`, `tag:`, `editor:`, `updated:` and the rest. With no query it is the open todos of the notes the asker can see: open first, then the soonest due with undated ones last, then the most important. Its older fields are turned into the same query and narrow it further, so there is one way the list is narrowed. It narrows by `folderId` (that folder and every folder under it), by `tag` (a tag of the todo's note, which a tag on the todo's own line is), by `dueFrom` and `dueTo` (both included), by `noDue`, by `importance` (the levels wanted), and by `noteId`. `todo.filters` gives the tags there are to narrow by, and `folder.list` the folders. Both carry `SEEN`: a todo in a note the asker can't see is not listed, not counted, and its tag names are not offered. The folder narrows inside that and never widens it: it is read by `loadFolder`, so a folder the asker can't see, an agent's folder limit included, is "No such folder" as one that was never there is, and a private note inside a folder they can see is still not listed.
 
 `todo.set` rewrites one todo's line as a change to its note by whoever asks. It takes the todo as `todo.list` gave it: `id`, the note's `revision`, `line` and `text`. The line the caller was shown is followed through every change recorded since that revision, by mapping its place through each change, so it is found wherever it has moved to. What a line says never decides which line it is, so another todo that reads the same is never taken for it. When the line itself was changed or deleted since, the call is refused as a conflict and nothing is written. The same call made twice is done once: the second finds the line already reading as asked.
 
@@ -147,7 +147,7 @@ The recurrence chip opens the editor of the rule (`RuleEditor.tsx`), in two stag
 
 Each todo is a card, in the look of the Plugins page and of a folder's notes. A card has two things to press: its checkbox, and its words, which open its note with the cursor on its line. Everything else is in one menu, from the card's "…" button, a right-click on the card, or the menu key or Shift+F10 with the keyboard in the card: open the note, open it to the side, set importance, set, pick or clear the due date, and **Recurrence…**, which opens the editor of the rule that the chip in a note opens. There, **Edit as text** is one field for the rule as written, since there is no token to put the cursor on, and skipping is `todo.set` with `skip`. A todo that has been checked off as a recurring one has **Completions** there too, which lists each time, and which someone who can only read the note has as well. Importance, the due date, the recurrence in words and the last-done mark are shown on the card as plain chips when they are set, and a todo with none shows none.
 
-The list is narrowed by folder, tag, due date and importance, and to completed ones too. The filters are kept in the browser, so the page opens as it was left.
+The list is narrowed by a query, typed in the bar at the top or built in **Advanced** beside it, which is the bar and the builder of the Search page (`docs/search.md`, `plugins/lib/QueryBar.tsx`). With nothing typed it is every open todo. The query is kept in the browser, so the page opens as it was left, and what a browser kept of the page's earlier filters is read as the query that says the same (`savedQuery` in `plugins/todos/dates.ts`).
 
 ## Undo
 

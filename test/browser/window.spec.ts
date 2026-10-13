@@ -189,6 +189,8 @@ async function listedIn(part: Locator, things: string) {
 
 test("a closed sidebar leaves a bar with an icon for each thing the sidebar lists, in the sidebar's own order, and each goes where it says", async ({ page }) => {
   await withNote(page);
+  // The Tags section is drawn once the tags have been asked for.
+  await expect(sidebar(page).locator(".section-head > span")).toHaveText(["Folders", "Tags"]);
   const open = await listedIn(sidebar(page), ".new-note, nav[aria-label=Modes] > *, .section-head > span");
   expect(open.map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders", "Tags"]);
 

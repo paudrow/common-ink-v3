@@ -16,6 +16,39 @@ import type { IconName } from "./icons.tsx";
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
 export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH } from "../core/protocol.ts";
+/**
+ * The query language notes and todos are found by, as the server reads it: what is typed to a query
+ * and back, every filter there is with what it takes and means, and what is being typed at the
+ * cursor. A bar that takes a query, a builder of one and the help are all made from these.
+ */
+export {
+  EMPTY as EMPTY_QUERY,
+  FILTERS,
+  filterOf,
+  keyNamed,
+  keysFor,
+  keysStarting,
+  names as queryNames,
+  parse as parseQuery,
+  print as printQuery,
+  soughtIn,
+  syntax as querySyntax,
+  typingAt,
+  wordsFor,
+  wordsOf,
+  written as writtenValue,
+  type Cmp,
+  type Filter as QueryFilter,
+  type FilterKey,
+  type In as QueryIn,
+  type Key as QueryKey,
+  type Node as QueryNode,
+  type Query,
+  type QueryError,
+  type Scope as QueryScope,
+  type SortKey,
+  type SyntaxRow,
+} from "../core/query.ts";
 /** Where two lists of lines differ, for a view that marks what changed inside a line. */
 export { lineHunks } from "../core/text.ts";
 

@@ -16,7 +16,12 @@ const authors = async (page: Page, id: string) => (await perform(page, { type: "
 const todosPage = (page: Page) => page.getByRole("region", { name: "Todos" });
 const rows = (page: Page) => todosPage(page).getByRole("list", { name: "Todos" }).getByRole("listitem");
 const row = (page: Page, text: string | RegExp) => rows(page).filter({ hasText: text });
-const filter = (page: Page, name: string) => todosPage(page).getByRole("group", { name: "Filters" }).getByLabel(name);
+/** The bar a query is typed in, and the builder Advanced opens under it. */
+const bar = (page: Page) => todosPage(page).getByRole("searchbox", { name: "Filter todos" });
+const advanced = (page: Page) => todosPage(page).getByRole("button", { name: "Advanced" });
+const builder = (page: Page) => todosPage(page).getByRole("group", { name: "Advanced filter" });
+const condition = (page: Page, n: number) => builder(page).getByRole("group", { name: `Condition ${n}` });
+const problem = (page: Page) => todosPage(page).getByRole("status");
 const words = (page: Page) => rows(page).locator(".todo-words > :first-child");
 const cursorLine = (page: Page) => page.evaluate(() => getSelection()!.anchorNode?.parentElement?.closest(".cm-line")?.textContent);
 const localDay = (page: Page, days = 0) =>
@@ -270,19 +275,37 @@ const toast = (page: Page) => page.locator(".toast");
 const laidOut = (page: Page, within: string) =>
   page.evaluate((selector) => [...document.querySelectorAll<HTMLElement>(selector)].map((el) => [el.className || el.tagName, ...(["x", "y", "width", "height"] as const).map((side) => Math.round(el.getBoundingClientRect()[side] * 10) / 10)].join(" ")), within);
 
-test("the Todos page lists open todos from every note, and narrows by folder, tag, due date and importance, and to completed ones too", async ({ page }) => {
+test("the Todos page lists open todos from every note, and its builder narrows by folder, tag, due date and importance, and to completed ones too", async ({ page }) => {
   const { home, work } = await twoNotes(page);
 
   await expect(todosPage(page).getByRole("heading", { level: 1 })).toHaveText("Todos");
   // A +Name is words of the todo: nothing is made of it.
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
   await expect(row(page, "Ship it").locator(".todo-note")).toHaveText("Work #office");
-  await expect(filter(page, "Project")).toHaveCount(0);
+  // At rest there is the bar and Advanced, and no filter of the page's own.
+  await expect(bar(page)).toHaveValue("");
+  await expect(todosPage(page).getByRole("combobox")).toHaveCount(0);
+  await expect(todosPage(page).getByRole("group", { name: "Filters" })).toHaveCount(0);
 
-  await filter(page, "Include completed").check();
+  // Done todos too: any of open or done, which the builder writes in the bar.
+  await advanced(page).click();
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "open", "done", "archived", "trashed", "shared", "private"]);
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption("open");
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 2).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
+  await condition(page, 2).getByRole("combobox", { name: "Value" }).selectOption("done");
+  await expect(bar(page)).toHaveValue("is:open is:done");
+  await expect(todosPage(page)).toContainText("No todos match.");
+  await builder(page).getByRole("radio", { name: "Match any" }).check();
+  await expect(bar(page)).toHaveValue("is:open OR is:done");
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes", "Book flights"]);
   await expect(row(page, "Book flights").getByRole("checkbox")).toBeChecked();
-  await filter(page, "Include completed").uncheck();
+  await condition(page, 2).getByRole("button", { name: "Remove condition 2" }).click();
+  await condition(page, 1).getByRole("button", { name: "Remove condition 1" }).click();
+  await expect(bar(page)).toHaveValue("");
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
 
   // A folder lists its notes' todos and those of the folders under it.
   const house = await perform(page, { type: "folder.create", name: "House" });
@@ -291,41 +314,167 @@ test("the Todos page lists open todos from every note, and narrows by folder, ta
   await perform(page, { type: "note.move", id: home.id, folderId: garden.id });
   await perform(page, { type: "note.move", id: work.id, folderId: office.id });
   await page.reload();
-  await expect(filter(page, "Folder").getByRole("option")).toHaveText(["All folders", "Unsorted", "House", "House / Garden", "Office"]);
-  await filter(page, "Folder").selectOption("House");
+  await advanced(page).click();
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Folder" });
+  const folder = condition(page, 1).getByRole("combobox", { name: "Value" });
+  await expect(folder.getByRole("option")).toHaveText(["Choose…", "House", "House / Garden", "Office", "Unsorted"]);
+  await folder.selectOption({ label: "House" });
+  await expect(bar(page)).toHaveValue("folder:House");
   await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside"]);
-  await filter(page, "Folder").selectOption("House / Garden");
+  await folder.selectOption({ label: "House / Garden" });
   await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside"]);
-  await filter(page, "Folder").selectOption("Office");
+  await folder.selectOption({ label: "Office" });
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
-  await filter(page, "Folder").selectOption("Unsorted");
+  await condition(page, 1).getByRole("combobox", { name: "Is or is not" }).selectOption("is not");
+  await expect(bar(page)).toHaveValue("-folder:Office");
+  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside"]);
+  await condition(page, 1).getByRole("combobox", { name: "Is or is not" }).selectOption("is");
+  await folder.selectOption({ label: "Unsorted" });
   await expect(todosPage(page)).toContainText("No todos match.");
-  await filter(page, "Folder").selectOption("All folders");
 
-  await expect(filter(page, "Tag").getByRole("option")).toHaveText(["All tags", "#office", "#outside"]);
-  await filter(page, "Importance").selectOption("!!");
+  // Importance and due take a comparison, and a row is no part of the query until it says something.
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Importance" });
+  await expect(bar(page)).toHaveValue("");
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption("2");
+  await expect(bar(page)).toHaveValue("importance:2");
   await expect(words(page)).toHaveText(["Call the bank +Home"]);
-  await filter(page, "Importance").selectOption("Normal");
+  await condition(page, 1).getByRole("combobox", { name: "Comparison" }).selectOption("on or after");
+  await expect(bar(page)).toHaveValue("importance:>=2");
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home"]);
+  await condition(page, 1).getByRole("combobox", { name: "Comparison" }).selectOption("on");
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption("0");
   await expect(words(page)).toHaveText(["Write notes"]);
-  await filter(page, "Importance").selectOption("Any");
-  await filter(page, "Due").selectOption("No date");
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Due" });
+  await condition(page, 1).getByRole("combobox", { name: "Comparison" }).selectOption("between");
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).fill("2026-10-13");
+  await expect(bar(page)).toHaveValue("");
+  await condition(page, 1).getByRole("combobox", { name: "To" }).fill("2026-10-31");
+  await expect(bar(page)).toHaveValue("due:2026-10-13..2026-10-31");
+  await expect(words(page)).toHaveText(["Call the bank +Home"]);
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Has" });
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption("due");
+  await condition(page, 1).getByRole("combobox", { name: "Is or is not" }).selectOption("is not");
+  await expect(bar(page)).toHaveValue("no:due");
   await expect(words(page)).toHaveText(["Water plants #outside", "Write notes"]);
+  await builder(page).getByRole("combobox", { name: "Sort" }).selectOption("title-desc");
+  await expect(bar(page)).toHaveValue("no:due sort:title-desc");
+  await expect(words(page)).toHaveText(["Write notes", "Water plants #outside"]);
 
   // The page opens the way it was left.
   await page.reload();
-  await expect(filter(page, "Due")).toHaveValue("none");
-  await expect(words(page)).toHaveText(["Water plants #outside", "Write notes"]);
+  await expect(bar(page)).toHaveValue("no:due sort:title-desc");
+  await expect(words(page)).toHaveText(["Write notes", "Water plants #outside"]);
 
-  // A folder the list was left narrowed to and that is gone since narrows nothing.
-  await filter(page, "Due").selectOption("Any date");
-  await filter(page, "Folder").selectOption("Office");
+  // A folder the list was left narrowed to and that is gone since is said to be no folder, and taking it out of the bar lists everything again.
+  await bar(page).fill("folder:Office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
   await perform(page, { type: "note.move", id: work.id, folderId: house.id });
   await perform(page, { type: "folder.delete", id: office.id });
   await page.reload();
-  await expect(filter(page, "Folder")).toHaveValue("");
+  await expect(bar(page)).toHaveValue("folder:Office");
+  await expect(problem(page)).toHaveText('No folder named "Office"');
+  await expect(rows(page)).toHaveCount(0);
+  await bar(page).fill("");
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
+  await expect(problem(page)).toHaveCount(0);
   await expect(todosPage(page).getByRole("alert")).toHaveCount(0);
+});
+
+test("the Todos page's bar takes the query language as typed: words of a todo's line, filters, OR and NOT, with what can't be read said under it", async ({ page }) => {
+  await twoNotes(page);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
+  const asked = async (query: string, found: string[]) => {
+    await bar(page).fill(query);
+    await expect(words(page), query).toHaveText(found);
+  };
+  await asked("bank", ["Call the bank +Home"]);
+  await asked("notes OR plants", ["Water plants #outside", "Write notes"]);
+  await asked("-ship -notes", ["Call the bank +Home", "Water plants #outside"]);
+  // Words are the todo's own, and with in:title its note's.
+  await asked("work in:title", ["Ship it", "Write notes"]);
+  await asked("is:done", ["Book flights"]);
+  await asked("importance:>=2", ["Ship it", "Call the bank +Home"]);
+  await asked("importance:1..2 sort:importance-desc", ["Call the bank +Home", "Water plants #outside"]);
+  await asked("has:due sort:due-desc", ["Call the bank +Home", "Ship it"]);
+  await asked("#office no:due", ["Write notes"]);
+  await asked("editor:@me -tag:office", ["Call the bank +Home", "Water plants #outside"]);
+  await asked("due:<2026-10-13 OR no:due", ["Ship it", "Water plants #outside", "Write notes"]);
+
+  // A query that can't be read is said so, with where, and the list stays as it was. One for notes alone says so.
+  await bar(page).fill("importance:9");
+  await expect(problem(page)).toContainText('importance: takes a number from 0 to 3, and "9" isn\'t one');
+  await expect(problem(page).locator("mark")).toHaveText("9");
+  await expect(bar(page)).toHaveAttribute("aria-invalid", "true");
+  await expect(words(page)).toHaveText(["Ship it", "Water plants #outside", "Write notes"]);
+  await bar(page).fill("has:todo");
+  await expect(problem(page)).toContainText("has:todo is for notes, and this is a search of todos");
+  await bar(page).fill("importance:3");
+  await expect(problem(page)).toHaveCount(0);
+  await expect(words(page)).toHaveText(["Ship it"]);
+
+  // One the server refuses is said so too, and the list of the query before is not left under it.
+  await bar(page).fill("folder:Nowhere");
+  await expect(problem(page)).toHaveText('No folder named "Nowhere"');
+  await expect(rows(page)).toHaveCount(0);
+  await bar(page).fill("importance:3");
+  await expect(problem(page)).toHaveCount(0);
+  await expect(words(page)).toHaveText(["Ship it"]);
+
+  // The filters of todos are offered as they are typed, and Tab takes one.
+  await bar(page).fill("");
+  await bar(page).pressSequentially("du");
+  await expect(todosPage(page).getByRole("option")).toHaveText([/^due:/]);
+  await page.keyboard.press("Tab");
+  await expect(bar(page)).toHaveValue("due:");
+  await expect(todosPage(page).getByRole("option")).toHaveText(["today", "yesterday", "tomorrow", "7d", "+7d"]);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(bar(page)).toHaveValue("due:tomorrow ");
+  // Tomorrow is the day after the member's own today, whenever this runs.
+  const tomorrow = await perform(page, { type: "todo.list", query: `due:${await localDay(page, 1)}` });
+  await expect(words(page)).toHaveText(tomorrow.todos.map((todo) => todo.words));
+});
+
+test("the Todos page's bar and builder fit a window 380 wide, and nothing in them runs off its side", async ({ page }) => {
+  await twoNotes(page);
+  await page.setViewportSize({ width: 380, height: 800 });
+  // Focus, so the page has the whole window, as a member with a window this narrow would have it.
+  await bar(page).focus();
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeHidden();
+  await bar(page).fill("due:2026-10-01..2026-10-31 OR importance:>=2 OR -tag:office");
+  await advanced(page).click();
+  await builder(page).getByRole("button", { name: "Query syntax" }).click();
+  await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(3);
+  await builder(page).getByRole("combobox", { name: "Sort" }).selectOption("due-desc");
+  await expect(bar(page)).toHaveValue("due:2026-10-01..2026-10-31 OR importance:>=2 OR -tag:office sort:due-desc");
+  const over = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".query-bar, .query-bar *")].filter((el) => el.getClientRects().length && (el.getBoundingClientRect().right > innerWidth + 0.5 || el.getBoundingClientRect().left < -0.5)).map((el) => `${el.tagName}.${el.className}`));
+  expect(over).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("what a browser kept of the Todos page's old filters opens as the query that says the same", async ({ page }) => {
+  await twoNotes(page);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
+  await page.evaluate(async () => {
+    const me = (await (await fetch("/api/me")).json()) as { person: { id: string }; workspaces: { id: string }[] };
+    const key = (name: string) => `ink.plugin.todos.${me.workspaces[0]!.id}.${me.person.id}.${name}`;
+    localStorage.removeItem(key("query"));
+    localStorage.setItem(key("filters"), JSON.stringify({ folder: "", tag: "outside", due: "any", importance: "", completed: true, archived: false }));
+  });
+  await page.reload();
+  await expect(bar(page)).toHaveValue("tag:outside (is:open OR is:done)");
+  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside", "Book flights"]);
+  await expect(todosPage(page).getByRole("alert")).toHaveCount(0);
+  // A link to the page can name its query, which is then what the page is left at.
+  await page.goto("/todos?q=is%3Adone+-tag%3Aoffice");
+  await expect(bar(page)).toHaveValue("is:done -tag:office");
+  await expect(words(page)).toHaveText(["Book flights"]);
+  await page.goto("/todos");
+  await expect(bar(page)).toHaveValue("is:done -tag:office");
 });
 
 test("a todo has the tags on its own line and its note's: its own are drawn in its words, and one listed for its note's tag says so beside the note's name", async ({ page }) => {
@@ -336,14 +485,20 @@ test("a todo has the tags on its own line and its note's: its own are drawn in i
   await expect(row(page, "Water plants").locator(".todo-words > :first-child .todo-tag")).toHaveText(["#outside"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
 
-  // Under the tag of its own line: both todos of the note are tagged with it, and only the other one is told why.
-  await filter(page, "Tag").selectOption("#outside");
+  // Under the tag of its own line: both todos of the note are tagged with it, and only the other one is told why. The builder offers the tags todos have.
+  await advanced(page).click();
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Tag" });
+  await expect.poll(() => condition(page, 1).locator("datalist option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))).toEqual(["office", "outside"]);
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).fill("outside");
+  await expect(bar(page)).toHaveValue("tag:outside");
   await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside"]);
   await expect(row(page, "Call the bank").locator(".todo-meta .todo-tag")).toHaveText(["#outside"]);
   await expect(row(page, "Water plants").locator(".todo-meta .todo-tag")).toHaveCount(0);
 
   // Under a tag only the note's title writes: every todo of the note, each with the tag beside the note's name.
-  await filter(page, "Tag").selectOption("#office");
+  await bar(page).fill("#office");
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" })).toHaveValue("office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
   await expect(rows(page).locator(".todo-meta .todo-tag")).toHaveText(["#office", "#office"]);
 });
@@ -462,10 +617,10 @@ test("a todo's menu opens at the pointer when there is room, and is moved wholly
 test("checking a todo off on the Todos page says so in a toast, and Undo opens it again as a change of its own; opening one says nothing", async ({ page }) => {
   const { home } = await twoNotes(page);
   const lineIn = async () => (await read(page, home.id)).split("\n")[2];
-  await filter(page, "Include completed").check();
+  await bar(page).fill("is:open OR is:done");
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes", "Book flights"]);
   await page.evaluate(() => document.fonts.ready);
-  const frame = ".todos-page h1, .todo-filters, .todo-filters label, .todos-page .cards";
+  const frame = ".todos-page h1, .query-bar, .query-line, .query-line > *, .todos-page .cards";
   const before = await laidOut(page, frame);
 
   await row(page, "Call the bank").getByRole("checkbox").check();
@@ -588,7 +743,8 @@ test("checking a todo off in a note says so in the same toast, and Undo opens it
 
 test("Undo opens a todo again after more was changed on it from the page, and after lines were written above it in a note that was left", async ({ page }) => {
   const { home } = await twoNotes(page);
-  await filter(page, "Include completed").check();
+  await bar(page).fill("is:open OR is:done");
+  await expect(row(page, "Book flights")).toHaveCount(1);
   await row(page, "Call the bank").getByRole("checkbox").check();
   await expect(toast(page)).toContainText("Completed Call the bank +Home");
   await more(page, "Call the bank").click();
@@ -707,12 +863,15 @@ test.describe("where the member's day is not the day in UTC", () => {
     await page.goto("/todos");
     await expect(row(page, "The ninth").locator(".todo-due")).toHaveText("Today");
     await expect(row(page, "The tenth").locator(".todo-due")).toHaveText("Tomorrow");
-    await filter(page, "Due").selectOption("Today");
+    // The days a query counts from today are counted from the member's own day, which the page says with every ask.
+    await bar(page).fill("due:today");
     await expect(words(page)).toHaveText(["The ninth"]);
-    await filter(page, "Due").selectOption("Overdue");
+    await bar(page).fill("due:<today");
     await expect(words(page)).toHaveText(["The eighth"]);
-    await filter(page, "Due").selectOption("Next 7 days");
+    await bar(page).fill("due:today..+6d");
     await expect(words(page)).toHaveText(["The ninth", "The tenth"]);
+    await bar(page).fill("due:tomorrow OR due:yesterday");
+    await expect(words(page)).toHaveText(["The eighth", "The tenth"]);
     await expect.poll(() => read(page, note.id)).toContain("due:2026-03-09");
   });
 });

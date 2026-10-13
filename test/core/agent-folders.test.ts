@@ -439,6 +439,113 @@ describe("an agent limited to folders", () => {
     for (const mark of marks) expect(claude.said.filter((text) => text.includes(mark)), mark).toEqual([]);
   });
 
+  it("learns nothing through the query language: a filter naming what is outside is one naming what was never there, and no filter finds or counts a note outside", async () => {
+    const w = await world();
+    const { ada } = w;
+    const note = (folderId: string | undefined, text: string) => perform(env.DB, ada, { type: "note.create", folderId, text });
+    // Both sides have a todo with the same words, due the same day, and a note of each is shared and one outside is private.
+    const tagged = await note(w.projects, "# Budget\n\ncommonword #sharedtag\n\n- [ ] !! sharedtodo due:2026-10-01 every:1w");
+    const hush = await note(w.journal, "# Hush-outside\n\ncommonword #sharedtag #hushtag\n\n- [ ] !!! sharedtodo Hideout due:2026-10-01 every:1w");
+    const sealed = await note(w.journal, "# Sealed-outside\n\ncommonword sealed-words-outside");
+    await perform(env.DB, ada, { type: "note.setPrivate", id: sealed.id, private: true });
+    await perform(env.DB, ada, { type: "grant.link", noteId: hush.id, link: "public" });
+    await perform(env.DB, ada, { type: "grant.link", noteId: tagged.id, link: "public" });
+    const marks = [...w.marks, "Hush-outside", "hushtag", "Hideout", "Sealed-outside", "sealed-words-outside", hush.id, sealed.id];
+    const claude = await asAgent(w.limited.token);
+    /** What it asks by a name of its own choosing says that name back, so those answers are compared and not searched for marks. */
+    const naming = await asAgent(w.limited.token);
+    const today = "2026-10-13";
+    type Found = { results: { note: { id: string } }[]; next: number | null; indexing: boolean };
+    type Listed = { todos: { noteId: string }[]; next: number | null };
+    const found = async (query: string) => idsOf((await claude.json<Found>("search", { query, today })).results.map((r) => r.note));
+    const listed = async (query: string) => (await claude.json<Listed>("list_todos", { query, today })).todos.map((t) => t.noteId).sort();
+    const INSIDE = [w.inside.id, w.deep.id, tagged.id].sort();
+
+    // A folder outside, by name or by id, one that is empty, and Unsorted: each is refused in the words a folder that never was is.
+    const blank = (text: string) => text.replace(/"[^"]*"/g, '"…"');
+    for (const tool of ["search", "list_todos"]) {
+      const never = await naming.call(tool, { query: "folder:Nowhere commonword", today });
+      expect(never).toEqual({ isError: true, text: 'invalid: No folder named "Nowhere"' });
+      for (const name of ["Journal", "journal", w.journal, "Vacant", w.empty, "Unsorted", MISSING]) {
+        for (const query of [`folder:${name} commonword`, `-folder:${name}`, `commonword OR folder:${name}`, `NOT (folder:${name} OR nosuchword)`]) {
+          const answer = await naming.call(tool, { query, today });
+          expect({ ...answer, text: blank(answer.text) }, `${tool} ${query}`).toEqual({ ...never, text: blank(never.text) });
+        }
+      }
+      // Someone who has only written outside is nobody, as a name nobody has is; and one who has written on both sides is found for the inside alone.
+      const nobody = await naming.call(tool, { query: "editor:Nobody-at-all", today });
+      expect(nobody).toEqual({ isError: true, text: 'invalid: Nobody named "Nobody-at-all" has changed a note you can see' });
+      for (const query of ['editor:"Ghost-outside"', 'author:"Ghost-outside"', 'edited-by:"ghost-outside" OR commonword', '-editor:"Ghost-outside"']) {
+        const answer = await naming.call(tool, { query, today });
+        expect({ ...answer, text: blank(answer.text) }, `${tool} ${query}`).toEqual({ ...nobody, text: blank(nobody.text) });
+      }
+    }
+    expect(await found('editor:"Scribe-everywhere"')).toEqual([w.deep.id]);
+    expect(await found('editor:"Ada Lovelace"')).toEqual(INSIDE);
+    expect(await found('author:"Ada Lovelace" -editor:"Scribe-everywhere"')).toEqual([w.inside.id, tagged.id].sort());
+    expect(await found("editor:@me")).toEqual([]);
+    expect(await found('folder:Projects -folder:Plans')).toEqual([w.inside.id, tagged.id].sort());
+    expect(await found(`folder:${w.plans} OR #sharedtag`)).toEqual([w.deep.id, tagged.id].sort());
+
+    // Every filter and operator, over words and tags both sides have: only its own notes are found, and no page is left over.
+    const nothing = await claude.call("search", { query: "nosuchwordanywhere" });
+    expect(JSON.parse(nothing.text)).toEqual({ results: [], next: null, indexing: false });
+    for (const query of [
+      "private-words-outside OR Hideout OR sealed-words-outside",
+      "#hushtag",
+      "tag:hushtag OR Diary-outside in:title",
+      "is:private",
+      "is:private OR is:shared",
+      "is:shared",
+      "has:backlink",
+      "commonword is:private",
+      "commonword -folder:Projects",
+      'sharedtodo "Hideout"',
+      "commonword (has:backlink OR is:shared OR #hushtag)",
+      "scribe-words-outside updated:>=2020-01-01",
+    ]) {
+      expect(await claude.call("search", { query, today }), query).toEqual(nothing);
+    }
+    for (const [query, ids] of [
+      ["commonword", [tagged.id]],
+      ["commonword OR nosuchword", [tagged.id]],
+      ["-nosuchword", INSIDE],
+      ["NOT (Hideout OR #hushtag OR is:private OR is:shared)", INSIDE],
+      ["no:backlink", INSIDE],
+      ["-is:shared -is:private", INSIDE],
+      ["has:link", [w.inside.id]],
+      ["#sharedtag", [tagged.id]],
+      ["has:open-todo", [tagged.id]],
+      ["has:todo OR has:tag", [tagged.id]],
+      ["updated:>=7d OR created:<=today", INSIDE],
+      ["is:open sort:title-desc", INSIDE],
+      ["commonword in:body", [tagged.id]],
+    ] as const) {
+      expect(await found(query), query).toEqual([...ids].sort());
+      const page = await claude.json<Found>("search", { query, today, limit: Math.max(1, ids.length) });
+      expect(page.next, `${query}: nothing more than its own notes to page to`).toBeNull();
+    }
+
+    // Todos the same: a todo outside with the same words, the same due date and a higher importance is never listed, counted or sorted in.
+    const none = await claude.call("list_todos", { query: "nosuchwordanywhere" });
+    expect(JSON.parse(none.text)).toEqual({ todos: [], next: null });
+    for (const query of ["Hideout", "importance:3", "sharedtodo importance:>2", "is:shared", "is:private", "has:backlink", "#hushtag", "sharedtodo -folder:Projects", "Hush-outside in:title", "is:done"]) {
+      expect(await claude.call("list_todos", { query, today }), query).toEqual(none);
+    }
+    for (const query of ["", "sharedtodo", "due:<today", "due:2026-10-01", "importance:>=2", "has:recurrence", "has:due", "#sharedtag", "sort:importance-desc", "sharedtodo OR Hideout", "-Hideout", "NOT is:shared", "Budget in:title", "is:open OR is:done"]) {
+      expect(await listed(query), query).toEqual([tagged.id]);
+      expect((await claude.json<Listed>("list_todos", { query, today, limit: 1 })).next, `${query}: one todo, and no page after it`).toBeNull();
+    }
+
+    // A query it can't be read says where, in its own words alone.
+    expect(await claude.call("search", { query: "commonword titel:x" })).toEqual({ isError: true, text: 'invalid: There is no filter "titel:". To search for the words, put them in quotes (characters 12 to 17 of the query: titel:)' });
+    expect(await claude.call("list_todos", { query: "due:today" })).toEqual({ isError: true, text: 'invalid: "today" is counted from today, and the server doesn\'t know your day: pass today, as YYYY-MM-DD' });
+
+    for (const mark of marks) expect(claude.said.filter((text) => text.includes(mark)), mark).toEqual([]);
+    // And what named a thing outside was told nothing but that name back.
+    for (const text of naming.said) expect(text).toMatch(/^invalid: (No folder named|Nobody named) "[^"]*"( has changed a note you can see)?$/);
+  });
+
   it("is told its own notes are still being indexed, and nothing of the notes outside that are", async () => {
     const w = await world();
     // More notes outside than one call reads in, none of them read in yet, and every note inside is.

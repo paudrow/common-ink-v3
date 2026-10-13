@@ -698,6 +698,273 @@ button.link:hover {
   background: var(--accent-soft);
 }
 
+/* The bar a query is typed in, for notes and for todos: the field, Advanced beside it, and under them what is offered while typing, what can't be read, and the builder. */
+.query-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.query-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-line > .finder-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.query-advanced {
+  flex: none;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.query-advanced:hover,
+.query-advanced[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.query-offers {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: min(100%, 260px);
+  max-width: 100%;
+  margin: 0;
+  padding: 4px;
+  border-radius: 9px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  list-style: none;
+  font-size: 13px;
+}
+
+.query-offers li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.query-offers li > span {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.query-offers small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-offers li:hover,
+.query-offers li[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.query-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.query-error code {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.query-error mark {
+  border-bottom: 2px solid var(--danger);
+  background: var(--removed-soft);
+  color: var(--ink);
+}
+
+.query-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.query-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-panel > header strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.query-panel > header span {
+  flex: 1;
+  min-width: 0;
+}
+
+.query-help-toggle {
+  flex: none;
+  font-weight: 600;
+}
+
+.query-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.query-rows:empty {
+  display: none;
+}
+
+.query-row,
+.query-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.query-foot {
+  gap: 8px 14px;
+}
+
+.query-foot label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.query-foot select {
+  flex: 1 1 auto;
+}
+
+.query-panel select,
+.query-panel input[type="text"] {
+  height: 26px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.query-row input[type="text"] {
+  flex: 1 1 5rem;
+}
+
+.query-row select {
+  max-width: 12rem;
+}
+
+.query-why {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.query-unshown {
+  margin: 0;
+}
+
+.query-help {
+  max-height: 16rem;
+  overflow: auto;
+  padding: 2px 0;
+  border-block: 1px solid var(--line);
+}
+
+.query-help p {
+  margin: 6px 0;
+}
+
+.query-help table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.query-help th,
+.query-help td {
+  padding: 4px 8px 4px 0;
+  border-top: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.query-help code,
+.query-example {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.query-example {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.query-example:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 520px) {
+  .query-help th,
+  .query-help td {
+    display: block;
+    padding-right: 0;
+    border-top: 0;
+  }
+
+  .query-help tr {
+    display: block;
+    padding: 5px 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
 .finder-scope button svg {
   width: 11px;
   height: 11px;
@@ -5145,31 +5412,6 @@ button.diff-fold:hover {
 .todos-page h1 {
   margin: 0;
   font-size: 22px;
-}
-
-.todo-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.todo-filters label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.todo-filters select {
-  max-width: 12rem;
-  padding: 2px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
 }
 
 /* A todo's card, in the look of a plugin's card and of a note's card in a folder's list. */
