@@ -37,7 +37,7 @@ export function Plugins(props: PluginsProps) {
     <section className="mode-view plugins-page">
       <h1>Plugins</h1>
       <p className="soon">
-        Most of Common Ink is plugins that come built in. Turn one off and what it adds goes away, in this browser, until you turn it back on.
+        Most of Common Ink is plugins that come built in. Turn one off and what it adds goes away until you turn it back on. The choice is kept in your settings.
       </p>
       <input type="search" className="filter" aria-label="Search plugins" placeholder={`Search ${plugins.length} plugins`} value={typed} onChange={(e) => setTyped(e.target.value)} />
       {found.length === 0 && <p className="soon">No plugin matches.</p>}

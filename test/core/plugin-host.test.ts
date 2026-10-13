@@ -1,17 +1,23 @@
 import { describe, expect, it } from "vitest";
-import type { App, Dispose, Plugin, PluginHost } from "../../src/web/plugin-api.ts";
+import type { App, Dispose, OpInput, Plugin, PluginHost, SettingValue } from "../../src/web/plugin-api.ts";
 import { createPluginHost, type Host, type HostOptions } from "../../src/web/pluginHost.ts";
+import { documentOf, editSetting } from "../../src/web/settings.ts";
 
 const View = () => null;
 
 function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
-  let stored: string[] = [];
+  /** The member's document, kept the way the app keeps it: as text, edited one key at a time. */
+  let text = JSON.stringify(options.settings ?? {});
   const went: string[] = [];
   const performed: [plugin: string, op: string][] = [];
-  const host = createPluginHost({
+  const host: Host = createPluginHost({
     plugins,
     mac: true,
-    disabled: { read: () => stored, write: (ids) => void (stored = ids) },
+    settings: {},
+    write(key: string, value: SettingValue | undefined) {
+      text = editSetting(text, key, value);
+      host.settingsChanged(documentOf(text)!);
+    },
     provide: (plugin) => ({
       workspace: { id: "w1", name: "Acme", role: "editor" },
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
@@ -23,7 +29,13 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
   });
   host.contributions();
   const ids = () => host.contributions().commands.map((c) => c.id);
-  return { host, ids, went, performed, stored: () => stored };
+  /** Replaces the member's document, as editing the JSON does. */
+  const wrote = (document: Record<string, unknown>) => {
+    text = JSON.stringify(document);
+    host.settingsChanged(document);
+  };
+  const problems = () => host.contributions().settings.problems;
+  return { host, ids, went, performed, stored: () => JSON.parse(text) as Record<string, unknown>, wrote, problems };
 }
 
 const notes: Plugin = {
@@ -77,18 +89,6 @@ describe("plugin host", () => {
     expect(host.contributions().commands.find((c) => c.id === "go.todos")!.title).toBe("Go to Todos");
   });
 
-  it("keeps pages off the addresses where a folder's notes are listed", () => {
-    for (const path of ["/folder", "/folder/all"] as const) {
-      const squatter: Plugin = { id: "squatter", name: "Squatter", activate: (h) => void h.views.register("page", { id: "mine", path, label: "Mine", component: View }) };
-      const { host } = hostWith([squatter]);
-
-      expect(host.contributions().views.page).toEqual([]);
-      expect(host.contributions().plugins[0]!.error).toBe(`${path} is where a folder's notes are listed, so no page can be there`);
-    }
-    const near: Plugin = { id: "near", name: "Near", activate: (h) => void h.views.register("page", { id: "folders", path: "/folders", label: "Folders", component: View }) };
-    expect(hostWith([near]).host.contributions().views.page.map((p) => p.path)).toEqual(["/folders"]);
-  });
-
   it("takes out everything a plugin added when it is turned off, and puts it back in the same order when turned on", () => {
     const { host, ids, stored } = hostWith([notes, palette]);
 
@@ -99,7 +99,7 @@ describe("plugin host", () => {
     expect(host.contributions().views.page).toEqual([]);
     expect(host.contributions().embeds).toEqual([]);
     expect(host.run("note.new")).toBe(false);
-    expect(stored()).toEqual(["notes"]);
+    expect(stored()).toEqual({ "notes.enabled": false });
     expect(host.contributions().plugins.map((p) => [p.id, p.enabled])).toEqual([
       ["notes", false],
       ["palette", true],
@@ -108,11 +108,11 @@ describe("plugin host", () => {
     host.setEnabled("notes", true);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.notes", "plugins.disable.palette"]);
     expect(host.contributions().embeds.map((e) => e.name)).toEqual(["timer"]);
-    expect(stored()).toEqual([]);
+    expect(stored()).toEqual({});
   });
 
   it("leaves a plugin off that was turned off before, and turns it on from its command", () => {
-    const { host, ids } = hostWith([notes, palette], { disabled: { read: () => ["palette"], write: () => {} } });
+    const { host, ids } = hostWith([notes, palette], { settings: { "palette.enabled": false } });
 
     expect(ids()).toEqual(["note.new", "go.todos", "plugins.disable.notes", "plugins.enable.palette"]);
     expect(host.contributions().commands.at(-1)!.title).toBe("Enable plugin: Command palette");
@@ -122,7 +122,7 @@ describe("plugin host", () => {
   });
 
   it("won't turn off a required plugin, whatever was stored", () => {
-    const { host, ids } = hostWith([notes, palette], { required: ["notes"], disabled: { read: () => ["notes"], write: () => {} } });
+    const { host, ids } = hostWith([notes, palette], { required: ["notes"], settings: { "notes.enabled": false } });
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
@@ -231,11 +231,11 @@ describe("plugin host", () => {
         return () => void events.push(`stop ${id}`);
       },
     });
-    let stored = ["b"];
     const host = createPluginHost({
       plugins: [counted("a"), counted("b"), counted("c")],
       mac: true,
-      disabled: { read: () => stored, write: (ids) => void (stored = ids) },
+      settings: { "b.enabled": false },
+      write: () => {},
       provide: () => ({}) as never,
     });
     const ids = () => host.contributions().commands.map((c) => c.id);
@@ -247,7 +247,6 @@ describe("plugin host", () => {
     host.dispose();
     host.dispose();
     expect(events).toEqual(["start a", "start c", "stop a", "stop c"]);
-    expect(stored).toEqual(["b"]);
 
     expect(ids()).toEqual(["a.go", "c.go", "plugins.disable.a", "plugins.enable.b", "plugins.disable.c"]);
     expect(events).toEqual(["start a", "start c", "stop a", "stop c", "start a", "start c"]);
@@ -264,10 +263,11 @@ describe("plugin host", () => {
         h.embeds.register(embed);
       },
     };
-    const host = createPluginHost({
+    const host: Host = createPluginHost({
       plugins: [notes, drawing],
       mac: true,
-      disabled: { read: () => [], write: () => {} },
+      settings: {},
+      write: (key, value) => host.settingsChanged(value === undefined ? {} : { [key]: value }),
       provide: (plugin) => ({ app: () => ({ path: `/as/${plugin.id}` }) as App }) as never,
     });
     const errorOf = (id: string) => host.contributions().plugins.find((p) => p.id === id)!.error;
@@ -311,6 +311,254 @@ describe("plugin host", () => {
     host.setEnabled("palette", true);
     expect(told).toBe(heard);
   });
+
+  it("refuses a plugin that asks to read or change the member's settings, and never sends it on", async () => {
+    let asked: PluginHost | null = null;
+    const { performed, stored } = hostWith([{ id: "greedy", name: "Greedy", activate: (h) => void (asked = h) }]);
+    const perform = asked!.perform as (op: OpInput) => Promise<unknown>;
+
+    await expect(perform({ type: "settings.write", text: '{"core.theme":"dark"}', baseRevision: 0 })).rejects.toThrow("Greedy can't settings.write: a plugin can't read or change the member's settings");
+    await expect(perform({ type: "settings.read" })).rejects.toThrow("Greedy can't settings.read");
+    expect(performed).toEqual([]);
+    expect(stored()).toEqual({});
+    expect(Object.keys(asked!.settings).sort()).toEqual(["get", "subscribe"]);
+  });
+});
+
+const size = { type: "integer", default: 14, minimum: 8, maximum: 32, title: "Text size" } as const;
+const reader: Plugin = {
+  id: "reader",
+  name: "Reader",
+  settings: { size, face: { type: "string", default: "serif", enum: ["serif", "sans"], title: "Typeface" } },
+  activate(host) {
+    host.commands.register({ id: "reader.open", title: "Open reader", keys: ["mod+r"], run: () => {} });
+  },
+};
+
+describe("settings, as the plugin host assembles and reads them", () => {
+  it("declares each plugin's switch and options under its id, then a keybinding for every command that is on", () => {
+    const { host } = hostWith([notes, reader], { required: ["notes"] });
+
+    expect(host.contributions().settings.declared.map((d) => [d.key, d.group.name, d.setting.type, d.setting.default])).toEqual([
+      ["reader.enabled", "Reader", "boolean", true],
+      ["reader.size", "Reader", "integer", 14],
+      ["reader.face", "Reader", "string", "serif"],
+      ["keybindings.note.new", "Keybindings", "chords", ["mod+n"]],
+      ["keybindings.go.todos", "Keybindings", "chords", []],
+      ["keybindings.reader.open", "Keybindings", "chords", ["mod+r"]],
+      ["keybindings.plugins.disable.reader", "Keybindings", "chords", []],
+    ]);
+    expect(host.contributions().settings.declared.find((d) => d.key === "reader.size")!.setting).toBe(size);
+  });
+
+  it("gives a plugin its own options: the default, then what the member wrote, as soon as they write it", () => {
+    let mine: PluginHost["settings"] | null = null;
+    let told = 0;
+    const watcher: Plugin = { ...reader, activate: (h) => void ((mine = h.settings), h.settings.subscribe(() => told++)) };
+    const { wrote } = hostWith([watcher]);
+
+    expect(mine!.get("size")).toBe(14);
+    wrote({ "reader.size": 20 });
+    expect(mine!.get("size")).toBe(20);
+    expect(told).toBe(1);
+    expect(() => mine!.get("theme")).toThrow("Reader declares no setting named theme");
+  });
+
+  it("overlays only the valid values on the defaults, and says what is wrong with the rest without dropping it", () => {
+    const { host, wrote, problems, stored } = hostWith([reader]);
+    const document = { "reader.size": 99, "reader.face": "sans", "reader.colour": "red", "keybindings.reader.open": ["cmd+r"], "keybindings.gone.command": ["mod+g"] };
+
+    wrote(document);
+
+    const { values } = host.contributions().settings;
+    expect([values["reader.size"], values["reader.face"], values["keybindings.reader.open"]]).toEqual([14, "sans", ["mod+r"]]);
+    expect(problems()).toEqual([
+      { key: "reader.size", kind: "invalid", reason: "Expected 32 or less, not 99. The default is used." },
+      { key: "keybindings.reader.open", kind: "invalid", reason: '"cmd" in "cmd+r" isn\'t a modifier. Use mod, alt, or shift, then one key. The default is used.' },
+      { key: "reader.colour", kind: "unknown", reason: "There's no setting by this name. It may belong to a plugin that isn't installed." },
+      { key: "keybindings.gone.command", kind: "unknown", reason: 'There\'s no command "gone.command". It may belong to a plugin that is off.' },
+    ]);
+    expect(stored()).toEqual(document);
+  });
+
+  it("writes one key and keeps the member's others, and takes a key out when it is set back to its default", () => {
+    const { host, stored, wrote } = hostWith([reader]);
+    wrote({ "not.a.setting": { kept: true }, "reader.face": "sans" });
+
+    host.setSetting("reader.size", 20);
+    expect(stored()).toEqual({ "not.a.setting": { kept: true }, "reader.face": "sans", "reader.size": 20 });
+
+    host.setSetting("reader.size", 14);
+    host.setSetting("reader.face", "serif");
+    expect(stored()).toEqual({ "not.a.setting": { kept: true } });
+
+    host.setSetting("not.a.setting", undefined);
+    expect(stored()).toEqual({});
+  });
+
+  it("keeps a plugin's options known and its keys in the document while it is off, and marks them as not applying", () => {
+    const { host, wrote, problems, stored } = hostWith([reader]);
+
+    wrote({ "reader.enabled": false, "reader.size": 20, "keybindings.reader.open": ["mod+o"] });
+
+    expect(host.contributions().plugins[0]!.enabled).toBe(false);
+    expect(host.contributions().settings.declared.filter((d) => d.group.id === "reader").map((d) => [d.key, d.active])).toEqual([
+      ["reader.enabled", true],
+      ["reader.size", false],
+      ["reader.face", false],
+    ]);
+    expect(host.contributions().settings.values["reader.size"]).toBe(20);
+    expect(problems()).toEqual([{ key: "keybindings.reader.open", kind: "unknown", reason: 'There\'s no command "reader.open". It may belong to a plugin that is off.' }]);
+
+    host.setEnabled("reader", true);
+    expect(stored()).toEqual({ "reader.size": 20, "keybindings.reader.open": ["mod+o"] });
+    expect(problems()).toEqual([]);
+    expect(host.contributions().keybindings["mod+o"]).toBe("reader.open");
+  });
+
+  it("turns plugins on and off as the document says, whoever wrote it", () => {
+    const { ids, wrote } = hostWith([notes, palette]);
+
+    wrote({ "notes.enabled": false });
+    expect(ids()).toEqual(["commands.show", "plugins.enable.notes", "plugins.disable.palette"]);
+    wrote({ "notes.enabled": "no" });
+    expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.notes", "plugins.disable.palette"]);
+  });
+
+  it("won't start a plugin that declares the setting that turns it off", () => {
+    const { host } = hostWith([{ id: "sly", name: "Sly", settings: { enabled: { type: "boolean", default: true, title: "On" } }, activate: () => {} }]);
+
+    expect(host.contributions().plugins[0]!.error).toBe("A plugin can't declare a setting named enabled, which turns it on and off");
+  });
+});
+
+describe("what is the host's and the required plugins' to have", () => {
+  const pages: Plugin = { id: "pages", name: "Pages", activate: (h) => void h.views.register("page", { id: "settings", path: "/settings", label: "Settings", component: View }) };
+  const errorOf = (host: Host, id: string) => host.contributions().plugins.find((p) => p.id === id)!.error;
+
+  it("starts a required plugin before the others, wherever it is listed, so none of them can take its ids", () => {
+    const squatter: Plugin = { id: "squatter", name: "Squatter", activate: (h) => void h.views.register("page", { id: "settings", path: "/mine", label: "Mine", component: View }) };
+    const { host } = hostWith([notes, squatter, pages], { required: ["pages"] });
+
+    expect(host.contributions().views.page.map((p) => [p.id, p.path])).toEqual([
+      ["todos", "/todos"],
+      ["settings", "/settings"],
+    ]);
+    expect(errorOf(host, "pages")).toBeNull();
+    expect(errorOf(host, "squatter")).toBe("There's already a page view with the id settings");
+    expect(host.contributions().commands.map((c) => c.id)).toContain("go.settings");
+  });
+
+  it("keeps one page to an address", () => {
+    const squatter: Plugin = { id: "squatter", name: "Squatter", activate: (h) => void h.views.register("page", { id: "mine", path: "/settings", label: "Mine", component: View }) };
+    const { host } = hostWith([squatter, pages], { required: ["pages"] });
+
+    expect(host.contributions().views.page.map((p) => p.id)).toEqual(["settings"]);
+    expect(errorOf(host, "squatter")).toBe("There's already a page at /settings");
+  });
+
+  it("keeps pages off the addresses where a folder's notes are listed", () => {
+    for (const path of ["/folder", "/folder/all"] as const) {
+      const squatter: Plugin = { id: "squatter", name: "Squatter", activate: (h) => void h.views.register("page", { id: "mine", path, label: "Mine", component: View }) };
+      const { host } = hostWith([squatter]);
+
+      expect(host.contributions().views.page).toEqual([]);
+      expect(errorOf(host, "squatter")).toBe(`${path} is where a folder's notes are listed, so no page can be there`);
+    }
+    const near: Plugin = { id: "near", name: "Near", activate: (h) => void h.views.register("page", { id: "folders", path: "/folders", label: "Folders", component: View }) };
+    expect(hostWith([near]).host.contributions().views.page.map((p) => p.path)).toEqual(["/folders"]);
+  });
+
+  it("refuses a plugin a command id that starts as the host's own do, and leaves that plugin out", () => {
+    for (const id of ["go.settings", "go.elsewhere", "plugins.enable.notes", "plugins.disable.notes", "settings.open"]) {
+      const ran: string[] = [];
+      const impostor: Plugin = {
+        id: "impostor",
+        name: "Impostor",
+        activate(h) {
+          h.commands.register({ id: "impostor.fine", title: "Fine", run: () => {} });
+          h.commands.register({ id, title: "Enable plugin: Notes", run: () => ran.push(id) });
+        },
+      };
+      const { host, ids } = hostWith([impostor, notes, pages], { required: ["pages"], settings: { "notes.enabled": false } });
+
+      expect(errorOf(host, "impostor"), id).toBe(`Only Common Ink adds a command whose id starts with ${id.split(".")[0]}., and this one is ${id}`);
+      expect(ids()).not.toContain("impostor.fine");
+      host.run("plugins.enable.notes");
+      expect(ran).toEqual([]);
+      expect(ids()).toContain("note.new");
+      expect(ids()).toContain("go.settings");
+    }
+  });
+
+  it("lets a required plugin add such a command, and gives any plugin's page its go command", () => {
+    const core: Plugin = { id: "core", name: "Core", activate: (h) => void h.commands.register({ id: "settings.open", title: "Open settings", run: () => {} }) };
+    const { host, ids } = hostWith([core, notes], { required: ["core"] });
+
+    expect(ids()).toEqual(["settings.open", "note.new", "go.todos", "plugins.disable.notes"]);
+    expect(errorOf(host, "notes")).toBeNull();
+  });
+});
+
+describe("keybindings, as settings", () => {
+  it("says which command is left with no key when the member gives its only chord to another", () => {
+    const { wrote, problems } = hostWith([notes, palette]);
+
+    wrote({ "keybindings.commands.show": ["mod+n", "f1"] });
+    expect(problems()).toEqual([
+      { key: "keybindings.commands.show", kind: "conflict", reason: "mod+n is also the key for New note (note.new). It runs Show all commands. New note is left with no key." },
+    ]);
+
+    wrote({ "keybindings.note.new": ["mod+shift+p"] });
+    expect(problems()).toEqual([{ key: "keybindings.note.new", kind: "conflict", reason: "mod+shift+p is also the key for Show all commands (commands.show). It runs New note." }]);
+  });
+
+  const shortcuts = (host: Host) => host.contributions().keybindings;
+
+  it("rebinds a command, in the table and in what the palette shows", () => {
+    let list: PluginHost["commands"]["list"] = () => [];
+    const { host, wrote, problems } = hostWith([notes, palette, { id: "reader", name: "Reader", activate: (h) => void (list = h.commands.list) }]);
+
+    wrote({ "keybindings.note.new": ["shift+MOD+k", "f2"] });
+
+    expect(shortcuts(host)).toEqual({ "mod+shift+k": "note.new", f2: "note.new", "mod+shift+p": "commands.show", f1: "commands.show" });
+    expect(list()[0]).toEqual({ id: "note.new", title: "New note", shortcut: "⇧⌘K" });
+    expect(problems()).toEqual([]);
+  });
+
+  it("unbinds a default with an empty list", () => {
+    let list: PluginHost["commands"]["list"] = () => [];
+    const { host, wrote } = hostWith([notes, palette, { id: "reader", name: "Reader", activate: (h) => void (list = h.commands.list) }]);
+
+    wrote({ "keybindings.commands.show": [] });
+
+    expect(shortcuts(host)).toEqual({ "mod+n": "note.new" });
+    expect(list()[2]).toEqual({ id: "commands.show", title: "Show all commands", shortcut: undefined });
+  });
+
+  it("gives a chord to the command the member bound it to, and flags that another command had it", () => {
+    const { host, wrote, problems } = hostWith([notes, palette]);
+
+    wrote({ "keybindings.commands.show": ["mod+n"] });
+
+    expect(shortcuts(host)).toEqual({ "mod+n": "commands.show" });
+    expect(problems()).toEqual([{ key: "keybindings.commands.show", kind: "conflict", reason: "mod+n is also the key for New note (note.new). It runs Show all commands. New note is left with no key." }]);
+
+    wrote({ "keybindings.commands.show": ["mod+n"], "keybindings.note.new": [] });
+    expect(problems()).toEqual([]);
+  });
+
+  it("flags both commands when the member binds one chord twice, and runs the first", () => {
+    const { host, wrote, problems } = hostWith([notes, palette]);
+
+    wrote({ "keybindings.commands.show": ["mod+j"], "keybindings.note.new": ["mod+j"] });
+
+    expect(shortcuts(host)).toEqual({ "mod+j": "note.new" });
+    expect(problems()).toEqual([
+      { key: "keybindings.note.new", kind: "conflict", reason: "mod+j is also the key for Show all commands (commands.show). It runs New note. Show all commands is left with no key." },
+      { key: "keybindings.commands.show", kind: "conflict", reason: "mod+j is also the key for New note (note.new). It runs New note." },
+    ]);
+  });
 });
 
 describe("what the host says of each plugin", () => {
@@ -343,7 +591,7 @@ describe("what the host says of each plugin", () => {
 
   it("remembers the whole of what a plugin added once it is turned off, and knows nothing of one that hasn't been on", () => {
     const quiet: Plugin = { id: "quiet", name: "Quiet", activate: (host) => void host.commands.register({ id: "quiet.go", title: "Go quietly", run: () => {} }) };
-    const { host, ids } = hostWith([notes, quiet], { disabled: { read: () => ["quiet"], write: () => {} } });
+    const { host, ids } = hostWith([notes, quiet], { settings: { "quiet.enabled": false } });
     // A page that is listening reads the contributions each time one is taken out, as the Plugins page does.
     host.subscribe(() => void host.contributions());
     const whole = stateOf(host, "notes").adds;
@@ -355,5 +603,19 @@ describe("what the host says of each plugin", () => {
     expect(ids()).toEqual(["quiet.go", "plugins.enable.notes", "plugins.disable.quiet"]);
     expect(stateOf(host, "notes")).toMatchObject({ enabled: false, adds: whole });
     expect(stateOf(host, "quiet").adds?.commands).toEqual([{ id: "quiet.go", title: "Go quietly" }]);
+  });
+
+  it("marks the setting that turns a plugin on and off as its switch, and no other", () => {
+    const reader: Plugin = { id: "reader", name: "Reader", settings: { wide: { type: "boolean", default: false, title: "Wide" } }, activate: () => {} };
+    const { host } = hostWith([reader, palette]);
+
+    expect(host.contributions().settings.declared.map((d) => [d.key, d.switch ?? false])).toEqual([
+      ["reader.enabled", true],
+      ["reader.wide", false],
+      ["palette.enabled", true],
+      ["keybindings.commands.show", false],
+      ["keybindings.plugins.disable.reader", false],
+      ["keybindings.plugins.disable.palette", false],
+    ]);
   });
 });

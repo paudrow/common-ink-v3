@@ -6,6 +6,7 @@ import { newId } from "./ids.ts";
 import { summarize } from "./markdown.ts";
 import {
   MAX_NOTE_LENGTH,
+  MAX_SETTINGS_LENGTH,
   Op,
   OpError,
   type Author,
@@ -59,6 +60,8 @@ const ALLOWS: Record<Role, ReadonlySet<Access>> = {
 
 type Handler<K extends OpType> = {
   needs: Access;
+  /** Set when only the member themself may ask, and an agent acting for them may not. */
+  by?: "member";
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
 
@@ -75,6 +78,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor, i
     .bind(actor.kind === "agent" ? actor.agentId : null, actor.workspaceId, actor.personId)
     .first<{ role: Role; name: string; agent_name: string | null }>();
   if (!member) throw new OpError("not_found", "No such workspace");
+  if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
   if (actor.kind === "agent" && actor.scope?.readOnly && handler.needs !== "view") throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if (!ALLOWS[member.role].has(handler.needs)) throw new OpError("forbidden", `A ${member.role} can't ${op.type}`);
 
@@ -462,6 +466,15 @@ function chosen(revisions: number[], history: Recorded[]): number[] {
   const missing = revisions.find((r) => r > history.length);
   if (missing !== undefined) throw new OpError("not_found", `The note has no change ${missing}`);
   return [...new Set(revisions)].sort((a, b) => a - b);
+}
+
+function isJsonObject(text: string) {
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  } catch {
+    return false;
+  }
 }
 
 /** Every change after `revision`: the note goes back to how it was then. */
@@ -1023,6 +1036,42 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const folder = await loadFolder(ctx, op.id);
       if (folder.unsorted) throw new OpError("invalid", "Unsorted can't be deleted");
       throw new OpError("invalid", `"${folder.name}" isn't empty. Move or delete what's in it first.`);
+    },
+  },
+
+  "settings.read": {
+    needs: "view",
+    by: "member",
+    async run(ctx) {
+      const row = await ctx.db
+        .prepare("SELECT text, revision, updated_at FROM settings WHERE workspace_id = ? AND person_id = ?")
+        .bind(ctx.actor.workspaceId, ctx.actor.personId)
+        .first<{ text: string; revision: number; updated_at: number }>();
+      return row ? { text: row.text, revision: row.revision, updatedAt: row.updated_at } : { text: "{}", revision: 0, updatedAt: null };
+    },
+  },
+
+  // A viewer has settings too, so this needs no more than belonging to the workspace.
+  "settings.write": {
+    needs: "view",
+    by: "member",
+    async run(ctx, op) {
+      if (op.text.length > MAX_SETTINGS_LENGTH) throw new OpError("invalid", `Settings can be at most ${MAX_SETTINGS_LENGTH} characters`);
+      if (!isJsonObject(op.text)) throw new OpError("invalid", "Settings are a JSON object, such as {}");
+      // One statement, so of two writes on the same revision exactly one is taken.
+      const taken = "settings.revision = ?6 OR (settings.revision = ?6 + 1 AND settings.write_id = ?7)";
+      const statement =
+        op.baseRevision === 0
+          ? `INSERT INTO settings (workspace_id, person_id, text, updated_at, write_id, revision) VALUES (?1, ?2, ?3, ?4, ?5, 1)
+             ON CONFLICT (workspace_id, person_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at, write_id = excluded.write_id, revision = settings.revision + 1 WHERE ${taken}
+             RETURNING revision`
+          : `UPDATE settings SET text = ?3, updated_at = ?4, write_id = ?5, revision = revision + 1 WHERE workspace_id = ?1 AND person_id = ?2 AND (${taken}) RETURNING revision`;
+      const row = await ctx.db
+        .prepare(statement)
+        .bind(ctx.actor.workspaceId, ctx.actor.personId, op.text, ctx.now, op.writeId ?? null, op.baseRevision, op.supersedes ?? null)
+        .first<{ revision: number }>();
+      if (!row) throw new OpError("conflict", "Your settings changed somewhere else since they were read here");
+      return { text: op.text, revision: row.revision, updatedAt: ctx.now };
     },
   },
 };

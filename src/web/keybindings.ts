@@ -6,6 +6,7 @@ interface Pressed {
   shiftKey: boolean;
 }
 
+const MODIFIERS = ["mod", "alt", "shift"];
 /** The keys whose own character is what keys are written with: a chord is joined with + and a sequence is spaced. */
 const NAMED: Record<string, string> = { " ": "space", "+": "plus" };
 
@@ -38,6 +39,84 @@ export function typed(keys: string) {
   const parts = keys.split(" ")[0]!.split("+");
   const key = parts.pop()!;
   return !parts.some((part) => part !== "shift") && key !== "escape" && !/^f\d{1,2}$/.test(key);
+}
+
+/**
+ * The key these keys begin with when it is one a control in focus acts on itself, alone or with
+ * Shift: Enter presses a button and follows a link, and Space presses a button and ticks a checkbox.
+ */
+export function pressing(keys: string): "enter" | "space" | null {
+  const key = keys.split(" ")[0]!.replace(/^shift\+/, "");
+  return key === "enter" || key === "space" ? key : null;
+}
+
+/**
+ * A command's keys as a member wrote them, put the way `chordOf` writes key presses, or why they
+ * aren't keys. They are what the app runs a command on: one chord, with or without a modifier, or
+ * several pressed one after another, written with spaces between them.
+ */
+export function readKeys(text: string): { keys: string } | { reason: string } {
+  const written = text.toLowerCase().trim().replace(/\s*\+\s*/g, "+").split(/\s+/);
+  const chords: string[] = [];
+  for (const chord of written) {
+    const within = written.length > 1 ? `"${chord}" in "${text}"` : `"${text}"`;
+    const parts = chord.split("+");
+    const key = parts.pop()!;
+    const stray = parts.find((part) => !MODIFIERS.includes(part));
+    if (stray !== undefined) return { reason: `"${stray}" in "${text}" isn't a modifier. Use mod, alt, or shift, then one key` };
+    if (!key || MODIFIERS.includes(key)) return { reason: `${within} has no key after its modifiers` };
+    if (new Set(parts).size < parts.length) return { reason: `${within} names a modifier twice` };
+    chords.push([...MODIFIERS.filter((m) => parts.includes(m)), key].join("+"));
+  }
+  return { keys: chords.join(" ") };
+}
+
+/** How one command's keys stand to another's: the same, or the first keys of the other's sequence, or going on from the other's. */
+export const overlap = (keys: string, others: string): "same" | "begins" | "follows" | null =>
+  keys === others ? "same" : others.startsWith(`${keys} `) ? "begins" : keys.startsWith(`${others} `) ? "follows" : null;
+
+export interface Bindable {
+  id: string;
+  title: string;
+  chords: readonly string[];
+  /** Whether the member chose these chords. A chosen chord is taken before another command's default. */
+  chosen: boolean;
+}
+
+/**
+ * Which command each chord runs. A command the member bound keeps its chords over one that only has
+ * them by default; between two of a kind, the first keeps it. A chord the member gave to a command
+ * that another command also has is a conflict, and is still bound. The conflict names a command it
+ * leaves with no key at all, since that command may be the only way to do what it does: undo is.
+ * Keys the member chose that are the first keys of another command's sequence, or go on from
+ * another's keys, are a conflict too: the shorter keys run on their last press, so the longer never do.
+ */
+export function bind(commands: readonly Bindable[]) {
+  const keybindings: Record<string, string> = {};
+  for (const chosen of [true, false]) for (const c of commands) if (c.chosen === chosen) for (const chord of c.chords) keybindings[chord] ??= c.id;
+  const conflicts = commands
+    .filter((c) => c.chosen)
+    .flatMap((c) =>
+      c.chords.flatMap((chord) => {
+        const found: { commandId: string; reason: string }[] = [];
+        const others = commands.filter((o) => o.id !== c.id);
+        const same = others.filter((o) => o.chords.includes(chord));
+        if (same.length) {
+          const runs = commands.find((o) => o.id === keybindings[chord])!;
+          const keyless = same.filter((o) => !Object.values(keybindings).includes(o.id)).map((o) => ` ${o.title} is left with no key.`);
+          found.push({ commandId: c.id, reason: `${chord} is also the key for ${same.map((o) => `${o.title} (${o.id})`).join(" and ")}. It runs ${runs.title}.${keyless.join("")}` });
+        }
+        const standing = (how: "begins" | "follows") => others.flatMap((o) => o.chords.filter((held) => overlap(chord, held) === how).map((held) => ({ held, o })));
+        const longer = standing("begins");
+        if (longer.length) {
+          const named = longer.map(({ held, o }) => `${held}, the keys for ${o.title} (${o.id})`).join(", and of ");
+          found.push({ commandId: c.id, reason: `${chord} is the first key of ${named}. Where both can run, ${chord} runs ${commands.find((o) => o.id === keybindings[chord])!.title} and the longer keys never run.` });
+        }
+        for (const { held, o } of standing("follows")) found.push({ commandId: c.id, reason: `${chord} begins with ${held}, the key for ${o.title} (${o.id}). Where both can run, ${held} runs ${commands.find((r) => r.id === keybindings[held])!.title} and ${chord} never runs.` });
+        return found;
+      }),
+    );
+  return { keybindings, conflicts };
 }
 
 export const chordFor = (commandId: string, bindings: Readonly<Record<string, string>>) => Object.keys(bindings).find((chord) => bindings[chord] === commandId);

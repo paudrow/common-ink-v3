@@ -25,8 +25,13 @@
   color: var(--ink);
 }
 
+/* The theme setting overrides the device's choice. The dark values are below twice, once for each way of arriving at them. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #171716;
     --bg-elev: #22211f;
     --ink: #e8e6e3;
@@ -46,6 +51,28 @@
     --removed-soft: rgb(240 138 93 / 0.14);
     --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #171716;
+  --bg-elev: #22211f;
+  --ink: #e8e6e3;
+  --muted: #9a958f;
+  --line: #2c2b29;
+  --hover: rgb(232 230 227 / 0.08);
+  --accent: #8f8ff0;
+  --accent-soft: rgb(143 143 240 / 0.16);
+  --on-accent: #10101a;
+  --selection: #34345c;
+  --bg-side: #1d1c1b;
+  --line-strong: #403e3b;
+  --faint: #6b6762;
+  --danger: #f08a5d;
+  --added: #6dc98a;
+  --added-soft: rgb(109 201 138 / 0.14);
+  --removed-soft: rgb(240 138 93 / 0.14);
+  --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
 }
 
 html,
@@ -1281,7 +1308,7 @@ button.link:hover {
 }
 
 .editor .cm-editor {
-  font-size: 1.05rem;
+  font-size: calc(1.05rem * var(--editor-text-scale, 1));
   line-height: 1.6;
 }
 
@@ -1586,19 +1613,12 @@ button.link:hover {
   margin: 0;
 }
 
-.settings-count {
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 400;
-}
-
 .plugin-adds dt {
   font-size: 12.5px;
   font-weight: 600;
 }
 
-.plugin-adds dd,
-.plugin-options li {
+.plugin-adds dd {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 8px;
@@ -1607,22 +1627,19 @@ button.link:hover {
   font-size: 13px;
 }
 
-.plugin-adds code {
+.plugin-adds code,
+.shortcuts code {
   color: var(--faint);
   font-family: var(--mono);
   font-size: 11.5px;
 }
 
+/* A plugin's options on its own page are the rows Settings draws, in a frame with no border of its own. */
 .plugin-options {
-  display: grid;
-  gap: 6px;
-  margin: 0;
+  min-width: 0;
+  margin: 0 0 10px;
   padding: 0;
-  list-style: none;
-}
-
-.plugin-option {
-  font-weight: 600;
+  border: 0;
 }
 
 /* A switch is a checkbox drawn as one, so it is still a checkbox to the keyboard and to a screen reader. */
@@ -1681,6 +1698,543 @@ kbd {
   font-family: var(--prose);
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+.settings-banner {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  max-width: 30rem;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.settings-banner[role="alert"] {
+  border-color: var(--danger);
+}
+
+.mode-view.settings {
+  max-width: 62rem;
+  container-type: inline-size;
+}
+
+.settings-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.settings-head h1 {
+  margin: 0;
+}
+
+/* Saved and Saving… take the same room, so the head wraps the same way through a save and nothing under it moves. */
+.settings-head .save-state {
+  flex: 1;
+  min-width: 4.5rem;
+}
+
+.settings-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.settings-tools .filter {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-tools [aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.settings-body {
+  display: grid;
+  grid-template-columns: 12.5rem minmax(0, 1fr);
+  gap: 0 28px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav a {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.settings-nav a:hover {
+  background: var(--hover);
+}
+
+.settings-nav a[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-nav h2 {
+  margin: 12px 0 2px;
+  padding: 0 10px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-count {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.settings-pick {
+  display: none;
+  grid-column: 1 / -1;
+  margin-bottom: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Too narrow to keep the categories beside the settings: they are a menu above them. */
+@container (max-width: 40rem) {
+  .settings-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    display: none;
+  }
+
+  .settings-pick {
+    display: block;
+  }
+}
+
+/* The table of shortcuts is rows of cells only where its own pane has room for the four columns. In less, each command is a card. */
+@container settings-pane (max-width: 38rem) {
+  /* The column names are out of sight and still read out, as the cells keep their order. */
+  .shortcuts thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .shortcuts,
+  .shortcuts tbody,
+  .shortcuts tr {
+    display: block;
+  }
+
+  /* A row is its command, with where its keys are from at the end of that line, and under it the keys and the buttons. The buttons' column is as wide whatever is in it, so the keys' is too. */
+  .shortcuts tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 4px 10px;
+    align-items: center;
+  }
+
+  .shortcuts tr > .shortcut-from {
+    grid-area: 1 / 2;
+    justify-self: end;
+    align-self: start;
+    width: 48px;
+    text-align: right;
+  }
+
+  .shortcuts tr > .shortcut-keys {
+    grid-area: 2 / 1;
+  }
+
+  .shortcuts tr > .shortcut-actions {
+    grid-area: 2 / 2;
+  }
+
+  .shortcuts tr > th,
+  .shortcuts tr > td {
+    padding: 0;
+    border: 0;
+  }
+
+  .shortcuts tr {
+    padding: 8px 0 8px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+/* In a pane narrower than the buttons and a key side by side, a card is one column: the command, its keys, where they are from, the buttons. */
+@container settings-pane (max-width: 18rem) {
+  .shortcuts tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shortcuts tr > :is(.shortcut-from, .shortcut-keys, .shortcut-actions) {
+    grid-area: auto;
+    justify-self: stretch;
+    width: auto;
+    text-align: left;
+  }
+
+  .shortcuts .shortcut-buttons {
+    grid-template-columns: 50px 38px 48px;
+    justify-content: start;
+  }
+}
+
+.settings-problems {
+  margin: 12px 0 0;
+  padding: 8px 12px 8px 28px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.settings-problems code,
+.setting code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.settings-locked {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.settings-pane {
+  container: settings-pane / inline-size;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-pane > .soon {
+  margin-top: 0;
+}
+
+.settings-group:first-child h2 {
+  margin-top: 0;
+}
+
+.settings-group h2 {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 22px 0 4px;
+  font-size: 15px;
+}
+
+.settings-about-plugin {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* The columns have widths of their own, not their content's, so a key added to one row moves no other. */
+.shortcuts {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+@container settings-pane (width > 38rem) {
+  .shortcuts thead th:nth-child(2) {
+    width: 216px;
+  }
+
+  .shortcuts thead th:nth-child(3) {
+    width: 60px;
+  }
+
+  .shortcuts thead th:nth-child(4) {
+    width: 188px;
+  }
+}
+
+.shortcuts th,
+.shortcuts td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.shortcuts thead th {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.shortcuts tbody th {
+  border-left: 2px solid transparent;
+}
+
+/* A command's id is one long word, and the pane may be narrower than it, with both sidebars open or in a split. So it has a line of its own under the title and breaks where it must. */
+.shortcuts code {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.shortcuts tr[data-modified] th {
+  border-left-color: var(--accent);
+}
+
+.shortcut-title {
+  margin-right: 8px;
+}
+
+.shortcuts .error {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+/* A command's keys are one line whatever their number and their length, so a key added grows no row: those past the column's width are scrolled to, and the cell's title names them all. */
+.shortcut-chords {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-height: 22px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shortcut-chords > * {
+  flex: none;
+}
+
+.shortcut-keys kbd button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.shortcut-keys kbd button:hover {
+  color: var(--danger);
+}
+
+.shortcut-none,
+.shortcut-from {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shortcut-buttons {
+  display: grid;
+  grid-template-columns: 58px 44px 54px;
+  gap: 4px;
+  justify-content: end;
+}
+
+.shortcut-buttons .button {
+  grid-row: 1;
+  grid-column: 1;
+  padding-inline: 0;
+}
+
+.shortcut-buttons [data-does="add"] {
+  grid-column: 2;
+}
+
+.shortcut-buttons [data-does="reset"] {
+  grid-column: 3;
+}
+
+.recorder-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: start center;
+  padding-top: 18vh;
+  background: rgb(0 0 0 / 0.25);
+}
+
+.recorder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(26rem, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.recorder p {
+  margin: 0;
+}
+
+.recorder-keys {
+  display: grid;
+  place-items: center;
+  min-height: 3.25rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  outline: none;
+}
+
+.recorder-keys:focus {
+  border-color: var(--accent);
+  border-style: solid;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.recorder-keys kbd {
+  padding: 2px 10px;
+  font-size: 15px;
+}
+
+.recorder-says {
+  min-height: 2.5em;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recorder-warning {
+  color: var(--danger);
+}
+
+.setting {
+  padding: 10px 0 10px 10px;
+  border-left: 2px solid transparent;
+}
+
+.setting[data-modified] {
+  border-left-color: var(--accent);
+}
+
+.setting[data-inactive] {
+  opacity: 0.6;
+}
+
+.setting-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.setting-head code {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.setting-about {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setting-control {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.setting-control input:not([type="checkbox"]),
+.setting-control select {
+  min-width: 12rem;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.setting-control [aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.setting-default {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setting .error {
+  margin: 6px 0 0;
+}
+
+.settings-json {
+  margin-top: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+
+.settings-json .cm-editor {
+  min-height: 16rem;
+  font-size: 13px;
+}
+
+.settings-json .cm-editor.cm-focused {
+  outline: none;
+}
+
+.settings-json .cm-content,
+.settings-json .cm-gutters {
+  font-family: var(--mono);
+}
+
+.settings-json .cm-gutters {
+  border-right: 0;
+  background: none;
+}
+
+.settings-json .cm-tooltip {
+  border-color: var(--line-strong);
+  background: var(--bg-elev);
+  color: var(--ink);
 }
 
 /* Inspector */

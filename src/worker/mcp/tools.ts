@@ -31,7 +31,10 @@ interface Tool {
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
  * tool below, and test/core/agent-parity.test.ts fails when one has neither.
  */
-export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {};
+export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
+  "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
+  "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
+};
 
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
   type: "object",

@@ -1,5 +1,6 @@
-import { chordFor, chordLabel } from "./keybindings.ts";
-import type { App, Command, CommandInfo, Dispose, Embed, IconName, Plugin, PluginHost, Screenshot, Slots } from "./plugin-api.ts";
+import { bind, chordFor, chordLabel } from "./keybindings.ts";
+import type { App, Command, CommandInfo, Dispose, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
+import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
 export interface PluginState {
   id: string;
@@ -28,11 +29,22 @@ export interface Added {
 /** Everything the plugins that are on have added, in the order of the plugins and then of their registering. */
 export interface Contributions {
   commands: readonly Command[];
-  /** Which command each chord runs. The first command to claim a chord keeps it. */
+  /** Which command each chord runs: each command's own keys, with the member's keybindings over them. */
   keybindings: Readonly<Record<string, string>>;
+  settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
   embeds: readonly Embed[];
   plugins: readonly PluginState[];
+}
+
+/** The member's settings, read against the schema the plugins that are installed and the commands that are on add up to. */
+export interface MemberSettings {
+  /** Every setting there is, in the order of the plugins, with keybindings last. */
+  declared: readonly Declared[];
+  values: Readonly<Record<string, SettingValue>>;
+  /** What is wrong in the member's document. None of it is taken out of the document. */
+  problems: readonly Problem[];
+  document: SettingsDocument;
 }
 
 /** What the app gives each plugin beyond registering: its reach into the workspace, bound to that plugin. */
@@ -44,8 +56,13 @@ export interface HostOptions {
   required?: readonly string[];
   /** The ids of the plugins that came with the app. */
   builtIn?: readonly string[];
-  /** Where the ids of the plugins turned off are kept. */
-  disabled: { read(): string[]; write(ids: string[]): void };
+  /** The member's settings as they are at the start. */
+  settings: SettingsDocument;
+  /**
+   * Asked to set one key of the member's settings, or to take it out when `value` is undefined. Only
+   * `setSetting` asks, on behalf of the member. Answer with `settingsChanged` once the document has changed.
+   */
+  write(key: string, value: SettingValue | undefined): void;
   /** Whether chords are labelled for a Mac. */
   mac: boolean;
   provide(plugin: PluginHost["plugin"]): Provided;
@@ -64,7 +81,14 @@ export interface Host {
   fail(contribution: object, error: unknown): void;
   /** Turns every plugin off without forgetting which are on. They start again the next time contributions are read. */
   dispose(): void;
+  /** Sets one of the member's settings. A value that is the default is taken out of the document, as is `undefined`. */
+  setSetting(key: string, value: SettingValue | undefined): void;
+  /** Tells the host the member's document is now this one. Plugins it turns on or off start and stop. */
+  settingsChanged(document: SettingsDocument): void;
 }
+
+/** The setting that turns a plugin on and off. */
+export const enabledKey = (pluginId: string) => `${pluginId}.enabled`;
 
 interface Owned<T> {
   plugin: number;
@@ -74,9 +98,12 @@ interface Owned<T> {
 
 const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
 
+/** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
+const RESERVED = ["plugins.", "go.", "settings."];
+
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
-export function createPluginHost({ plugins, required = [], builtIn = [], disabled, mac, provide }: HostOptions): Host {
+export function createPluginHost({ plugins, required = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed>>();
   const views = new Map<keyof Slots, Map<string, Owned<Slots[keyof Slots]>>>(SLOTS.map((slot) => [slot, new Map()]));
@@ -85,13 +112,17 @@ export function createPluginHost({ plugins, required = [], builtIn = [], disable
   const errors = new Map<string, string>();
   /** What each plugin had registered when contributions were last read with it on. */
   const added = new Map<string, Added>();
-  const off = new Set(disabled.read().filter((id) => !required.includes(id)));
+  let document = settings;
+  const isOff = (id: string) => !required.includes(id) && document[enabledKey(id)] === false;
+  const off = new Set(plugins.filter((p) => isOff(p.id)).map((p) => p.id));
   const listeners = new Set<() => void>();
   /** Which plugin registered a view or an embed, and the reach that plugin was given. */
   const owners = new WeakMap<object, { id: string; app: () => App }>();
   /** Plugins start when contributions are first read, so a host that is made and never used starts nothing. */
   let started = false;
   let starting = false;
+  /** The plugins that asked to hear when settings change. */
+  const watching = new Set<() => void>();
   let seq = 0;
   let snapshot: Contributions | null = null;
 
@@ -129,8 +160,25 @@ export function createPluginHost({ plugins, required = [], builtIn = [], disable
     return {
       plugin: { id: plugin.id, name: plugin.name },
       ...provided,
+      // Settings are the member's. This is the one way a plugin reaches the server, so it is where a plugin is refused.
+      perform: (op) => ((op as OpInput).type.startsWith("settings.") ? Promise.reject(new Error(`${plugin.name} can't ${(op as OpInput).type}: a plugin can't read or change the member's settings`)) : provided.perform(op)),
+      settings: {
+        get<T extends SettingValue>(name: string) {
+          if (!plugin.settings || !Object.hasOwn(plugin.settings, name)) throw new Error(`${plugin.name} declares no setting named ${name}`);
+          return contributions().settings.values[`${plugin.id}.${name}`] as T;
+        },
+        subscribe(listener) {
+          const heard = () => listener();
+          watching.add(heard);
+          return keep(() => void watching.delete(heard));
+        },
+      },
       commands: {
-        register: (c) => keep(command(c)),
+        register(c) {
+          const prefix = required.includes(plugin.id) ? undefined : RESERVED.find((p) => c.id.startsWith(p));
+          if (prefix) throw new Error(`Only Common Ink adds a command whose id starts with ${prefix}, and this one is ${c.id}`);
+          return keep(command(c));
+        },
         list: () => contributions().commands.map(infoOf),
         run,
       },
@@ -138,6 +186,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], disable
         register(slot, view) {
           const table = views.get(slot) as Map<string, Owned<typeof view>>;
           if (slot === "page" && /^\/folder(\/|$)/.test((view as Slots["page"]).path)) throw new Error(`${(view as Slots["page"]).path} is where a folder's notes are listed, so no page can be there`);
+          if (slot === "page" && [...table.values()].some((o) => (o.value as Slots["page"]).path === (view as Slots["page"]).path)) throw new Error(`There's already a page at ${(view as Slots["page"]).path}`);
           const dispose = keep(add(table, view.id, view, index, `a ${slot} view with the id`));
           owners.set(view, owner);
           if (slot !== "page") return dispose;
@@ -163,6 +212,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], disable
     const mine = new Set<Dispose>();
     errors.delete(plugin.id);
     try {
+      if (plugin.settings && Object.hasOwn(plugin.settings, "enabled")) throw new Error("A plugin can't declare a setting named enabled, which turns it on and off");
       const stopping = plugin.activate(hostFor(plugin, index, mine));
       if (stopping) mine.add(stopping);
       running.set(plugin.id, mine);
@@ -190,9 +240,12 @@ export function createPluginHost({ plugins, required = [], builtIn = [], disable
   function startAll() {
     if (started) return;
     started = starting = true;
-    plugins.forEach((plugin, index) => {
-      if (!off.has(plugin.id)) start(plugin, index);
-    });
+    // A required plugin starts first, so no other can take an id it needs. Where its contributions are shown is still its place in the list.
+    for (const first of [true, false]) {
+      plugins.forEach((plugin, index) => {
+        if (required.includes(plugin.id) === first && !off.has(plugin.id)) start(plugin, index);
+      });
+    }
     starting = false;
   }
 
@@ -213,18 +266,43 @@ export function createPluginHost({ plugins, required = [], builtIn = [], disable
   }
 
   function setEnabled(id: string, enabled: boolean) {
-    startAll();
-    const index = plugins.findIndex((p) => p.id === id);
-    if (index < 0 || required.includes(id) || enabled === !off.has(id)) return;
-    if (enabled) {
-      off.delete(id);
-      start(plugins[index]!, index);
-    } else {
-      off.add(id);
-      stop(plugins[index]!);
-    }
-    disabled.write([...off]);
+    if (plugins.some((p) => p.id === id) && !required.includes(id)) setSetting(enabledKey(id), enabled);
+  }
+
+  function setSetting(key: string, value: SettingValue | undefined) {
+    const setting = contributions().settings.declared.find((d) => d.key === key)?.setting;
+    const read = setting && value !== undefined ? readSetting(setting, value) : undefined;
+    const isDefault = read && "value" in read && sameValue(read.value, setting!.default);
+    write(key, isDefault ? undefined : value);
+  }
+
+  function settingsChanged(next: SettingsDocument) {
+    document = next;
+    plugins.forEach((plugin, index) => {
+      if (isOff(plugin.id) === off.has(plugin.id)) return;
+      if (off.delete(plugin.id)) {
+        if (started) start(plugin, index);
+      } else {
+        off.add(plugin.id);
+        stop(plugin);
+      }
+    });
     changed();
+    for (const heard of [...watching]) heard();
+  }
+
+  /** The schema: each plugin's switch and options, then a keybinding for each command that is on. */
+  function declare(all: readonly Command[]): Declared[] {
+    const options = plugins.flatMap((p) => {
+      const group = { id: p.id, name: p.name };
+      const active = running.has(p.id);
+      const own = Object.entries(p.settings ?? {}).map(([name, setting]): Declared => ({ key: `${p.id}.${name}`, setting, group, active }));
+      if (required.includes(p.id)) return own;
+      const enabled: Declared = { switch: true, key: enabledKey(p.id), setting: { type: "boolean", default: true, title: "On", description: `Turn ${p.name} off and what it adds goes away.` }, group, active: true };
+      return [enabled, ...own];
+    });
+    const group = { id: "keybindings", name: "Keybindings" };
+    return [...options, ...all.map((c): Declared => ({ key: KEYBINDING + c.id, setting: { type: "chords", default: c.keys ?? [], title: c.title }, group, active: true }))];
   }
 
   /** What the plugin at one place has in the tables now. */
@@ -250,11 +328,13 @@ export function createPluginHost({ plugins, required = [], builtIn = [], disable
         return { id: `plugins.${enable ? "enable" : "disable"}.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
       });
     const all = [...inOrder(commands.values()), ...toggles];
-    const keybindings: Record<string, string> = {};
-    for (const c of all) for (const chord of c.keys ?? []) keybindings[chord] ??= c.id;
+    const declared = declare(all);
+    const { values, problems, chosen } = resolve(declared, document);
+    const { keybindings, conflicts } = bind(all.map((c) => ({ id: c.id, title: c.title, chords: values[KEYBINDING + c.id] as readonly string[], chosen: chosen.has(KEYBINDING + c.id) })));
     return (snapshot = {
       commands: all,
       keybindings,
+      settings: { declared, values, problems: [...problems, ...conflicts.map(({ commandId, reason }): Problem => ({ key: KEYBINDING + commandId, kind: "conflict", reason }))], document },
       views: Object.fromEntries(SLOTS.map((slot) => [slot, inOrder(views.get(slot)!.values())])) as unknown as Contributions["views"],
       embeds: inOrder(embeds.values()),
       plugins: plugins.map((p) => ({
@@ -283,5 +363,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], disable
     appFor: (view) => owners.get(view)!.app(),
     fail,
     dispose,
+    setSetting,
+    settingsChanged,
   };
 }

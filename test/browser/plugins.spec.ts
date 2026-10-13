@@ -106,7 +106,7 @@ test("turning the sidebar off takes the workspace menu, the page links, and the 
   await expect(sidebar.getByRole("link", { name: "Dashboard" })).toBeVisible();
   await expect(sidebar.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "Unsorted" })).toBeVisible();
   await sidebar.getByRole("button", { name: /Ada/ }).click();
-  await expect(page.getByRole("menuitem")).toHaveText(["Agents", "Sign out"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Agents", "Settings", "Sign out"]);
 });
 
 test("turning folders off takes the folder tree out of the sidebar and its icon out of the closed bar, and leaves the notes", async ({ page }) => {
@@ -435,11 +435,12 @@ test("a built-in plugin's details show what it is, what it adds as it registered
   await expect(details.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
   await expect(details).toContainText("A stopwatch in a note, written ::stopwatch{}.");
   await expect(section(page, "Permissions")).toContainText("It comes with Common Ink and runs inside the app as you, so it asks for nothing");
-  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Permissions", "What it adds"]);
+  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Permissions", "What it adds", "Settings"]);
 
   const adds = section(page, "What it adds");
   await expect(adds.getByRole("group")).toHaveAccessibleName("Embeds");
   await expect(adds.getByRole("group", { name: "Embeds" })).toHaveText("Embeds 1Stopwatch::stopwatch{}");
+  await expect(section(page, "Settings")).toHaveText("SettingsIt has no settings.");
 
   // Its switch is here, and what it added when it was on is still said once it is off.
   const toggle = details.getByRole("checkbox", { name: "Stopwatch", exact: true });
@@ -448,6 +449,7 @@ test("a built-in plugin's details show what it is, what it adds as it registered
   await expect(details.locator(".plugin-switch")).toHaveText("Off");
   await expect(adds).toContainText("It is off, so none of this is in the app now. This is what it adds when it is on.");
   await expect(adds.getByRole("group", { name: "Embeds" })).toContainText("Stopwatch");
+  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)).toEqual({ "stopwatch.enabled": false });
   await page.getByRole("link", { name: "All plugins" }).click();
   await expect(pluginRow(page, "Stopwatch").getByRole("checkbox")).not.toBeChecked();
 
@@ -466,19 +468,32 @@ test("a built-in plugin's details show what it is, what it adds as it registered
   await expect(page.getByText("There's no plugin here.")).toBeVisible();
 });
 
-test("a plugin that hasn't been on since the app loaded says so in its details until it is turned on", async ({ page }) => {
+test("a plugin's details have its settings and link to them in Settings, and one that hasn't been on says so until it is", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.goto("/plugins/note-list");
   const details = page.locator(".plugin-details");
   await expect(page.getByRole("heading", { name: "Note list", level: 1 })).toBeVisible();
   await details.getByRole("checkbox", { name: "Note list", exact: true }).uncheck();
-  await expect(details.locator(".plugin-switch")).toHaveText("Off");
+  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)).toEqual({ "note-list.enabled": false });
   await page.reload();
   await expect(details.locator(".plugin-switch")).toHaveText("Off");
   await expect(section(page, "What it adds")).toContainText("It hasn't been on since the app loaded, so what it adds isn't listed yet. Turn it on to see.");
+  const own = section(page, "Settings").getByRole("group", { name: "Settings of Note list" });
+  await expect(own.getByRole("checkbox")).toHaveAccessibleName("Show snippets");
+  await expect(own).toContainText("Show the first lines of each note under its title.");
+  await expect(section(page, "Settings")).toContainText("Note list is off, so its options change nothing until it is turned on.");
 
   await details.getByRole("checkbox", { name: "Note list", exact: true }).check();
   await expect(section(page, "What it adds").getByRole("group", { name: "Views" })).toBeVisible();
+  await expect(section(page, "What it adds").getByRole("group", { name: "Settings" })).toContainText("Settings 1");
+
+  await section(page, "Settings").getByRole("link", { name: "Open in Settings" }).click();
+  await expect(page).toHaveURL(/\/settings\/plugins\/note-list$/);
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Note list" })).toHaveAttribute("aria-current", "page");
+  const noteList = page.getByRole("region", { name: "Note list", exact: true });
+  await expect(noteList.getByRole("checkbox")).toHaveAccessibleName("Show snippets");
+  await noteList.getByRole("link", { name: "About this plugin" }).click();
+  await expect(page).toHaveURL(/\/plugins\/note-list$/);
 });
 
 test("only a plugin that came with the app is called Built-in", async ({ page }) => {

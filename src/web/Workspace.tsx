@@ -6,7 +6,7 @@ import { Drawn } from "./Drawn.tsx";
 import { folderTree } from "./folders.ts";
 import { Icon } from "./icons.tsx";
 import { Inspector, viewsFor, type Subject } from "./Inspector.tsx";
-import { advance, chordFor, chordLabel, chordOf, isModifier, typed } from "./keybindings.ts";
+import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, typed } from "./keybindings.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { NoteReader } from "./NoteReader.tsx";
 import { ALL_NOTES, folderTitle, type App, type Embed, type Folders, type Opened, type Plugin } from "./plugin-api.ts";
@@ -15,7 +15,10 @@ import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, type Navigate, type Place } from "./router.ts";
-import { isBoolean, isStrings, readStored, useStored, writeStored } from "./stored.ts";
+import { documentOf } from "./settings.ts";
+import { Settings } from "./Settings.tsx";
+import type { SettingsStore } from "./settingsStore.ts";
+import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
 import { performInSync, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
@@ -39,6 +42,9 @@ const isRevisions = (v: unknown): v is Record<string, number> => typeof v === "o
 const inField = (el: EventTarget | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
 
 /** How long the first keys of a sequence wait for the rest. */
+/** What acts on Enter or Space itself when it has focus and isn't a field. A bare key bound to a command is left to it. */
+const PRESSED = 'button, summary, [role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="option"], [role="treeitem"], [role^="menuitem"]';
+const TAKES = { enter: `${PRESSED}, a[href], [role="link"]`, space: PRESSED };
 const SEQUENCE_MS = 1500;
 const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 
@@ -104,12 +110,14 @@ function FolderNotes({ folderId, folders, notes, pathOf, onOpen }: { folderId: s
 interface Props {
   me: Me;
   workspace: WorkspaceSummary;
+  /** The member's settings in this workspace. */
+  settings: SettingsStore;
   place: Place;
   navigate: Navigate;
   onSwitch: (workspaceId: string) => void;
 }
 
-export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
+export function Workspace({ me, workspace, settings, place, navigate, onSwitch }: Props) {
   const { route } = place;
   const workspaceId = workspace.id;
   const canEdit = workspace.role !== "viewer";
@@ -144,11 +152,15 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
   const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
   const [host] = useState(() => {
     let created: Host;
-    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} mac={MAC} path={app.path} go={app.go} />;
+    const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
       id: "core",
       name: "Common Ink",
+      settings: {
+        theme: { type: "string", default: "system", enum: ["system", "light", "dark"], title: "Theme", description: "Light or dark, or system to follow this device." },
+        editorTextSize: { type: "integer", default: 100, minimum: 75, maximum: 200, title: "Editor text size", description: "The size of a note's text, as a percentage." },
+      },
       activate(h) {
         h.commands.register({ id: "notes.all", title: "Open All notes", run: () => h.app().openFolder(ALL_NOTES) });
         if (canEdit) {
@@ -161,20 +173,23 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
         h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", run: () => inner.current.toggleInspector() });
       },
     };
-    /** Kept apart from the rest so its link and command come after the plugins', where the others come before. */
-    const pluginsPage: Plugin = {
+    /** Kept apart from the rest so their links and commands come after the plugins', where the others come before. */
+    const pages: Plugin = {
       id: "plugins",
       name: "Plugins",
-      activate: (h) => void h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage }),
+      activate(h) {
+        h.views.register("page", { id: "settings", path: "/settings", label: "Settings", nav: "menu", component: ({ app }) => <Settings host={created} store={settings} mac={MAC} path={app.path} go={app.go} /> });
+        h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage });
+      },
     };
-    const disabledKey = `ink.plugins.off.${workspaceId}.${me.person.id}`;
     created = createPluginHost({
       // A test puts plugins on the page before the app loads. Loading a member's own plugins is another matter.
-      plugins: [core, ...BUILT_INS, ...((window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__ ?? []), pluginsPage],
-      builtIn: [core, ...BUILT_INS, pluginsPage].map((p) => p.id),
-      required: [core.id, pluginsPage.id],
-      // Settings will keep this per member per workspace; until then it is kept in this browser.
-      disabled: { read: () => readStored(disabledKey, isStrings) ?? [], write: (ids) => writeStored(disabledKey, ids) },
+      plugins: [core, ...BUILT_INS, ...((window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__ ?? []), pages],
+      builtIn: [core, ...BUILT_INS, pages].map((p) => p.id),
+      required: [core.id, pages.id],
+      settings: documentOf(settings.text()) ?? {},
+      // The member's own controls come through here: the Settings and Plugins pages, and the commands that turn a plugin on or off.
+      write: (key, value) => void settings.set(key, value),
       mac: MAC,
       provide: (plugin) => ({
         workspace,
@@ -190,6 +205,16 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
     });
     return created;
   });
+  useEffect(() => {
+    let last: string | null = null;
+    const read = () => {
+      if (settings.text() === last) return;
+      last = settings.text();
+      host.settingsChanged(documentOf(last) ?? {});
+    };
+    read();
+    return settings.subscribe(read);
+  }, [host, settings]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   /** The page the address names: the one at exactly that address, or else the one whose path it is under. */
   const routePage = route.kind === "page" ? (contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`))) : undefined;
@@ -223,6 +248,12 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
       }),
     [host, guarded, contributed.embeds],
   );
+  const theme = contributed.settings.values["core.theme"] as string;
+  useEffect(() => {
+    if (theme === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    return () => void delete document.documentElement.dataset.theme;
+  }, [theme]);
   const shortcut = (commandId: string) => {
     const chord = chordFor(commandId, contributed.keybindings);
     return chord && chordLabel(chord, MAC);
@@ -381,16 +412,22 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || isModifier(e.key)) return;
+      // A press in the keyboard shortcuts table's recorder is a key to write down, not one to run.
+      if (e.target instanceof Element && e.target.closest("[data-records-keys]")) return;
       const { keybindings, commands } = host.contributions();
       const chord = chordOf(e);
       const begun = pending;
       giveUp();
+      const press = pressing(chord);
+      const pressesIt = press !== null && e.target instanceof Element && e.target.matches(TAKES[press]);
       const commandFor = (keys: string) => commands.find((c) => c.id === keybindings[keys]);
       const ready = Object.keys(keybindings).filter((keys) => {
         if (keys !== chord && !keys.startsWith(`${chord} `) && !(begun && keys.startsWith(`${begun} `))) return false;
         const command = commandFor(keys)!;
         // Keys that would type are left to what is being typed in.
         if (typed(keys) && (inField(e.target) || (e.target instanceof HTMLElement && e.target.isContentEditable))) return false;
+        // Enter and Space are a button's, a link's or a checkbox's own while it has focus.
+        if (pressesIt && (keys === chord || keys.startsWith(`${chord} `))) return false;
         return !(inField(e.target) && command.leaveToFields);
       });
       const next = advance(begun, chord, ready);
@@ -579,7 +616,7 @@ export function Workspace({ me, workspace, place, navigate, onSwitch }: Props) {
   const focusable = !nothingThere && (!!editorArea || !passing);
 
   return (
-    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100, "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
       {contributed.views.column.map((column) => (
         <Drawn key={column.id} host={host} view={column} />
       ))}

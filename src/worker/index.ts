@@ -7,7 +7,7 @@ import { handleMcp } from "./mcp/mcp.ts";
 import { redirectFor } from "./hosts.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 
-const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404 };
+const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409 };
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
