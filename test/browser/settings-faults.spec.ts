@@ -134,6 +134,30 @@ test("slow settings don't hold the workspace back for long: it opens with the de
   await expect.poll(() => theme(page)).toBe("dark");
 });
 
+test("JSON typed before slow settings arrive is not kept as a draft that would write over them", async ({ page }) => {
+  await openSettings(page);
+  await perform(page, { type: "settings.write", text: '{"core.theme":"dark","note-list.snippets":false}', baseRevision: 0 });
+  await slow(page, "settings.read", 4000);
+
+  await page.goto("/settings/json");
+  await expect(json(page)).toBeVisible({ timeout: 3500 });
+  await expect(page.locator(".settings-head").getByRole("status")).toHaveText("Loading your settings…");
+  // Nothing can be changed yet, so nothing typed now is taken: it used to be held and, a key later, written over what was stored.
+  await json(page).click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.insertText('{"core.editorTextSize": 120}');
+  await expect(json(page)).toHaveText("{}");
+
+  await expect(json(page)).toContainText("core.theme");
+  await expect(problems(page)).toHaveCount(0);
+  await expect(page.locator(".settings-head").getByRole("status")).toHaveText("Saved");
+  await json(page).click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(500);
+  expect(await stored(page)).toEqual({ "core.theme": "dark", "note-list.snippets": false });
+});
+
 test("a plugin that names a command or a page as the app's own are named is left out, and Settings and Plugins stay where they are", async ({ page }) => {
   await page.addInitScript(() => {
     interface Handed {
