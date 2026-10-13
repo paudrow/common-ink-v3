@@ -9,20 +9,21 @@ const ID = "abcdefgh1234";
 
 describe("the room an upload's embed keeps", () => {
   it("is the size the note writes, at its own shape", () => {
-    expect(boxFor("image", `${ID} 640x480`)).toEqual({ ratio: 640 / 480, width: 640 });
-    expect(boxFor("video", `${ID} 640x360`)).toEqual({ ratio: 16 / 9, width: 640 });
+    expect(boxFor("image", `${ID} 640x480`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
+    expect(boxFor("video", `${ID} 640x360`)).toEqual({ ratio: 16 / 9, maxWidth: 640 });
   });
 
-  it("is never larger than the picture, and never taller than 480 pixels", () => {
-    expect(boxFor("image", `${ID} 20x10`)).toEqual({ ratio: 2, width: 20 });
-    expect(boxFor("image", `${ID} 300x900`)).toEqual({ ratio: 1 / 3, width: 160 });
-    expect(boxFor("image", `${ID} 4000x3000`)).toEqual({ ratio: 4 / 3, width: 640 });
+  it("is never larger than the picture, never taller than 480 pixels and never wider than 640", () => {
+    expect(boxFor("image", `${ID} 20x10`)).toEqual({ ratio: 2, maxWidth: 20 });
+    expect(boxFor("image", `${ID} 300x900`)).toEqual({ ratio: 1 / 3, maxWidth: 160 });
+    expect(boxFor("image", `${ID} 4000x3000`)).toEqual({ ratio: 4 / 3, maxWidth: 640 });
+    expect(boxFor("video", `${ID} 1920x1080`)).toEqual({ ratio: 16 / 9, maxWidth: 640 });
   });
 
   it("is a fixed box for a picture or a video written without a size, or with one that can't be read", () => {
-    expect(boxFor("image", ID)).toEqual({ ratio: 16 / 9, width: 480 });
-    expect(boxFor("video", `${ID} wide`)).toEqual({ ratio: 16 / 9, width: 480 });
-    expect(boxFor("image", `${ID} 0x100`)).toEqual({ ratio: 16 / 9, width: 480 });
+    expect(boxFor("image", ID)).toEqual({ ratio: 16 / 9, maxWidth: 480 });
+    expect(boxFor("video", `${ID} wide`)).toEqual({ ratio: 16 / 9, maxWidth: 480 });
+    expect(boxFor("image", `${ID} 0x100`)).toEqual({ ratio: 16 / 9, maxWidth: 480 });
   });
 
   it("is a fixed height for a recording, whatever else its embed says, and nothing for a file", () => {

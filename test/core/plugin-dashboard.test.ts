@@ -93,7 +93,7 @@ describe("notes made or edited today", () => {
 });
 
 describe("the summary of changes", () => {
-  const change = (noteId: string, revision: number, createdAt: number, author: HistoryEntry["author"]): HistoryEntry => ({ noteId, noteTitle: `Title of ${noteId}`, revision, baseRevision: revision - 1, author, createdAt, label: null, reverts: null, revertedBy: null, added: 0, removed: 0, diff: null });
+  const change = (noteId: string, revision: number, createdAt: number, author: HistoryEntry["author"]): HistoryEntry => ({ noteId, noteTitle: `Title of ${noteId}`, revision, baseRevision: revision - 1, author, createdAt, label: null, reverts: null, revertedBy: null, restores: 0, added: 0, removed: 0, diff: null });
   const grace = { kind: "member" as const, personId: "g", name: "Grace" };
   const claude = { kind: "agent" as const, agentId: "c", name: "Claude", onBehalfOf: "g" };
 

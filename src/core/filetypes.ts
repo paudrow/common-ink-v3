@@ -100,6 +100,8 @@ export function imageSize(type: string, head: Uint8Array): { width: number; heig
 }
 
 const MAX_NAME_LENGTH = 200;
+/** Half of a character that takes two: what a cut through one leaves, and what no name is made of. */
+const LONE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
 /**
  * A file's name as it is kept: the last part of what was given, with nothing a path or a header
@@ -107,11 +109,11 @@ const MAX_NAME_LENGTH = 200;
  */
 export function cleanName(given: string): string {
   const last = given.split(/[/\\]/).at(-1) ?? "";
-  const clean = last.replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069"<>:|?*]/g, "").replace(/\s+/g, " ").trim().replace(/^\.+/, "");
+  const clean = last.replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069"<>:|?*]/g, "").replace(LONE, "").replace(/\s+/g, " ").trim().replace(/^\.+/, "");
   if (!clean) return "file";
   if (clean.length <= MAX_NAME_LENGTH) return clean;
   const ending = /\.[A-Za-z0-9]{1,8}$/.exec(clean)?.[0] ?? "";
-  return clean.slice(0, MAX_NAME_LENGTH - ending.length) + ending;
+  return clean.slice(0, MAX_NAME_LENGTH - ending.length).replace(LONE, "") + ending;
 }
 
 /** How the name is written in the header that says what to save a download as. */

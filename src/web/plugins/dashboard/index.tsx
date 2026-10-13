@@ -32,6 +32,8 @@ function PinMark({ pins, note }: { pins: Pins; note: NoteSummary }) {
 export const dashboard: Plugin = {
   id: "dashboard",
   name: "Dashboard",
+  description: "The home page: what is ahead of you today, your pinned notes, and what changed.",
+  icon: "dashboard",
   activate(host) {
     const pins = pinsOf(host);
     const openTodo = todoOpener(host);

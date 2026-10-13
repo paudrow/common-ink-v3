@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
-import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
+import { useCallback, useEffect, useId, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
+import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carry, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
 import { useKept } from "./lib/kept.ts";
 import { listable } from "./lib/listable.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
@@ -8,7 +8,8 @@ import { SHARE_COMMAND, SHARE_OVERLAY } from "./sharing/Summary.tsx";
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((id) => typeof id === "string");
 
 type Editing = { kind: "create"; parentId: string | null } | { kind: "rename"; id: string };
-type Menu = { folder: ListedFolder; x: number; y: number };
+/** A row's menu. `folder` is left out for a row that is a list and no folder, which can be opened and not changed. */
+type Menu = { id: string; name: string; folder?: ListedFolder; x: number; y: number };
 
 const indent = (depth: number) => ({ "--depth": depth }) as CSSProperties;
 
@@ -24,13 +25,15 @@ interface Props {
   selectedId: string | null;
   /** A single click opens a folder's list as a preview; a double click keeps it open. */
   onOpen: (id: string, keep: boolean) => void;
+  /** Opens a folder's list in a split, right of or under what is in front. Null where the editor area has no splits. */
+  onSplit: ((id: string, side: "right" | "down") => void) | null;
   onChanged: () => void;
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
   /** Opens the Share dialog for a folder. Left out when there is none to open. */
   onShare?: (folderId: string) => void;
 }
 
-function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChanged, onMoveNote, onShare }: Props) {
+function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSplit, onChanged, onMoveNote, onShare }: Props) {
   const ids = useId();
   const [expandedList, setExpanded] = useKept(host.storage, "expanded", isStrings, []);
   const expanded = new Set(expandedList);
@@ -44,7 +47,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
   const member = role !== "guest";
   /** The folder the server said the member may share, asked when its menu opens. */
   const [shareable, setShareable] = useState<string | null>(null);
-  const menuFolderId = menu?.folder.id;
+  const menuFolderId = menu?.folder?.id;
   useEffect(() => {
     if (!menuFolderId || !onShare) return;
     let live = true;
@@ -104,7 +107,10 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
     </div>
   );
 
-  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and it has no menu. */
+  /** Dragged to the editor area, a row's list is dropped in a group as a tab is. */
+  const dragged = (id: string) => ({ draggable: true, onDragStart: (e: DragEvent) => carry(e.dataTransfer, { kind: "folder", id }) });
+
+  /** A row that stands for a list of notes and isn't a folder: nothing is dropped on it, and its menu only opens it. */
   const listRow = (id: string, name: string, count: number) => (
     <div
       key={id}
@@ -116,8 +122,13 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
       aria-labelledby={`${ids}-${id}`}
       aria-describedby={`${ids}-${id}-count`}
       tabIndex={selectedId === id || (id === ALL_NOTES && !(selectedId && (tree.byId.has(selectedId) || (selectedId === SHARED_WITH_ME && loose > 0)))) ? 0 : -1}
+      {...dragged(id)}
       onClick={() => onOpen(id, false)}
       onDoubleClick={() => onOpen(id, true)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ id, name, x: e.clientX, y: e.clientY });
+      }}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
@@ -159,6 +170,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
             aria-labelledby={`${ids}-${folder.id}`}
             aria-describedby={`${ids}-${folder.id}-count`}
             tabIndex={folder.id === selectedId ? 0 : -1}
+            {...dragged(folder.id)}
             onClick={choose}
             onDoubleClick={() => onOpen(folder.id, true)}
             onKeyDown={(e) => {
@@ -167,9 +179,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
               choose();
             }}
             onContextMenu={(e) => {
-              if (folder.access !== "edit") return;
               e.preventDefault();
-              setMenu({ folder, x: e.clientX, y: e.clientY });
+              setMenu({ id: folder.id, name: folder.name, folder, x: e.clientX, y: e.clientY });
             }}
             onDragOver={(e) => {
               if (!e.dataTransfer.types.includes(NOTE_DRAG)) return;
@@ -189,6 +200,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
               <button
                 type="button"
                 className="chevron"
+                data-row-toggle
                 data-open={open || undefined}
                 tabIndex={-1}
                 aria-label={`${open ? "Collapse" : "Expand"} ${folder.name}`}
@@ -209,8 +221,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
             <span className="count" id={`${ids}-${folder.id}-count`}>
               {folder.noteCount}
             </span>
-            {folder.access === "edit" && (
-              <button
+            <button
                 type="button"
                 className="row-actions"
                 tabIndex={-1}
@@ -218,12 +229,11 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
                 onClick={(e) => {
                   e.stopPropagation();
                   const box = e.currentTarget.getBoundingClientRect();
-                  setMenu({ folder, x: box.left, y: box.bottom + 2 });
+                  setMenu({ id: folder.id, name: folder.name, folder, x: box.left, y: box.bottom + 2 });
                 }}
               >
                 <Icon name="more" />
               </button>
-            )}
           </div>,
         );
       }
@@ -257,24 +267,30 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onChan
       )}
       {menu && (
         <ContextMenu
-          label={`${menu.folder.name} actions`}
+          label={`${menu.name} actions`}
           x={menu.x}
           y={menu.y}
           onClose={closeMenu}
           items={[
-            { label: "New folder inside", action: () => startCreate(menu.folder.id) },
-            ...(onShare && shareable === menu.folder.id ? [{ label: "Share", action: () => onShare(menu.folder.id) }] : []),
-            ...(menu.folder.id === tree.unsortedId
+            ...(onSplit
+              ? [
+                  { label: "Open in a split right", action: () => onSplit(menu.id, "right") },
+                  { label: "Open in a split down", action: () => onSplit(menu.id, "down") },
+                ]
+              : []),
+            ...(menu.folder?.access === "edit" ? [{ label: "New folder inside", action: () => startCreate(menu.id) }] : []),
+            ...(onShare && menu.folder && shareable === menu.id ? [{ label: "Share", action: () => onShare(menu.id) }] : []),
+            ...(menu.folder?.access !== "edit" || menu.id === tree.unsortedId
               ? []
               : [
                   {
                     label: "Rename",
                     action: () => {
                       setError(null);
-                      setEditing({ kind: "rename", id: menu.folder.id });
+                      setEditing({ kind: "rename", id: menu.id });
                     },
                   },
-                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.folder.id }) }] : []),
+                  ...(role === "admin" ? [{ label: "Delete", action: () => run({ type: "folder.delete", id: menu.id }) }] : []),
                 ]),
           ]}
         />
@@ -311,9 +327,13 @@ function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit:
 export const folders: Plugin = {
   id: "folders",
   name: "Folders",
+  description: "The folder tree in the sidebar, where notes are filed, moved and found.",
+  icon: "folders",
   activate(host) {
     host.views.register("section", {
       id: "folders",
+      label: "Folders",
+      icon: "folders",
       component: ({ app }) => {
         const live = listable(app.notes ?? [], false);
         return (
@@ -326,6 +346,7 @@ export const folders: Plugin = {
             total={live.length}
             selectedId={app.folderId}
             onOpen={(id, keep) => app.openFolder(id, { preview: !keep })}
+            onSplit={app.openBeside && ((id, side) => app.openBeside?.({ kind: "folder", id }, side))}
             onChanged={app.refresh}
             onMoveNote={app.moveNote}
             onShare={host.commands.list().some((c) => c.id === SHARE_COMMAND) ? (folderId) => app.toggleOverlay(SHARE_OVERLAY, { folderId }) : undefined}

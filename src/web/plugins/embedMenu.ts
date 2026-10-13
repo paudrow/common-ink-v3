@@ -16,6 +16,8 @@ function itemFor({ name, title, block, starts, pick }: EmbedInfo): CompletionIte
 export const embedMenu: Plugin = {
   id: "embed-menu",
   name: "Embed menu",
+  description: "Type / in a note to pick something to embed from a list.",
+  icon: "slash",
   activate(host) {
     host.completions.register({
       id: "embeds",

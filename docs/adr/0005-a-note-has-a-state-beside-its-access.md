@@ -18,8 +18,8 @@ Until #21 every note was live, and every listing was written as if that would st
 |---|---|---|---|
 | Listings (`note.list`, `todo.list`, `todo.filters`, `tag.list`, `search`, a folder's count) | listed | only with `includeArchived` | never |
 | `trash.list` | no | no | yes |
-| Read (`note.read`, `note.history`, `todo.history`) | yes | yes | yes, and `state` says so |
-| Change (write, todo, move, label, revert, undo, redo, archive) | yes | yes | refused: `conflict`, "This note is in Trash" |
+| Read (`note.read`, `note.history`, `todo.history`, `history.diff`, a revert's preview) | yes | yes | yes, and `state` says so |
+| Change (write, todo, move, label, revert, undo, redo, archive) | yes | yes | refused: `conflict`, "This note is in Trash". `history.revert`, which answers note by note, skips it with those words |
 | A link to it from another note | title | title, state | title, state: the link says it is in Trash |
 | `[[Title]]` in a write | resolves | resolves when no live note has the title | never |
 | Backlinks from it | listed | listed | not listed |
@@ -52,6 +52,6 @@ Until #21 every note was live, and every listing was written as if that would st
 - A new operation over notes says which states it covers or what it does with a trashed note, and has a row in the matrix that says it again.
 - A new table keyed by a note's id needs a line in `REMOVALS`, and the purge test fails until it has one. Uploads (#22) follow the same states, and removing a note leaves the uploads it references.
 - `note.list` with `updatedSince` reports a note whose state changed since, as well as one whose text did, among the states it covers. A note that was trashed since is in `trash.list`, which an agent that mirrors notes reads as well, as the web app does on each relist.
-- How long a search takes depends on how many notes match, hidden ones included. Nothing in the answer does.
+- How long a search takes depends on how many notes match, hidden ones included. Nothing in the answer does. `indexing`, which `search` and `tag.list` answer while notes are still being read in, is about the asker's own notes: a listing reads in the notes the asker can see and no other, so neither whether a hidden note is waiting nor how many are shows in how often they are told to ask again. A note is read in when someone who sees it first asks. A rebuild by someone who sees every folder covers every note, and one by an agent limited to folders covers its own. Removing a note also merges the index's pages (FTS5 `optimize`), since a deleted row's words otherwise stay in them until a later merge.
 - `wrangler d1 export` refuses a database with a virtual table, so it can no longer back this one up. The backup is D1 Time Travel (`wrangler d1 time-travel restore`), which keeps 30 days. For a file export, drop `note_search` first on a copy: `links.rebuild` fills it again.
 - Previews have no cron, so nothing leaves a Preview's Trash on its own.

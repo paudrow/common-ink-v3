@@ -50,8 +50,8 @@ test("the app opens to the dashboard, which makes nothing: no daily note until t
   await expect(pinned(page)).toContainText("Nothing is pinned.");
   await expect(changes(page)).toContainText("Nothing has changed.");
   await expect(changes(page).getByRole("button", { name: "Mark as read" })).toBeDisabled();
-  expect(await perform(page, { type: "note.list", includeArchived: true })).toEqual([]);
-  expect((await perform(page, { type: "folder.list" })).folders.map((f) => f.name)).toEqual(["Unsorted"]);
+  await expect.poll(() => perform(page, { type: "note.list", includeArchived: true })).toEqual([]);
+  await expect.poll(async () => (await perform(page, { type: "folder.list" })).folders.map((f) => f.name)).toEqual(["Unsorted"]);
 
   const today = await page.evaluate(() => {
     const now = new Date();
@@ -102,7 +102,7 @@ test("each section is its full size before its answer arrives, so nothing moves 
   await expect(what(pinned(page))).toHaveCount(10);
   await expect(what(todays(page))).toHaveCount(11);
 
-  expect(await boxes()).toEqual(waiting);
+  await expect.poll(() => boxes()).toEqual(waiting);
   expect(waiting.every((box) => box !== null && box.height > 0)).toBe(true);
 });
 
@@ -124,7 +124,7 @@ for (const { timezoneId, ahead } of ZONES) {
     test("today is the member's day: todos due, events still ahead and notes edited are read by the date where they are", async ({ page }) => {
       await signInAsNewPerson(page, "Ada Lovelace");
       await settled(page);
-      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(timezoneId);
+      await expect.poll(() => page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(timezoneId);
       const now = Date.now();
       const today = written(now + ahead);
       test.info().annotations.push({ type: "dates", description: `${today} in ${timezoneId}, ${written(now)} in UTC` });
@@ -163,7 +163,7 @@ for (const { timezoneId, ahead } of ZONES) {
       await todos(page).getByRole("button", { name: /Pay rent/ }).click();
       await expect(page).toHaveURL(new RegExp(`${plan.id}$`));
       await expect(editor(page)).toBeFocused();
-      expect(await page.evaluate(() => getSelection()!.anchorNode!.parentElement!.closest(".cm-line")!.textContent)).toContain("Pay rent");
+      await expect.poll(() => page.evaluate(() => getSelection()!.anchorNode!.parentElement!.closest(".cm-line")!.textContent)).toContain("Pay rent");
 
       // The same member a day later, by the clock of their browser: yesterday's note and events are no longer today's, and tomorrow's todo is.
       const later = await page.context().newPage();
@@ -199,7 +199,7 @@ test("a member pins a note from its bar: the pin is theirs alone, follows them t
   await pin.click();
   const unpin = page.getByRole("button", { name: "Unpin from dashboard" });
   await expect(unpin).toHaveAttribute("aria-pressed", "true");
-  expect(await line.boundingBox(), "pinning moves nothing in the note").toEqual(before);
+  await expect.poll(() => line.boundingBox(), "pinning moves nothing in the note").toEqual(before);
   await expect.poll(async () => (await perform(page, { type: "pin.list" })).map((n) => n.title)).toEqual(["Plan"]);
   const read = await perform(page, { type: "note.read", id: plan.id });
   expect([read.text, read.revision]).toEqual(["# Plan\n\nFirst line", 1]);
@@ -211,7 +211,7 @@ test("a member pins a note from its bar: the pin is theirs alone, follows them t
   await grace.goto(`/note/${plan.id}`);
   await expect(editor(grace)).toContainText("First line");
   await expect(grace.getByRole("button", { name: "Pin to dashboard" })).toHaveAttribute("aria-pressed", "false");
-  expect(await perform(grace, { type: "pin.list" }, workspaceId)).toEqual([]);
+  await expect.poll(() => perform(grace, { type: "pin.list" }, workspaceId)).toEqual([]);
 
   // Ada again, in a browser that has never been here.
   const elsewhere = await (await page.context().browser()!.newContext({ baseURL: test.info().project.use.baseURL })).newPage();
@@ -311,12 +311,12 @@ test("the summary lists what others and agents changed since the member marked i
   const second = await page.context().newPage();
   await openDashboard(second);
   await expect(rows(second)).toHaveText([/^Plan2 changes/]);
-  expect((await perform(page, { type: "visit.read" })).readUntil).toBeNull();
+  await expect.poll(async () => (await perform(page, { type: "visit.read" })).readUntil).toBeNull();
 
   await changes(page).getByRole("button", { name: "Mark as read" }).click();
   await expect(changes(page)).toContainText("Nothing has changed.");
   await expect(changes(page)).toContainText("By others since you marked changes read on ");
-  expect((await perform(page, { type: "visit.read" })).readUntil).not.toBeNull();
+  await expect.poll(async () => (await perform(page, { type: "visit.read" })).readUntil).not.toBeNull();
   await second.reload();
   await settled(second);
   await expect(changes(second)).toContainText("Nothing has changed.");
@@ -423,9 +423,9 @@ test("with more changes than the summary reads, its counts say they are the leas
   await expect(changes(page).getByRole("button", { name: "Mark as read", exact: true })).toHaveCount(0);
 
   await changes(page).getByRole("button", { name: "See them all on the History page" }).click();
+  // History lists every change by time, latest first, which is where the ones past the latest hundred are.
   await expect(page).toHaveURL(/\/history$/);
-  const sevenDaysAgo = await page.evaluate(() => new Date(Date.now() - 7 * 86_400_000).toLocaleDateString("en-CA"));
-  await expect(page.getByLabel("From")).toHaveValue(sevenDaysAgo);
+  await expect(page.getByRole("listbox", { name: "Changes" }).getByRole("option").first()).toBeVisible();
 });
 
 test("a guest's dashboard shows what they were granted and nothing else of the workspace", async ({ page }) => {
@@ -459,7 +459,9 @@ test("the Dashboard is a plugin: turned off, its page, its link and the pin are 
   await page.goto("/plugins");
   await page.getByRole("checkbox", { name: "Dashboard", exact: true }).setChecked(false);
   await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Dashboard" })).toHaveCount(0);
-  await page.goto("/");
+  // The Plugins page is a tab, which `/` would return to: with it closed nothing is open, and no Dashboard opens there.
+  await page.getByRole("button", { name: "Close Plugins" }).click();
+  await expect(page).toHaveURL(/\/$/);
   await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
   await expect(dashboard(page)).toHaveCount(0);
   await page.goto(`/note/${note.id}`);
