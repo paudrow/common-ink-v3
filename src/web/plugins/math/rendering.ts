@@ -15,7 +15,7 @@ const FACES = ["KaTeX_Main", "KaTeX_Math", "KaTeX_Size1", "KaTeX_Size2", "KaTeX_
 export const facesLoaded = (): Promise<unknown> => Promise.race([Promise.allSettled(FACES.flatMap((face) => [document.fonts.load(`1em ${face}`), document.fonts.load(`italic 1em ${face}`)])), new Promise((done) => setTimeout(done, 1500))]);
 
 /**
- * Draws `$…$` and `$$…$$` as math with KaTeX. A formula on the cursor's line is shown as written.
+ * Draws `$…$` and `$$…$$` as math with KaTeX. A formula the cursor is on is shown as written, and another on the same line stays drawn.
  * A block is shown as written, whole, while the cursor is anywhere in it: its formula is one thing,
  * edited as one. `blocks` is where the note's blocks are found, and `heights` how tall each is.
  */
