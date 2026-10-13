@@ -15,6 +15,13 @@ export const SDK = `(() => {
   const commands = new Map();
   const unheard = [];
   const settingsHeard = new Set();
+  const noteHeard = new Set();
+  const itemsHeard = new Set();
+  const storageHeard = new Set();
+  const watch = (heard, what, fn) => {
+    heard.add(fn);
+    if (heard.size === 1) call({ call: "watch", what }).catch(() => {});
+  };
   const call = (fields) => new Promise((ok, no) => {
     const id = next++;
     waiting.set(id, { ok, no });
@@ -28,7 +35,15 @@ export const SDK = `(() => {
     root: document.getElementById("ink-root"),
     perform: (op) => call({ call: "perform", op }),
     notify: (message) => call({ call: "notify", message: String(message) }),
-    open: (noteId) => call({ call: "open", noteId }),
+    open: (noteId, options) => call({ call: "open", noteId, ...(options && options.background ? { background: true } : {}) }),
+    prompt: (question) => call({ call: "prompt", ...question }),
+    storage: {
+      get: (key) => call({ call: "storage.get", key }),
+      set: (key, value) => call({ call: "storage.set", key, value }),
+    },
+    onStorage(fn) { storageHeard.add(fn); },
+    onNote(fn) { watch(noteHeard, "note", fn); },
+    onItems(fn) { watch(itemsHeard, "items", fn); },
     onCommand(id, fn) {
       commands.set(id, fn);
       for (let i = unheard.length - 1; i >= 0; i--) if (unheard[i] === id) { unheard.splice(i, 1); fn(); }
@@ -40,6 +55,15 @@ export const SDK = `(() => {
     if (!data || data.v !== V) return;
     if (data.init && !ink.context) {
       Object.assign(ink, data.init);
+      if (ink.context.kind === "view" && ink.context.slot === "bar") {
+        let told = -1;
+        const fit = () => {
+          const width = Math.ceil(ink.root.getBoundingClientRect().width);
+          if (width !== told) port.postMessage({ v: V, fit: (told = width) });
+        };
+        new ResizeObserver(fit).observe(ink.root);
+        fit();
+      }
       const script = document.createElement("script");
       script.textContent = JSON.parse(document.getElementById("ink-code").textContent);
       document.body.append(script);
@@ -53,6 +77,12 @@ export const SDK = `(() => {
     } else if (data.event === "settings") {
       ink.settings = data.settings;
       for (const fn of settingsHeard) fn(data.settings);
+    } else if (data.event === "note") {
+      for (const fn of noteHeard) fn(data.note);
+    } else if (data.event === "items") {
+      for (const fn of itemsHeard) fn();
+    } else if (data.event === "storage") {
+      for (const fn of storageHeard) fn(data.key, data.value);
     }
   };
   addEventListener("message", function take(event) {

@@ -1,6 +1,6 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { Capability } from "../../src/core/plugins.ts";
-import { anotherPerson, join, listedNote, me, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, listedNote, me, openAllNotes, perform, signInAsNewPerson, ownFrame, THEIR_FRAMES } from "./helpers.ts";
 import { asPlugin, codeHashOf, frameFor, install, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn } from "./third-party-helpers.ts";
 import { hostileCode, hostileManifest, VICTIM, VICTIM_CODE } from "./third-party-hostile.ts";
 
@@ -28,7 +28,7 @@ const attack = <K extends keyof Attacks>(frame: Frame, name: K, ...args: Paramet
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const read = async (page: Page, id: string) => (await perform(page, { type: "note.read", id })).text;
-const outside = (page: Page) => page.frames().filter((f) => f !== page.mainFrame());
+const outside = (page: Page) => page.frames().filter((f) => f !== page.mainFrame() && !ownFrame(f));
 
 /**
  * Mel, a member who isn't an admin, with the hostile plugin and a harmless one turned on, in Ada's
@@ -191,7 +191,7 @@ test("over its own port a plugin is answered only for what it was permitted: wha
 
   await expect.poll(() => attack(frame, "flood", 5000)).toBe("sent");
   await expect.poll(() => running(page).length, "the hostile plugin's frames are gone, and the other's is not").toBe(1);
-  await expect(page.locator(".plugin-background")).toHaveCount(0);
+  await expect(page.locator(".plugin-background:not([data-own])")).toHaveCount(0);
   // The app is still the member's to use.
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+End");
@@ -229,8 +229,8 @@ test("a plugin can't read another plugin's frames, hand one a port or a document
   expect(view.isDetached() || view === viewAgain).toBe(true);
 
   const { count, found } = await attack(frame, "others");
-  expect(count, "its own, and the other plugin's two").toBe(3);
-  expect(found, "six tries at each of the other plugin's two frames").toHaveLength(12);
+  expect(count, "its own, the other plugin's two, and the three of Common Ink's own plugins that run shut off: two in the bar, and the quick timer's for its commands").toBe(6);
+  expect(found, "six tries at each of the five frames that aren't its own").toHaveLength(30);
   expect(found.filter((line) => !line.endsWith(": refused: SecurityError")), "nothing of either was read").toEqual([]);
 
   const forged = await attack(frame, "forged");
@@ -310,7 +310,7 @@ test("a plugin's frame can't take the keyboard from the note, wherever it is dra
   // From the frame nobody sees.
   await runCommand(page, "Hostile plugin: Steal the keyboard");
   // A frame that isn't shown can still take the keyboard, so it is guarded like any other: it is ended, and the plugin is named.
-  await expect(page.locator(".plugin-background")).toHaveCount(0);
+  await expect(page.locator(".plugin-background:not([data-own])")).toHaveCount(0);
   await editor(page).click({ position: { x: 300, y: 12 } });
   await page.keyboard.press("ControlOrMeta+End");
   await page.waitForTimeout(500);
@@ -388,7 +388,7 @@ test("an uninstalled plugin is refused by the server at once, and its frames are
   read();
   await expect.poll(() => running(page).length).toBe(0);
   expect(frame.isDetached()).toBe(true);
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Hostile plugin: Probe", exact: true })).toHaveCount(0);
   await relist(page);
   await expect.poll(() => asPlugin(page, workspaceId, hostile, { type: "note.list" })).toMatchObject({ status: 403, body: { error: "forbidden" } });
@@ -524,7 +524,7 @@ test("HTML embeds reach no site until an admin lists one, and then the Run butto
 
   await page.goto(`/note/${note.id}`);
   await expect(run).toContainText(`Written in this note. It runs shut off from the app, and can reach ${app}.`);
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
   await run.click();
   await expect(framed.locator("#out")).toHaveText("tried");
   await expect(page.locator('.embed-below[data-embed="html"] iframe')).toHaveAttribute("src", /^\/embed-frame\/g\/[\w-]{20,}$/);

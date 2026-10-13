@@ -73,8 +73,8 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   }
 
   // A plugin's operations come from the app too, which says in the address which install it made the frame for. Nothing the plugin sent names it.
-  // `/draft` is the member's own copy of that plugin: whose draft is never said, since it is the session's person's.
-  const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})(?:\/plugins\/([a-z0-9]{12})(\/draft)?)?\/ops$/.exec(url.pathname);
+  // The id is an install's, or that of one of Common Ink's own plugins that run shut off. `/draft` is the member's own copy of that plugin: whose draft is never said, since it is the session's person's.
+  const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})(?:\/plugins\/([a-z0-9]{12}|[a-z][a-z-]{0,39})(\/draft)?)?\/ops$/.exec(url.pathname);
   if (opsRoute && req.method === "POST") {
     const [, workspaceId, pluginId, draft] = opsRoute as unknown as [string, string, string | undefined, string | undefined];
     const actor: Actor = pluginId ? { kind: "plugin", pluginId, personId, workspaceId, draft: draft !== undefined } : { kind: "member", personId, workspaceId };

@@ -114,7 +114,7 @@ function Source({ plugin, workspaceId, admin, drafts, onDrafts, onRecord }: Sour
           <DraftEditor plugin={plugin} workspaceId={workspaceId} admin={admin} original={load.original} summary={summary} drafts={drafts} onDrafts={onDrafts} onRecord={onRecord} codeView={load.codeView} />
         ) : (
           <>
-            <p className="soon">{load.original ? `The manifest and the code of ${name}, as this workspace has them.` : `The code of ${name}, as it was built into this version of Common Ink.`}</p>
+            <p className="soon">{load.original ? `The manifest and the code of ${name}, as ${plugin.own ? "they were built into this version of Common Ink" : "this workspace has them"}.` : `The code of ${name}, as it was built into this version of Common Ink.`}</p>
             <Files files={load.files} codeView={load.codeView} />
             {load.original && (
               <>
@@ -369,7 +369,7 @@ function DraftEditor({ plugin, workspaceId, admin, original, summary, drafts, on
         <button type="button" className="button small danger" disabled={busy} onClick={() => setAsking("discard")}>
           Discard draft
         </button>
-        {admin && (
+        {admin && !plugin.own && (
           <button type="button" className="button small" disabled={busy} onClick={() => setAsking("publish")}>
             Publish to the workspace
           </button>
@@ -407,7 +407,11 @@ function DraftEditor({ plugin, workspaceId, admin, original, summary, drafts, on
           </button>
         </span>
       )}
-      {!admin && <p className="soon">Only an admin installs a plugin for the workspace. To share this, show an admin your draft or send them its two files.</p>}
+      {plugin.own ? (
+        <p className="soon">{name} comes with Common Ink, so a copy of it is never published over it: yours runs for you, and an admin can install its two files as a plugin of the workspace&rsquo;s own, under another name.</p>
+      ) : (
+        !admin && <p className="soon">Only an admin installs a plugin for the workspace. To share this, show an admin your draft or send them its two files.</p>
+      )}
     </>
   );
 }

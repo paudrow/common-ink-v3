@@ -27,7 +27,7 @@ const RECORD: PluginRecord = {
   canManage: true,
   plugins: [
     installed("html", "HTML embeds", { thirdParty: false, codeHash: null }),
-    installed("p1", "Word counter", { permissions: [permission(["mel", "sam"]), { ...permission(["mel"]), capability: "todos.read" }] }, { description: "Counts the words in a note.", icon: "text" }),
+    installed("p1", "Word counter", { permissions: [permission(["mel", "sam"]), { ...permission(["mel"]), capability: "todos.read" }] }, { description: "Counts the words in a note." }),
     installed("p2", "Not started yet"),
   ],
 };

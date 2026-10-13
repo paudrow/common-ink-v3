@@ -455,7 +455,7 @@ describe("a plugin acting for a member", () => {
     const agent = await connectAgent(env.DB, ada.personId, "Claude");
 
     // The whole of a plugin's reach, with every permission there is allowed.
-    expect([...opsAllowedBy(CAPABILITY_NAMES)].sort()).toEqual(["daily.find", "folder.list", "member.list", "note.create", "note.list", "note.read", "note.write", "search", "todo.list"]);
+    expect([...opsAllowedBy(CAPABILITY_NAMES)].sort()).toEqual(["daily.find", "folder.list", "member.list", "note.backlinks", "note.create", "note.list", "note.read", "note.write", "search", "todo.list"]);
 
     const refused: OpInput[] = [
       ...pluginOps(id),

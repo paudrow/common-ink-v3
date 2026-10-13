@@ -1027,6 +1027,65 @@ describe("the plugins a workspace installed, which change while the app runs", (
     expect(stopped).toEqual(["Counter 1"]);
   });
 
+  /** One of the app's own that runs shut off, as the app says of it: nothing in the plugin itself says so. */
+  const own = (id: string, name: string, after?: string): Installed => ({
+    version: "1",
+    origin: "own",
+    after,
+    plugin: {
+      id,
+      name,
+      activate(host) {
+        host.commands.register({ id: `${id}.go`, title: `${name}: go`, run: () => {} });
+        host.views.register("bar", { id, component: View });
+      },
+    },
+  });
+
+  it("runs one of the app's own that is shut off as a built-in in its old place, on from the start, and hands it no more than a workspace's plugin", async () => {
+    const first: Plugin = { id: "sharing", name: "Sharing", activate: (host) => void host.commands.register({ id: "sharing.share", title: "Share", run: () => {} }) };
+    const { host, ids, performed } = hostWith([core, first, last], { required: ["core"], builtIn: ["core", "sharing", "pages"] });
+    let handed: PluginHost | undefined;
+    const backlinks = own("backlinks", "Backlinks", "sharing");
+    host.setInstalled([{ ...backlinks, plugin: { ...backlinks.plugin, activate: (h) => (backlinks.plugin.activate(h), void (handed = h)) } }, third("aaaaaaaaaaaa", "Counter")]);
+
+    const states = host.contributions().plugins;
+    expect(states.map((p) => [p.id, p.builtIn, p.installed, p.enabled, p.error])).toEqual([
+      ["core", true, false, true, null],
+      ["sharing", true, false, true, null],
+      ["backlinks", true, false, true, null],
+      ["pages", true, false, true, null],
+      ["aaaaaaaaaaaa", false, true, false, null],
+    ]);
+    // Its command is where Backlinks' was: after Sharing's and before the next plugin's.
+    expect(ids().filter((id) => !id.startsWith("plugins."))).toEqual(["note.new", "sharing.share", "backlinks.go"]);
+    // The name is one of the app's own, which stops a workspace's plugin and not the app's.
+    expect(states.find((p) => p.id === "backlinks")!.adds?.views).toEqual([{ slot: "bar", id: "backlinks", label: null }]);
+    await expect(handed!.members.invite("mallory@example.com", "admin")).rejects.toThrow("Backlinks isn't given host.members.invite");
+    await expect(handed!.agents.connect("Robot", {})).rejects.toThrow("isn't given host.agents.connect");
+    await expect(handed!.sharing.link({ noteId: "n" }, "public")).rejects.toThrow("isn't given host.sharing.link");
+    await expect(handed!.perform({ type: "plugin.list" })).rejects.toThrow("a workspace's record of its plugins is read only by Common Ink's own plugins");
+    await expect(handed!.perform({ type: "upload.list" } as never)).rejects.toThrow("only by Common Ink's own plugins");
+    await expect(handed!.perform({ type: "settings.read" } as never)).rejects.toThrow("can't read or change the member's settings");
+    expect(() => handed!.views.register("page", { id: "home", path: "/home", label: "Home", home: true, component: View })).toThrow("Only Common Ink's own plugins add the page shown at /");
+    expect(performed).toEqual([]);
+  });
+
+  it("says a plugin came with the app only when the app said so: a workspace's plugin is never a built-in by its id, its name, or being listed twice", () => {
+    const { host } = hostWith([core, last], { required: ["core"], builtIn: ["core", "pages"] });
+    host.settingsChanged(on("backlinks", "word-count", "quick-timer"));
+    // What a record could be made to say: plugins with the ids and names of the app's own, with no origin the app gave.
+    host.setInstalled([own("backlinks", "Backlinks"), third("backlinks", "Backlinks"), third("word-count", "Word count"), third("quick-timer", "Quick Timer")]);
+
+    const states = host.contributions().plugins.filter((p) => p.id !== "core" && p.id !== "pages");
+    expect(states.map((p) => [p.id, p.builtIn, p.installed, p.error])).toEqual([
+      ["backlinks", true, false, null],
+      ["word-count", false, true, "Its name is one of Common Ink's own, or reads as one"],
+      ["quick-timer", false, true, "Its name is one of Common Ink's own, or reads as one"],
+    ]);
+    expect(host.contributions().commands.map((c) => c.id).filter((id) => /count|timer/.test(id))).toEqual([]);
+  });
+
   it("never lets an installed plugin take the place of one that comes with the app, by taking its id", () => {
     const { host, ids } = hostWith([core, last], { required: ["core"] });
     host.settingsChanged(on("core", "pages"));

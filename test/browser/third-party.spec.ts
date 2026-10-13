@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, perform, signInAsNewPerson, THEIR_FRAMES } from "./helpers.ts";
 import { asPlugin, codeHashOf, frameFor, install, openDetails, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn, type Written } from "./third-party-helpers.ts";
 
 let errors: string[];
@@ -156,7 +156,7 @@ test("a command reads notes and tells the member, a view and a page are drawn in
   await expect(toast(page)).toContainText(/^Word counter plugin: Counted \d+ notes/);
   const background = await frameFor(page, "background");
   await expect.poll(() => background.evaluate(() => self.origin)).toBe("null");
-  await expect(page.locator(".plugin-background")).toBeHidden();
+  await expect(page.locator(".plugin-background:not([data-own])")).toBeHidden();
 
   // The embed: its title in the line as text, and below it the plugin's frame in the room the manifest named.
   await expect(editor(page).locator(".media-name")).toHaveText("Word counter plugin: Word count");
@@ -348,7 +348,7 @@ test("a plugin uninstalled while another page has it running is refused by the s
 
   await relist(page);
   await expect.poll(() => running(page).length).toBe(0);
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
   await expect(inspector.getByRole("tab", { name: "Word counter plugin: Words", exact: true })).toHaveCount(0);
   await expect(editor(page)).toContainText("::x-wordcount{all}");
   await page.keyboard.press("ControlOrMeta+Shift+P");

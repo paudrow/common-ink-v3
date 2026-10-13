@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore } from "react";
 import { Icon } from "./icons.tsx";
 import { PluginDetails, type PluginsProps } from "./PluginDetails.tsx";
 import { InstallForm } from "./PluginInstall.tsx";
-import { KIND_LABEL, PLUGINS_PATH, listPlugins, matchesPlugin, waitingOn, within } from "./pluginList.ts";
+import { PLUGINS_PATH, kindLabel, listPlugins, matchesPlugin, waitingOn, within } from "./pluginList.ts";
 
 /**
  * Where a member sees every plugin there is, each a card like a note in a folder's list, turns each
@@ -64,7 +64,7 @@ export function Plugins(props: PluginsProps) {
                   </a>
                   {(plugin.kind === "third-party" || state?.builtIn) && (
                     <span className="badge" data-kind={plugin.kind}>
-                      {KIND_LABEL[plugin.kind]}
+                      {kindLabel(plugin)}
                     </span>
                   )}
                   {drafts.some((draft) => draft.pluginId === id && draft.running) && (

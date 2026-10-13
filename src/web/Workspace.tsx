@@ -296,10 +296,13 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         storage: {
           // By member too: two people who share a browser and a workspace don't share what a plugin keeps, such as which notes are open.
           get: (key) => readStored(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`, isAnything),
-          set: (key, value) => writeStored(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`, value),
+          // Null keeps nothing, so nothing is left under the key: what a plugin takes out takes no room.
+          set: (key, value) => (value === null || value === undefined ? localStorage.removeItem(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`) : writeStored(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`, value)),
         },
       }),
     });
+    // The app's own plugins that run shut off are there from the first drawing, as the ones compiled in are, for a guest too, who is told no record.
+    created.setInstalled(installer.list());
     return created;
   });
   useEffect(() => {
@@ -330,9 +333,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       ),
     [workspaceId],
   );
-  useEffect(() => {
-    if (record) host.setInstalled(installer.list());
-  }, [host, installer, record, drafts]);
+  useEffect(() => host.setInstalled(installer.list()), [host, installer, record, drafts]);
   const contributed = useSyncExternalStore(host.subscribe, host.contributions);
   /** The page the address names: the one at exactly that address, or else the one whose path it is under. */
   const routePage = route.kind === "page" ? (contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`))) : undefined;

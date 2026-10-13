@@ -32,11 +32,20 @@ export interface Added {
   editorExtensions: readonly string[];
 }
 
-/** A third-party plugin a workspace has installed, as the app's own code made a plugin of it. */
+/**
+ * A plugin that isn't compiled into the app and runs shut off from it, as the app's own code made a
+ * plugin of it: one a workspace installed, or one of Common Ink's own. What the host lets it do
+ * follows from what is said of it here, by the app, and from nothing the plugin says of itself.
+ * Neither kind is among `trusted`: both are handed the host a third-party plugin is.
+ */
 export interface Installed {
   plugin: Plugin;
   /** Changes when the plugin is to start again: other code, another manifest, other permissions. */
   version: string;
+  /** Whose it is. One that is `installed`, which it is unless said, can't go by a name of the app's own, and its embeds are written `::x-name{}`. */
+  origin?: "own" | "installed";
+  /** For one of the app's own: the built-in plugin its contributions come after. Any other comes after them all. */
+  after?: string;
 }
 
 /** Everything the plugins that are on have added, in the order of the plugins and then of their registering. */
@@ -111,9 +120,10 @@ export interface Host {
   /** Tells the host the notes the member can see have changed. */
   notesChanged(): void;
   /**
-   * Tells the host which third-party plugins the workspace has installed now. One that is new starts
-   * if the member has it on, one that is gone stops and takes what it added with it, and one whose
-   * version changed stops and starts again. They are never among Common Ink's own.
+   * Tells the host which plugins run shut off now: the app's own, and the third-party ones the
+   * workspace has installed. One that is new starts if the member has it on, one that is gone stops
+   * and takes what it added with it, and one whose version changed stops and starts again. None is
+   * ever among the plugins the host was made with, or is handed what they are.
    */
   setInstalled(installed: readonly Installed[]): void;
 }
@@ -185,7 +195,7 @@ const ownOnly = (type: string): string | null =>
           : null;
 
 export function createPluginHost({ plugins: builtIn, required = [], trusted = [], builtIn: cameWith = [], settings, write, mac, provide }: HostOptions): Host {
-  /** The third-party plugins the workspace has installed, after the ones that come with the app. */
+  /** The plugins that run shut off: the app's own, and the third-party ones the workspace has installed. */
   let installed: readonly Installed[] = [];
   let plugins: readonly Plugin[] = builtIn;
   /** Where each plugin's contributions go among the others'. An installed plugin keeps its place while it is installed. */
@@ -193,7 +203,13 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
   let nextPlace = builtIn.length;
   const ownNames = [...builtIn.map((p) => p.name), ...OWN_NAMES];
   /** Why an installed plugin can't start under the name it gives itself, or null when it can. Names are compared by how they read, so a look-alike letter is no way around it. */
-  const misnamed = (plugin: Plugin) => (builtIn.includes(plugin) ? null : takenName(plugin.name, ownNames));
+  const about = (plugin: Plugin) => installed.find((i) => i.plugin === plugin);
+  /** Whether a plugin is one a workspace installed. Everything a third-party plugin is refused by its name keys on this. */
+  const theirs = (plugin: Plugin) => {
+    const told = about(plugin);
+    return told !== undefined && told.origin !== "own";
+  };
+  const misnamed = (plugin: Plugin) => (theirs(plugin) ? takenName(plugin.name, ownNames) : null);
   const placeOf = (plugin: Plugin) => places.get(plugin.id)!;
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed | AddressEmbed>>();
@@ -308,8 +324,8 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
       },
       embeds: {
         register(embed) {
-          const theirs = !builtIn.includes(plugin);
-          if (embed.name.startsWith(INSTALLED_EMBED) !== theirs) throw new Error(`${theirs ? "An" : "Only an"} installed plugin's embed has a name that starts with ${INSTALLED_EMBED}, and this one is ${embed.name}`);
+          const marked = theirs(plugin);
+          if (embed.name.startsWith(INSTALLED_EMBED) !== marked) throw new Error(`${marked ? "An" : "Only an"} installed plugin's embed has a name that starts with ${INSTALLED_EMBED}, and this one is ${embed.name}`);
           const address = "claims" in embed;
           // An address embed is in no note by its name, so it is no clash with an embed a note writes by the same one: a video by its address, and `::video{}`.
           const dispose = keep(add(embeds, address ? `address ${embed.name}` : embed.name, embed, index, address ? "an address embed named" : "an embed named"));
@@ -441,6 +457,14 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
     for (const heard of [...watching]) heard();
   }
 
+  /** A place right after a built-in plugin's and before the next one's, or after everything for one that names none. */
+  function placeAfter(after: string | undefined): number {
+    const base = after === undefined ? undefined : places.get(after);
+    if (base === undefined) return nextPlace++;
+    const next = Math.min(base + 1, ...[...places.values()].filter((place) => place > base));
+    return (base + next) / 2;
+  }
+
   function setInstalled(next: readonly Installed[]) {
     // An id that is one of the app's own plugins' is never taken by an installed one.
     const usable = next.filter((now, index) => !builtIn.some((p) => p.id === now.plugin.id) && next.findIndex((other) => other.plugin.id === now.plugin.id) === index);
@@ -454,10 +478,11 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
     }
     const before = installed;
     installed = usable.map((now) => kept(now) ?? now);
-    plugins = [...builtIn, ...installed.map((i) => i.plugin)];
+    for (const now of installed) if (!places.has(now.plugin.id)) places.set(now.plugin.id, placeAfter(now.after));
+    // In the order of their places, so one of the app's own that runs shut off is listed, and starts, where it was when it ran in the page.
+    plugins = [...builtIn, ...installed.map((i) => i.plugin)].sort((a, b) => placeOf(a) - placeOf(b));
     for (const now of installed) {
       if (before.includes(now)) continue;
-      if (!places.has(now.plugin.id)) places.set(now.plugin.id, nextPlace++);
       if (isOff(now.plugin)) off.add(now.plugin.id);
       else if (started) start(now.plugin, placeOf(now.plugin));
     }
@@ -494,9 +519,7 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
   function contributions(): Contributions {
     startAll();
     if (snapshot) return snapshot;
-    plugins.forEach((p, place) => {
-      if (running.has(p.id)) added.set(p.id, addedBy(place));
-    });
+    for (const p of plugins) if (running.has(p.id)) added.set(p.id, addedBy(placeOf(p)));
     const toggles = plugins
       // One that can't start under its name gets no command either, which would read as turning one of the app's own on or off.
       .filter((p) => !required.includes(p.id) && !misnamed(p))
@@ -521,8 +544,8 @@ export function createPluginHost({ plugins: builtIn, required = [], trusted = []
         name: p.name,
         enabled: !off.has(p.id),
         required: required.includes(p.id),
-        builtIn: cameWith.includes(p.id),
-        installed: !builtIn.includes(p),
+        builtIn: cameWith.includes(p.id) || about(p)?.origin === "own",
+        installed: theirs(p),
         error: errors.get(p.id) ?? misnamed(p),
         description: p.description ?? null,
         icon: p.icon ?? null,

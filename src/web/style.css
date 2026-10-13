@@ -2331,15 +2331,55 @@ button.link:hover {
   color: var(--danger);
 }
 
-.quick-timer-how {
+/* What a plugin that runs shut off asks the member, in the dialog the command palette is drawn in. */
+.plugin-prompt-about {
   margin: 0;
   padding: 8px 14px 10px;
   color: var(--muted);
   font-size: 12px;
 }
 
-.quick-timer input[aria-invalid="true"] {
+.plugin-prompt input[aria-invalid="true"] {
   color: var(--danger);
+}
+
+/* Whose question it is, in the app's words, where a plugin's own can't be taken for them. */
+.plugin-prompt-from {
+  margin: 0;
+  padding: 8px 14px 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* A frame in the bottom bar is as wide as what it draws, which it says once it has drawn. The item's padding is the frame's own. */
+.bar-item:has(> .bar-frame) {
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+
+/* The name of the workspace's plugin whose frame is beside it. */
+.bar-from {
+  padding-left: 8px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.bar-from::after {
+  content: ":";
+}
+
+.plugin-frame.bar-frame {
+  height: 25px;
+  min-height: 0;
+}
+
+/* With nothing drawn it takes no room, as any item with nothing to say. It keeps a size, out of the bar's flow, so what it draws next can be measured. */
+.bar-item:has(> .bar-frame[data-empty]) {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* The list a completion offers at the cursor, such as the embed menu. */
@@ -3297,16 +3337,6 @@ kbd {
   min-height: 0;
   padding: 14px;
   overflow-y: auto;
-}
-
-.backlinks {
-  margin: -14px;
-}
-
-.backlinks ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 .info {

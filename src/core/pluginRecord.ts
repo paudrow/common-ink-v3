@@ -1,6 +1,7 @@
 import { hashToken } from "./agents.ts";
 import { newId } from "./ids.ts";
 import type { Context } from "./operations.ts";
+import { ownSandboxed } from "./ownPlugins.ts";
 import {
   BUILT_IN_SUBJECTS,
   HTML_EMBEDS,
@@ -166,13 +167,20 @@ export const NO_DRAFT_RUNNING = "You have no draft of that plugin that is runnin
  * perform what the original is allowed and its own manifest still asks for, and never more.
  */
 export async function actingPlugin(db: D1Database, workspaceId: string, pluginId: string, personId: string, draft = false): Promise<{ name: string; allowed: ReadonlySet<OpType> } | { refused: string }> {
-  const plugin = await installed(db, workspaceId, pluginId);
-  if (!plugin) return { refused: NOT_INSTALLED };
-  const { results } = await db.prepare("SELECT subject, capability, state, locked, approved, origins, NULL AS decided_by_name FROM plugin_permissions WHERE workspace_id = ? AND subject = ?").bind(workspaceId, pluginId).all<PermissionRow>();
-  const standing = plugin.manifest.capabilities.filter((c) => stands(results.find((row) => row.capability === c.name), approvalOf(c, plugin.codeHash))).map((c) => c.name);
-  if (!draft) return { name: plugin.manifest.name, allowed: opsAllowedBy(standing) };
+  // One of Common Ink's own is allowed what its manifest declares, from the start: it comes with the app, so there is nobody to ask. No row in any workspace is read for it, or can change it.
+  const own = ownSandboxed(pluginId);
+  const plugin = own ? null : await installed(db, workspaceId, pluginId);
+  const manifest = own ?? plugin?.manifest;
+  if (!manifest) return { refused: NOT_INSTALLED };
+  let standing: Capability[];
+  if (own) standing = own.capabilities.map((c) => c.name);
+  else {
+    const { results } = await db.prepare("SELECT subject, capability, state, locked, approved, origins, NULL AS decided_by_name FROM plugin_permissions WHERE workspace_id = ? AND subject = ?").bind(workspaceId, pluginId).all<PermissionRow>();
+    standing = manifest.capabilities.filter((c) => stands(results.find((row) => row.capability === c.name), approvalOf(c, plugin!.codeHash))).map((c) => c.name);
+  }
+  if (!draft) return { name: manifest.name, allowed: opsAllowedBy(standing) };
   const mine = await db.prepare("SELECT manifest FROM plugin_drafts WHERE workspace_id = ? AND person_id = ? AND plugin_id = ? AND running = 1").bind(workspaceId, personId, pluginId).first<{ manifest: string }>();
-  const read = mine && readManifest(mine.manifest);
+  const read = mine && readManifest(mine.manifest, own !== null);
   if (!read || "reason" in read) return { refused: NO_DRAFT_RUNNING };
   const asks = new Set(read.manifest.capabilities.map((c) => c.name));
   return { name: read.manifest.name, allowed: opsAllowedBy(standing.filter((capability) => asks.has(capability))) };
@@ -374,22 +382,23 @@ export async function readDraft(ctx: Context, id: string): Promise<Draft> {
  * since it is being written. To run, it has to be one.
  */
 export async function saveDraft(ctx: Context, op: Extract<Op, { type: "draft.save" }>): Promise<DraftSummary> {
-  if (!(await installed(ctx.db, ctx.workspaceId, op.id))) throw new OpError("not_found", NO_SUCH_PLUGIN);
+  const own = ownSandboxed(op.id) !== null;
+  if (!own && !(await installed(ctx.db, ctx.workspaceId, op.id))) throw new OpError("not_found", NO_SUCH_PLUGIN);
   if (op.manifest.length > MAX_PLUGIN_MANIFEST) throw new OpError("invalid", `A manifest is at most ${MAX_PLUGIN_MANIFEST} characters`);
   if (op.running) {
-    const read = readManifest(op.manifest);
+    const read = readManifest(op.manifest, own);
     if ("reason" in read) throw new OpError("invalid", read.reason);
   }
   const hash = await codeHash(op.code);
-  // Kept only while its author is a member and the plugin is installed, said in the statement itself: a save that crosses their removal, or the plugin's, keeps nothing for either to leave behind.
+  // Kept only while its author is a member and the plugin is installed or is one of the app's own, said in the statement itself: a save that crosses their removal, or the plugin's, keeps nothing for either to leave behind.
   const { meta } = await ctx.db
     .prepare(
       `INSERT INTO plugin_drafts (workspace_id, person_id, plugin_id, manifest, code, code_hash, base_hash, running, updated_at)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
-       WHERE EXISTS (SELECT 1 FROM members WHERE workspace_id = ?1 AND person_id = ?2) AND EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?3 AND workspace_id = ?1 AND removed_at IS NULL)
+       WHERE EXISTS (SELECT 1 FROM members WHERE workspace_id = ?1 AND person_id = ?2) AND (?10 = 1 OR EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?3 AND workspace_id = ?1 AND removed_at IS NULL))
        ON CONFLICT (workspace_id, person_id, plugin_id) DO UPDATE SET manifest = excluded.manifest, code = excluded.code, code_hash = excluded.code_hash, base_hash = excluded.base_hash, running = excluded.running, updated_at = excluded.updated_at`,
     )
-    .bind(ctx.workspaceId, ctx.personId, op.id, op.manifest, op.code, hash, op.baseHash ?? null, op.running ? 1 : 0, ctx.now)
+    .bind(ctx.workspaceId, ctx.personId, op.id, op.manifest, op.code, hash, op.baseHash ?? null, op.running ? 1 : 0, ctx.now, own ? 1 : 0)
     .run();
   if (!meta.changes) throw new OpError("not_found", NO_SUCH_PLUGIN);
   return { pluginId: op.id, manifest: op.manifest, codeHash: hash, baseHash: op.baseHash ?? null, running: op.running, updatedAt: ctx.now };

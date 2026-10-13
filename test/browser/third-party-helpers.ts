@@ -1,6 +1,6 @@
 import { expect, type Frame, type Page } from "@playwright/test";
 import type { Capability } from "../../src/core/plugins.ts";
-import { perform } from "./helpers.ts";
+import { perform, ownFrame } from "./helpers.ts";
 
 export interface Written {
   name: string;
@@ -8,7 +8,7 @@ export interface Written {
   description?: string;
   capabilities?: { name: Capability; reason: string; origins?: string[] }[];
   commands?: { id: string; title: string }[];
-  views?: { slot: "inspector" | "page"; id: string; label: string }[];
+  views?: { slot: "inspector" | "page" | "bar"; id: string; label: string; width?: number; end?: boolean }[];
   embeds?: { name: string; title: string; height?: number }[];
   settings?: Record<string, unknown>;
 }
@@ -66,7 +66,7 @@ export async function turnOn(page: Page, name: string, workspaceId?: string) {
 export const relist = (page: Page) => page.evaluate(() => void window.dispatchEvent(new Event("focus")));
 
 /** The documents plugins are running as, which have no address. */
-export const running = (page: Page) => page.frames().filter((f) => f.url() === "about:srcdoc");
+export const running = (page: Page) => page.frames().filter((f) => f.url() === "about:srcdoc" && !ownFrame(f));
 
 /** The frame a plugin is running in for one context, once it has started. */
 export async function frameFor(page: Page, kind: "background" | "view" | "embed", which?: string): Promise<Frame> {

@@ -19,7 +19,7 @@ export const MAX_PLUGIN_MANIFEST = 16_000;
  * perform nothing: it is the sites its frames may load from and send to.
  */
 export const CAPABILITIES = {
-  "notes.read": { title: "Read notes", detail: "The notes and folders you can see, and search across them.", ops: ["note.list", "note.read", "folder.list", "search", "daily.find"] },
+  "notes.read": { title: "Read notes", detail: "The notes and folders you can see, which of them link to a note, and search across them.", ops: ["note.list", "note.read", "note.backlinks", "folder.list", "search", "daily.find"] },
   "notes.write": { title: "Write notes", detail: "Make notes and change the ones you can change. Each change is recorded in History as the plugin's.", ops: ["note.create", "note.write"] },
   "todos.read": { title: "Read todos", detail: "The todos in the notes you can see.", ops: ["todo.list"] },
   "members.read": { title: "Read members' names", detail: "The names and roles of the workspace's members. Never their emails.", ops: ["member.list"] },
@@ -86,7 +86,8 @@ const LOOKALIKES: Record<string, string> = Object.fromEntries(
  */
 export const nameSkeleton = (name: string): string =>
   [...name.normalize("NFKD")]
-    .map((letter) => LOOKALIKES[letter] ?? letter)
+    // The dotless ı and the long ſ are Latin letters with no compatibility form.
+    .map((letter) => (letter === "ı" ? "i" : letter === "ſ" ? "s" : (LOOKALIKES[letter] ?? letter)))
     .join("")
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]/gu, "")
@@ -112,6 +113,17 @@ export function takenName(name: string, own: readonly string[] = OWN_NAMES): str
   return skeleton.startsWith(nameSkeleton("Common Ink")) || own.some((mine) => nameSkeleton(mine) === skeleton) ? "Its name is one of Common Ink's own, or reads as one" : null;
 }
 
+/**
+ * The pictures a plugin can stand under on the Plugins page, which the app draws: a manifest names
+ * one and never brings its own, so nothing of a plugin's is fetched or drawn as markup there.
+ */
+export const PLUGIN_ICONS = [
+  "plugin", "agent", "at", "backlinks", "board", "calendar", "chevron", "clock", "close", "code", "command", "contacts", "dashboard", "edit", "folders", "history", "info", "inspector", "keyboard", "link", "list",
+  "lock", "markdown", "math", "members", "more", "numbers", "outline", "play", "plus", "search", "settings", "share", "sidebar", "slash", "stopwatch", "table", "tabs", "tag", "text", "today", "todos", "trash",
+  "uploads",
+] as const;
+export type PluginIcon = (typeof PLUGIN_ICONS)[number];
+
 /** A name a plugin gives one of its own things: a command, a view, an embed, an option. */
 const Local = z.string().regex(/^[a-z][a-zA-Z0-9-]{0,39}$/, "letters, digits and - only, starting with a small letter");
 
@@ -132,8 +144,8 @@ const Option = z.discriminatedUnion("type", [
   z.strictObject({ type: z.enum(["number", "integer"]), default: z.number(), minimum: z.number().optional(), maximum: z.number().optional(), title: Words(80), description: Words(300).optional() }),
 ]);
 
-/** The slots a third-party plugin's view may be in. Each is drawn in a frame of the plugin's own. */
-export const REMOTE_SLOTS = ["inspector", "page"] as const;
+/** The slots the view of a plugin that runs shut off may be in. Each is drawn in a frame of the plugin's own. */
+export const REMOTE_SLOTS = ["inspector", "page", "bar"] as const;
 
 const unique = <T>(of: (item: T) => string, what: string) => [(items: T[]) => new Set(items.map(of)).size === items.length, `each ${what} once`] as const;
 
@@ -142,10 +154,11 @@ const unique = <T>(of: (item: T) => string, what: string) => [(items: T[]) => ne
  * options from it without running any of its code, and whoever decides its permissions reads its
  * capabilities and reasons from it.
  */
-export const Manifest = z.strictObject({
-  name: Words(60).refine((name) => takenName(name) === null, "a plugin can't have a name that is Common Ink's own, or that reads as one"),
+const shape = {
+  name: Words(60),
   version: Words(20).default("1"),
   description: Words(300).optional(),
+  icon: z.enum(PLUGIN_ICONS).optional(),
   capabilities: z
     .array(Declared)
     .max(CAPABILITY_NAMES.length)
@@ -157,8 +170,23 @@ export const Manifest = z.strictObject({
     .refine(...unique<{ id: string }>((c) => c.id, "command"))
     .default([]),
   views: z
-    .array(z.strictObject({ slot: z.enum(REMOTE_SLOTS), id: Local, label: Words(40) }))
+    .array(
+      z
+        .strictObject({
+          slot: z.enum(REMOTE_SLOTS),
+          id: Local,
+          label: Words(40),
+          /** For an inspector tab and a page's link. */
+          icon: z.enum(PLUGIN_ICONS).optional(),
+          /** For a view in the bar, and required for it: the most room its frame takes, in pixels. The frame is as wide as what it draws, up to this. */
+          width: z.number().int().min(24).max(480).optional(),
+          /** For a view in the bar: whether it is at the bar's far end. */
+          end: z.boolean().optional(),
+        })
+        .refine((view) => (view.slot === "bar") === (view.width !== undefined) && (view.slot === "bar" || view.end === undefined), "width is given for a view in the bar, and width and end only for it"),
+    )
     .max(10)
+    .refine((views) => views.filter((view) => view.slot === "bar").length <= 1, "one view in the bar, which is a line everything shares")
     .refine(...unique<{ id: string }>((v) => v.id, "view"))
     .default([]),
   embeds: z
@@ -171,11 +199,22 @@ export const Manifest = z.strictObject({
     .refine((s) => !Object.hasOwn(s, "enabled"), "enabled is the option that turns a plugin on and off")
     .refine((s) => Object.keys(s).length <= 30, "at most 30 options")
     .default({}),
-});
+};
+
+/** A manifest whatever its name and with a picture, which is how the plugins that come with Common Ink declare themselves. */
+export const OwnManifest = z.strictObject(shape);
+
+/** The manifest of a plugin a workspace installs: the same, but for what would let it be taken for one of the app's. It is drawn under the plugin picture, whoever wrote it. */
+export const Manifest = z
+  .strictObject({
+    ...shape,
+    name: shape.name.refine((name) => takenName(name) === null, "a plugin can't have a name that is Common Ink's own, or that reads as one"),
+  })
+  .refine((manifest) => manifest.icon === undefined && manifest.views.every((view) => view.icon === undefined), "icon is for the plugins that come with Common Ink: a plugin a workspace installs is drawn under the plugin picture");
 export type Manifest = z.output<typeof Manifest>;
 
-/** The manifest written in `text`, or why it isn't one. */
-export function readManifest(text: string): { manifest: Manifest } | { reason: string } {
+/** The manifest written in `text`, or why it isn't one. `own` is for a copy of one of Common Ink's own plugins, which may keep its name. */
+export function readManifest(text: string, own = false): { manifest: Manifest } | { reason: string } {
   if (text.length > MAX_PLUGIN_MANIFEST) return { reason: `A manifest is at most ${MAX_PLUGIN_MANIFEST} characters` };
   let json: unknown;
   try {
@@ -183,7 +222,7 @@ export function readManifest(text: string): { manifest: Manifest } | { reason: s
   } catch {
     return { reason: "The manifest isn't JSON" };
   }
-  const parsed = Manifest.safeParse(json);
+  const parsed = (own ? OwnManifest : Manifest).safeParse(json);
   return parsed.success ? { manifest: parsed.data } : { reason: z.prettifyError(parsed.error) };
 }
 
@@ -250,7 +289,7 @@ export interface InstalledPlugin {
 
 /** A member's own copy of a plugin's source, as they are told of it without its code. */
 export interface DraftSummary {
-  /** The plugin it is a copy of: an install's id. */
+  /** The plugin it is a copy of: an install's id, or the id of one of Common Ink's own that runs shut off. */
   pluginId: string;
   /** The manifest as the member wrote it, which may not be one yet. */
   manifest: string;

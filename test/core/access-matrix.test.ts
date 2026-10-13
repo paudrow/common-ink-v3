@@ -4,6 +4,7 @@ import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { IN_TRASH, type Covering, type NoteState, type Trashed } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
+import { OWN_SANDBOXED, type OwnSandboxedId } from "../../src/core/ownPlugins.ts";
 import { opsAllowedBy, type Capability } from "../../src/core/plugins.ts";
 import { Op, OpError, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
 import { UPLOAD_IN_TRASH } from "../../src/core/uploads.ts";
@@ -90,12 +91,21 @@ const PLUGINS = {
   "their plugin, permitted nothing": { permitted: [], installed: true },
   "their plugin, uninstalled after it was permitted to read and write notes": { permitted: DECLARED, installed: false },
   "their own draft of the plugin permitted to read and write notes, asking to read notes and todos": { permitted: DECLARED, installed: true, draft: ["notes.read", "todos.read"] },
+  "Common Ink's own Word count, run shut off, which declares reading notes": { permitted: ["notes.read"], installed: true, own: "word-count" },
+  "Common Ink's own Quick timer, run shut off, which declares nothing": { permitted: [], installed: true, own: "quick-timer" },
+  "their own draft of Common Ink's own Backlinks, asking to read and write notes and to read members": { permitted: ["notes.read"], installed: true, own: "backlinks", draft: ["notes.read", "notes.write", "members.read"] },
 } as const satisfies Record<string, PluginRow>;
-/** `draft` is the actor's own copy of the first plugin, running, and what its manifest asks for: some of what the original was allowed, and something it was not. */
+/**
+ * `draft` is the actor's own copy of the plugin, running, and what its manifest asks for: some of
+ * what the original was allowed, and something it was not. `own` is one of the plugins that come
+ * with the app and run shut off: nobody installs it, `permitted` is what its manifest declares, and
+ * a guest's app runs it too, as the guest.
+ */
 interface PluginRow {
   permitted: readonly Capability[];
   installed: boolean;
   draft?: readonly Capability[];
+  own?: OwnSandboxedId;
 }
 const manifestOf = (capabilities: readonly Capability[]) => JSON.stringify({ name: "Matrix plugin", capabilities: capabilities.map((capability) => ({ name: capability, reason: "To be asked everything." })) });
 type PluginName = keyof typeof PLUGINS;
@@ -166,6 +176,12 @@ async function world(): Promise<World> {
 
   const plugins = {} as World["plugins"];
   for (const name of PLUGIN_NAMES) {
+    const row: PluginRow = PLUGINS[name];
+    if (row.own) {
+      expect(OWN_SANDBOXED[row.own].capabilities.map((c) => c.name), `what ${row.own} declares is what its row says`).toEqual(row.permitted);
+      plugins[name] = row.own;
+      continue;
+    }
     const manifest = manifestOf(DECLARED);
     const made = await perform(env.DB, ada, { type: "plugin.install", manifest, code: "" });
     const { id } = made;
@@ -452,13 +468,13 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
           as === "themself"
             ? person
             : plugin
-              ? { kind: "plugin", pluginId: w.plugins[plugin.draft ? "their plugin, permitted to read and write notes" : (as as PluginName)], personId: person.personId, workspaceId: person.workspaceId, draft: !!plugin.draft }
+              ? { kind: "plugin", pluginId: plugin.own ?? w.plugins[plugin.draft ? "their plugin, permitted to read and write notes" : (as as PluginName)], personId: person.personId, workspaceId: person.workspaceId, draft: !!plugin.draft }
               : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope };
         const agent = as !== "themself" && !plugin;
         const readOnly = agent && as.includes("read-only");
         const role = roleOf(name);
-        /** Whether whoever asks is let as far as their member is. A plugin is for what its permissions name, when it is installed and its member is one. */
-        const runs = plugin && plugin.installed && role !== "guest";
+        /** Whether whoever asks is let as far as their member is. A plugin is for what its permissions name, when it is installed and its member is one. One of the app's own runs for a guest too, and a draft of it for no guest. */
+        const runs = plugin && plugin.installed && (role !== "guest" || (plugin.own !== undefined && !plugin.draft));
         // A guest keeps no draft: they are refused it as they are refused the plugin.
         if (plugin && runs && plugin.draft) await perform(env.DB, person, { type: "draft.save", id: actor.kind === "plugin" ? actor.pluginId : "", manifest: manifestOf(plugin.draft), code: "mine", running: true });
         const permitted = plugin && opsAllowedBy(runs ? plugin.permitted.filter((capability) => !plugin.draft || plugin.draft.includes(capability)) : []);

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { UploadKind } from "./filetypes.ts";
 import type { NoteState } from "./lifecycle.ts";
 import { readableName } from "./mentions.ts";
+import { OWN_SANDBOXED_IDS } from "./ownPlugins.ts";
 import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Origins, type Draft, type DraftSummary, type PluginRecord } from "./plugins.ts";
 import { parseRule } from "./recurrence.ts";
 import { isDay, isProjectName, type LastDone } from "./todos.ts";
@@ -79,6 +80,8 @@ const FileName = z.string().min(1).max(1000);
 /** What a permission is of: a plugin installed in the workspace, or HTML embeds. */
 const PluginSubject = z.union([Id, z.literal(HTML_EMBEDS)]);
 const CapabilityName = z.enum(CAPABILITY_NAMES);
+/** A plugin whose source a member may copy: one installed in the workspace, or one of Common Ink's own that runs shut off. */
+const Drafted = z.union([Id, z.enum(OWN_SANDBOXED_IDS)]);
 const CodeHash = z.string().regex(/^[0-9a-f]{64}$/);
 
 const FolderName = z
@@ -602,14 +605,14 @@ export const Op = z.discriminatedUnion("type", [
    * a person. It is no note, so it is in no folder, search or history.
    */
   z.object({ type: z.literal("draft.list") }),
-  z.object({ type: z.literal("draft.read"), id: Id }),
+  z.object({ type: z.literal("draft.read"), id: Drafted }),
   /**
    * Keeps the asker's draft of a plugin as it is now. `baseHash` is the original's code when the
    * copy was made. With `running` it runs in the original's place for its author alone, shut off
    * from the app, with what the original is permitted and never more.
    */
-  z.object({ type: z.literal("draft.save"), id: Id, manifest: z.string().max(MAX_PLUGIN_MANIFEST), code: z.string().max(MAX_PLUGIN_CODE), baseHash: CodeHash.nullable().optional(), running: z.boolean() }),
-  z.object({ type: z.literal("draft.discard"), id: Id }),
+  z.object({ type: z.literal("draft.save"), id: Drafted, manifest: z.string().max(MAX_PLUGIN_MANIFEST), code: z.string().max(MAX_PLUGIN_CODE), baseHash: CodeHash.nullable().optional(), running: z.boolean() }),
+  z.object({ type: z.literal("draft.discard"), id: Drafted }),
 ]);
 export type Op = z.output<typeof Op>;
 export type OpInput = z.input<typeof Op>;

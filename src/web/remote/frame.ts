@@ -16,7 +16,7 @@ function behind(box: HTMLElement): string {
 }
 
 /** The app's look as it is now: which scheme, and the styles a frame in `box` starts from. A frame keeps the look it was made with. */
-function look(box: HTMLElement): { scheme: "light" | "dark"; styles: string } {
+function look(box: HTMLElement, bar: boolean): { scheme: "light" | "dark"; styles: string } {
   const root = getComputedStyle(document.documentElement);
   const chosen = document.documentElement.dataset.theme;
   const scheme = chosen === "light" || chosen === "dark" ? chosen : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -28,9 +28,20 @@ body { padding: 12px; background: ${behind(box)}; color: var(--ink); font: 14px/
 a { color: var(--accent); }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px 10px; background: var(--bg-elev); cursor: pointer; }
-button:hover { background: var(--hover); }`;
+button:hover { background: var(--hover); }${bar ? BAR : ""}`;
   return { scheme, styles };
 }
+
+/** A frame in the bottom bar is one line of small text, as everything else there is, with nothing around it. What it draws is as wide as its words, which is what the app is told to make the frame as wide as. */
+const BAR = `
+html, body { height: 100%; overflow: hidden; }
+#ink-root { display: inline-block; }
+body { padding: 0; color: var(--muted); font-size: 12px; line-height: 25px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+button { border: 0; border-radius: 5px; padding: 1px 8px; background: none; line-height: 18px; }
+button:hover { color: var(--ink); }`;
+
+/** What a frame of one of Common Ink's own plugins is named. */
+export const OWN_FRAME = "ink-own-plugin";
 
 export interface Opened {
   post(message: ToPlugin): void;
@@ -45,12 +56,14 @@ export interface Opened {
  * is called with whatever the frame sends, which is anything at all. `grant` is a token for a frame
  * that may reach the network.
  */
-export function openFrame(box: HTMLElement, { code, title, grant, heard }: { code: string; title: string; grant: string | null; heard: (data: unknown) => void }): Opened {
+export function openFrame(box: HTMLElement, { code, title, grant, heard, bar = false, own = false }: { code: string; title: string; grant: string | null; heard: (data: unknown) => void; bar?: boolean; own?: boolean }): Opened {
   const channel = new MessageChannel();
-  const { scheme, styles } = look(box);
-  const made = sandboxed(frameDocument({ code, sdk: SDK, styles, scheme }), { title, port: channel.port2, scheme, grant });
+  const { scheme, styles } = look(box, bar);
+  const made = sandboxed(frameDocument({ code, sdk: SDK, styles, scheme }), { title, port: channel.port2, scheme, grant, name: own ? OWN_FRAME : undefined });
   let open = true;
   channel.port1.onmessage = (event) => open && heard(event.data);
+  // Nothing in the bar holds the keyboard, so Tab passes its frames by.
+  if (bar) made.frame.tabIndex = -1;
   made.frame.style.visibility = "hidden";
   box.append(made.frame);
   return {

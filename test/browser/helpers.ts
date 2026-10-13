@@ -1,4 +1,4 @@
-import { test, type Page } from "@playwright/test";
+import { test, type Frame, type Page } from "@playwright/test";
 import type { Me, OpInput, Results, Role } from "../../src/core/protocol.ts";
 
 /** Signs in without Google, which only this machine and Previews allow (`devSignIn` in src/worker/auth.ts). `next` is where the app opens. */
@@ -109,3 +109,12 @@ export const listedNote = (page: Page, title: string) => listedNotes(page).filte
 
 /** A note's card in the folder's list that is showing: its title, its details, and its text once expanded. */
 export const noteCard = (page: Page, title: string) => page.getByRole("navigation", { name: "Notes" }).getByRole("article", { name: title, exact: true });
+
+/** Whether a frame is one of Common Ink's own plugins', which run shut off as a workspace's do and are no part of what a test installs. */
+export const ownFrame = (frame: Frame) => [frame, frame.parentFrame()].some((f) => f?.name() === "ink-own-plugin");
+
+/** What one of Common Ink's own plugins has drawn in its frame, by the name of the view it is in. */
+export const ownPlugin = (page: Page, view: string) => page.locator(`.plugin-frame[aria-label="${view}"] > iframe`).contentFrame().locator("iframe").contentFrame();
+
+/** Every frame in the page but those of Common Ink's own plugins: the frames of what a note embeds and a workspace installs. */
+export const THEIR_FRAMES = 'iframe:not([name="ink-own-plugin"])';

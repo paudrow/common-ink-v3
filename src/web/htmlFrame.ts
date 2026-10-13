@@ -36,10 +36,12 @@ function opening(): string {
  * what runs there and the app talk, and holding the other end is how the app knows which frame is
  * speaking. `scheme` is what the document shows behind what it runs. `grant` is a token from
  * `plugin.frame`, good once, for a document whose policy lets it reach the sites an admin allowed.
+ * `name` names the frame, which is how the frames of the app's own plugins are told from a workspace's.
  */
-export function sandboxed(html: string, { title, port, scheme, grant, refused }: { title: string; refused?: () => void; port?: MessagePort; scheme?: "light" | "dark"; grant?: string | null }): { frame: HTMLIFrameElement; stop: () => void } {
+export function sandboxed(html: string, { title, port, scheme, grant, refused, name }: { title: string; refused?: () => void; port?: MessagePort; scheme?: "light" | "dark"; grant?: string | null; name?: string }): { frame: HTMLIFrameElement; stop: () => void } {
   const frame = document.createElement("iframe");
   frame.title = title;
+  if (name) frame.name = name;
   frame.referrerPolicy = "no-referrer";
   frame.setAttribute("allow", "");
   const ready = (event: MessageEvent) => {

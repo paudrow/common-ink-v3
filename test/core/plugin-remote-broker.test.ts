@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Capability, InstalledPlugin, Permission } from "../../src/core/plugins.ts";
-import { createBroker, decide, granted, LIMITS, type Decision } from "../../src/web/remote/broker.ts";
-import type { FromPlugin } from "../../src/web/remote/protocol.ts";
+import { appsOwn, createBroker, decide, granted, kept, LIMITS, type Decision } from "../../src/web/remote/broker.ts";
+import { MAX_STORED, MAX_STORED_KEYS, MAX_STORED_TOTAL, STORED_INDEX, WATCHED, read, type FromPlugin } from "../../src/web/remote/protocol.ts";
 
 const NOTE = "abcdefghijkl";
 
@@ -69,6 +69,66 @@ describe("what a plugin is permitted, decided from the record", () => {
     expect(decide(installed(["notes.write"]), { v: 1, id: 3, call: "open", noteId: NOTE })).toMatchObject({ kind: "refuse", id: 3, error: { code: "forbidden" } });
     expect(decide(installed(["notes.read"]), { v: 1, id: 3, call: "open", noteId: "/settings" })).toMatchObject({ kind: "refuse", id: 3, error: { code: "invalid" } });
     expect(decide(installed(["notes.read"]), { v: 1, id: 3, call: "open", noteId: "javascript:alert(1)" })).toMatchObject({ kind: "refuse", error: { code: "invalid" } });
+  });
+});
+
+describe("what every plugin that runs shut off was given so the app's own could run there", () => {
+  /** One of the app's own, as the app tells of it: its code has no name. A member's copy of it has one. */
+  const own = (allowed: Capability[]): InstalledPlugin => ({ ...installed(allowed), id: "quick-timer", thirdParty: false, codeHash: null, manifest: { ...installed(allowed).manifest, name: "Quick timer" } });
+  const copy = (allowed: Capability[]): InstalledPlugin => ({ ...own(allowed), codeHash: "1".repeat(64) });
+
+  it("tells a plugin of the note in front and of changes to the notes only when it may read notes", () => {
+    for (const what of WATCHED) {
+      expect(decide(installed(["notes.read"]), { v: 1, id: 4, call: "watch", what })).toEqual({ kind: "watch", id: 4, what });
+      for (const plugin of [installed([]), installed(["notes.write", "todos.read", "members.read"]), installed([], ["notes.read"]), own([]), copy([])]) {
+        expect(decide(plugin, { v: 1, id: 4, call: "watch", what })).toMatchObject({ kind: "refuse", id: 4, error: { code: "forbidden" } });
+      }
+    }
+  });
+
+  it("opens a note behind the one in front only when asked to, and still only for a plugin that may read notes", () => {
+    expect(decide(installed(["notes.read"]), { v: 1, id: 3, call: "open", noteId: NOTE, background: true })).toEqual({ kind: "open", id: 3, noteId: NOTE, background: true });
+    expect(decide(installed(["notes.read"]), { v: 1, id: 3, call: "open", noteId: NOTE, background: false })).toEqual({ kind: "open", id: 3, noteId: NOTE });
+    expect(decide(own([]), { v: 1, id: 3, call: "open", noteId: NOTE, background: true })).toMatchObject({ kind: "refuse", error: { code: "forbidden" } });
+  });
+
+  it("keeps what a plugin asks to keep under its own keys, never the app's, and no more than a plugin may keep", () => {
+    expect(decide(installed([]), { v: 1, id: 5, call: "storage.get", key: "running" })).toEqual({ kind: "stored", id: 5, key: "running" });
+    expect(decide(installed([]), { v: 1, id: 5, call: "storage.set", key: "running", value: { length: "5m" } })).toEqual({ kind: "store", id: 5, key: "running", value: { length: "5m" } });
+    for (const call of ["storage.get", "storage.set"] as const) expect(decide(installed([]), { v: 1, id: 5, call, key: STORED_INDEX, value: {} } as FromPlugin)).toMatchObject({ kind: "refuse", error: { code: "invalid" } });
+    expect(decide(installed([]), { v: 1, id: 5, call: "storage.set", key: "big", value: "x".repeat(MAX_STORED) })).toMatchObject({ kind: "refuse", error: { code: "invalid" } });
+
+    expect(kept(undefined, "a", "xy")).toEqual({ index: { a: 5 } });
+    expect(kept({ a: 4, b: 9 }, "a", null)).toEqual({ index: { b: 9 } });
+    // What the browser handed back is not trusted to be what the app wrote.
+    expect(kept({ a: "many", b: -3, c: 2 }, "d", 1)).toEqual({ index: { c: 2, d: 2 } });
+    expect(kept("nonsense", "d", 1)).toEqual({ index: { d: 2 } });
+    // A key's name is kept as well as what is under it, so a long name counts.
+    expect(kept(undefined, "k".repeat(100), 1)).toEqual({ index: { ["k".repeat(100)]: 101 } });
+    const full = Object.fromEntries(Array.from({ length: MAX_STORED_KEYS }, (_, i) => [`k${i}`, 1]));
+    expect(kept(full, "one-more", 1)).toHaveProperty("reason");
+    expect(kept(full, "k3", "changed")).toHaveProperty("index");
+    expect(kept({ a: MAX_STORED_TOTAL - 2 }, "b", "xyz")).toHaveProperty("reason");
+    expect(kept({ a: MAX_STORED_TOTAL - 2 }, "a", "xyz")).toHaveProperty("index");
+  });
+
+  it("asks the member a plugin's question under the plugin's name, so it can't be taken for the app's: only the app's own unchanged code asks unnamed", () => {
+    const ask: FromPlugin = { v: 1, id: 6, call: "prompt", title: "Sign in again", label: "Your password\u0000", value: "v".repeat(500), hint: "h".repeat(500), error: "one\ntwo" };
+    const theirs = decide(installed([]), ask) as Extract<Decision, { kind: "prompt" }>;
+    expect(theirs).toMatchObject({ kind: "prompt", id: 6, from: "Word counter", title: "Word counter plugin: Sign in again", label: "Your password ", error: "one two" });
+    expect(theirs.value).toHaveLength(200);
+    expect(theirs.hint).toHaveLength(LIMITS.notice);
+    expect(decide(own([]), ask)).toMatchObject({ from: null, title: "Sign in again" });
+    // A member's copy of one of the app's own is that member's code, and is named as a plugin is.
+    expect(decide(copy([]), ask)).toMatchObject({ from: "Quick timer", title: "Quick timer plugin: Sign in again" });
+    expect(decide(copy([]), { v: 1, id: 2, call: "notify", message: "Done" })).toEqual({ kind: "notify", id: 2, message: "Quick timer plugin: Done" });
+    expect(decide(own([]), { v: 1, id: 2, call: "notify", message: "Done" })).toEqual({ kind: "notify", id: 2, message: "Done" });
+    expect([appsOwn(own([])), appsOwn(copy([])), appsOwn(installed([])), appsOwn({ ...installed([]), codeHash: null })]).toEqual([true, false, false, false]);
+  });
+
+  it("is told how wide a frame in the bar draws, as a number of pixels and nothing else", () => {
+    expect(decide(installed([]), { v: 1, fit: 120 })).toEqual({ kind: "fit", width: 120 });
+    for (const fit of [-1, 1.5, 1e9, "120", null]) expect(read({ v: 1, fit })).toBeNull();
   });
 });
 

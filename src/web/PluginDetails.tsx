@@ -1,11 +1,11 @@
 import { useState, useSyncExternalStore, type ReactNode } from "react";
-import { HTML_EMBEDS, type DraftSummary, type InstalledPlugin, type PluginRecord } from "../core/plugins.ts";
+import { CAPABILITIES, HTML_EMBEDS, type DraftSummary, type InstalledPlugin, type PluginRecord } from "../core/plugins.ts";
 import { Icon } from "./icons.tsx";
 import { chordFor, chordLabel } from "./keybindings.ts";
 import type { Slots } from "./plugin-api.ts";
 import { INSTALLED_EMBED, type Added, type Contributions, type Host } from "./pluginHost.ts";
 import { InstallForm } from "./PluginInstall.tsx";
-import { KIND_LABEL, PLUGINS_PATH, within, type Listed } from "./pluginList.ts";
+import { PLUGINS_PATH, kindLabel, within, type Listed } from "./pluginList.ts";
 import { PermissionRow, sitesIn, useRecordChanges, type RecordChanges } from "./PluginPermissions.tsx";
 import { PluginSource } from "./PluginSource.tsx";
 import { SettingRow } from "./SettingRow.tsx";
@@ -103,7 +103,7 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
           {(theirs || state?.builtIn) && (
             <p className="plugin-meta">
               <span className="badge" data-kind={plugin.kind}>
-                {KIND_LABEL[plugin.kind]}
+                {kindLabel(plugin)}
               </span>
               {drafts.some((draft) => draft.pluginId === id && draft.running) && (
                 <span className="badge" data-state="draft">
@@ -188,9 +188,34 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
               </ul>
             )}
           </>
+        ) : plugin.own ? (
+          <>
+            <p className="soon">It comes with Common Ink and runs shut off from the app, through the same door a third-party plugin does. It does only what it declares here, and the server holds it to that.</p>
+            {plugin.own.capabilities.length === 0 ? (
+              <p className="permission-detail">It asks for nothing: it can't read or change anything in the workspace.</p>
+            ) : (
+              <ul className="permissions" aria-label={`What ${name} may do`}>
+                {plugin.own.capabilities.map((declared) => (
+                  <li key={declared.name} className="permission" aria-label={`${CAPABILITIES[declared.name].title} for ${name}`}>
+                    <div className="permission-head">
+                      <span className="permission-title">{CAPABILITIES[declared.name].title}</span>
+                      <span className="badge" data-state="allowed">
+                        Comes with the app
+                      </span>
+                    </div>
+                    <p className="permission-detail">{CAPABILITIES[declared.name].detail}</p>
+                    <p className="permission-reason">{declared.reason}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         ) : (
           <>
-            <p className="soon">{state?.builtIn ? "It comes with Common Ink and runs" : "It runs"} inside the app as you, so it asks for nothing: it can do what you can, and no more. What it does with that is what it adds, below.</p>
+            <p className="soon">
+              {state?.builtIn ? "It comes with Common Ink and runs" : "It runs"} inside the app as you, so it asks for nothing: it can do what you can, and no more.
+              {state?.builtIn && " That is full access, which it has because what it does can\u2019t be done shut off from the app."} What it does with that is what it adds, below.
+            </p>
             {plugin.record && id === HTML_EMBEDS && <HtmlNetwork subject={plugin.record} admin={admin} personId={personId} changes={changes} />}
           </>
         )}

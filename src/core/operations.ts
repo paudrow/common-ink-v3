@@ -43,6 +43,7 @@ import {
   type Visit,
   type Written,
 } from "./protocol.ts";
+import { ownSandboxed } from "./ownPlugins.ts";
 import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, listPlugins, permitPlugin, readDraft, readPlugin, requestPlugin, saveDraft, uninstallPlugin } from "./pluginRecord.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
@@ -162,7 +163,9 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   if (actor.kind === "agent" && actor.scope?.readOnly && (handler.needs !== "view" || handler.changes)) throw new OpError("forbidden", `A read-only token can't ${op.type}`);
   if ((handler.members || handler.own) && standing.sight.within) throw new OpError("forbidden", `An agent limited to folders can't ${op.type}`);
   // A plugin is refused everything but what a permission it was given names. Members run plugins, so a guest's is refused whatever it asks, before anything is said of the plugin.
-  const plugin = actor.kind === "plugin" && standing.role ? await actingPlugin(db, standing.workspaceId, actor.pluginId, actor.personId, actor.draft) : null;
+  // The plugins that come with Common Ink are the app's, so a guest's app has them too: each acts as the guest, within what it declares. A draft is a member's.
+  const runsPlugins = standing.role !== null || (actor.kind === "plugin" && !actor.draft && ownSandboxed(actor.pluginId) !== null);
+  const plugin = actor.kind === "plugin" && runsPlugins ? await actingPlugin(db, standing.workspaceId, actor.pluginId, actor.personId, actor.draft) : null;
   if (actor.kind === "plugin") {
     if (!plugin) throw new OpError("forbidden", `A ${standing.as} runs no plugins: they are for the workspace's members`);
     if ("refused" in plugin) throw new OpError("forbidden", plugin.refused);

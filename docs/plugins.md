@@ -132,8 +132,8 @@ A widget is a small live thing to glance at or press. There are three places one
 | In a note, inline | `host.embeds.register({ name, render })`, written `::name{config}` | The note: its config | Timer (`timer`), Stopwatch (`stopwatch`), Event (`calendar`), Contact (`contacts`) |
 | In a note, as a block | `host.embeds.register({ name, block: true, render })`, written `:::name{config}` … `:::` | The note: its config and body | Kanban board (`kanban`) |
 | In a note, below its line | An embed, inline or block, that also gives `below: { box, render }`, or an address embed: `host.embeds.register({ name, title, claims, below })` | The note: its config and body, or the address | A video's or a post's address alone on a line (`media`), HTML (`html`) |
-| The bottom bar | `host.views.register("bar", { id, component, side, order })` | Whatever it shows: the open note, the app | Note clocks (`note-clocks`) at the left end, Word count (`word-count`, from #31) at the right |
-| From the command palette only | A command that opens an `overlay` to ask what it needs, and a `bar` view that shows it | This browser, for this workspace: `host.storage` | Quick timer (`quick-timer`) |
+| The bottom bar | `host.views.register("bar", { id, component, side, order })` | Whatever it shows: the open note, the app | Note clocks (`note-clocks`) at the left end. Word count (`word-count`) at the right is the same slot from a frame: see [One interface for a plugin that runs shut off](#one-interface-for-a-plugin-that-runs-shut-off) |
+| From the command palette only | A command that asks what it needs with `ink.prompt`, and a `bar` view that shows it | This browser, for this member and workspace: `ink.storage` | Quick timer (`quick-timer`), which runs shut off |
 
 Every embed with a syntax is in the `/` menu, by itself or, with `menu: false`, through the `pick` of another that writes it (a picture, a video and a sound are all written by "Upload a file"), and every command-started widget is a command in the palette. An address embed is written by pasting or typing its address and by nothing else.
 
@@ -555,6 +555,62 @@ Plugins that come with Common Ink show their source and can't be copied.
 
 A plugin whose `activate` throws is left out whole. A view that throws while being drawn is left out alone, an embed that throws is shown as it is written, and a completion that throws offers nothing. Each way the Plugins page says what failed.
 
+## One interface for a plugin that runs shut off
+
+Word count, Quick timer and Backlinks come with Common Ink and run shut off from it, through the broker, the port and the address on the server a third-party plugin uses (ADR 10). There is no second door: what the three needed and a frame lacked was added for every plugin. Their manifests are in `src/core/ownPlugins.ts`, read by the schema every manifest is read by, and their code is one file each in `src/web/plugins/sandboxed/`, plain JavaScript written against `ink` and nothing else. The server holds each to what its manifest declares (`actingPlugin` in `src/core/pluginRecord.ts`): no row in any workspace is read for one, so nobody permits, locks or uninstalls it, and what it declares is all it can ask, in an admin's session as in a guest's. A guest's app runs them too, as that guest.
+
+| Plugin | Runs | The Plugins page says |
+|---|---|---|
+| Common Ink's own that needs the editor or the app's layout | in the page, compiled in, as the member | Built-in, full access |
+| Common Ink's own that needs nothing of the page | shut off, in frames | Built-in, sandboxed |
+| A workspace's | shut off, in frames | Third-party |
+
+What sets the three apart from a workspace's plugin, and all of it is decided by the app from where the plugin was read, never from anything a manifest or a record says:
+
+- **Their words are the app's.** Commands, tabs and questions are not marked `<name> plugin:`, their views keep the ids they had in the page, their frames are named `ink-own-plugin`, and a manifest of theirs may name an `icon`. A workspace's manifest that names an icon is refused, as one with a name of the app's own is.
+- **Their frames are never stopped for holding the keyboard.** Any frame can hand the keyboard to another (`top.frames[i].focus()`), and the app can't see which did. The keyboard goes back to the note either way. A workspace's plugin's frame is stopped for it, as before, so one workspace plugin can still have another's frame stopped.
+- **They are on from the start,** and placed among the built-ins where they were (`PLACED_AFTER` in `src/web/plugins/index.ts`).
+- **Their code for commands starts with the app,** not at the first command, so what a command shows is there at once. A workspace's plugin runs nothing until the member asks something of it.
+
+What was added to the sandbox, for every plugin:
+
+| Added | For | Needs |
+|---|---|---|
+| `views[].slot: "bar"` with `width`, and `end` for the right side | an item in the app's one bottom bar. The frame is as wide as what `ink.root` holds, which the SDK reports as it changes, and never wider than `width`. With nothing drawn it takes no room. It is not told which note is in front and not started again for each: it asks with `ink.onNote`. A press in it works, and the keyboard goes straight back to where it was. A plugin has one, and beside a workspace's the app writes the plugin's name | nothing |
+| `ink.onNote(fn)` | the note in front as its editor has it, `{ id, text, selected }`, typing not yet saved included, or null when no note is open in an editor. Told again when any of the three changes, 150 ms after the last change | `notes.read` |
+| `ink.onItems(fn)` | told when the notes the member can see have changed | `notes.read` |
+| `ink.storage.get(key)`, `ink.storage.set(key, value)`, `ink.onStorage(fn)` | JSON kept in this browser for this plugin, this member and this workspace. At most 20,000 characters a key, 50 keys and 100,000 characters in all with the keys' names counted, refused with `invalid` past any of them. Setting a key to null takes it out, and leaves nothing under it. Every frame of the plugin hears a set. No plugin reads another's, and a second person in the same browser has their own | nothing |
+| `ink.prompt({ title, label, value, hint, error })` | one line of text asked in a dialog the app draws, answered with the text or null. One at a time, and only within ten seconds of the member running one of the plugin's commands, or at once after an answer: no plugin puts a dialog up of its own accord, or again once it was turned away. Above a workspace's plugin's question the app says "The plugin <name> asks", and its title is `<name> plugin: ...`, so it can't be taken for the app's. Asked again within 120 ms of an answer, the dialog stays with what was typed | nothing |
+| `ink.open(noteId, { background })` | open a note in a tab of its own behind the one in front | `notes.read` |
+| `note.backlinks` in `notes.read` | the notes that link to a note, as the member may see them | `notes.read` |
+
+What moving the three cost, which is what a workspace's plugin lives with:
+
+- **A question is asked a moment after its command.** The command goes to the plugin's frame, which asks the app. With the frame already running that was 36 ms on a laptop, measured once, so Enter pressed twice at once is not what it was. What is typed is judged where the plugin runs, so the quick timer says a length is wrong once it is entered, not as it is typed.
+- **A frame is under a shield until the pointer is on it.** With a mouse nothing is noticed. On a touch screen the first tap on a frame only takes the shield away.
+- **The bar's frames are passed by Tab.** The quick timer in the bar is pressed with the pointer, or stopped with its command.
+- **A link in a frame is not the browser's.** ⌘ or Ctrl and a press on a backlink opens it in a tab behind, as in the note list, and not in a new window.
+
+Tab does reach into a frame in the inspector, and Enter there opens a backlink.
+
+**A member's copy of one** runs in its place for them alone ("Edit a copy" on its page, as for a workspace's plugin). It has what the original declares and its own manifest still asks for, never more, its name may stay, and since it is no longer the app's code everything of it is marked `<name> plugin:`. It is never published over the original: an admin installs its two files as a workspace's plugin under another name.
+
+### The built-ins that stay in the page, and what each needs
+
+This is the map for moving more. Each row names what a frame can't be given today.
+
+| Built-in | What it needs that a frame can't have |
+|---|---|
+| Vim mode, Outline bullets, Tables, LaTeX, Code blocks, GitHub-flavored markdown, Links, Mentions, Todos, Tags, Media embeds, Upload embeds, HTML embeds, Line numbers, Embed menu, Daily notes | Editor extensions and completions: CodeMirror values that run in the editor's own page. Nothing crosses a port. |
+| Timer, Stopwatch, Kanban | An embed drawn inside the line, sized by what it draws, that rewrites its own config as the member's edit. A sandboxed embed is a fixed-height frame below the line and read-only. |
+| Note clocks | It reads the open note's running clocks, which `ink.onNote` gives, and scrolls the editor to one, which nothing gives yet. |
+| Tabs and splits, Sidebar, Folders, Note list | The `editor`, `column`, `section` and `folder` slots, which draw the app's own layout and the editor itself. |
+| Command palette, Quick open | The `overlay` slot with the keyboard from the first key, and the list of every command. |
+| Search, History, Dashboard | Pages that move the app (`app.go`, the address's query), the sync seam, the page at `/`, and pins and visits, which are the member's own. |
+| Calendar, Contacts, Uploads | The member's data sources and an upload's bytes, for which there is no capability. |
+| Agents, Members, Sharing | Operations that are the member's alone (`by: "member"`): tokens, roles, invites, grants. No plugin actor is let do them. |
+| Note info, Trash | The `mark` and `notice` slots, and moving and trashing notes, for which there is no capability. |
+
 ## Third-party plugins
 
 A third-party plugin is one a member wrote and an admin installed in a workspace. It is two pieces of text: a **manifest**, which is JSON and says what the plugin is, and its **code**, which is JavaScript. An admin pastes both into the form on the Plugins page. They are kept in the workspace and nowhere else: nothing is fetched from another site to run a plugin, now or later.
@@ -599,7 +655,7 @@ if (ink.context.kind === "embed") ink.root.textContent = "Counting: " + ink.cont
 - `name` (60 characters), `version`, `description`. No control or invisible characters anywhere. A name that is Common Ink's own, or reads as one, is refused when the plugin is installed and again when it would start: the app, its pages and its built-in plugins (`OWN_NAMES`, and in the app the built-ins it actually has). Names are compared by `nameSkeleton` in `src/core/plugins.ts`: compatibility forms folded, accents off, Cyrillic and Greek letters drawn as Latin ones read as those, case, spaces and punctuation dropped, and `l`, `1`, `0` read as `i` and `o`. So `Сommon Ink` with a Cyrillic С, `HISTORY` and `Hist0ry` are all refused. It covers Latin, Cyrillic and Greek look-alikes and no other script.
 - `capabilities`: each `{ name, reason }`, and for `network` also `origins`, up to ten sites such as `https://api.example.com` (no path, no wildcard). The reason is in the author's words and is shown to whoever decides.
 - `commands`: `{ id, title }`. In the app the command is `<install id>.<id>`, titled `<plugin name> plugin: <title>`, and can be given a keybinding like any other.
-- `views`: `{ slot, id, label }` with `slot` `inspector` (a tab about the open note) or `page` (at `/x/<install id>/<id>`, linked under More). Both are labelled `<plugin name> plugin: <label>`, so neither reads as part of the app. A third-party page is never the home page at `/`: only Common Ink's own plugins register one with `home`.
+- `views`: `{ slot, id, label }` with `slot` `inspector` (a tab about the open note), `page` (at `/x/<install id>/<id>`, linked under More) or `bar` (one item in the bottom bar, with `width` from 24 to 480 and `end: true` for the right side, and the plugin's name written beside it by the app). All are labelled `<plugin name> plugin: <label>`, so none reads as part of the app. A third-party page is never the home page at `/`: only Common Ink's own plugins register one with `home`.
 - `embeds`: `{ name, title, height }`. A note writes `::x-name{config}`: every third-party embed's name starts with `x-`, which no built-in's does, so a plugin can't take a built-in embed's name, on or off. `<plugin name> plugin: <title>` stands in the line and in the `/` menu, and the plugin's frame is below the line, in a room `height` pixels tall, which comes from the manifest so nothing moves when the frame loads. A name an earlier plugin already has is refused, and the Plugins page says so. `ink.context.name` is the manifest's own name, without the `x-`. **`config` and `body` are written by whoever can edit the note and run in every reader's browser: treat them as untrusted input.** An embed runs with no Run button, as the reader, with everything the plugin is permitted, so a plugin that acts on its config (reads the note it names, writes what it says) lets any editor of a note steer it in another member's session. The install prompt tells the admin so when a manifest declares embeds.
 - `settings`: options as built-ins declare them (`boolean`, `string`, `number`, `integer`), kept in each member's settings under `<install id>.<name>`.
 
@@ -609,7 +665,7 @@ if (ink.context.kind === "embed") ink.root.textContent = "Counting: " + ink.cont
 
 | Capability | Opens |
 | --- | --- |
-| `notes.read` | `note.list`, `note.read`, `folder.list`, `search`, `daily.find` (the member's daily note for a day, when there is one: nothing is made), and `ink.open(noteId)` |
+| `notes.read` | `note.list`, `note.read`, `note.backlinks`, `folder.list`, `search`, `daily.find` (the member's daily note for a day, when there is one: nothing is made), `ink.open(noteId)`, `ink.onNote` and `ink.onItems` |
 | `notes.write` | `note.create`, `note.write` |
 | `todos.read` | `todo.list` |
 | `members.read` | `member.list`: names and roles, never emails |
@@ -639,7 +695,7 @@ Never in the app's page. Each running piece of a plugin is a frame of its own: t
 A plugin runs in up to three kinds of frame, each with all of its code and an `ink.context` saying which it is:
 
 - `{ kind: "background" }`: hidden, started the first time one of the plugin's commands is run, and kept. Commands are heard here.
-- `{ kind: "view", id, noteId }`: in the inspector or on its page. `noteId` is the open note's id when the plugin has `notes.read`, and null otherwise.
+- `{ kind: "view", id, slot, noteId }`: in the inspector, on its page, or in the bar. `noteId` is the open note's id for an inspector tab when the plugin has `notes.read`, and null otherwise.
 - `{ kind: "embed", name, config, body, readOnly: true }`: below the line that writes the embed. It runs without a Run button, since the member turned the plugin on. It is made again when the note says something else of the embed.
 
 The app and a frame talk over a `MessagePort` the app makes for that frame (`src/web/remote/`). The port is who the frame is: nothing in a message is read as an identity. Every message is parsed against a strict schema (`protocol.ts`): another version, an unknown key, a wrong type, a key naming a prototype, or more than 600,000 characters is dropped. One function decides what a message leads to (`decide` in `broker.ts`), from the record as it is now. Each plugin may send 30 messages at once and 15 a second after that, with 8 operations under way; the rest are answered `rate_limited`, and a plugin that keeps on is stopped, with its frames taken out and the reason on the Plugins page. Nothing a frame sends is run, read as markup, or set as HTML.
@@ -649,8 +705,9 @@ What the code is given, as `ink`:
 - `ink.context`, `ink.granted` (the capabilities allowed now), `ink.settings` (its own options' values), `ink.plugin` (`{ name, version }`), `ink.root` (the element to draw in). A permission that changes starts the plugin's frames again.
 - `ink.perform(op)`: an operation from the table above. The app refuses one the plugin isn't permitted, and sends the rest to the server at an address that names the install (`/api/workspaces/<id>/plugins/<install id>/ops`), where it is checked again against the record and performed as the plugin, for the member. A refusal rejects with `{ code, message }`.
 - `ink.notify(message)`: a notice at the foot of the app, as text, 200 characters at most, starting with `<plugin name> plugin:`.
-- `ink.open(noteId)`: opens a note, with `notes.read`.
+- `ink.open(noteId, { background })`: opens a note, with `notes.read`.
 - `ink.onCommand(id, fn)`, `ink.onSettings(fn)`.
+- `ink.onNote(fn)`, `ink.onItems(fn)`, `ink.storage`, `ink.onStorage(fn)` and `ink.prompt(question)`: see [One interface for a plugin that runs shut off](#one-interface-for-a-plugin-that-runs-shut-off).
 
 Nothing of the member is sent to a frame: no name, no email, no role.
 
@@ -661,9 +718,9 @@ The frame's look follows the app's theme as it was when the frame was made, with
 ### What a third-party plugin can't do in this version
 
 - **Editor extensions and completions.** An editor extension is code inside the editor, built from the app's own copy of CodeMirror, with the note's text and every key typed. It can't cross to a frame, and no declarative subset is offered yet.
-- **Drawing in the app's page.** No `Embed.render` or `Below.render`, no inline widget in the line beyond the embed's title, no block embeds, and no view in the `column`, `section`, `rail`, `editor`, `bar`, `overlay`, `mark` or `notice` slots.
+- **Drawing in the app's page.** No `Embed.render` or `Below.render`, no inline widget in the line beyond the embed's title, no block embeds, and no view in the `column`, `section`, `rail`, `editor`, `overlay`, `mark` or `notice` slots. A view in `bar` is a frame.
 - **Writing a note from an embed** (`update`). An embed is read-only. A plugin changes a note only through `note.write`, with `notes.write`, as itself.
-- **Keeping anything in the browser.** No `host.storage`. What a plugin keeps, it keeps in a note.
+- **Keeping much in the browser.** `ink.storage` holds small JSON for this member in this browser. Anything else a plugin keeps, it keeps in a note.
 - **Running commands**, its own or any other: there is no call for it, so `plugins.disable.<another>` is out of reach. It can't change or read settings other than its own options' values.
 - **The `app` snapshot**, uploads and their bytes, data sources, sharing, members' emails, agents.
 

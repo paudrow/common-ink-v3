@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Manifest, type DraftSummary, type InstalledPlugin, type Permission } from "../../src/core/plugins.ts";
-import { decideRun } from "../../src/web/pluginRun.ts";
+import { OWN_RECORDS, decideRun } from "../../src/web/pluginRun.ts";
 
 const HASH = "a".repeat(64);
 const OTHER = "b".repeat(64);
@@ -47,5 +47,31 @@ describe("what an installed plugin runs as", () => {
     expect(decideRun(tally, draft([], { manifest: "{ not json" }))).toEqual({ as: "refused", plugin: tally, why: "Your draft's manifest can't be read, so it isn't running: The manifest isn't JSON" });
     expect(decideRun(tally, draft([asks("full-trust")]))).toMatchObject({ as: "refused", plugin: tally });
     expect(decideRun(tally, draft([], { manifest: JSON.stringify({ name: "Tabs and splits" }) }))).toMatchObject({ as: "refused", plugin: tally });
+  });
+});
+
+describe("what one of Common Ink's own that runs shut off runs as", () => {
+  it("is the app's own code with what its manifest declares, allowed from the start and decided by nobody", () => {
+    expect(OWN_RECORDS.map((p) => [p.id, p.thirdParty, p.codeHash, p.permissions.map((perm) => [perm.capability, perm.state, perm.locked])])).toEqual([
+      ["word-count", false, null, [["notes.read", "allowed", true]]],
+      ["quick-timer", false, null, []],
+      ["backlinks", false, null, [["notes.read", "allowed", true]]],
+    ]);
+    for (const own of OWN_RECORDS) expect(decideRun(own, undefined)).toEqual({ as: "sandbox", plugin: own });
+  });
+
+  it("runs a member's copy under the name it had, with what the original declares and the copy still asks for, and never more", () => {
+    const timer = OWN_RECORDS.find((p) => p.id === "quick-timer")!;
+    const count = OWN_RECORDS.find((p) => p.id === "word-count")!;
+    const mine = (name: string, capabilities: object[]): DraftSummary => ({ pluginId: "x", manifest: JSON.stringify({ name, capabilities }), codeHash: OTHER, baseHash: null, running: true, updatedAt: 2 });
+
+    const grabby = decideRun(timer, mine("Quick timer", [asks("notes.read"), asks("notes.write"), asks("network", { origins: ["https://evil.example"] })]));
+    expect(grabby.as).toBe("draft");
+    expect(allowedIn(grabby)).toEqual([]);
+    // Its code has a name now, which is how the app tells a copy from what it came with.
+    expect(grabby.plugin).toMatchObject({ thirdParty: false, codeHash: OTHER });
+    expect(allowedIn(decideRun(count, mine("Word count", [asks("notes.read"), asks("members.read")])))).toEqual([["notes.read", []]]);
+    // The name is the app's own only for a copy of the app's own.
+    expect(decideRun(plugin([]), mine("Word count", []))).toMatchObject({ as: "refused" });
   });
 });

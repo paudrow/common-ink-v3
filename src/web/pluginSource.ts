@@ -1,3 +1,5 @@
+import { ownSandboxed } from "../core/ownPlugins.ts";
+import { codeHash } from "../core/plugins.ts";
 import { perform } from "./api.ts";
 import type { Listed } from "./pluginList.ts";
 import { SOURCE_OF } from "./plugins/index.ts";
@@ -60,11 +62,18 @@ export interface Editable {
   codeHash: string;
 }
 
+const manifestText = (manifest: object) => `${JSON.stringify(manifest, null, 2)}\n`;
+
 /** The plugin as the two files it can be copied and changed as, or null for one that is compiled into the app. */
 export async function editableOf(plugin: Listed, workspaceId: string): Promise<Editable | null> {
-  if (plugin.kind !== "third-party" || !plugin.record) return null;
-  const { code, codeHash } = await perform(workspaceId, { type: "plugin.read", id: plugin.id });
-  return { manifest: `${JSON.stringify(plugin.record.manifest, null, 2)}\n`, code, codeHash };
+  if (plugin.kind === "third-party" && plugin.record) {
+    const { code, codeHash: hash } = await perform(workspaceId, { type: "plugin.read", id: plugin.id });
+    return { manifest: manifestText(plugin.record.manifest), code, codeHash: hash };
+  }
+  const own = ownSandboxed(plugin.id);
+  if (!own) return null;
+  const code = await RAW[`${ROOT}sandboxed/${plugin.id}.js`]!();
+  return { manifest: manifestText(own), code, codeHash: await codeHash(code) };
 }
 
 /** Every file of a plugin's source: the two files of one that can be copied, or a built-in's entry file and what it imports. */

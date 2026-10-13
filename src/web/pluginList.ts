@@ -1,5 +1,6 @@
 import type { MouseEvent } from "react";
-import type { InstalledPlugin, PluginRecord } from "../core/plugins.ts";
+import { ownSandboxed } from "../core/ownPlugins.ts";
+import type { InstalledPlugin, Manifest, PluginRecord } from "../core/plugins.ts";
 import type { IconName } from "./icons.tsx";
 import type { PluginState } from "./pluginHost.ts";
 
@@ -27,9 +28,12 @@ export interface Listed {
   state: PluginState | null;
   /** What the workspace's record says of it: every third-party plugin has one, and of the built-ins only HTML embeds. */
   record: InstalledPlugin | null;
+  /** For one of Common Ink's own that runs shut off from the app: the manifest it declares itself in. Null for one compiled into the app, which runs inside it. */
+  own: Manifest | null;
 }
 
-export const KIND_LABEL: Record<Listed["kind"], string> = { "built-in": "Built-in", "third-party": "Third-party" };
+/** What kind a plugin is, and for one that comes with the app where it runs: inside the app with everything the member has, or shut off from it with what its manifest declares. */
+export const kindLabel = (plugin: Pick<Listed, "kind" | "own">): string => (plugin.kind === "third-party" ? "Third-party" : plugin.own ? "Built-in, sandboxed" : "Built-in, full access");
 
 /**
  * Every plugin a member can turn on or off: the ones that come with the app, in their order, then
@@ -47,6 +51,8 @@ export function listPlugins(states: readonly PluginState[], record: PluginRecord
       kind: "built-in",
       state,
       record: record?.plugins.find((p) => !p.thirdParty && p.id === state.id) ?? null,
+      // Said of a plugin the host says came with the app, so no installed plugin is shown as sandboxed built-in by an id it chose.
+      own: state.builtIn ? ownSandboxed(state.id) : null,
     }));
   const thirdParty = (record?.plugins ?? [])
     .filter((p) => p.thirdParty)
@@ -58,6 +64,7 @@ export function listPlugins(states: readonly PluginState[], record: PluginRecord
       kind: "third-party",
       state: states.find((state) => state.installed && state.id === p.id) ?? null,
       record: p,
+      own: null,
     }));
   return [...builtIn, ...thirdParty];
 }
@@ -65,7 +72,7 @@ export function listPlugins(states: readonly PluginState[], record: PluginRecord
 /** Whether a plugin is found by what was typed: in its name, its description, or its kind. */
 export function matchesPlugin(plugin: Listed, typed: string): boolean {
   const needle = typed.trim().toLowerCase();
-  return !needle || [plugin.name, plugin.description ?? "", KIND_LABEL[plugin.kind]].some((text) => text.toLowerCase().includes(needle));
+  return !needle || [plugin.name, plugin.description ?? "", kindLabel(plugin)].some((text) => text.toLowerCase().includes(needle));
 }
 
 /** How many members are waiting on an admin for something of this plugin's. */

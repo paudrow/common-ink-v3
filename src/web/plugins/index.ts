@@ -1,6 +1,5 @@
 import type { Plugin } from "../plugin-api.ts";
 import { agents } from "./agents/index.tsx";
-import { backlinks } from "./backlinks.tsx";
 import { bullets } from "./bullets/index.ts";
 import { calendar } from "./calendar/index.tsx";
 import { codeBlocks } from "./code/index.ts";
@@ -24,7 +23,6 @@ import { noteClocks } from "./noteClocks.tsx";
 import { noteInfo } from "./noteInfo.tsx";
 import { noteList } from "./noteList.tsx";
 import { quickOpen } from "./quickOpen.tsx";
-import { quickTimer } from "./quickTimer.tsx";
 import { search } from "./search/index.tsx";
 import { sharing } from "./sharing/index.tsx";
 import { sidebar } from "./sidebar.tsx";
@@ -37,11 +35,12 @@ import { todos } from "./todos/index.tsx";
 import { trash } from "./trash/index.tsx";
 import { uploads } from "./uploads/index.tsx";
 import { vim } from "./vim/index.ts";
-import { wordCount } from "./wordCount.tsx";
 
 /**
- * The plugins that come with the app, each beside the file it starts from, in the order their
- * contributions are shown. Each is on until a member turns it off, except one that says it starts off.
+ * The plugins that come with the app and run inside it, each beside the file it starts from, in the
+ * order their contributions are shown. Each is on until a member turns it off, except one that says
+ * it starts off. The ones that run shut off from the app are not here: their code is in
+ * `sandboxed/`, they are declared in `src/core/ownPlugins.ts`, and `PLACED_AFTER` places them among these.
  */
 const AT: readonly (readonly [Plugin, string])[] = [
   [sidebar, "sidebar.tsx"],
@@ -58,7 +57,6 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [agents, "agents/index.tsx"],
   [members, "members/index.tsx"],
   [sharing, "sharing/index.tsx"],
-  [backlinks, "backlinks.tsx"],
   [noteInfo, "noteInfo.tsx"],
   [trash, "trash/index.tsx"],
   [embedMenu, "embedMenu.ts"],
@@ -66,7 +64,6 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [stopwatch, "stopwatch.ts"],
   [kanban, "kanban/index.ts"],
   [noteClocks, "noteClocks.tsx"],
-  [quickTimer, "quickTimer.tsx"],
   [media, "media/index.ts"],
   [html, "html/index.ts"],
   [calendar, "calendar/index.tsx"],
@@ -82,10 +79,12 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [bullets, "bullets/index.ts"],
   [lineNumbers, "lineNumbers.ts"],
   [vim, "vim/index.ts"],
-  [wordCount, "wordCount.tsx"],
 ];
 
 export const BUILT_INS: readonly Plugin[] = AT.map(([plugin]) => plugin);
 
 /** Where each one's source starts, under this folder. A plugin's page shows that file and what it imports from here. */
 export const SOURCE_OF: ReadonlyMap<string, string> = new Map(AT.map(([plugin, file]) => [plugin.id, file]));
+
+/** Which of the plugins above each plugin that runs shut off comes after, so its contributions keep the place they had when it ran inside the app. */
+export const PLACED_AFTER: Readonly<Record<string, string>> = { backlinks: "sharing", "quick-timer": "note-clocks", "word-count": "vim" };
