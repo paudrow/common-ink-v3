@@ -177,7 +177,7 @@ describe("Google Calendar", () => {
 
   it("sends a record's id nowhere but into one segment of a path on Google's host, whatever it says", async () => {
     const { google, ask } = await connected();
-    const hostile = ["https://evil.example/steal lunch", "ada@example.com ../../../users/me/settings", "ada@example.com lunch?alt=media", "../../oauth2/v1/tokeninfo lunch", "ada@example.com lunch extra", " lunch", "ada@example.com "];
+    const hostile = ["https://evil.example/steal lunch", "ada@example.com ../../../users/me/settings", "ada@example.com lunch?alt=media", "../../oauth2/v1/tokeninfo lunch", "ada@example.com lunch extra", " lunch", "ada@example.com ", "ada@example.com ..", "ada@example.com .", ".. lunch", ". lunch"];
     for (const id of hostile) expect(await refusal(ask({ type: "event.update", sourceId: "google-calendar", id, etag: '"1"', title: "x" })), id).toMatch(/^not_found: /);
     for (const id of ["people/../../v1/otherContacts", "people/c1?x=y", "https://evil.example/", "people/c1/../c2"]) expect(await refusal(ask({ type: "record.refer", sourceId: "google-contacts", id })), id).toBe("not_found: No such record");
     for (const sent of google.sent) {
@@ -366,7 +366,7 @@ describe("what one operation may ask of Google", () => {
     expect(await states()).toEqual({ "google-calendar": "connected", "google-contacts": "connected" });
   });
 
-  it("tells the member a request that took too long from one that couldn't be sent, and writes down which, with no id in it", async () => {
+  it("tells the member a request that took too long from one that couldn't be sent, and writes down which, with no id in it and nothing of what the runtime said", async () => {
     const { google, ask } = await connected();
     const warned: string[] = [];
     vi.spyOn(console, "warn").mockImplementation((line: string) => void warned.push(line));
@@ -375,7 +375,7 @@ describe("what one operation may ask of Google", () => {
     });
     expect(await refusal(ask({ type: "event.list", ...WEEK }))).toBe("unavailable: Google took too long to answer. Try again in a moment.");
     google.once.set("GET /calendar/v3/users/me/calendarList/ada%40example.com", () => {
-      throw new TypeError("Network connection lost.");
+      throw new TypeError("Network connection lost sending Bearer ya29.token-in-a-message");
     });
     expect(await refusal(ask({ type: "event.update", sourceId: "google-calendar", id: "ada@example.com lunch", etag: '"1"', title: "x" }))).toBe("unavailable: Common Ink couldn't reach Google. Try again in a moment.");
     google.once.set("GET /v1/people/me/connections", () => {
@@ -383,11 +383,17 @@ describe("what one operation may ask of Google", () => {
     });
     expect(await refusal(ask({ type: "contact.list" }))).toMatch(/^unavailable: There is too much in Google to fetch at once/);
     expect(warned).toEqual([
-      "Google request failed: TimeoutError: The operation was aborted due to timeout (GET www.googleapis.com/calendar/v3/users/me/calendarList)",
-      "Google request failed: TypeError: Network connection lost. (GET www.googleapis.com/calendar/v3/users/me/calendarList/…)",
-      "Google request failed: Error: Too many subrequests. (GET people.googleapis.com/v1/people/me/connections)",
+      "Google request failed: TimeoutError (GET www.googleapis.com/calendar/v3/users/me/calendarList)",
+      "Google request failed: TypeError (GET www.googleapis.com/calendar/v3/users/me/calendarList/…)",
+      "Google request failed: Error, too many subrequests (GET people.googleapis.com/v1/people/me/connections)",
     ]);
     vi.restoreAllMocks();
+  });
+
+  it("takes an answer that isn't JSON for no answer, and passes on nothing of what it said", async () => {
+    const { google, ask } = await connected();
+    google.once.set("GET /calendar/v3/users/me/calendarList", () => new Response("<html>ya29.token-in-a-page</html>", { status: 200 }));
+    expect(await refusal(ask({ type: "event.list", ...WEEK }))).toBe("unavailable: Google answered with something Common Ink couldn't read. Try again in a moment.");
   });
 });
 

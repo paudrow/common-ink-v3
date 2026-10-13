@@ -316,7 +316,7 @@ interface Summary {
   more: boolean;
 }
 
-const names = (authors: readonly { author: Author }[]) => authors.map(({ author }) => (author.kind === "agent" ? `${author.name} (agent)` : author.name)).join(", ");
+const names = (authors: readonly { author: Author }[]) => authors.map(({ author }) => (author.kind !== "member" ? `${author.name} (${author.kind})` : author.name)).join(", ");
 
 const since = (time: number) => new Date(time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).replace(/[\u202f\u00a0]/g, " ");
 
@@ -383,7 +383,7 @@ function Changes({ host, app, now }: { host: PluginHost; app: App; now: number }
       {value?.more && (
         <p className="dash-more" role="note">
           There are more changes than the latest {CHANGES_READ}, which is what is counted here, so each count is at least that many and other notes changed too.{" "}
-          <button type="button" className="link" onClick={() => app.go("/history", { state: { from: dayOf(new Date(from)) } })}>
+          <button type="button" className="link" onClick={() => app.go("/history")}>
             See them all on the History page
           </button>
           . Mark all as read covers the ones not listed.

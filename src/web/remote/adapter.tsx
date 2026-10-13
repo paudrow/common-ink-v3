@@ -187,7 +187,7 @@ export function adapt(installed: InstalledPlugin, reach: Reach): Plugin {
         const title = marked(name, view.label);
         const label = marked(name, view.label);
         const Frame = ({ noteId }: { noteId: string | null }) => <Framed title={title} open={(box) => open(box, { kind: "view", id: view.id, noteId: has.includes("notes.read") ? noteId : null }, title)} about={has.includes("notes.read") ? noteId : null} />;
-        if (view.slot === "inspector") host.views.register("inspector", { id: viewId, label, icon: "info", component: ({ note }) => <Frame noteId={note.id} /> });
+        if (view.slot === "inspector") host.views.register("inspector", { id: viewId, for: "note", label, icon: "info", component: ({ note }) => <Frame noteId={note.id} /> });
         // Never the page shown at /: the manifest has no word for it, and the host refuses it to any plugin but the app's own.
         else host.views.register("page", { id: viewId, path: `/x/${id}/${view.id}`, label, nav: "more", component: () => <Frame noteId={null} /> });
       }

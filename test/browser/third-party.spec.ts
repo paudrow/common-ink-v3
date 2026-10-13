@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { anotherPerson, join, perform, signInAsNewPerson } from "./helpers.ts";
-import { asPlugin, codeHashOf, frameFor, install, openPlugins, relist, runCommand, running, toast, turnOn, type Written } from "./third-party-helpers.ts";
+import { asPlugin, codeHashOf, frameFor, install, openDetails, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn, type Written } from "./third-party-helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -10,7 +10,6 @@ test.beforeEach(({ page }) => {
 test.afterEach(() => expect(errors).toEqual([]));
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
-const installedList = (page: Page) => page.getByRole("list", { name: "Installed plugins" });
 const permission = (page: Page, title: string, plugin = "Word counter") => page.getByRole("listitem", { name: `${title} for ${plugin}` });
 
 const COUNTER: Written = {
@@ -67,7 +66,7 @@ test("an admin installs a plugin through the form, is shown each capability with
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.goto("/plugins");
   const form = page.getByRole("form", { name: "Install a plugin" });
-  await expect(page.getByText("None are installed.")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Plugins" }).getByText("Third-party")).toHaveCount(0);
 
   // A manifest that isn't one is said to be so, with why, and nothing is installed.
   await form.getByRole("textbox", { name: "Manifest" }).fill("{ not json");
@@ -97,39 +96,50 @@ test("an admin installs a plugin through the form, is shown each capability with
   await expect(review).toContainText("WebRTC");
   await expect(review).toContainText("What an embed is handed is written in the note, by anyone who can change that note.");
   // Nothing is installed by looking.
-  expect((await perform(page, { type: "plugin.list" })).plugins.filter((p) => p.thirdParty)).toEqual([]);
+  await expect.poll(async () => (await perform(page, { type: "plugin.list" })).plugins.filter((p) => p.thirdParty)).toEqual([]);
 
   await review.getByRole("checkbox", { name: "Allow Read notes" }).check();
   await review.getByRole("button", { name: "Install" }).click();
 
-  const installed = installedList(page).getByRole("listitem", { name: "Word counter", exact: true });
-  await expect(installed).toContainText("version 1.2");
+  const installed = pluginRow(page, "Word counter");
+  await expect(installed).toContainText("Third-party");
   await expect(installed).toContainText("Counts the words in your notes.");
+  await expect(installed.getByRole("checkbox", { name: "Word counter", exact: true })).not.toBeChecked();
+  await expect(form.getByRole("textbox", { name: "Manifest" })).toHaveValue("");
+  await openDetails(page, "Word counter");
+  const details = page.locator(".plugin-details");
+  await expect(details).toContainText("version 1.2");
+  await expect(details).toContainText("installed by Ada Lovelace");
+  await expect(details).toContainText("Counts the words in your notes.");
+  await expect(page.getByRole("region", { name: "What it adds" }).getByRole("group", { name: "Commands" })).toContainText("Count notes");
+  await expect(page.getByRole("region", { name: "What it adds" }).getByRole("group", { name: "Embeds" })).toContainText("::x-wordcount{}");
   await expect(permission(page, "Read notes")).toContainText("Allowed");
   await expect(permission(page, "Read notes")).toContainText("decided by Ada Lovelace");
   await expect(permission(page, "Write notes")).toContainText("Off");
   await expect(permission(page, "Read todos")).toContainText("Off");
-  await expect(installed.getByRole("checkbox", { name: "Word counter, on for you" })).not.toBeChecked();
+  await expect(details.getByRole("checkbox", { name: "Word counter", exact: true })).not.toBeChecked();
   await expect
     .poll(async () => (await perform(page, { type: "plugin.list" })).plugins.filter((p) => p.thirdParty).map((p) => [p.manifest.name, p.permissions.map((c) => `${c.capability} ${c.state}`)]))
     .toEqual([["Word counter", ["notes.read allowed", "notes.write off", "todos.read off"]]]);
-  await expect(form.getByRole("textbox", { name: "Manifest" })).toHaveValue("");
   // Nothing of it ran: installing a plugin starts no frame.
   expect(running(page)).toHaveLength(0);
 
   // Other code under the same name is the same plugin, and nothing it was allowed carries over to it.
   const [before] = (await perform(page, { type: "plugin.list" })).plugins.filter((p) => p.thirdParty);
-  await installed.getByRole("button", { name: "Update Word counter" }).click();
-  await expect(form.getByRole("heading", { name: "Update Word counter" })).toBeVisible();
-  await form.getByRole("textbox", { name: "Manifest" }).fill(JSON.stringify(COUNTER));
-  await form.getByRole("textbox", { name: "Code" }).fill(`${COUNTER_CODE}\n// changed`);
-  await form.getByRole("button", { name: "Review" }).click();
-  await expect(form.getByRole("group", { name: "Review Word counter" }).getByRole("checkbox", { name: "Allow Read notes" })).not.toBeChecked();
-  await form.getByRole("group", { name: "Review Word counter" }).getByRole("button", { name: "Update" }).click();
+  await details.getByRole("button", { name: "Update Word counter" }).click();
+  const update = page.getByRole("form", { name: "Update Word counter" });
+  await expect(update.getByRole("heading", { name: "Update Word counter" })).toBeVisible();
+  await update.getByRole("textbox", { name: "Manifest" }).fill(JSON.stringify(COUNTER));
+  await update.getByRole("textbox", { name: "Code" }).fill(`${COUNTER_CODE}\n// changed`);
+  await update.getByRole("button", { name: "Review" }).click();
+  await expect(update.getByRole("group", { name: "Review Word counter" }).getByRole("checkbox", { name: "Allow Read notes" })).not.toBeChecked();
+  await update.getByRole("group", { name: "Review Word counter" }).getByRole("button", { name: "Update" }).click();
   await expect(permission(page, "Read notes")).toContainText("Off");
   await expect(permission(page, "Read notes")).toContainText("It was allowed, and the plugin has changed since. It is off until an admin allows it again.");
   const [after] = (await perform(page, { type: "plugin.list" })).plugins.filter((p) => p.thirdParty);
   expect([after!.id, after!.codeHash === before!.codeHash, after!.permissions[0]!.state]).toEqual([before!.id, false, "off"]);
+  await expect(update).toHaveCount(0);
+  await page.getByRole("link", { name: "All plugins" }).click();
   await expect(form.getByRole("heading", { name: "Install a plugin" })).toBeVisible();
 });
 
@@ -145,7 +155,7 @@ test("a command reads notes and tells the member, a view and a page are drawn in
   await runCommand(page, "Word counter plugin: Count notes");
   await expect(toast(page)).toContainText(/^Word counter plugin: Counted \d+ notes/);
   const background = await frameFor(page, "background");
-  expect(await background.evaluate(() => self.origin)).toBe("null");
+  await expect.poll(() => background.evaluate(() => self.origin)).toBe("null");
   await expect(page.locator(".plugin-background")).toBeHidden();
 
   // The embed: its title in the line as text, and below it the plugin's frame in the room the manifest named.
@@ -160,7 +170,7 @@ test("a command reads notes and tells the member, a view and a page are drawn in
   const before = (await end.boundingBox())!.y;
   await embed.evaluate(() => void (document.body.style.height = "4000px"));
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-  expect((await end.boundingBox())!.y).toBe(before);
+  await expect.poll(async () => (await end.boundingBox())!.y).toBe(before);
   expect(Math.round((await below.boundingBox())!.height)).toBe(96);
 
   // The inspector's tab is there to pick, and the inspector didn't open on it.
@@ -170,7 +180,9 @@ test("a command reads notes and tells the member, a view and a page are drawn in
   const view = await frameFor(page, "view", "words");
   await expect(view.locator(".said").first()).toHaveText("View words in words, granted notes.read");
   await expect(view.locator(".said").nth(1)).toHaveText("7 words");
-  await expect(inspector.locator(".plugin-frame iframe")).toHaveAttribute("sandbox", "allow-scripts");
+  // What shuts it in is its document's own headers, as an HTML embed's: an origin with no name, whatever the frame around it says.
+  await expect.poll(() => view.locator("body").evaluate(() => self.origin)).toBe("null");
+  await expect(inspector.locator(".plugin-frame iframe")).not.toHaveAttribute("sandbox");
 
   // A setting the plugin declared reaches its frames when the member changes it.
   await perform(page, { type: "settings.write", text: JSON.stringify({ [`${id}.enabled`]: true, [`${id}.unit`]: "characters" }), baseRevision: (await perform(page, { type: "settings.read" })).revision });
@@ -199,8 +211,9 @@ test("a plugin's embed is written ::x-name{}, so one named as a built-in's is ne
   await expect(page.locator('.embed-below[data-embed="x-timer"] iframe')).toHaveCount(1);
   await expect(editor(page)).toContainText("::timer{5m}");
   expect(running(page)).toHaveLength(1);
-  await openPlugins(page, /Ada/);
-  await expect(installedList(page).getByRole("listitem", { name: "Clock", exact: true }).getByRole("alert")).toHaveCount(0);
+  await openPlugins(page);
+  await expect(pluginRow(page, "Clock")).toBeVisible();
+  await expect(pluginRow(page, "Clock").getByRole("alert")).toHaveCount(0);
 });
 
 test("a plugin named as one of Common Ink's own is doesn't start, and the Plugins page says why", async ({ page }) => {
@@ -219,7 +232,7 @@ test("a plugin named as one of Common Ink's own is doesn't start, and the Plugin
   await perform(page, { type: "settings.write", text: JSON.stringify({ [`${id}.enabled`]: true }), baseRevision: (await perform(page, { type: "settings.read" })).revision });
 
   await page.goto("/plugins");
-  await expect(installedList(page).getByRole("listitem").getByRole("alert")).toHaveText("Its name is one of Common Ink's own, or reads as one");
+  await expect(page.getByRole("list", { name: "Plugins" }).getByRole("listitem").filter({ hasText: "Third-party" }).getByRole("alert")).toHaveText("Its name is one of Common Ink's own, or reads as one");
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("dashboard");
   await expect(page.locator(".palette").getByRole("option")).toHaveText(["Go to Dashboard", "Disable plugin: Dashboard"]);
@@ -239,15 +252,16 @@ test("a member who isn't an admin sees what a plugin may do and can only ask; on
   await expect(editor(page)).toContainText("Shared");
   await page.evaluate(() => void ((window as unknown as { sameLoad: boolean }).sameLoad = true));
 
-  await openPlugins(page, /Ada/);
-  const mine = installedList(page).getByRole("listitem", { name: "Word counter", exact: true });
+  await openPlugins(page);
   await expect(page.getByRole("form", { name: "Install a plugin" })).toHaveCount(0);
+  await openDetails(page, "Word counter");
+  const mine = page.locator(".plugin-details");
   await expect(mine.getByRole("button")).toHaveText(["Ask an admin", "Ask an admin"]);
   await expect(permission(page, "Read notes")).toContainText("Allowed");
   await expect(permission(page, "Read notes").getByRole("button")).toHaveCount(0);
   await expect(permission(page, "Write notes")).toContainText("Off");
   await expect(permission(page, "Write notes")).toContainText("Word counter says: To write the count into a note.");
-  await mine.getByRole("checkbox", { name: "Word counter, on for you" }).check();
+  await mine.getByRole("checkbox", { name: "Word counter", exact: true }).check();
 
   await runCommand(page, "Word counter plugin: Stamp a note");
   await expect(toast(page)).toContainText("Word counter plugin: Refused: forbidden: Word counter isn't permitted to note.create");
@@ -256,11 +270,13 @@ test("a member who isn't an admin sees what a plugin may do and can only ask; on
   await expect(permission(page, "Write notes").getByRole("status")).toHaveText("Asked. An admin decides.");
   await expect(permission(page, "Write notes").getByRole("button")).toHaveCount(0);
   // Asking allowed nothing, and a member can't allow it themself.
-  expect((await perform(admin, { type: "plugin.list" })).plugins.find((p) => p.id === id)!.permissions.map((p) => `${p.capability} ${p.state}`)).toEqual(["notes.read allowed", "notes.write off", "todos.read off"]);
+  await expect.poll(async () => (await perform(admin, { type: "plugin.list" })).plugins.find((p) => p.id === id)!.permissions.map((p) => `${p.capability} ${p.state}`)).toEqual(["notes.read allowed", "notes.write off", "todos.read off"]);
   await expect(perform(page, { type: "plugin.permit", id, capability: "notes.write", allowed: true, codeHash: await codeHashOf(page, id, workspaceId) }, workspaceId)).rejects.toThrow("editor can't plugin.permit");
-  expect((await asPlugin(page, workspaceId, id, { type: "note.create", text: "# Not yet" })).status).toBe(403);
+  await expect.poll(async () => (await asPlugin(page, workspaceId, id, { type: "note.create", text: "# Not yet" })).status).toBe(403);
 
   await admin.goto("/plugins");
+  await expect(pluginRow(admin, "Word counter")).toContainText("1 asking");
+  await openDetails(admin, "Word counter");
   const asked = admin.getByRole("group", { name: "Mel Member asked for Write notes for Word counter" });
   await expect(asked).toContainText("Mel Member asked for this.");
   await asked.getByRole("button", { name: "Approve" }).click();
@@ -272,7 +288,7 @@ test("a member who isn't an admin sees what a plugin may do and can only ask; on
   await expect(permission(page, "Write notes").getByRole("status")).toHaveCount(0);
   await runCommand(page, "Word counter plugin: Stamp a note");
   await expect(toast(page)).toContainText(/Word counter plugin: Stamped [a-z0-9]{12}/);
-  expect(await page.evaluate(() => (window as unknown as { sameLoad?: boolean }).sameLoad), "the member's page was never loaded again").toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { sameLoad?: boolean }).sameLoad), "the member's page was never loaded again").toBe(true);
 
   // Locked: nobody can ask for it, and the admin can't change it without unlocking.
   await permission(admin, "Read todos").getByRole("button", { name: "Lock Read todos for Word counter" }).click();
@@ -306,7 +322,7 @@ test("a plugin uninstalled while another page has it running is refused by the s
   const note = await perform(admin, { type: "note.create", text: "# Shared\n\n::x-wordcount{all}\n\nend\n" });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Shared");
-  await openPlugins(page, /Ada/);
+  await openPlugins(page);
   await turnOn(page, "Word counter", workspaceId);
   await page.goto(`/note/${note.id}`);
   const inspector = page.getByRole("complementary", { name: "Inspector" });
@@ -316,15 +332,18 @@ test("a plugin uninstalled while another page has it running is refused by the s
   await runCommand(page, "Word counter plugin: Count notes");
   await expect(toast(page)).toContainText(/Counted \d+ notes/);
   expect(running(page)).toHaveLength(3);
-  expect((await asPlugin(page, workspaceId, id, { type: "note.list" })).status).toBe(200);
+  await expect.poll(async () => (await asPlugin(page, workspaceId, id, { type: "note.list" })).status).toBe(200);
 
   await admin.goto("/plugins");
+  await openDetails(admin, "Word counter");
   await admin.getByRole("button", { name: "Uninstall Word counter" }).click();
   await admin.getByRole("group", { name: "Uninstall Word counter?" }).getByRole("button", { name: "Uninstall it" }).click();
-  await expect(installedList(admin).getByRole("listitem", { name: "Word counter", exact: true })).toHaveCount(0);
+  await expect(admin).toHaveURL(/\/plugins$/);
+  await expect(admin.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "History" })).toBeVisible();
+  await expect(pluginRow(admin, "Word counter")).toHaveCount(0);
 
   // At once, whatever the member's page still shows: the server performs nothing for it.
-  expect(await asPlugin(page, workspaceId, id, { type: "note.list" })).toMatchObject({ status: 403, body: { error: "forbidden" } });
+  await expect.poll(() => asPlugin(page, workspaceId, id, { type: "note.list" })).toMatchObject({ status: 403, body: { error: "forbidden" } });
   await expect(perform(page, { type: "plugin.read", id }, workspaceId)).rejects.toThrow();
 
   await relist(page);
@@ -343,7 +362,7 @@ test("a plugin uninstalled while another page has it running is refused by the s
   await expect(page.getByText("There's nothing at this address.")).toBeVisible();
 });
 
-test("what a plugin writes is recorded in History as the plugin's, for the member it wrote for, and is filtered and reverted as an agent's is", async ({ page }) => {
+test("what a plugin writes is recorded as the plugin's for the member it wrote for, and History lists it under the plugin's name and reverts it as anyone's change", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const plan = await perform(page, { type: "note.create", text: "# Plan\n\nAda's step" });
   const id = await install(page, COUNTER, COUNTER_CODE, ["notes.read", "notes.write"]);
@@ -359,22 +378,29 @@ test("what a plugin writes is recorded in History as the plugin's, for the membe
   expect(read.text).toBe("# Plan\n\nAda's step\n\nThe counter's step");
   expect(read.updatedBy).toEqual({ kind: "plugin", pluginId: id, name: "Word counter", onBehalfOf: (await perform(page, { type: "member.list" }))[0]!.personId });
 
+  // History lists it under the plugin's name, with a plugin's mark, among everyone's changes. It is neither a person's nor an agent's.
   await page.goto("/history");
   const mode = page.getByRole("region", { name: "History" });
-  const changed = mode.getByRole("list", { name: "Notes that changed" }).locator('> li[aria-label="Plan"]');
-  const changes = changed.getByRole("list", { name: "Changes" }).getByRole("listitem");
-  await changed.locator(".changed-note-toggle").click();
-  await expect(changes.first()).toHaveAccessibleName("Change 2 to Plan by Word counter");
-  await expect(changes.first()).toContainText("Word counterpluginfor Ada Lovelace");
-  await expect(changes).toHaveCount(2);
-  await mode.getByRole("group", { name: "Authors" }).getByRole("button", { name: "Word counter (plugin)" }).click();
-  await expect(changes).toHaveCount(1);
-  await expect(changes.first()).toHaveAccessibleName("Change 2 to Plan by Word counter");
+  const rows = mode.getByRole("listbox", { name: "Changes" }).getByRole("option");
+  const lines = () => rows.locator(".hist-line").evaluateAll((all) => all.map((el) => el.textContent!.trim().replace(/\s+/g, " ")));
+  await expect.poll(lines).toEqual(["Word counter edited Plan", "You wrote Plan"]);
+  await expect(rows.first().locator('.avatar.agent[data-kind="plugin"] svg')).toHaveCount(1);
+  await expect(rows.first().locator(".avatar")).toHaveAttribute("title", "Word counter, a plugin");
+  for (const [by, listed] of [["People", ["You wrote Plan"]], ["Agents", []], ["Everyone", ["Word counter edited Plan", "You wrote Plan"]]] as const) {
+    await mode.getByRole("radio", { name: by }).click();
+    await expect.poll(lines).toEqual(listed);
+  }
 
-  await mode.getByRole("button", { name: "Revert Word counter's changes" }).click();
-  await mode.getByRole("group", { name: "Revert Word counter's changes" }).getByRole("button", { name: "Revert" }).click();
-  await expect(mode.getByRole("status")).toContainText("Reverted 1 change by Word counter in 1 note.");
-  expect((await perform(page, { type: "note.read", id: plan.id })).text).toBe("# Plan\n\nAda's step");
+  // Its change is picked and reverted as anyone's is.
+  await rows.first().click();
+  const pane = mode.getByRole("region", { name: "What the selection did" });
+  await expect(pane.locator("ins.diff-line .diff-text")).toHaveText(["", "The counter's step"]);
+  await pane.getByRole("button", { name: "Revert…" }).click();
+  const dialog = page.getByRole("dialog", { name: /^Revert/ });
+  await expect(dialog).toHaveAccessibleName("Revert 1 change to Plan");
+  await dialog.getByRole("button", { name: "Revert", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: plan.id })).text).toBe("# Plan\n\nAda's step");
 });
 
 test("a plugin put on the page through the fixture global runs only where the Worker says tests run, and is ignored everywhere else", async ({ page }) => {
@@ -395,11 +421,11 @@ test("a plugin put on the page through the fixture global runs only where the Wo
   const builtIn = page.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "History" });
 
   // Here the Worker says so, and the fixture is a plugin.
-  expect((await (await page.request.get("/api/me")).json()).dev).toBe(true);
+  await expect.poll(async () => (await (await page.request.get("/api/me")).json()).dev).toBe(true);
   await page.goto("/plugins");
   await expect(builtIn).toBeChecked();
   await expect(page.getByRole("checkbox", { name: "Planted fixture" })).toBeChecked();
-  expect(await page.evaluate(() => (window as unknown as Planted).planted)).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as Planted).planted)).toBe(true);
 
   // As production answers: the same global on the same page is never read.
   await page.route("**/api/me", async (route) => {
@@ -409,7 +435,7 @@ test("a plugin put on the page through the fixture global runs only where the Wo
   await page.goto("/plugins");
   await expect(builtIn).toBeChecked();
   await expect(page.getByRole("checkbox", { name: "Planted fixture" })).toHaveCount(0);
-  expect(await page.evaluate(() => [(window as unknown as Planted).__INK_FIXTURE_PLUGINS__.length, (window as unknown as Planted).planted ?? null])).toEqual([1, null]);
+  await expect.poll(() => page.evaluate(() => [(window as unknown as Planted).__INK_FIXTURE_PLUGINS__.length, (window as unknown as Planted).planted ?? null])).toEqual([1, null]);
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("Planted");
   await expect(page.locator(".palette").getByRole("option")).toHaveCount(0);

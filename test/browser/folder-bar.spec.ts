@@ -167,12 +167,12 @@ test("a card's Archive is one click or the E key, with Undo, and the card leaves
 
   // It is there on hover and on keyboard focus, and not otherwise.
   await page.mouse.move(5, 5);
-  expect(await shownAt(archive)).toBe("0");
+  await expect.poll(() => shownAt(archive)).toBe("0");
   await noteCard(page, "Budget").hover();
-  expect(await shownAt(archive)).toBe("1");
+  await expect.poll(() => shownAt(archive)).toBe("1");
   await page.mouse.move(5, 5);
   await noteCard(page, "Budget").focus();
-  expect(await shownAt(archive)).toBe("1");
+  await expect.poll(() => shownAt(archive)).toBe("1");
 
   await noteCard(page, "Budget").hover();
   await archive.click();
@@ -239,7 +239,7 @@ test("a viewer's cards have no Archive, and E does nothing for them", async ({ p
   await page.waitForTimeout(500);
   await expect(listedNotes(page)).toHaveText(["Plan"]);
   await expect(notice(page)).toHaveCount(0);
-  expect((await perform(page, { type: "note.read", id: note.id }, workspaceId)).state).toBe("live");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id }, workspaceId)).state).toBe("live");
   await expect(newInSidebar(page)).toHaveCount(0);
 });
 
@@ -335,7 +335,7 @@ test("a guest who can't add notes where they are is shown New note with the reas
   await newInSidebar(grace).click({ force: true });
   await grace.waitForTimeout(500);
   await expect(listedNotes(grace)).toHaveText(["Leave policy"]);
-  expect(await perform(grace, { type: "note.list" }, workspaceId)).toHaveLength(1);
+  await expect.poll(() => perform(grace, { type: "note.list" }, workspaceId)).toHaveLength(1);
 
   await folderRow(grace, "Drafts").click();
   await expect(newInSidebar(grace)).toHaveAttribute("aria-disabled", "false");
@@ -345,5 +345,5 @@ test("a guest who can't add notes where they are is shown New note with the reas
   await expect(folderRow(grace, "Drafts")).toHaveAccessibleDescription("1");
   await folderRow(grace, "Policies").click();
   // It is in the same place whether or not it can be used, so nothing in the column moves between folders.
-  expect(await newInSidebar(grace).boundingBox()).toEqual(box);
+  await expect.poll(() => newInSidebar(grace).boundingBox()).toEqual(box);
 });

@@ -74,18 +74,29 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   folder-delete ID                    delete an empty folder
   history ID                          a note's changes and who made them
   diff ID --change N                  what one change did to its note, as a line diff
-  changed [--note ID,ID] [--author KIND:ID] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
+  changed [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
                                       the notes that changed, latest first, with the lines added and removed in each
-  changes [--note ID,ID] [--author KIND:ID] [--not-author KIND:ID] [--from TIME] [--to TIME] [--limit N]
-          [--before NEXT] [--diffs false]
+  changes [--note ID,ID] [--author KIND:ID] [--not-author KIND:ID] [--by people|agents] [--from TIME] [--to TIME]
+          [--limit N] [--before NEXT] [--diffs false]
                                       changes across the workspace, newest first, with diffs
   authors                             everyone who has changed a note
+  diffs ID:N,N [ID:N,N ...]           what a selection of changes did, note by note: changes that follow one another as one diff
+  revert-many ID:N,N[@AT] [ID:N,N[@AT] ...] [--preview] [--resolve keep|back]
+                                      revert changes of several notes, each note as one new change. --preview writes nothing and
+                                      prints each note's revision: pass it back as @AT and a note changed since is skipped, not reverted
   label ID --revision N [--name NAME] name a revision, or take its name away without --name
   revert ID --revision N              put a note back to a revision, as a new change
   revert ID --changes N,N             revert chosen changes, as one new change; revert a revert to have its changes again
-  revert-author KIND:ID [--note ID,ID] [--after ID] [--trash-emptied true]
-                                      revert every change an author made that still stands,
-                                      and with --trash-emptied move the notes that leaves empty to Trash
+  revert ID ... --preview             what either revert would do, and each conflict with later changes to the same lines, with nothing written
+  revert ID ... --resolve keep|back|JSON --at N
+                                      settle the conflicts the preview listed at revision N: keep the later edits, go back to the
+                                      lines as they were, or a JSON list with "keep", "back" or {"text": "..."} for each conflict
+  revert ID --author KIND:ID --preview [--resolve keep|back|JSON --at N]
+                                      what revert-author would do to this one note, with nothing written
+  revert-author KIND:ID [--note ID,ID] [--after ID] [--resolve JSON] [--trash-emptied true]
+                                      revert every change an author made that still stands; --resolve settles the conflicts of the
+                                      notes it names, as {"NOTE ID": {"at": N, "choices": "keep"|"back"|[...]}};
+                                      with --trash-emptied the notes that leaves empty go to Trash
   undo ID                             take back your latest change to a note
   redo ID                             revert your latest undo, so what it undid stands again
   sources                             your member's data sources: their calendar and contacts, and whether each is connected
@@ -128,12 +139,16 @@ Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from C
 
 export class UsageError extends Error {}
 
+/** Flags that take no value. */
+const SWITCHES = new Set(["--preview"]);
+
 function parse(argv: string[]): { command: string; positional: string[]; flags: Map<string, string> } {
   const flags = new Map<string, string>();
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg.startsWith("--")) {
+    if (SWITCHES.has(arg)) flags.set(arg.slice(2), "");
+    else if (arg.startsWith("--")) {
       const value = argv[++i];
       if (value === undefined) throw new UsageError(`${arg} needs a value`);
       flags.set(arg.slice(2), value);
@@ -149,6 +164,26 @@ const integer = (name: string, value: string): number => {
 };
 
 const integers = (name: string, value: string) => value.split(",").map((part) => integer(name, part));
+
+/** How a revert's conflicts are settled: one word for all of them, or a JSON list with a choice for each. The server checks the choices. */
+function choices(value: string): unknown {
+  if (value === "keep" || value === "back") return value;
+  try {
+    const list: unknown = JSON.parse(value);
+    if (Array.isArray(list)) return list;
+  } catch {
+    // Said below.
+  }
+  throw new UsageError('--resolve must be keep, back, or a JSON list with "keep", "back" or {"text": "..."} for each conflict');
+}
+
+/** One note's changes of a selection, written ID:N,N, with @AT for the revision its revert was previewed at. */
+function selected(value: string, resolve?: string): Record<string, unknown> {
+  const found = /^([^:@]+):([\d,]+)(?:@(\d+))?$/.exec(value);
+  if (!found) throw new UsageError(`${value} isn't a note's changes: write ID:N,N, or ID:N,N@AT`);
+  const at = found[3] === undefined ? {} : { at: Number(found[3]) };
+  return { noteId: found[1], revisions: integers("a change", found[2]!), ...at, ...(resolve !== undefined && found[3] !== undefined ? { choices: resolve } : {}) };
+}
 
 const time = (name: string, value: string): number => {
   const parsed = Date.parse(value);
@@ -452,7 +487,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "changed":
         tool = "history_summary";
-        args = given({ noteIds: ["note", ids], authors: ["author", (_, value) => [authorRef(value)]], from: ["from", time], to: ["to", time], limit: ["limit", integer], before: ["before", json] });
+        args = given({ noteIds: ["note", ids], authors: ["author", (_, value) => [authorRef(value)]], by: ["by"], from: ["from", time], to: ["to", time], limit: ["limit", integer], before: ["before", json] });
         break;
       case "changes":
         tool = "history";
@@ -460,6 +495,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           noteIds: ["note", ids],
           authors: ["author", (_, value) => [authorRef(value)]],
           notAuthors: ["not-author", (_, value) => [authorRef(value)]],
+          by: ["by"],
           from: ["from", time],
           to: ["to", time],
           limit: ["limit", integer],
@@ -470,6 +506,19 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "authors":
         tool = "history_authors";
         break;
+      case "diffs":
+        if (!id) throw new UsageError("diffs needs a note's changes, as ID:N,N");
+        tool = "history_diff";
+        args = { changes: positional.map((value) => selected(value)) };
+        break;
+      case "revert-many": {
+        if (!id) throw new UsageError("revert-many needs a note's changes, as ID:N,N");
+        const resolve = flags.get("resolve");
+        if (resolve !== undefined && resolve !== "keep" && resolve !== "back") throw new UsageError("revert-many takes --resolve keep or --resolve back, for the notes given with @AT");
+        tool = flags.has("preview") ? "preview_reverts" : "revert_many";
+        args = { changes: positional.map((value) => selected(value, resolve)) };
+        break;
+      }
       case "sources":
         tool = "list_sources";
         break;
@@ -506,13 +555,25 @@ export async function run(argv: string[], io: Io): Promise<number> {
         args = { id: needId(), revision: integer("--revision", flags.get("revision")!), name: flags.get("name") ?? null };
         break;
       case "revert":
-        if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to revert those");
-        tool = flags.has("revision") ? "revert_note" : "revert_changes";
-        args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+        if (flags.has("author")) {
+          if (!flags.has("preview") || flags.has("revision") || flags.has("changes")) throw new UsageError("revert --author takes --preview, and --resolve with --at to preview it settled: revert-author is what reverts an author's changes");
+        } else if (flags.has("revision") === flags.has("changes")) throw new UsageError("revert needs --revision, to return to it, or --changes, to revert those");
+        if (flags.has("resolve") !== flags.has("at")) throw new UsageError("revert needs --resolve and --at together: how to settle the conflicts, and the revision the preview was of");
+        if (flags.has("author")) {
+          tool = "preview_revert";
+          args = { id: needId(), author: authorRef(flags.get("author")!) };
+        } else if (flags.has("preview")) {
+          tool = "preview_revert";
+          args = flags.has("revision") ? { id: needId(), to: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+        } else {
+          tool = flags.has("revision") ? "revert_note" : "revert_changes";
+          args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+        }
+        if (flags.has("resolve")) args.resolve = { at: integer("--at", flags.get("at")!), choices: choices(flags.get("resolve")!) };
         break;
       case "revert-author":
         tool = "revert_author";
-        args = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids], after: ["after"], trashEmptied: ["trash-emptied", truth] }) };
+        args = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids], after: ["after"], resolve: ["resolve", json], trashEmptied: ["trash-emptied", truth] }) };
         break;
       case "undo":
       case "redo":

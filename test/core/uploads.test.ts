@@ -70,6 +70,10 @@ describe("uploading a file", () => {
     expect(await named('a"b<c>\r\n.png')).toBe("abc.png");
     expect(await named("..")).toBe("file");
     expect((await named(`${"x".repeat(400)}.png`)).length).toBe(200);
+    // A name is cut between characters, never through one, and half of one is no part of a name.
+    const cut = await named(`${"x".repeat(195)}\u{1F600}${"y".repeat(20)}.png`);
+    expect([cut.length, cut.isWellFormed(), cut.endsWith("x.png")]).toEqual([199, true, true]);
+    expect(await named("a\ud800b.png")).toBe("ab.png");
   });
 
   it("refuses a file that isn't the size it was said to be, or is too big, and keeps nothing of it", async () => {

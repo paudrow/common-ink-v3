@@ -2,7 +2,7 @@
 
 Status: accepted by the owner of #22 on 2026-10-11, without the maintainer. Issue 1 left several of these open; overrule them here if they are wrong.
 
-An upload is a file in a workspace. The spec says grants, archive and Trash apply to it as to a note. We made that literal: `uploads` has the same `folder_id`, `private_owner` and `state` columns as `notes`, the access resolver decides "an item in a folder" (`itemLevel`, `SEEN`) and is the same code for both, and the access matrix test holds every upload operation to the row its neighbouring note has. There is no second access system.
+An upload is a file in a workspace. The spec says grants, archive and Trash apply to it as to a note. We made that literal: `uploads` has the same `folder_id`, `private_owner` and `state` columns as `notes`, the access resolver decides "an item in a folder" (`itemLevel`, `SEEN`) and is the same code for both, and the access matrix test holds every upload operation to the row its neighbouring note has. There is no second access system. An agent's folder limit (ADR 2) is part of that resolver, so it holds for an upload as for a note, and every way in makes the agent's actor in one place (`agentActor`), the addresses that carry bytes included.
 
 ## What an upload can and can't have of its own
 

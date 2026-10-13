@@ -53,7 +53,9 @@ function Backlinks({ host, app, note }: ViewProps & { host: PluginHost; note: No
 export const backlinks: Plugin = {
   id: "backlinks",
   name: "Backlinks",
+  description: "The notes that link to the open note, in the inspector.",
+  icon: "backlinks",
   activate(host) {
-    host.views.register("inspector", { id: "backlinks", label: "Backlinks", icon: "backlinks", component: (props) => <Backlinks host={host} {...props} /> });
+    host.views.register("inspector", { id: "backlinks", label: "Backlinks", icon: "backlinks", for: "note", component: (props) => <Backlinks host={host} {...props} /> });
   },
 };

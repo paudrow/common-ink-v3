@@ -24,11 +24,21 @@ export async function install(page: Page, manifest: Written, code: string, allow
 /** The name of an installed plugin's code as the record has it now, which allowing it anything has to say. */
 export const codeHashOf = async (page: Page, id: string, workspaceId?: string) => (await perform(page, { type: "plugin.list" }, workspaceId)).plugins.find((p) => p.id === id)!.codeHash!;
 
-/** The Plugins page, reached through the workspace menu, so the app is not loaded again. */
-export async function openPlugins(page: Page, who: RegExp) {
-  await page.getByRole("button", { name: who }).click();
-  await page.getByRole("menuitem", { name: "Plugins" }).click();
-  await expect(page.getByRole("heading", { name: "Installed plugins" })).toBeVisible();
+/** The Plugins page, reached through More in the sidebar, so the app is not loaded again. */
+export async function openPlugins(page: Page) {
+  const modes = page.getByRole("navigation", { name: "Modes" });
+  if (!(await modes.getByRole("link", { name: "Plugins" }).isVisible())) await modes.getByRole("button", { name: "More" }).click();
+  await modes.getByRole("link", { name: "Plugins" }).click();
+  await expect(page.getByRole("heading", { name: "Plugins", level: 1 })).toBeVisible();
+}
+
+/** A plugin's row in the Plugins page's list. */
+export const pluginRow = (page: Page, name: string) => page.getByRole("list", { name: "Plugins" }).getByRole("listitem", { name, exact: true });
+
+/** One plugin's details, opened from its row, which is where its permissions are read and decided. */
+export async function openDetails(page: Page, name: string) {
+  await pluginRow(page, name).getByRole("link", { name, exact: true }).click();
+  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 }
 
 /** Performs `op` as the plugin for whoever is on `page`, the way the app does for a plugin's frame. What the server answers, with its status. */
@@ -45,8 +55,8 @@ export function asPlugin(page: Page, workspaceId: string, pluginId: string, op: 
 /** Turns an installed plugin on for whoever is on `page`, on the Plugins page, as a member does. */
 export async function turnOn(page: Page, name: string, workspaceId?: string) {
   if (!page.url().endsWith("/plugins")) await page.goto("/plugins");
-  await page.getByRole("checkbox", { name: `${name}, on for you` }).check();
-  await expect(page.getByRole("checkbox", { name: `${name}, on for you` })).toBeChecked();
+  await pluginRow(page, name).getByRole("checkbox", { name, exact: true }).check();
+  await expect(pluginRow(page, name).getByRole("checkbox", { name, exact: true })).toBeChecked();
   // The choice is the member's setting, and has reached the server before the test goes on to another address.
   const id = (await perform(page, { type: "plugin.list" }, workspaceId)).plugins.find((p) => p.manifest.name === name)!.id;
   await expect.poll(async () => (JSON.parse((await perform(page, { type: "settings.read" }, workspaceId)).text || "{}") as Record<string, unknown>)[`${id}.enabled`]).toBe(true);

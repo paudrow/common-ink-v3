@@ -39,6 +39,8 @@ export const uploadDrawing: Plugin = {
 export const uploads: Plugin = {
   id: "uploads",
   name: "Uploads",
+  description: "Keeps files in the workspace. A picture, a video or a recording pasted or dropped into a note shows there, any other file is a chip that downloads, and the Uploads page lists them all.",
+  icon: "uploads",
   activate(host) {
     const sending = sender(host);
     const { embeds, stop } = uploadEmbeds(host, { title: "Upload a file", detail: "a picture, a video, a recording, or any file", run: sending.pickIntoNote });

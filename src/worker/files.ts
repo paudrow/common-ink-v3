@@ -6,7 +6,7 @@
 // unable to act as a page of the app: see `SEALED`.
 import { authenticateAgent } from "../core/agents.ts";
 import { disposition } from "../core/filetypes.ts";
-import { perform, type Actor, type Visitor } from "../core/operations.ts";
+import { agentActor, perform, type Actor, type Visitor } from "../core/operations.ts";
 import { MAX_UPLOAD_BYTES, OpError, type OpErrorCode, type OpenedUpload } from "../core/protocol.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { sessionPersonId } from "./auth.ts";
@@ -60,7 +60,7 @@ async function asker(req: Request, env: Env, url: URL, workspaceId: string): Pro
   if (token) {
     const agent = await authenticateAgent(env.DB, token);
     if (!agent) return json({ error: "unauthorized", message: "Send a Common Ink agent token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
-    return { byToken: true, actor: { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly } } };
+    return { byToken: true, actor: agentActor(agent, workspaceId) };
   }
   const personId = await sessionPersonId(req, env, url);
   return personId ? { byToken: false, actor: { kind: "member", personId, workspaceId } } : json({ error: "signed_out" }, 401);

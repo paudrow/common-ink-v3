@@ -1,22 +1,52 @@
 import { useCallback, useRef, useState } from "react";
-import { Icon, useDismiss, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
+import { Icon, carry, useDismiss, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
+import { ContextMenu } from "./lib/Menu.tsx";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
 function Sidebar({ app }: ViewProps) {
-  const [more, setMore] = useState(false);
-  const links = (nav: PageInfo["nav"]) => app.pages.filter((p) => p.nav === nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled />);
+  const under = (nav: PageInfo["nav"]) => app.pages.filter((p) => p.nav === nav);
+  // It opens on arriving at a page that is under it, however that page was reached, so the page the member is on is marked in the
+  // list. Closed by hand, it stays closed until they arrive at such a page again.
+  const on = under("more").find((p) => p.path === app.path || app.path.startsWith(`${p.path}/`))?.id ?? null;
+  const [was, setWas] = useState(on);
+  const [more, setMore] = useState(on !== null);
+  if (on !== was) {
+    setWas(on);
+    if (on !== null) setMore(true);
+  }
+  const open = app.sidebarOpen;
+  const links = (nav: PageInfo["nav"]) => under(nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled={open} />);
+  const pages = (
+    <>
+      {links("primary")}
+      <button type="button" className="mode more-toggle" aria-expanded={more} aria-label={open ? undefined : more ? "Less" : "More"} title={open ? undefined : more ? "Less" : "More"} onClick={() => setMore(!more)}>
+        <Icon name="chevron" />
+        {open && <span>{more ? "Less" : "More"}</span>}
+      </button>
+      {more && links("more")}
+    </>
+  );
+  // Closed, it is a narrow bar with an icon for each thing the open sidebar lists, in the same order.
+  if (!open)
+    return (
+      <nav className="rail" aria-label="Sidebar bar">
+        <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />
+        <NewNote app={app} />
+        {pages}
+        {app.sectionNames.map((section) => (
+          <button key={section.id} type="button" className="icon-button" aria-label={section.label} title={section.label} onClick={app.toggleSidebar}>
+            <Icon name={section.icon} />
+          </button>
+        ))}
+      </nav>
+    );
   return (
     <aside className="sidebar" aria-label="Sidebar">
       <WorkspaceMenu app={app} />
       <NewNote app={app} />
       <nav aria-label="Modes" className="modes">
-        {links("primary")}
-        <button type="button" className="mode" aria-expanded={more} onClick={() => setMore(!more)}>
-          <Icon name="more" />
-          <span>More</span>
-        </button>
-        {more && links("more")}
+        {pages}
       </nav>
       {app.sections}
     </aside>
@@ -33,39 +63,69 @@ function NewNote({ app }: ViewProps) {
   const folder = app.folderId && app.folders?.byId.get(app.folderId);
   const where = folder ? folder.name : "Unsorted";
   const refused = app.canCreateNote ? null : folder ? `You can read ${folder.name}, and not add notes to it` : "Open a folder you can change to add a note to it";
+  const title = refused ?? `New note in ${where}`;
+  const create = () => {
+    if (!refused) app.createNote().catch((err: Error) => app.notify({ message: err.message }));
+  };
+  if (!app.sidebarOpen)
+    return (
+      <button type="button" className="icon-button new-note" aria-label="New note" aria-disabled={!!refused} title={title} onClick={create}>
+        <Icon name="plus" />
+      </button>
+    );
   return (
-    <button
-      type="button"
-      className="button new-note"
-      aria-disabled={!!refused}
-      title={refused ?? `New note in ${where}`}
-      onClick={() => {
-        if (!refused) app.createNote().catch((err: Error) => app.notify({ message: err.message }));
-      }}
-    >
+    <button type="button" className="button new-note" aria-disabled={!!refused} title={title} onClick={create}>
       <Icon name="plus" />
       New note
     </button>
   );
 }
 
+/**
+ * A page's link. Clicked, it goes there; dragged to the editor area, the page is dropped in a group
+ * as a tab is; and where the editor area has splits its menu opens the page in one.
+ */
 function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelled?: boolean }) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const tab: Opened = { kind: "page", id: page.id, path: page.path };
+  const { openBeside } = app;
   return (
-    <a
-      href={page.path}
-      className="mode"
-      aria-current={page.path === app.path || (page.home && app.path === "/") ? "page" : undefined}
-      aria-label={labelled ? undefined : page.label}
-      title={labelled ? undefined : page.label}
-      onClick={(e) => {
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-        e.preventDefault();
-        app.go(page.path);
-      }}
-    >
-      {page.icon && <Icon name={page.icon} />}
-      {labelled && <span>{page.label}</span>}
-    </a>
+    <>
+      <a
+        href={page.path}
+        className="mode"
+        aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) || (page.home && app.path === "/") ? "page" : undefined}
+        aria-label={labelled ? undefined : page.label}
+        title={labelled ? undefined : page.label}
+        draggable
+        onDragStart={(e) => carry(e.dataTransfer, tab)}
+        onContextMenu={(e) => {
+          if (!openBeside) return;
+          e.preventDefault();
+          setMenu({ x: e.clientX, y: e.clientY });
+        }}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+          e.preventDefault();
+          app.go(page.path);
+        }}
+      >
+        {page.icon && <Icon name={page.icon} />}
+        {labelled && <span>{page.label}</span>}
+      </a>
+      {menu && openBeside && (
+        <ContextMenu
+          label={`${page.label} actions`}
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: "Open in a split right", action: () => openBeside(tab, "right") },
+            { label: "Open in a split down", action: () => openBeside(tab, "down") },
+          ]}
+        />
+      )}
+    </>
   );
 }
 
@@ -140,19 +200,9 @@ function WorkspaceMenu({ app }: ViewProps) {
 export const sidebar: Plugin = {
   id: "sidebar",
   name: "Sidebar",
+  description: "The column on the left: the workspace menu, the links to pages, and what other plugins put under them.",
+  icon: "sidebar",
   activate(host) {
     host.views.register("column", { id: "sidebar", component: Sidebar });
-    host.views.register("rail", {
-      id: "pages",
-      component: ({ app }) => (
-        <>
-          {app.pages
-            .filter((p) => p.nav === "primary")
-            .map((page) => (
-              <PageLink key={page.id} app={app} page={page} />
-            ))}
-        </>
-      ),
-    });
   },
 };

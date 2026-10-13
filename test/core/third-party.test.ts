@@ -574,6 +574,13 @@ describe("a plugin acting for a member", () => {
     expect((await perform(env.DB, ada, { type: "note.list" })).map((n) => n.id).sort()).toEqual([mine.id, empty.id].sort());
     // An agent of a member's is not the plugin, though both act for a member.
     expect((await perform(env.DB, ada, { type: "history.revertAuthor", author: { kind: "plugin", id } })).reverted).toEqual([]);
+    // The notes History lists name it among who changed each, and so does a revert that a change of its stands in the way of.
+    const two = await perform(env.DB, ada, { type: "note.create", text: "# Two\n\nStep" });
+    await perform(env.DB, acting, { type: "note.write", id: two.id, baseRevision: 1, text: "# Two\n\nStep by step" });
+    const summed = await perform(env.DB, ada, { type: "history.summary" });
+    const [preview] = await perform(env.DB, ada, { type: "history.previewRevert", changes: [{ noteId: two.id, revisions: [1] }] });
+    expect(preview!.conflicts.flatMap((c) => c.later.map((l) => l.author))).toContainEqual(plugin);
+    expect(summed.notes.find((n) => n.noteId === two.id)!.authors).toEqual(expect.arrayContaining([{ kind: "plugin", pluginId: id, name: "Word Tally", onBehalfOf: "" }]));
   });
 
   it("is answered no more than its permission names: no uploads or members with a note, and never an email", async () => {
@@ -589,6 +596,9 @@ describe("a plugin acting for a member", () => {
     const asPlugin = await perform(env.DB, pluginOf(ada, id), { type: "note.read", id: note.id });
     expect(asPlugin.text).toBe(text);
     expect(asPlugin.uploads).toEqual([]);
+    // Nor how many there are: a folder's count of uploads is of what reading notes doesn't reach.
+    expect((await perform(env.DB, ada, { type: "folder.list" })).folders.map((f) => f.uploadCount)).toContain(1);
+    expect((await perform(env.DB, pluginOf(ada, id), { type: "folder.list" })).folders.map((f) => f.uploadCount)).not.toContain(1);
     // Each mention as the text writes it: who is a member, and what they are called now, is not the note's to say.
     expect(asPlugin.mentions).toEqual([{ id: grace.personId, name: "Gracie", member: false }, { id: null, name: "Sam", member: false }]);
     expect(JSON.stringify(asPlugin)).not.toMatch(/cat\.png|Grace Hopper/);

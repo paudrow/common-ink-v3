@@ -182,8 +182,11 @@ export async function listContacts(asker: Asker, query: string | undefined): Pro
   return { contacts, sources, more: read.some((r) => r.more) };
 }
 
-/** What a note may hold of a record: its reference, and words its owner is content for every reader of the note to see. */
-const labelled = (label: string) => label.replace(/[{}\s]+/g, " ").trim().slice(0, 200);
+/**
+ * What a note may hold of a record: its reference, and words its owner is content for every reader of the note to see.
+ * An event's title can be someone else's, who invited the member: it writes no embed, link or code into the note.
+ */
+const labelled = (label: string) => label.replace(/[{}[\]`\s]+/g, " ").replace(/ +/g, " ").trim().slice(0, 200);
 
 /** A reference as a note writes it: an embed whose config is the reference, then the label. */
 export const writtenReference = (kind: SourceRecord["kind"], ref: string, label: string) => `::${kind}{${[ref, labelled(label)].filter(Boolean).join(" ")}}`;

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { run } from "../../scripts/ink-cli.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
-import type { HistoryEntry, OpInput } from "../../src/core/protocol.ts";
+import { OpError, type Diff, type HistoryEntry, type OpInput, type Resolve } from "../../src/core/protocol.ts";
 import worker from "../../src/worker/index.ts";
 import { addMember, newMember } from "./members.ts";
 
@@ -307,6 +307,7 @@ describe("the diff of one change", () => {
       added: 2,
       removed: 0,
       omitted: 0,
+      lines: 3,
     });
     expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 1 })).toMatchObject({ added: 1, removed: 0 });
   });
@@ -483,6 +484,271 @@ describe("reverting changes", () => {
   });
 });
 
+describe("a preview of a revert", () => {
+  const changeRows = async (id: string) => (await env.DB.prepare("SELECT COUNT(*) AS n FROM changes WHERE note_id = ?").bind(id).first<{ n: number }>())!.n;
+
+  it("says what reverting chosen changes would do, and the revert then does exactly that, for an editor", async () => {
+    const { ada, id } = await sharedNote();
+    const grace = await addMember(ada, "editor");
+
+    const preview = await perform(env.DB, grace, { type: "note.previewRevert", id, revisions: [3] });
+
+    expect(preview).toMatchObject({ revision: 4, revisions: [3], overlaps: [] });
+    expect(preview.diff.hunks.flatMap((h) => h.lines.filter((l) => l.kind !== "same"))).toEqual([
+      { kind: "del", text: "Claude's step" },
+      { kind: "del", text: "" },
+    ]);
+    expect(await changeRows(id)).toBe(4);
+    expect(await read(ada, id)).toBe("# Plan\n\nAda's step\n\nClaude's step\n\nAda's last word");
+
+    const reverted = await perform(env.DB, grace, { type: "note.revertChanges", id, revisions: [3] });
+    expect(reverted.text).toBe("# Plan\n\nAda's step\n\nAda's last word");
+    expect(await perform(env.DB, grace, { type: "note.diff", id, revision: 5 })).toEqual(preview.diff);
+    expect((await history(ada, id))[4]!.reverts!.revisions).toEqual(preview.revisions);
+  });
+
+  it("says what reverting an author would do to a note, and reverting the author then does exactly that there", async () => {
+    const { ada, claude, id } = await sharedNote();
+    const grace = await addMember(ada, "viewer");
+
+    const preview = await perform(env.DB, grace, { type: "note.previewRevert", id, author: claude.ref });
+
+    expect(preview).toMatchObject({ revision: 4, revisions: [3], overlaps: [], diff: { added: 0, removed: 2 } });
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [3] })).toEqual(preview);
+    expect(await changeRows(id)).toBe(4);
+    await perform(env.DB, ada, { type: "history.revertAuthor", author: claude.ref });
+    expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 5 })).toEqual(preview.diff);
+    const nothing = { revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0, lines: 5 }, overlaps: [], conflicts: [] };
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref })).toEqual(nothing);
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, author: { kind: "agent", id: "aaaaaaaaaaaa" } })).toEqual(nothing);
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref, revisions: [3] })).rejects.toMatchObject({ code: "invalid" });
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref, to: 1 })).rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("says what putting the note back to a revision would do, and the revert then does exactly that", async () => {
+    const { ada, id } = await sharedNote();
+
+    const preview = await perform(env.DB, ada, { type: "note.previewRevert", id, to: 2 });
+
+    expect(preview).toMatchObject({ revision: 4, revisions: [3, 4], overlaps: [], diff: { added: 0, removed: 4 } });
+    expect(await changeRows(id)).toBe(4);
+    await perform(env.DB, ada, { type: "note.revert", id, revision: 2 });
+    expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 5 })).toEqual(preview.diff);
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, to: 5 })).toEqual({ revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0, lines: 3 }, overlaps: [], conflicts: [] });
+  });
+
+  it("names no later change when the later edits are on other lines", async () => {
+    const ada = await newMember();
+    const claude = await agentOf(ada);
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# List\n- [ ] buy milk\n- [ ] call bank" });
+    await write(claude.actor, note.id, "# List\n- [ ] buy milk\n- [ ] book flights\n- [ ] call bank");
+    await write(ada, note.id, "# List\n- [x] buy milk\n- [ ] book flights\n- [ ] call bank today\n- [ ] water plants");
+    await write(ada, note.id, "# List\n- [x] buy milk\n- [ ] renew passport\n- [ ] book flights\n- [ ] call bank today\n- [ ] water plants");
+
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [2] })).toMatchObject({ revisions: [2], overlaps: [], diff: { added: 0, removed: 1 } });
+    expect((await perform(env.DB, ada, { type: "note.revertChanges", id: note.id, revisions: [2] })).text).toBe("# List\n- [x] buy milk\n- [ ] renew passport\n- [ ] call bank today\n- [ ] water plants");
+  });
+
+  it("names the later change that edited a line the revert changes, and not one already reverted or one being reverted with it", async () => {
+    const ada = await newMember();
+    const claude = await agentOf(ada);
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# List\n- [ ] buy milk" });
+    await write(claude.actor, note.id, "# List\n- [ ] buy milk\n- [ ] book flights");
+    await write(ada, note.id, "# List\n- [ ] buy milk\n- [ ] book flights to Lisbon");
+    await write(ada, note.id, "# List\n- [ ] buy oat milk\n- [ ] book flights to Lisbon");
+    await write(claude.actor, note.id, "# List\n- [ ] buy oat milk\n- [x] book flights to Lisbon");
+
+    expect((await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [2] })).overlaps).toEqual([3, 5]);
+    expect((await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [2, 5] })).overlaps).toEqual([3]);
+    expect((await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [1] })).overlaps).toEqual([4]);
+    expect((await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [4] })).overlaps).toEqual([]);
+
+    await perform(env.DB, ada, { type: "note.revertChanges", id: note.id, revisions: [3] });
+    expect((await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [2] })).overlaps).toEqual([5]);
+    expect((await perform(env.DB, ada, { type: "note.previewRevert", id: note.id, revisions: [6] })).overlaps).toEqual([5]);
+  });
+
+  /** Claude edits two todos, Ada edits one of them and adds a line, Claude ticks the other: reverting Claude's first change conflicts with the two after it. */
+  async function conflicted() {
+    const ada = await newMember();
+    const claude = await agentOf(ada);
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank" });
+    await write(claude.actor, note.id, "# List\n- [ ] buy milk now\n- [ ] sit still\n- [ ] call bank today");
+    await write(ada, note.id, "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [ ] call bank today\n- [ ] water plants");
+    await write(claude.actor, note.id, "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [x] call bank today\n- [ ] water plants");
+    return { ada, claude, id: note.id, revert: { type: "note.revertChanges" as const, id: note.id, revisions: [2] } };
+  }
+
+  it("lists each place a later change edited a line the revert changes: the line before, now, and with the later edit kept, and who edited it in which change", async () => {
+    const { ada, claude, id } = await conflicted();
+    const preview = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2] });
+    expect(preview.overlaps).toEqual([3, 4]);
+    expect(preview.conflicts).toEqual([
+      { line: 2, before: ["- [ ] buy milk"], now: ["- [ ] buy oat milk now"], kept: ["- [ ] buy oat milk"], later: [{ revision: 3, author: { kind: "member", personId: ada.personId, name: "Ada Lovelace" } }] },
+      { line: 4, before: ["- [ ] call bank"], now: ["- [x] call bank today"], kept: ["- [x] call bank"], later: [{ revision: 4, author: { kind: "agent", agentId: claude.actor.agentId, name: "Claude", onBehalfOf: ada.personId } }] },
+    ]);
+    expect(preview.diff).toMatchObject({ added: 2, removed: 2 });
+  });
+
+  it("lists the conflicts of an author's revert in a note, previews them settled, and reverts the author with each note's settled as asked", async () => {
+    const { ada, claude, id } = await conflicted();
+    const preview = await perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref });
+    expect(preview.revisions).toEqual([2, 4]);
+    expect(preview.conflicts).toEqual([
+      { line: 2, before: ["- [ ] buy milk"], now: ["- [ ] buy oat milk now"], kept: ["- [ ] buy oat milk"], later: [{ revision: 3, author: { kind: "member", personId: ada.personId, name: "Ada Lovelace" } }] },
+    ]);
+    const added = (diff: Diff) => diff.hunks.flatMap((h) => h.lines.filter((l) => l.kind === "add").map((l) => l.text));
+    expect(added(preview.diff)).toEqual(["- [ ] buy oat milk", "- [ ] call bank"]);
+    const back = await perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref, resolve: { at: 4, choices: "back" } });
+    expect(added(back.diff)).toEqual(["- [ ] buy milk", "- [ ] call bank"]);
+
+    const stale = await perform(env.DB, ada, { type: "history.revertAuthor", author: claude.ref, resolve: { [id]: { at: 3, choices: "back" } } });
+    expect(stale).toMatchObject({ reverted: [], failed: [{ noteId: id, message: expect.stringContaining("has changed since this revert was previewed") }] });
+    expect(await changeRows(id)).toBe(4);
+
+    const done = await perform(env.DB, ada, { type: "history.revertAuthor", author: claude.ref, resolve: { [id]: { at: 4, choices: "back" }, aaaaaaaaaaaa: { at: 1, choices: "back" } } });
+    expect([done.reverted.map((r) => r.revisions), done.failed]).toEqual([[[2, 4]], []]);
+    expect(await read(ada, id)).toBe("# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank\n- [ ] water plants");
+    expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 5 })).toEqual(back.diff);
+
+    const other = await conflicted();
+    const miscounted = await perform(env.DB, other.ada, { type: "history.revertAuthor", author: other.claude.ref, resolve: { [other.id]: { at: 4, choices: ["back", "back"] } } });
+    expect(miscounted).toMatchObject({ reverted: [], failed: [{ noteId: other.id, message: expect.stringContaining("1 conflict to settle, and 2 choices were given") }] });
+    const tooMany = Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`a${String(i).padStart(11, "0")}`, { at: 1, choices: "keep" as const }]));
+    await expect(perform(env.DB, other.ada, { type: "history.revertAuthor", author: other.claude.ref, resolve: tooMany })).rejects.toMatchObject({ code: "invalid" });
+    await perform(env.DB, other.ada, { type: "history.revertAuthor", author: other.claude.ref });
+    expect(await read(other.ada, other.id)).toBe("# List\n- [ ] buy oat milk\n- [ ] sit still\n- [ ] call bank\n- [ ] water plants");
+  });
+
+  it("previews and makes the same note for the choices given: each later edit kept, the line as it was before, or lines typed by hand", async () => {
+    const { ada, id, revert } = await conflicted();
+    const resolve = { at: 4, choices: ["back", { text: "- [ ] call the bank\r\n- [ ] and the broker" }] } satisfies Resolve;
+    const preview = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve });
+    expect(preview.diff.hunks.flatMap((h) => h.lines.filter((l) => l.kind === "add").map((l) => l.text))).toEqual(["- [ ] buy milk", "- [ ] call the bank", "- [ ] and the broker"]);
+    expect(await changeRows(id)).toBe(4);
+
+    const note = await perform(env.DB, ada, { ...revert, resolve });
+    expect(note.text).toBe("# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call the bank\n- [ ] and the broker\n- [ ] water plants");
+    const changes = await perform(env.DB, ada, { type: "note.history", id });
+    expect(changes.find((c) => c.revision === 5)).toMatchObject({ revision: 5, reverts: { how: "revert", revisions: [2] } });
+    expect(await changeRows(id)).toBe(5);
+
+    // What was chosen is part of the record: an edit made after it and undone leaves it, and reverting the revert takes it out.
+    await write(ada, id, `${note.text}\n- [ ] one more`);
+    expect((await perform(env.DB, ada, { type: "note.undo", id })).text).toBe(note.text);
+    expect((await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [5] })).text).toBe("# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [x] call bank today\n- [ ] water plants");
+  });
+
+  it("settles every conflict one way when one choice is given, and a revert to a revision the same way", async () => {
+    const { ada, id, revert } = await conflicted();
+    const kept = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve: { at: 4, choices: "keep" } });
+    expect(kept).toEqual(await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2] }));
+    expect((await perform(env.DB, ada, { ...revert, resolve: { at: 4, choices: "back" } })).text).toBe("# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank\n- [ ] water plants");
+
+    const other = await conflicted();
+    expect((await perform(env.DB, other.ada, { ...other.revert, resolve: { at: 4, choices: "keep" } })).text).toBe("# List\n- [ ] buy oat milk\n- [ ] sit still\n- [x] call bank\n- [ ] water plants");
+    expect((await perform(env.DB, other.ada, { type: "note.previewRevert", id: other.id, to: 1 })).conflicts).toEqual([]);
+    expect((await perform(env.DB, other.ada, { type: "note.revert", id: other.id, revision: 1, resolve: { at: 5, choices: [] } })).text).toBe("# List\n- [ ] buy milk\n- [ ] sit still\n- [ ] call bank");
+  });
+
+  it("refuses choices made for a note that has changed since, or not one for each conflict, and records nothing", async () => {
+    const { ada, id, revert } = await conflicted();
+    await expect(perform(env.DB, ada, { ...revert, resolve: { at: 4, choices: ["back"] } })).rejects.toMatchObject({
+      code: "invalid",
+      message: "This revert has 2 conflicts to settle, and 1 choice was given: give one for each, in the order the preview lists them",
+    });
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve: { at: 4, choices: ["back", "keep", "keep"] } })).rejects.toMatchObject({ code: "invalid" });
+    await write(ada, id, "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [x] call bank today\n- [ ] water plants\n- [ ] new");
+    const stale = { code: "invalid", message: "The note has changed since this revert was previewed: it was at revision 4 and is at 5. Preview the revert again, and settle its conflicts as they are now" };
+    await expect(perform(env.DB, ada, { ...revert, resolve: { at: 4, choices: "back" } })).rejects.toMatchObject(stale);
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve: { at: 4, choices: "back" } })).rejects.toMatchObject(stale);
+    await expect(perform(env.DB, ada, { ...revert, resolve: { at: 5, choices: ["sideways"] } } as unknown as OpInput)).rejects.toMatchObject({ code: "invalid" });
+    expect(await changeRows(id)).toBe(5);
+  });
+
+  it("gives an agent the same conflicts and choices through its tools, and a read-only token the preview alone", async () => {
+    const { ada, claude, id } = await conflicted();
+    const reader = await agentOf(ada, "Reader", { readOnly: true });
+    const asAda = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], resolve: { at: 4, choices: "back" } });
+    expect((await tool(reader.token, "preview_revert", { id, revisions: [2], resolve: { at: 4, choices: "back" } })).json()).toEqual(asAda);
+    expect((await tool(reader.token, "revert_changes", { id, revisions: [2], resolve: { at: 4, choices: "back" } })).isError).toBe(true);
+    const done = await tool(claude.token, "revert_changes", { id, revisions: [2], resolve: { at: 4, choices: ["keep", { text: "- [ ] call bank, by Claude" }] } });
+    expect(done.json()).toMatchObject({ revision: 5, text: "# List\n- [ ] buy oat milk\n- [ ] sit still\n- [ ] call bank, by Claude\n- [ ] water plants" });
+  });
+
+  it("refuses what the revert would refuse, in the same words", async () => {
+    const { ada, id } = await sharedNote();
+    await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [3] });
+
+    for (const revisions of [[3], [9]]) {
+      const refusal = await perform(env.DB, ada, { type: "note.revertChanges", id, revisions }).catch((err: OpError) => err);
+      expect(refusal).toBeInstanceOf(OpError);
+      await expect(perform(env.DB, ada, { type: "note.previewRevert", id, revisions })).rejects.toMatchObject({ code: (refusal as OpError).code, message: (refusal as OpError).message });
+    }
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [3] })).rejects.toMatchObject({ code: "invalid", message: "Change 3 was already reverted, by change 5. Revert change 5 to have it again" });
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [9] })).rejects.toMatchObject({ code: "not_found", message: "The note has no change 9" });
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, to: 9 })).rejects.toMatchObject({ code: "not_found", message: "The note has no revision 9" });
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id })).rejects.toMatchObject({ code: "invalid" });
+    await expect(perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2], to: 1 })).rejects.toMatchObject({ code: "invalid" });
+    expect(await changeRows(id)).toBe(5);
+  });
+
+  it("is for anyone who can read the note: a viewer and a read-only token, and nobody outside the workspace", async () => {
+    const { ada, id } = await sharedNote();
+    const viewer = await addMember(ada, "viewer");
+    const reader = await agentOf(ada, "Reader", { readOnly: true });
+    const op: OpInput = { type: "note.previewRevert", id, revisions: [3] };
+    const asAda = await perform(env.DB, ada, op);
+
+    expect(await perform(env.DB, viewer, op)).toEqual(asAda);
+    expect(await perform(env.DB, reader.actor, op)).toEqual(asAda);
+    expect((await tool(reader.token, "preview_revert", { id, revisions: [3] })).json()).toEqual(asAda);
+    expect((await tool(reader.token, "preview_revert", { id, to: 1 })).json()).toMatchObject({ revision: 4, revisions: [2, 3, 4], overlaps: [] });
+    await expect(perform(env.DB, await newMember("Mallory"), op)).rejects.toMatchObject({ code: "not_found", message: "No such note" });
+    await expect(perform(env.DB, { ...(await newMember("Mallory")), workspaceId: ada.workspaceId }, op)).rejects.toMatchObject({ code: "not_found", message: "No such workspace" });
+    expect(await changeRows(id)).toBe(4);
+  });
+});
+
+describe("a change taken out next to another author's line", () => {
+  it("undo leaves the todo an agent added above whole", async () => {
+    const ada = await newMember();
+    const claude = await agentOf(ada);
+    const note = await perform(env.DB, ada, { type: "note.create", text: "- [ ] buy milk" });
+    await write(claude.actor, note.id, "- [ ] call bank\n- [ ] buy milk");
+
+    expect((await perform(env.DB, ada, { type: "note.undo", id: note.id })).text).toBe("- [ ] call bank");
+    expect((await perform(env.DB, ada, { type: "note.redo", id: note.id })).text).toBe("- [ ] call bank\n- [ ] buy milk");
+  });
+
+  it("reverting an agent's changes leaves the member's lines around them whole", async () => {
+    const ada = await newMember();
+    const claude = await agentOf(ada);
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# Shopping\n- [ ] buy milk" });
+    await write(claude.actor, note.id, "# Shopping\n- [ ] buy milk\n- [ ] buy bread");
+    await write(ada, note.id, "# Shopping\n- [ ] buy milk\n- [ ] buy butter\n- [ ] buy bread\n- [ ] buy beans");
+    await write(claude.actor, note.id, "# Shopping\n- [ ] buy bananas\n- [ ] buy milk\n- [ ] buy butter\n- [ ] buy bread\n- [ ] buy beans");
+    const theirs = (await perform(env.DB, ada, { type: "history.list", noteIds: [note.id], authors: [claude.ref] })).changes.map((c) => c.revision);
+
+    expect((await perform(env.DB, ada, { type: "note.revertChanges", id: note.id, revisions: theirs })).text).toBe("# Shopping\n- [ ] buy milk\n- [ ] buy butter\n- [ ] buy beans");
+  });
+
+  it("two writes from the same revision to todos next to each other each keep their own line", async () => {
+    const ada = await newMember();
+    const grace = await addMember(ada, "editor");
+    const both = async (base: string, first: string, second: string) => {
+      const note = await perform(env.DB, ada, { type: "note.create", text: base });
+      await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: first });
+      return (await perform(env.DB, grace, { type: "note.write", id: note.id, baseRevision: 1, text: second })).text;
+    };
+
+    expect(await both("- [ ] buy milk", "- [ ] buy milk now", "- [ ] buy milk\n- [ ] x")).toBe("- [ ] buy milk now\n- [ ] x");
+    expect(await both("- [ ] a\n- [ ] buy milk", "- [ ] a\n- [ ] x\n- [ ] buy milk", "- [ ] a")).toBe("- [ ] a\n- [ ] x");
+    expect(await both("- [ ] a\n- [ ] buy milk", "- [ ] a\n- [ ] x\n- [ ] buy milk", "- [ ] a\n- [x] buy milk")).toBe("- [ ] a\n- [ ] x\n- [x] buy milk");
+    expect(await both("- [ ] buy milk\n- [ ] call bank", "- [ ] buy milk", "- [ ] buy milk\n- [ ] x\n- [ ] call bank")).toBe("- [ ] buy milk\n- [ ] x");
+  });
+});
+
 describe("undo and redo", () => {
   it("take back the author's own latest change and put it back, each as a new change", async () => {
     const ada = await newMember();
@@ -632,7 +898,7 @@ describe("reverting an author", () => {
 
     expect(emptied).toEqual([{ noteId: draft.id, title: "Draft", trashed: false }]);
     expect(reverted.map((r) => r.note.id).sort()).toEqual([id, draft.id, joint.id].sort());
-    expect([await read(ada, draft.id), await read(ada, joint.id)]).toEqual(["", "\n\nAda's line"]);
+    expect([await read(ada, draft.id), await read(ada, joint.id)]).toEqual(["", "\nAda's line"]);
     expect((await revertAuthor(ada, claude.ref)).emptied).toEqual([]);
   });
 
@@ -784,7 +1050,7 @@ describe("reverting an author", () => {
     expect(await history(ada, id)).toHaveLength(4);
 
     expect((await revertAuthor(ada, memberRef(ada))).reverted.map((r) => r.revisions)).toEqual([[1, 2, 4]]);
-    expect(await read(ada, id)).toBe("\n\nClaude's step");
+    expect(await read(ada, id)).toBe("\nClaude's step");
     expect(await history(mallory, hers.id)).toHaveLength(1);
   });
 
@@ -829,7 +1095,14 @@ describe("who may move through history", () => {
   ];
   /** A change that names no note, so a stranger asking for it reaches only their own workspace. */
   const revertAuthor: OpInput = { type: "history.revertAuthor", author: { kind: "agent", id: "aaaaaaaaaaaa" } };
-  const reads = (id: string): OpInput[] => [{ type: "history.list", noteIds: [id] }, { type: "history.authors" }, { type: "note.history", id }, { type: "history.summary" }, { type: "note.diff", id, revision: 2 }];
+  const reads = (id: string): OpInput[] => [
+    { type: "history.list", noteIds: [id] },
+    { type: "history.authors" },
+    { type: "note.history", id },
+    { type: "history.summary" },
+    { type: "note.diff", id, revision: 2 },
+    { type: "note.previewRevert", id, revisions: [2] },
+  ];
 
   it("a viewer reads history and can't label, revert, undo, or redo", async () => {
     const { ada, id } = await sharedNote();
@@ -902,6 +1175,18 @@ describe("history for an agent", () => {
     expect(await run(["label", id, "--revision", "2"], io)).toBe(0);
     expect(await run(["revert", id, "--revision", "2"], io)).toBe(0);
     expect(await run(["revert", id, "--changes", "3,4"], io)).toBe(0);
+    expect(await run(["revert", id, "--changes", "3,4", "--preview"], io)).toBe(0);
+    expect(await run(["revert", id, "--preview", "--revision", "2"], io)).toBe(0);
+    expect(await run(["revert", id, "--changes", "3", "--resolve", "back", "--at", "7"], io)).toBe(0);
+    expect(await run(["revert", id, "--revision", "2", "--resolve", '["keep", {"text": "by hand"}]', "--at", "7"], io)).toBe(0);
+    expect(await run(["revert", id, "--changes", "3", "--preview", "--resolve", "keep", "--at", "7"], io)).toBe(0);
+    expect(await run(["revert", id, "--changes", "3", "--resolve", "back"], io)).toBe(2);
+    expect(await run(["revert", id, "--changes", "3", "--resolve", "sideways", "--at", "7"], io)).toBe(2);
+    expect(await run(["revert", id, "--preview"], io)).toBe(2);
+    expect(await run(["revert", id, "--author", "agent:cccccccccccc", "--preview", "--resolve", "back", "--at", "7"], io)).toBe(0);
+    expect(await run(["revert", id, "--author", "agent:cccccccccccc", "--resolve", "back", "--at", "7"], io)).toBe(2);
+    expect(await run(["revert-author", "agent:cccccccccccc", "--resolve", `{"${id}": {"at": 7, "choices": "back"}}`], io)).toBe(0);
+
     expect(await run(["reapply", id, "--changes", "3"], io)).toBe(2);
     expect(await run(["diff", id, "--change", "3"], io)).toBe(0);
     expect(await run(["diff", id], io)).toBe(2);
@@ -918,6 +1203,13 @@ describe("history for an agent", () => {
       ["label_revision", { id, revision: 2, name: null }],
       ["revert_note", { id, revision: 2 }],
       ["revert_changes", { id, revisions: [3, 4] }],
+      ["preview_revert", { id, revisions: [3, 4] }],
+      ["preview_revert", { id, to: 2 }],
+      ["revert_changes", { id, revisions: [3], resolve: { at: 7, choices: "back" } }],
+      ["revert_note", { id, revision: 2, resolve: { at: 7, choices: ["keep", { text: "by hand" }] } }],
+      ["preview_revert", { id, revisions: [3], resolve: { at: 7, choices: "keep" } }],
+      ["preview_revert", { id, author: { kind: "agent", id: "cccccccccccc" }, resolve: { at: 7, choices: "back" } }],
+      ["revert_author", { author: { kind: "agent", id: "cccccccccccc" }, resolve: { [id]: { at: 7, choices: "back" } } }],
       ["change_diff", { id, revision: 3 }],
       ["history_summary", { noteIds: [id], authors: [{ kind: "agent", id: "cccccccccccc" }], limit: 5 }],
       ["undo", { id }],

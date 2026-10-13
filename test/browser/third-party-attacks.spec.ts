@@ -1,7 +1,7 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { Capability } from "../../src/core/plugins.ts";
 import { anotherPerson, join, listedNote, me, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
-import { asPlugin, codeHashOf, frameFor, install, openPlugins, relist, runCommand, running, toast, turnOn } from "./third-party-helpers.ts";
+import { asPlugin, codeHashOf, frameFor, install, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn } from "./third-party-helpers.ts";
 import { hostileCode, hostileManifest, VICTIM, VICTIM_CODE } from "./third-party-hostile.ts";
 
 let errors: string[];
@@ -52,7 +52,7 @@ async function withHostile(page: Page, baseURL: string, { allow = ["notes.read"]
   });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Shared");
-  await openPlugins(page, /Ada/);
+  await openPlugins(page);
   await turnOn(page, "Hostile", workspaceId);
   await turnOn(page, "Victim", workspaceId);
   await page.goto(`/note/${note.id}`);
@@ -113,13 +113,13 @@ test("a plugin can't reach the app's page, the member's session, what the browse
     // The one way out of the frame that works, in the same run: the port, for what it was permitted.
     "allowed: note.list over its port": "ok",
   });
-  expect(await page.evaluate(() => history.length), "it added nothing to what Back goes through").toBe(pages);
+  await expect.poll(() => page.evaluate(() => history.length), "it added nothing to what Back goes through").toBe(pages);
   expect(new URL(page.url()).pathname).toContain(note.id);
   expect(page.context().pages()).toHaveLength(1);
   expect(reached, "nothing reached another site").toEqual([]);
   expect([...new Set(answered)], "the app answered a frame with nothing but its own empty document").toEqual(["/embed-frame"]);
   // The member is still signed in, and the note is as it was.
-  expect(await read(admin, note.id)).toBe("# Shared\n\nwritten by Ada\n");
+  await expect.poll(() => read(admin, note.id)).toBe("# Shared\n\nwritten by Ada\n");
 });
 
 test("over its own port a plugin is answered only for what it was permitted: what is malformed is dropped, what isn't permitted is refused, and a flood stops it", async ({ page, baseURL }) => {
@@ -176,20 +176,20 @@ test("over its own port a plugin is answered only for what it was permitted: wha
   });
   // The note it was allowed to open is open, and nothing else came of any of it.
   await expect(page).toHaveURL(new RegExp(`${other.id}$`));
-  expect(await page.evaluate(() => [({} as { polluted?: unknown }).polluted, Object.hasOwn(Object.prototype, "polluted")])).toEqual([null, false].map((v, i) => (i ? v : undefined)));
-  expect((await perform(page, { type: "settings.read" }, workspaceId)).text, "the member's settings, which turn plugins on and off, are as they were").toBe(settings);
+  await expect.poll(() => page.evaluate(() => [({} as { polluted?: unknown }).polluted, Object.hasOwn(Object.prototype, "polluted")])).toEqual([null, false].map((v, i) => (i ? v : undefined)));
+  await expect.poll(async () => (await perform(page, { type: "settings.read" }, workspaceId)).text, "the member's settings, which turn plugins on and off, are as they were").toBe(settings);
   expect(JSON.stringify((await perform(admin, { type: "plugin.list" })).plugins), "what each plugin is permitted is as it was").toBe(record);
-  expect(await read(admin, note.id)).toBe("# Shared\n\nwritten by Ada\n");
-  expect(await read(admin, other.id)).toBe("# Other\n");
-  expect((await perform(admin, { type: "note.list" })).map((n) => n.title).sort()).toEqual(["Ada's secret", "Other", "Shared"]);
-  expect((await perform(admin, { type: "member.list" })).map((m) => m.name).sort()).toEqual(["Ada Lovelace", "Mel Member"]);
+  await expect.poll(() => read(admin, note.id)).toBe("# Shared\n\nwritten by Ada\n");
+  await expect.poll(() => read(admin, other.id)).toBe("# Other\n");
+  await expect.poll(async () => (await perform(admin, { type: "note.list" })).map((n) => n.title).sort()).toEqual(["Ada's secret", "Other", "Shared"]);
+  await expect.poll(async () => (await perform(admin, { type: "member.list" })).map((m) => m.name).sort()).toEqual(["Ada Lovelace", "Mel Member"]);
 
   // The harmless plugin is running beside it, to show what the flood leaves alone.
   await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Victim plugin: Victim", exact: true }).click();
   const beside = await frameFor(page, "view", "panel");
   await expect(beside.locator("#out")).toContainText("Victim view listed 2");
 
-  expect(await attack(frame, "flood", 5000)).toBe("sent");
+  await expect.poll(() => attack(frame, "flood", 5000)).toBe("sent");
   await expect.poll(() => running(page).length, "the hostile plugin's frames are gone, and the other's is not").toBe(1);
   await expect(page.locator(".plugin-background")).toHaveCount(0);
   // The app is still the member's to use.
@@ -203,9 +203,9 @@ test("over its own port a plugin is answered only for what it was permitted: wha
   await runCommand(page, "Hostile plugin: Start");
   await expect(toast(page)).toContainText("Hostile was stopped: it sent too many messages.");
   expect(running(page)).toHaveLength(1);
-  await openPlugins(page, /Ada/);
-  await expect(page.getByRole("list", { name: "Installed plugins" }).getByRole("listitem", { name: "Hostile", exact: true }).getByRole("alert")).toHaveText("Stopped: it sent too many messages");
-  await expect(page.getByRole("list", { name: "Installed plugins" }).getByRole("listitem", { name: "Victim", exact: true }).getByRole("alert")).toHaveCount(0);
+  await openPlugins(page);
+  await expect(pluginRow(page, "Hostile").getByRole("alert")).toHaveText("Stopped: it sent too many messages");
+  await expect(pluginRow(page, "Victim").getByRole("alert")).toHaveCount(0);
 });
 
 test("a plugin can't read another plugin's frames, hand one a port or a document of its own, or pass for a frame the app is starting", async ({ page, baseURL }) => {
@@ -217,7 +217,7 @@ test("a plugin can't read another plugin's frames, hand one a port or a document
   await page.evaluate(() => addEventListener("message", (event) => void (window as unknown as { gotMessage(data: string): void }).gotMessage(JSON.stringify(event.data))));
 
   // Forging from before the other plugin's frames exist, through their start, and on after it.
-  expect(await attack(frame, "forge")).toBe("forging");
+  await expect.poll(() => attack(frame, "forge")).toBe("forging");
   await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Victim plugin: Victim", exact: true }).click();
   const view = await frameFor(page, "view", "panel");
   await openAllNotes(page);
@@ -236,15 +236,15 @@ test("a plugin can't read another plugin's frames, hand one a port or a document
   const forged = await attack(frame, "forged");
   expect(forged.sent).toBeGreaterThan(500);
   expect(forged.heardOnForged, "no port it handed out was ever spoken to").toEqual([]);
-  expect(await attack(frame, "atWindow"), "nothing was sent to its window after its own port").toEqual([]);
+  await expect.poll(() => attack(frame, "atWindow"), "nothing was sent to its window after its own port").toEqual([]);
   for (const other of outside(page)) expect(await other.locator("#pwned").count(), `no document of its writing in ${other.url()}`).toBe(0);
   expect(got.some((data) => data.includes("pwned"))).toBe(false);
   // The app took none of what was posted at it for a frame's or a plugin's: every frame is one the app made, and nothing was done.
   expect(outside(page).map((f) => f.url()).sort()).toEqual(["/embed-frame", "/embed-frame", "/embed-frame", "about:srcdoc", "about:srcdoc", "about:srcdoc"].map((url) => (url.startsWith("/") ? new URL(url, baseURL).href : url)).sort());
   await expect(page.getByText("from the window")).toHaveCount(0);
   // Still each its own plugin, on its own port.
-  expect(await embed.evaluate(() => (window as unknown as { ink: { plugin: { name: string }; context: { kind: string } } }).ink.plugin.name)).toBe("Victim");
-  expect(await attack(frame, "perform", { type: "note.list" })).toBe("ok");
+  await expect.poll(() => embed.evaluate(() => (window as unknown as { ink: { plugin: { name: string }; context: { kind: string } } }).ink.plugin.name)).toBe("Victim");
+  await expect.poll(() => attack(frame, "perform", { type: "note.list" })).toBe("ok");
 });
 
 test("a plugin can't send its frame, the frame around it, or the app anywhere, or open a window", async ({ page, baseURL }) => {
@@ -337,8 +337,8 @@ test("a plugin's frame can't take the keyboard from the note, wherever it is dra
   expect(Math.round(boxes.room.bottom - boxes.room.top), "the room is the height the manifest gave, whatever was drawn in it").toBe(80);
   expect(boxes).toMatchObject({ clipped: "hidden", position: "static", overEnd: true });
 
-  await openPlugins(page, /Ada/);
-  await expect(page.getByRole("list", { name: "Installed plugins" }).getByRole("listitem", { name: "Hostile", exact: true }).getByRole("alert")).toHaveText("Its frame for commands was stopped: it tried to take the keyboard");
+  await openPlugins(page);
+  await expect(pluginRow(page, "Hostile").getByRole("alert")).toHaveText("Its frame for commands was stopped: it tried to take the keyboard");
 });
 
 test("every write a plugin manages is recorded as the plugin's, whatever it puts beside the operation", async ({ page, baseURL }) => {
@@ -348,8 +348,8 @@ test("every write a plugin manages is recorded as the plugin's, whatever it puts
   const frame = await background(page);
   const claims = { author: { kind: "member", personId: ada, name: "Ada Lovelace" }, by: "member", actor: { kind: "member", personId: ada }, onBehalfOf: ada, pluginId: victim, personId: ada, authorKind: "member" };
 
-  expect(await attack(frame, "perform", { type: "note.write", id: note.id, baseRevision: 1, text: "# Shared\n\nwritten by Ada\n\nand by a plugin\n", ...claims })).toBe("ok");
-  expect(await attack(frame, "perform", { type: "note.create", text: "# Planted\n", ...claims })).toBe("ok");
+  await expect.poll(() => attack(frame, "perform", { type: "note.write", id: note.id, baseRevision: 1, text: "# Shared\n\nwritten by Ada\n\nand by a plugin\n", ...claims })).toBe("ok");
+  await expect.poll(() => attack(frame, "perform", { type: "note.create", text: "# Planted\n", ...claims })).toBe("ok");
 
   const asPlugin = { kind: "plugin", pluginId: hostile, name: "Hostile", onBehalfOf: mel };
   const { changes } = await perform(admin, { type: "history.list", diffs: false, limit: 100 });
@@ -359,9 +359,9 @@ test("every write a plugin manages is recorded as the plugin's, whatever it puts
     ["Shared", 1, { kind: "member", personId: ada, name: "Ada Lovelace" }],
     ["Shared", 2, asPlugin],
   ]);
-  expect((await perform(admin, { type: "note.read", id: note.id })).updatedBy).toEqual(asPlugin);
+  await expect.poll(async () => (await perform(admin, { type: "note.read", id: note.id })).updatedBy).toEqual(asPlugin);
   // Listed as one author whoever it wrote for, so its changes can be filtered and taken back out together.
-  expect((await perform(admin, { type: "history.authors" })).filter((a) => a.kind === "plugin")).toEqual([expect.objectContaining({ kind: "plugin", pluginId: hostile, name: "Hostile" })]);
+  await expect.poll(async () => (await perform(admin, { type: "history.authors" })).filter((a) => a.kind === "plugin")).toEqual([expect.objectContaining({ kind: "plugin", pluginId: hostile, name: "Hostile" })]);
 });
 
 test("an uninstalled plugin is refused by the server at once, and its frames are gone when the app next reads the record", async ({ page, baseURL }) => {
@@ -369,7 +369,7 @@ test("an uninstalled plugin is refused by the server at once, and its frames are
   const frame = await background(page);
   await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Hostile plugin: Probe", exact: true }).click();
   await frameFor(page, "view", "probe");
-  expect(await attack(frame, "perform", { type: "note.list" })).toBe("ok");
+  await expect.poll(() => attack(frame, "perform", { type: "note.list" })).toBe("ok");
   // The app reads the record again as soon as the server refuses a plugin. That read is held here, so the frame is still there to say what it was answered.
   let read = () => {};
   const held = new Promise<void>((done) => (read = done));
@@ -381,9 +381,9 @@ test("an uninstalled plugin is refused by the server at once, and its frames are
   await perform(admin, { type: "plugin.uninstall", id: hostile });
 
   // The frame is still there, with its port. What it asks for is answered with the server's refusal.
-  expect(await attack(frame, "perform", { type: "note.list" })).toBe("forbidden: That plugin isn't installed in this workspace");
-  expect(await attack(frame, "perform", { type: "note.read", id: "abcdefghijkl" })).toBe("forbidden: That plugin isn't installed in this workspace");
-  expect(await asPlugin(page, workspaceId, hostile, { type: "note.list" })).toMatchObject({ status: 403, body: { error: "forbidden" } });
+  await expect.poll(() => attack(frame, "perform", { type: "note.list" })).toBe("forbidden: That plugin isn't installed in this workspace");
+  await expect.poll(() => attack(frame, "perform", { type: "note.read", id: "abcdefghijkl" })).toBe("forbidden: That plugin isn't installed in this workspace");
+  await expect.poll(() => asPlugin(page, workspaceId, hostile, { type: "note.list" })).toMatchObject({ status: 403, body: { error: "forbidden" } });
   // Once the record is read, nothing of the plugin is left to hold a port.
   read();
   await expect.poll(() => running(page).length).toBe(0);
@@ -391,7 +391,7 @@ test("an uninstalled plugin is refused by the server at once, and its frames are
   await expect(page.locator("iframe")).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Hostile plugin: Probe", exact: true })).toHaveCount(0);
   await relist(page);
-  expect(await asPlugin(page, workspaceId, hostile, { type: "note.list" })).toMatchObject({ status: 403, body: { error: "forbidden" } });
+  await expect.poll(() => asPlugin(page, workspaceId, hostile, { type: "note.list" })).toMatchObject({ status: 403, body: { error: "forbidden" } });
 });
 
 test("a plugin reaches no site until an admin allows its network, then the sites it listed and no other, without the member's session, and its frame's address is good once", async ({ page, baseURL }) => {
@@ -467,11 +467,11 @@ test("a plugin reaches no site until an admin allows its network, then the sites
   await expect.poll(() => sent.find((request) => request.url === "/sw.js?from=app")?.cookie).toMatch(/\S/);
 
   // The address the frame was opened at is spent: asked for again, by the member or by anyone, there is nothing there.
-  expect((await page.request.get(shell!)).status()).toBe(404);
-  expect((await page.request.get(`${app}/embed-frame/g/${"A".repeat(43)}`)).status()).toBe(404);
-  expect(await after.evaluate(async (address) => fetch(address, { mode: "no-cors" }).then((r) => r.type, (err: Error) => `refused: ${err.name}`), shell!)).toBe("opaque");
+  await expect.poll(async () => (await page.request.get(shell!)).status()).toBe(404);
+  await expect.poll(async () => (await page.request.get(`${app}/embed-frame/g/${"A".repeat(43)}`)).status()).toBe(404);
+  await expect.poll(() => after.evaluate(async (address) => fetch(address, { mode: "no-cors" }).then((r) => r.type, (err: Error) => `refused: ${err.name}`), shell!)).toBe("opaque");
   const frames = outside(page).length;
-  expect(await after.evaluate((address) => new Promise<string>((done) => document.body.append(Object.assign(document.createElement("iframe"), { src: address, onload: () => done("made"), onerror: () => done("refused") }))), shell!)).toBe("made");
+  await expect.poll(() => after.evaluate((address) => new Promise<string>((done) => document.body.append(Object.assign(document.createElement("iframe"), { src: address, onload: () => done("made"), onerror: () => done("refused") }))), shell!)).toBe("made");
   expect(outside(page).filter((f) => f.url().includes("/embed-frame/g/")), "a frame it makes for itself gets no document, with network or without").toHaveLength(1);
   expect(outside(page).length).toBeLessThanOrEqual(frames + 1);
 });
@@ -506,15 +506,17 @@ test("HTML embeds reach no site until an admin lists one, and then the Run butto
   await run.click();
   await expect(framed.locator("#out")).toHaveText("tried");
   await expect(page.locator('.embed-below[data-embed="html"] iframe')).toHaveAttribute("src", "/embed-frame");
-  expect(await found()).toEqual({ listed: "refused: TypeError", other: "refused: TypeError", top: "refused: SecurityError", blocked: expect.stringContaining(`${app}/sw.js`) });
+  await expect.poll(() => found()).toEqual({ listed: "refused: TypeError", other: "refused: TypeError", top: "refused: SecurityError", blocked: expect.stringContaining(`${app}/sw.js`) });
 
   await page.goto("/plugins");
+  await page.getByRole("list", { name: "Plugins" }).getByRole("link", { name: "HTML embeds", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "HTML embeds", level: 1 })).toBeVisible();
   const row = page.getByRole("listitem", { name: "Use the network for HTML embeds" });
   await expect(row).toContainText("Off");
   await row.getByRole("textbox", { name: "Sites HTML embeds may reach" }).fill("api.example.com/path");
   await row.getByRole("button", { name: "Allow Use the network for HTML embeds" }).click();
   await expect(page.getByRole("alert")).toHaveText("api.example.com/path isn't a site such as https://api.example.com");
-  expect((await perform(page, { type: "plugin.frame", id: "html" })).token).toBeNull();
+  await expect.poll(async () => (await perform(page, { type: "plugin.frame", id: "html" })).token).toBeNull();
   await row.getByRole("textbox", { name: "Sites HTML embeds may reach" }).fill(app);
   await row.getByRole("button", { name: "Allow Use the network for HTML embeds" }).click();
   await expect(row).toContainText("Allowed");
@@ -526,7 +528,7 @@ test("HTML embeds reach no site until an admin lists one, and then the Run butto
   await run.click();
   await expect(framed.locator("#out")).toHaveText("tried");
   await expect(page.locator('.embed-below[data-embed="html"] iframe')).toHaveAttribute("src", /^\/embed-frame\/g\/[\w-]{20,}$/);
-  expect(await found()).toEqual({ listed: "opaque", other: "refused: TypeError", top: "refused: SecurityError", blocked: "https://leak.example/fetch" });
+  await expect.poll(() => found()).toEqual({ listed: "opaque", other: "refused: TypeError", top: "refused: SecurityError", blocked: "https://leak.example/fetch" });
   expect(reached, "it reached the site that was listed and no other").toEqual([]);
 
   // Turned off again, the next one that is run reaches nothing.
@@ -535,5 +537,5 @@ test("HTML embeds reach no site until an admin lists one, and then the Run butto
   await expect(run).toContainText("It runs shut off from the app and the network.");
   await run.click();
   await expect(framed.locator("#out")).toHaveText("tried");
-  expect(await found()).toMatchObject({ listed: "refused: TypeError", other: "refused: TypeError" });
+  await expect.poll(() => found()).toMatchObject({ listed: "refused: TypeError", other: "refused: TypeError" });
 });

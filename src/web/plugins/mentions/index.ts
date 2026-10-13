@@ -32,6 +32,8 @@ const named = (members: readonly Member[]) => new Intl.ListFormat(undefined, { t
 export const mentions: Plugin = {
   id: "mentions",
   name: "Mentions",
+  description: "Mentions a person in a note with @: a member of the workspace, one of your contacts, or a name. On a todo's line it assigns the todo.",
+  icon: "at",
   settings: {
     offerToShare: {
       type: "boolean",

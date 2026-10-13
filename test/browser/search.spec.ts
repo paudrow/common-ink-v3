@@ -87,9 +87,9 @@ test("a matched line is shown as the characters it is: HTML and markdown in a no
   await expect(results(page).locator(".found-line")).toContainText("**bold**");
 
   // The only elements in a result's matched lines are the ones the page makes, and nothing anywhere in the card came out of the note's text.
-  expect(await results(page).first().locator(".card-matches").evaluate((el) => [...el.querySelectorAll("*")].map((child) => child.tagName.toLowerCase()).sort())).toEqual(["mark", "mark", "span"]);
+  await expect.poll(() => results(page).first().locator(".card-matches").evaluate((el) => [...el.querySelectorAll("*")].map((child) => child.tagName.toLowerCase()).sort())).toEqual(["mark", "mark", "span"]);
   await expect(results(page).first().locator("i, img, script, strong, b")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as { pwned?: number }).pwned)).toBeUndefined();
+  await expect.poll(() => page.evaluate(() => (window as { pwned?: number }).pwned)).toBeUndefined();
 });
 
 test("an archived note is found only when Archived or All is chosen, and a note in Trash never", async ({ page }) => {
@@ -159,8 +159,9 @@ test("a result's title is a link to its note: a click with the modifier opens it
   await titles(page).first().click({ modifiers: ["ControlOrMeta"] });
   await expect(page).toHaveURL(/\/search\?q=tomatoes$/);
   await expect(titles(page)).toHaveText(["Garden plan"]);
+  await expect(page.getByRole("tablist", { name: "Open notes" }).getByRole("tab")).toHaveText(["Search", "Garden plan"]);
   await openAllNotes(page);
-  await expect(page.getByRole("tablist", { name: "Open notes" }).getByRole("tab")).toHaveText(["Garden plan", "All notes"]);
+  await expect(page.getByRole("tablist", { name: "Open notes" }).getByRole("tab")).toHaveText(["All notes", "Garden plan"]);
 });
 
 test("More results appends the next page until there are no more", async ({ page }) => {
