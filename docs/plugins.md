@@ -272,8 +272,11 @@ How each kind of mark keeps the third rule:
 | A block of math | the formula, in the room its lines take when written, wrapped rows and blank lines counted | its lines, the last padded to the formula's height |
 | A table | a table, always | still a table: a cell is typed in where it is drawn, held at the size it was drawn while it shows its source |
 | A code block | code, always | the same: only a fence line changes, as above |
+| A list item's wrapped rows | start under the first letter of its words: the line is padded by the width of its indent, mark and task box as written, and its first row pulled back by the same (`plugins/gfm/lists.ts`) | the same: that width is the text's own, and a mark is as wide drawn as written. Only the line an item begins on hangs: an item in a quote and a second line written under an item's words do not |
 
 One case moves, and is left that way on purpose: the marks inside a line are taken out when it is drawn, so a paragraph that fills its rows can need more rows with its marks put back, and the lines after it move down by those rows while the cursor is on it. Measured on a three-sentence paragraph with bold, code and a link in each: 2 rows (47px) in a 720px column, 5 rows (118px) in a 314px one. Showing the line as written and moving nothing can't both hold there. The layout test asserts what is kept: the paragraph starts where it did, grows by whole rows, and everything after it moves by exactly that.
+
+A background painted on a line or on words in it must let what is under it show (`--code-bg` is a tint, not a flat color). With vim on the editor draws the selection itself, in a layer behind the text, and a flat background would cover it: `test/browser/vim-selection.spec.ts` reads the painted color over a code block. A box inside a list item's line (an `inline-block`) must set `text-indent: 0`, or it takes the line's pull for its own first row; the line's direct children already do.
 
 A formula's drawn height is kept in the plugin's storage, so a block of math has its room before KaTeX has loaded. The first time a formula is ever drawn in a browser, the lines after it move down once if it is taller than its lines. They never move up.
 
