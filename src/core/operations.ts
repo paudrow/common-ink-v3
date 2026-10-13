@@ -40,6 +40,7 @@ import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing
 import { noteSlug } from "./slug.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
+import { ruleLabel } from "./recurrence.ts";
 import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, todoIndex, todosIn, type Completed } from "./todos.ts";
 
 /** Who is performing an operation, and where. */
@@ -1166,6 +1167,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             importance: r.importance,
             due: r.due,
             every: todo?.every?.written ?? null,
+            recurs: todo?.every ? ruleLabel(todo.every.rule) : null,
             lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
             tags: JSON.parse(r.tags) as string[],
             words: todo?.words ?? r.text,
@@ -1198,7 +1200,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       settle(async (): Promise<Written | null> => {
         const row = await loadNote(ctx, op.id, "edit");
         const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, ...change } = op;
-        const mine = change.done ? await completing(ctx, on) : null;
+        const mine = change.done || change.skip ? await completing(ctx, on) : null;
         let wanted: Completed;
         try {
           wanted = changeTodo(listedAs, change, mine?.day ?? "");

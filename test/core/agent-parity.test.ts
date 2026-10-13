@@ -23,7 +23,7 @@ const COMMANDS: Record<string, string[][]> = {
   rebuild_links: [["links-rebuild"]],
   list_todos: [["todos", "--folder", ID, "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--completed", "true", "--note", ID, "--limit", "5", "--offset", "5"]],
   todo_filters: [["todo-filters"]],
-  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--every", "2w", "--on", "2026-10-11"]],
+  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--every", "2w", "--on", "2026-10-11"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w", "--skip", "true"]],
   todo_history: [["todo-history", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w"]],
   daily_note: [["daily", "--on", "2026-10-11"]],
   rebuild_todos: [["todos-rebuild"]],

@@ -151,6 +151,7 @@ describe("listing todos", () => {
       importance: 1,
       due: null,
       every: null,
+      recurs: null,
       lastDone: null,
       tags: ["work", "garden"],
       words: "Water plants +home #garden",

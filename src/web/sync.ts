@@ -203,8 +203,8 @@ export class NoteSync {
     this.timer = setTimeout(() => void this.commit(), ms);
   }
 
-  /** Send what's typed now, after any save already on its way. */
-  async commit(): Promise<void> {
+  /** Send what's typed now, after any save already on its way. It answers with the note as that write left it, or with nothing when there was nothing to send or the write didn't land. */
+  async commit(): Promise<Written | undefined> {
     clearTimeout(this.timer);
     while (this.inFlight) await this.inFlight;
     const doc = this.doc();
@@ -220,6 +220,7 @@ export class NoteSync {
       this.typedSinceWrite = ChangeSet.empty(text.length);
     }
     const write = this.unacknowledged;
+    let landed: Written | undefined;
     this.onState("saving");
     this.inFlight = (async () => {
       try {
@@ -232,6 +233,7 @@ export class NoteSync {
         this.revision = saved.revision;
         this.savedText = saved.text;
         this.onSaved(saved);
+        landed = saved;
         void settle(saved);
         if (this.dirty) this.schedule(PAUSE_MS);
         else unsaved.delete(this);
@@ -251,6 +253,7 @@ export class NoteSync {
       }
     })();
     await this.inFlight;
+    return landed;
   }
 
   private apply(changes: ChangeSet) {
@@ -299,9 +302,9 @@ export class NoteSync {
   }
 
   /** Stop following the view, which can be destroyed right after, and commit what was typed. */
-  close(): Promise<void> {
+  async close(): Promise<void> {
     if (open.get(this.noteId) === this) open.delete(this.noteId);
     this.closedDoc = this.view?.state.doc ?? null;
-    return this.commit();
+    await this.commit();
   }
 }

@@ -2,7 +2,7 @@ import { EditorView, ViewPlugin } from "@codemirror/view";
 import { locateTodo, type ListedTodo, type Plugin } from "../../plugin-api.ts";
 import { editorKey, redraw } from "../lib/live.ts";
 import { tickedIn, todoChips, untick } from "./chips.ts";
-import { CHANGED, completed, refused } from "./completed.ts";
+import { CHANGED, completed, refused, takeBack } from "./completed.ts";
 import { dueOffers, today } from "./dates.ts";
 import { everyOffers } from "./recurrence.ts";
 import { TodosPage } from "./Todos.tsx";
@@ -73,7 +73,7 @@ export const todos: Plugin = {
     host.editorExtensions.register({
       id: "todos",
       extension: (editor) => [
-        todoChips({ host, noteId: editor.noteId, onCompleted: (view, words) => completed(words, () => reopen(editor.noteId, view)) }),
+        todoChips({ host, noteId: editor.noteId, onCompleted: (view, words) => completed(words, () => reopen(editor.noteId, view)), onRecurred: (words, revision) => completed(words, () => takeBack(host, editor.noteId, revision)) }),
         ViewPlugin.define((view) => {
           const key = editorKey(editor);
           editors.set(key, view);

@@ -1,6 +1,7 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { perform, type Actor } from "../../core/operations.ts";
 import { NO_SUCH_WORKSPACE, OpError, type OpInput, type OpType } from "../../core/protocol.ts";
+import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 
 /** What a tool call comes back with: text for the agent, and whether it failed. */
@@ -66,7 +67,9 @@ const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
 const TODOS =
-  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, and due:YYYY-MM-DD for the day it is due. every:RULE makes it recur: 2w (every 2 weeks, in d, w, m or y), mon,thu, 3d-after-done, 3rd-day or last-day of the month, 2nd-tue or last-fri of the month. done:YYYY-MM-DDxN is when a recurring todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.";
+  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, and due:YYYY-MM-DD for the day it is due. every:RULE makes it recur, and each listed todo's recurs says its rule in words. The rules:\n" +
+  RULE_GRAMMAR +
+  "\ndone:YYYY-MM-DDxN is when a recurring todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.";
 const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
@@ -205,7 +208,7 @@ export const TOOLS: Tool[] = [
   {
     name: "set_todo",
     description:
-      "Check a todo off, or change its importance, due date or how it recurs, by rewriting its line in its note. Checking off a todo that recurs leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Check a todo off, skip it, or change its importance, due date or how it recurs, by rewriting its line in its note. Checking off a todo that recurs leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. A rule that ends (-times-N, -until-DAY) counts down, and its last time checks the todo off for good. skip moves a recurring todo to its next due date with nothing checked off, and is refused for one that doesn't recur or is on its last time. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         id: noteId,
@@ -215,7 +218,8 @@ export const TOOLS: Tool[] = [
         done: { type: "boolean", description: "True checks it off, false opens it again" },
         importance: { type: "integer", minimum: 0, maximum: 3, description: "0 for normal, 1 to 3 for !, !! and !!!" },
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
-        every: { type: ["string", "null"], description: "How it recurs, as written after every:, such as 2w, mon,thu, 3d-after-done or last-fri, or null to stop it recurring" },
+        every: { type: ["string", "null"], description: `How it recurs, as written after every:, or null to stop it recurring. The rules:\n${RULE_GRAMMAR}` },
+        skip: { type: "boolean", description: "True moves a recurring todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Not together with done" },
         on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "revision", "line", "text"],

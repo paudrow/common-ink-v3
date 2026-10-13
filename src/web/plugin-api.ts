@@ -10,7 +10,7 @@
  * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary, Written } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
@@ -23,10 +23,10 @@ export { lineHunks } from "../core/text.ts";
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { changeTodo, completeTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+export { changeTodo, completeTodo, skipTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
 
 /** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
-export { WEEKDAYS, describeRule, nextDue, parseRule, writeRule, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
+export { DAY_NAMES, MONTHS, MONTH_NAMES, WEEKDAYS, counted, describeRule, endLabel, isInterval, nextDue, occurrences, ordinal, parseRule, pastThe28th, ruleLabel, skippedTo, writeRule, type End, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
 
 /** The settings a daily note is made by, which the daily plugin declares under exactly these keys and the server reads. */
 export { DAILY_SETTINGS } from "../core/daily.ts";
@@ -706,8 +706,13 @@ export interface App {
   noteChanged(note: Note): void;
   /** Reads the folders and notes again, after a change the app wasn't told about. */
   refresh(): void;
-  /** Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a change that must reach the server as it is, before anything else is typed. */
-  saveNote(noteId: string): void;
+  /**
+   * Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a
+   * change that must reach the server as it is, before anything else is typed. It answers with the
+   * note as that write left it, `filed` saying whether it checked off a recurring todo, and with
+   * nothing when there was nothing to send, no editor of the note, or the write didn't land.
+   */
+  saveNote(noteId: string): Promise<Written | undefined>;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */

@@ -5166,59 +5166,120 @@ button.diff-fold:hover {
   font-size: 13px;
 }
 
-.rule-form {
+/* The editor of how a todo recurs: a short list of picks, then a rule built as a sentence. */
+.rule-editor {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 244px;
+  max-width: 100%;
 }
 
-.rule-form button,
-.rule-form input,
-.rule-form select {
+.rule-editor[data-stage="sentence"] {
+  width: 324px;
+}
+
+.rule-editor p {
+  margin: 0;
+}
+
+.rule-editor hr {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.rule-now {
+  padding: 2px 8px 0;
+  font-weight: 600;
+}
+
+.rule-editor button,
+.rule-editor input,
+.rule-editor select {
   border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: var(--bg-elev);
+  background-color: var(--bg-elev);
   color: var(--ink);
   font: inherit;
 }
 
-.rule-form button {
+.rule-editor button {
   padding: 3px 8px;
   cursor: pointer;
 }
 
-.rule-form button:hover:enabled,
-.rule-form button:focus-visible {
-  background: var(--hover);
+.rule-editor button:hover:enabled,
+.rule-editor button:focus-visible {
+  background-color: var(--hover);
   outline: none;
 }
 
-.rule-form button:focus-visible,
+.rule-editor button:focus-visible,
+.rule-editor input:focus-visible,
+.rule-editor select:focus-visible,
 .completions button:focus-visible {
+  outline: none;
   box-shadow: 0 0 0 2px var(--accent);
 }
 
-.rule-form button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.rule-form button:disabled {
+.rule-editor button:disabled,
+.rule-editor select:disabled {
   color: var(--faint);
   cursor: default;
 }
 
-.rule-simple {
+.rule-picks {
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
-.rule-form .rule-simple button {
+.rule-editor .rule-picks button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   border-color: transparent;
   text-align: left;
+}
+
+.rule-picks button > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rule-in {
+  margin-left: 16px;
+}
+
+.rule-row input[type="number"] {
+  width: 4em;
+  padding: 2px 4px;
+}
+
+.rule-row input[type="date"],
+.rule-row input[type="text"] {
+  padding: 2px 6px;
+}
+
+.rule-row .rule-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.rule-row select {
+  max-width: 100%;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .rule-days {
@@ -5226,69 +5287,72 @@ button.diff-fold:hover {
   gap: 3px;
 }
 
-.rule-days button {
+.rule-editor .rule-days button {
   flex: 1;
   padding: 3px 0;
 }
 
-.rule-form .rule-more {
-  align-self: flex-start;
+.rule-editor button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rule-editor .rule-out {
+  padding: 0 6px;
   border-color: transparent;
-  padding-left: 0;
   color: var(--muted);
 }
 
-.rule-more::before {
-  content: "▸ ";
+.rule-editor .rule-add {
+  align-self: flex-start;
+  padding-left: 0;
+  border-color: transparent;
+  color: var(--muted);
 }
 
-.rule-more[aria-expanded="true"]::before {
-  content: "▾ ";
+.rule-hint,
+.rule-next {
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.rule-advanced {
+.rule-note {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12px;
 }
 
-.rule-advanced label {
+.rule-says {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.rule-advanced input[type="radio"] {
-  margin: 0 2px 0 0;
-  accent-color: var(--accent);
-}
-
-.rule-advanced input[type="number"] {
-  width: 3.6em;
-  padding: 2px 4px;
-}
-
-.rule-advanced select {
-  padding: 2px 2px;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
 }
 
 .rule-foot {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
 }
 
-.rule-says {
-  flex: 1;
+.rule-editor .rule-foot button:first-child {
+  padding-left: 0;
+  border-color: transparent;
   color: var(--muted);
 }
 
-.rule-form button.primary:enabled {
+.rule-editor button.primary:enabled {
   border-color: var(--accent);
-  background: var(--accent);
+  background-color: var(--accent);
   color: var(--on-accent);
 }
 

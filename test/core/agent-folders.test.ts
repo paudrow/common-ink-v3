@@ -295,6 +295,28 @@ describe("an agent limited to folders", () => {
     expect(claude.said.join("\n")).not.toMatch(/buy-outside|proj-outside|tag-outside|Chores-outside|Journal/);
   });
 
+  it("skips a recurring todo inside its folders and completes the last time of one that ends, with nothing filed outside them, and neither outside", async () => {
+    const w = await world();
+    const todo = "- [ ] Water-inside every:1w-times-2 due:2026-10-10";
+    const chores = await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: todo });
+    const elsewhere = await perform(env.DB, w.ada, { type: "note.create", text: "- [ ] Water-outside every:1w due:2026-10-10" });
+    const daily = await perform(env.DB, w.ada, { type: "daily.open", on: "2026-10-11" });
+    const claude = await asAgent(w.limited.token);
+
+    const skipped = await claude.json<{ text: string; revision: number; filed?: unknown }>("set_todo", { id: chores.id, revision: 1, line: 0, text: todo, skip: true, on: "2026-10-11" });
+    expect(skipped.text).toBe("- [ ] Water-inside every:1w-times-1 due:2026-10-17");
+    expect(skipped.filed).toBeUndefined();
+
+    const last = await claude.json<{ text: string; filed: { dailyNoteId: string | null; todos: number } }>("set_todo", { id: chores.id, revision: skipped.revision, line: 0, text: skipped.text, done: true, on: "2026-10-11" });
+    expect(last.text).toBe("- [x] Water-inside every:1w-times-1 due:2026-10-17");
+    expect(last.filed).toEqual({ on: "2026-10-11", dailyNoteId: null, todos: 1 });
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: daily.id })).revision).toBe(1);
+
+    expect(await claude.call("set_todo", { id: elsewhere.id, revision: 1, line: 0, text: "- [ ] Water-outside every:1w due:2026-10-10", skip: true, on: "2026-10-11" })).toEqual(NO_NOTE);
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: elsewhere.id })).revision).toBe(1);
+    expect(await claude.call("set_todo", { id: chores.id, revision: 3, line: 0, text: last.text, skip: true })).toMatchObject({ isError: true, text: expect.stringContaining("invalid") });
+  });
+
   it("completes a recurring todo inside its folders and files nothing on a daily note outside them, makes no daily folder, and is told of no daily note", async () => {
     const w = await world();
     const todo = "- [ ] Water-inside every:1w due:2026-10-10";

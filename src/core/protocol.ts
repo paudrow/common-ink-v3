@@ -81,8 +81,8 @@ const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
-/** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done` or `last-fri`. docs/todos.md has every rule. */
-const Recurrence = z.string().max(40).refine((rule) => parseRule(rule) !== null, "not a way to recur, such as 2w, mon,thu, 3d-after-done or last-fri");
+/** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done`, `last-fri`, `mar-1` or `1m-times-5`. docs/todos.md has every rule. */
+const Recurrence = z.string().max(1000).refine((rule) => parseRule(rule) !== null, "not a way to recur, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 or 1m-times-5");
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 
 export const Op = z.discriminatedUnion("type", [
@@ -213,7 +213,13 @@ export const Op = z.discriminatedUnion("type", [
    * `every` sets how it recurs, or with null stops it recurring. Checking off a todo that recurs
    * leaves it open with its next due date and a mark of when it was last done and how many times,
    * and files the checked line on the daily note of whoever asks, or of the member an agent acts
-   * for. `on` is the day that happens on, as it is for note.write.
+   * for. `on` is the day that happens on, as it is for note.write. A rule that ends after so many
+   * times has one fewer left, and its last time, or the last before the day it runs until, checks
+   * the todo off for good.
+   *
+   * `skip` moves a recurring todo's due date to its next one with nothing checked off, recorded or
+   * filed. It counts as one of a rule's times. It is refused for a todo that doesn't recur, for the
+   * last time of a rule that ends, and together with `done`.
    */
   z.object({
     type: z.literal("todo.set"),
@@ -225,6 +231,7 @@ export const Op = z.discriminatedUnion("type", [
     importance: ImportanceLevel.optional(),
     due: Day.nullable().optional(),
     every: Recurrence.nullable().optional(),
+    skip: z.boolean().optional(),
     on: Day.optional(),
   }).strict(),
   /**
@@ -405,6 +412,8 @@ export interface ListedTodo {
   due: string | null;
   /** How it recurs, as written after `every:`, or null. */
   every: string | null;
+  /** That rule as a chip says it, such as "every 2 weeks on Mon · 5 left", or null. */
+  recurs: string | null;
   /** When it was last checked off and how many times, for a todo that recurs and has been. */
   lastDone: LastDone | null;
   /** The tags of the note it is in. The ones written on its own line are those `text` has. */

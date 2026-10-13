@@ -1,13 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Icon, changeTodo, nameKey, parseTodo, tagsOn, useNow, type App, type Folders, type Importance, type ListedTodo, type OpInput, type PluginHost, type Results, type TodoChange, type TodoCompletion } from "../../plugin-api.ts";
+import { Icon, changeTodo, nameKey, parseTodo, ruleLabel, tagsOn, useNow, type App, type Folders, type Importance, type ListedTodo, type OpInput, type PluginHost, type Results, type TodoChange, type TodoCompletion } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
 import { IMPORTANCE } from "./chips.ts";
-import { completed, refused } from "./completed.ts";
+import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
 import { DUE_FILTERS, addDays, dayOf, dueLabel, dueRange, dueState, type DueFilter } from "./dates.ts";
-import { doneLabel, doneName, everyLabel, everyName } from "./recurrence.ts";
-import { RuleForm } from "./RuleForm.tsx";
+import { doneLabel, doneName, everyName } from "./recurrence.ts";
+import { RuleEditor } from "./RuleEditor.tsx";
 
 /** What the list is narrowed to. Kept in this browser, so the page opens the way it was left. */
 interface Filters {
@@ -47,11 +47,17 @@ const keyOf = (todo: Pick<ListedTodo, "noteId" | "line">) => `${todo.noteId}/${t
 
 /** The todo as it reads once `change` is made on the day `on`, by the function the server makes it with: a recurring todo checked off stays open, due next. */
 function changed(todo: ListedTodo, change: TodoChange, on: string): ListedTodo {
-  const text = changeTodo(todo.text, change, on).line;
+  let text: string;
+  try {
+    text = changeTodo(todo.text, change, on).line;
+  } catch {
+    // A change the line no longer takes, such as a skip of a todo someone else just stopped: the server says why, and the row stays.
+    return todo;
+  }
   const read = parseTodo(text);
   if (!read) return todo;
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
-  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, lastDone, words: read.words };
+  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
@@ -147,15 +153,13 @@ function Row({ todo, now, tag, app, completing, onChange, onOpen, completions }:
     openPopover(more.current!, label, content);
   };
   const setEvery = () =>
-    panel("Recurrence", (close) => (
-      <RuleForm
-        every={todo.every}
-        onSet={(every) => {
-          close();
-          onChange(row.current, { every });
-        }}
-      />
-    ));
+    panel("Recurrence", (close) => {
+      const set = (change: TodoChange) => {
+        close();
+        onChange(row.current, change);
+      };
+      return <RuleEditor every={todo.every} due={todo.due} now={now} onSet={(every) => set({ every })} onSkip={() => set({ skip: true })} />;
+    });
   const listDone = () => {
     const ask = () => completions(row.current);
     panel("Completions", (close) => (
@@ -236,7 +240,7 @@ function Row({ todo, now, tag, app, completing, onChange, onOpen, completions }:
           )}
           {todo.every && (
             <span className="todo-chip todo-every" title={everyName(todo.every)}>
-              {everyLabel(todo.every)}
+              {todo.recurs ?? todo.every}
             </span>
           )}
           {todo.lastDone && (
@@ -349,14 +353,16 @@ export function TodosPage({ host, app, onOpen }: Props) {
       sent.then(
         (note) => {
           const left = changed(todo, to, now);
+          // A recurring todo's completion moved its due date, counted it and filed a line on the daily note: Undo reverts the change that did, which takes all of it back.
+          if (done && note.filed) completed(todo.words, () => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
           // Undo is the same change the other way, made to the line this one left, at the revision it made.
           // It is made to the todo as the page has it by then, which may have been changed again since.
-          if (done && left.done) completed(left.words, () => send(shown.current.find((t) => keyOf(t) === keyOf(todo) && t.done) ?? { ...left, revision: note.revision }, { done: false }).then(() => undefined, refused));
+          else if (done && left.done) completed(left.words, () => send(shown.current.find((t) => keyOf(t) === keyOf(todo) && t.done) ?? { ...left, revision: note.revision }, { done: false }).then(() => undefined, refused));
         },
         (err: unknown) => setProblem(err instanceof Error ? err.message : "The todo couldn't be changed."),
       );
     },
-    [send, now],
+    [send, now, host],
   );
 
   const completions = useCallback(

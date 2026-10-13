@@ -49,7 +49,7 @@ The day a todo is due, written `due:2026-10-14` on its line. It is a calendar da
 _Avoid_: Deadline
 
 **Recurrence**:
-How a todo comes due again, written `every:` and a rule on its line: every N days, weeks, months or years after the due date (`every:2w`); N after it was last done (`every:3d-after-done`); days of the week (`every:mon,thu`); a day of the month from its start or end (`every:3rd-day`, `every:last-day`); the nth weekday of the month (`every:2nd-tue`, `every:last-fri`). `docs/todos.md` has each rule and its next due date.
+How a todo comes due again, written `every:` and a rule on its line: every N days, weeks, months or years after the due date (`every:2w`); N after it was last done (`every:3d-after-done`); days of the week, every week or every Nth (`every:mon,thu`, `every:2w-mon,thu`); days of the month from its start or end (`every:3rd-day`, `every:1st-day,15th-day`, `every:last-day`); the nth weekdays of the month (`every:2nd-tue`, `every:last-fri`); a date or a weekday of a month every year (`every:mar-1`, `every:1st-mon-mar`). A rule may end, on a day or after so many more times (`-until-2026-12-31`, `-times-5`), and its last time checks the todo off for good. A member can **skip** one occurrence: the due date moves to the next with nothing checked off. `docs/todos.md` has each rule and its next due date.
 _Avoid_: Repeat, schedule
 
 **Completion**:

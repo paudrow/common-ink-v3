@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { createElement } from "react";
-import { parseTodo, rewriteTodo, type Importance, type LastDone, type PluginHost } from "../../plugin-api.ts";
+import { parseTodo, rewriteTodo, skipTodo, type Importance, type LastDone, type PluginHost } from "../../plugin-api.ts";
 import { chips, type Chip, type Source, type Token } from "../lib/chips.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
 import { replacing } from "../lib/rewrite.ts";
@@ -10,7 +10,7 @@ import { openPopover } from "../lib/Popover.tsx";
 import { Completions } from "./Completions.tsx";
 import { dueLabel, dueState, today } from "./dates.ts";
 import { doneLabel, doneName, everyLabel, everyName } from "./recurrence.ts";
-import { RuleForm } from "./RuleForm.tsx";
+import { RuleEditor } from "./RuleEditor.tsx";
 
 interface Checkbox extends Token {
   checked: boolean;
@@ -32,6 +32,8 @@ export interface TodoChipsContext {
   noteId: string;
   /** Told of a todo checked off in the note and left done, to be undone with `untick`. */
   onCompleted: (view: EditorView, words: string) => void;
+  /** Told of a recurring todo checked off in the note, once the server has completed it: the change that did. */
+  onRecurred: (words: string, revision: number) => void;
 }
 
 export const IMPORTANCE = ["Normal", "!", "!!", "!!!"] as const;
@@ -82,7 +84,7 @@ export function untick(view: EditorView): boolean {
  * completes a recurring todo whose box a write checked, and the editor takes the line it answers with.
  * Only the server can file the line on the daily note, so nothing is rolled forward here.
  */
-const checkbox = ({ host, noteId, onCompleted }: TodoChipsContext): Chip<Checkbox> => ({
+const checkbox = ({ host, noteId, onCompleted, onRecurred }: TodoChipsContext): Chip<Checkbox> => ({
   ...onTodoLine,
   id: "task",
   find(line, offset) {
@@ -99,14 +101,25 @@ const checkbox = ({ host, noteId, onCompleted }: TodoChipsContext): Chip<Checkbo
       const editor = el.closest<HTMLElement>(".cm-editor");
       const view = editor && EditorView.findFromDOM(editor);
       const at = view?.posAtDOM(el);
+      const was = view && at !== undefined ? parseTodo(view.state.doc.lineAt(Math.min(at, view.state.doc.length)).text) : null;
+      // What was typed before the click goes first, in a write of its own, so that the change that completes a recurring todo holds the check alone and Undo takes back nothing else.
+      const before = box.checked && was?.every ? host.app().saveNote(noteId) : undefined;
       source.rewrite(box.checked ? "[x]" : "[ ]");
       // Saved at once, so the write holds the check alone and not what is typed on the line in the pause after it.
-      host.app().saveNote(noteId);
+      const saved = host.app().saveNote(noteId);
       if (!box.checked || !view || at === undefined) return;
-      // Said only of a todo this left done: a note that can't be written, or a recurring todo, which the server opens again, has nothing to undo.
       const line = view.state.doc.lineAt(Math.min(at, view.state.doc.length));
       const todo = parseTodo(line.text);
-      if (!todo?.done || todo.every) return;
+      // A note that can't be written has nothing to undo.
+      if (!todo?.done) return;
+      if (todo.every) {
+        // The server completes it, and says so of the write that checked it: that change is what Undo takes back.
+        void Promise.all([saved, before]).then((writes) => {
+          const completing = writes.find((note) => note?.filed);
+          if (completing) onRecurred(todo.words, completing.revision);
+        });
+        return;
+      }
       view.dispatch({ effects: tick.of({ from: line.from, text: line.text }) });
       onCompleted(view, todo.words);
     });
@@ -187,25 +200,46 @@ function opener(el: HTMLElement, says: string, name: string, disabled: boolean, 
   button.addEventListener("click", () => open(button));
 }
 
-/** How a todo recurs. A click opens the form that sets it, which rewrites the token, or takes it away with the space before it. */
+/** How a todo recurs, in a few plain words. A click opens the editor of the rule, which rewrites the token, or takes it away with the space before it. */
 const every: Chip<Every> = {
   ...onTodoLine,
+  // Its words are longer than its token, so it takes its own width: what follows it on its row moves by the difference, and nothing else does.
+  keepsWidth: false,
   id: "every",
   find(line, offset) {
     const todo = parseTodo(line, offset);
     return todo?.every ? [{ from: todo.every.from, to: todo.every.to, written: todo.every.written }] : [];
   },
   draw(el, token, source) {
+    // The chip doesn't hold its token as the chips drawn over theirs do, so it says here what it stands for.
+    el.dataset.written = `every:${token.written}`;
     opener(el, everyLabel(token.written), everyName(token.written), source.readOnly, (anchor) =>
-      openPopover(anchor, "Recurrence", (close) =>
-        createElement(RuleForm, {
+      openPopover(anchor, "Recurrence", (close) => {
+        const line = source.line();
+        const rewrite = (next: (line: string) => string) => {
+          source.rewriteLine(next);
+          close();
+        };
+        return createElement(RuleEditor, {
           every: token.written,
-          onSet(next) {
-            source.rewriteLine((line) => rewriteTodo(line, { every: next }));
+          due: (line && parseTodo(line.text)?.due?.date) ?? null,
+          now: today(),
+          onSet: (next) => rewrite((text) => rewriteTodo(text, { every: next })),
+          onSkip: () =>
+            rewrite((text) => {
+              try {
+                return skipTodo(text, today());
+              } catch {
+                // The line was written another way while the editor was open, and has no later time to skip to.
+                return text;
+              }
+            }),
+          onText() {
             close();
+            source.edit();
           },
-        }),
-      ),
+        });
+      }),
     );
   },
 };
@@ -306,6 +340,9 @@ const look = EditorView.baseTheme({
   ".md-chip-task:has(input:disabled) > :last-child": { cursor: "default" },
   ".md-todo-token": { whiteSpace: "nowrap" },
   ".md-chip-sized > span.md-todo-chip": { top: "0.2em", bottom: "0.2em", borderRadius: "4px", overflow: "hidden", fontSize: "0.82em", lineHeight: "1", whiteSpace: "nowrap", background: "var(--hover)", color: "var(--muted)" },
+  // Smaller than the line and no taller, on the line's own baseline, so the line is as high with it as with its token.
+  ".md-chip-every": { position: "relative", display: "inline-block", padding: "0 0.45em", borderRadius: "4px", fontSize: "0.82em", lineHeight: "1.35", whiteSpace: "nowrap", background: "var(--hover)", color: "var(--muted)" },
+  ".md-chip-every:focus-within": { outline: "2px solid var(--accent)", outlineOffset: "1px" },
   ".md-todo-chip > input, .md-todo-chip > select, .md-todo-chip > button": { position: "absolute", inset: "0", width: "100%", height: "100%", minWidth: "0", margin: "0", padding: "0", border: "0", opacity: "0", cursor: "pointer", font: "inherit" },
   ".md-todo-chip > :disabled": { cursor: "default" },
   ".md-chip-sized > span.md-todo-chip:focus-within": { outline: "2px solid var(--accent)", outlineOffset: "1px" },

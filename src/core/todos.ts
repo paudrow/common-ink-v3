@@ -1,7 +1,7 @@
 import type { ChangeSet } from "@codemirror/state";
 import { following } from "./follow.ts";
 import { linesOutsideCode } from "./lines.ts";
-import { RULE_PATTERN, nextDue, parseRule, type Rule } from "./recurrence.ts";
+import { RULE_PATTERN, counted, nextDue, parseRule, skippedTo, writeRule, type Rule } from "./recurrence.ts";
 import { applyChanges } from "./text.ts";
 
 /**
@@ -137,6 +137,8 @@ export interface TodoChange {
   every?: string | null;
   /** When it was last checked off and how many times, or null to take the mark away. */
   lastDone?: LastDone | null;
+  /** True moves a recurring todo's due date to its next one, with nothing checked off. */
+  skip?: boolean;
 }
 
 export interface Edit extends Span {
@@ -173,7 +175,7 @@ export function todoEdits(line: string, change: TodoChange): Edit[] {
   }
 
   if (change.every !== undefined && change.every !== (todo.every?.written ?? null)) {
-    if (change.every !== null && !parseRule(change.every)) throw new RangeError(`${change.every} isn't a way to recur. docs/todos.md has the rules, such as 2w, mon,thu, 3d-after-done and last-fri`);
+    if (change.every !== null && !parseRule(change.every)) throw new RangeError(`${change.every} isn't a way to recur. docs/todos.md has the rules, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 and 1m-times-5`);
     if (!todo.every) tail += ` every:${change.every}`;
     else if (change.every) edits.push({ from: todo.every.from, to: todo.every.to, insert: `every:${change.every}` });
     else edits.push({ from: todo.every.from - 1, to: todo.every.to, insert: "" });
@@ -213,24 +215,47 @@ export interface Completed {
 
 /**
  * Checking a todo off on the day `on`. A todo that recurs stays open: its due date moves to the next
- * one, its `done:` mark says `on` and one more time, and the line as it was, checked and without how
- * it recurs, is what gets filed. Any other todo is checked, and nothing is filed. Every completion
- * comes through here on the server: the todo.set operation, and a write that checks a recurring
- * todo's box, which is what the editor's checkbox and a typed `x` are. The Todos page calls it to
- * show at once what the server will answer.
+ * one, its `done:` mark says `on` and one more time, a rule that ends after so many times has one
+ * fewer left, and the line as it was, checked and without how it recurs, is what gets filed. The
+ * last time of a rule that ends checks the todo off for good, its tokens as written, and is filed
+ * the same. Any other todo is checked, and nothing is filed. Every completion comes through here on
+ * the server: the todo.set operation, and a write that checks a recurring todo's box, which is what
+ * the editor's checkbox and a typed `x` are. The Todos page calls it to show at once what the server
+ * will answer.
  */
 export function completeTodo(line: string, on: string): Completed {
   const todo = parseTodo(line);
   if (!todo || todo.done) return { line, filed: null };
-  const next = todo.every && nextDue(todo.every.rule, { due: todo.due?.date ?? null, done: on });
-  if (!next) return { line: rewriteTodo(line, { done: true }), filed: null };
-  const checked = rewriteTodo(line, { done: true, every: null, lastDone: null });
-  return { line: rewriteTodo(line, { due: next, lastDone: { on, times: (todo.lastDone?.times ?? 0) + 1 } }), filed: `- ${checked.slice(todo.box.from)}` };
+  const rule = todo.every?.rule;
+  const next = rule && nextDue(rule, { due: todo.due?.date ?? null, done: on });
+  if (!rule || (!next && !rule.end)) return { line: rewriteTodo(line, { done: true }), filed: null };
+  const filed = `- ${rewriteTodo(line, { done: true, every: null, lastDone: null }).slice(todo.box.from)}`;
+  if (!next) return { line: rewriteTodo(line, { done: true }), filed };
+  return { line: rewriteTodo(line, { due: next, every: writeRule(counted(rule)), lastDone: { on, times: (todo.lastDone?.times ?? 0) + 1 } }), filed };
 }
 
-/** The todo's line with `change` made, as todo.set makes it on the day `on`: checking it off is `completeTodo`'s to do, and the rest is `rewriteTodo`'s. */
-export function changeTodo(line: string, { done, ...rest }: TodoChange, on: string): Completed {
+/**
+ * Skipping a recurring todo's occurrence on the day `on`: its due date moves to the next one after
+ * both its due date and that day, as if it had been done on the later of the two, and it counts as
+ * one of the times of a rule that ends after so many. Nothing is checked off. It is refused for a
+ * todo that doesn't recur, one that is done, and one with no later time to skip to.
+ */
+export function skipTodo(line: string, on: string): string {
+  const todo = parseTodo(line);
+  if (!todo?.every || todo.done) throw new RangeError("Only an open todo that recurs can be skipped");
+  const next = skippedTo(todo.every.rule, { due: todo.due?.date ?? null, on });
+  if (!next) throw new RangeError("This is the last time this todo recurs, so there is no later one to skip to. Check it off, or stop it recurring");
+  return rewriteTodo(line, { due: next, every: writeRule(counted(todo.every.rule)) });
+}
+
+/**
+ * The todo's line with `change` made, as todo.set makes it on the day `on`: checking it off is
+ * `completeTodo`'s to do, skipping it `skipTodo`'s, and the rest is `rewriteTodo`'s.
+ */
+export function changeTodo(line: string, { done, skip, ...rest }: TodoChange, on: string): Completed {
+  if (done && skip) throw new RangeError("A todo is checked off or skipped, not both");
   const next = rewriteTodo(line, done === false ? { ...rest, done } : rest);
+  if (skip) return { line: skipTodo(next, on), filed: null };
   return done ? completeTodo(next, on) : { line: next, filed: null };
 }
 
