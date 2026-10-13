@@ -2739,6 +2739,10 @@ kbd {
   font-size: 13px;
 }
 
+.recorder:focus {
+  outline: none;
+}
+
 .recorder p {
   margin: 0;
 }
