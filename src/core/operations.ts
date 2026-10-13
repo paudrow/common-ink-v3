@@ -151,7 +151,7 @@ export interface NoteRow extends SummaryRow {
   indexed: number;
 }
 
-/** What a note's `indexed` is once its links, todos, projects and tags have been made from its text. */
+/** What a note's `indexed` is once its links, todos and tags have been made from its text. */
 const MADE = 1;
 
 const SUMMARY_COLUMNS = `n.id, n.folder_id, n.revision, n.title, n.snippet, n.open_todos, n.created_at, n.updated_at, n.updated_by, n.updated_by_kind, n.private_owner,
@@ -218,6 +218,9 @@ const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx
 
 const NO_SUCH_NOTE = "No such note";
 const NO_SUCH_FOLDER = "No such folder";
+
+/** The folder bound as ?4 and every folder under it, for a listing narrowed to a folder. */
+const UNDER = "WITH RECURSIVE under (id) AS (SELECT ?4 UNION SELECT f.id FROM folders f JOIN under u ON f.parent_id = u.id)";
 
 const CANT_CHANGE = "You can read this note, and not change it";
 
@@ -361,13 +364,12 @@ function inParts(rows: readonly unknown[]): string[] {
 
 const INDEXED = {
   todos: "INSERT INTO todos (note_id, line, done, importance, due, text) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]')",
-  projects: "INSERT INTO todo_projects (note_id, line, project, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
   tags: "INSERT INTO note_tags (note_id, tag, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]')",
 } as const;
-const INDEX_TABLE = { todos: "todos", projects: "todo_projects", tags: "note_tags" } as const;
+const INDEX_TABLE = { todos: "todos", tags: "note_tags" } as const;
 
 /**
- * The statements that make the index of a note's todos, their projects, and its tags what `text`
+ * The statements that make the index of a note's todos and its tags what `text`
  * says, or none for a part that `was` says the same of. Like `linking`, they go in the batch that
  * changes the text, and with `atRevision` do nothing unless the note is still at that revision.
  */
@@ -386,7 +388,7 @@ function indexing(ctx: Context, noteId: string, text: string, { was, atRevision 
 }
 
 /**
- * Makes the links, todos, projects and tags of the notes that have never had them made, from their
+ * Makes the links, todos and tags of the notes that have never had them made, from their
  * text: notes written before there were tables for them, and every note after a rebuild asks. It
  * covers every note in the workspace, whoever asks, since it tells the asker nothing: what it writes
  * is only ever read back through `SEEN`. It does so many a call. False when there are more.
@@ -816,14 +818,16 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       await mend(ctx);
+      // The folder narrows inside what the asker sees and never widens it: one they can't see is no folder.
+      const folder = op.folderId === undefined ? null : (await loadFolder(ctx, op.folderId, "view")).id;
       const { results } = await ctx.db
         .prepare(
-          `SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
+          `${UNDER} SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
              (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
            FROM todos t JOIN notes n ON n.id = t.note_id
            WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")}
              AND (?3 = 1 OR t.done = 0)
-             AND (?4 IS NULL OR EXISTS (SELECT 1 FROM todo_projects p WHERE p.note_id = t.note_id AND p.line = t.line AND p.project = ?4))
+             AND (?4 IS NULL OR n.folder_id IN (SELECT id FROM under))
              AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = t.note_id AND g.tag = ?5))
              AND (?6 IS NULL OR t.due >= ?6)
              AND (?7 IS NULL OR t.due <= ?7)
@@ -837,7 +841,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           ctx.workspaceId,
           ctx.sight.bind,
           op.includeCompleted ? 1 : 0,
-          op.project === undefined ? null : nameKey(op.project),
+          folder,
           op.tag === undefined ? null : nameKey(op.tag),
           op.dueFrom ?? null,
           op.dueTo ?? null,
@@ -861,7 +865,6 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             done: r.done === 1,
             importance: r.importance,
             due: r.due,
-            projects: todo?.projects.map((p) => p.name) ?? [],
             tags: JSON.parse(r.tags) as string[],
             words: todo?.words ?? r.text,
             access: noteLevel(ctx.sight, { id: r.note_id, folder_id: r.folder_id, private_owner: r.private_owner }) === "edit" ? "edit" : "view",
@@ -876,18 +879,14 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx) {
       await mend(ctx);
-      const [projects, tags] = await ctx.db.batch<{ name: string }>([
-        ctx.db
-          .prepare(`SELECT MIN(p.name) AS name FROM todo_projects p JOIN notes n ON n.id = p.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} GROUP BY p.project ORDER BY p.project`)
-          .bind(ctx.workspaceId, ctx.sight.bind),
-        ctx.db
-          .prepare(
-            `SELECT MIN(g.name) AS name FROM note_tags g JOIN notes n ON n.id = g.note_id
-             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} AND EXISTS (SELECT 1 FROM todos t WHERE t.note_id = g.note_id) GROUP BY g.tag ORDER BY g.tag`,
-          )
-          .bind(ctx.workspaceId, ctx.sight.bind),
-      ]);
-      return { projects: projects!.results.map((r) => r.name), tags: tags!.results.map((r) => r.name) };
+      const { results } = await ctx.db
+        .prepare(
+          `SELECT MIN(g.name) AS name FROM note_tags g JOIN notes n ON n.id = g.note_id
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} AND EXISTS (SELECT 1 FROM todos t WHERE t.note_id = g.note_id) GROUP BY g.tag ORDER BY g.tag`,
+        )
+        .bind(ctx.workspaceId, ctx.sight.bind)
+        .all<{ name: string }>();
+      return { tags: results.map((r) => r.name) };
     },
   },
 

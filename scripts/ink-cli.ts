@@ -20,12 +20,11 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       replace a note's text (from stdin if --text is left out)
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
-  todos [--project NAME] [--tag NAME] [--due-from DAY] [--due-to DAY] [--no-due true] [--importance N,N]
+  todos [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY] [--no-due true] [--importance N,N]
         [--completed true] [--note ID] [--limit N] [--offset N]
                                       the todos in the notes you can see, open ones unless --completed
-  todo-filters                        the projects and tags that todos can be narrowed by
+  todo-filters                        the tags that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none]
-        [--add-project NAME] [--remove-project NAME]
                                       check a todo off or change it; ID, both Ns and LINE are from todos
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
@@ -66,7 +65,7 @@ A link to a note is [[ID]] or [[ID|display text]]. Write [[Title]] and create an
 the id of the one note with that title, or refuse when none or several have it. --link-titles keep
 leaves such text as it is.
 
-A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14 +Home
+A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
 DAY is a calendar date, YYYY-MM-DD. Importance is 0 for normal and 1 to 3 for !, !! and !!!.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
@@ -76,8 +75,21 @@ export class UsageError extends Error {}
 /** Flags that take no value. */
 const SWITCHES = new Set(["--preview"]);
 
-function parse(argv: string[]): { command: string; positional: string[]; flags: Map<string, string> } {
-  const flags = new Map<string, string>();
+/** The flags a command was given, which remembers the ones it looked for: one it never looked for is not its flag. */
+class Flags extends Map<string, string> {
+  readonly asked = new Set<string>();
+  override get(name: string) {
+    this.asked.add(name);
+    return super.get(name);
+  }
+  override has(name: string) {
+    this.asked.add(name);
+    return super.has(name);
+  }
+}
+
+function parse(argv: string[]): { command: string; positional: string[]; flags: Flags } {
+  const flags = new Flags();
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -204,7 +216,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "todos":
         tool = "list_todos";
         args = given({
-          project: ["project"],
+          folderId: ["folder"],
           tag: ["tag"],
           dueFrom: ["due-from"],
           dueTo: ["due-to"],
@@ -227,7 +239,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           revision: integer("--revision", flags.get("revision")!),
           line: integer("--line", flags.get("line")!),
           text: flags.get("text")!,
-          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], addProject: ["add-project"], removeProject: ["remove-project"] }),
+          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)] }),
         };
         break;
       case "todos-rebuild":
@@ -329,6 +341,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
         throw new UsageError(`No such command: ${command}`);
     }
     if (flags.has("workspace")) args = { ...args, workspace: flags.get("workspace") };
+    // A flag the command doesn't take is refused, and never dropped: a filter that is left out lists everything.
+    const stray = [...flags.keys()].filter((name) => !flags.asked.has(name));
+    if (stray.length) throw new UsageError(`${command} doesn't take ${stray.map((name) => `--${name}`).join(" or ")}`);
 
     const base = (io.env.INK_URL ?? "https://commonink.app").replace(/\/+$/, "");
     for (;;) {

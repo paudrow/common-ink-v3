@@ -38,7 +38,7 @@ _Avoid_: Wikilink, reference
 A note whose text links to the open note. The inspector's Backlinks tab lists the ones the member can see.
 
 **Todo**:
-A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, recurrence, importance, project, and assignees are written on that line and shown as chips. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a recurring todo leaves the open line and appends the checked line to the daily note of the member who checked it off. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, with a control to include completed ones.
+A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, recurrence, importance, and assignees are written on that line and shown as chips. It has the tags written on its line and the tags of its note. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a recurring todo leaves the open line and appends the checked line to the daily note of the member who checked it off. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, with a control to include completed ones.
 _Avoid_: Task, item
 
 **Importance**:
@@ -47,10 +47,6 @@ How urgent a todo is. Three raised levels, written `!`, `!!`, or `!!!` immediate
 **Due date**:
 The day a todo is due, written `due:2026-10-14` on its line. It is a calendar date with no time and no time zone. Overdue is a due date before today, where today is the viewing member's.
 _Avoid_: Deadline
-
-**Project**:
-A `+Name` on a todo that groups it with todos in other notes. It does not tag the note. A todo can be in several. A name starts with a letter and goes on in letters, digits, `_` and `-`. Matching ignores case.
-_Avoid_: Folder, tag
 
 **Daily note**:
 A note for one calendar date, belonging to one member. Its heading is that date in that member's timezone. Which member it belongs to is stored outside the note. The folder comes from that member's settings, and the default is Daily. Changing that setting leaves daily notes already created where they are. An agent files a completion on the connecting member's daily note.
@@ -84,11 +80,11 @@ A person from a member's data source, with or without a Common Ink account. On a
 _Avoid_: Member, user
 
 **Tag**:
-An inline `#tag` in a note, with no space after the `#`, outside code. It tags the whole note, including when it appears on a todo line. It has something in it besides digits, so `#12` is not one. It is not a folder or a heading. Matching ignores case.
+An inline `#tag` in a note, with no space after the `#`, outside code. It tags the whole note, including when it appears on a todo line, and every todo in a note counts as tagged with the note's tags. Todos are grouped by tag and by folder, and by nothing else: a `+Name` on a todo is words. It has something in it besides digits, so `#12` is not one. It is not a folder or a heading. Matching ignores case.
 _Avoid_: Label, project
 
 **Search**:
-A search of the text of notes a member can see, including todo lines, tags, and projects. Archived and trashed notes are excluded unless included.
+A search of the text of notes a member can see, including todo lines and tags. Archived and trashed notes are excluded unless included.
 
 **Quick open**:
 A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included.

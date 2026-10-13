@@ -3,17 +3,16 @@ import { linesOutsideCode } from "./lines.ts";
 /**
  * A todo as a note writes it: a list item with a checkbox, and its options as tokens on the same line.
  *
- *     - [ ] !! Call the bank due:2026-10-14 +Home #money
+ *     - [ ] !! Call the bank due:2026-10-14 #money
  *
  * - `[ ]` is open and `[x]` is done.
  * - `!`, `!!` or `!!!` right after the checkbox is its importance. None is normal.
  * - `due:YYYY-MM-DD` is the day it is due: a calendar date, with no time and no time zone.
- * - `+Name` puts it in a project. A name starts with a letter and goes on in letters, digits, `_` and `-`.
  * - `#tag` tags the whole note, on this line as on any other.
  *
  * A token stands alone: after a space, and before a space, the end of the line, or `.,;:!?)`. Text
- * in inline code, in a link to a note, and in a link's address is never a token. Projects and tags
- * match ignoring case. docs/todos.md says the same to a person.
+ * in inline code, in a link to a note, and in a link's address is never a token. Tags match
+ * ignoring case. docs/todos.md says the same to a person.
  */
 export interface Todo {
   /** Where the `[ ]` is. */
@@ -24,9 +23,9 @@ export interface Todo {
   importanceAt: Span | null;
   /** The first `due:` with a real date. */
   due: (Span & { date: string }) | null;
-  projects: (Span & { name: string })[];
+  /** The tags written on this line. They tag its note, as a tag on any line does. */
   tags: (Span & { name: string })[];
-  /** The line without its list mark, checkbox, importance, due date and projects. */
+  /** The line without its list mark, checkbox, importance and due date. */
   words: string;
 }
 
@@ -45,9 +44,7 @@ const ADDRESS = /\]\([^)\n]*\)/g;
 const AFTER = "(?=$|[\\s.,;:!?)])";
 const IMPORTANCE = /^\s+(!{1,3})(?=\s|$)/;
 const DUE = new RegExp(`(?<=\\s)due:(\\d{4}-\\d{2}-\\d{2})${AFTER}`, "g");
-const PROJECT = new RegExp(`(?<=\\s)\\+(\\p{L}[\\p{L}\\p{N}_-]*)${AFTER}`, "gu");
 const TAG = new RegExp(`(?<=^|\\s)#([\\p{L}\\p{N}_][\\p{L}\\p{N}_/-]*)${AFTER}`, "gu");
-const PROJECT_NAME = /^\p{L}[\p{L}\p{N}_-]*$/u;
 
 /** The line with what is never a token put out of the way, each character still where it was. */
 const readable = (line: string) => {
@@ -64,9 +61,7 @@ export function isDay(day: string): boolean {
   return year >= 1000 && made.getUTCFullYear() === year && made.getUTCMonth() === month - 1 && made.getUTCDate() === date;
 }
 
-export const isProjectName = (name: string) => PROJECT_NAME.test(name);
-
-/** What a project or a tag is matched by: its name in lower case. */
+/** What a tag is matched by: its name in lower case. */
 export const nameKey = (name: string) => name.toLowerCase();
 
 /** The tags on one line of a note, which starts at `offset`. A tag has something in it besides digits, so `#12` is not one. */
@@ -88,11 +83,10 @@ export function parseTodo(line: string, offset = 0): Todo | null {
   const importanceAt = marks ? span(marks[0].length - marks[1]!.length, marks[1]!.length) : null;
   const dated = [...body.matchAll(DUE)].find((m) => isDay(m[1]!));
   const due = dated ? { ...span(dated.index, dated[0].length), date: dated[1]! } : null;
-  const projects = [...body.matchAll(PROJECT)].map((m) => ({ ...span(m.index, m[0].length), name: m[1]! }));
 
   let words = "";
   let at = start;
-  for (const taken of [importanceAt, due, ...projects].filter((s) => s !== null).sort((a, b) => a.from - b.from)) {
+  for (const taken of [importanceAt, due].filter((s) => s !== null).sort((a, b) => a.from - b.from)) {
     words += line.slice(at, taken.from - offset);
     at = taken.to - offset;
   }
@@ -104,7 +98,6 @@ export function parseTodo(line: string, offset = 0): Todo | null {
     importance: (marks?.[1]!.length ?? 0) as Importance,
     importanceAt,
     due,
-    projects,
     tags: tagsOn(line, offset),
     words,
   };
@@ -116,10 +109,6 @@ export interface TodoChange {
   importance?: Importance;
   /** A day as YYYY-MM-DD, or null for no due date. */
   due?: string | null;
-  /** Puts it in a project, unless it is in it already. With `removeProject`, the new one takes the old one's place on the line. */
-  addProject?: string;
-  /** Takes it out of a project, ignoring case. */
-  removeProject?: string;
 }
 
 export interface Edit extends Span {
@@ -129,7 +118,7 @@ export interface Edit extends Span {
 /**
  * The edits to a todo's line that make `change`, as offsets into the line, in order and apart from
  * each other. Each replaces one token's own characters. Taking a token away takes the space before it
- * too, and adding one writes a space before it: due dates and projects go at the end of the line,
+ * too, and adding one writes a space before it: a due date goes at the end of the line,
  * importance right after the checkbox. Nothing else on the line is touched. None when the line
  * isn't a todo or already says all of it.
  */
@@ -153,15 +142,6 @@ export function todoEdits(line: string, change: TodoChange): Edit[] {
     if (!todo.due) tail += ` due:${change.due}`;
     else if (change.due) edits.push({ from: todo.due.from, to: todo.due.to, insert: `due:${change.due}` });
     else edits.push({ from: todo.due.from - 1, to: todo.due.to, insert: "" });
-  }
-
-  if (change.addProject !== undefined && !isProjectName(change.addProject)) throw new RangeError(`${change.addProject} isn't a project's name: a letter, then letters, digits, _ and -`);
-  const adding = change.addProject !== undefined && !todo.projects.some((p) => nameKey(p.name) === nameKey(change.addProject!)) ? change.addProject : undefined;
-  const leaving = change.removeProject === undefined ? [] : todo.projects.filter((p) => nameKey(p.name) === nameKey(change.removeProject!));
-  // A project asked to be both taken out and put in stays as it is written.
-  if (change.addProject === undefined || change.removeProject === undefined || nameKey(change.addProject) !== nameKey(change.removeProject)) {
-    leaving.forEach((p, i) => edits.push(i === 0 && adding ? { from: p.from, to: p.to, insert: `+${adding}` } : { from: p.from - 1, to: p.to, insert: "" }));
-    if (adding && !leaving.length) tail += ` +${adding}`;
   }
 
   if (tail) {
@@ -237,14 +217,12 @@ export function locateTodo(text: string, at: { line: number; text: string }): No
 }
 
 /**
- * What the index of todos holds for one note: its todos, their projects, and the note's tags. It is
- * made from the text alone, so it can always be made again.
+ * What the index of todos holds for one note: its todos, and the note's tags. It is made from the
+ * text alone, so it can always be made again.
  */
 export interface TodoIndex {
   /** Line, done, importance, due, and the line as written. */
   todos: [line: number, done: 0 | 1, importance: Importance, due: string | null, text: string][];
-  /** Line, the project's key, and its name as written. */
-  projects: [line: number, key: string, name: string][];
   tags: [key: string, name: string][];
 }
 
@@ -252,7 +230,6 @@ export function todoIndex(text: string): TodoIndex {
   const todos = todosIn(text);
   return {
     todos: todos.map((t) => [t.line, t.done ? 1 : 0, t.importance, t.due?.date ?? null, t.text]),
-    projects: todos.flatMap((t) => [...new Map(t.projects.map((p) => [nameKey(p.name), p.name])).entries()].map(([key, name]): [number, string, string] => [t.line, key, name])),
     tags: tagsIn(text).map((name) => [nameKey(name), name]),
   };
 }

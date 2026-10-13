@@ -30,8 +30,7 @@ export const sharedToken = (pathname: string) => ADDRESS.exec(pathname)?.[1] ?? 
 
 /**
  * The plugins that draw a note's text. None of them needs the server, and the page gives them no way
- * to it: the one thing any asks for, the projects a todo's chip offers, is refused, and nobody here
- * can change a todo anyway.
+ * to it.
  */
 const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, tables, math, codeBlocks, bullets];
 

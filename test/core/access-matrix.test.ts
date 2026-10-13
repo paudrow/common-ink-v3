@@ -57,7 +57,7 @@ interface World {
 
 const address = () => `${crypto.randomUUID()}@example.com`;
 
-/** Each note has a todo with a project of its own, and a tag of its own, which give the note away as its title does. */
+/** Each note has a todo with words of its own, and a tag of its own, which give the note away as its title does. */
 const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name}`;
 const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
 
@@ -353,6 +353,15 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         expect((await perform(env.DB, actor, { type: "history.summary", authors: [{ kind: "agent", id: w.secretAgent.id }] })).notes.map((n) => [n.noteId, n.changes])).toEqual(levelOf(name, "secret") === "-" ? [] : [[w.notes.secret, 1]]);
         await run("history.revertAuthor narrowed", "history.revertAuthor", { author: { kind: "agent", id: "aaaaaaaaaaaa" }, noteIds: every }, role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")) ? "forbidden" : "done");
         await run("note.list in a hidden folder", "note.list", { folderId: w.folders.Open }, "done");
+        // The todos of each folder, with the folder inside it: a folder that isn't there for the actor is no folder, as one that never was is, and no note is listed that they can't see.
+        for (const folder of FOLDERS) {
+          const seen = folderLevelOf(name, folder) !== "-";
+          await run(`todo.list in ${folder}`, "todo.list", { folderId: w.folders[folder], includeCompleted: true }, seen ? "done" : NO_FOLDER);
+          if (!seen) continue;
+          const inside = NOTES.filter((note) => (FOLDER_OF[note] === folder || (folder === "Team" && FOLDER_OF[note] === "Deep")) && levelOf(name, note) !== "-");
+          expect((await perform(env.DB, actor, { type: "todo.list", folderId: w.folders[folder] })).todos.map((t) => t.noteId).sort(), `todo.list in ${folder}`).toEqual(inside.map((note) => w.notes[note]).sort());
+        }
+        await run("todo.list in a folder that never was", "todo.list", { folderId: MISSING }, NO_FOLDER);
         // Several notes at once, each answered for itself: a hidden note is answered word for word as one that was never there, and one the actor may only read is not reverted.
         const asMissing = (answer: object, noteId: string) => ({ ...answer, noteId });
         const previews = await perform(env.DB, actor, { type: "history.previewRevert", ...everyNote(w, 1) });

@@ -21,9 +21,9 @@ const COMMANDS: Record<string, string[][]> = {
   write_note: [["write", ID, "--base", "1", "--text", "# Hi", "--write-id", "w1", "--link-titles", "keep"]],
   backlinks: [["backlinks", ID]],
   rebuild_links: [["links-rebuild"]],
-  list_todos: [["todos", "--project", "Home", "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--completed", "true", "--note", ID, "--limit", "5", "--offset", "5"]],
+  list_todos: [["todos", "--folder", ID, "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--completed", "true", "--note", ID, "--limit", "5", "--offset", "5"]],
   todo_filters: [["todo-filters"]],
-  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--add-project", "Home", "--remove-project", "Work"]],
+  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none"]],
   rebuild_todos: [["todos-rebuild"]],
   move_note: [["move", ID, "--folder", ID]],
   list_folders: [["folders"]],
@@ -89,5 +89,14 @@ describe("what an agent can do, against what the web app can", () => {
       expect([...sent].sort(), `ink has no way to send every argument of ${tool.name}; add a command and list it in COMMANDS`).toEqual(argumentsOf(tool).sort());
     }
     expect(Object.keys(COMMANDS).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  });
+
+  it("refuses a flag a command doesn't take, and asks the server nothing: a filter dropped unsaid would list everything", async () => {
+    for (const argv of [["todos", "--project", "Home"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--add-project", "Home"], ["folders", "--tag", "money"]]) {
+      const said: string[] = [];
+      const io = { env: { INK_TOKEN: "cink_x" }, stdin: async () => "", out: (text: string) => void said.push(text), fetch: (async () => expect.unreachable(argv.join(" "))) as unknown as typeof fetch };
+      expect(await run(argv, io), argv.join(" ")).not.toBe(0);
+      expect(said.join("\n"), argv.join(" ")).toContain(`${argv[0]} doesn't take ${argv.find((arg) => arg.startsWith("--") && !["--revision", "--line", "--text"].includes(arg))}`);
+    }
   });
 });

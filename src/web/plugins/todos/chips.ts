@@ -1,8 +1,9 @@
-import type { Extension, Range } from "@codemirror/state";
+import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { completeTodo, parseTodo, rewriteTodo, type Importance } from "../../plugin-api.ts";
 import { chips, type Chip, type Token } from "../lib/chips.ts";
-import { drawnInView } from "../lib/live.ts";
+import { drawnInView, touched, writable } from "../lib/live.ts";
+import { replacing } from "../lib/rewrite.ts";
 import { onTodo, todoLines } from "../lib/todoLines.ts";
 import { dueLabel, dueState, today } from "./dates.ts";
 
@@ -15,9 +16,6 @@ interface ImportanceMarks extends Token {
 interface Due extends Token {
   date: string;
 }
-interface Project extends Token {
-  name: string;
-}
 
 export const IMPORTANCE = ["Normal", "!", "!!", "!!!"] as const;
 
@@ -28,8 +26,42 @@ export const IMPORTANCE = ["Normal", "!", "!!", "!!!"] as const;
  */
 const onTodoLine = { keepsWidth: true, inCode: true, skip: (state: Parameters<typeof onTodo>[0], token: Token) => !onTodo(state, token.from) } as const;
 
-/** A checkbox that checks its todo off when it is clicked, as `completeTodo` says a todo is, or writes `[ ]` to open it again. */
-const checkbox: Chip<Checkbox> = {
+/** A todo's line as checking it off left it, and where that line starts now. */
+interface Ticked {
+  from: number;
+  text: string;
+}
+
+const tick = StateEffect.define<Ticked>();
+
+/** The todo last checked off in this editor, followed through every change since: what Undo opens again. */
+const ticked = StateField.define<Ticked | null>({
+  create: () => null,
+  update(was, tr) {
+    for (const effect of tr.effects) if (effect.is(tick)) return effect.value;
+    return was && tr.docChanged ? { ...was, from: tr.changes.mapPos(was.from, 1) } : was;
+  },
+});
+
+/** The todo last checked off in `view`, as todo.set takes it, when its line still reads as checking it off left it. */
+export function tickedIn(view: EditorView): { line: number; text: string } | null {
+  const { doc } = view.state;
+  const at = view.state.field(ticked, false);
+  const line = at && doc.lineAt(Math.min(at.from, doc.length));
+  return line && line.text === at.text ? { line: line.number - 1, text: line.text } : null;
+}
+
+/** Opens the todo last checked off in `view` again, as the member's edit. False when its line no longer reads as checking it off left it. */
+export function untick(view: EditorView): boolean {
+  const at = writable(view.state) ? tickedIn(view) : null;
+  if (!at) return false;
+  const changes = replacing(at.text, rewriteTodo(at.text, { done: false }), view.state.doc.line(at.line + 1).from);
+  if (changes) view.dispatch({ changes, userEvent: "input.task" });
+  return true;
+}
+
+/** A checkbox that checks its todo off when it is clicked, as `completeTodo` says a todo is, or writes `[ ]` to open it again. `onCompleted` is told of a todo it checked off. */
+const checkbox = (onCompleted: (view: EditorView, words: string) => void): Chip<Checkbox> => ({
   ...onTodoLine,
   id: "task",
   find(line, offset) {
@@ -42,7 +74,20 @@ const checkbox: Chip<Checkbox> = {
     box.checked = token.checked;
     box.disabled = source.readOnly;
     box.setAttribute("aria-label", token.checked ? "Done" : "Not done");
-    box.addEventListener("change", () => (box.checked ? source.rewriteLine(completeTodo) : source.rewrite("[ ]")));
+    box.addEventListener("change", () => {
+      if (!box.checked) return source.rewrite("[ ]");
+      const editor = el.closest<HTMLElement>(".cm-editor");
+      const view = editor && EditorView.findFromDOM(editor);
+      const at = view?.posAtDOM(el);
+      source.rewriteLine(completeTodo);
+      if (!view || at === undefined) return;
+      // Said only of a todo this left done: a note that can't be written, or a todo that completing leaves open, has nothing to undo.
+      const line = view.state.doc.lineAt(Math.min(at, view.state.doc.length));
+      const todo = parseTodo(line.text);
+      if (!todo?.done) return;
+      view.dispatch({ effects: tick.of({ from: line.from, text: line.text }) });
+      onCompleted(view, todo.words);
+    });
     // The keyboard stays in the note: a box ticked with the pointer is not somewhere the next key goes.
     el.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -52,7 +97,7 @@ const checkbox: Chip<Checkbox> = {
     // The tick is an element of its own, so it is painted in the theme's ink.
     el.append(box, document.createElement("i"));
   },
-};
+});
 
 /** Draws what a chip says, with the browser's own control laid over it unseen: a click on the chip is a click on the control. */
 function over<C extends HTMLInputElement | HTMLSelectElement>(el: HTMLElement, says: string, control: C, name: string, readOnly: boolean): C {
@@ -110,30 +155,9 @@ const due: Chip<Due> = {
   },
 };
 
-const NO_PROJECT = "";
-const AS_WRITTEN = "\0";
-
-function project(projects: () => readonly string[]): Chip<Project> {
-  return {
-    ...onTodoLine,
-    id: "project",
-    find: (line, offset) => parseTodo(line, offset)?.projects ?? [],
-    key: () => projects().join("\n"),
-    draw(el, token, source) {
-      const others = projects().filter((name) => name.toLowerCase() !== token.name.toLowerCase());
-      const options = [[token.name, token.name], ...others.map((name) => [name, name] as const), [NO_PROJECT, "No project"], [AS_WRITTEN, "Rename…"]] as const;
-      const select = over(el, `+${token.name}`, choice(options, token.name), "Project", source.readOnly);
-      select.addEventListener("change", () => {
-        if (select.value === AS_WRITTEN) source.edit();
-        else source.rewriteLine((line) => rewriteTodo(line, select.value === NO_PROJECT ? { removeProject: token.name } : { removeProject: token.name, addProject: select.value }));
-      });
-    },
-  };
-}
-
 const written = Decoration.mark({ class: "md-todo-token" });
 
-/** A todo's tokens on the cursor's line, where they are shown as written: each stays in one piece, as its chip is, so the line wraps where it did. */
+/** A todo's token the cursor is on, where it is shown as written: it stays in one piece, as its chip is, so the line wraps where it did. */
 const asWritten = drawnInView((view) => {
   const { state } = view;
   const marked: Range<Decoration>[] = [];
@@ -141,7 +165,7 @@ const asWritten = drawnInView((view) => {
   for (const from of lines) {
     if (!state.field(todoLines).has(from)) continue;
     const todo = parseTodo(state.doc.lineAt(from).text, from);
-    for (const token of todo ? [todo.importanceAt, todo.due, ...todo.projects] : []) if (token) marked.push(written.range(token.from, token.to));
+    for (const token of todo ? [todo.importanceAt, todo.due] : []) if (token && touched(state, token.from, token.to)) marked.push(written.range(token.from, token.to));
   }
   return marked;
 });
@@ -179,5 +203,5 @@ const look = EditorView.baseTheme({
   ".md-chip-importance > span.md-todo-chip": { fontWeight: "700" },
 });
 
-/** Draws a todo's checkbox and its options as chips. `projects` are the ones a project chip offers. */
-export const todoChips = (projects: () => readonly string[]): Extension => [todoLines, chips(checkbox), chips(importance), chips(due), chips(project(projects)), asWritten, look];
+/** Draws a todo's checkbox and its options as chips. `onCompleted` is told of a todo checked off in the note, to be undone with `untick`. */
+export const todoChips = (onCompleted: (view: EditorView, words: string) => void): Extension => [todoLines, ticked, chips(checkbox(onCompleted)), chips(importance), chips(due), asWritten, look];

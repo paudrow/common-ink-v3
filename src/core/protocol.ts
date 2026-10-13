@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isDay, isProjectName } from "./todos.ts";
+import { isDay } from "./todos.ts";
 
 export const MAX_NOTE_LENGTH = 500_000;
 export const MAX_SETTINGS_LENGTH = 100_000;
@@ -80,7 +80,6 @@ const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
-const ProjectName = z.string().max(100).refine(isProjectName, "not a project's name: a letter, then letters, digits, _ and -");
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 
 export const Op = z.discriminatedUnion("type", [
@@ -164,7 +163,7 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional(), resolve: z.record(Id, Resolve).refine((byNote) => Object.keys(byNote).length <= 200, "resolve names at most 200 notes").optional() }),
   /**
    * Makes what is derived from the notes' text again, for every note in the workspace: which notes
-   * link to which, and the index of todos, projects and tags. Nothing needs it while every write
+   * link to which, and the index of todos and tags. Nothing needs it while every write
    * keeps them, so it is for a record that was changed some other way. It covers so many notes a
    * call: while the answer's `done` is false, ask again. It is the same operation as todos.rebuild.
    */
@@ -173,12 +172,15 @@ export const Op = z.discriminatedUnion("type", [
    * The todos in the notes the asker can see: open ones, or done ones too with `includeCompleted`.
    * Open ones come first, then by due date with those that have none last, then the most important.
    * `dueFrom` and `dueTo` are days, both included, and leave out todos with no due date; `noDue`
-   * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `project` and `tag`
-   * match ignoring case, and a tag is the note's. Pass the answer's `next` as `offset` for the page after.
+   * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `tag` matches ignoring
+   * case, and is a tag of the todo's note: one written on the todo's own line, or anywhere else in the
+   * note. `folderId` lists the todos of the notes in that folder and in every folder under it; one the
+   * asker can't see is no folder. Pass the answer's `next` as `offset` for the page after. A field it
+   * doesn't know is refused, so a filter it no longer has, such as a project, is never read as no filter.
    */
   z.object({
     type: z.literal("todo.list"),
-    project: z.string().min(1).max(100).optional(),
+    folderId: Id.optional(),
     tag: z.string().min(1).max(100).optional(),
     dueFrom: Day.optional(),
     dueTo: Day.optional(),
@@ -188,8 +190,8 @@ export const Op = z.discriminatedUnion("type", [
     noteId: Id.optional(),
     limit: z.number().int().min(1).max(200).default(100),
     offset: z.number().int().min(0).default(0),
-  }),
-  /** What todo.list can be narrowed by: the projects of the todos, and the tags of the notes that have todos, in notes the asker can see. */
+  }).strict(),
+  /** What todo.list can be narrowed by, besides the folders of folder.list: the tags of the notes that have todos, in notes the asker can see. */
   z.object({ type: z.literal("todo.filters") }),
   /**
    * Changes one todo by rewriting its line, as a change to its note by whoever asks. `revision`,
@@ -208,9 +210,7 @@ export const Op = z.discriminatedUnion("type", [
     done: z.boolean().optional(),
     importance: ImportanceLevel.optional(),
     due: Day.nullable().optional(),
-    addProject: ProjectName.optional(),
-    removeProject: z.string().min(1).max(100).optional(),
-  }),
+  }).strict(),
   /** The same operation as links.rebuild, under the name of the other record it makes again. */
   z.object({ type: z.literal("todos.rebuild") }),
   /**
@@ -374,10 +374,9 @@ export interface ListedTodo {
   importance: 0 | 1 | 2 | 3;
   /** A calendar date, YYYY-MM-DD, or null. */
   due: string | null;
-  projects: string[];
-  /** The tags of the note it is in. */
+  /** The tags of the note it is in. The ones written on its own line are those `text` has. */
   tags: string[];
-  /** The line without its list mark, checkbox, importance, due date and projects. */
+  /** The line without its list mark, checkbox, importance and due date. */
   words: string;
   /** What the one asking may do with its note. With edit, todo.set changes it. */
   access: GrantAccess;
@@ -678,7 +677,7 @@ export interface Results {
   /** `next` is the `offset` of the page after, or null on the last. */
   "todo.list": { todos: ListedTodo[]; next: number | null };
   /** Each name once, ignoring case, as a note writes it. */
-  "todo.filters": { projects: string[]; tags: string[] };
+  "todo.filters": { tags: string[] };
   "todo.set": Note;
   "todos.rebuild": Rebuilt;
   "note.history": ChangeEntry[];
