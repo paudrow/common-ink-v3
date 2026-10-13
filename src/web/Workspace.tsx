@@ -236,6 +236,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   const embeds = useMemo(
     () =>
       contributed.embeds.map((embed) => {
+        if ("claims" in embed) return embed;
         const guard: Embed = guarded.get(embed) ?? {
           ...embed,
           render(el, written) {

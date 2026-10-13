@@ -1753,8 +1753,7 @@ button.link:hover {
   content: attr(data-label);
 }
 
-.clock-unread,
-.embed-unread {
+.clock-unread {
   color: var(--muted);
   font-size: 0.85em;
 }
@@ -1769,14 +1768,46 @@ button.link:hover {
   pointer-events: none;
 }
 
+/* One box with one radius, and what is drawn in it is cut to that: nothing of another site's own frame shows past it. */
 .embed-below {
   position: absolute;
   box-sizing: border-box;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg-side);
+  border-radius: 10px;
+  background: var(--bg);
   pointer-events: auto;
+}
+
+/* A post's site draws the post's own border and corners. The box is cut to the same corners and adds nothing, so there is one edge and it is the post's. */
+.embed-below[data-embed="post"] {
+  border: 0;
+  border-radius: 12px;
+  background: none;
+}
+
+/* The rest of a block's card: the card above has the top corners and this has the bottom ones. */
+.embed-below-joined {
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+}
+
+.embed-joined.embed-frame-block {
+  padding-bottom: 0;
+}
+
+.embed-joined > .embed-card {
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  box-shadow: none;
+}
+
+.embed-joined .embed-head {
+  padding-bottom: 6px;
+}
+
+.embed-joined .embed {
+  display: none;
 }
 
 /* As far in as a line's own text. */
@@ -1787,6 +1818,20 @@ button.link:hover {
 .embed-below-room > div {
   width: 100%;
   max-width: 40rem;
+}
+
+.embed-below-room-joined > div {
+  max-width: none;
+}
+
+/* The line of an address that is shown as media: a caption's size, and seen only with the pointer on it or on the media, or the cursor on it. It keeps its room either way, so nothing moves. */
+.cm-line.embed-address {
+  font-size: 0.8125rem;
+  transition: opacity 120ms;
+}
+
+.cm-line.embed-address:not(.embed-address-seen):not(:hover) {
+  opacity: 0;
 }
 
 .embed-below-drawn {
@@ -1841,23 +1886,83 @@ button.link:hover {
   text-align: center;
 }
 
+/* A frame whose page is in another colour scheme than the element is given an opaque backdrop by the browser, which would show as white corners round a dark post. */
 .embed-below iframe {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
+  background: none;
+  color-scheme: normal;
 }
 
-.media-name {
-  border-radius: 4px;
-  padding: 0 4px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-family: var(--prose);
-  font-size: 0.9em;
-  cursor: text;
+/* A video before it is played: its picture, what it is called along the top, and a play mark in the middle. */
+.media-play {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: #000;
+  cursor: pointer;
 }
 
+.media-play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.media-poster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-title {
+  position: absolute;
+  inset: 0 0 auto;
+  overflow: hidden;
+  padding: 12px 16px 28px;
+  background: linear-gradient(rgb(0 0 0 / 0.7), transparent);
+  color: #fff;
+  font: 600 15px/1.3 var(--prose);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-title:empty {
+  display: none;
+}
+
+.media-play-mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 64px;
+  height: 44px;
+  translate: -50% -50%;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.72);
+}
+
+.media-play-mark::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -40% -50%;
+  border-block: 9px solid transparent;
+  border-left: 15px solid #fff;
+}
+
+.media-play:hover .media-play-mark {
+  background: var(--accent);
+}
+
+/* What a frame asks before it runs anything. */
 .media-load {
   display: flex;
   flex-direction: column;
@@ -1889,48 +1994,6 @@ button.link:hover {
 .media-load-from {
   color: var(--muted);
   font-size: 12px;
-}
-
-.link-card {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  max-width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0 8px;
-  background: var(--bg-side);
-  color: inherit;
-  font-family: var(--prose);
-  text-decoration: none;
-  vertical-align: top;
-}
-
-.link-card:hover {
-  border-color: var(--line-strong);
-}
-
-.link-card-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.link-card-site {
-  color: var(--muted);
-  font-size: 0.8em;
-}
-
-.html-embed-edit {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0 8px;
-  background: var(--bg-side);
-  color: var(--muted);
-  font: inherit;
-  font-family: var(--mono);
-  font-size: 0.8em;
-  cursor: pointer;
 }
 
 .kanban {

@@ -4,12 +4,16 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type Decoration
 import { keptBelow } from "./below.ts";
 import { closeOptions, refreshOptions, toggleOptions, type Options } from "./embedOptions.ts";
 import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "./embedSyntax.ts";
-import type { Drawn, Embed, Embedded } from "./plugin-api.ts";
+import type { AddressEmbed, Drawn, Embed, Embedded } from "./plugin-api.ts";
+import { isReading } from "./readOnly.ts";
 
 type ByName = ReadonlyMap<string, Embed>;
 
 /** The embeds plugins have registered, by name. */
 const registered = Facet.define<readonly Embed[], ByName>({ combine: (values) => new Map(values.flat().map((e) => [e.name, e])) });
+
+/** What plugins show for an address alone on a line, in the order they were registered. */
+const addressed = Facet.define<readonly AddressEmbed[], readonly AddressEmbed[]>({ combine: (values) => values.flat() });
 
 /** What each drawn embed gave back: how to stop it, and how to change it where it stands if it knows how. */
 const live = new WeakMap<HTMLElement, Drawn>();
@@ -62,6 +66,8 @@ class EmbedWidget extends WidgetType {
       titled.className = "embed-head";
     }
     titled.dataset.title = this.embed.title;
+    // What a block keeps below it is the rest of its card, so the card ends open and that closes it.
+    if (block && this.embed.below) frame.classList.add("embed-joined");
     const el = card.appendChild(document.createElement(block ? "div" : "span"));
     el.className = block ? "embed embed-block" : "embed";
     el.dataset.embed = this.embed.name;
@@ -427,6 +433,6 @@ const arrowsIn = Prec.high(
  * under that name, and keeps what an embed draws below its line. A name nobody registered stays as
  * text. Which embeds there are is said with `embedsAre`.
  */
-export const embedding: Extension = [used, blocks, steppingIn, arrowsIn, Prec.lowest(inline), keptBelow((state) => ({ embeds: state.facet(registered), blocks: state.field(blocks).all }))];
+export const embedding: Extension = [used, blocks, steppingIn, arrowsIn, Prec.lowest(inline), keptBelow((state) => ({ embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
 
-export const embedsAre = (embeds: readonly Embed[]): Extension => registered.of(embeds);
+export const embedsAre = (embeds: readonly (Embed | AddressEmbed)[]): Extension => [registered.of(embeds.filter((e): e is Embed => !("claims" in e))), addressed.of(embeds.filter((e): e is AddressEmbed => "claims" in e))];

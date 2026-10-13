@@ -161,7 +161,7 @@ function Adds({ adds, options, off, keys, mac }: AddsProps) {
   const kinds: { title: string; items: { key: string; text: string; code?: string; chord?: string }[] }[] = [
     { title: "Commands", items: adds.commands.map((c) => ({ key: c.id, text: c.title, code: c.id, chord: keys(c.id) })) },
     { title: "Views", items: adds.views.map((v) => ({ key: `${v.slot}.${v.id}`, text: v.label ? `${SLOT_WORDS[v.slot]}: ${v.label}` : SLOT_WORDS[v.slot] })) },
-    { title: "Embeds", items: adds.embeds.map((e) => ({ key: e.name, text: e.title, code: `${e.block ? ":::" : "::"}${e.name}{}` })) },
+    { title: "Embeds", items: adds.embeds.map((e) => (e.address ? { key: e.name, text: `${e.title}, from its address alone on a line` } : { key: e.name, text: e.title, code: `${e.block ? ":::" : "::"}${e.name}{}` })) },
     { title: "Completions", items: adds.completions.map((c) => ({ key: c.id, text: "A list offered while typing after", code: c.trigger })) },
     { title: "Editor extensions", items: adds.editorExtensions.map((id) => ({ key: id, text: "Added to every note's editor", code: id })) },
   ].filter((kind) => kind.items.length > 0);
