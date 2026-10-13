@@ -303,6 +303,7 @@ describe("the diff of one change", () => {
       added: 2,
       removed: 0,
       omitted: 0,
+      lines: 3,
     });
     expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 1 })).toMatchObject({ added: 1, removed: 0 });
   });
@@ -513,7 +514,7 @@ describe("a preview of a revert", () => {
     expect(await changeRows(id)).toBe(4);
     await perform(env.DB, ada, { type: "history.revertAuthor", author: claude.ref });
     expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 5 })).toEqual(preview.diff);
-    const nothing = { revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0 }, overlaps: [], conflicts: [] };
+    const nothing = { revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0, lines: 5 }, overlaps: [], conflicts: [] };
     expect(await perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref })).toEqual(nothing);
     expect(await perform(env.DB, ada, { type: "note.previewRevert", id, author: { kind: "agent", id: "aaaaaaaaaaaa" } })).toEqual(nothing);
     await expect(perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref, revisions: [3] })).rejects.toMatchObject({ code: "invalid" });
@@ -529,7 +530,7 @@ describe("a preview of a revert", () => {
     expect(await changeRows(id)).toBe(4);
     await perform(env.DB, ada, { type: "note.revert", id, revision: 2 });
     expect(await perform(env.DB, ada, { type: "note.diff", id, revision: 5 })).toEqual(preview.diff);
-    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, to: 5 })).toEqual({ revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0 }, overlaps: [], conflicts: [] });
+    expect(await perform(env.DB, ada, { type: "note.previewRevert", id, to: 5 })).toEqual({ revision: 5, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0, lines: 3 }, overlaps: [], conflicts: [] });
   });
 
   it("names no later change when the later edits are on other lines", async () => {
