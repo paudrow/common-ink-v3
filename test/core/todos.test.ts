@@ -91,11 +91,13 @@ describe("the index of todos", () => {
     await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: true });
     for (const note of [...notes, diary]) await unindex(note.id);
 
-    // Whoever lists first mends every note, their own or not, and is told only of what they can see.
+    // Whoever lists first mends every note they can see. One they can't waits for someone who can, so nothing about it shows in what they are told.
     expect((await list(ada)).length).toBe(45);
     expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ projects: ["P0", "P1"], tags: ["t"], assignees: [] });
-    for (const note of [...notes, diary]) expect(await indexed(note.id)).toEqual(todoIndex(note.text));
+    for (const note of notes) expect(await indexed(note.id)).toEqual(todoIndex(note.text));
+    expect(await indexed(diary.id)).toEqual({ todos: [], projects: [], tags: [] });
     expect(await words(eve, { project: "secret" })).toEqual(["hers alone"]);
+    expect(await indexed(diary.id)).toEqual(todoIndex(diary.text));
   });
 
   it("mends a note on its next write, even one that leaves its todos as they were", async () => {

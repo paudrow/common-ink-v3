@@ -22,7 +22,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       workspace: { id: "w1", name: "Acme", role: "editor" },
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
-      agents: { list: async () => [], connect: async () => ({}) as never, disconnect: async () => {} },
+      agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
       members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
       sharing: { of: async () => ({}) as never, grant: async () => ({}) as never, link: async () => null, revoke: async () => {}, setPrivate: async () => ({ removed: 0 }), all: async () => [] },
       storage: { get: () => undefined, set: () => {} },
@@ -153,7 +153,16 @@ describe("plugin host", () => {
 
     host.setEnabled("notes", false);
     expect(ids()).toEqual(["note.new", "go.todos", "commands.show", "plugins.disable.palette"]);
-    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, error: null });
+    expect(host.contributions().plugins[0]).toEqual({ id: "notes", name: "Notes", enabled: true, required: true, builtIn: false, error: null, description: null, icon: null, screenshots: [], adds: expect.any(Object) });
+  });
+
+  it("says which plugins came with the app, and no others", () => {
+    const { host } = hostWith([notes, palette], { builtIn: ["notes"] });
+
+    expect(host.contributions().plugins.map((p) => [p.id, p.builtIn])).toEqual([
+      ["notes", true],
+      ["palette", false],
+    ]);
   });
 
   it("leaves out the whole of a plugin that can't start, and says why", () => {
@@ -697,6 +706,7 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
       setting: { type: "boolean", default: false, title: "On", description: "Quiet is off until you turn it on here." },
       group: { id: "quiet", name: "Quiet" },
       active: true,
+      switch: true,
     });
 
     host.setEnabled("quiet", true);
@@ -790,5 +800,68 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
 
     for (const [, call] of every(hosts.get("Sharing")!)) await call();
     expect(reached).toHaveLength(15);
+  });
+});
+
+describe("what the host says of each plugin", () => {
+  const stateOf = (host: Host, id: string) => host.contributions().plugins.find((p) => p.id === id)!;
+
+  it("passes on a plugin's description, icon and pictures, and says nothing for one that has none", () => {
+    const shown: Plugin = { ...notes, description: "Notes, listed.", icon: "list", screenshots: [{ src: "/shots/notes.png", alt: "The list of notes" }] };
+    const { host } = hostWith([shown, palette]);
+
+    expect(stateOf(host, "notes")).toMatchObject({ description: "Notes, listed.", icon: "list", screenshots: [{ src: "/shots/notes.png", alt: "The list of notes" }] });
+    expect(stateOf(host, "palette")).toMatchObject({ description: null, icon: null, screenshots: [] });
+  });
+
+  it("lists what a plugin added from its registrations: its commands and the one its page was given, its views by slot, its embeds, completions and editor extensions", () => {
+    const editing: Plugin = { id: "editing", name: "Editing", activate: (host) => void host.editorExtensions.register({ id: "editing.keys", extension: {} }) };
+    const { host } = hostWith([notes, palette, editing]);
+
+    expect(stateOf(host, "notes").adds).toEqual({
+      commands: [
+        { id: "note.new", title: "New note" },
+        { id: "go.todos", title: "Go to Todos" },
+      ],
+      views: [
+        { slot: "column", id: "list", label: null },
+        { slot: "page", id: "todos", label: "Todos" },
+      ],
+      embeds: [{ name: "timer", title: "Timer", block: false }],
+      completions: [{ id: "embeds", trigger: "/" }],
+      editorExtensions: [],
+    });
+    expect(stateOf(host, "palette").adds).toEqual({ commands: [{ id: "commands.show", title: "Show all commands" }], views: [{ slot: "overlay", id: "commands", label: null }], embeds: [], completions: [], editorExtensions: [] });
+    expect(stateOf(host, "editing").adds?.editorExtensions).toEqual(["editing.keys"]);
+  });
+
+  it("remembers the whole of what a plugin added once it is turned off, and knows nothing of one that hasn't been on", () => {
+    const quiet: Plugin = { id: "quiet", name: "Quiet", enabledByDefault: false, activate: (host) => void host.commands.register({ id: "quiet.go", title: "Go quietly", run: () => {} }) };
+    const { host, ids } = hostWith([notes, quiet]);
+    // A page that is listening reads the contributions each time one is taken out, as the Plugins page does.
+    host.subscribe(() => void host.contributions());
+    const whole = stateOf(host, "notes").adds;
+    expect(stateOf(host, "quiet").adds).toBeNull();
+
+    host.setEnabled("notes", false);
+    host.setEnabled("quiet", true);
+
+    expect(ids()).toEqual(["quiet.go", "plugins.enable.notes", "plugins.disable.quiet"]);
+    expect(stateOf(host, "notes")).toMatchObject({ enabled: false, adds: whole });
+    expect(stateOf(host, "quiet").adds?.commands).toEqual([{ id: "quiet.go", title: "Go quietly" }]);
+  });
+
+  it("marks the setting that turns a plugin on and off as its switch, and no other", () => {
+    const reader: Plugin = { id: "reader", name: "Reader", settings: { wide: { type: "boolean", default: false, title: "Wide" } }, activate: () => {} };
+    const { host } = hostWith([reader, palette]);
+
+    expect(host.contributions().settings.declared.map((d) => [d.key, d.switch ?? false])).toEqual([
+      ["reader.enabled", true],
+      ["reader.wide", false],
+      ["palette.enabled", true],
+      ["keybindings.commands.show", false],
+      ["keybindings.plugins.disable.reader", false],
+      ["keybindings.plugins.disable.palette", false],
+    ]);
   });
 });

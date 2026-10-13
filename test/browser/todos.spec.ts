@@ -104,7 +104,7 @@ test("changing a chip rewrites its token and nothing else, as the member's chang
   await bank().getByLabel("Due date").fill("");
   await bank().getByRole("combobox", { name: "Project" }).selectOption("No project");
   await expect.poll(lineIn).toBe("- [x] Call the bank about the card");
-  expect((await read(page, note.id)).replace("- [x] Call the bank about the card", "- [ ] !! Call the bank due:2031-10-14 +Home about the card")).toBe(CHORES);
+  await expect.poll(async () => (await read(page, note.id)).replace("- [x] Call the bank about the card", "- [ ] !! Call the bank due:2031-10-14 +Home about the card")).toBe(CHORES);
 
   // Rename puts the cursor in the token, which shows the line as written.
   await line(page, "Deep one").getByRole("combobox", { name: "Project" }).selectOption("Rename…");
@@ -139,7 +139,7 @@ test("a viewer sees the chips and can change nothing through them, in the note o
   await expect(words(page)).toHaveText(["Call the bank about the card", "Deep one", "Plain one"]);
   for (const control of await rows(page).locator("input, select").all()) await expect(control).toBeDisabled();
   await expect(rows(page).getByLabel("Add to a project")).toHaveCount(0);
-  expect(await read(admin, note.id)).toBe(CHORES);
+  await expect.poll(() => read(admin, note.id)).toBe(CHORES);
 });
 
 /** Where the first letter of each of these words is, and the top and height of the line it is on. */
@@ -203,7 +203,7 @@ for (const width of [1600, 1100]) {
         return { x: box.right - 4, y: box.bottom - 6 };
       }, word);
       await page.mouse.click(at.x, at.y);
-      expect(await cursorLine(page), `the cursor is on "${word}"`).toContain(word);
+      await expect.poll(() => cursorLine(page), `the cursor is on "${word}"`).toContain(word);
       // As written: the line's own chips are gone and its tokens are text.
       await expect(line(page, word).locator(".md-chip-sized")).toHaveCount(0);
       const now = await places(page, MEASURED);
@@ -222,7 +222,7 @@ for (const width of [1600, 1100]) {
       }
     }
     await page.keyboard.press("ControlOrMeta+Home");
-    expect(await chipBoxes()).toEqual(drawn);
+    await expect.poll(() => chipBoxes()).toEqual(drawn);
   });
 }
 
@@ -292,7 +292,7 @@ test("checking a todo off and changing its chips on the Todos page rewrites its 
   await row(page, "Call the bank").getByRole("checkbox").check();
   await expect.poll(lineIn).toBe("- [x] ! Call the bank due:2026-11-02 +Garden +Launch");
   await expect(words(page)).toHaveText(["Write notes", "Ship it", "Water plants #outside"]);
-  expect((await read(page, home.id)).replace("- [x] ! Call the bank due:2026-11-02 +Garden +Launch", "- [ ] !! Call the bank due:2026-10-14 +Home")).toBe(HOME);
+  await expect.poll(async () => (await read(page, home.id)).replace("- [x] ! Call the bank due:2026-11-02 +Garden +Launch", "- [ ] !! Call the bank due:2026-10-14 +Home")).toBe(HOME);
   expect(new Set(await authors(page, home.id))).toEqual(new Set(["member Ada Lovelace"]));
   // The note list's count of open todos follows.
   await expect.poll(async () => (await perform(page, { type: "note.list" })).find((n) => n.id === home.id)!.openTodos).toBe(1);
@@ -330,7 +330,7 @@ test("a todo that changed since it was listed is not rewritten: the page says so
 
   await expect(todosPage(page).getByRole("alert")).toHaveText("This todo was changed since it was listed. List the todos again.");
   await expect(words(page)).toHaveText(["Ship it", "Call the credit union", "Water plants #outside", "Email the landlord", "Write notes"]);
-  expect(await read(page, home.id)).toBe(changed);
+  await expect.poll(() => read(page, home.id)).toBe(changed);
 });
 
 test("an agent lists todos and checks one off, and the Todos page and the note follow", async ({ page }) => {
@@ -344,8 +344,8 @@ test("an agent lists todos and checks one off, and the Todos page and the note f
   // The same call again, as after an answer that never arrived, changes nothing more.
   await agent.tool("set_todo", { id: noteId, revision, line: at, text, done: true, due: "2026-10-20" });
 
-  expect((await read(page, home.id)).split("\n")[2]).toBe("- [x] !! Call the bank due:2026-10-20 +Home");
-  expect(await authors(page, home.id)).toEqual(["member Ada Lovelace", "agent Claude"]);
+  await expect.poll(async () => (await read(page, home.id)).split("\n")[2]).toBe("- [x] !! Call the bank due:2026-10-20 +Home");
+  await expect.poll(() => authors(page, home.id)).toEqual(["member Ada Lovelace", "agent Claude"]);
   await expect(words(page)).toHaveText(["Ship it", "Water plants #outside", "Write notes"], { timeout: 20_000 });
 });
 
@@ -356,7 +356,7 @@ test.describe("where the member's day is not the day in UTC", () => {
   test("due today is today where the member is, in the note and on the Todos page", async ({ page }) => {
     await page.clock.setFixedTime(new Date("2026-03-10T05:00:00Z"));
     const note = await open(page, "# Days\n\n- [ ] The eighth due:2026-03-08\n- [ ] The ninth due:2026-03-09\n- [ ] The tenth due:2026-03-10\n- [ ] The twentieth due:2026-03-20\n- [ ] Undated\n");
-    expect(await localDay(page)).toBe("2026-03-09");
+    await expect.poll(() => localDay(page)).toBe("2026-03-09");
 
     await expectShown(line(page, "The eighth"), "The eighth Yesterday");
     await expectShown(line(page, "The ninth"), "The ninth Today");
@@ -373,7 +373,7 @@ test.describe("where the member's day is not the day in UTC", () => {
     await expect(words(page)).toHaveText(["The eighth"]);
     await filter(page, "Due").selectOption("Next 7 days");
     await expect(words(page)).toHaveText(["The ninth", "The tenth"]);
-    expect(await read(page, note.id)).toContain("due:2026-03-09");
+    await expect.poll(() => read(page, note.id)).toContain("due:2026-03-09");
   });
 });
 

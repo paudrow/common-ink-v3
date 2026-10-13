@@ -8,6 +8,9 @@ import { editTable, hasTable, tableRendering } from "./rendering.ts";
 export const tables: Plugin = {
   id: "tables",
   name: "Tables",
+  description: "A markdown table drawn as a table, typed into cell by cell.",
+  icon: "table",
+  screenshots: [{ src: "/plugin-shots/tables-light.png", dark: "/plugin-shots/tables-dark.png", alt: "A markdown table in a note, drawn as a table." }],
   activate(host) {
     host.editorExtensions.register({ id: "tables", extension: tableRendering });
     host.commands.register({

@@ -1,5 +1,5 @@
 import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
-import type { App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, OpInput, Plugin, PluginHost, SettingValue, Slots } from "./plugin-api.ts";
+import type { AddressEmbed, App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
 export interface PluginState {
@@ -8,8 +8,25 @@ export interface PluginState {
   enabled: boolean;
   /** A required plugin can't be turned off. */
   required: boolean;
+  /** Whether it came with the app, and wasn't added to it. */
+  builtIn: boolean;
   /** Why the plugin isn't running though it is turned on, or what of it failed while being drawn. */
   error: string | null;
+  description: string | null;
+  icon: IconName | null;
+  screenshots: readonly Screenshot[];
+  /** What it has registered: as it stands while the plugin is on, and as it last stood once it is off. Null for one that hasn't been on since the app loaded. */
+  adds: Added | null;
+}
+
+/** What one plugin has registered, read from the host's own tables and never from what the plugin says of itself. */
+export interface Added {
+  commands: readonly { id: string; title: string }[];
+  views: readonly { slot: keyof Slots; id: string; label: string | null }[];
+  /** `address` is on one a note writes as a web address alone on a line, and not as `::name{}`. */
+  embeds: readonly { name: string; title: string; block: boolean; address?: true }[];
+  completions: readonly { id: string; trigger: string }[];
+  editorExtensions: readonly string[];
 }
 
 /** Everything the plugins that are on have added, in the order of the plugins and then of their registering. */
@@ -19,7 +36,7 @@ export interface Contributions {
   keybindings: Readonly<Record<string, string>>;
   settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
-  embeds: readonly Embed[];
+  embeds: readonly (Embed | AddressEmbed)[];
   completions: readonly Completion[];
   editorExtensions: readonly EditorExtension[];
   plugins: readonly PluginState[];
@@ -48,6 +65,8 @@ export interface HostOptions {
    * `host.sharing`. Any other plugin is handed ones whose every method refuses.
    */
   trusted?: readonly Plugin[];
+  /** The ids of the plugins that came with the app. */
+  builtIn?: readonly string[];
   /** The member's settings as they are at the start. */
   settings: SettingsDocument;
   /**
@@ -92,7 +111,7 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "rail", "editor", "folder", "inspector", "page", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
 const RESERVED = ["plugins.", "go.", "settings."];
@@ -123,15 +142,17 @@ function keptFromPerform(type: string): string | null {
 /** Why a plugin that isn't Common Ink's own is refused an operation, or null when it isn't. The type `OwnOnly` says the same. */
 const ownOnly = (type: string): string | null => (/^(source|event|contact|record)\./.test(type) ? "a member's data sources are theirs, and are read only by Common Ink's own plugins" : null);
 
-export function createPluginHost({ plugins, required = [], trusted = [], settings, write, mac, provide }: HostOptions): Host {
+export function createPluginHost({ plugins, required = [], trusted = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
   const commands = new Map<string, Owned<Command>>();
-  const embeds = new Map<string, Owned<Embed>>();
+  const embeds = new Map<string, Owned<Embed | AddressEmbed>>();
   const completions = new Map<string, Owned<Completion>>();
   const editorExtensions = new Map<string, Owned<EditorExtension>>();
   const views = new Map<keyof Slots, Map<string, Owned<Slots[keyof Slots]>>>(SLOTS.map((slot) => [slot, new Map()]));
   /** What each running plugin registered, to take back out when it is turned off. */
   const running = new Map<string, Set<Dispose>>();
   const errors = new Map<string, string>();
+  /** What each plugin had registered when contributions were last read with it on. */
+  const added = new Map<string, Added>();
   let document = settings;
   /** A switch that isn't true or false reads as its default, as any setting does. */
   const isOff = (p: Plugin) => {
@@ -240,7 +261,7 @@ export function createPluginHost({ plugins, required = [], trusted = [], setting
         },
         list: () =>
           contributions()
-            .embeds.filter((e) => e.menu !== false)
+            .embeds.filter((e): e is Embed => !("claims" in e))
             .map(({ name, title, block, starts }) => ({ name, title, block, starts })),
       },
       completions: {
@@ -291,8 +312,10 @@ export function createPluginHost({ plugins, required = [], trusted = [], setting
   }
 
   function stop(plugin: Plugin) {
-    for (const dispose of running.get(plugin.id) ?? []) dispose();
+    const mine = running.get(plugin.id) ?? [];
+    // It stops running before its contributions go one by one, so what it added is remembered whole and not as it stood halfway out.
     running.delete(plugin.id);
+    for (const dispose of mine) dispose();
     errors.delete(plugin.id);
   }
 
@@ -369,16 +392,31 @@ export function createPluginHost({ plugins, required = [], trusted = [], setting
       const own = Object.entries(p.settings ?? {}).map(([name, setting]): Declared => ({ key: `${p.id}.${name}`, setting, group, active }));
       if (required.includes(p.id)) return own;
       const on = p.enabledByDefault ?? true;
-      const enabled: Declared = { key: enabledKey(p.id), setting: { type: "boolean", default: on, title: "On", description: on ? `Turn ${p.name} off and what it adds goes away.` : `${p.name} is off until you turn it on here.` }, group, active: true };
+      const enabled: Declared = { switch: true, key: enabledKey(p.id), setting: { type: "boolean", default: on, title: "On", description: on ? `Turn ${p.name} off and what it adds goes away.` : `${p.name} is off until you turn it on here.` }, group, active: true };
       return [enabled, ...own];
     });
     const group = { id: "keybindings", name: "Keybindings" };
     return [...options, ...all.map((c): Declared => ({ key: KEYBINDING + c.id, setting: { type: "chords", default: c.keys ?? [], title: c.title }, group, active: true }))];
   }
 
+  /** What the plugin at one place has in the tables now. */
+  function addedBy(place: number): Added {
+    const mine = <T>(owned: Iterable<Owned<T>>) => inOrder([...owned].filter((o) => o.plugin === place));
+    return {
+      commands: mine(commands.values()).map(({ id, title }) => ({ id, title })),
+      views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: ("label" in view ? view.label : null) ?? null }))),
+      embeds: mine(embeds.values()).map((e) => ("claims" in e ? { name: e.name, title: e.title, block: false, address: true as const } : { name: e.name, title: e.title, block: e.block ?? false })),
+      completions: mine(completions.values()).map(({ id, trigger }) => ({ id, trigger })),
+      editorExtensions: mine(editorExtensions.values()).map((extension) => extension.id),
+    };
+  }
+
   function contributions(): Contributions {
     startAll();
     if (snapshot) return snapshot;
+    plugins.forEach((p, place) => {
+      if (running.has(p.id)) added.set(p.id, addedBy(place));
+    });
     const toggles = plugins
       .filter((p) => !required.includes(p.id))
       .map((p): Command => {
@@ -397,7 +435,18 @@ export function createPluginHost({ plugins, required = [], trusted = [], setting
       embeds: inOrder(embeds.values()),
       completions: inOrder(completions.values()),
       editorExtensions: inOrder(editorExtensions.values()),
-      plugins: plugins.map((p) => ({ id: p.id, name: p.name, enabled: !off.has(p.id), required: required.includes(p.id), error: errors.get(p.id) ?? null })),
+      plugins: plugins.map((p) => ({
+        id: p.id,
+        name: p.name,
+        enabled: !off.has(p.id),
+        required: required.includes(p.id),
+        builtIn: builtIn.includes(p.id),
+        error: errors.get(p.id) ?? null,
+        description: p.description ?? null,
+        icon: p.icon ?? null,
+        screenshots: p.screenshots ?? [],
+        adds: added.get(p.id) ?? null,
+      })),
     });
   }
 

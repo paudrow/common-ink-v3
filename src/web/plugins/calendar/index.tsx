@@ -13,6 +13,8 @@ const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 export const calendar: Plugin = {
   id: "calendar",
   name: "Calendar",
+  description: "Shows the events of the calendars you connect, which nobody else in the workspace sees, and lets a note reference one.",
+  icon: "calendar",
   activate(host) {
     host.views.register("page", { id: "calendar", path: "/calendar", label: "Calendar", icon: "calendar", nav: "primary", order: 40, component: (props) => <CalendarPage host={host} {...props} /> });
     host.embeds.register(
@@ -20,7 +22,7 @@ export const calendar: Plugin = {
         host,
         kind: "event",
         title: "Event",
-        hint: "copy a reference from an event on the Calendar page, and paste it here",
+        hint: "copy a reference from an event on the Calendar page, and paste it over this",
         // The title alone: adding the time as the details arrive would widen the chip, and a line that just fit would gain a row.
         shown: ({ event }) => ({ text: event.title || "Untitled", title: `${whenLabel(event.when, zone())} · ${event.calendar}${event.location ? ` · ${event.location}` : ""}` }),
         details: ({ event }) => (

@@ -11,7 +11,7 @@ A member types `@` and picks a person: a member of the workspace, or one of thei
 3. It reads plainly in the markdown, and an agent writes one through `ink` or MCP without a table of ids.
 4. It is never taken for something else with an `@` in it: an email address, a social handle, a URL, `@` in code.
 5. It survives a tool that knows nothing of it.
-6. A reader who isn't told who is in the workspace, a guest or whoever holds a share link, still reads a name.
+6. A reader who isn't told who is in the workspace, a guest, an agent limited to folders or whoever holds a share link, still reads a name.
 
 | | `@[[id\|name]]` / `@[[name]]` | `@name` and a table beside the note | `::mention{id name}` | `@[name](id)` |
 |---|---|---|---|---|

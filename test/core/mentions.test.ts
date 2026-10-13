@@ -195,6 +195,23 @@ describe("a todo's assignees", () => {
     expect(await codeOf(perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 5, text: "- [ ] four", assign: "a]]b" }))).toMatch(/^invalid: /);
   });
 
+  it("are set by their id by a guest with the name the note already calls them, which is all the guest was told", async () => {
+    const { ada, grace, note } = await team();
+    const gus = await guestOn(ada, note.id, "edit");
+    const stored = await read(ada, note.id);
+    const four = (await todos(gus, { noteId: note.id })).find((t) => t.words === "four")!;
+    const set = await perform(env.DB, gus, { type: "todo.set", id: note.id, revision: stored.revision, line: four.line, text: four.text, assign: grace.personId });
+    expect(set.text.split("\n")[four.line]).toBe(`- [ ] four @[[${grace.personId}|Grace Hopper]]`);
+    expect((await todos(gus, { noteId: note.id })).find((t) => t.words === "four")!.assignees).toEqual([{ id: grace.personId, name: "Grace Hopper", member: false }]);
+    const after = await read(ada, note.id);
+    const again = await perform(env.DB, gus, { type: "todo.set", id: note.id, revision: after.revision, line: four.line, text: set.text.split("\n")[four.line]!, assign: ada.personId });
+    expect(again.text.split("\n")[four.line]).toBe(`- [ ] four @[[${grace.personId}|Grace Hopper]] @[[${ada.personId}|Ada Lovelace]]`);
+    // An id the note calls nothing is written as it was given: there is no name to be had without being told who is a member.
+    const lone = await create(ada, "# Lone\n\n- [ ] five");
+    const gusToo = await guestOn(ada, lone.id, "edit");
+    expect((await perform(env.DB, gusToo, { type: "todo.set", id: lone.id, revision: lone.revision, line: 2, text: "- [ ] five", assign: grace.personId })).text).toBe(`# Lone\n\n- [ ] five @[[${grace.personId}]]`);
+  });
+
   it("are taken away by name as they are by id, a member's too, and an unassign that names nobody on the line is refused", async () => {
     const { ada, grace, note } = await team();
     const line = async (words: string) => (await todos(ada, { noteId: note.id, includeCompleted: true })).find((t) => t.words === words)!;

@@ -132,7 +132,7 @@ test("another reader sees a mentioned contact's name in gray, and nothing else o
   expect(heard).toContain("Zoë Álvarez");
   for (const kept of ["zoe@example.com", "Okafor", "Harbor Books", "Lin Wei"]) expect(heard, kept).not.toContain(kept);
   // And being mentioned let nobody in anywhere: the note has no grant, and its history names only who wrote it.
-  expect((await perform(page, { type: "grant.list", noteId: note.id }, workspaceId)).grants).toEqual([]);
+  await expect.poll(async () => (await perform(page, { type: "grant.list", noteId: note.id }, workspaceId)).grants).toEqual([]);
 });
 
 test("mentioning a member in a private note of mine offers to share it, and sharing is a grant the Share dialog shows", async ({ page }) => {
@@ -149,7 +149,7 @@ test("mentioning a member in a private note of mine offers to share it, and shar
   await pick(page, " and @grace", "Grace HopperMember");
   await expect(notice(page)).toContainText("Grace Hopper can't see this private note.");
   // Nothing is shared until I say so.
-  expect((await perform(page, { type: "grant.list", noteId: note.id })).grants).toEqual([]);
+  await expect.poll(async () => (await perform(page, { type: "grant.list", noteId: note.id })).grants).toEqual([]);
   await grace.goto(`/note/${note.id}`);
   await expect(editor(grace)).toHaveCount(0);
 
@@ -192,11 +192,12 @@ test("the offer to share can be turned off in settings, isn't made for a note th
   const claude = await connectAgent(page, "Claude");
   await claude.tool("write_note", { id: diary.id, baseRevision: diary.revision, text: "# Diary\n\nAsk @[[Grace Hopper]]" });
   await expect(mentions(page)).toHaveText(["@Grace Hopper"]);
-  expect(await text(page, diary.id)).toBe(`# Diary\n\nAsk @[[${graceId}|Grace Hopper]]`);
+  await expect.poll(() => text(page, diary.id)).toBe(`# Diary\n\nAsk @[[${graceId}|Grace Hopper]]`);
   await expect(notice(page)).toHaveCount(0);
-  expect((await perform(page, { type: "grant.list", noteId: diary.id })).grants).toEqual([]);
+  await expect.poll(async () => (await perform(page, { type: "grant.list", noteId: diary.id })).grants).toEqual([]);
 
   await page.goto("/settings");
+  await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Mentions" }).click();
   const toggle = page.getByRole("checkbox", { name: "Offer to share a private note with a member you mention in it" });
   await expect(toggle).toBeChecked();
   await toggle.click();

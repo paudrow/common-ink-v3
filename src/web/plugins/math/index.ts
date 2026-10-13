@@ -16,6 +16,8 @@ const isHeights = (value: unknown): value is Record<string, number> => typeof va
 export const math: Plugin = {
   id: "math",
   name: "LaTeX",
+  description: "Formulas written between $ signs, drawn as math.",
+  icon: "math",
   activate(host) {
     let stopped = false;
     let drawn = false;

@@ -574,6 +574,24 @@ describe("taking a completion back", () => {
     expect(reverted.unfiled).toEqual({ removed: 1, left: 0, dailyNoteIds: [] });
   });
 
+  it("does so for changes of several notes reverted at once, as History's page reverts them, and files the line again when that revert is reverted", async () => {
+    const { ada, note, daily, text } = await setUp();
+    const other = await create(ada, "# Other\n\nwords");
+    await perform(env.DB, ada, { type: "note.write", id: other.id, baseRevision: 1, text: "# Other\n\nwords, and more" });
+
+    const done = await perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: note.id, revisions: [2] }, { noteId: other.id, revisions: [2] }] });
+
+    expect(done.skipped).toEqual([]);
+    expect(done.reverted.map((r) => [r.noteId, r.unfiled])).toEqual([[note.id, { removed: 1, left: 0, dailyNoteIds: [daily] }], [other.id, undefined]]);
+    expect(await text()).toBe(`# ${SUNDAY}\n\n`);
+    expect((await read(ada, note.id)).text).toBe(`# Chores\n\n${WATER}`);
+    expect((await history(ada, note.id, 2, WATER)).completions).toEqual([]);
+
+    await perform(env.DB, ada, { type: "history.revert", changes: [{ noteId: note.id, revisions: [3] }] });
+    expect(await text()).toBe(`# ${SUNDAY}\n\n${filedLine(note.id)}\n`);
+    expect((await history(ada, note.id, 2, WATERED)).completions).toHaveLength(1);
+  });
+
   it.each(["the todo's note first", "the daily note first"] as const)("takes an agent's completions back out of the daily note when the agent's changes are reverted, %s", async (order) => {
     const ada = await newMember();
     const claude = await agentOf(ada);
@@ -588,8 +606,8 @@ describe("taking a completion back", () => {
     const answers = order === "the todo's note first" ? [await revert(note.id), await revert(daily)] : [await revert(daily), await revert(note.id)].reverse();
 
     expect(answers[0]!.reverted[0]!.note.unfiled).toEqual({ removed: 1, left: 0, dailyNoteIds: [daily] });
-    // The agent's completion made the daily note, so its heading was the agent's change too and goes with the rest. What Ada filed stays.
-    expect((await read(ada, daily)).text).toBe(`- [x] Bins [[${note.id}]]\n`);
+    // The agent's completion made the daily note, so its heading was the agent's change too and goes with the rest, as does the empty line that ended the note. What Ada filed stays.
+    expect((await read(ada, daily)).text).toBe(`- [x] Bins [[${note.id}]]`);
     expect((await read(ada, note.id)).text).toBe(`# Chores\n\n${WATER}\n- [ ] Bins every:2w due:2026-10-25 done:${SUNDAY}x1`);
     expect((await perform(env.DB, ada, { type: "daily.open", on: SUNDAY })).id).toBe(daily);
   });

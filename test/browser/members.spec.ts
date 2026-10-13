@@ -49,7 +49,7 @@ for (const role of ["Admin", "Editor", "Viewer"] as const) {
 
     await expect(workspaceButton(grace)).toHaveText(`Ada's workspace${role}`);
     await expect(grace).toHaveURL(/\/$/);
-    expect((await me(grace)).workspaces.map((w) => `${w.name}: ${w.role}`).sort()).toEqual([`Ada's workspace: ${role.toLowerCase()}`, "Grace's workspace: admin"]);
+    await expect.poll(async () => (await me(grace)).workspaces.map((w) => `${w.name}: ${w.role}`).sort()).toEqual([`Ada's workspace: ${role.toLowerCase()}`, "Grace's workspace: admin"]);
     await page.reload();
     await expect(member(page, "Grace Hopper")).toContainText(email);
     await expect(member(page, "Grace Hopper").getByLabel("Role of Grace Hopper")).toHaveValue(role.toLowerCase());
@@ -82,12 +82,12 @@ test("a viewer reads notes and can't change them or manage members, in the app a
 
   const adaId = (await me(ada)).person.id;
   const refused = (op: Parameters<typeof perform>[1]) => perform(page, op, workspaceId).then(() => "done", (err: Error) => err.message);
-  expect(await refused({ type: "note.write", id: note.id, baseRevision: 1, text: "# Mine now" })).toContain("A viewer can't note.write");
-  expect(await refused({ type: "member.invite", email: newEmail(), as: "admin" })).toContain("A viewer can't member.invite");
+  await expect.poll(() => refused({ type: "note.write", id: note.id, baseRevision: 1, text: "# Mine now" })).toContain("A viewer can't note.write");
+  await expect.poll(() => refused({ type: "member.invite", email: newEmail(), as: "admin" })).toContain("A viewer can't member.invite");
   expect(await refused({ type: "member.setRole", memberId: (await me(page)).person.id, as: "admin" })).toContain("A viewer can't member.setRole");
-  expect(await refused({ type: "member.remove", memberId: adaId })).toContain("A viewer can't member.remove");
-  expect(await refused({ type: "invite.list" })).toContain("A viewer can't invite.list");
-  expect((await perform(ada, { type: "note.read", id: note.id })).text).toBe("# Plan\n\nAda's words.");
+  await expect.poll(() => refused({ type: "member.remove", memberId: adaId })).toContain("A viewer can't member.remove");
+  await expect.poll(() => refused({ type: "invite.list" })).toContain("A viewer can't invite.list");
+  await expect.poll(async () => (await perform(ada, { type: "note.read", id: note.id })).text).toBe("# Plan\n\nAda's words.");
 });
 
 test("an editor writes notes and can't manage members", async ({ page }) => {
@@ -102,7 +102,7 @@ test("an editor writes notes and can't manage members", async ({ page }) => {
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("Edith's step");
   await expect.poll(async () => (await perform(ada, { type: "note.read", id: note.id })).text).toBe("# Plan\nEdith's step");
-  expect((await perform(ada, { type: "note.read", id: note.id })).updatedBy.name).toBe("Edith Clarke");
+  await expect.poll(async () => (await perform(ada, { type: "note.read", id: note.id })).updatedBy.name).toBe("Edith Clarke");
 
   await openMembers(page);
   await expect(inviteForm(page)).toHaveCount(0);
@@ -132,7 +132,7 @@ test("an admin changes a member's role, and the member's open app follows: an ed
   await expect(workspaceButton(grace)).toHaveText("Ada's workspaceViewer");
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
   await expect(editor(grace)).not.toContainText("too late");
-  expect((await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plan\n");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plan\n");
 
   await member(page, "Grace Hopper").getByLabel("Role of Grace Hopper").selectOption({ label: "Admin" });
   await expect(membersPage(page).getByRole("status")).toHaveText("Grace Hopper is now an admin.");
@@ -162,7 +162,7 @@ test("an admin removes a member, whose open app leaves the workspace for their o
   await expect(workspaceButton(grace)).toHaveText("Grace's workspaceAdmin", { timeout: 20_000 });
   await expect(grace.getByText("There's nothing at this address.")).toBeVisible();
   await expect(perform(grace, { type: "note.read", id: note.id }, workspaceId)).rejects.toThrow("No such workspace");
-  expect((await perform(page, { type: "note.read", id: note.id })).updatedBy).toMatchObject({ kind: "member", name: "Grace Hopper" });
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).updatedBy).toMatchObject({ kind: "member", name: "Grace Hopper" });
 });
 
 test("a workspace's only admin can't leave or stop being admin, and anyone else can leave", async ({ page }) => {
@@ -183,8 +183,11 @@ test("a workspace's only admin can't leave or stop being admin, and anyone else 
   await member(grace, "Grace Hopper").getByRole("group", { name: "Leave Ada's workspace" }).getByRole("button", { name: "Leave Ada's workspace" }).click();
 
   await expect(workspaceButton(grace)).toHaveText("Grace's workspaceAdmin");
-  await expect(grace).toHaveURL(/\/$/);
-  expect((await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
+  // A page is a tab now, so she is on the page she left from, in the workspace she still has: its own members.
+  await expect(grace).toHaveURL(/\/members$/);
+  await expect(member(grace, "Grace Hopper")).toBeVisible();
+  await expect(member(grace, "Ada Lovelace")).toHaveCount(0);
+  await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
   await page.reload();
   await expect(memberList(page).getByRole("listitem")).toHaveText([/^Ada Lovelace/]);
 });
@@ -198,10 +201,11 @@ test("an invite's link lets in only the invited email, and nobody once it is rev
   const mallory = await anotherPerson(page, "Mallory");
   await mallory.goto(link);
   await expect(mallory.getByRole("heading")).toHaveText("This invite doesn't let you in");
-  await expect(mallory.getByText("Ada")).toHaveCount(0);
+  // Not "Ada" alone: the page shows the visitor's own email, which is random here and now and then has "ada" in it.
+  await expect(mallory.getByText(/Ada's|Lovelace/)).toHaveCount(0);
   await mallory.getByRole("button", { name: "Go to my notes" }).click();
   await expect(workspaceButton(mallory)).toHaveText("Mallory's workspaceAdmin");
-  expect((await me(mallory)).workspaces).toHaveLength(1);
+  await expect.poll(async () => (await me(mallory)).workspaces).toHaveLength(1);
   await page.reload();
   await expect(invites(page).getByRole("listitem"), "someone else opening the link doesn't use it up").toHaveCount(1);
 
@@ -214,7 +218,7 @@ test("an invite's link lets in only the invited email, and nobody once it is rev
   await signInAs(grace, email, "Grace Hopper", link);
   await expect(grace.getByRole("heading")).toHaveText("This invite doesn't let you in");
   await expect(grace.getByRole("main")).toContainText(`You are signed in as ${email}.`);
-  expect((await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
+  await expect.poll(async () => (await me(grace)).workspaces.map((w) => w.name)).toEqual(["Grace's workspace"]);
 });
 
 test("inviting an email twice keeps one invite, and inviting a member changes their role", async ({ page }) => {
@@ -389,8 +393,8 @@ test("a plugin under an admin can't change who is in the workspace, or read its 
   await expect.poll(() => page.evaluate(() => (window as unknown as { __GREEDY__?: unknown }).__GREEDY__)).toEqual(
     Object.fromEntries(["member.invite", "member.setRole", "member.remove", "member.leave", "invite.list"].map((type) => [type, `Greedy can't ${type}: ${why}`])),
   );
-  expect((await perform(page, { type: "member.list" })).map((m) => `${m.name}: ${m.role}`)).toEqual(["Ada Lovelace: admin", "Grace Hopper: editor"]);
-  expect(await perform(page, { type: "invite.list" })).toEqual([]);
+  await expect.poll(async () => (await perform(page, { type: "member.list" })).map((m) => `${m.name}: ${m.role}`)).toEqual(["Ada Lovelace: admin", "Grace Hopper: editor"]);
+  await expect.poll(() => perform(page, { type: "invite.list" })).toEqual([]);
 });
 
 test("an admin who stops being one takes their pending invites with them", async ({ page }) => {
@@ -410,7 +414,7 @@ test("an admin who stops being one takes their pending invites with them", async
   const victor = await (await page.context().browser()!.newContext({ baseURL: test.info().project.use.baseURL })).newPage();
   await signInAs(victor, email, "Victor", `/invite/${planted!.id}`);
   await expect(victor.getByRole("heading")).toHaveText("This invite doesn't let you in");
-  expect((await me(victor)).workspaces.map((w) => w.name)).toEqual(["Victor's workspace"]);
+  await expect.poll(async () => (await me(victor)).workspaces.map((w) => w.name)).toEqual(["Victor's workspace"]);
 });
 
 test("two people who share a browser and a workspace don't share the tabs they have open", async ({ page }) => {
