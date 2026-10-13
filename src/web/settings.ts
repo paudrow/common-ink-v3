@@ -1,4 +1,4 @@
-import { readChord } from "./keybindings.ts";
+import { readKeys } from "./keybindings.ts";
 import type { Setting, SettingValue } from "./plugin-api.ts";
 
 /** A member's settings as they wrote them: any JSON object. Only some of its keys are settings. */
@@ -15,6 +15,8 @@ export interface Declared {
   group: { id: string; name: string };
   /** False when its plugin is off, so it changes nothing for now. */
   active: boolean;
+  /** True for the setting that turns its plugin on and off, which is the Plugins page's to show and no part of the Settings page. */
+  switch?: true;
 }
 
 export interface Problem {
@@ -58,9 +60,9 @@ export function readSetting(setting: Setting, value: unknown): { value: SettingV
       if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return { reason: `Expected a list of keys, such as ["mod+k"], not ${shown(value)}` };
       const chords: string[] = [];
       for (const text of value as string[]) {
-        const read = readChord(text);
+        const read = readKeys(text);
         if ("reason" in read) return read;
-        if (!chords.includes(read.chord)) chords.push(read.chord);
+        if (!chords.includes(read.keys)) chords.push(read.keys);
       }
       return { value: chords };
     }

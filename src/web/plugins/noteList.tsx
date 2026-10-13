@@ -414,7 +414,7 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
         {found?.indexing && <p className="search-status">{STILL_INDEXING}</p>}
         <nav aria-label="Notes">
           {!notes.length && search.status !== "failed" && search.status !== "searching" && <p className="empty">{nothing}</p>}
-          <ul className="cards" aria-busy={search.status === "searching"}>
+          <ul className="cards" data-list aria-busy={search.status === "searching"}>
             {items.map(({ note, matches }, at) => {
               const expanded = view.expanded[note.id];
               const name = titleOf(note);
@@ -605,6 +605,8 @@ function keeping() {
 export const noteList: Plugin = {
   id: "note-list",
   name: "Note list",
+  description: "A folder's notes as cards, each with its details and its first lines, to sort and to filter.",
+  icon: "list",
   settings: {
     snippets: { type: "boolean", default: true, title: "Show snippets", description: "Show the first lines of each note under its title." },
   },

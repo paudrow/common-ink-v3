@@ -1,4 +1,5 @@
 import type { ChangeSet } from "@codemirror/state";
+import { following } from "./follow.ts";
 import { linesOutsideCode } from "./lines.ts";
 import { RULE_PATTERN, nextDue, parseRule, type Rule } from "./recurrence.ts";
 import { applyChanges } from "./text.ts";
@@ -301,9 +302,9 @@ const reopened = (todo: NoteTodo) => rewriteTodo(todo.text, { done: false });
  * a change to `was`. A todo is checked off when its line was an open todo and is a done, recurring
  * one now, whatever else on the line changed with it, and however the box came to be checked: the
  * checkbox, an `x` typed between the brackets, an agent writing the whole note. Which line is which
- * is read from where the changes are, never from what a line says. A line written already checked
- * was never open, and a change that runs from inside the line out past either end of it has replaced
- * the line with another, so neither is a completion.
+ * is read from where the changes are. Where a change puts some lines in the place of others and so
+ * doesn't say, the line is the one most like it there (`following`). A line written already checked
+ * was never open, and one replaced by a line unlike it is gone, so neither is a completion.
  */
 export function checkedOff(was: string, changes: ChangeSet): NoteTodo[] {
   const text = applyChanges(changes, was);
@@ -311,16 +312,11 @@ export function checkedOff(was: string, changes: ChangeSet): NoteTodo[] {
   const done = todosIn(text).filter((todo) => todo.done && todo.every);
   if (!done.length) return [];
   const found = new Set<NoteTodo>();
+  const after = following(was, changes, text);
   for (const open of todosIn(was)) {
     if (open.done) continue;
-    const [from, to] = [open.from, open.from + open.text.length];
-    let replaced = false;
-    changes.iterChangedRanges((fromA, toA) => {
-      if ((fromA < from && toA > from) || (fromA < to && toA > to)) replaced = true;
-    });
-    if (replaced) continue;
-    const at = changes.mapPos(from, 1);
-    const now = done.find((todo) => todo.from <= at && at <= todo.from + todo.text.length);
+    const at = after(open.from);
+    const now = at === null ? undefined : done.find((todo) => todo.from <= at && at <= todo.from + todo.text.length);
     if (now) found.add(now);
   }
   return [...found].sort((a, b) => a.from - b.from);

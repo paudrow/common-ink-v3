@@ -187,3 +187,21 @@ export function createSettingsStore(server: SettingsServer): SettingsStore {
     },
   };
 }
+
+/** What a member is told of how their settings stand, on the Settings page and wherever else one is changed. */
+export const statusLabel = (status: SettingsStatus) => {
+  switch (status.kind) {
+    case "loading":
+      return "Loading your settings…";
+    case "unread":
+      return "Your settings couldn't be loaded, so nothing can be changed here";
+    case "saved":
+      return "Saved";
+    case "saving":
+      return "Saving…";
+    case "retrying":
+      return "Couldn't save. Retrying…";
+    case "refused":
+      return `Not saved, and put back as it was: ${status.message}`;
+  }
+};

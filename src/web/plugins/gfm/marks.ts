@@ -94,7 +94,7 @@ const following = EditorView.domEventHandlers({
 });
 
 const look = EditorView.baseTheme({
-  ".md-code": { backgroundColor: "var(--bg-side)", borderRadius: "4px", padding: "0.1em 0.3em" },
+  ".md-code": { backgroundColor: "var(--code-bg)", borderRadius: "4px", padding: "0.1em 0.3em" },
   ".md-link": { color: "var(--accent)", textDecoration: "underline", textUnderlineOffset: "2px" },
   ".md-link[data-href]": { cursor: "pointer" },
   ".md-quote": { borderLeft: "3px solid var(--line-strong)", paddingLeft: "0.6em !important", color: "var(--muted)" },

@@ -13,6 +13,8 @@ const isKept = (value: unknown): value is Record<string, Kept[]> =>
 export const bullets: Plugin = {
   id: "bullets",
   name: "Outline bullets",
+  description: "Lists that work as an outline: indent, move and fold a bullet with what is under it.",
+  icon: "outline",
   activate(host) {
     const stored = host.storage.get("folds");
     const folds: Record<string, Kept[]> = isKept(stored) ? { ...stored } : {};

@@ -101,7 +101,7 @@ test("a tag's page takes its name from the address as text: a slash, other lette
   await expect(tagPage(page, markup).getByRole("heading", { level: 1 })).toHaveText(`#${markup}`);
   await expect(tagPage(page, markup)).toContainText(`No notes have #${markup}.`);
   await expect(tagPage(page, markup).locator("img")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as { pwned?: number }).pwned)).toBeUndefined();
+  await expect.poll(() => page.evaluate(() => (window as { pwned?: number }).pwned)).toBeUndefined();
 
   await page.goto("/tags");
   await expect(page.getByRole("heading", { level: 1, name: "Tags" })).toBeVisible();
@@ -163,7 +163,7 @@ test("a tag in a note is drawn as a tag where its characters were: nothing moves
   const tags = editor(page).locator(".md-tag");
   // What the server takes for a tag and nothing else: not `#12`, code, a fence, or a link's address.
   await expect(tags).toHaveText(["#alpha", "#beta-2", "#alpha"]);
-  expect(await perform(page, { type: "tag.list" })).toEqual({ tags: [{ name: "alpha", notes: 1 }, { name: "beta-2", notes: 1 }], indexing: false });
+  await expect.poll(() => perform(page, { type: "tag.list" })).toEqual({ tags: [{ name: "alpha", notes: 1 }, { name: "beta-2", notes: 1 }], indexing: false });
 
   const look = (el: Element) => {
     const { color, fontSize, fontFamily, fontWeight, padding, margin, borderWidth, letterSpacing } = getComputedStyle(el);

@@ -1,4 +1,4 @@
-import { NO_SUCH_WORKSPACE, type Agent, type ConnectOptions, type Me, type OpErrorCode, type OpInput, type Results, type Shared } from "../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type Me, type OpErrorCode, type OpInput, type Results, type Shared } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -69,6 +69,10 @@ export const listAgents = () => request<{ agents: Agent[] }>("/api/agents").then
 /** The token in the answer is the only time it can be seen. */
 export const connectAgent = (name: string, options: ConnectOptions) =>
   request<{ agent: Agent; token: string }>("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, ...options }) });
+
+/** Changes what an agent may do. Its token stays the one it has. */
+export const editAgent = (id: string, edit: AgentEdit) =>
+  request<{ agent: Agent }>(`/api/agents/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then((r) => r.agent);
 
 export const disconnectAgent = (id: string) => request<unknown>(`/api/agents/${id}`, { method: "DELETE" });
 
