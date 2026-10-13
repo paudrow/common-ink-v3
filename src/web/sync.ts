@@ -1,7 +1,7 @@
 import { redo, undo } from "@codemirror/commands";
 import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
-import type { Filed, Note, OpInput, Results, Written } from "../core/protocol.ts";
+import type { Filed, Note, OpInput, Results, RevertedNotes, Written } from "../core/protocol.ts";
 import { changesBetween } from "../core/text.ts";
 import { ApiError, perform } from "./api.ts";
 import { today } from "./time.ts";
@@ -73,16 +73,37 @@ export async function moveThroughHistory(workspaceId: string, op: HistoryOp): Pr
   return note;
 }
 
+/** Sends what is typed in these notes and not yet saved, so that what is read of them next is all of it. */
+export const commitTyping = (noteIds: readonly string[]) => Promise.all(noteIds.flatMap((id) => [open.get(id)?.commit(), committed(id)]));
+
+type RevertMany = Extract<OpInput, { type: "history.revert" }>;
+
+/** Reverts changes of several notes. What's typed in them is saved first, and each reverted note's editor takes the result if it's open. */
+export async function revertMany(workspaceId: string, changes: RevertMany["changes"]): Promise<RevertedNotes> {
+  await commitTyping(changes.map((c) => c.noteId));
+  const done = await perform(workspaceId, { type: "history.revert", changes });
+  await Promise.all(done.reverted.map((r) => open.get(r.noteId)?.pull(r.revision)));
+  for (const r of done.reverted) await settle({ id: r.noteId, unfiled: r.unfiled });
+  return done;
+}
+
 const MOVES: ReadonlySet<string> = new Set<HistoryOp["type"]>(["note.revert", "note.revertChanges", "note.undo", "note.redo", "todo.set"]);
 
 /**
  * Performs an operation and keeps the open editors true to it. Before one that moves notes through
- * history or rewrites a todo, what's typed is saved, and each open editor takes its note's result.
+ * history or rewrites a todo, or previews a revert, what's typed is saved, and each open editor takes
+ * its note's result.
  */
 export async function performInSync<T extends OpInput>(workspaceId: string, op: T): Promise<Results[T["type"]]> {
   if (MOVES.has(op.type)) return moveThroughHistory(workspaceId, op as HistoryOp) as Promise<Results[T["type"]]>;
   // A todo's history is asked for by its line, which the server has only once what is typed is saved.
   if (op.type === "todo.history") await open.get(op.id)?.commit();
+  if (op.type === "history.revert") return revertMany(workspaceId, op.changes) as Promise<Results[T["type"]]>;
+  if (op.type === "history.previewRevert") {
+    // What is typed and not yet saved would change the note under the preview.
+    await commitTyping(op.changes.map((c) => c.noteId)).catch(() => {});
+    return perform(workspaceId, op);
+  }
   if (op.type !== "history.revertAuthor") return perform(workspaceId, op);
   await Promise.all([...open.values()].map((sync) => sync.commit()));
   const result = await perform(workspaceId, op);

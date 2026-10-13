@@ -87,7 +87,7 @@ test("checking a recurring todo's box in the editor keeps the line open with its
   // A todo that doesn't recur is checked as it always was.
   await line(page, "Plain one").getByRole("checkbox").click();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[3]).toBe("- [x] Plain one");
-  expect((await dailyNote(page, today)).note.text).toBe(daily.note.text);
+  await expect.poll(async () => (await dailyNote(page, today)).note.text).toBe(daily.note.text);
 });
 
 test("checking a recurring todo off on the Todos page leaves its row open, as its note reads, and it can't be completed twice while the first is on its way", async ({ page }) => {
@@ -109,7 +109,7 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(bins.locator(".todo-done")).toHaveText("✓ Today ×1");
   await expect(bins.getByLabel("Due date")).toHaveValue(addDays(today, 14));
   await expect.poll(async () => (await perform(page, { type: "todo.list", noteId: note.id })).todos.find((t) => t.line === 2)?.text).toBe(rolled);
-  expect((await dailyNote(page, today)).note.text).toBe(`# ${today}\n\n- [x] Take out the bins due:${today} [[${note.id}]]\n`);
+  await expect.poll(async () => (await dailyNote(page, today)).note.text).toBe(`# ${today}\n\n- [x] Take out the bins due:${today} [[${note.id}]]\n`);
 
   // The same history as the editor's chip opens, with the daily note a click away.
   await bins.getByRole("button", { name: "Last done Today, 1 time" }).click();
@@ -136,7 +136,7 @@ test("typing x into a recurring todo's brackets completes it as its checkbox doe
   const note = await open(page, `# Habits\n\n${written}`);
 
   await page.keyboard.press("ControlOrMeta+End");
-  expect(await cursorLine(page)).toBe(written);
+  await expect.poll(() => cursorLine(page)).toBe(written);
   for (let i = 0; i < written.length - "- [".length; i++) await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("Delete");
   await page.keyboard.type("x");
@@ -146,7 +146,7 @@ test("typing x into a recurring todo's brackets completes it as its checkbox doe
   await expect.poll(() => cursorLine(page)).toBe(rolled);
   await page.keyboard.press("ControlOrMeta+Home");
   await expectShown(line(page, "Stretch"), "Stretch ↻ 1d Tomorrow ✓ Today ×1");
-  expect((await dailyNote(page, today)).note.text).toBe(`# ${today}\n\n- [x] Stretch [[${note.id}]]\n`);
+  await expect.poll(async () => (await dailyNote(page, today)).note.text).toBe(`# ${today}\n\n- [x] Stretch [[${note.id}]]\n`);
 });
 
 /** The lines filed on the member's daily note for `day`. */
@@ -162,9 +162,9 @@ test("a word typed on a recurring todo's line right after its box is clicked is 
   await page.keyboard.type(" slowly");
 
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toMatch(new RegExp(`^- \\[ \\] Stretch every:1d(?=.* slowly)(?=.* due:${addDays(today, 1)})(?=.* done:${today}x1)`));
-  expect((await read(page, note.id)).split("\n")[2]!.length).toBe(`- [ ] Stretch every:1d slowly due:${today} done:${today}x1`.length);
+  await expect.poll(async () => (await read(page, note.id)).split("\n")[2]!.length).toBe(`- [ ] Stretch every:1d slowly due:${today} done:${today}x1`.length);
   await expect.poll(() => filedOn(page, today)).toHaveLength(1);
-  expect((await filedOn(page, today))[0]).toContain("Stretch");
+  await expect.poll(async () => (await filedOn(page, today))[0]).toContain("Stretch");
   await page.keyboard.press("ControlOrMeta+Home");
   await expect(line(page, "Stretch").getByRole("button", { name: "Last done Today, 1 time" })).toBeVisible();
 });
@@ -183,7 +183,7 @@ test("typing x into a recurring todo's brackets and going on typing on the line 
 
   await expect.poll(() => read(page, note.id)).toBe(`# Habits\n\n- [ ] Stretch every:1d slowly due:${addDays(today, 1)} done:${today}x1`);
   await expect.poll(() => filedOn(page, today)).toHaveLength(1);
-  expect((await filedOn(page, today))[0]).toContain("Stretch");
+  await expect.poll(async () => (await filedOn(page, today))[0]).toContain("Stretch");
   await expect.poll(() => cursorLine(page)).toContain(`done:${today}x1`);
 });
 
@@ -216,7 +216,7 @@ test("undoing a completion puts the todo's line back and takes the filed line of
   await expect.poll(() => read(page, note.id)).toBe(text);
   await expect.poll(() => filedOn(page, today)).toEqual([]);
   await complete();
-  expect(await filedOn(page, today)).toEqual([`- [x] Stretch [[${note.id}]]`]);
+  await expect.poll(() => filedOn(page, today)).toEqual([`- [x] Stretch [[${note.id}]]`]);
 });
 
 test("the recurrence chip sets a simple rule, each advanced kind, and days of the week, and takes the rule away", async ({ page }) => {
@@ -240,7 +240,7 @@ test("the recurrence chip sets a simple rule, each advanced kind, and days of th
   await chip("Recurs: Every month").click();
   await line(page, "Plan").click();
   await expect(recurrence(page)).toHaveCount(0);
-  expect(await lineIn()).toBe("- [ ] Pay rent every:1m due:2031-01-01 +Home");
+  await expect.poll(() => lineIn()).toBe("- [ ] Pay rent every:1m due:2031-01-01 +Home");
 
   // By keyboard: the form takes focus, and Enter in a field sets the rule.
   await chip("Recurs: Every month").click();
@@ -278,7 +278,7 @@ test("the recurrence chip sets a simple rule, each advanced kind, and days of th
   await recurrence(page).getByRole("button", { name: "Doesn't recur" }).click();
   await expect.poll(lineIn).toBe("- [ ] Pay rent due:2031-01-01 +Home");
   await expect(rent().getByRole("button")).toHaveCount(0);
-  expect(await read(page, note.id)).toBe("# Plan\n\n- [ ] Pay rent due:2031-01-01 +Home\nAfter");
+  await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- [ ] Pay rent due:2031-01-01 +Home\nAfter");
 });
 
 test("typing every: offers rules, and the one picked is written as a rule", async ({ page }) => {
@@ -343,7 +343,7 @@ test("a viewer sees the recurrence and last-done chips, can list the completions
   // A viewer has no daily note, and is told so in the server's words.
   await modes(page).getByRole("link", { name: "Today" }).click();
   await expect(page.getByRole("region", { name: "Today" }).getByRole("alert")).not.toBeEmpty();
-  expect(await read(admin, note.id)).toBe(text);
+  await expect.poll(() => read(admin, note.id)).toBe(text);
 });
 
 /** Where the first letter of each of these words is, and the top and height of the line it is on. */
@@ -409,7 +409,7 @@ for (const width of [1600, 1100]) {
         return { x: box.right - 4, y: box.bottom - 6 };
       }, word);
       await page.mouse.click(at.x, at.y);
-      expect(await cursorLine(page), `the cursor is on "${word}"`).toContain(word);
+      await expect.poll(() => cursorLine(page), `the cursor is on "${word}"`).toContain(word);
       await expect(line(page, word).locator(".md-chip-sized")).toHaveCount(0);
       const now = await places(page, MEASURED);
       for (const [measured, was] of Object.entries(before)) {
@@ -428,13 +428,13 @@ for (const width of [1600, 1100]) {
       }
     }
     await page.keyboard.press("ControlOrMeta+Home");
-    expect(await chipBoxes()).toEqual(drawn);
+    await expect.poll(() => chipBoxes()).toEqual(drawn);
 
     // The form opens over the app and takes no room in the note.
     await line(page, "First todo").getByRole("button", { name: "Recurs: Every 2 weeks" }).click();
     await expect(recurrence(page)).toBeVisible();
     await recurrence(page).getByRole("button", { name: "Advanced" }).click();
-    expect(await places(page, MEASURED)).toEqual(before);
+    await expect.poll(() => places(page, MEASURED)).toEqual(before);
     await page.keyboard.press("Escape");
   });
 }
@@ -467,7 +467,7 @@ test("the sidebar's Today and the command both open today's daily note, headed b
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`${daily.note.id}$`));
   await expect(editor(page)).toContainText(today);
-  expect((await perform(page, { type: "note.list" })).filter((n) => n.title === today)).toHaveLength(1);
+  await expect.poll(async () => (await perform(page, { type: "note.list" })).filter((n) => n.title === today)).toHaveLength(1);
   await page.goBack();
   await expect(page).toHaveURL(/\/todos$/);
 });
@@ -533,4 +533,75 @@ test("a daily note open in another editor group takes the line filed on it, and 
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("Evening.");
   await expect.poll(() => read(page, daily.note.id)).toBe(`# ${today}\n\nMorning.\n- [x] Sweep [[${note.id}]]\nEvening.`);
+});
+
+test("going to Today leaves the editor of a note open beside it as it was: the same one, not one made again", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const today = await localDay(page);
+  const note = await perform(page, { type: "note.create", text: "# Alpha\n\nSome words.\n" });
+  await perform(page, { type: "note.create", text: "# Beta\n\nOther words.\n" });
+  await page.goto(`/note/${note.id}`);
+  await expect(editor(page)).toContainText("Some words.");
+  await page.keyboard.press("ControlOrMeta+p");
+  await page.getByRole("combobox", { name: "Go to note" }).fill("Beta");
+  await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText("Beta");
+  await page.keyboard.press("Enter");
+  await expect(editor(page)).toContainText("Other words.");
+  await page.keyboard.press("ControlOrMeta+Shift+p");
+  await page.getByRole("combobox", { name: "Commands" }).fill("Split editor right");
+  await page.keyboard.press("Enter");
+  const [left, right] = [page.getByRole("region", { name: "Editor group 1" }), page.getByRole("region", { name: "Editor group 2" })];
+  await expect(right.getByRole("textbox", { name: "Note text" })).toContainText("Other words.");
+  await expect(left.getByRole("textbox", { name: "Note text" })).toContainText("Some words.");
+  const alpha = left.locator(".cm-editor");
+  await alpha.evaluate((el) => ((el as HTMLElement & { wasThere?: boolean }).wasThere = true));
+
+  await modes(page).getByRole("link", { name: "Today" }).click();
+
+  await expect(right.getByRole("textbox", { name: "Note text" })).toContainText(today);
+  await expect(page).toHaveURL(/\/note\//);
+  await expect(page.getByRole("tab", { name: "Today", exact: true })).toHaveCount(0);
+  await expect(alpha).toContainText("Some words.");
+  await expect.poll(() => alpha.evaluate((el) => (el as HTMLElement & { wasThere?: boolean }).wasThere)).toBe(true);
+});
+
+test("reverting a completion from History takes its line off the daily note open beside it, and what is typed there next is kept", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const today = await localDay(page);
+  const note = await perform(page, { type: "note.create", text: "# Chores\n\n- [ ] Sweep every:1d\n" });
+  await page.goto(`/note/${note.id}`);
+  await expect(editor(page)).toContainText("Sweep");
+  await modes(page).getByRole("link", { name: "Today" }).click();
+  await expect(editor(page)).toContainText(today);
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("Morning.");
+  const daily = await dailyNote(page, today);
+  await expect.poll(() => read(page, daily.note.id)).toBe(`# ${today}\n\nMorning.`);
+  await page.keyboard.press("ControlOrMeta+Shift+p");
+  await page.getByRole("combobox", { name: "Commands" }).fill("Split editor right");
+  await page.keyboard.press("Enter");
+  const [left, right] = [page.getByRole("region", { name: "Editor group 1" }).getByRole("textbox", { name: "Note text" }), page.getByRole("region", { name: "Editor group 2" }).getByRole("textbox", { name: "Note text" })];
+  await expect(right).toContainText("Morning.");
+  await left.locator(".cm-line").filter({ hasText: "Sweep" }).getByRole("checkbox").click();
+  await expect(right).toContainText("Sweep");
+  await expect.poll(() => read(page, daily.note.id)).toContain(`Morning.\n- [x] Sweep [[${note.id}]]`);
+
+  // The todo's note is in front on the left, and its History tab reverts the change that completed the todo.
+  await left.click();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await inspector.getByRole("tab", { name: "History" }).click();
+  const changes = inspector.getByRole("listbox", { name: "Changes" }).getByRole("option");
+  await expect(changes.first()).toBeVisible();
+  await inspector.getByRole("button", { name: "Revert…" }).click();
+  const dialog = page.getByRole("dialog", { name: /^Revert/ });
+  await dialog.getByRole("button", { name: "Revert", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await expect(right).not.toContainText("Sweep");
+  await expect(right).toContainText("Morning.");
+  await right.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("Evening.");
+  await expect.poll(() => read(page, daily.note.id)).toContain("Evening.");
+  await expect.poll(() => read(page, daily.note.id)).not.toContain("Sweep");
 });

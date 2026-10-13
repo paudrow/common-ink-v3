@@ -1,5 +1,6 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import { perform, signInAsNewPerson } from "./helpers.ts";
+import { PLAYER, standIns } from "./media-helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -33,21 +34,6 @@ async function goTo(page: Page, lineNumber: number, side: "Home" | "End" = "End"
   await page.keyboard.press("ControlOrMeta+Home");
   for (let i = 1; i < lineNumber; i++) await page.keyboard.press("ArrowDown");
   await page.keyboard.press(side);
-}
-
-const PLAYER = "https://www.youtube-nocookie.com/";
-
-/**
- * Stands in for YouTube's player, which the tests can't count on reaching: a page that knows when it
- * was loaded and counts for as long as it lives. Returns how many times it has been asked for.
- */
-async function standInPlayer(page: Page) {
-  const asked: string[] = [];
-  await page.route(`${PLAYER}**`, (route) => {
-    asked.push(route.request().url());
-    return route.fulfill({ contentType: "text/html", body: "<body>stand-in<script>window.born = String(Math.random()); window.ticks = 0; setInterval(() => window.ticks++, 20);</script>" });
-  });
-  return asked;
 }
 
 const player = (page: Page) => page.frames().find((f) => f.url().startsWith(PLAYER));
@@ -93,77 +79,54 @@ async function expectOverItsRoom(page: Page, embed: string, when: string) {
     .toBeLessThanOrEqual(1);
 }
 
-// A video and a post are written as an address alone on a line now (media-address.spec.ts). These are the embeds notes used to
-// write them with, which no menu offers and which are still drawn where a note has one.
-for (const [typed, picked, written, address, shows] of [
-  ["/you", "YouTube video", "::youtube{video address}", "https://youtu.be/dQw4w9WgXcQ", "Play video"],
-  ["/soc", "Social post", "::social{post address}", "https://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/3l6oveex3ii2l", "Show post"],
-] as const) {
-  test(`${picked} written the old way is not in the embed menu, and still shows below its line without loading anything from the other site`, async ({ page, baseURL }) => {
-    const outside: string[] = [];
-    page.on("request", (request) => !request.url().startsWith(new URL(baseURL!).origin) && outside.push(request.url()));
-    await open(page, "# Media\n\n");
-    await page.keyboard.press("ControlOrMeta+End");
-    await page.keyboard.type(typed, { delay: 20 });
-    await settled(page);
-    await expect(menu(page).getByRole("option", { name: picked })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    for (let i = 0; i < typed.length; i++) await page.keyboard.press("Backspace");
-    const name = written.slice(2, written.indexOf("{"));
-    await page.keyboard.type(`::${name}{${address}} and words after`);
-    await expect(below(page, name).getByRole("button", { name: shows })).toBeVisible();
-    await expect(line(page, "and words after")).toContainText(`::${name}{${address}}`);
-    await page.keyboard.press("ControlOrMeta+Home");
-    await expect(line(page, "and words after")).toHaveText(`${picked === "Social post" ? "Post on Bluesky" : picked} and words after`);
-    await expect(below(page, name).getByRole("button", { name: shows })).toBeVisible();
-    await expect(page.getByRole("status")).toHaveText("Saved");
-    expect(outside).toEqual([]);
-  });
-}
-
-test("a link card written the old way is not in the embed menu, and is still drawn from what the note says, with nothing fetched", async ({ page, baseURL }) => {
+test("a note that writes `::youtube{}`, `::social{}` or `::link{}` shows them as the text they are, the embed menu offers none of them, and nothing is asked of another site", async ({ page, baseURL }) => {
   const outside: string[] = [];
   page.on("request", (request) => !request.url().startsWith(new URL(baseURL!).origin) && outside.push(request.url()));
-  await open(page, "# Media\n\n");
-  await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type("/link", { delay: 20 });
-  await settled(page);
-  await expect(menu(page).getByRole("option", { name: "Link" })).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  for (let i = 0; i < "/link".length; i++) await page.keyboard.press("Backspace");
-  await page.keyboard.type("::link{https://example.com/docs The docs}");
-  await page.keyboard.press("ControlOrMeta+Home");
-  const card = editor(page).getByRole("link", { name: "The docs example.com" });
-  await expect(card).toHaveAttribute("href", "https://example.com/docs");
-  await expect(card).toHaveAttribute("target", "_blank");
-  await expect(card).toHaveAttribute("rel", "noopener noreferrer");
-  expect(outside).toEqual([]);
-});
-
-test("an address that isn't https, or isn't a video, is never made a link or a frame", async ({ page }) => {
-  await open(page, "# Media\n\nOne ::link{javascript:alert(1) Click me} two ::youtube{https://evil.example/watch?v=dQw4w9WgXcQ} three ::social{https://example.com/a/status/1}\n\nlast\n");
-  await expect(editor(page).locator(".embed-unread")).toHaveCount(3);
-  await expect(editor(page).getByRole("link")).toHaveCount(0);
+  const old = "# Old\n\nOne ::youtube{https://youtu.be/dQw4w9WgXcQ} two\n\n::social{https://x.com/jack/status/20}\n\n::link{https://example.com/docs The docs}\n\nlast";
+  const note = await open(page, old);
+  await expect(line(page, "One")).toHaveText("One ::youtube{https://youtu.be/dQw4w9WgXcQ} two");
+  await expect(line(page, "::social")).toHaveText("::social{https://x.com/jack/status/20}");
+  await expect(line(page, "::link")).toHaveText("::link{https://example.com/docs The docs}");
+  await expect(editor(page).locator(".embed-frame")).toHaveCount(0);
   await expect(page.locator(".embed-below")).toHaveCount(0);
   await expect(page.locator("iframe")).toHaveCount(0);
+
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("\n\n/", { delay: 20 });
+  const options = menu(page).getByRole("option");
+  await expect(options.first()).toBeVisible();
+  const offered = await options.allTextContents();
+  expect(offered.join("\n")).not.toMatch(/YouTube|Video|Social|Post|Link|::youtube|::social|::link/);
+  expect(offered.some((o) => o.startsWith("Timer"))).toBe(true);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Backspace");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(`${old}\n\n`);
+  expect(outside).toEqual([]);
 });
 
 test("a playing video is never loaded again, stopped, or moved in the page by anything but a change to its own source", async ({ page }) => {
   test.slow();
   // Wide enough that the embed's line is one row as written, so Home and End are the ends of the line.
   await page.setViewportSize({ width: 1800, height: 900 });
-  const asked = await standInPlayer(page);
+  const asked = await standIns(page);
   const filler = Array.from({ length: 400 }, (_, i) => `filler ${i}`).join("\n");
-  const text = `# Video\n\nfirst above\nsecond above\n\nWatch ::youtube{https://youtu.be/dQw4w9WgXcQ} now\n\nfirst below\nsecond below\n\n${filler}\n`;
+  const text = `# Video\n\nfirst above\nsecond above\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nfirst below\nsecond below\n\n${filler}\n`;
   const note = await open(page, text);
 
-  await below(page, "youtube").getByRole("button", { name: "Play video" }).click();
+  // Its picture and what it is called are there before anything is pressed, and its player is not.
+  const play = below(page, "video").getByRole("button", { name: "Play video: Stand-in video" });
+  await expect(play.locator("img")).toHaveAttribute("src", "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
+  await expect(play).toContainText("Stand-in video");
+  expect(asked).toEqual([]);
+  const size = (await placed(page, "video")).el;
+  await play.click();
   await expect.poll(() => player(page)?.url()).toBe(`${PLAYER}embed/dQw4w9WgXcQ?autoplay=1`);
-  const frame = below(page, "youtube").locator("iframe");
+  await expect.poll(async () => (await placed(page, "video")).el, "the player is where the picture was, as large").toEqual(size);
+  const frame = below(page, "video").locator("iframe");
   await expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation");
   await expect(frame).toHaveAttribute("referrerpolicy", "strict-origin");
   const { born } = await playing(player(page)!);
-  await watch(page, "youtube");
+  await watch(page, "video");
 
   let ticks = 0;
   const expectStillPlaying = async (when: string) => {
@@ -172,35 +135,31 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
     ticks = now.ticks;
     expect(now.born, `the same load ${when}`).toBe(born);
     expect(asked, `asked for once ${when}`).toHaveLength(1);
-    expect(await kept(page, "youtube"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
+    await expect.poll(() => kept(page, "video"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
   };
   await expectStillPlaying("after it started");
 
   await goTo(page, 3);
   await page.keyboard.type(" with words typed above");
   await expectStillPlaying("after typing above");
-  await expectOverItsRoom(page, "youtube", "after typing above");
+  await expectOverItsRoom(page, "video", "after typing above");
 
   await page.keyboard.type("\nnew line one\nnew line two\nnew line three");
   await expectStillPlaying("after lines were added above");
-  await expectOverItsRoom(page, "youtube", "after lines were added above");
+  await expectOverItsRoom(page, "video", "after lines were added above");
 
   await page.keyboard.press("Home");
   for (let i = 0; i < 2; i++) await page.keyboard.press("Shift+ArrowUp");
   await page.keyboard.press("Backspace");
   await expect(editor(page)).not.toContainText("new line two");
   await expectStillPlaying("after lines were removed above");
-  await expectOverItsRoom(page, "youtube", "after lines were removed above");
+  await expectOverItsRoom(page, "video", "after lines were removed above");
 
-  // The embed's own line: the cursor arriving shows it as written, and typing either side of the embed is not a change to it.
+  // Its own line: the cursor arriving shows the address, which is not a change to it.
   await goTo(page, 7);
-  await expect(line(page, "Watch")).toHaveText("Watch ::youtube{https://youtu.be/dQw4w9WgXcQ} now");
-  await page.keyboard.type(" and then");
-  await page.keyboard.press("Home");
-  await page.keyboard.type("Come and ");
-  await expect(line(page, "Watch")).toHaveText("Come and Watch ::youtube{https://youtu.be/dQw4w9WgXcQ} now and then");
-  await expectStillPlaying("after typing on its own line");
-  await expectOverItsRoom(page, "youtube", "after typing on its own line");
+  await expect(line(page, "youtu.be")).toHaveClass(/embed-address-seen/);
+  await expectStillPlaying("with the cursor on its own line");
+  await expectOverItsRoom(page, "video", "with the cursor on its own line");
 
   await goTo(page, 9);
   await page.keyboard.type(" with words typed below\nand a line added below");
@@ -213,12 +172,11 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
 
   await page.keyboard.press("Enter");
   await page.keyboard.press("ArrowUp");
-  await page.keyboard.type("Another ::youtube{https://youtu.be/aaaaaaaaaaa}");
-  await expect(below(page, "youtube")).toHaveCount(2);
+  await page.keyboard.type("https://youtu.be/aaaaaaaaaaa");
+  await expect(below(page, "video")).toHaveCount(2);
   await page.keyboard.press("Backspace");
-  await page.keyboard.press("Backspace");
-  await page.keyboard.type("b}");
-  await expect(below(page, "youtube")).toHaveCount(2);
+  await page.keyboard.type("b");
+  await expect(below(page, "video")).toHaveCount(2);
   await expectStillPlaying("after another embed was written and changed");
 
   await expect(page.getByRole("status")).toHaveText("Saved");
@@ -228,7 +186,7 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
   await expect(editor(page)).toContainText("A paragraph from somewhere else.", { timeout: 30_000 });
   await expect(editor(page)).toContainText("first below, changed elsewhere");
   await expectStillPlaying("after someone else's change landed above and below");
-  await expectOverItsRoom(page, "youtube", "after someone else's change landed");
+  await expectOverItsRoom(page, "video", "after someone else's change landed");
 
   // Far out of sight the note no longer holds its room, and it goes on playing where the room will be again.
   await editor(page).focus();
@@ -239,74 +197,117 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
   await page.keyboard.press("ControlOrMeta+Home");
   await expect(page.locator(".embed-below-room")).toHaveCount(2);
   await expectStillPlaying("after scrolling back");
-  await expectOverItsRoom(page, "youtube", "after scrolling back");
+  await expectOverItsRoom(page, "video", "after scrolling back");
 
   // Its own source: the one thing that draws it again, once, in the element and the place it has.
   await page.evaluate(() => ((document.querySelector(".embed-below iframe")!.closest(".embed-below") as HTMLElement & { marked?: boolean }).marked = true));
-  await goTo(page, 9, "Home");
-  const written = "Come and Watch ::youtube{https://youtu.be/dQw4w9WgXcQ}";
-  await expect(line(page, "Watch")).toContainText(written);
-  for (let i = 0; i < written.length - 1; i++) await page.keyboard.press("ArrowRight");
-  await expectOverItsRoom(page, "youtube", "with the cursor in its source");
-  const boxBefore = (await placed(page, "youtube")).el;
+  await goTo(page, 9);
+  await expect(line(page, "youtu.be/dQw4w9WgXcQ")).toHaveClass(/embed-address-seen/);
+  await expectOverItsRoom(page, "video", "with the cursor in its source");
+  const boxBefore = (await placed(page, "video")).el;
+  // One change that leaves it a video's address: with a character short it would be no video, and gone.
   await page.keyboard.press("Shift+ArrowLeft");
   await page.keyboard.type("c");
-  await expect(line(page, "Watch")).toContainText("::youtube{https://youtu.be/dQw4w9WgXcc}");
+  await expect(line(page, "youtu.be/dQw4w9WgXcc")).toBeVisible();
   await expect.poll(() => player(page)).toBeUndefined();
   const again = page.locator(".embed-below").first();
-  expect(await again.evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
-  await expect.poll(async () => (await placed(page, "youtube")).el, "and in the place it had").toEqual(boxBefore);
-  await expect(below(page, "youtube").getByRole("button", { name: "Play video" })).toHaveCount(2);
+  await expect.poll(() => again.evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
+  await expect.poll(async () => (await placed(page, "video")).el, "and in the place it had").toEqual(boxBefore);
+  await expect(below(page, "video").getByRole("button", { name: /^Play video/ })).toHaveCount(2);
   expect(asked).toHaveLength(1);
-  await again.getByRole("button", { name: "Play video" }).click();
+  await again.getByRole("button", { name: /^Play video/ }).click();
   await expect.poll(() => player(page)?.url()).toBe(`${PLAYER}embed/dQw4w9WgXcc?autoplay=1`);
   expect(asked).toHaveLength(2);
 });
 
-test("nothing in the note moves when the cursor comes to a video's line, or when the video loads", async ({ page }) => {
-  await standInPlayer(page);
-  // Wide enough that each embed's line is one row as written, whatever the face: a line too long for the column wraps under the cursor.
+test("a video's address is out of sight until the pointer is on the video or the cursor on its line, and nothing in the note moves when it comes, goes, or the video loads", async ({ page }) => {
+  await standIns(page);
   await page.setViewportSize({ width: 1800, height: 1400 });
-  await open(page, "# Video\n\nbefore it\n\n::youtube{https://youtu.be/dQw4w9WgXcQ}\n\nbetween them\n\nSee ::youtube{https://youtu.be/aaaaaaaaaaa} here\n\nafter them\n");
+  await open(page, "# Video\n\nbefore it\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nbetween them\n\nhttps://youtu.be/aaaaaaaaaaa\n\nafter them\n");
+  // The folder's name comes after the note and can change the height of the bar above it, and the faces come when they come.
+  await expect(page.locator(".note-meta .crumbs")).not.toHaveText("");
+  await page.evaluate(() => document.fonts.ready);
   const measured = () =>
     page.evaluate(() => {
-      const top = (el: Element) => Math.round(el.getBoundingClientRect().top * 10) / 10;
       const box = (el: Element) => {
         const rect = el.getBoundingClientRect();
-        return [rect.left, rect.top, rect.width, rect.height].map((n) => Math.round(n * 10) / 10);
+        return [rect.left, rect.top, rect.width, rect.height];
       };
-      const lines = [...document.querySelectorAll(".cm-content .cm-line")];
-      const see = lines.find((l) => l.textContent!.startsWith("See"))!;
-      const range = document.createRange();
-      range.setStart(document.createTreeWalker(see, NodeFilter.SHOW_TEXT).nextNode()!, 0);
-      range.setEnd(range.startContainer, 1);
       return {
-        lines: lines.map((l) => [top(l), Math.round(l.getBoundingClientRect().height * 10) / 10]),
-        see: Math.round(range.getBoundingClientRect().left * 10) / 10,
+        lines: [...document.querySelectorAll(".cm-content .cm-line")].map(box),
         rooms: [...document.querySelectorAll(".embed-below-room > div")].map(box),
         shown: [...document.querySelectorAll(".embed-below")].map(box),
       };
     });
-  await expect(below(page, "youtube")).toHaveCount(2);
+  /** Which of the two addresses can be seen. */
+  const seen = () => page.evaluate(() => [...document.querySelectorAll(".cm-line.embed-address")].map((l) => getComputedStyle(l).opacity));
+  await expect(below(page, "video")).toHaveCount(2);
+  await expect(below(page, "video").getByRole("button", { name: "Play video: Stand-in video" })).toHaveCount(2);
   await expect.poll(async () => (await measured()).shown).toEqual((await measured()).rooms);
   const before = await measured();
   expect(before.rooms[0]![3], "a 16:9 box from the first moment").toBeCloseTo(before.rooms[0]![2]! * (9 / 16), 0);
+  // The note opens with the cursor where nobody put it, which shows nothing as written.
+  await expect.poll(seen).toEqual(["0", "0"]);
 
-  for (const lineNumber of [5, 9, 3, 11]) {
+  for (const [lineNumber, shows] of [[5, ["1", "0"]], [9, ["0", "1"]], [3, ["0", "0"]], [11, ["0", "0"]]] as const) {
     await goTo(page, lineNumber);
+    await expect.poll(seen, `with the cursor on line ${lineNumber}`).toEqual(shows);
     await settled(page);
-    expect(await measured(), `with the cursor on line ${lineNumber}`).toEqual(before);
+    await expect.poll(() => measured(), `with the cursor on line ${lineNumber}`).toEqual(before);
   }
-  await goTo(page, 5);
-  await expect(page.locator(".cm-line").nth(4)).toHaveText("::youtube{https://youtu.be/dQw4w9WgXcQ}");
+  await below(page, "video").nth(1).hover();
+  await expect.poll(seen, "with the pointer on the second video").toEqual(["0", "1"]);
+  await expect.poll(() => measured(), "with the pointer on the second video").toEqual(before);
+  await below(page, "video").first().hover();
+  await expect.poll(seen, "with the pointer on the first video").toEqual(["1", "0"]);
+  await expect.poll(() => measured(), "with the pointer on the first video").toEqual(before);
+  await page.mouse.move(2, 2);
+  await expect.poll(seen, "with the pointer gone").toEqual(["0", "0"]);
 
-  await below(page, "youtube").getByRole("button", { name: "Play video" }).first().click();
+  // The keys reach it as they reach any line, and it reads as it is written.
+  await goTo(page, 5);
+  await expect(page.locator(".cm-line").nth(4)).toHaveText("https://youtu.be/dQw4w9WgXcQ");
+  await expect.poll(seen).toEqual(["1", "0"]);
+
+  await below(page, "video").first().getByRole("button", { name: /^Play video/ }).click();
   await expect.poll(() => player(page)).toBeDefined();
-  await expect(below(page, "youtube").first().locator("iframe")).toBeVisible();
-  await settled(page);
+  await expect(below(page, "video").first().locator("iframe")).toBeVisible();
+  await page.mouse.move(2, 2);
   await goTo(page, 1);
+  await expect.poll(seen).toEqual(["0", "0"]);
   await settled(page);
-  expect(await measured(), "after the video loaded").toEqual(before);
+  await expect.poll(() => measured(), "after the video loaded").toEqual(before);
+});
+
+test("each thing below a line is one box with one radius, and what is in it fills it and is cut to it", async ({ page }) => {
+  await standIns(page);
+  await page.setViewportSize({ width: 1280, height: 1600 });
+  await open(page, "# Corners\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nhttps://x.com/jack/status/20\n\n:::html{height=80}\n<b>hello</b>\n:::\n\nlast\n");
+  await below(page, "video").getByRole("button", { name: /^Play video/ }).click();
+  await runHtml(page).click();
+  await expect(page.locator(".embed-below iframe")).toHaveCount(3);
+  const drawn = (embed: string) =>
+    below(page, embed).evaluate((box) => {
+      const style = getComputedStyle(box);
+      const frame = box.querySelector("iframe")!.getBoundingClientRect();
+      const inner = { left: box.getBoundingClientRect().left + box.clientLeft, top: box.getBoundingClientRect().top + box.clientTop };
+      return {
+        radius: style.borderRadius,
+        cut: style.overflow,
+        border: style.borderTopWidth,
+        fills: Math.abs(frame.left - inner.left) < 0.5 && Math.abs(frame.top - inner.top) < 0.5 && Math.abs(frame.width - box.clientWidth) < 0.5 && Math.abs(frame.height - box.clientHeight) < 0.5,
+      };
+    });
+  await expect.poll(() => drawn("video")).toEqual({ radius: "10px", cut: "hidden", border: "1px", fills: true });
+  // A post's own site draws its border and its corners, so the box adds no edge of its own and is cut where the post's is.
+  await expect.poll(() => drawn("post")).toEqual({ radius: "12px", cut: "hidden", border: "0px", fills: true });
+  await expect.poll(async () => (await below(page, "post").boundingBox())!.width).toBe(550);
+  // A block's frame is the body of its card: the card has the top corners, the frame the bottom ones, and they are as wide as each other.
+  await expect.poll(() => drawn("html")).toEqual({ radius: "0px 0px 10px 10px", cut: "hidden", border: "1px", fills: true });
+  const card = editor(page).locator(".embed-joined > .embed-card");
+  await expect(card).toHaveCSS("border-radius", "10px 10px 0px 0px");
+  const [head, body] = [(await card.boundingBox())!, (await below(page, "html").boundingBox())!];
+  expect([body.x, body.width, body.y]).toEqual([head.x, head.width, head.y + head.height]);
 });
 
 test("an HTML embed is picked from the embed menu, runs only when asked, and stays running while the note is written around it", async ({ page }) => {
@@ -325,17 +326,22 @@ test("an HTML embed is picked from the embed menu, runs only when asked, and sta
   await runHtml(page).click();
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
   await expect(framed.getByText("Hello from HTML.")).toBeVisible();
-  expect((await placed(page, "html")).el, "running, it is where its button was").toEqual(room);
-  await expect(below(page, "html").locator("iframe")).toHaveAttribute("sandbox", "allow-scripts");
+  await expect.poll(async () => (await placed(page, "html")).el, "running, it is where its button was").toEqual(room);
   await expect(below(page, "html").locator("iframe")).toHaveAttribute("src", "/embed-frame");
+  // What shuts it in is its document's own headers, which give it an origin with no name whatever the frame around it says.
+  await expect.poll(() => running(page)[0]!.evaluate(() => self.origin)).toBe("null");
+  // The frame says nothing of a sandbox itself: the Claude desktop app's browser refuses a local address to a frame that does, which left the embed a white box.
+  await expect(below(page, "html").locator("iframe")).not.toHaveAttribute("sandbox");
+  // The card has the block's name and its options, and no button of its own to show the block as written: the cursor does that.
+  await expect(editor(page).locator(".embed-joined").getByRole("button")).toHaveCount(1);
+  await expect(editor(page).getByRole("button", { name: "Options for HTML" })).toBeVisible();
 
   // The block as written, with a counter in it. Its body changed, so what was running is gone and it asks again.
-  await editor(page).getByRole("button", { name: "HTML", exact: true }).click();
-  await expect(editor(page)).toContainText("<p>Hello from HTML.</p>");
-  await page.keyboard.press("End");
+  await goTo(page, 6);
+  await expect(editor(page)).toContainText("<p>Hello from <b>HTML</b>.</p>");
   await page.keyboard.type("<script>window.born = String(Math.random()); window.ticks = 0; setInterval(() => window.ticks++, 20);</script>");
   await goTo(page, 3);
-  await expect(editor(page).getByRole("button", { name: "HTML", exact: true })).toBeVisible();
+  await expect(line(page, ":::html{}")).toHaveCount(0);
   await expect(runHtml(page)).toBeVisible();
   await expect(page.locator("iframe")).toHaveCount(0);
   await runHtml(page).click();
@@ -350,7 +356,7 @@ test("an HTML embed is picked from the embed menu, runs only when asked, and sta
     const now = await playing(running(page)[0]!);
     ticks = now.ticks;
     expect(now.born, `the same load ${when}`).toBe(born);
-    expect(await kept(page, "html"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
+    await expect.poll(() => kept(page, "html"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
   };
   await page.keyboard.type(" and more\nand a new line");
   await expectStillRunning("after typing above");
@@ -359,8 +365,8 @@ test("an HTML embed is picked from the embed menu, runs only when asked, and sta
   await page.keyboard.type(" and more\nand a new line");
   await expectStillRunning("after typing below");
 
-  // The cursor going into the block shows it as written. Nothing of it changed, so the frame stays.
-  await editor(page).getByRole("button", { name: "HTML", exact: true }).click();
+  // A press on the card's head puts the cursor in the block, which shows it as written. Nothing of it changed, so the frame stays.
+  await editor(page).locator(".embed-joined .embed-head").click({ position: { x: 120, y: 12 } });
   await expect(editor(page)).toContainText(":::html{}");
   await expectStillRunning("with the cursor in its block");
   await expectOverItsRoom(page, "html", "with the cursor in its block");
@@ -471,7 +477,7 @@ test("an HTML embed can't reach the app, the member's session, the browser's sto
     history: "refused: SecurityError",
     form: "still here",
   });
-  expect(await page.evaluate(() => history.length), "it added nothing to what Back goes through").toBe(pages);
+  await expect.poll(() => page.evaluate(() => history.length), "it added nothing to what Back goes through").toBe(pages);
 
   await settled(page);
   expect(new URL(page.url()).origin, "the app's window was taken nowhere").toBe(app);
@@ -479,7 +485,7 @@ test("an HTML embed can't reach the app, the member's session, the browser's sto
   expect(reached, "nothing reached another site").toEqual([]);
   expect([...new Set(answered)], "the app answered an embed with nothing but its own empty document").toEqual(["/embed-frame"]);
   // The member is still signed in, and the note is as it was.
-  expect((await perform(page, { type: "note.read", id: note.id })).text).toContain("# Probe");
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("# Probe");
 });
 
 test("what is below a line is there, whole and in its place, in every frame painted: as the note loads, and as the note is written above it", async ({ page }) => {
@@ -499,7 +505,7 @@ test("what is below a line is there, whole and in its place, in every frame pain
       const content = document.querySelector(".cm-content");
       if (!content) return;
       painted.push({
-        written: /::(youtube|social)\{|:::html/.test(content.textContent!),
+        written: /:::html/.test(content.textContent!),
         rooms: [...document.querySelectorAll(".embed-below-room > div")].map(box),
         shown: [...document.querySelectorAll(".embed-below")].map(box),
         filled: [...document.querySelectorAll(".embed-below-drawn")].every((el) => el.childElementCount > 0),
@@ -515,7 +521,8 @@ test("what is below a line is there, whole and in its place, in every frame pain
   });
   const frames = () => page.evaluate(() => (window as unknown as { painted: { written: boolean; rooms: string[]; shown: string[]; filled: boolean }[] }).painted.splice(0));
   await page.setViewportSize({ width: 1280, height: 1400 });
-  await open(page, "# Video\n\nabove\n\nSee ::youtube{https://youtu.be/dQw4w9WgXcQ} here\n\nand ::social{https://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/3l6oveex3ii2l}\n\n:::html{height=120}\n<p>Hello</p>\n:::\n\nafter\n");
+  await standIns(page);
+  await open(page, "# Video\n\nabove\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nhttps://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/3l6oveex3ii2l\n\n:::html{height=120}\n<p>Hello</p>\n:::\n\nafter\n");
   await expect(runHtml(page)).toBeVisible();
   await settled(page);
 
@@ -567,7 +574,7 @@ test("an HTML embed can't send its frame, or any frame, anywhere: not to a site 
     ["hints", `<link rel="preconnect" href="https://leak.example/"><link rel="prefetch" href="https://leak.example/prefetch?x=10"><link rel="preload" as="fetch" href="https://leak.example/preload?x=11"><link rel="modulepreload" href="https://leak.example/module?x=12">${later("1")}`],
     ["a download", later(`const a = document.createElement("a"); a.href = "https://leak.example/download?x=13"; a.download = "x"; document.body.append(a); a.click()`)],
   ];
-  await page.setViewportSize({ width: 1280, height: 2400 });
+  await page.setViewportSize({ width: 1280, height: 3600 });
   await open(page, `# Leaving\n\n${embeds.map(([name, body]) => named(name, body)).join("")}end\n`);
   await expect(runHtml(page)).toHaveCount(embeds.length);
   for (let i = 0; i < embeds.length; i++) await runHtml(page).first().click();
@@ -660,21 +667,22 @@ test("a frame the member clicks into has the keyboard, and gives it back from a 
   await expect.poll(() => read(page, note.id)).toContain("!");
   await expect(inside).toHaveValue("typed inside, twice");
   await expect(stopped(page)).toHaveCount(0);
-  expect(await read(page, note.id)).not.toContain("typed inside");
+  await expect.poll(() => read(page, note.id)).not.toContain("typed inside");
 });
 
 test("another site's frame that takes the keyboard is stopped the same way", async ({ page }) => {
+  await standIns(page);
   await page.route(`${PLAYER}**`, (route) => route.fulfill({ contentType: "text/html", body: `<body>${STEALS}` }));
-  const note = await open(page, "# Video\n\nWatch ::youtube{https://youtu.be/dQw4w9WgXcQ} now\n\nend line\n");
+  const note = await open(page, "# Video\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nend line\n");
   await page.keyboard.press("ControlOrMeta+End");
-  await below(page, "youtube").getByRole("button", { name: "Play video" }).click();
-  await expect(stopped(page)).toContainText("YouTube video was stopped: it tried to take the keyboard while you were typing.");
+  await below(page, "video").getByRole("button", { name: /^Play video/ }).click();
+  await expect(stopped(page)).toContainText("Video was stopped: it tried to take the keyboard while you were typing.");
   await expect(page.locator("iframe")).toHaveCount(0);
   await expect(editor(page)).toBeFocused();
   await page.keyboard.type("TYPED", { delay: 20 });
   await expect.poll(() => read(page, note.id)).toContain("TYPED");
   await stopped(page).getByRole("button", { name: "Show it again" }).click();
-  await expect(below(page, "youtube").getByRole("button", { name: "Play video" })).toBeVisible();
+  await expect(below(page, "video").getByRole("button", { name: /^Play video/ })).toBeVisible();
 });
 
 test("what is below a line can write what it learned into the note, which is where its room is read from", async ({ page }) => {
@@ -719,25 +727,25 @@ test("what is below a line can write what it learned into the note, which is whe
   await expect.poll(() => read(page, note.id)).toBe("# Album\n\nabove\n\n::pic{cat 400x100}\n\nbelow\n");
   await expect.poll(async () => { const [width, height] = await size(); return Math.round(width! / height!); }).toBe(4);
   await expectOverItsRoom(page, "pic", "once its size is in the note");
-  expect(await below(page, "pic").evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
-  expect(await page.evaluate(() => (window as unknown as { drawn: string[] }).drawn)).toEqual(["cat", "cat 400x100"]);
+  await expect.poll(() => below(page, "pic").evaluate((el: HTMLElement & { marked?: boolean }) => el.marked), "drawn again in the element it had").toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { drawn: string[] }).drawn)).toEqual(["cat", "cat 400x100"]);
   // It is the member's edit: one step of undo takes it back, and it is in the note's history as theirs.
-  expect((await perform(page, { type: "note.history", id: note.id })).map((c) => c.author.kind)).toEqual(["member", "member"]);
+  await expect.poll(async () => (await perform(page, { type: "note.history", id: note.id })).map((c) => c.author.kind)).toEqual(["member", "member"]);
 });
 
 test("a playing video goes on through vim's operators, undo and redo, and plugins turned off and on", async ({ page }) => {
   test.slow();
   await page.setViewportSize({ width: 1600, height: 1000 });
-  const asked = await standInPlayer(page);
+  const asked = await standIns(page);
   await signInAsNewPerson(page, "Ada Lovelace");
   await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
-  const note = await perform(page, { type: "note.create", text: "# Video\n\nabove one\nabove two\nWatch ::youtube{https://youtu.be/dQw4w9WgXcQ} now\nbelow one\nbelow two\n" });
+  const note = await perform(page, { type: "note.create", text: "# Video\n\nabove one\nabove two\nhttps://youtu.be/dQw4w9WgXcQ\nbelow one\nbelow two\n" });
   await page.goto(`/note/${note.id}`);
   await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
-  await below(page, "youtube").getByRole("button", { name: "Play video" }).click();
+  await below(page, "video").getByRole("button", { name: /^Play video/ }).click();
   await expect.poll(() => player(page)?.url()).toContain("dQw4w9WgXcQ");
   const { born } = await playing(player(page)!);
-  await watch(page, "youtube");
+  await watch(page, "video");
   let ticks = 0;
   const expectStillPlaying = async (when: string) => {
     await expect.poll(async () => (await playing(player(page)!)).ticks, `counting on ${when}`).toBeGreaterThan(ticks);
@@ -745,7 +753,7 @@ test("a playing video goes on through vim's operators, undo and redo, and plugin
     ticks = now.ticks;
     expect(now.born, `the same load ${when}`).toBe(born);
     expect(asked, `asked for once ${when}`).toHaveLength(1);
-    expect(await kept(page, "youtube"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
+    await expect.poll(() => kept(page, "video"), `the same element, never moved, ${when}`).toEqual({ same: true, moves: 0 });
   };
   const toLine = async (lineNumber: number) => {
     await editor(page).focus();
@@ -766,12 +774,12 @@ test("a playing video goes on through vim's operators, undo and redo, and plugin
   await page.keyboard.press("u");
   await expect(editor(page)).toContainText("above two");
 
-  // J joins the embed's line onto the one above: it is somewhere else in the note, and the same embed.
-  await toLine(4);
+  // J joins the two lines above it into one: its own line is a line higher, and it is the same video.
+  await toLine(3);
   await page.keyboard.press("Shift+J");
-  await expect(line(page, "above two")).toContainText("Watch");
-  await expectStillPlaying("after its line was joined to the one above");
-  await expectOverItsRoom(page, "youtube", "after its line was joined to the one above");
+  await expect(line(page, "above one above two")).toBeVisible();
+  await expectStillPlaying("after the lines above were joined");
+  await expectOverItsRoom(page, "video", "after the lines above were joined");
   await page.keyboard.press("u");
   await expectStillPlaying("after the join was undone");
 
@@ -790,10 +798,10 @@ test("a playing video goes on through vim's operators, undo and redo, and plugin
   await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
   await toLine(5);
   await page.keyboard.type("dd");
-  await expect(below(page, "youtube")).toHaveCount(0);
+  await expect(below(page, "video")).toHaveCount(0);
   await expect.poll(() => player(page)).toBeUndefined();
   await page.keyboard.press("u");
-  await expect(below(page, "youtube").getByRole("button", { name: "Play video" })).toBeVisible();
+  await expect(below(page, "video").getByRole("button", { name: /^Play video/ })).toBeVisible();
   expect(asked).toHaveLength(1);
 });
 
@@ -805,13 +813,47 @@ test("an HTML block's lines fold away when the cursor leaves it, which moves the
   await settled(page);
   const top = () => line(page, "after the block").evaluate((el) => Math.round(el.getBoundingClientRect().top));
   const outside = await top();
-  await editor(page).getByRole("button", { name: "HTML", exact: true }).click();
+  await goTo(page, 5);
   await expect(editor(page)).toContainText(":::html{height=120}");
   await expectOverItsRoom(page, "html", "with the block shown as written");
-  // Five lines as written in place of the one line of its button.
+  // Five lines as written above its card, where there were none.
   const lineHeight = await line(page, "after the block").evaluate((el) => el.getBoundingClientRect().height);
-  expect((await top()) - outside).toBeGreaterThan(3 * lineHeight);
+  await expect.poll(async () => (await top()) - outside).toBeGreaterThan(3 * lineHeight);
   await page.keyboard.press("ControlOrMeta+Home");
   await expect.poll(top).toBe(outside);
   await expectOverItsRoom(page, "html", "with the block folded again");
+});
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`an HTML embed that says nothing of colour is read in the app's own, in the ${scheme} theme, and its frame is never a white box`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await open(page, "# Bare\n\n:::html{height=80}\n<b>hello</b>\n:::\n\nlast\n");
+    await runHtml(page).click();
+    const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
+    await expect(framed.getByText("hello")).toBeVisible();
+    const colours = () => {
+      const { backgroundColor, color } = getComputedStyle(document.documentElement);
+      return [backgroundColor, color];
+    };
+    const inside = await running(page)[0]!.evaluate(colours);
+    expect(inside).toEqual(await page.evaluate(colours));
+    expect(inside).toEqual(scheme === "dark" ? ["rgb(23, 23, 22)", "rgb(232, 230, 227)"] : ["rgb(251, 250, 248)", "rgb(31, 30, 28)"]);
+    // The document around the embed's own has no colour to show through before it, or beside it.
+    await expect.poll(() => page.frames().find((f) => f.url().endsWith("/embed-frame"))!.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  });
+}
+
+test("HTML is not handed to a frame whose document came without what shuts it in, and the member is told that nothing ran", async ({ page }) => {
+  // The shell as the Worker serves it, but with no policy: its origin is then the app's own.
+  await page.route("**/embed-frame", async (route) => {
+    const served = await route.fetch();
+    const headers = { ...served.headers() };
+    delete headers["content-security-policy"];
+    await route.fulfill({ response: served, headers });
+  });
+  await open(page, "# Open\n\n:::html{height=80}\n<b>hello</b><script>window.ran = true;</script>\n:::\n\nlast\n");
+  await runHtml(page).click();
+  await expect(below(page, "html").getByRole("alert")).toHaveText("This browser wouldn't load the frame HTML runs in, so nothing was run.", { timeout: 15_000 });
+  expect(running(page)).toEqual([]);
+  await expect(page.locator("iframe")).toHaveCount(0);
 });

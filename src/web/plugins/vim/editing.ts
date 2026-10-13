@@ -1,5 +1,5 @@
-import { Prec, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin } from "@codemirror/view";
+import { EditorState, Prec, type Extension } from "@codemirror/state";
+import { EditorView, ViewPlugin, drawSelection } from "@codemirror/view";
 import { Vim, getCM, vim } from "@replit/codemirror-vim";
 import { TITLE_MARK, dismissing } from "../../plugin-api.ts";
 
@@ -85,6 +85,12 @@ export function vimEditing(runCommand: (commandId: string) => boolean): { extens
       // Escape closes what is open over the editor before it is vim's.
       Prec.highest(EditorView.domEventHandlers({ keydown: (e) => e.key === "Escape" && dismissing() })),
       vim({ status: true }),
+      // Vim's library hides the browser's own selection in its modes and leaves the drawing of one to the editor.
+      // Without this nothing selected in visual mode is painted anywhere.
+      drawSelection(),
+      // Visual block mode is a selection on each of its lines, which an editor keeps only when told it may. A click still makes one.
+      EditorState.allowMultipleSelections.of(true),
+      EditorView.clickAddsSelectionRange.of(() => false),
       titleFirst,
     ],
     /** Leaves insert or visual mode in the note whose text the element is, as Escape does. */

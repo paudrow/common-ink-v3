@@ -1,9 +1,24 @@
 import { useRef, useState } from "react";
-import type { NoteSummary, Plugin, PluginHost, ViewProps } from "../plugin-api.ts";
+import { ago, useNow, type Inspected, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../plugin-api.ts";
 import { Soon } from "./lib/Soon.tsx";
 import { SharingSummary } from "./sharing/Summary.tsx";
 
-function Info({ host, app, note }: ViewProps & { host: PluginHost; note: NoteSummary }) {
+function FolderInfo({ name, notes }: Inspected["folder"]) {
+  const now = useNow();
+  const last = notes.reduce<NoteSummary | null>((latest, n) => (latest && latest.updatedAt >= n.updatedAt ? latest : n), null);
+  return (
+    <dl className="info">
+      <dt>Folder</dt>
+      <dd>{name}</dd>
+      <dt>Notes</dt>
+      <dd>{notes.length === 1 ? "1 note" : `${notes.length} notes`}</dd>
+      <dt>Last changed</dt>
+      <dd>{last ? `${ago(last.updatedAt, now)} by ${last.updatedBy.name}` : "Nothing in it yet"}</dd>
+    </dl>
+  );
+}
+
+function Info({ host, app, note }: ViewProps & Inspected["note"] & { host: PluginHost }) {
   const tree = app.folders;
   const url = `${location.origin}${app.notePath(note.id)}`;
   const urlField = useRef<HTMLInputElement>(null);
@@ -79,9 +94,10 @@ function Info({ host, app, note }: ViewProps & { host: PluginHost; note: NoteSum
 export const noteInfo: Plugin = {
   id: "note-info",
   name: "Note info",
-  description: "The open note's details, in the inspector.",
+  description: "The details of the note or the folder in front, in the inspector.",
   icon: "info",
   activate(host) {
-    host.views.register("inspector", { id: "info", label: "Info", icon: "info", component: (props) => <Info host={host} {...props} /> });
+    host.views.register("inspector", { id: "info", label: "Info", icon: "info", for: "note", component: (props) => <Info host={host} {...props} /> });
+    host.views.register("inspector", { id: "folder-info", label: "Info", icon: "info", for: "folder", component: FolderInfo });
   },
 };

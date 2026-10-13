@@ -35,7 +35,11 @@ function linkChip(titleOf: TitleOf, open: Open): Chip<WrittenLink> {
     written: "within",
     inCode: true,
     skip: (state, link) => !isLink(state, link),
-    key: (link) => JSON.stringify([titleOf(link.target)]),
+    // A title not known yet and a note that isn't there are told apart, which JSON would write alike: the first becomes the second when the notes are listed.
+    key: (link) => {
+      const title = titleOf(link.target);
+      return title === undefined ? "waiting" : JSON.stringify([title]);
+    },
     draw(el, link, source) {
       const title = titleOf(link.target);
       el.textContent = link.display ?? (title === null ? UNAVAILABLE : title === undefined ? "…" : title || "Untitled");

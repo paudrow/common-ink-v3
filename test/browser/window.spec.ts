@@ -87,45 +87,186 @@ test("the inspector is dragged by its inner edge, and both edges are moved with 
   expect(await widthOf(sidebar(page))).toBe(216);
 });
 
-test("the buttons for the inspector and writing mode are at the top right of the editor area, in no note's bar, whatever is open", async ({ page }) => {
+test("the buttons for the sidebar and the inspector are together at the left end of the top left group's tab row, in no note's bar, whatever is open", async ({ page }) => {
   await withNote(page);
   const buttons = windowButtons(page);
-  await expect(buttons.getByRole("button")).toHaveText(["", ""]);
+  await expect(buttons).toHaveCount(1);
+  await expect(buttons.getByRole("button")).toHaveCount(2);
+  await expect(buttons.getByRole("button", { name: "Sidebar" })).toHaveAttribute("aria-pressed", "true");
   await expect(buttons.getByRole("button", { name: "Inspector" })).toHaveAttribute("aria-pressed", "true");
-  await expect(buttons.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator(".note-bar").getByRole("button", { name: /Inspector|Writing mode/ })).toHaveCount(0);
+  await expect(page.locator(".note-bar").getByRole("button", { name: /Sidebar|Inspector|Focus/ })).toHaveCount(0);
 
   const main = (await page.getByRole("main", { name: "Editor" }).boundingBox())!;
   const bar = (await page.locator(".note-bar").boundingBox())!;
   const at = (await buttons.boundingBox())!;
   expect(at.y).toBeGreaterThanOrEqual(main.y);
   expect(at.y + at.height).toBeLessThanOrEqual(bar.y);
-  expect(Math.round(at.x + at.width)).toBe(Math.round(main.x + main.width));
+  expect(Math.round(at.x)).toBe(Math.round(main.x));
+  const tab = (await page.getByRole("tab", { name: "Draft" }).boundingBox())!;
+  expect(Math.round(at.x + at.width)).toBe(Math.round(tab.x));
+  const side = (await buttons.getByRole("button", { name: "Sidebar" }).boundingBox())!;
+  const insp = (await buttons.getByRole("button", { name: "Inspector" }).boundingBox())!;
+  expect(insp.x - (side.x + side.width)).toBe(2);
+  expect(insp.y).toBe(side.y);
 
   await page.getByRole("tab", { name: "Draft" }).dblclick();
   await page.getByRole("link", { name: "Search" }).click();
   await expect(page.getByRole("tab", { name: "Search" })).toHaveAttribute("aria-selected", "true");
-  await expect(buttons.getByRole("button", { name: "Writing mode" })).toBeVisible();
+  await expect(buttons.getByRole("button", { name: "Sidebar" })).toBeVisible();
   await expect(buttons.getByRole("button", { name: "Inspector" })).toBeVisible();
 
   await page.getByRole("tab", { name: "Draft" }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Split down" }).click();
   await expect(page.getByRole("region", { name: "Editor group 2" })).toBeVisible();
   await expect(buttons).toHaveCount(1);
-  await expect(page.getByRole("region", { name: "Editor group 1" }).getByRole("group", { name: "Window" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Editor group 1" }).getByRole("group", { name: "Window" })).toHaveCount(1);
 
-  await buttons.getByRole("button", { name: "Writing mode" }).click();
-  await expect(page.getByRole("navigation", { name: "Left rail" })).toBeVisible();
-  await expect(buttons.getByRole("button", { name: "Writing mode" })).toHaveAttribute("aria-pressed", "true");
-  await buttons.getByRole("button", { name: "Writing mode" }).click();
+  await buttons.getByRole("button", { name: "Sidebar" }).click();
+  await expect(sidebar(page)).toHaveCount(0);
+  await buttons.getByRole("button", { name: "Inspector" }).click();
+  await expect(inspector(page)).toHaveCount(0);
+  await buttons.getByRole("button", { name: "Sidebar" }).click();
   await expect(sidebar(page)).toBeVisible();
+});
+
+test("a button at the left end of the window buttons' row closes and opens the sidebar, with the inspector's beside it, and so does ⌘\\", async ({ page }) => {
+  await withNote(page);
+  const main = page.getByRole("main", { name: "Editor" });
+  const sidebarButton = windowButtons(page).getByRole("button", { name: "Sidebar" });
+  const inspectorButton = windowButtons(page).getByRole("button", { name: "Inspector" });
+  await expect(sidebarButton).toHaveAttribute("title", /^Sidebar \((⌘\\|Ctrl\+\\)\)$/);
+
+  const [area, left, right] = [(await main.boundingBox())!, (await sidebarButton.boundingBox())!, (await inspectorButton.boundingBox())!];
+  expect({ width: left.width, height: left.height, y: left.y }).toEqual({ width: right.width, height: right.height, y: right.y });
+  expect(left.x - area.x).toBe(6);
+  // It is in the tab row, before the first tab.
+  const first = (await page.getByRole("tab", { name: "Draft" }).boundingBox())!;
+  expect(first.x).toBeGreaterThanOrEqual(left.x + left.width);
+  expect(first.y).toBeLessThanOrEqual(left.y);
+
+  await sidebarButton.click();
+  await expect(sidebar(page)).toHaveCount(0);
+  await expect(sidebarButton).toHaveAttribute("aria-pressed", "false");
+  await expect(edge(page, "Resize sidebar")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
+  expect(await widthOf(page.getByRole("navigation", { name: "Sidebar bar" }))).toBe(44);
+  expect(await widthOf(main)).toBe(Math.round(area.width) + 216 - 44);
+  // The inspector's button is still beside it.
+  expect((await inspectorButton.boundingBox())!.x - (await sidebarButton.boundingBox())!.x).toBe(right.x - left.x);
+  expect(right.x - left.x).toBe(30);
+
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
+  await expect(sidebar(page)).toHaveCount(0);
+
+  await sidebarButton.focus();
+  await page.keyboard.press("Enter");
+  await expect(sidebar(page)).toBeVisible();
+  expect(await sidebarButton.boundingBox()).toEqual(left);
+
+  await page.getByRole("textbox", { name: "Note text" }).click();
+  await page.keyboard.press("ControlOrMeta+\\");
+  await expect(sidebar(page)).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+\\");
+  await expect(sidebar(page)).toBeVisible();
+
+  // It is a command, with its keys beside it in the palette.
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type("Toggle sidebar");
+  await expect(page.getByRole("dialog", { name: "Commands" }).getByRole("option")).toHaveText([/^Toggle sidebar\s*(⌘\\|Ctrl\+\\)$/]);
+  await page.keyboard.press("Enter");
+  await expect(sidebar(page)).toHaveCount(0);
+});
+
+/** What a part lists, top to bottom: the name of each thing in it, checked to lie one under the other in that order. */
+async function listedIn(part: Locator, things: string) {
+  const found = await part.locator(things).evaluateAll((els) =>
+    els.map((el) => ({ name: (el.getAttribute("aria-label") ?? el.textContent ?? "").trim(), y: el.getBoundingClientRect().y, current: el.getAttribute("aria-current") === "page" })),
+  );
+  expect(found.map((f) => f.y)).toEqual(found.map((f) => f.y).sort((a, b) => a - b));
+  return found;
+}
+
+test("a closed sidebar leaves a bar with an icon for each thing the sidebar lists, in the sidebar's own order, and each goes where it says", async ({ page }) => {
+  await withNote(page);
+  const open = await listedIn(sidebar(page), ".new-note, nav[aria-label=Modes] > *, .section-head > span");
+  expect(open.map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders"]);
+
+  await windowButtons(page).getByRole("button", { name: "Sidebar" }).click();
+  const bar = page.getByRole("navigation", { name: "Sidebar bar" });
+  await expect(bar).toBeVisible();
+  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(open.map((o) => o.name));
+  for (const name of ["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders"]) {
+    const icon = bar.getByRole(["New note", "More", "Folders"].includes(name) ? "button" : "link", { name, exact: true });
+    await expect(icon).toHaveAttribute("title", name === "New note" ? "New note in Unsorted" : name);
+    expect(await widthOf(icon)).toBe(28);
+  }
+
+  // A mode's icon goes to the mode, marks it, and leaves the sidebar closed.
+  await bar.getByRole("link", { name: "Calendar" }).click();
+  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
+  await expect(sidebar(page)).toHaveCount(0);
+  expect((await listedIn(bar, "a, button")).filter((o) => o.current).map((o) => o.name)).toEqual(["Calendar"]);
+
+  // More lists the rest in the bar as it does in the sidebar, between Calendar and Folders.
+  await bar.getByRole("button", { name: "More" }).click();
+  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "Less", "Contacts", "Uploads", "History", "Plugins", "Folders"]);
+  await bar.getByRole("button", { name: "Less" }).click();
+
+  // Folders has nowhere to go but the sidebar, so it opens it.
+  await bar.getByRole("button", { name: "Folders" }).click();
+  await expect(sidebar(page).getByRole("tree", { name: "Folders" })).toBeVisible();
+  await expect(bar).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
+
+  // New note in the bar makes one.
+  await windowButtons(page).getByRole("button", { name: "Sidebar" }).click();
+  await bar.getByRole("button", { name: "New note" }).click();
+  await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
+  await expect(bar).toBeVisible();
+});
+
+test("a closed inspector leaves a bar with an icon for each of its tabs for what is in front, and an icon opens the inspector on its tab", async ({ page }) => {
+  await withNote(page);
+  const main = page.getByRole("main", { name: "Editor" });
+  const before = (await main.boundingBox())!;
+  await windowButtons(page).getByRole("button", { name: "Inspector" }).click();
+  const bar = page.getByRole("navigation", { name: "Inspector bar" });
+  await expect(bar.getByRole("button")).toHaveCount(3);
+  expect((await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Backlinks", "Info"]);
+  await expect(bar.getByRole("button", { name: "Backlinks" })).toHaveAttribute("title", "Backlinks");
+  expect(await widthOf(bar)).toBe(44);
+  expect(await widthOf(main)).toBe(Math.round(before.width) + 300 - 44);
+  expect((await main.boundingBox())!.x).toBe(before.x);
+
+  await bar.getByRole("button", { name: "History" }).click();
+  await expect(inspector(page).getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  await expect(inspector(page).getByRole("tabpanel").getByRole("listbox", { name: "Changes" }).getByRole("option")).toHaveCount(1);
+  await expect(bar).toHaveCount(0);
+  await expect(windowButtons(page).getByRole("button", { name: "Inspector" })).toHaveAttribute("aria-pressed", "true");
+
+  // A folder's list has its two tabs, and a mode has none: the bar is there, with nothing in it to press that would say nothing.
+  await windowButtons(page).getByRole("button", { name: "Inspector" }).click();
+  await page.getByRole("treeitem", { name: "Unsorted" }).click();
+  await expect.poll(async () => (await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Info"]);
+  await bar.getByRole("button", { name: "Info" }).click();
+  await expect(inspector(page).getByRole("definition")).toHaveText(["Unsorted", "1 note", "just now by Ada Lovelace"]);
+
+  await windowButtons(page).getByRole("button", { name: "Inspector" }).click();
+  await page.getByRole("link", { name: "Search" }).click();
+  await expect(page.getByRole("heading", { name: "Search" })).toBeVisible();
+  await expect(bar).toBeVisible();
+  await expect(bar.getByRole("button")).toHaveCount(0);
+  await windowButtons(page).getByRole("button", { name: "Inspector" }).click();
+  await expect(inspector(page)).toHaveText("Nothing to show for this view");
 });
 
 test("with nothing open the buttons are still there", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await expect(page.getByRole("tab")).toHaveCount(0);
   await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
-  await expect(windowButtons(page).getByRole("button", { name: "Writing mode" })).toBeVisible();
+  await expect(windowButtons(page).getByRole("button", { name: "Sidebar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();
   await expect(windowButtons(page).getByRole("button", { name: "Inspector" })).toBeVisible();
 });
 
@@ -159,9 +300,10 @@ for (const width of [900, 700, 480]) {
       });
 
     const buttons = windowButtons(page);
+    const sidebarButton = buttons.getByRole("button", { name: "Sidebar" });
     const inspectorButton = buttons.getByRole("button", { name: "Inspector" });
-    const writingButton = buttons.getByRole("button", { name: "Writing mode" });
-    await inside(inspectorButton, writingButton, sidebar(page), inspector(page), page.getByRole("tab", { name: /Draft/ }), page.locator(".save-state"), edge(page, "Resize sidebar"), edge(page, "Resize inspector"));
+    const focusButton = page.getByRole("button", { name: "Focus" });
+    await inside(sidebarButton, inspectorButton, focusButton, sidebar(page), inspector(page), page.getByRole("tab", { name: /Draft/ }), page.locator(".save-state"), edge(page, "Resize sidebar"), edge(page, "Resize inspector"));
     for (const button of await page.locator(".note-bar").getByRole("button").all()) await inside(button);
     let bar = await barIsWhole();
     expect(bar.cut).toEqual([]);
@@ -170,19 +312,26 @@ for (const width of [900, 700, 480]) {
 
     await inspectorButton.click();
     await expect(inspector(page)).toHaveCount(0);
-    await inside(inspectorButton, writingButton, sidebar(page));
+    await inside(sidebarButton, inspectorButton, focusButton, sidebar(page), page.getByRole("navigation", { name: "Inspector bar" }));
     bar = await barIsWhole();
     expect(bar.cut).toEqual([]);
+    await sidebarButton.click();
+    await expect(sidebar(page)).toHaveCount(0);
+    await inside(sidebarButton, inspectorButton, focusButton, page.getByRole("navigation", { name: "Sidebar bar" }), page.getByRole("navigation", { name: "Inspector bar" }));
+    bar = await barIsWhole();
+    expect(bar.cut).toEqual([]);
+    await sidebarButton.click();
     await inspectorButton.click();
-    await inside(inspector(page), inspectorButton, writingButton);
+    await inside(sidebar(page), inspector(page), sidebarButton, inspectorButton, focusButton);
 
-    await writingButton.click();
+    await focusButton.click();
     await expect(sidebar(page)).toHaveCount(0);
     await expect(inspector(page)).toHaveCount(0);
-    await inside(page.getByRole("navigation", { name: "Left rail" }), page.getByRole("navigation", { name: "Right rail" }), writingButton);
+    await expect(page.getByRole("navigation")).toHaveCount(0);
+    await inside(focusButton);
     bar = await barIsWhole();
     expect(bar.cut).toEqual([]);
-    await writingButton.click();
-    await inside(sidebar(page), inspector(page), inspectorButton, writingButton);
+    await focusButton.click();
+    await inside(sidebar(page), inspector(page), sidebarButton, inspectorButton, focusButton);
   });
 }

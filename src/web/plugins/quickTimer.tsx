@@ -87,7 +87,7 @@ export const quickTimer: Plugin = {
         if (!clock) return null;
         const done = finished(clock, time);
         return (
-          <button type="button" className="bar-item bar-clock" data-done={done || undefined} title={done ? "Dismiss" : "Stop it"} aria-label={`Quick timer, ${done ? "finished" : `${shown(clock, time)} left`}`} onClick={() => set(null)}>
+          <button type="button" className="bar-clock" data-done={done || undefined} title={done ? "Dismiss" : "Stop it"} aria-label={`Quick timer, ${done ? "finished" : `${shown(clock, time)} left`}`} onClick={() => set(null)}>
             Quick timer {shown(clock, time)}
           </button>
         );

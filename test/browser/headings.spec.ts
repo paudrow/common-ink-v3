@@ -76,6 +76,9 @@ async function open(page: Page, text: string, width = 1280) {
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Body");
+  // The folder's name arrives in the note's bar after the note does, and in a narrow column, with a wide
+  // face, it puts the bar on two rows: everything under it is lower from then on. Measure after it.
+  await expect(page.locator(".note-meta .crumbs")).not.toBeEmpty();
   await editor(page).focus();
   await page.evaluate(() => document.fonts.ready);
   return note;
