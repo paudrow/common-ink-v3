@@ -1,14 +1,15 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Icon, MAX_SEARCH_LENGTH, changeTodo, nameKey, parseQuery, parseTodo, ruleLabel, soughtIn, tagsOn, useNow, type App, type ListedTodo, type PluginHost, type Results, type TodoChange, type TodoCompletion } from "../../plugin-api.ts";
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { Icon, MAX_SEARCH_LENGTH, changeTodo, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useNow, type App, type ListedTodo, type PluginHost, type Results, type TodoChange, type TodoCompletion } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
 import { QueryBar } from "../lib/QueryBar.tsx";
-import { IMPORTANCE } from "./chips.ts";
+import { ChipMenu } from "./ChipMenu.tsx";
 import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
-import { addDays, dayOf, dueLabel, dueState, savedQuery } from "./dates.ts";
+import { dayOf, dueLabel, dueState, savedQuery } from "./dates.ts";
+import { CHIP_NAMES, IMPORTANCE, pickerLabel, picking, type ChipKind, type Opened, type PickingEvent } from "./picking.ts";
+import { narrowedTo, toggledTag } from "./tagged.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
-import { RuleEditor } from "./RuleEditor.tsx";
 
 /** How long typing rests before the list is asked for, so a word is one ask and not one a letter. */
 const PAUSE_MS = 200;
@@ -33,7 +34,22 @@ function changed(todo: ListedTodo, change: TodoChange, on: string): ListedTodo {
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
 const comesAround = (todo: ListedTodo, on: string) => !todo.done && changeTodo(todo.text, { done: true }, on).filed !== null;
 
-/** A todo's words with the tags written on its line drawn as tags. */
+/**
+ * A todo's words, and the tags written at their end, which are drawn as chips after them. A tag inside the
+ * sentence stays where it is written. Words that are nothing but tags keep them.
+ */
+function splitTags(words: string): { lead: string; trailing: string[] } {
+  const tags = tagsOn(words);
+  let from = words.trimEnd().length;
+  const trailing: string[] = [];
+  for (let i = tags.length - 1; i >= 0 && !words.slice(tags[i]!.to, from).trim(); i--) {
+    trailing.unshift(tags[i]!.name);
+    from = tags[i]!.from;
+  }
+  return words.slice(0, from).trim() ? { lead: words.slice(0, from).trimEnd(), trailing } : { lead: words, trailing: [] };
+}
+
+/** A todo's words with the tags written in them drawn as tags. */
 function Words({ words }: { words: string }) {
   const parts: (string | { tag: string })[] = [];
   let at = 0;
@@ -57,41 +73,94 @@ function Words({ words }: { words: string }) {
   );
 }
 
-/** Opens a date field's calendar as the field arrives. One function, so it is asked once and not again each time the row is drawn. */
-const openCalendar = (input: HTMLInputElement | null) => {
-  try {
-    input?.showPicker();
-  } catch {
-    // A browser that won't open its calendar from here still takes the date typed into the field.
-  }
-};
-
 interface RowProps {
   todo: ListedTodo;
   now: string;
-  /** The tag the list is narrowed to, if any. */
-  tag: string;
+  /** The tags the list is narrowed to, as the query names them. */
+  tags: readonly string[];
   app: App;
+  /** Which of its chips has its popover open, if one does. */
+  picked: Opened | null;
   /** Whether its completion is on its way to the server. */
   completing: boolean;
   onChange: (todo: ListedTodo, change: TodoChange) => void;
   onOpen: (todo: ListedTodo) => void;
   /** Reads each time it was checked off. */
   completions: (todo: ListedTodo) => Promise<TodoCompletion[]>;
+  onPicking: (event: PickingEvent) => void;
+  /** Narrows the list to a tag through the query, or takes it off the query when the list is narrowed to it. */
+  onTag: (name: string) => void;
 }
 
 /**
- * A todo's card. Its checkbox and its words, which open its note, are the two things to press, and
- * everything else is in one menu: from the "…" button, a right-click, or the menu key on the row.
+ * A todo's card: its checkbox, its words, which open its note, and what is set on it as chips straight
+ * after the words, each opening a small popover under itself to be set with. What has no chip is in one
+ * menu: from the "…" button, a right-click, or the menu key on the row.
  */
-function Row({ todo, now, tag, app, completing, onChange, onOpen, completions }: RowProps) {
+function Row({ todo, now, tags, app, picked, completing, onChange, onOpen, completions, onPicking, onTag }: RowProps) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const [picking, setPicking] = useState(false);
   const more = useRef<HTMLButtonElement>(null);
+  // A popover stays open while the list is read again: what is picked in it is made to the todo as the list has it then.
+  const latest = useRef(todo);
+  latest.current = todo;
+  // A card is a line of a note. When the list is read again with another todo on that line, as when a line is written above it,
+  // the popover opened for the todo that was there closes, so a pick never lands on the one that came.
+  const openedOn = useRef<string | null>(null);
+  useEffect(() => {
+    if (picked && openedOn.current !== null && openedOn.current !== todo.text) closePopover();
+  }, [picked, todo.text]);
   const readOnly = todo.access !== "edit";
   const words = todo.words || "Nothing written";
+  const { lead, trailing } = splitTags(words);
+  const row = keyOf(todo);
   // Listed under a tag its own line doesn't write: the tag is its note's, which is said beside the note's name.
-  const ofNote = tag && !tagsOn(todo.text).some((own) => nameKey(own.name) === nameKey(tag)) ? (todo.tags.find((name) => nameKey(name) === nameKey(tag)) ?? null) : null;
+  const ownTags = new Set(tagsOn(todo.text).map((own) => nameKey(own.name)));
+  const ofNote = tags.filter((tag) => !ownTags.has(nameKey(tag))).flatMap((tag) => todo.tags.filter((name) => nameKey(name) === nameKey(tag)));
+  const narrowed = (name: string) => tags.some((tag) => nameKey(tag) === nameKey(name));
+
+  /** Opens a popover under `anchor` for one of the card's chips, with the card marked while it is open. */
+  const show = (chip: Opened, anchor: HTMLElement, label: string, content: (close: () => void) => ReactNode) => {
+    onPicking({ type: "open", row, chip });
+    openedOn.current = todo.text;
+    openPopover(anchor, label, content, () => onPicking({ type: "closed", row, chip }));
+  };
+  /** Opens a chip's popover under `anchor`: the chip, or the "…" button for what has no chip yet. */
+  const pick = (chip: ChipKind, anchor: HTMLElement) =>
+    show(chip, anchor, pickerLabel(chip, words), (close) => (
+      <ChipMenu
+        chip={chip}
+        todo={todo}
+        now={now}
+        onPick={(to) => {
+          close();
+          if (latest.current.text !== todo.text) return;
+          // A chip the pick takes away can't have the keyboard back: the card's "…" has it.
+          if (document.activeElement === anchor && (to.due === null || to.importance === 0 || to.every === null)) more.current?.focus();
+          onChange(latest.current, to);
+        }}
+      />
+    ));
+  const chipProps = (chip: ChipKind, said: string) => ({
+    type: "button" as const,
+    "aria-label": `${CHIP_NAMES[chip]}: ${said}`,
+    "aria-haspopup": "dialog" as const,
+    "aria-expanded": picked === chip,
+    disabled: readOnly,
+    onClick: (e: { currentTarget: HTMLElement }) => pick(chip, e.currentTarget),
+  });
+  // Listing them changes nothing, so someone who can only read may look.
+  const listDone = (anchor: HTMLElement) =>
+    show("done", anchor, "Completions", (close) => (
+      <Completions
+        ask={() => completions(latest.current)}
+        done={todo.lastDone!}
+        now={now}
+        onOpen={(noteId) => {
+          close();
+          app.openNote(noteId);
+        }}
+      />
+    ));
 
   const underMore = () => {
     const box = more.current!.getBoundingClientRect();
@@ -101,36 +170,6 @@ function Row({ todo, now, tag, app, completing, onChange, onOpen, completions }:
     setMenu(null);
     more.current?.focus();
   }, []);
-  // A panel stays open while the list is read again, and what it does is done to the row as it reads by then.
-  const row = useRef(todo);
-  row.current = todo;
-  /** Opens a panel under the "…" button, in place of any that is open. */
-  const panel = (label: string, content: (close: () => void) => ReactNode) => {
-    closePopover();
-    openPopover(more.current!, label, content);
-  };
-  const setEvery = () =>
-    panel("Recurrence", (close) => {
-      const set = (change: TodoChange) => {
-        close();
-        onChange(row.current, change);
-      };
-      return <RuleEditor every={todo.every} due={todo.due} now={now} onSet={(every) => set({ every })} onSkip={() => set({ skip: true })} />;
-    });
-  const listDone = () => {
-    const ask = () => completions(row.current);
-    panel("Completions", (close) => (
-      <Completions
-        ask={ask}
-        done={todo.lastDone!}
-        now={now}
-        onOpen={(noteId) => {
-          close();
-          app.openNote(noteId);
-        }}
-      />
-    ));
-  };
   const { openBeside } = app;
   const items: MenuItem[] = [
     { label: "Open the note", action: () => onOpen(todo) },
@@ -138,21 +177,18 @@ function Row({ todo, now, tag, app, completing, onChange, onOpen, completions }:
     ...(readOnly
       ? []
       : [
-          ...([3, 2, 1, 0] as const).map((level) => ({ label: `Importance: ${IMPORTANCE[level]}`, disabled: level === todo.importance, action: () => onChange(todo, { importance: level }) })),
-          { label: "Due today", disabled: todo.due === now, action: () => onChange(todo, { due: now }) },
-          { label: "Due tomorrow", disabled: todo.due === addDays(now, 1), action: () => onChange(todo, { due: addDays(now, 1) }) },
-          { label: "Pick a due date…", action: () => setPicking(true) },
-          { label: "No due date", disabled: !todo.due, action: () => onChange(todo, { due: null }) },
-          { label: "Recurrence…", action: setEvery },
+          ...(todo.importance ? [] : [{ label: "Importance…", action: () => pick("importance", more.current!) }]),
+          ...(todo.due ? [] : [{ label: "Due date…", action: () => pick("due", more.current!) }]),
+          ...(todo.every ? [] : [{ label: "Recurrence…", action: () => pick("every", more.current!) }]),
         ]),
-    // Listing them changes nothing, so someone who can only read may look.
-    ...(todo.lastDone ? [{ label: "Completions", action: listDone }] : []),
   ];
+  const due = todo.due && dueLabel(todo.due, now);
 
   return (
     <li
       className="todo-card"
       data-done={todo.done || undefined}
+      data-picking={picked ?? undefined}
       onContextMenu={(e) => {
         e.preventDefault();
         // Asked for by the keyboard, it has no place of its own.
@@ -165,50 +201,55 @@ function Row({ todo, now, tag, app, completing, onChange, onOpen, completions }:
       }}
     >
       <input type="checkbox" checked={todo.done} disabled={readOnly || completing} aria-label={todo.done ? "Done" : "Not done"} onChange={(e) => onChange(todo, { done: e.target.checked })} />
-      <div className="todo-text">
-        <button type="button" className="todo-words" data-row-open onClick={() => onOpen(todo)}>
-          <Words words={words} />
-        </button>
-        <div className="todo-meta">
-          {todo.importance > 0 && (
-            <span className="todo-chip todo-importance" data-level={todo.importance} title="Importance">
-              {IMPORTANCE[todo.importance]}
-            </span>
-          )}
-          {picking ? (
-            <input
-              type="date"
-              className="todo-pick"
-              aria-label={`Due date for ${words}`}
-              defaultValue={todo.due ?? ""}
-              autoFocus
-              ref={openCalendar}
-              // A date half typed has no value: taking the date away is the menu's to do.
-              onChange={(e) => e.target.value && onChange(todo, { due: e.target.value })}
-              onBlur={() => setPicking(false)}
-              onKeyDown={(e) => (e.key === "Enter" || e.key === "Escape") && more.current?.focus()}
-            />
-          ) : (
-            todo.due && (
-              <span className="todo-chip todo-due" data-due={dueState(todo.due, now)} title="Due">
-                {dueLabel(todo.due, now)}
-              </span>
-            )
-          )}
-          {todo.every && (
-            <span className="todo-chip todo-every" title={everyName(todo.every)}>
-              {todo.recurs ?? todo.every}
-            </span>
-          )}
-          {todo.lastDone && (
-            <span className="todo-chip todo-done" title={doneName(todo.lastDone, now)}>
-              {doneLabel(todo.lastDone, now)}
-            </span>
-          )}
-          <span className="todo-note">{todo.noteTitle || "Untitled"}</span>
-          {ofNote && <span className="todo-chip todo-tag">#{ofNote}</span>}
-        </div>
-      </div>
+      <span className="todo-text">
+        <a
+          className="todo-words"
+          href={`/note/${todo.noteId}`}
+          onClick={(e) => {
+            // With a key held, the browser opens it elsewhere, as any link.
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            e.preventDefault();
+            onOpen(todo);
+          }}
+        >
+          <Words words={lead} />
+        </a>
+        {todo.importance > 0 && (
+          <button className="todo-chip todo-importance" {...chipProps("importance", IMPORTANCE[todo.importance])}>
+            {IMPORTANCE[todo.importance]}
+          </button>
+        )}
+        {due && (
+          <button className="todo-chip todo-due" data-due={dueState(todo.due!, now)} {...chipProps("due", due)}>
+            <Icon name="calendar" />
+            {due}
+          </button>
+        )}
+        {todo.every && (
+          <button className="todo-chip todo-every" title={everyName(todo.every)} {...chipProps("every", todo.recurs ?? todo.every)}>
+            <Icon name="repeat" />
+            {todo.recurs ?? todo.every}
+          </button>
+        )}
+        {todo.lastDone && (
+          <button type="button" className="todo-chip todo-done" aria-label={doneName(todo.lastDone, now)} aria-haspopup="dialog" aria-expanded={picked === "done"} onClick={(e) => listDone(e.currentTarget)}>
+            {doneLabel(todo.lastDone, now)}
+          </button>
+        )}
+        {trailing.map((name, i) => (
+          <button key={`${i} ${name}`} type="button" className="todo-chip todo-tag" aria-pressed={narrowed(name)} title={`Todos tagged #${name}`} onClick={() => onTag(name)}>
+            #{name}
+          </button>
+        ))}
+      </span>
+      <span className="todo-where">
+        <span className="todo-note">{todo.noteTitle || "Untitled"}</span>
+        {ofNote.map((name) => (
+          <span key={name} className="todo-chip todo-tag">
+            #{name}
+          </span>
+        ))}
+      </span>
       <button ref={more} type="button" className="icon-button todo-more" aria-label={`More for ${words}`} aria-haspopup="menu" aria-expanded={menu !== null} onClick={() => setMenu(underMore())}>
         <Icon name="more" />
       </button>
@@ -235,6 +276,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
   /** What the server said of a query that reads and can't be answered, and the query it said it of. */
   const [unanswered, setUnanswered] = useState<{ query: string; message: string } | null>(null);
   const [asked, setAsked] = useState(0);
+  const [picked, onPicking] = useReducer(picking, null);
   /** The recurring todos whose completion is on its way. Checked again before it lands, one would be completed twice. */
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
   /** The todos as the page shows them now, for an Undo pressed after more was changed. */
@@ -246,8 +288,8 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const now = dayOf(new Date(useNow()));
   const read = useMemo(() => parseQuery(query, "todos"), [query]);
   const ask = useMemo(() => ({ query, today: now, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }), [query, now]);
-  /** The tag the list is narrowed to, which a todo listed for its note's tag says beside the note. */
-  const tag = (read.ok && soughtIn(read.query).tags[0]) || "";
+  /** The tags the list is narrowed to: their chips read as pressed, and a todo listed for its note's tag says it beside the note. */
+  const tags = useMemo(() => narrowedTo(query), [query]);
   // The list is read again whenever a note the member can see changes, by anyone, or is archived, trashed, or brought back.
   const version = useMemo(() => (app.notes ?? []).map((n) => `${n.id}:${n.revision}:${n.state}`).join(","), [app.notes]);
 
@@ -383,7 +425,24 @@ export function TodosPage({ host, app, onOpen }: Props) {
       {page && page.todos.length > 0 && (
         <ul className="cards" aria-label="Todos">
           {page.todos.map((todo) => (
-            <Row key={keyOf(todo)} todo={todo} now={now} tag={tag} app={app} completing={completing.has(keyOf(todo))} onChange={change} onOpen={onOpen} completions={completions} />
+            <Row
+              key={keyOf(todo)}
+              todo={todo}
+              now={now}
+              tags={tags}
+              app={app}
+              picked={picked?.row === keyOf(todo) ? picked.chip : null}
+              completing={completing.has(keyOf(todo))}
+              onChange={change}
+              onOpen={onOpen}
+              completions={completions}
+              onPicking={onPicking}
+              onTag={(name) => {
+                const next = toggledTag(typed, name);
+                setTyped(next);
+                run(next);
+              }}
+            />
           ))}
         </ul>
       )}

@@ -163,8 +163,22 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
   });
 }
 
-/** The embed below a line that the pointer is over, or none. */
-const pointed = StateEffect.define<number | null>();
+/** Whether the cursor is in what the note writes for an embed, or at its edge. */
+const within = (state: EditorState, written: Written) => state.selection.ranges.some((r) => r.from <= written.to && r.to >= written.from);
+
+/** Whether any of an element is in sight: inside the window and inside everything around it that scrolls or clips. */
+function inSight(el: Element): boolean {
+  const rect = el.getBoundingClientRect();
+  let [top, bottom, left, right] = [Math.max(rect.top, 0), Math.min(rect.bottom, window.innerHeight), Math.max(rect.left, 0), Math.min(rect.right, window.innerWidth)];
+  for (let around = el.parentElement; around && top < bottom && left < right; around = around.parentElement) {
+    const style = getComputedStyle(around);
+    if (style.overflowX === "visible" && style.overflowY === "visible") continue;
+    const clip = around.getBoundingClientRect();
+    [top, bottom, left, right] = [Math.max(top, clip.top), Math.min(bottom, clip.bottom), Math.max(left, clip.left), Math.min(right, clip.right)];
+  }
+  return top < bottom && left < right;
+}
+
 /** The height what is below a line turned out to have, once it had loaded. */
 const resized = StateEffect.define<{ id: number; height: number }>();
 
@@ -173,17 +187,17 @@ const SEEN = Decoration.line({ class: "embed-address embed-address-seen" });
 
 /**
  * An address shown as media keeps its line, as small as a caption, and the line's text is seen only
- * with the pointer over the media or the cursor on the line. So the address comes and goes and
- * nothing in the note moves.
+ * with the cursor on the line, as anything else in a note is shown as written only under the cursor.
+ * So the address comes and goes and nothing in the note moves.
  */
-function addressLines(state: EditorState, shown: readonly Shown[], over: number | null, written: boolean): DecorationSet {
+function addressLines(state: EditorState, shown: readonly Shown[], written: boolean): DecorationSet {
   return Decoration.set(
     shown
       .filter((s) => s.bare)
       .map((s) => {
         const line = state.doc.lineAt(s.from);
         const on = written && state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from);
-        return (on || over === s.id ? SEEN : HIDDEN).range(line.from);
+        return (on ? SEEN : HIDDEN).range(line.from);
       }),
   );
 }
@@ -204,7 +218,6 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     rooms: DecorationSet;
     lines: DecorationSet;
     reading: Reading;
-    over: number | null;
     /** The heights given by what was drawn, by id, which stand over what `box` says for as long as that one is kept. */
     sized: ReadonlyMap<number, number>;
   }
@@ -213,20 +226,19 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     create(state) {
       const now = reading(state);
       const shown = read(state, now, [], (pos) => pos, new Map());
-      return { shown, rooms: rooms(shown), lines: addressLines(state, shown, null, now.written), reading: now, over: null, sized: new Map() };
+      return { shown, rooms: rooms(shown), lines: addressLines(state, shown, now.written), reading: now, sized: new Map() };
     },
     update(value, tr) {
       const now = reading(tr.state);
-      let { over, sized } = value;
+      let { sized } = value;
       for (const effect of tr.effects) {
-        if (effect.is(pointed)) over = effect.value;
         if (effect.is(resized) && sized.get(effect.value.id) !== effect.value.height) sized = new Map(sized).set(effect.value.id, effect.value.height);
       }
       const reread = tr.docChanged || sized !== value.sized || now.embeds !== value.reading.embeds || now.addresses !== value.reading.addresses || now.blocks !== value.reading.blocks || syntaxTree(tr.startState) !== syntaxTree(tr.state);
-      if (!reread && !tr.selection && over === value.over && now.written === value.reading.written) return value;
+      if (!reread && !tr.selection && now.written === value.reading.written) return value;
       const shown = reread ? read(tr.state, now, value.shown, (pos) => tr.changes.mapPos(pos, 1), sized) : value.shown;
       if (reread && sized.size) sized = new Map([...sized].filter(([id]) => shown.some((s) => s.id === id)));
-      return { shown, rooms: reread ? rooms(shown) : value.rooms, lines: addressLines(tr.state, shown, over, now.written), reading: now, over, sized };
+      return { shown, rooms: reread ? rooms(shown) : value.rooms, lines: addressLines(tr.state, shown, now.written), reading: now, sized };
     },
     provide: (f) => [EditorView.decorations.from(f, (value) => value.rooms), EditorView.decorations.from(f, (value) => value.lines)],
   });
@@ -253,12 +265,16 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     class {
       readonly dom: HTMLElement;
       readonly live = new Map<number, Live>();
+      readonly scrolled: () => void;
       readonly measure: { key: object; read: (view: EditorView) => Map<number, Place & { seen: boolean }>; write: (places: Map<number, Place & { seen: boolean }>, view: EditorView) => void };
 
       constructor(view: EditorView) {
         this.dom = view.scrollDOM.appendChild(document.createElement("div"));
         this.dom.className = "embed-below-layer";
         this.measure = { key: this, read: (v) => this.places(v), write: (places, v) => this.place(places, v) };
+        // The note may scroll in something around the editor, which the editor isn't told of. A room that comes on screen that way is drawn too.
+        this.scrolled = () => view.state.field(field).shown.some((s) => !this.live.has(s.id)) && view.requestMeasure(this.measure);
+        document.addEventListener("scroll", this.scrolled, { capture: true, passive: true });
         this.settle(view);
       }
 
@@ -291,7 +307,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           if (room) {
             const rect = room.getBoundingClientRect();
             heights.set(id, rect.height);
-            places.set(id, { left: rect.left + dx, top: rect.top + dy, width: rect.width, height: rect.height, seen: rect.bottom > 0 && rect.top < window.innerHeight });
+            places.set(id, { left: rect.left + dx, top: rect.top + dy, width: rect.width, height: rect.height, seen: this.live.has(id) || inSight(room) });
             continue;
           }
           const was = this.live.get(id)?.place;
@@ -311,10 +327,6 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
             const el = document.createElement("div");
             el.className = shown.written.block ? "embed-below embed-below-joined" : "embed-below";
             el.dataset.embed = shown.embed.name;
-            const { id: mine } = shown;
-            const over = (id: number | null) => view.state.field(field, false) && view.dispatch({ effects: pointed.of(id) });
-            el.addEventListener("pointerenter", () => over(mine));
-            el.addEventListener("pointerleave", () => view.state.field(field, false)?.over === mine && over(null));
             // In the page before it is drawn in: a frame made in an element that is put in later would load twice.
             this.dom.append(el);
             const drawn = el.appendChild(document.createElement("div"));
@@ -325,8 +337,9 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
             this.draw(made, shown, view);
           }
           if (!live) continue;
-          // The note says something else of it now: it is drawn again, in the element and the place it has.
-          if (live.source !== shown.source) {
+          // The note says something else of it now: it is drawn again, in the element and the place it has. A block
+          // being written is drawn again once the cursor has left it, and not at each key, half-written.
+          if (live.source !== shown.source && !(shown.written.block && within(view.state, shown.written))) {
             this.stop(live);
             live.drawn.replaceChildren();
             this.draw(live, shown, view);
@@ -389,6 +402,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           this.draw(live, now, view);
         });
         notice.append(`${shown?.embed.title ?? "This"} was stopped: it tried to take the keyboard while you were typing.`, again);
+        live.drawn.removeAttribute("aria-busy");
         live.drawn.replaceChildren(notice);
       }
 
@@ -403,6 +417,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
       }
 
       destroy() {
+        document.removeEventListener("scroll", this.scrolled, { capture: true });
         for (const [id, live] of this.live) this.drop(id, live);
         this.dom.remove();
       }

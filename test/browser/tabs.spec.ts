@@ -715,6 +715,9 @@ test("a page that only leads somewhere else leaves the editor of a note open bes
   await page.evaluate((id) => ((window as unknown as { onwardTo: string }).onwardTo = id), gamma!.id);
   await keep(page, "Alpha");
   await keep(page, "Beta");
+  // With the italic list closed there is no italic tab, so what the page leads to opens in the pane in front, beside Alpha's.
+  await tab(page, "All notes").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Close", exact: true }).click();
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.keyboard.type("Split editor right");
   await page.keyboard.press("Enter");

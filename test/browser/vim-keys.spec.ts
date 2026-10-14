@@ -218,7 +218,7 @@ for (const listed of LISTS) {
   });
 }
 
-test("History's list of changes keeps its own keys with vim mode on: j goes to the list, and there j, k, x and Enter are History's", async ({ page }) => {
+test("History's list of changes keeps its own keys with vim mode on: j goes to the list, and there j, k, x and Enter are History's, and gg, G and the half pages reach it as its own", async ({ page }) => {
   await signIn(page);
   for (let n = 0; n < 4; n++) await perform(page, { type: "note.create", text: `# Plum ${n}` });
   await open(page, "/history");
@@ -228,14 +228,20 @@ test("History's list of changes keeps its own keys with vim mode on: j goes to t
   const cursor = () => list.evaluate((el) => [...el.querySelectorAll('[role="option"]')].findIndex((o) => o.id === el.getAttribute("aria-activedescendant")));
   const shown = page.locator(".hist-main .hist-file");
 
-  // The newest change is selected as the page opens. j from the page goes to the list, not onto a row of it.
-  await expect(changes.nth(0)).toHaveAttribute("aria-selected", "true");
+  // No change is selected as the page opens. j from the page goes to the list, not onto a row of it.
+  await expect(page.locator(".hist-hint")).toBeVisible();
+  await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
   await page.keyboard.press("j");
   await expect(list).toBeFocused();
   await expect(page.locator("[data-vim-at]"), "no row is marked as vim's").toHaveCount(0);
-  await expect.poll(cursor).toBe(0);
+  await expect.poll(cursor).toBe(-1);
+  await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
 
-  // From here the keys are History's: j and k move its cursor and show that change, and x ticks one more.
+  // From here the keys are History's: j goes to the first change, j and k move its cursor and show that change, and x ticks one more.
+  await page.keyboard.press("j");
+  await expect.poll(cursor).toBe(0);
+  await expect(changes.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(shown).toContainText("Plum 3");
   await page.keyboard.press("j");
   await expect.poll(cursor).toBe(1);
   await expect(changes.nth(1)).toHaveAttribute("aria-selected", "true");
@@ -251,10 +257,24 @@ test("History's list of changes keeps its own keys with vim mode on: j goes to t
   await page.keyboard.press("x");
   await expect(changes.nth(2)).toHaveAttribute("aria-selected", "true");
   await expect(list).toBeFocused();
-  // Vim's keys for a list that History has none of move nothing.
-  await keys(page, "Shift+G", "Control+d");
-  await expect.poll(cursor).toBe(2);
+  // G, gg and the half pages are History's too: vim sends them to the list as End, Home, Page Down and Page Up.
+  await page.keyboard.press("Shift+G");
+  await expect.poll(cursor).toBe(3);
+  await expect(changes.nth(3)).toHaveAttribute("aria-selected", "true");
+  await keys(page, "g", "g");
+  await expect.poll(cursor).toBe(0);
+  await expect(shown).toContainText("Plum 3");
+  await page.keyboard.press("Control+d");
+  await expect.poll(cursor).toBe(3);
+  await page.keyboard.press("Control+u");
+  await expect.poll(cursor).toBe(0);
   await expect(list).toBeFocused();
+  await expect(page.locator("[data-vim-at]"), "no row is marked as vim's").toHaveCount(0);
+  // A g that begins nothing here takes no key from the list: the j after it is the list's.
+  await keys(page, "g", "j");
+  await expect.poll(cursor).toBe(1);
+  await keys(page, "j", "g");
+  await expect.poll(cursor).toBe(2);
 
   // Enter is History's too: it opens the change's note, which vim has in normal mode.
   await page.keyboard.press("Enter");

@@ -1,131 +1,96 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { Icon, MAX_NOTES_AT_ONCE, useNow, type AuthorRef, type ChangedNote, type DiffRun, type HistoryEntry, type HistoryPage, type HistorySummary, type NoteDiff, type NoteSummary, type OpInput, type PluginHost } from "../../plugin-api.ts";
-import { Avatar, DiffView, Stat } from "../lib/HistoryDiff.tsx";
-import { MOST_OF_A_NOTE, NOTHING, asked, clock, count, dayLabel, did, groupSaves, keyOf, only, picked, sameSelection, sizeOf, titleOf, who as whoOf, within, withRows, type Row, type Selection } from "../lib/historyView.ts";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { Icon, MAX_NOTES_AT_ONCE, useNow, type AuthorRef, type DiffRun, type HistoryEntry, type HistoryPage, type NoteDiff, type NoteRevertPreview, type OpInput, type PluginHost, type RevertConflict } from "../../plugin-api.ts";
+import { Avatar, DiffView, Stat, type Marked } from "../lib/HistoryDiff.tsx";
+import { MOST_OF_A_NOTE, NOTHING, asked, byDay, clock, count, dayLabel, did, groupSaves, kept, keyOf, lists, notesOf, only, picked, pieces, sameSelection, sizeOf, titleOf, who as whoOf, within, withRows, type Narrowing, type NoteOfDay, type Row, type Selection } from "../lib/historyView.ts";
 import { useKept } from "../lib/kept.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
-import { useReverts, type RevertAsk } from "../lib/RevertDialog.tsx";
+import { later, useReverts, type RevertAsk } from "../lib/RevertDialog.tsx";
 
-/** What narrows history: to some notes, to some authors, and to people's changes or agents'. */
+/** What the operation that lists changes is narrowed by. */
 type Filters = Pick<Extract<OpInput, { type: "history.list" }>, "noteIds" | "authors" | "by">;
 
 export type View = "time" | "note";
 type Who = "everyone" | "people" | "agents";
 
-/** What History is narrowed to, under the name it goes by: some notes under a note's title or a folder's name, or one author's changes under the author's name. */
-export type Scope = { label: string; noteIds: string[] } | { label: string; author: AuthorRef };
+/**
+ * What History is narrowed to, under the name it goes by: some notes under a folder's name, one
+ * note under its title, or one author's changes under the author's name. One note is listed by
+ * time alone, as there is no other note to list it by.
+ */
+export type Scope = { label: string; noteIds: string[]; one?: true } | { label: string; author: AuthorRef };
 
 /** Whether a page's state, which any plugin may hand over, is a scope. */
 export const isScope = (v: unknown): v is Scope => typeof v === "object" && v !== null && typeof (v as Scope).label === "string" && (Array.isArray((v as { noteIds?: unknown }).noteIds) || typeof (v as { author?: unknown }).author === "object");
 
 const CHANGES_A_PAGE = 100;
-const NOTES_A_PAGE = 30;
 /** As many changes as Select all picks. */
 const MOST_SELECTED = 2000;
-/** As many changes as the timeline reads again when a note changes. */
+/** As many changes as the list reads again when a note changes. */
 const MOST_REREAD = 1000;
 const DIFF_PAUSE_MS = 90;
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
 interface Loaded {
-  /** The timeline: every change that matches, newest first, as far as it has been read. */
+  /** Every change that matches, newest first, as far as it has been read. */
   changes: HistoryEntry[] | null;
   next: HistoryPage["next"];
-  /** The notes that changed, when they are listed by note. */
-  notes: ChangedNote[] | null;
-  nextNotes: HistorySummary["next"];
-  /** Notes whose changes were all read, beyond what the timeline holds of them. */
-  whole: ReadonlyMap<string, HistoryEntry[]>;
   error: string | null;
 }
 
-const NOT_LOADED: Loaded = { changes: null, next: null, notes: null, nextNotes: null, whole: new Map(), error: null };
+const NOT_LOADED: Loaded = { changes: null, next: null, error: null };
 
-/** The changes History lists and the notes they are in, read a page at a time and again whenever `version` does. */
-function useChanges(host: PluginHost, filters: Filters, byNote: boolean, version: number) {
+/**
+ * The changes History lists, read a page at a time and again whenever `version` does. When the
+ * narrowing changes, what was read and is still listed stays until the new reading arrives, so the
+ * list is never emptied between two. The first reading goes as far as `atLeast` changes, which is
+ * how far the list was read when it was last left.
+ */
+function useChanges(host: PluginHost, narrowing: Narrowing, version: number, atLeast: number) {
   const [loaded, setLoaded] = useState(NOT_LOADED);
-  const key = JSON.stringify(filters);
-  const latest = useRef(loaded);
-  latest.current = loaded;
+  const key = JSON.stringify(narrowing);
+  const latest = useRef({ loaded, key });
+  latest.current = { loaded, key };
 
-  const list = useCallback(
-    (page: { before?: NonNullable<HistoryPage["next"]>; limit: number; noteIds?: string[] }) => host.perform({ type: "history.list", ...(JSON.parse(key) as Filters), ...page, diffs: false }),
-    [host, key],
-  );
-
-  /** Every listed change of one note, the latest of them when it has more than a row lists. */
-  const wholeOf = useCallback(
-    async (noteId: string) => {
-      let read: HistoryEntry[] = [];
-      let before: HistoryPage["next"] | undefined;
-      do {
-        const page = await list({ noteIds: [noteId], limit: CHANGES_A_PAGE, ...(before ? { before } : {}) });
-        read = [...read, ...page.changes];
-        before = page.next;
-      } while (before && read.length < MOST_OF_A_NOTE);
-      return read;
-    },
-    [list],
-  );
+  const list = useCallback((page: { before?: NonNullable<HistoryPage["next"]>; limit: number }) => host.perform({ type: "history.list", ...(JSON.parse(key) as Filters), ...page, diffs: false }), [host, key]);
 
   useEffect(() => {
     let live = true;
-    const fail = (err: Error) => live && setLoaded((was) => ({ ...was, error: err.message }));
-    // As far as the timeline was read, so that reading it again takes nothing listed away, within reason.
-    const upTo = Math.min(MOST_REREAD, latest.current.changes?.length ?? 0);
+    // As far as the list was read, so that reading it again takes nothing listed away, within reason.
+    const upTo = Math.min(MOST_REREAD, latest.current.loaded.changes?.length ?? atLeast);
     (async () => {
       let [changes, next]: [HistoryEntry[], HistoryPage["next"]] = [[], null];
       do {
         const page = await list({ limit: CHANGES_A_PAGE, ...(next ? { before: next } : {}) });
         [changes, next] = [[...changes, ...page.changes], page.next];
       } while (next && changes.length < upTo);
-      if (live) setLoaded((was) => ({ ...was, changes, next, error: null }));
-    })().catch(fail);
-    if (byNote) {
-      host.perform({ type: "history.summary", ...(JSON.parse(key) as Filters), limit: Math.min(100, Math.max(NOTES_A_PAGE, latest.current.notes?.length ?? 0)) }).then(
-        (summary) => live && setLoaded((was) => ({ ...was, notes: summary.notes, nextNotes: summary.next })),
-        fail,
-      );
-    }
-    // A note read whole is read whole again, or its rows would stop at what the timeline holds of it.
-    for (const noteId of latest.current.whole.keys()) wholeOf(noteId).then((read) => live && setLoaded((was) => ({ ...was, whole: new Map(was.whole).set(noteId, read) })), fail);
+      if (live) setLoaded({ changes, next, error: null });
+    })().catch((err: Error) => live && setLoaded((was) => ({ ...was, error: err.message })));
     return () => {
       live = false;
     };
-  }, [host, key, list, wholeOf, byNote, version]);
+  }, [list, version]);
 
   const older = async () => {
     if (!loaded.next || !loaded.changes) return;
     const page = await list({ before: loaded.next, limit: CHANGES_A_PAGE });
-    setLoaded((was) => ({ ...was, changes: [...(was.changes ?? []), ...page.changes], next: page.next }));
+    if (latest.current.key === key) setLoaded((was) => ({ ...was, changes: [...(was.changes ?? []), ...page.changes], next: page.next }));
   };
-  const moreNotes = async () => {
-    if (!loaded.nextNotes) return;
-    const summary = await host.perform({ type: "history.summary", ...filters, before: loaded.nextNotes, limit: NOTES_A_PAGE });
-    setLoaded((was) => ({ ...was, notes: [...(was.notes ?? []), ...summary.notes], nextNotes: summary.next }));
-  };
-
-  /** The changes of a note that are listed: the timeline's when it holds them all, and otherwise read now. */
-  const ofNote = useCallback(
-    async (noteId: string): Promise<HistoryEntry[]> => {
-      const { changes, notes, whole } = latest.current;
-      const known = whole.get(noteId);
-      if (known) return known;
-      const listed = (changes ?? []).filter((c) => c.noteId === noteId);
-      const all = notes?.find((n) => n.noteId === noteId)?.changes;
-      if (all !== undefined && listed.length >= all) return listed;
-      const read = await wholeOf(noteId);
-      setLoaded((was) => ({ ...was, whole: new Map(was.whole).set(noteId, read) }));
-      return read;
-    },
-    [wholeOf],
-  );
-  return { ...loaded, older, moreNotes, ofNote };
+  const changes = useMemo(() => loaded.changes?.filter((c) => lists(JSON.parse(key) as Narrowing, c)) ?? null, [loaded.changes, key]);
+  return { changes, next: loaded.next, error: loaded.error, older };
 }
 
-/** One thing the list holds that the cursor stops at: a row of changes, or a note with its rows under it. */
-type Item = { kind: "row"; id: string; row: Row } | { kind: "note"; id: string; note: ChangedNote };
+/** How many rows a page of the list is: what its scroller shows at once, less one so a row of the page before stays in view. */
+function pageOf(list: HTMLElement, row: Element | null) {
+  let scroller: HTMLElement | null = list;
+  while (scroller && !(/auto|scroll/.test(getComputedStyle(scroller).overflowY) && scroller.scrollHeight > scroller.clientHeight)) scroller = scroller.parentElement;
+  return Math.max(1, Math.floor((scroller?.clientHeight ?? innerHeight) / (row?.getBoundingClientRect().height || 40)) - 1);
+}
+
+/** One thing the list holds that the cursor stops at: a row of changes, or what a day did to a note, with its rows under it when it is open. */
+type Item = { kind: "row"; id: string; row: Row } | { kind: "note"; id: string; key: string; note: NoteOfDay };
+
+const rowsOf = (item: Item) => (item.kind === "row" ? [item.row] : item.note.rows);
 
 interface RowProps {
   id: string;
@@ -133,8 +98,6 @@ interface RowProps {
   me: string;
   /** The note's name is left out where every row is of one note. */
   named: boolean;
-  /** The day is said with the time where no heading says it. */
-  dated: boolean;
   role: "option" | "treeitem";
   /** Whether all its saves are picked, or only some: older saves of a sitting can be read after the row was picked. */
   on: "all" | "some" | "none";
@@ -142,8 +105,7 @@ interface RowProps {
   onPress: (e: MouseEvent) => void;
 }
 
-function ChangeRow({ id, row, me, named, dated, role, on, focused, onPress }: RowProps) {
-  const time = dated ? `${new Date(row.lastAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${clock(row.lastAt)}` : clock(row.lastAt);
+function ChangeRow({ id, row, me, named, role, on, focused, onPress }: RowProps) {
   return (
     <div
       id={id}
@@ -165,7 +127,7 @@ function ChangeRow({ id, row, me, named, dated, role, on, focused, onPress }: Ro
           <Stat added={row.added} removed={row.removed} />
           {row.revisions.length > 1 && <span>{row.revisions.length} saves</span>}
           <time dateTime={new Date(row.lastAt).toISOString()} title={new Date(row.lastAt).toLocaleString()}>
-            {time}
+            {clock(row.lastAt)}
           </time>
           {row.reverted && <span className="hist-reverted">reverted</span>}
           {row.labels.map((label) => (
@@ -189,12 +151,24 @@ interface CardProps {
   onLabeled: () => void;
   /** Reads the diffs this note came without. */
   onWanted: (noteId: string) => void;
+  /** Where reverting the picked changes of this note would not line up, as the preview of that revert lists them. */
+  conflicts: readonly RevertConflict[];
+  /** When a change of this note was made, if the list has read it. */
+  madeAt: (revision: number) => number | undefined;
+  /** Opens the revert at one of the conflicts. */
+  onConflict: (index: number) => void;
+}
+
+/** A conflict in a line: whose later change it is with, and when that was if the list knows. */
+function saysOf(conflict: RevertConflict, madeAt: (revision: number) => number | undefined) {
+  const at = conflict.later.length === 1 ? madeAt(conflict.later[0]!.revision) : undefined;
+  return `Conflict: ${later(conflict)} changed ${conflict.now.length === 1 ? "this line" : "these lines"} later${at === undefined ? "" : `, at ${clock(at)}`}`;
 }
 
 const span = (run: DiffRun) => (clock(run.firstAt) === clock(run.lastAt) ? clock(run.lastAt) : `${clock(run.firstAt)}–${clock(run.lastAt)}`);
 
 /** What the picked changes did to one note: each run of them as one diff, with the changes left out between two runs counted. */
-function NoteCard({ host, note, canEdit, onOpenNote, onRevert, onLabeled, onWanted }: CardProps) {
+function NoteCard({ host, note, canEdit, onOpenNote, onRevert, onLabeled, onWanted, conflicts, madeAt, onConflict }: CardProps) {
   const ids = useId();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [naming, setNaming] = useState(false);
@@ -202,6 +176,18 @@ function NoteCard({ host, note, canEdit, onOpenNote, onRevert, onLabeled, onWant
   const closeMenu = useCallback(() => setMenu(null), []);
   const last = note.runs.at(-1)!;
   const title = titleOf(note.noteTitle);
+  /** For each run, its conflicts as marks on its diff, and which of them the diff has lines for. */
+  const marked = useMemo(
+    () =>
+      note.runs.map((run) => {
+        const marks = conflicts.flatMap((conflict, index) => conflict.runs.filter((r) => r.revision === run.to).map((r) => ({ index, from: r.line - 1, to: r.line - 1 + r.lines })));
+        const shown = new Set(run.diff ? pieces(run.diff, marks).flatMap((p) => ("mark" in p && p.mark !== undefined ? [marks[p.mark]!.index] : [])) : []);
+        return { marks, shown };
+      }),
+    [note.runs, conflicts],
+  );
+  // A conflict no diff here has lines for is still said: nothing a revert would ask about is left out.
+  const unplaced = conflicts.flatMap((conflict, index) => (marked.some((m) => m.shown.has(index)) ? [] : [{ conflict, index }]));
 
   const label = async (name: string | null) => {
     setNaming(false);
@@ -259,7 +245,12 @@ function NoteCard({ host, note, canEdit, onOpenNote, onRevert, onLabeled, onWant
         </form>
       )}
       {error && <p role="alert" className="error">{error}</p>}
-      {note.runs.map((run) => (
+      {unplaced.map(({ conflict, index }) => (
+        <button key={index} type="button" className="diff-conflict lone" title="Open the revert to settle this" onClick={() => onConflict(index)}>
+          <span className="diff-conflict-says">{saysOf(conflict, madeAt)}</span>
+        </button>
+      ))}
+      {note.runs.map((run, n) => (
         <div key={run.from} className="hist-run">
           {(note.runs.length > 1 || run.skipped > 0 || run.label) && (
             <div className="hist-run-head">
@@ -278,7 +269,11 @@ function NoteCard({ host, note, canEdit, onOpenNote, onRevert, onLabeled, onWant
           )}
           {run.diff ? (
             run.diff.hunks.length ? (
-              <DiffView diff={run.diff} readBefore={async () => (await host.perform({ type: "note.read", id: note.noteId, revision: run.from - 1 })).text} />
+              <DiffView
+                diff={run.diff}
+                marks={marked[n]!.marks.map(({ index, from, to }): Marked => ({ from, to, says: saysOf(conflicts[index]!, madeAt), onOpen: () => onConflict(index) }))}
+                readBefore={async () => (await host.perform({ type: "note.read", id: note.noteId, revision: run.from - 1 })).text}
+              />
             ) : (
               <p className="diff-none">No text changed overall.</p>
             )
@@ -305,16 +300,26 @@ interface PaneProps {
   canEdit: (noteId: string) => boolean;
   /** Changes when a note does, or a label, so the diffs are read again. */
   version: number;
-  titleOfNote: (noteId: string) => string;
+  madeAt: (noteId: string, revision: number) => number | undefined;
   onOpenNote: (noteId: string) => void;
   onRevert: (asks: RevertAsk[], beyond?: string) => void;
+  /** Opens the revert of everything picked at one conflict of one note. */
+  onConflict: (noteId: string, index: number) => void;
   onLabeled: () => void;
   onBack: () => void;
 }
 
-/** What the selection did, note by note, under one line that counts it and holds the one thing to do with it: revert. */
-function SelectionPane({ host, selection, counted, canEdit, version, titleOfNote, onOpenNote, onRevert, onLabeled, onBack }: PaneProps) {
+const NO_CONFLICTS: readonly RevertConflict[] = [];
+
+/**
+ * What the selection did, note by note, under one line that counts it. Where reverting it would
+ * not line up with a later change is marked on the diff and counted, from the preview of that
+ * revert, for a member who can revert.
+ */
+function SelectionPane({ host, selection, counted, canEdit, version, madeAt, onOpenNote, onRevert, onConflict, onLabeled, onBack }: PaneProps) {
   const [notes, setNotes] = useState<NoteDiff[]>([]);
+  /** The previews of reverting what was asked for, and what that was: a preview of another selection says nothing of this one. */
+  const [previews, setPreviews] = useState<{ of: string; notes: ReadonlyMap<string, NoteRevertPreview> }>({ of: "", notes: new Map() });
   const [parts, setParts] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -339,9 +344,17 @@ function SelectionPane({ host, selection, counted, canEdit, version, titleOfNote
     const timer = setTimeout(async () => {
       try {
         const read: NoteDiff[] = [];
-        for (let i = 0; i < changes.length; i += MAX_NOTES_AT_ONCE) read.push(...(await host.perform({ type: "history.diff", changes: changes.slice(i, i + MAX_NOTES_AT_ONCE) })).notes);
+        const previewed: NoteRevertPreview[] = [];
+        // The diffs and the preview of their revert are read together and shown together, so no mark arrives on a diff already drawn.
+        for (let i = 0; i < changes.length; i += MAX_NOTES_AT_ONCE) {
+          const part = changes.slice(i, i + MAX_NOTES_AT_ONCE);
+          const [diffs, previews] = await Promise.all([host.perform({ type: "history.diff", changes: part }), part.some((c) => canEdit(c.noteId)) ? host.perform({ type: "history.previewRevert", changes: part }) : []]);
+          read.push(...diffs.notes);
+          previewed.push(...previews);
+        }
         if (!live) return;
         setNotes(read);
+        setPreviews({ of: wanted, notes: new Map(previewed.map((p) => [p.noteId, p])) });
         setError(null);
       } catch (err) {
         if (live) setError((err as Error).message);
@@ -353,7 +366,7 @@ function SelectionPane({ host, selection, counted, canEdit, version, titleOfNote
       live = false;
       clearTimeout(timer);
     };
-  }, [host, wanted, version]);
+  }, [host, wanted, version, canEdit]);
 
   const fill = async (noteId: string) => {
     const one = all.find((c) => c.noteId === noteId);
@@ -369,6 +382,12 @@ function SelectionPane({ host, selection, counted, canEdit, version, titleOfNote
   const none = !all.length;
   const left = all.length - notes.length;
   const [added, removed] = [notes.reduce((sum, n) => sum + n.added, 0), notes.reduce((sum, n) => sum + n.removed, 0)];
+  /** The preview is of the note as the diffs show it: one read at another revision says nothing here. */
+  const conflictsOf = (note: NoteDiff) => {
+    const preview = previews.of === wanted ? previews.notes.get(note.noteId) : undefined;
+    return preview && preview.revision === note.revision ? preview.conflicts : NO_CONFLICTS;
+  };
+  const conflicted = notes.flatMap((note) => conflictsOf(note).map((_, index) => ({ noteId: note.noteId, index })));
   return (
     <section className="hist-main" aria-label="What the selection did">
       <header className="hist-summary">
@@ -386,32 +405,34 @@ function SelectionPane({ host, selection, counted, canEdit, version, titleOfNote
               <span>{count(all.length, "note")}</span>
               {notes.length > 0 && <Stat added={added} removed={removed} />}
               {notes.length > 0 && left > 0 && <span>in the first {notes.length}</span>}
+              {conflicted.length > 0 && (
+                <button type="button" className="link hist-conflicts" title="Later changes edited lines these changes wrote. Open the revert to settle them." onClick={() => onConflict(conflicted[0]!.noteId, conflicted[0]!.index)}>
+                  {count(conflicted.length, "conflict")}
+                </button>
+              )}
             </>
           )}
         </p>
-        <span className="spacer" />
-        {mine.length > 0 && (
-          <button
-            type="button"
-            className="button small"
-            onClick={() =>
-              onRevert(
-                mine.map((c) => ({ noteId: c.noteId, title: notes.find((n) => n.noteId === c.noteId)?.noteTitle ?? titleOfNote(c.noteId), revisions: c.revisions })),
-                mine.length < all.length ? `${count(all.length - mine.length, "note")} you can read and not change ${all.length - mine.length === 1 ? "is" : "are"} left out.` : undefined,
-              )
-            }
-          >
-            Revert…
-          </button>
-        )}
       </header>
       {error && <p role="alert" className="error">{error}</p>}
       {none ? (
-        <p className="hist-hint">Select changes to see what they did. Shift-click takes a range, and {MAC ? "⌘" : "Ctrl"}-click adds or skips one.</p>
+        <p className="hist-hint">Tick changes to see what they did together, and where reverting them would not line up with later changes. Shift-click takes a range, and {MAC ? "⌘" : "Ctrl"}-click adds or skips one.</p>
       ) : (
         <div className={loading ? "hist-files loading" : "hist-files"} aria-busy={loading}>
           {notes.map((note) => (
-            <NoteCard key={note.noteId} host={host} note={note} canEdit={canEdit(note.noteId)} onOpenNote={onOpenNote} onRevert={onRevert} onLabeled={onLabeled} onWanted={(noteId) => void fill(noteId)} />
+            <NoteCard
+              key={note.noteId}
+              host={host}
+              note={note}
+              canEdit={canEdit(note.noteId)}
+              onOpenNote={onOpenNote}
+              onRevert={onRevert}
+              onLabeled={onLabeled}
+              onWanted={(noteId) => void fill(noteId)}
+              conflicts={conflictsOf(note)}
+              madeAt={(revision) => madeAt(note.noteId, revision)}
+              onConflict={(index) => onConflict(note.noteId, index)}
+            />
           ))}
           {notes.length > 0 && left > 0 && (
             <button type="button" className="button small" onClick={() => setParts(parts + 1)}>
@@ -424,38 +445,76 @@ function SelectionPane({ host, selection, counted, canEdit, version, titleOfNote
   );
 }
 
-interface PanesProps {
+interface Props {
   host: PluginHost;
   /** The member, whose own changes read "You". */
   me: string;
+  /** Whether the member may change a note. A selection can hold notes they may only read. */
   canEdit: (noteId: string) => boolean;
-  view: View;
-  filters: Filters;
-  /** The page lays its panes side by side with room, and shows one at a time without; a panel always stacks them. */
+  /** What it is narrowed to. Null is every note and everyone. */
+  scope: Scope | null;
+  /** The page lays the list and what is picked side by side with room, and shows one at a time without. A panel is narrow: what is picked is under the list. */
   layout: "page" | "panel";
   /** Changes when any listed note does. */
   version: number;
-  /** What stands over the list. */
-  head: ReactNode;
+  /** What it says where nothing was ever written. */
   empty: string;
+  /** Widens or changes what the page is narrowed to. */
+  onScope?: (scope: Scope | null) => void;
+  /** Opens the page on what the panel lists. */
+  onOpenHistory?: () => void;
   onOpenNote: (noteId: string) => void;
   /** Notes were reverted. The caller answers with a new `version`. */
   onChanged: () => void;
   /** Called with the latest changes each time they are read. */
   onLoaded?: (changes: HistoryEntry[]) => void;
+  /** What was ticked here when it was last left, for as long as the app is open. */
+  left: Left;
 }
 
+/** What History keeps of one place it is shown at, between leaving it and coming back: the ticks, and how far the list was read. */
+export interface Kept {
+  selection: Selection;
+  read: number;
+}
+
+/** Where one History keeps that. */
+export interface Left {
+  get: () => Kept | undefined;
+  set: (kept: Kept) => void;
+}
+
+const isView = (v: unknown): v is View => v === "time" || v === "note";
+const WHO: readonly [Who, string][] = [
+  ["everyone", "Everyone"],
+  ["people", "People"],
+  ["agents", "Agents"],
+];
+
 /**
- * History's two panes. The list has every change with a tick: click one to see it, tick or
- * ⌘-click to add or skip, shift-click for a range. The other pane shows what everything picked
- * did, note by note, and reverts it.
+ * History, wherever it is shown: the page, and the inspector's tab for a note or a folder. The
+ * list has every change under its day with a tick: click one to see it, tick or ⌘-click to add or
+ * skip, shift-click for a range, and a day's tick for the whole day. Nothing is ticked but by the
+ * member, and what they ticked is there when they come back. What everything ticked did is beside
+ * the list or under it, note by note, and at the list's foot is what to do with it: clear it, or
+ * revert it.
  */
-function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head, empty, onOpenNote, onChanged, onLoaded }: PanesProps) {
+export function History({ host, me, canEdit, scope, layout, version, empty, onScope, onOpenHistory, onOpenNote, onChanged, onLoaded, left }: Props) {
   const ids = useId();
   const now = useNow();
+  const [keptView, setView] = useKept<View>(host.storage, layout === "page" ? "view" : "view.panel", isView, layout === "page" ? "time" : "note");
+  const [who, setWho] = useState<Who>("everyone");
+  const author = scope && "author" in scope ? scope.author : null;
+  const noteIds = scope && "noteIds" in scope ? scope.noteIds : null;
+  const one = scope !== null && "one" in scope && scope.one === true;
+  const view = one ? "time" : keptView;
+  const narrowed = JSON.stringify(author ? { authors: [author] } : { ...(noteIds ? { noteIds } : {}), ...(who === "everyone" ? {} : { by: who }) });
+  const narrowing = useMemo(() => JSON.parse(narrowed) as Narrowing, [narrowed]);
+
   const [reloads, reload] = useState(0);
-  const data = useChanges(host, filters, view === "note", version + reloads);
-  const [selection, setPicked] = useState<Selection>(NOTHING);
+  const [was] = useState(() => left.get());
+  const data = useChanges(host, narrowing, version + reloads, was?.read ?? 0);
+  const [selection, setPicked] = useState<Selection>(was?.selection ?? NOTHING);
   const [cut, setCut] = useState(false);
   /** Picks, with no more of one note than a request takes: the rest are left out, which the list says. */
   const setSelection = (next: Selection | ((was: Selection) => Selection)) =>
@@ -464,8 +523,6 @@ function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head,
       setCut(made.cut);
       return made.selection;
     });
-  /** Counts the presses that wait on a read, so that only the last of them picks. */
-  const presses = useRef(0);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [cursor, setCursor] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -480,132 +537,136 @@ function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head,
   }, [data.changes]);
 
   const timeline = useMemo(() => groupSaves(data.changes ?? []), [data.changes]);
-  const dated = view === "note" || layout === "panel";
-  /** The rows of a note as far as they are read: all of them once it was opened or picked. */
-  const rowsOf = useCallback((noteId: string) => groupSaves(data.whole.get(noteId) ?? (data.changes ?? []).filter((c) => c.noteId === noteId)), [data.whole, data.changes]);
+  const known = useMemo(() => new Map((data.changes ?? []).map((c) => [keyOf(c.noteId, c.revision), c])), [data.changes]);
 
-  const items = useMemo<Item[]>(() => {
-    if (view === "time") return timeline.map((row) => ({ kind: "row", id: `${ids}-${row.key}`, row }));
-    return (data.notes ?? []).flatMap((note): Item[] => [
-      { kind: "note", id: `${ids}-${note.noteId}`, note },
-      ...(open.has(note.noteId) ? rowsOf(note.noteId).map((row): Item => ({ kind: "row", id: `${ids}-${row.key}`, row })) : []),
-    ]);
-  }, [view, timeline, data.notes, open, rowsOf, ids]);
-  const ready = view === "time" ? data.changes !== null : data.notes !== null && data.changes !== null;
+  // Whatever changes the list picks nothing: what is picked and still listed stays picked, and the rest is let go.
+  useEffect(() => {
+    if (data.changes) setSelection((was) => kept(was, (noteId, revision) => known.has(keyOf(noteId, revision))));
+  }, [known]);
 
-  /** Every row of a note, read if it wasn't yet. */
-  const allRowsOf = async (noteId: string) => groupSaves(await data.ofNote(noteId));
-  const rowsFor = async (item: Item) => (item.kind === "row" ? [item.row] : allRowsOf(item.note.noteId));
+  const isTree = view === "note";
+  const days = useMemo(
+    () =>
+      byDay(timeline).map((day) => ({
+        ...day,
+        id: `${ids}-day-${day.at}`,
+        items: isTree
+          ? notesOf(day.rows).flatMap((note): Item[] => {
+              const key = `${day.at}/${note.noteId}`;
+              return [{ kind: "note", id: `${ids}-${key}`, key, note }, ...(open.has(key) ? note.rows.map((row): Item => ({ kind: "row", id: `${ids}-${row.key}`, row })) : [])];
+            })
+          : day.rows.map((row): Item => ({ kind: "row", id: `${ids}-${row.key}`, row })),
+      })),
+    [timeline, isTree, open, ids],
+  );
+  const items = useMemo(() => days.flatMap((day) => day.items), [days]);
+  const ready = data.changes !== null;
 
-  const showOnly = async (item: Item) => {
+  const showOnly = (item: Item) => {
     setCursor(item.id);
     setAnchor(item.id);
     setCapped(false);
-    if (item.kind === "note") setOpen((was) => new Set(was).add(item.note.noteId));
-    const press = ++presses.current;
-    const rows = await rowsFor(item);
-    if (press === presses.current) setSelection(only(rows));
+    if (item.kind === "note") setOpen((was) => new Set(was).add(item.key));
+    setSelection(only(rowsOf(item)));
   };
-  const toggle = async (item: Item) => {
+  /** Adds the rows to what is picked, or takes them out when all of them are in it. */
+  const tick = (rows: readonly Row[]) => {
+    setCapped(false);
+    setSelection((was) => withRows(was, rows, picked(was, rows) !== "all"));
+  };
+  const toggle = (item: Item) => {
     setCursor(item.id);
     setAnchor(item.id);
-    setCapped(false);
-    const press = ++presses.current;
-    const rows = await rowsFor(item);
-    if (press === presses.current) setSelection((was) => withRows(was, rows, picked(was, rows) !== "all"));
+    tick(rowsOf(item));
   };
   const extendTo = (item: Item) => {
-    const [from, to] = [items.findIndex((i) => i.id === (anchor ?? item.id)), items.indexOf(item)];
-    const range = items.slice(Math.min(from, to), Math.max(from, to) + 1).flatMap((i) => (i.kind === "row" ? [i.row] : []));
+    const to = items.indexOf(item);
+    // A range starts at the row itself when the one it was to start from is no longer listed.
+    const anchored = items.findIndex((i) => i.id === anchor);
+    const from = anchored < 0 ? to : anchored;
+    const range = items.slice(Math.min(from, to), Math.max(from, to) + 1).flatMap(rowsOf);
     setCursor(item.id);
-    presses.current++;
     setSelection((was) => withRows(was, range, true));
   };
 
-  // The first row is picked on arriving, so the other pane is never empty.
-  const arrived = useRef(false);
+  const leaving = useRef(left);
+  leaving.current = left;
+  const read = data.changes?.length;
   useEffect(() => {
-    if (!ready || arrived.current || !items[0]) return;
-    arrived.current = true;
-    void showOnly(items[0]);
-  }, [ready, items]);
+    if (read !== undefined) leaving.current.set({ selection, read });
+  }, [selection, read]);
 
-  const listedRows = view === "time" ? timeline : (data.notes ?? []).flatMap((n) => rowsOf(n.noteId));
-  const listedCount = view === "time" ? (data.changes?.length ?? 0) : (data.notes ?? []).reduce((sum, n) => sum + n.changes, 0);
-  const selectedHere = view === "time" ? sizeOf(selection) : (data.notes ?? []).reduce((sum, n) => sum + (selection.get(n.noteId)?.size ?? 0), 0);
-  const everything = view === "time" ? picked(selection, timeline) : selectedHere === 0 ? "none" : selectedHere >= Math.min(listedCount, MOST_SELECTED) ? "all" : "some";
-
-  const selectAll = async () => {
-    const press = ++presses.current;
+  const everything = picked(selection, timeline);
+  const selectAll = () => {
     if (everything === "all") {
       setCapped(false);
       return setSelection(NOTHING);
     }
-    let rows = listedRows;
-    if (view === "note") {
-      rows = [];
-      const notes = data.notes ?? [];
-      for (let i = 0; i < notes.length && rows.reduce((sum, r) => sum + r.revisions.length, 0) < MOST_SELECTED; i += 4) rows.push(...(await Promise.all(notes.slice(i, i + 4).map((n) => allRowsOf(n.noteId)))).flat());
-    }
     const taken: Row[] = [];
     let size = 0;
-    for (const row of rows) {
+    for (const row of timeline) {
       if (size + row.revisions.length > MOST_SELECTED) break;
       taken.push(row);
       size += row.revisions.length;
     }
-    if (press !== presses.current) return;
-    setCapped(taken.length < rows.length);
+    setCapped(taken.length < timeline.length);
     setSelection(only(taken));
+  };
+
+  const unfold = (item: Item, on?: boolean) => {
+    if (item.kind !== "note") return;
+    setOpen((was) => {
+      const next = new Set(was);
+      if (on ?? !next.has(item.key)) next.add(item.key);
+      else next.delete(item.key);
+      return next;
+    });
   };
 
   const press = (item: Item, e: MouseEvent) => {
     listbox.current?.focus({ preventScroll: true });
     if (e.shiftKey) return extendTo(item);
-    if (e.metaKey || e.ctrlKey || (e.target as HTMLElement).closest(".hist-check")) return void toggle(item);
-    if ((e.target as HTMLElement).closest(".hist-caret") && item.kind === "note") {
+    if (e.metaKey || e.ctrlKey || (e.target as HTMLElement).closest(".hist-check")) return toggle(item);
+    if ((e.target as HTMLElement).closest(".hist-caret")) {
       setCursor(item.id);
-      return setOpen((was) => {
-        const next = new Set(was);
-        if (!next.delete(item.note.noteId)) next.add(item.note.noteId);
-        return next;
-      });
+      return unfold(item);
     }
-    void showOnly(item);
+    showOnly(item);
     setDetail(true);
   };
 
   const onKey = (e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey || !items.length) return;
-    const at = Math.max(0, items.findIndex((i) => i.id === cursor));
-    const here = items[at]!;
-    const move = (by: number) => {
-      const to = items[Math.max(0, Math.min(items.length - 1, at + by))]!;
+    // A day's tick is pressed with its own keys. Every other key is the list's from there too.
+    if (e.target !== e.currentTarget && (e.key === " " || e.key === "Enter")) return;
+    // With no row the cursor is on, the first key down goes to the first row.
+    const at = items.findIndex((i) => i.id === cursor);
+    const here = items[Math.max(0, at)]!;
+    const go = (index: number) => {
+      const to = items[Math.max(0, Math.min(items.length - 1, index))]!;
       if (e.shiftKey) extendTo(to);
-      else void showOnly(to);
+      else showOnly(to);
+      listbox.current?.focus({ preventScroll: true });
       requestAnimationFrame(() => document.getElementById(to.id)?.scrollIntoView({ block: "nearest" }));
     };
-    const unfold = (on: boolean) => {
-      if (here.kind !== "note") return;
-      setOpen((was) => {
-        const next = new Set(was);
-        if (on) next.add(here.note.noteId);
-        else next.delete(here.note.noteId);
-        return next;
-      });
-    };
+    const page = () => pageOf(e.currentTarget as HTMLElement, document.getElementById(here.id));
     const act: Record<string, () => void> = {
-      j: () => move(1),
-      ArrowDown: () => move(1),
-      k: () => move(-1),
-      ArrowUp: () => move(-1),
-      x: () => void toggle(here),
-      " ": () => void toggle(here),
-      a: () => void selectAll(),
-      Escape: () => void showOnly(here),
+      j: () => go(at + 1),
+      ArrowDown: () => go(at + 1),
+      k: () => go(at - 1),
+      ArrowUp: () => go(at - 1),
+      Home: () => go(0),
+      End: () => go(items.length - 1),
+      PageDown: () => go(at + page()),
+      PageUp: () => go(at - page()),
+      x: () => toggle(here),
+      " ": () => toggle(here),
+      a: () => selectAll(),
+      // Back from several to the one change the cursor is on. With nothing picked, or the cursor on no change, it picks nothing.
+      Escape: () => at >= 0 && sizeOf(selection) > 0 && showOnly(here),
       Enter: () => onOpenNote(here.kind === "row" ? here.row.noteId : here.note.noteId),
-      ArrowRight: () => unfold(true),
-      ArrowLeft: () => unfold(false),
+      ArrowRight: () => unfold(here, true),
+      ArrowLeft: () => unfold(here, false),
     };
     const fn = act[e.key.length === 1 ? e.key.toLowerCase() : e.key];
     if (!fn) return;
@@ -613,11 +674,6 @@ function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head,
     fn();
   };
 
-  const known = useMemo(() => {
-    const all = new Map<string, HistoryEntry>();
-    for (const c of [...(data.changes ?? []), ...[...data.whole.values()].flat()]) all.set(keyOf(c.noteId, c.revision), c);
-    return all;
-  }, [data.changes, data.whole]);
   const counted = useMemo(() => {
     let changes = 0;
     for (const [noteId, revisions] of selection) {
@@ -626,7 +682,15 @@ function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head,
     }
     return { changes, saves: sizeOf(selection) };
   }, [selection, known]);
-  const titleOfNote = (noteId: string) => data.notes?.find((n) => n.noteId === noteId)?.noteTitle ?? data.changes?.find((c) => c.noteId === noteId)?.noteTitle ?? "";
+  const titleOfNote = (noteId: string) => data.changes?.find((c) => c.noteId === noteId)?.noteTitle ?? "";
+  const asks = (): RevertAsk[] => asked(selection).map((c) => ({ noteId: c.noteId, title: titleOfNote(c.noteId), revisions: c.revisions }));
+  /** The picked changes of notes the member may change, and what is said of the rest, which are left out of a revert. */
+  const revertable = (): [RevertAsk[], string | undefined] => {
+    const all = asks();
+    const mine = all.filter((a) => canEdit(a.noteId));
+    const out = all.length - mine.length;
+    return [mine, out ? `${count(out, "note")} you can read and not change ${out === 1 ? "is" : "are"} left out.` : undefined];
+  };
 
   const changed = () => {
     reload((n) => n + 1);
@@ -634,16 +698,60 @@ function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head,
   };
   const reverts = useReverts({ host, version, onChanged: changed });
 
-  const isTree = view === "note";
-  let day = "";
-  return (
+  const switcher = !one && (
+    <div className="segmented" role="radiogroup" aria-label="List">
+      {(["time", "note"] as const).map((v) => (
+        <button key={v} type="button" role="radio" aria-checked={view === v} onClick={() => setView(v)}>
+          {v === "time" ? "By time" : "By note"}
+        </button>
+      ))}
+    </div>
+  );
+  const head =
+    layout === "page" ? (
+      <div className="hist-head">
+        <h1>History</h1>
+        <p className="hist-sub">
+          Click to see a change · {MAC ? "⌘" : "Ctrl"}-click to add or skip · shift-click for a range
+        </p>
+        <div className="hist-filters">
+          {switcher}
+          {!author && (
+            <div className="segmented" role="radiogroup" aria-label="Whose changes">
+              {WHO.map(([value, label]) => (
+                <button key={value} type="button" role="radio" aria-checked={who === value} onClick={() => setWho(value)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {scope && (
+            <span className="chip hist-scope">
+              {scope.label}
+              <button type="button" aria-label={author ? "Show everyone's changes" : "Show every note"} title={author ? "Show everyone's changes" : "Show every note"} onClick={() => onScope?.(null)}>
+                <Icon name="close" />
+              </button>
+            </span>
+          )}
+        </div>
+      </div>
+    ) : (
+      <div className="hist-filters">
+        {switcher}
+        <button type="button" className="link hist-open-page" onClick={onOpenHistory}>
+          Open in History
+        </button>
+      </div>
+    );
+
+  const panes = (
     <div className={`history-panes ${layout}${detail ? " detail" : ""}`}>
       <div className="hist-side">
         {head}
         {data.error && <p role="alert" className="error">{data.error}</p>}
         {ready && items.length > 0 && (
           <div className="hist-all">
-            <button type="button" role="checkbox" aria-checked={everything === "all" ? true : everything === "some" ? "mixed" : false} className="hist-all-tick" onClick={() => void selectAll()}>
+            <button type="button" role="checkbox" aria-checked={everything === "all" ? true : everything === "some" ? "mixed" : false} className="hist-all-tick" onClick={selectAll}>
               <span className={`hist-check ${everything}`} aria-hidden="true" />
               Select all
             </button>
@@ -652,7 +760,7 @@ function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head,
                 ? `The latest ${MOST_OF_A_NOTE} changes of a note are picked, no more`
                 : capped
                   ? `The first ${MOST_SELECTED.toLocaleString()} changes are picked`
-                  : `${count(listedCount, "change")}${(view === "time" ? data.next : data.nextNotes) ? " so far" : ""}`}
+                  : `${count(data.changes?.length ?? 0, "change")}${data.next ? " so far" : ""}`}
             </span>
           </div>
         )}
@@ -666,90 +774,95 @@ function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head,
           tabIndex={0}
           onKeyDown={onKey}
         >
-          {ready && !items.length && <p className="empty">{empty}</p>}
-          {items.map((item) => {
-            if (item.kind === "note") {
-              const { note } = item;
-              const rows = rowsOf(note.noteId);
-              const has = selection.get(note.noteId)?.size ?? 0;
-              const state = has === 0 ? "none" : has >= Math.min(note.changes, MOST_OF_A_NOTE) && picked(selection, rows) === "all" ? "all" : "some";
-              return (
-                <div
-                  key={item.id}
-                  id={item.id}
-                  role="treeitem"
-                  aria-level={1}
-                  aria-expanded={open.has(note.noteId)}
-                  aria-selected={state === "all"}
-                  className={`hist-row hist-note-row${state === "all" ? " selected" : ""}${cursor === item.id ? " focused" : ""}`}
-                  onMouseDown={(e) => e.shiftKey && e.preventDefault()}
-                  onClick={(e) => press(item, e)}
-                >
-                  <span className={`hist-check ${state}`} aria-hidden="true" />
-                  <span className="hist-caret caret" aria-hidden="true" />
-                  <span className="hist-body">
-                    <span className="hist-line">
-                      <Stat added={note.added} removed={note.removed} /> <span className="hist-note">{titleOf(note.noteTitle)}</span>
-                    </span>
-                    <span className="hist-meta">
-                      <span>{count(note.changes, "change")}</span>
-                      <span>{note.authors.map((a) => whoOf(a, me)).join(", ")}</span>
-                    </span>
-                  </span>
-                </div>
-              );
-            }
-            const ofNote = isTree ? data.notes?.find((n) => n.noteId === item.row.noteId) : undefined;
-            const cut = ofNote && data.whole.has(ofNote.noteId) && ofNote.changes > data.whole.get(ofNote.noteId)!.length && rowsOf(ofNote.noteId).at(-1) === item.row;
-            const heading = isTree || dated ? null : dayLabel(item.row.lastAt, now);
-            const starts = heading !== null && heading !== day;
-            if (heading !== null) day = heading;
+          {ready && !items.length && <p className="empty">{who !== "everyone" || (layout === "page" && scope) ? "No changes match these filters." : empty}</p>}
+          {days.map((day) => {
+            const ticked = picked(selection, day.rows);
             return (
-              <div key={item.id} role="presentation">
-                {starts && (
-                  <div className="hist-day" role="presentation">
-                    {heading}
-                  </div>
-                )}
-                <ChangeRow
-                  id={item.id}
-                  row={item.row}
-                  me={me}
-                  named={!isTree && filters.noteIds?.length !== 1}
-                  dated={dated}
-                  role={isTree ? "treeitem" : "option"}
-                  on={picked(selection, [item.row])}
-                  focused={cursor === item.id}
-                  onPress={(e) => press(item, e)}
-                />
-                {cut && (
-                  <p className="hist-cut">
-                    These are its latest {data.whole.get(ofNote.noteId)!.length} changes of {ofNote.changes}. The list by time reaches the older ones.
-                  </p>
-                )}
+              <div key={day.at} role="group" aria-labelledby={day.id}>
+                <div className="hist-day">
+                  <button type="button" id={day.id} role="checkbox" aria-checked={ticked === "all" ? true : ticked === "some" ? "mixed" : false} className="hist-day-tick" onClick={() => tick(day.rows)}>
+                    <span className={`hist-check ${ticked}`} aria-hidden="true" />
+                    {dayLabel(day.at, now)}
+                  </button>
+                </div>
+                {day.items.map((item) => {
+                  if (item.kind === "row")
+                    return (
+                      <ChangeRow
+                        key={item.id}
+                        id={item.id}
+                        row={item.row}
+                        me={me}
+                        named={!isTree && noteIds?.length !== 1}
+                        role={isTree ? "treeitem" : "option"}
+                        on={picked(selection, [item.row])}
+                        focused={cursor === item.id}
+                        onPress={(e) => press(item, e)}
+                      />
+                    );
+                  const { note } = item;
+                  const state = picked(selection, note.rows);
+                  return (
+                    <div
+                      key={item.id}
+                      id={item.id}
+                      role="treeitem"
+                      aria-level={1}
+                      aria-expanded={open.has(item.key)}
+                      aria-selected={state === "all"}
+                      className={`hist-row hist-note-row${state === "all" ? " selected" : ""}${cursor === item.id ? " focused" : ""}`}
+                      onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+                      onClick={(e) => press(item, e)}
+                    >
+                      <span className={`hist-check ${state}`} aria-hidden="true" />
+                      <span className="hist-caret caret" aria-hidden="true" />
+                      <span className="hist-body">
+                        <span className="hist-line">
+                          <Stat added={note.added} removed={note.removed} /> <span className="hist-note">{titleOf(note.noteTitle)}</span>
+                        </span>
+                        <span className="hist-meta">
+                          <span>{count(note.saves, "change")}</span>
+                          <span>{note.authors.map((a) => whoOf(a, me)).join(", ")}</span>
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
         </div>
-        {view === "time" && data.next && (
+        {data.next && (
           <div className="hist-more">
             <button type="button" className="link" onClick={() => void data.older()}>
               Load older changes
             </button>
           </div>
         )}
-        {view === "note" && data.nextNotes && (
-          <div className="hist-more">
-            <button type="button" className="link" onClick={() => void data.moreNotes()}>
-              Show more notes
-            </button>
-          </div>
-        )}
         {sizeOf(selection) > 0 && (
-          <div className="hist-open">
-            <button type="button" className="button small primary" onClick={() => setDetail(true)}>
-              See {count(counted.changes, "change")}
+          <div className="hist-picked" role="group" aria-label="Selection">
+            <span className="hist-picked-count" role="status">
+              {count(counted.changes, "change")} selected{selection.size > 1 && ` in ${count(selection.size, "note")}`}
+            </span>
+            <span className="spacer" />
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                setCapped(false);
+                setSelection(NOTHING);
+              }}
+            >
+              Clear
             </button>
+            <button type="button" className="link hist-open" onClick={() => setDetail(true)}>
+              See
+            </button>
+            {asked(selection).some((c) => canEdit(c.noteId)) && (
+              <button type="button" className="button small" onClick={() => reverts.ask(...revertable())}>
+                Revert…
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -759,194 +872,21 @@ function HistoryPanes({ host, me, canEdit, view, filters, layout, version, head,
         counted={counted}
         canEdit={canEdit}
         version={version + reloads}
-        titleOfNote={titleOfNote}
+        madeAt={(noteId, revision) => known.get(keyOf(noteId, revision))?.createdAt}
         onOpenNote={onOpenNote}
         onRevert={reverts.ask}
+        onConflict={(noteId, conflict) => reverts.ask(...revertable(), { noteId, conflict })}
         onLabeled={() => reload((n) => n + 1)}
         onBack={() => setDetail(false)}
       />
       {reverts.shown}
     </div>
   );
-}
-
-interface OpenInHistoryProps {
-  onOpen: () => void;
-}
-
-function OpenInHistory({ onOpen }: OpenInHistoryProps) {
-  return (
-    <button type="button" className="link hist-open-page" onClick={onOpen}>
-      Open in History
-    </button>
-  );
-}
-
-interface NoteHistoryProps {
-  host: PluginHost;
-  me: string;
-  note: NoteSummary;
-  canEdit: boolean;
-  onChanged: () => void;
-  onOpenNote: (noteId: string) => void;
-  onOpenHistory: (scope: Scope) => void;
-  /** Called with the latest revision each time the member is shown the note's changes. */
-  onSeen: (noteId: string, revision: number) => void;
-}
-
-/** The open note's history, for the inspector: History's list and what the picked changes did, one over the other. */
-export function NoteHistory({ host, me, note, canEdit, onChanged, onOpenNote, onOpenHistory, onSeen }: NoteHistoryProps) {
-  const filters = useMemo<Filters>(() => ({ noteIds: [note.id] }), [note.id]);
-  return (
-    <HistoryPanes
-      key={note.id}
-      host={host}
-      me={me}
-      canEdit={() => canEdit}
-      view="time"
-      filters={filters}
-      layout="panel"
-      version={note.revision}
-      head={<OpenInHistory onOpen={() => onOpenHistory({ label: titleOf(note.title), noteIds: [note.id] })} />}
-      empty="Nothing has been written in this note yet."
-      onOpenNote={onOpenNote}
-      onChanged={onChanged}
-      onLoaded={(changes) => onSeen(note.id, changes[0]?.revision ?? 0)}
-    />
-  );
-}
-
-interface FolderHistoryProps {
-  host: PluginHost;
-  me: string;
-  name: string;
-  /** The folder's notes. */
-  notes: readonly NoteSummary[];
-  /** Whether they are every note of the workspace, as All notes lists. */
-  whole: boolean;
-  onOpenNote: (noteId: string) => void;
-  onOpenHistory: (scope: Scope | null) => void;
-  onChanged: () => void;
-}
-
-/** Which of the notes the member may change: each note says so of itself, since a grant or a private note can differ from the member's role. */
-function useEditable(notes: readonly NoteSummary[]): (noteId: string) => boolean {
-  const editable = useMemo(() => new Set(notes.filter((n) => n.access === "edit").map((n) => n.id)), [notes]);
-  return useCallback((noteId: string) => editable.has(noteId), [editable]);
-}
-
-/** As many notes as history can be narrowed to at once. A folder with more shows the ones changed last. */
-const MOST_NOTES = 200;
-
-/** A folder's history, for the inspector: its notes that changed, each opening to its changes. */
-export function FolderHistory({ host, me, name, notes, whole, onOpenNote, onOpenHistory, onChanged }: FolderHistoryProps) {
-  const canEdit = useEditable(notes);
-  const version = useMemo(() => notes.reduce((sum, n) => sum + n.revision, 0), [notes]);
-  const ids = useMemo(() => [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MOST_NOTES).map((n) => n.id).join(","), [notes]);
-  const filters = useMemo<Filters>(() => (whole ? {} : { noteIds: ids.split(",") }), [whole, ids]);
-  const empty = whole ? "Nothing has been written in this workspace yet." : "Nothing has been written in this folder yet.";
-  if (!whole && !notes.length) return <p className="empty">{empty}</p>;
-  return (
-    <HistoryPanes
-      host={host}
-      me={me}
-      canEdit={canEdit}
-      view="note"
-      filters={filters}
-      layout="panel"
-      version={version}
-      head={<OpenInHistory onOpen={() => onOpenHistory(whole ? null : { label: name, noteIds: ids.split(",") })} />}
-      empty={empty}
-      onOpenNote={onOpenNote}
-      onChanged={onChanged}
-    />
-  );
-}
-
-interface HistoryModeProps {
-  host: PluginHost;
-  me: string;
-  /** Every note in the workspace. */
-  notes: readonly NoteSummary[];
-  /** The notes History was opened on, from a note's or a folder's History tab. */
-  scope: Scope | null;
-  onScope: (scope: Scope | null) => void;
-  onOpenNote: (noteId: string) => void;
-  onChanged: () => void;
-}
-
-const isView = (v: unknown): v is View => v === "time" || v === "note";
-const WHO: readonly [Who, string][] = [
-  ["everyone", "Everyone"],
-  ["people", "People"],
-  ["agents", "Agents"],
-];
-
-/** The workspace's history: every change by time or by note, and what any selection of them did. */
-export function HistoryMode({ host, me, notes, scope, onScope, onOpenNote, onChanged }: HistoryModeProps) {
-  const canEdit = useEditable(notes);
-  const [view, setView] = useKept<View>(host.storage, "view", isView, "time");
-  const [who, setWho] = useState<Who>("everyone");
-  const version = useMemo(() => notes.reduce((sum, n) => sum + n.revision, 0), [notes]);
-  const author = scope && "author" in scope ? scope.author : null;
-  const scoped = scope && "noteIds" in scope ? scope.noteIds.join(",") : "";
-  const one = author && `${author.kind}:${author.id}`;
-  const filters = useMemo<Filters>(() => {
-    if (one) return { authors: [{ kind: one.split(":")[0] as AuthorRef["kind"], id: one.split(":")[1]! }] };
-    return { ...(scoped ? { noteIds: scoped.split(",") } : {}), ...(who === "everyone" ? {} : { by: who }) };
-  }, [one, scoped, who]);
-  const filtered = who !== "everyone" || scope !== null;
-
-  const head = (
-    <div className="hist-head">
-      <h1>History</h1>
-      <p className="hist-sub">
-        Click to see a change · {MAC ? "⌘" : "Ctrl"}-click to add or skip · shift-click for a range
-      </p>
-      <div className="hist-filters">
-        <div className="segmented" role="radiogroup" aria-label="List">
-          {(["time", "note"] as const).map((v) => (
-            <button key={v} type="button" role="radio" aria-checked={view === v} onClick={() => setView(v)}>
-              {v === "time" ? "By time" : "By note"}
-            </button>
-          ))}
-        </div>
-        {!author && (
-          <div className="segmented" role="radiogroup" aria-label="Whose changes">
-            {WHO.map(([value, label]) => (
-              <button key={value} type="button" role="radio" aria-checked={who === value} onClick={() => setWho(value)}>
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-        {scope && (
-          <span className="chip hist-scope">
-            {scope.label}
-            <button type="button" aria-label={author ? "Show everyone's changes" : "Show every note"} title={author ? "Show everyone's changes" : "Show every note"} onClick={() => onScope(null)}>
-              <Icon name="close" />
-            </button>
-          </span>
-        )}
-      </div>
-    </div>
-  );
-  return (
+  return layout === "page" ? (
     <section className="history-mode" aria-label="History">
-      <HistoryPanes
-        key={JSON.stringify(filters)}
-        host={host}
-        me={me}
-        canEdit={canEdit}
-        view={view}
-        filters={filters}
-        layout="page"
-        version={version}
-        head={head}
-        empty={filtered ? "No changes match these filters." : "Nothing has been written in this workspace yet."}
-        onOpenNote={onOpenNote}
-        onChanged={onChanged}
-      />
+      {panes}
     </section>
+  ) : (
+    panes
   );
 }
