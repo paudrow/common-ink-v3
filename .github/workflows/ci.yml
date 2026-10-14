@@ -169,7 +169,8 @@ jobs:
       - run: npm ci
       - run: npm run preview -- --name "pr-${{ github.event.pull_request.number }}" --delete
 
-  # Main goes live at PRODUCTION_DOMAIN. Until that variable is set, nothing deploys, so merging can't
+  # Main goes live at PRODUCTION_DOMAIN and www.PRODUCTION_DOMAIN (the Worker 301s www to the apex, see
+  # src/worker/hosts.ts; a deploy that leaves www out detaches it). Until that variable is set, nothing deploys, so merging can't
   # take commonink.app from v2 before the cutover is chosen.
   deploy:
     needs: check
@@ -203,6 +204,6 @@ jobs:
         if: env.PRODUCTION_DOMAIN != ''
         run: |
           jq -n --arg g "$GOOGLE_CLIENT_SECRET" --arg s "$SESSION_SECRET" --arg t "$TOKEN_KEY" '{GOOGLE_CLIENT_SECRET: $g, SESSION_SECRET: $s, TOKEN_KEY: $t} | with_entries(select(.value != ""))' > "$RUNNER_TEMP/secrets.json"
-          npm run deploy -- --domain "$PRODUCTION_DOMAIN" --secrets-file "$RUNNER_TEMP/secrets.json" \
+          npm run deploy -- --domain "$PRODUCTION_DOMAIN" --domain "www.$PRODUCTION_DOMAIN" --secrets-file "$RUNNER_TEMP/secrets.json" \
             --var "GOOGLE_CLIENT_ID:$GOOGLE_CLIENT_ID" --var "ALLOWED_EMAILS:$ALLOWED_EMAILS"
           rm "$RUNNER_TEMP/secrets.json"
