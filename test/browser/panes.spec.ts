@@ -224,7 +224,7 @@ test("a mode's and a folder's menu open it in a split to the right or below, kep
   await expect(page).toHaveURL(/\/search$/);
 });
 
-test("the window has one italic tab, in whichever pane is in front, and it is kept only when the member says so", async ({ page }) => {
+test("the window has one italic tab, which is where the next thing opens whichever pane is in front, and it is kept only when the member says so", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta");
   for (const name of ["Plans", "Ideas"]) await perform(page, { type: "folder.create", name });
   await page.reload();
@@ -237,12 +237,13 @@ test("the window has one italic tab, in whichever pane is in front, and it is ke
   await expect(tabs(page, 0)).toHaveText(["Alpha"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
 
-  // A folder clicked with each pane in front in turn: one italic tab, in the pane in front.
-  for (const [pane, folder, tabsThere, tabsOther] of [[1, "Plans", ["Alpha", "Plans"], ["Beta"]], [2, "Ideas", ["Beta", "Ideas"], ["Alpha"]], [1, "Unsorted", ["Alpha", "Unsorted"], ["Beta"]], [2, "Plans", ["Beta", "Plans"], ["Alpha"]]] as const) {
+  // A folder clicked with each pane in front in turn: the first opens in the pane in front, and the italic tab is then where the next opens, whichever pane is in front.
+  for (const [pane, folder] of [[2, "Plans"], [1, "Ideas"], [2, "Unsorted"], [1, "Plans"]] as const) {
     await tab(page, pane === 1 ? "Alpha" : "Beta", pane - 1).click();
     await folderRow(page, folder).click();
-    await expect(tabs(page, pane - 1)).toHaveText([...tabsThere]);
-    await expect(tabs(page, 2 - pane)).toHaveText([...tabsOther]);
+    await expect(tabs(page, 1)).toHaveText(["Beta", folder]);
+    await expect(tabs(page, 0)).toHaveText(["Alpha"]);
+    await expect(group(page, 2)).toHaveAttribute("data-focused", "true");
     await expect.poll(() => previews(page)).toEqual([folder]);
   }
 
@@ -524,3 +525,73 @@ test("a tab's menu opens from the keyboard, and a tab moves to the next pane and
   await expect(tabs(page)).toHaveText(["Beta", "Alpha"]);
   await expect(tab(page, "Alpha")).toHaveAttribute("aria-selected", "true");
 });
+
+/** Where every pane and both sidebars are, to the pixel. */
+const placed = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll("section.group, aside.sidebar, aside.inspector")].map((el) => {
+      const box = el.getBoundingClientRect();
+      return `${el.getAttribute("aria-label")} ${[box.x, box.y, box.width, box.height].map(Math.round).join(" ")}`;
+    }),
+  );
+
+for (const [name, splits, panes] of [
+  ["right", ["Split right"], 2],
+  ["down", ["Split down"], 2],
+  ["nested", ["Split right", "Split down"], 3],
+] as const) {
+  test(`in a split ${name}, a page from the sidebar, the palette or the address opens where the italic tab is, with every pane and both sidebars where they were`, async ({ page }) => {
+    await withNotes(page, "Alpha", "Beta", "Gamma");
+    for (const title of ["Alpha", "Beta", "Gamma"]) await keep(page, title);
+    // The italic tab, All notes, is split off last, so it is alone in the last pane.
+    if (splits.length > 1) {
+      await tab(page, "Gamma").click({ button: "right" });
+      await menuItem(page, splits[0]).click();
+    }
+    await tab(page, "All notes").click({ button: "right" });
+    await menuItem(page, splits.at(-1)!).click();
+    await expect(page.getByRole("region", { name: /^Editor group/ })).toHaveCount(panes);
+    const there = (await Promise.all(Array.from({ length: panes }, (_, i) => tabs(page, i).allInnerTexts()))).findIndex((titles) => titles.join() === "All notes");
+    expect(there).toBeGreaterThan(0);
+    await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
+    await modes(page).getByRole("button", { name: "More" }).click();
+    await page.evaluate(() => document.fonts.ready);
+
+    const front = async () => {
+      await tab(page, "Alpha").click();
+      await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
+    };
+    await front();
+    const before = await placed(page);
+    expect(before).toHaveLength(panes + 2);
+    const others = await Promise.all(Array.from({ length: panes }, (_, i) => tabs(page, i).allInnerTexts()));
+
+    const pages = await modes(page).getByRole("link").allInnerTexts();
+    expect(pages).toEqual(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
+    const opensThere = async (label: string) => {
+      for (let i = 0; i < panes; i++) await expect(tabs(page, i)).toHaveText(i === there ? [label] : others[i]!);
+      await expect(group(page, there + 1)).toHaveAttribute("data-focused", "true");
+      await expect(group(page, there + 1).getByRole("heading", { name: label, level: 1 })).toBeVisible();
+      await expect.poll(() => previews(page)).toEqual([label]);
+      await expect.poll(() => placed(page)).toEqual(before);
+    };
+    for (const label of pages) {
+      await modes(page).getByRole("link", { name: label, exact: true }).click();
+      await opensThere(label);
+      await front();
+      await expect.poll(() => placed(page)).toEqual(before);
+    }
+
+    // From the command palette, and from a link to the page's address.
+    await page.keyboard.press("ControlOrMeta+Shift+P");
+    await page.keyboard.type("Go to Calendar");
+    await page.keyboard.press("Enter");
+    await opensThere("Calendar");
+    await front();
+    await page.evaluate(() => {
+      history.pushState(null, "", "/todos");
+      dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await opensThere("Todos");
+  });
+}

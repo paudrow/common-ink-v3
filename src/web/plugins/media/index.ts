@@ -1,4 +1,5 @@
 import { askSite, onTheme, themeNow, type AddressEmbed, type Plugin, type PluginHost } from "../../plugin-api.ts";
+import { arriving } from "../lib/arriving.ts";
 import { postIn, POST_WIDTH } from "./social.ts";
 import { playerFor, posterFor, sharpPosterFor, titleFor, videoIn } from "./youtube.ts";
 
@@ -89,22 +90,45 @@ const post = (heights: Heights): AddressEmbed => ({
       const found = postIn(config);
       if (!found) return;
       const frame = into.appendChild(framed({ title: `Post on ${found.site}`, src: found.frame(themeNow()) }));
+      // A post says how tall it is once it is drawn. One that never says is shown a while after its page has loaded.
+      const shown = arriving(into, frame);
+      let late: ReturnType<typeof setTimeout> | undefined;
+      let waiting = true;
+      const arrived = () => {
+        waiting = false;
+        clearTimeout(late);
+        shown.arrived();
+      };
+      frame.addEventListener("load", () => {
+        clearTimeout(late);
+        if (waiting) late = setTimeout(arrived, SAYS_NOTHING);
+      });
       const said = (event: MessageEvent) => {
         if (event.source !== frame.contentWindow || event.origin !== found.origin) return;
         const height = found.tall(event.data);
         if (height === null) return;
         heights.remember(found.key, height);
         resize(height);
+        arrived();
       };
       addEventListener("message", said);
-      const themed = onTheme((theme) => (frame.src = found.frame(theme)));
+      const themed = onTheme((theme) => {
+        clearTimeout(late);
+        waiting = true;
+        shown.again();
+        frame.src = found.frame(theme);
+      });
       return () => {
+        clearTimeout(late);
         removeEventListener("message", said);
         themed();
       };
     },
   },
 });
+
+/** How long after its page has loaded a post that hasn't said how tall it is is shown anyway, in milliseconds. */
+const SAYS_NOTHING = 2500;
 
 interface Heights {
   of(post: string): number | undefined;

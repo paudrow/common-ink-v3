@@ -60,7 +60,7 @@ const seen = (page: Page) =>
     const line = lines.find((el) => el.textContent!.includes("Alpha"))!;
     const text = line.textContent!;
     const written = [
-      ...(line.querySelector(".bullet-dot") ? [] : ["mark"]),
+      ...(line.querySelector(".bullet-dot, .bullet-blank") ? [] : ["mark"]),
       ...(line.querySelector("input[type=checkbox]") ? [] : ["box"]),
       ...(text.includes("**bold**") ? ["bold"] : []),
       ...(text.includes("[link](x.co)") ? ["link"] : []),
@@ -299,3 +299,132 @@ for (const scheme of ["light", "dark"] as const) {
     await page.screenshot({ path: info.outputPath(`boxes-${scheme}.png`) });
   });
 }
+
+test("a task has no dot beside its box, a bullet with things under it keeps its fold toggle, and a plain bullet keeps its dot", async ({ page }) => {
+  await open(page, DEPTHS.replace("- Plain bullet", "- Plain bullet\n> - [ ] Quoted task\n- - [ ] Inner task"));
+  const marks = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")]
+      .filter((line) => /(Task|Bullet) (one|two)|Mixed three|Quoted|Inner/.test(line.textContent!))
+      .map((line) => {
+        const mark = line.querySelector<HTMLElement>(".bullet-dot, .bullet-blank");
+        return {
+          line: line.textContent!.replace(/^[\s▾▸]+/, ""),
+          painted: mark ? getComputedStyle(mark, "::before").content !== "none" || getComputedStyle(mark).webkitTextFillColor !== "rgba(0, 0, 0, 0)" : null,
+          toggle: line.querySelector(".bullet-toggle") !== null,
+        };
+      }),
+  );
+  expect(marks).toEqual([
+    { line: "- Bullet one", painted: true, toggle: true },
+    { line: "- Bullet two", painted: true, toggle: true },
+    { line: "- [ ] Task one", painted: false, toggle: true },
+    { line: "- [ ] Task two", painted: false, toggle: true },
+    { line: "- [ ] Mixed three", painted: false, toggle: true },
+    // Where no box is drawn, in a quote or after another mark, the mark keeps its dot.
+    { line: "> - [ ] Quoted task", painted: true, toggle: false },
+    { line: "- - [ ] Inner task", painted: true, toggle: false },
+  ]);
+
+  // With the cursor on a task's mark it is shown as written, and nothing on the line moves.
+  const task = editor(page).locator(".cm-line").filter({ hasText: "Task two" });
+  const before = await startsOf(page, ["Task two"]);
+  await task.getByText("Task two").click();
+  await page.keyboard.press("Home");
+  await expect(task.locator(".bullet-blank")).toHaveCount(0);
+  await expect(task.getByRole("checkbox")).toHaveCount(1);
+  expect(await startsOf(page, ["Task two"])).toEqual(before);
+});
+
+test("a task's words start well clear of its box, the same distance ticked or not, and neither the cursor coming onto the box nor ticking it moves them", async ({ page }) => {
+  await open(page, "# Gap\n\n- [ ] Open task\n- [x] Done task\n- [X] Shouted task\n1. [ ] Numbered task\n\nLast words.");
+  const size = await editor(page).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  const gaps = () =>
+    page.evaluate((words) => {
+      const lines = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")];
+      return words.map((word) => {
+        const line = lines.find((el) => el.textContent!.includes(word))!;
+        const text = [...line.querySelectorAll("*")].flatMap((el) => [...el.childNodes]).concat([...line.childNodes]).find((node) => node.nodeType === Node.TEXT_NODE && node.textContent!.includes(word))!;
+        const range = document.createRange();
+        range.setStart(text, text.textContent!.indexOf(word));
+        range.setEnd(text, text.textContent!.indexOf(word) + 1);
+        const words = range.getBoundingClientRect().left;
+        const box = line.querySelector("input[type=checkbox]")?.getBoundingClientRect();
+        return { words, gap: box ? words - box.right : null, boxLeft: box?.left ?? null };
+      });
+    }, ["Open task", "Done task", "Shouted task", "Numbered task"]);
+
+  const drawn = await gaps();
+  for (const [n, { gap }] of drawn.entries()) expect(gap!, `the gap after box ${n} is ${gap}, the text is ${size}px`).toBeGreaterThanOrEqual(0.55 * size);
+  expect(Math.abs(drawn[0]!.words - drawn[1]!.words), "an open and a done task's words start together").toBeLessThanOrEqual(0.5);
+  expect(Math.abs(drawn[0]!.words - drawn[2]!.words), "and an [X] one's").toBeLessThanOrEqual(0.5);
+  expect(Math.abs(drawn[0]!.boxLeft! - drawn[1]!.boxLeft!), "their boxes are in one place").toBeLessThanOrEqual(0.5);
+
+  // The cursor on the box shows `[ ]` as written in the box's place: the words stay put.
+  const first = editor(page).locator(".cm-line").filter({ hasText: "Open task" });
+  await first.getByText("Open task").click();
+  await page.keyboard.press("Home");
+  for (let n = 0; n < 2; n++) await page.keyboard.press("ArrowRight");
+  await expect(first.getByRole("checkbox")).toHaveCount(0);
+  expect(Math.abs((await gaps())[0]!.words - drawn[0]!.words), "the words with the box shown as written").toBeLessThanOrEqual(0.5);
+
+  // Ticked from elsewhere, the words stay put too.
+  await page.keyboard.press("ControlOrMeta+End");
+  await first.getByRole("checkbox").click();
+  await expect(first.getByRole("checkbox")).toBeChecked();
+  const ticked = await gaps();
+  expect(Math.abs(ticked[0]!.words - drawn[0]!.words), "the words once the box is ticked").toBeLessThanOrEqual(0.5);
+  expect(Math.abs(ticked[0]!.boxLeft! - drawn[0]!.boxLeft!), "the box once it is ticked").toBeLessThanOrEqual(0.5);
+});
+
+test("a formula in a line sits on the line's baseline where KaTeX itself puts it, and the line is no taller", async ({ page }) => {
+  await open(page, "# Inline $\\frac{a}{b}$ head\n\nA fraction $\\frac{a}{b}$ and a square $x^2$ and a sum $\\sum_{i=1}^{n} i$ and $a \\neq b$ and $x \\notin S$ in words.\n\nLast words.");
+  await expect(editor(page).locator(".katex").first()).toBeVisible();
+  await page.addScriptTag({ path: "node_modules/katex/dist/katex.min.js" });
+  const { ours, katex, plainHeight, ourHeight, headingBaselines } = await page.evaluate(() => {
+    const line = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes("fraction"))!;
+    const style = getComputedStyle(line);
+    // The same formulas as KaTeX sets them in a paragraph of the line's own face, size and height.
+    const plain = document.createElement("p");
+    Object.assign(plain.style, { position: "fixed", left: "0", top: "0", margin: "0", font: style.font, lineHeight: style.lineHeight, whiteSpace: "pre" });
+    for (const tex of ["\\frac{a}{b}", "x^2", "\\sum_{i=1}^{n} i", "a \\neq b", "x \\notin S"]) {
+      const el = document.createElement("span");
+      (window as unknown as { katex: { render(tex: string, el: HTMLElement, options: object): void } }).katex.render(tex, el, { output: "htmlAndMathml" });
+      plain.append(" words ", el);
+    }
+    document.body.append(plain);
+    const baseline = (host: HTMLElement) => {
+      const probe = host.appendChild(document.createElement("span"));
+      probe.style.cssText = "display: inline-block; width: 0; height: 0";
+      const y = probe.getBoundingClientRect().bottom;
+      probe.remove();
+      return y;
+    };
+    /** Where each letter of each formula is, above (less than 0) or below its line's baseline. */
+    const letters = (host: HTMLElement): [number, number][][] => {
+      const at = baseline(host);
+      return [...host.querySelectorAll(".katex-html")].map((formula) =>
+        [...formula.querySelectorAll(".mord, .mop, .mrel")]
+          .filter((el) => el.children.length === 0)
+          .map((el): [number, number] => {
+            const box = el.getBoundingClientRect();
+            return [Math.round((box.top - at) * 10) / 10, Math.round((box.bottom - at) * 10) / 10];
+          }),
+      );
+    };
+    const plainLine = document.createElement("p");
+    Object.assign(plainLine.style, { margin: "0", font: style.font, lineHeight: style.lineHeight });
+    plainLine.textContent = "words";
+    document.body.append(plainLine);
+    // In a heading, the formula's baseline is the heading's.
+    const heading = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes("head"))!;
+    const headingFormula = heading.querySelector<HTMLElement>(".katex-html")!;
+    return { ours: letters(line), katex: letters(plain), plainHeight: plainLine.getBoundingClientRect().height, ourHeight: line.getBoundingClientRect().height, headingBaselines: [baseline(heading), baseline(headingFormula)] };
+  });
+  expect(ours.length).toBe(5);
+  for (const [n, formula] of ours.entries()) for (const [m, [top, bottom]] of formula.entries()) {
+    expect(Math.abs(top - katex[n]![m]![0]), `formula ${n} letter ${m}: ours from ${top} to ${bottom} of the baseline, KaTeX's ${katex[n]![m]}`).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(bottom - katex[n]![m]![1])).toBeLessThanOrEqual(0.5);
+  }
+  expect(Math.abs(ourHeight - plainHeight), `the line is ${ourHeight} tall, a line of words ${plainHeight}`).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(headingBaselines[0]! - headingBaselines[1]!), `a heading's baseline and its formula's: ${headingBaselines}`).toBeLessThanOrEqual(0.5);
+});

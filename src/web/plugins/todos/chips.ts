@@ -1,6 +1,7 @@
 import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { completeTodo, parseTodo, rewriteTodo, type Importance } from "../../plugin-api.ts";
+import { BOX_EM } from "../gfm/lists.ts";
 import { chips, type Chip, type Token } from "../lib/chips.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
 import { replacing } from "../lib/rewrite.ts";
@@ -172,14 +173,15 @@ const asWritten = drawnInView((view) => {
 
 const look = EditorView.baseTheme({
   // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark.
-  ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", cursor: "pointer" },
+  // The box starts where its `[` does, so it is in one place ticked or not, though `[x]` is wider than `[ ]`.
+  ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", paddingLeft: "0.35em", justifyContent: "flex-start", cursor: "pointer" },
   ".md-chip-task input": {
     appearance: "none",
     boxSizing: "border-box",
     flex: "none",
     margin: "0",
-    width: "1.1em",
-    height: "1.1em",
+    width: `${BOX_EM}em`,
+    height: `${BOX_EM}em`,
     font: "inherit",
     border: "1.5px solid color-mix(in srgb, var(--muted) 75%, transparent)",
     borderRadius: "0.28em",

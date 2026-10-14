@@ -56,7 +56,11 @@ export interface MemberSettings {
 export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "sharing" | "storage">;
 
 export interface HostOptions {
-  /** Every installed plugin, in the order their contributions are shown. */
+  /**
+   * Every installed plugin, in the order their contributions are shown. One whose id an earlier one
+   * has is left out: the id is what a plugin's settings and switch are kept under, so a second one
+   * would read and change the first one's.
+   */
   plugins: readonly Plugin[];
   required?: readonly string[];
   /**
@@ -139,7 +143,8 @@ function keptFromPerform(type: string): string | null {
   return null;
 }
 
-export function createPluginHost({ plugins, required = [], trusted = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
+export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
+  const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed | AddressEmbed>>();
   const completions = new Map<string, Owned<Completion>>();
@@ -209,10 +214,12 @@ export function createPluginHost({ plugins, required = [], trusted = [], builtIn
       plugin: { id: plugin.id, name: plugin.name },
       ...provided,
       // This is the one way a plugin performs an operation of its own choosing, so it is where a plugin is refused.
+      // What is sent is a copy taken once, so the type that was looked at is the type that goes.
       perform(op) {
-        const { type } = op as OpInput;
-        const why = keptFromPerform(type);
-        return why ? Promise.reject(new Error(`${plugin.name} can't ${type}: ${why}`)) : provided.perform(op);
+        const sent = { ...(op as OpInput) };
+        const type: unknown = sent.type;
+        const why = typeof type === "string" ? keptFromPerform(type) : "a plugin can't read or change the member's settings";
+        return why ? Promise.reject(new Error(`${plugin.name} can't ${String(type)}: ${why}`)) : provided.perform(sent as typeof op);
       },
       settings: {
         get<T extends SettingValue>(name: string) {

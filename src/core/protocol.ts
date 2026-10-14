@@ -601,6 +601,13 @@ export interface RevertConflict {
   kept: string[];
   /** The later changes that edited these lines. */
   later: Array<{ revision: number; author: Author }>;
+  /**
+   * For a revert of chosen changes, where these lines are in the note as each run of those changes
+   * left it, so that the conflict can be shown on the diff of that run: `revision` is the run's
+   * last, `line` is counted from 1 in the note at that revision, and no `lines` is the place
+   * before that line. Runs are the ones `history.diff` answers with for the same changes.
+   */
+  runs: Array<{ revision: number; line: number; lines: number }>;
 }
 
 export interface HistoryEntry extends ChangeEntry {

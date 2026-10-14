@@ -580,8 +580,8 @@ describe("a preview of a revert", () => {
     const preview = await perform(env.DB, ada, { type: "note.previewRevert", id, revisions: [2] });
     expect(preview.overlaps).toEqual([3, 4]);
     expect(preview.conflicts).toEqual([
-      { line: 2, before: ["- [ ] buy milk"], now: ["- [ ] buy oat milk now"], kept: ["- [ ] buy oat milk"], later: [{ revision: 3, author: { kind: "member", personId: ada.personId, name: "Ada Lovelace" } }] },
-      { line: 4, before: ["- [ ] call bank"], now: ["- [x] call bank today"], kept: ["- [x] call bank"], later: [{ revision: 4, author: { kind: "agent", agentId: claude.actor.agentId, name: "Claude", onBehalfOf: ada.personId } }] },
+      { line: 2, before: ["- [ ] buy milk"], now: ["- [ ] buy oat milk now"], kept: ["- [ ] buy oat milk"], later: [{ revision: 3, author: { kind: "member", personId: ada.personId, name: "Ada Lovelace" } }], runs: [{ revision: 2, line: 2, lines: 1 }] },
+      { line: 4, before: ["- [ ] call bank"], now: ["- [x] call bank today"], kept: ["- [x] call bank"], later: [{ revision: 4, author: { kind: "agent", agentId: claude.actor.agentId, name: "Claude", onBehalfOf: ada.personId } }], runs: [{ revision: 2, line: 4, lines: 1 }] },
     ]);
     expect(preview.diff).toMatchObject({ added: 2, removed: 2 });
   });
@@ -591,7 +591,7 @@ describe("a preview of a revert", () => {
     const preview = await perform(env.DB, ada, { type: "note.previewRevert", id, author: claude.ref });
     expect(preview.revisions).toEqual([2, 4]);
     expect(preview.conflicts).toEqual([
-      { line: 2, before: ["- [ ] buy milk"], now: ["- [ ] buy oat milk now"], kept: ["- [ ] buy oat milk"], later: [{ revision: 3, author: { kind: "member", personId: ada.personId, name: "Ada Lovelace" } }] },
+      { line: 2, before: ["- [ ] buy milk"], now: ["- [ ] buy oat milk now"], kept: ["- [ ] buy oat milk"], later: [{ revision: 3, author: { kind: "member", personId: ada.personId, name: "Ada Lovelace" } }], runs: [] },
     ]);
     const added = (diff: Diff) => diff.hunks.flatMap((h) => h.lines.filter((l) => l.kind === "add").map((l) => l.text));
     expect(added(preview.diff)).toEqual(["- [ ] buy oat milk", "- [ ] call bank"]);
