@@ -1824,14 +1824,19 @@ button.link:hover {
   max-width: none;
 }
 
-/* The line of an address that is shown as media: a caption's size, and seen only with the pointer on it or on the media, or the cursor on it. It keeps its room either way, so nothing moves. */
+/* The line of an address that is shown as media: a caption's size, and seen only with the cursor on it. It keeps its room either way, so nothing moves. */
 .cm-line.embed-address {
   font-size: 0.8125rem;
   transition: opacity 120ms;
 }
 
-.cm-line.embed-address:not(.embed-address-seen):not(:hover) {
+.cm-line.embed-address:not(.embed-address-seen) {
   opacity: 0;
+}
+
+/* Out of sight, the address is no link: the pointer and a press reach the line, which puts the cursor there. */
+.cm-line.embed-address:not(.embed-address-seen) * {
+  pointer-events: none;
 }
 
 .embed-below-drawn {
@@ -1894,6 +1899,30 @@ button.link:hover {
   border: 0;
   background: none;
   color-scheme: normal;
+}
+
+/* What is below a line while it loads: a placeholder as big as its room, and what loads is there but unseen until it is drawn. */
+.embed-loading {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--muted) 14%, var(--bg));
+  animation: embed-loading 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes embed-loading {
+  to {
+    background: color-mix(in srgb, var(--muted) 7%, var(--bg));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .embed-loading {
+    animation: none;
+  }
+}
+
+.embed-arriving {
+  opacity: 0;
 }
 
 /* A video before it is played: its picture, what it is called along the top, and a play mark in the middle. */
@@ -3491,8 +3520,6 @@ kbd {
 }
 
 .hist-open-page {
-  align-self: flex-start;
-  margin-bottom: 6px;
   text-decoration: underline;
 }
 
@@ -3540,14 +3567,34 @@ kbd {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 12px 10px 6px;
+  padding: 10px 10px 4px;
   background: var(--bg);
+}
+
+/* A day's heading is its tick: the box stands in the column of its rows' boxes. */
+.hist-day-tick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
   color: var(--muted);
+  font: inherit;
   font-size: 10.5px;
   font-weight: 650;
   letter-spacing: 0.08em;
   line-height: 1;
+  text-align: left;
   text-transform: uppercase;
+  cursor: pointer;
+}
+
+.hist-day-tick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .hist-row {
@@ -3589,11 +3636,13 @@ kbd {
   background: var(--bg-elev);
 }
 
-.hist-all-tick .hist-check {
+.hist-all-tick .hist-check,
+.hist-day-tick .hist-check {
   margin-top: 0;
 }
 
 .hist-row:hover .hist-check,
+.hist-day-tick:hover .hist-check,
 .hist-all-tick:hover .hist-check {
   border-color: var(--muted);
 }
@@ -3886,8 +3935,69 @@ kbd {
   cursor: pointer;
 }
 
-.hist-open {
-  padding: 8px 18px 12px;
+/* What to do with what is ticked, at the foot of the list and only while something is. */
+.hist-picked {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 44px;
+  padding: 6px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.hist-picked-count {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.hist-picked .link {
+  text-decoration: underline;
+}
+
+.hist-sum-text .hist-conflicts {
+  color: var(--danger);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* Lines of a diff that a later change edited: reverting them asks what they become. */
+.diff-conflict {
+  display: block;
+  width: 100%;
+  margin: 2px 0;
+  padding: 0;
+  border: 0;
+  border-left: 3px solid var(--danger);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-conflict:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.diff-conflict:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.diff-conflict-says {
+  display: block;
+  padding: 4px 10px 1px calc(var(--diff-gutter, 14px) - 3px);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.diff-conflict.lone {
+  padding-bottom: 4px;
 }
 
 @container history (max-width: 720px) {
@@ -3935,7 +4045,7 @@ kbd {
   }
 
   .history-panes.page .hist-open {
-    display: block;
+    display: inline;
   }
 
   .history-panes.page .hist-summary,
@@ -3957,8 +4067,19 @@ kbd {
   padding-top: 10px;
 }
 
-.history-panes.panel .hist-open-page {
-  margin: 0 14px 2px;
+.history-panes.panel .hist-filters {
+  justify-content: space-between;
+  padding: 0 14px 2px;
+}
+
+.history-panes.panel .hist-day {
+  padding-right: 8px;
+  padding-left: 8px;
+  background: var(--bg-side);
+}
+
+.history-panes.panel .hist-day-tick {
+  gap: 8px;
 }
 
 .history-panes.panel .hist-all {
@@ -3978,6 +4099,13 @@ kbd {
 
 .history-panes.panel .hist-row[aria-level="2"] {
   margin-left: 14px;
+}
+
+.history-panes.panel .hist-picked {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 6px 12px;
 }
 
 .history-panes.panel .hist-more {
@@ -4011,9 +4139,10 @@ kbd {
   font-size: 13px;
 }
 
+/* It stands clear of the bar at the foot of History's list, which has what the toast may send the member to: Revert… */
 .toast {
   position: fixed;
-  bottom: 20px;
+  bottom: 84px;
   left: 50%;
   z-index: 50;
   display: flex;
@@ -4613,12 +4742,6 @@ button.diff-fold:hover {
 
 .revert-dialog-body > .button {
   align-self: flex-start;
-}
-
-.hist-cut {
-  margin: 2px 10px 6px 36px;
-  color: var(--muted);
-  font-size: 11.5px;
 }
 
 .members .agent-head {

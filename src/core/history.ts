@@ -383,6 +383,26 @@ export function reverting(history: readonly Recorded[], reverts: Reverts, text: 
   return { changes, overlaps, conflicts };
 }
 
+/**
+ * Where lines of the note after a revert, every later edit kept, were in the note as revision `at`
+ * left it: the lines there that they came of, by every change since and by the revert. `line` is
+ * counted from 1, as a conflict's is, and so is the answer's. No lines is the place before that line.
+ */
+export function linesAsOf(history: readonly Recorded[], { changes }: Pick<Reverting, "changes">, at: number, line: number, count: number): { line: number; lines: number } {
+  const made = [...replayed(history.map((h) => h.changes))];
+  const now = made.at(-1)?.next ?? Text.empty;
+  const then = made[at]?.doc ?? now;
+  const revert = anchored(lift(changes), now);
+  const kept = revert.apply(now);
+  const back = made.slice(at).reduce((all, m) => all.compose(m.change), ChangeSet.empty(then.length)).compose(revert).invertedDesc;
+  const startOf = (n: number) => (n < kept.lines ? kept.line(n + 1).from : kept.length);
+  // Text taken out since, at either end, is of these lines too: it is put back where they are.
+  const [from, to] = [back.mapPos(startOf(line - 1), -1), back.mapPos(startOf(line - 1 + count), 1)];
+  const first = then.lineAt(from).number - 1;
+  const last = to > from ? then.lineAt(to - 1).number : first;
+  return { line: first + 1, lines: last - first };
+}
+
 /** The lines of `a` that lines `from` up to `to` of `b` came of, given where the two differ. */
 function across(hunks: readonly { aFrom: number; aTo: number; bFrom: number; bTo: number }[], from: number, to: number): [number, number] {
   let [start, end] = [Infinity, -Infinity];
