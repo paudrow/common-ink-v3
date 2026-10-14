@@ -9,10 +9,13 @@ export type ChipKind = "due" | "importance";
 /** The chips of a row on the Todos page that open a popover: those two, and Add tag. A tag's own chip narrows the list instead. */
 export type RowChip = ChipKind | "tag";
 
-/** Which todo's chip has its popover open, by the todo's key in the list, or nothing. One at a time, in the whole app. */
-export type Picking = { row: string; chip: RowChip } | null;
+/** What a row's popover can be open for: one of its chips, or its fields button, which lists what its chips set. */
+export type Opened = RowChip | "fields";
 
-export type PickingEvent = { type: "open" | "closed"; row: string; chip: RowChip };
+/** Which todo's chip has its popover open, by the todo's key in the list, or nothing. One at a time, in the whole app. */
+export type Picking = { row: string; chip: Opened } | null;
+
+export type PickingEvent = { type: "open" | "closed"; row: string; chip: Opened };
 
 /**
  * Opening a chip's popover shows it, and opening the one that is open closes it. A popover tells it
@@ -46,7 +49,24 @@ export function choicesFor(chip: ChipKind, todo: { due: string | null; importanc
 export const CHIP_NAMES: Record<RowChip, string> = { due: "Due date", importance: "Importance", tag: "Tag" };
 
 /** What a chip's popover is called, for the todo whose words are these where they are said. */
-export const pickerLabel = (chip: RowChip, words?: string) => `${CHIP_NAMES[chip]}${words ? ` of ${words}` : ""}`;
+export const pickerLabel = (chip: Opened, words?: string) => `${chip === "fields" ? "Fields" : CHIP_NAMES[chip]}${words ? ` of ${words}` : ""}`;
+
+/** One line of what a row's fields button lists: a chip it opens, and what that says now, or null where nothing is set. */
+export interface Field {
+  chip: RowChip;
+  name: string;
+  value: string | null;
+}
+
+/** What a row's fields button lists, as v1's did: each thing a todo can have, in the order of its chips, with what it is set to. */
+export function fieldsOf(todo: { due: string | null; importance: Importance; words: string }, now: string): Field[] {
+  const tags = tagsOn(todo.words).map((tag) => `#${tag.name}`);
+  return [
+    { chip: "importance", name: CHIP_NAMES.importance, value: todo.importance ? IMPORTANCE[todo.importance] : null },
+    { chip: "due", name: CHIP_NAMES.due, value: todo.due && dueLabel(todo.due, now) },
+    { chip: "tag", name: "Tags", value: tags.length ? tags.join(" ") : null },
+  ];
+}
 
 /** The tag typed into Add tag, without its #, or null when it can't be one: a tag is one word, and not only digits. */
 export function typedTag(typed: string): string | null {

@@ -10,6 +10,9 @@ let shown: { anchor: HTMLElement; close: () => void } | null = null;
 /** Closes the popover that is open, if one is. */
 export const closePopover = () => shown?.close();
 
+/** Whether the popover that is open hangs from `anchor`. */
+export const openFrom = (anchor: HTMLElement) => shown?.anchor === anchor;
+
 /**
  * Opens a small panel under `anchor`, such as the form a chip is set with. It is laid over the app,
  * in an element of its own at the end of the page, so it takes no room in the note and moves nothing

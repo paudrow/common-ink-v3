@@ -172,6 +172,20 @@ const PATHS = {
     </>
   ),
   flag: <path d="M4 14V2.75h8l-1.5 3 1.5 3H4" />,
+  sliders: (
+    <>
+      <path d="M13.5 4.75h-6M9.5 11.25h-6" />
+      <circle cx="11.5" cy="11.25" r="2" />
+      <circle cx="4.5" cy="4.75" r="2" />
+    </>
+  ),
+  open: <path d="M10 2.5h3.5V6M7 9l6.5-6.5M12 9v3.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 2 12.5v-7A1.5 1.5 0 0 1 3.5 4H7" />,
+  split: (
+    <>
+      <rect x="1.5" y="2.75" width="5.75" height="10.5" rx="1.25" />
+      <rect x="8.75" y="2.75" width="5.75" height="10.5" rx="1.25" />
+    </>
+  ),
   check: <path d="m3.75 8.25 2.75 2.75 5.75-6" />,
 } as const;
 

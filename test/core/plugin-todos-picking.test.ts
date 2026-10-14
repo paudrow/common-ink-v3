@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choicesFor, picking, tagged, typedTag, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
+import { choicesFor, fieldsOf, pickerLabel, picking, tagged, typedTag, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
 
 const run = (events: PickingEvent[], from: Picking = null) => events.reduce(picking, from);
 const open = (row: string, chip: "due" | "importance"): PickingEvent => ({ type: "open", row, chip });
@@ -59,5 +59,26 @@ describe("adding a tag from a row", () => {
     expect(tagged("Call the bank", "money")).toBe("Call the bank #money");
     expect(tagged("Call the bank #Money", "money")).toBe("Call the bank #Money");
     expect(tagged("", "money")).toBe("#money");
+  });
+});
+
+describe("what a row's fields button lists", () => {
+  const now = "2026-10-14";
+
+  it("each thing its chips set, in their order, with what it is now", () => {
+    expect(fieldsOf({ due: "2026-10-15", importance: 2, words: "Call the bank #money #home" }, now)).toEqual([
+      { chip: "importance", name: "Importance", value: "!!" },
+      { chip: "due", name: "Due date", value: "Tomorrow" },
+      { chip: "tag", name: "Tags", value: "#money #home" },
+    ]);
+  });
+
+  it("nothing for what isn't set", () => {
+    expect(fieldsOf({ due: null, importance: 0, words: "Call the bank" }, now).map((f) => f.value)).toEqual([null, null, null]);
+  });
+
+  it("is one of what a row's popover can be open for, and is called by the todo's words", () => {
+    expect(run([{ type: "open", row: "a/2", chip: "fields" }, open("a/2", "due"), { type: "closed", row: "a/2", chip: "fields" }])).toEqual({ row: "a/2", chip: "due" });
+    expect(pickerLabel("fields", "Call the bank")).toBe("Fields of Call the bank");
   });
 });
