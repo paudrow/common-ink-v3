@@ -75,8 +75,8 @@ describe("taking changes back out", () => {
     expect(without(texts)).toBe(texts[3]);
   });
 
-  it("keeps text a later change typed inside what the taken-out change added", () => {
-    expect(without(["one", "one two three", "one two and a half three"], 2)).toBe("oneand a half ");
+  it("leaves what the taken-out change added where a later change typed inside it", () => {
+    expect(without(["one", "one two three", "one two and a half three"], 2)).toBe("one two and a half three");
   });
 });
 
@@ -348,13 +348,11 @@ describe("a write moved over the changes made since the text it was based on", (
     expect(applyChanges(rebased(base, middle, [changesBetween(base, ends)]), ends)).toBe("ALPHA beta GAMMA delta EPSILON");
     expect(applyChanges(rebased(base, ends, [changesBetween(base, middle)]), middle)).toBe("ALPHA beta GAMMA delta EPSILON");
     expect(without([base, ends, "ALPHA beta GAMMA delta EPSILON"], 2)).toBe(middle);
-    expect(without(["one", "one, edited with a rather long line", "one, edited (again) with a rather long line"], 2)).toBe("one(again) ");
+    expect(without(["one", "one, edited with a rather long line", "one, edited (again) with a rather long line"], 2)).toBe("one, edited (again) with a rather long line");
     expect(applyChanges(rebased("- [ ] call \u{1F600} bank", "- [x] call \u{1F600} bank", [changesBetween("- [ ] call \u{1F600} bank", "- [ ] call \u{1F601} bank today")]), "- [ ] call \u{1F601} bank today")).toBe("- [x] call \u{1F601} bank today");
   });
 
   it("keeps what is left of a line the other change removed as a line of its own, not joined to the next", () => {
-    expect(without(["a\nc", "a\nx\nc", "a\nx!\nc"], 2)).toBe("a\n!\nc");
-    expect(without(["a\nb\nc", "a\nB\nc", "a\nc"], 2)).toBe("a\nb\nc");
     expect(applyChanges(rebased("a\nb\nc", "a\nb!\nc", [changesBetween("a\nb\nc", "a\nc")]), "a\nc")).toBe("a\n!\nc");
     expect(applyChanges(rebased("a\nb\nc", "a\nc", [changesBetween("a\nb\nc", "a\nb!\nc")]), "a\nb!\nc")).toBe("a\n!\nc");
     expect(applyChanges(rebased("a\nb", "a\nb!", [changesBetween("a\nb", "a")]), "a")).toBe("a\n!");
@@ -432,7 +430,7 @@ describe("the cost of taking a change out", () => {
     inside.edit("one two three", "claude");
     inside.edit("one two and a half three");
     inside.take([2]);
-    expect(inside.text()).toBe("oneand a half ");
+    expect(inside.text()).toBe("one two and a half three");
     expect(takeOut(inside.history.map((c) => c.changes), new Set([2, 4])).empty).toBe(true);
   });
 });

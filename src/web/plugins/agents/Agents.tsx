@@ -203,7 +203,8 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
   useEffect(() => {
     void load();
     let live = true;
-    host.perform({ type: "history.authors" }).then((authors) => live && setWrote(new Set(authors.flatMap((a) => (a.kind === "agent" ? [a.agentId] : [])))));
+    // Left unknown when it can't be read: the agents are still listed, without the way to revert what one wrote.
+    host.perform({ type: "history.authors" }).then((authors) => live && setWrote(new Set(authors.flatMap((a) => (a.kind === "agent" ? [a.agentId] : [])))), () => {});
     return () => {
       live = false;
     };

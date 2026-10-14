@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Note } from "../../src/core/protocol.ts";
-import { connectAgent, perform, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
 const editorLines = (page: Page) => page.locator(".cm-line");
@@ -48,8 +48,8 @@ async function conflicted(page: Page) {
   await perform(page, { type: "note.write", id: note.id, baseRevision: 2, text: "# List\n- [ ] buy oat milk now\n- [ ] sit still\n- [ ] call bank today\n- [ ] water plants" });
   await claude.tool<Note>("write_note", { id: note.id, baseRevision: 3, text: NOW });
   await page.goto(`/note/${note.id}`);
-  await inspector(page).getByRole("tab", { name: "History" }).click();
-  return { id: note.id, panel: inspector(page).getByRole("tabpanel") };
+  await showPanel(page, "History");
+  return { id: note.id, panel: inspector(page).locator(".inspector-body") };
 }
 
 /** Opens the dialog that reverts Claude's first change. */
@@ -281,7 +281,7 @@ test("Edit picked with nothing typed reverts to exactly what the choice before i
   await perform(page, { type: "note.revertChanges", id: kept, revisions: [2], resolve: { at: 3, choices: "keep" } });
   const want = await text(page, kept);
   await page.goto(`/note/${edited}`);
-  await inspector(page).getByRole("tab", { name: "History" }).click();
+  await showPanel(page, "History");
   await revertRow(inspector(page), rows(inspector(page)).nth(1));
   await expect(conflicts(page)).toHaveCount(1);
   const only = conflicts(page).first();
@@ -425,7 +425,7 @@ test("in a window 420px wide the dialog and its conflicts fit, and a long line w
   await claude.tool<Note>("write_note", { id: note.id, baseRevision: 1, text: `# List\none ${long}\ntwo` });
   await perform(page, { type: "note.write", id: note.id, baseRevision: 2, text: `# List\none ${long} ${long}\ntwo` });
   await page.goto(`/note/${note.id}`);
-  await inspector(page).getByRole("tab", { name: "History" }).click();
+  await showPanel(page, "History");
   await revertRow(inspector(page), rows(inspector(page)).nth(1));
   const dialog = revertDialog(page);
   await expect(conflicts(page)).toHaveCount(1);

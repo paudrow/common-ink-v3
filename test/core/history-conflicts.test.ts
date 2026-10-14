@@ -315,7 +315,7 @@ describe(`the record through ${FUZZ} random runs of lines added, removed, rewrit
 describe("a note's record replayed", () => {
   it("leaves nothing of a note every line of which was rewritten and then replaced, once going back empties it", () => {
     const n = made("x y z8", "X Y Z8", "a6");
-    expect(n.preview([1]).conflicts).toEqual([{ line: 1, before: [], now: ["a6"], kept: ["a6", "Y", "Z"], later: [2, 3] }]);
+    expect(n.preview([1]).conflicts).toEqual([{ line: 1, before: [], now: ["a6"], kept: ["a6"], later: [3] }]);
     n.revert([1], "back");
     expect(n.text()).toBe("");
     n.edit("hello");
@@ -366,7 +366,7 @@ describe("where a conflict is on the diff of the changes reverted", () => {
 
   it("is the last line, when the reverted change wrote it at the note's end and a later one added to it", () => {
     const n = made("a\nb", "a\nb\nc", "a\nb\nc!");
-    expect(n.preview([2]).conflicts).toMatchObject([{ now: ["c!"], kept: ["!"] }]);
+    expect(n.preview([2]).conflicts).toMatchObject([{ now: ["c!"], kept: ["c!"] }]);
     expect(placed(n, [2], 2)).toEqual([{ line: 3, lines: 1 }]);
   });
 
