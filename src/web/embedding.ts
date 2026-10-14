@@ -228,7 +228,8 @@ const placed = Annotation.define<true>();
  */
 const used = StateField.define<boolean>({
   create: () => false,
-  update: (value, tr) => value || tr.selection !== undefined || tr.isUserEvent("input") || tr.isUserEvent("delete"),
+  // An embed's own rewrite of its text is no use of the cursor: a press on its button leaves the cursor wherever it was.
+  update: (value, tr) => value || tr.selection !== undefined || (tr.isUserEvent("input") && !tr.isUserEvent("input.embed")) || tr.isUserEvent("delete"),
 });
 
 /** With the cursor on it, an embed is shown as it is written, so it can be changed, as the markup around it is. */

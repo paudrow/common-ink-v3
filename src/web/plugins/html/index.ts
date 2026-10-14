@@ -22,10 +22,11 @@ export const html: Plugin = {
   settings: {
     run: {
       title: "Run HTML embeds",
-      description: "Automatically, as soon as one is on screen, or only when you press Run. Either way it runs shut off from the app and the network.",
+      description: "Automatically, as soon as one is on screen, or only when you press Run. Either way it runs shut off from the app and the network. Unless you choose, it asks first on a server where HTML embeds have no site of their own, and runs by itself where they have.",
       type: "string",
       enum: ["automatically", "ask first"],
       default: "automatically",
+      defaultWithoutEmbedSite: "ask first",
       unreadable: "ask first",
     },
   },

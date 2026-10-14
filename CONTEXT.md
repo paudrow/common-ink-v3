@@ -35,7 +35,7 @@ A reference from one note to another by the target note's id, written `[[id]]` o
 _Avoid_: Wikilink, reference
 
 **Backlink**:
-A note whose text links to the open note. The inspector's Backlinks tab lists the ones the member can see.
+A note whose text links to the note in front. The inspector's Backlinks panel lists the ones the member can see.
 
 **Todo**:
 A markdown checkbox line in a note. Its due date, recurrence, importance, project, and assignees are written on that line and shown as chips. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. Checking off a recurring todo leaves the open line and appends the checked line to the daily note of the member who checked it off. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, with a control to include completed ones.
@@ -104,20 +104,30 @@ A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `
 The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, and it is where the next thing opened with a single click goes, whatever either is of and whichever editor group is focused: so no group is closed by opening something in another. With none, it opens in the focused group. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, a card's pencil, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
 
 **Editor group**:
-A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. The inspector shows the tab the member last picked wherever what is in front has it, and otherwise one it does have, with the pick left as it was. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
+A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
 _Avoid_: Pane
 
 **Split**:
 Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
 
-**Window buttons**:
-The buttons that act on the window and on no one note, whatever is open: the sidebar's and the inspector's, together before the first tab of the top left editor group, where the sidebar meets the editor area.
+**Edge**:
+The line where the sidebar or the inspector meets the editor area, with a short grip half way down it. Dragged, it resizes its side. Dragged in well past the side's least width, the side folds: the sidebar to its bar, and the inspector's pinned panel away, leaving its bar. The folded edge dragged out, or pressed, opens it again, as wide as it was, and it follows the pointer only once the pointer is out that far; the inspector's panel opened this way is pinned. There are no buttons for the sidebar, and the commands Toggle sidebar (⌘\) and Toggle inspector do the same.
 
-**Sidebar bar**, **Inspector bar**:
-What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
+**Sidebar bar**:
+What a closed sidebar leaves: a narrow bar of icons, one for each thing the open sidebar lists, in the same order. A mode's icon goes to the mode and Folders opens the folder picker.
+
+**Inspector bar**:
+The narrow bar of icons at the right of the window, one for each of the inspector's panels. It is always there, the same whatever is in front: no icon comes or goes with what is open, and it never closes by itself. An icon shows its panel, and the same icon again closes it.
+
+**Folder picker**:
+The sidebar's folder tree shown over the page beside the sidebar bar, from the bar's Folders icon, while the sidebar stays closed. Nothing under it moves. It goes when a folder is opened from it, on Escape, and on a press outside it.
 
 **Inspector**:
-The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line. A note has History, Backlinks and Info; a folder's list has History and Info. Its History tab is History itself, narrowed to what is in front and with what is selected under the list: a note's changes by time, a folder's by time or by note.
+The inspector bar and the panel it shows, which is about whatever is in front: the tab in front of the focused group. The panels are History, Backlinks and Info. A panel opens over the page and goes when the member presses elsewhere or presses Escape; pinned, by the one control in its header, it is beside the page and stays. Which panel, whether it shows and whether it is pinned are as the member last had them. A panel with nothing for what is in front says "Nothing to show for this view". The History panel is History itself, narrowed to what is in front and with what is selected under the list: a note's changes by time, a folder's or a page's notes by time or by note.
+_Avoid_: Right sidebar, inspector tab
+
+**About**:
+What the inspector's panels are told is in front: a note, a folder's list, or the notes a page says it is showing. A page says so itself, as the History page does with the notes whose changes are ticked; a page that says nothing is nothing to be about.
 
 **Focus**:
 One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
@@ -220,7 +230,7 @@ What a revert would do, worked out and not recorded: the changes it would revert
 A later change that still stands and edited a line a revert changes. A preview names each one. A line added or removed whole next to such a line is not an overlap.
 
 **Conflict**:
-A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
+A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was, or left whole as it is when the later edit was to the same words or removed the line; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
 
 **Undo**:
 Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
@@ -247,7 +257,7 @@ The part of the core that turns plugins on and off, hands each one its reach int
 One thing a plugin adds: a command, a view, an embed, a completion, or an editor extension. It is there while its plugin is on.
 
 **View**:
-Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector tab, a page, the bottom bar, or an overlay.
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector panel, a page, the bottom bar, or an overlay.
 _Avoid_: Panel
 
 **Bottom bar**:
@@ -281,13 +291,13 @@ Where an embed keeps what it shows that is more than a word in the line: a video
 Something from another site shown below the line that names it: a YouTube video, or a post on X or Bluesky. It is written as its web address alone on a line, with no syntax of its own. A video is its picture and its title with a play button, and its player loads when play is pressed. A post is shown at once, in the app's theme. An address inside a paragraph is only a link.
 
 **Address line**:
-The line that holds a media embed's address. It is a caption's size and out of sight until the cursor is on it, and it keeps its room either way. Out of sight it is no link: a press there puts the cursor on it.
+The line that holds a media embed's address. While the cursor is elsewhere it takes no room and the media is where it was, a paragraph's gap below the words above. With the cursor on it, the address shows above the media, small, in the code face and the accent's colour, and the media gets an edge of that colour. A step of the arrow keys, or vim's `j` and `k`, from the line next to it stops on it.
 
 **HTML embed**:
 A block embed (`:::html{}`) whose body is HTML, run below the block in a frame with an origin of its own, by itself the first time its room is on screen, or when the member presses Run if they have asked to be asked first. While the cursor is in the block, what was run stays; the HTML as written runs once the cursor leaves. HTML that was running when its page stopped answering asks before it runs again. Until it is drawn its room shows a placeholder its size. It can't read the app, the member's session, or anything the browser or the server keeps, can't fetch or send anything, and can't send its frame anywhere. The one way out it has is a WebRTC connection, which browsers give no way to refuse.
 
 **Run HTML embeds**:
-A member's setting (`html.run`): `automatically`, the default, or `ask first`, which shows a Run button in place of each HTML embed until it is pressed. A value that is neither reads as `ask first`, and a change reaches notes already open: what ran by itself stops and asks, what was asking runs. Like every setting it is the member's alone: no plugin, agent or embed can read or change it. A page opened from a share link always asks first. An embed whose HTML has changed runs again, or asks again.
+A member's setting (`html.run`): `automatically` or `ask first`, which shows a Run button in place of each HTML embed until it is pressed. It defaults to `ask first` until the server serves HTML embeds from a site of their own (`EMBED_ORIGIN`), as the server says in `/api/me`, and to `automatically` where it does; the member's own choice stands either way. A value that is neither reads as `ask first`, and a change reaches notes already open: what ran by itself stops and asks, what was asking runs. Like every setting it is the member's alone: no plugin, agent or embed can read or change it. A page opened from a share link always asks first. An embed whose HTML has changed runs again, or asks again.
 
 **Embed menu**:
 The list of embeds that opens at the cursor when a member types `/` at the start of a line or after a space. Typing filters it, and picking one writes that embed into the note.

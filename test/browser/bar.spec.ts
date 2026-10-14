@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 import { openDetails, pluginRow } from "./plugins-helpers.ts";
 
 const bar = (page: Page) => page.getByRole("group", { name: "Bottom bar" });
@@ -30,6 +30,7 @@ async function open(page: Page, text: string) {
 
 test("the bottom bar is one thin line along the foot of the window, under the sidebar, the editor area and the inspector", async ({ page }) => {
   await open(page, "# Tea\n\nSteep the leaves.\n");
+  await pinPanel(page, "Info");
   await expect(bar(page)).toBeVisible();
 
   const window = page.viewportSize()!;

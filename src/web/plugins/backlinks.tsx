@@ -52,6 +52,12 @@ export const backlinks: Plugin = {
   description: "The notes that link to the open note, in the inspector.",
   icon: "backlinks",
   activate(host) {
-    host.views.register("inspector", { id: "backlinks", label: "Backlinks", icon: "backlinks", for: "note", component: (props) => <Backlinks host={host} {...props} /> });
+    host.views.register("inspector", {
+      id: "backlinks",
+      label: "Backlinks",
+      icon: "backlinks",
+      for: ["note"],
+      component: ({ app, about }) => (about.kind === "note" ? <Backlinks key={about.note.id} host={host} app={app} note={about.note} /> : null),
+    });
   },
 };
