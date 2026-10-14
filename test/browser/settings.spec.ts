@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 import { category, group, json, openJson, openOptions, setPlugin, typeJson } from "./settings-helpers.ts";
 
 let errors: string[];
@@ -300,6 +300,7 @@ for (const width of [1700, 1280, 900, 560]) {
     await page.setViewportSize({ width, height: 480 });
     await openSettings(page);
     await page.goto("/settings/keyboard");
+    await pinPanel(page, "Info");
     await expect(page.getByRole("status")).toHaveText("Saved");
     const row = page.getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Toggle inspector/ });
     await row.scrollIntoViewIfNeeded();

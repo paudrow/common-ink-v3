@@ -112,7 +112,7 @@ interface Owned<T> {
 const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
-const RESERVED = ["plugins.", "go.", "settings."];
+const RESERVED = ["plugins.", "go.", "settings.", "inspector."];
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
@@ -223,12 +223,14 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
           if (slot === "page" && [...table.values()].some((o) => (o.value as Slots["page"]).path === (view as Slots["page"]).path)) throw new Error(`There's already a page at ${(view as Slots["page"]).path}`);
           const dispose = keep(add(table, view.id, view, index, `a ${slot} view with the id`));
           owners.set(view, owner);
-          if (slot !== "page") return dispose;
-          const page = view as Slots["page"];
-          const go = keep(command({ id: `go.${page.id}`, title: `Go to ${page.label}`, run: () => provided.app().go(page.path) }));
+          if (slot !== "page" && slot !== "inspector") return dispose;
+          const own =
+            slot === "page"
+              ? keep(command({ id: `go.${view.id}`, title: `Go to ${(view as Slots["page"]).label}`, run: () => provided.app().go((view as Slots["page"]).path) }))
+              : keep(command({ id: `inspector.${view.id}`, title: `Toggle ${(view as Slots["inspector"]).label} panel`, run: () => provided.app().togglePanel(view.id) }));
           return () => {
             dispose();
-            go();
+            own();
           };
         },
       },

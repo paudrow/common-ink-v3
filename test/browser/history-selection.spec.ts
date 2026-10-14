@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Note } from "../../src/core/protocol.ts";
-import { connectAgent, folderRow, perform, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, folderRow, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
 const historyMode = (page: Page) => page.getByRole("region", { name: "History" });
@@ -84,12 +84,12 @@ test("nothing is ticked by itself: History opens with no change ticked as a page
 
   // A note's History, and a folder's, in the inspector.
   await page.goto(`/note/${id}`);
-  await inspector(page).getByRole("tab", { name: "History" }).click();
-  const panel = inspector(page).getByRole("tabpanel");
+  await showPanel(page, "History");
+  const panel = inspector(page).locator(".inspector-body");
   await expect(rows(panel)).toHaveCount(4);
   await nothingTicked(panel);
   await folderRow(page, "All notes").click();
-  await inspector(page).getByRole("tab", { name: "History" }).click();
+  await showPanel(page, "History");
   await expect(panel.getByRole("tree", { name: "Notes that changed" }).getByRole("treeitem")).toHaveCount(1);
   await nothingTicked(panel);
 });
@@ -121,8 +121,8 @@ test("what is ticked is still ticked on coming back, each place History is shown
 
   // A note's History keeps its own ticks, and the page's are as they were beside them.
   await pane(mode).getByRole("button", { name: "Plan", exact: true }).click();
-  await inspector(page).getByRole("tab", { name: "History" }).click();
-  const panel = inspector(page).getByRole("tabpanel");
+  await showPanel(page, "History");
+  const panel = inspector(page).locator(".inspector-body");
   await expect(rows(panel)).toHaveCount(4);
   await expect.poll(picked(panel)).toEqual([]);
   await tick(rows(panel).nth(3)).click();
@@ -131,7 +131,7 @@ test("what is ticked is still ticked on coming back, each place History is shown
   await expect.poll(picked(mode)).toEqual(ticked);
   await pane(mode).getByRole("button", { name: "Plan", exact: true }).click();
   await expect(page).toHaveURL(/\/note\/plan-/);
-  await inspector(page).getByRole("tab", { name: "History" }).click();
+  await showPanel(page, "History");
   await expect.poll(picked(panel)).toEqual(["You wrote"]);
 
   // The page narrowed to the note is another place again, and widening it back shows the page's own ticks.
@@ -147,7 +147,7 @@ test("what is ticked is still ticked on coming back, each place History is shown
 
   // Loading the app again starts with nothing ticked anywhere.
   await page.reload();
-  await inspector(page).getByRole("tab", { name: "History" }).click();
+  await showPanel(page, "History");
   await expect(rows(panel)).toHaveCount(4);
   await expect.poll(picked(panel)).toEqual([]);
   await page.goto("/history");

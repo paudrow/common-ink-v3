@@ -399,7 +399,9 @@ for (const face of ["the app's face", "a face with a wide X"] as const) {
 test("a formula in a line sits on the line's baseline where KaTeX itself puts it, and the line is no taller", async ({ page }) => {
   await open(page, "# Inline $\\frac{a}{b}$ head\n\nA fraction $\\frac{a}{b}$ and a square $x^2$ and a sum $\\sum_{i=1}^{n} i$ and $a \\neq b$ and $x \\notin S$ in words.\n\nLast words.");
   await expect(editor(page).locator(".katex").first()).toBeVisible();
-  await page.addScriptTag({ path: "node_modules/katex/dist/katex.min.js" });
+  // KaTeX's own script, served as a file of the app's origin: the page's policy runs no inline script.
+  await page.route("**/test-only/katex.min.js", (route) => route.fulfill({ path: "node_modules/katex/dist/katex.min.js", contentType: "text/javascript" }));
+  await page.addScriptTag({ url: "/test-only/katex.min.js" });
   const { ours, katex, plainHeight, ourHeight, headingBaselines } = await page.evaluate(() => {
     const line = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes("fraction"))!;
     const style = getComputedStyle(line);

@@ -465,6 +465,8 @@ interface Props {
   onChanged: () => void;
   /** Called with the latest changes each time they are read. */
   onLoaded?: (changes: HistoryEntry[]) => void;
+  /** Called with the notes that have a change ticked, each time those change. */
+  onTicked?: (noteIds: string[]) => void;
   /** What was ticked here when it was last left, for as long as the app is open. */
   left: Left;
 }
@@ -496,7 +498,7 @@ const WHO: readonly [Who, string][] = [
  * the list or under it, note by note, and at the list's foot is what to do with it: clear it, or
  * revert it.
  */
-export function History({ host, me, canEdit, scope, layout, version, empty, onScope, onOpenHistory, onOpenNote, onChanged, onLoaded, left }: Props) {
+export function History({ host, me, canEdit, scope, layout, version, empty, onScope, onOpenHistory, onOpenNote, onChanged, onLoaded, onTicked, left }: Props) {
   const ids = useId();
   const now = useNow();
   const [keptView, setView] = useKept<View>(host.storage, layout === "page" ? "view" : "view.panel", isView, layout === "page" ? "time" : "note");
@@ -532,6 +534,11 @@ export function History({ host, me, canEdit, scope, layout, version, empty, onSc
   useEffect(() => {
     if (data.changes) loaded.current?.(data.changes);
   }, [data.changes]);
+
+  const tickedIn = [...selection].filter(([, revisions]) => revisions.size > 0).map(([noteId]) => noteId).sort().join();
+  const tellTicked = useRef(onTicked);
+  tellTicked.current = onTicked;
+  useEffect(() => tellTicked.current?.(tickedIn ? tickedIn.split(",") : []), [tickedIn]);
 
   const timeline = useMemo(() => groupSaves(data.changes ?? []), [data.changes]);
   const known = useMemo(() => new Map((data.changes ?? []).map((c) => [keyOf(c.noteId, c.revision), c])), [data.changes]);
@@ -639,6 +646,8 @@ export function History({ host, me, canEdit, scope, layout, version, empty, onSc
     // With no row the cursor is on, the first key down goes to the first row.
     const at = items.findIndex((i) => i.id === cursor);
     const here = items[Math.max(0, at)]!;
+    // Escape that would change nothing is left to where the list is, such as a panel over the page, which goes on it.
+    if (e.key === "Escape" && (at < 0 || !sizeOf(selection) || sameSelection(selection, only(rowsOf(here))))) return;
     const go = (index: number) => {
       const to = items[Math.max(0, Math.min(items.length - 1, index))]!;
       if (e.shiftKey) extendTo(to);

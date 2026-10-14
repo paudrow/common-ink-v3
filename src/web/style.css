@@ -966,6 +966,22 @@ button.link:hover {
   background: var(--accent);
 }
 
+/* The edge of a side that folds has a short grip half way down it, so there is something to see where it is taken hold of. */
+.resize-handle[data-folds]::before {
+  position: absolute;
+  top: calc(50% - 14px);
+  left: 1px;
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.resize-handle[data-folds]:is(:hover, [data-dragging], :focus-visible)::before {
+  background: var(--accent);
+}
+
 .resize-handle:focus-visible {
   outline: none;
 }
@@ -1036,15 +1052,6 @@ button.link:hover {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
-}
-
-/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
-.window-controls {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  padding: 0 6px;
 }
 
 /* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
@@ -1260,7 +1267,7 @@ button.link:hover {
   text-overflow: ellipsis;
 }
 
-/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
+/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. The folder has a line and the last edit has the next, each there before it has anything to say, so the bar is as tall while they load as after. */
 @container note (max-width: 520px) {
   .note-bar {
     flex-wrap: wrap;
@@ -1271,16 +1278,23 @@ button.link:hover {
   }
 
   .note-meta {
-    flex-wrap: wrap;
-    row-gap: 2px;
+    flex-direction: column;
+    gap: 2px;
     overflow: visible;
     white-space: normal;
   }
 
   .note-meta > * {
     max-width: 100%;
+    min-height: 1lh;
     overflow: visible;
     overflow-wrap: anywhere;
+  }
+
+  /* The folder's path arrives after the note and is as long as its folders' names: it has its one line and is cut short at the end of it. */
+  .note-meta > .crumbs {
+    overflow: hidden;
+    white-space: nowrap;
   }
 }
 
@@ -3177,34 +3191,55 @@ kbd {
   display: flex;
   flex: 0 1 auto;
   flex-direction: column;
-  width: var(--inspector-width, 300px);
-  min-width: 180px;
+  width: var(--inspector-width, 256px);
+  /* With its bar, the 180px the inspector gives way down to in a window too narrow for everything. */
+  min-width: 136px;
   min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--bg-side);
 }
 
-.tabs {
+/* Pinned, it is beside the page. Otherwise it lies over the page from the bar's edge, and nothing under it moves. */
+.inspector[data-layout="temporary"] {
+  position: absolute;
+  top: 0;
+  right: 44px;
+  bottom: 0;
+  z-index: 20;
+  max-width: calc(100% - 44px);
+  box-shadow: var(--shadow);
+}
+
+.app[data-bar] > .inspector[data-layout="temporary"] {
+  bottom: 26px;
+}
+
+.inspector:focus {
+  outline: none;
+}
+
+.panel-head {
   display: flex;
   flex: none;
-  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
   height: 38px;
-  padding: 0 14px;
+  padding: 0 8px 0 14px;
   border-bottom: 1px solid var(--line);
 }
 
-.tabs [role="tab"] {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
+.panel-head h2 {
+  margin: 0;
   font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
 }
 
-.tabs [role="tab"][aria-selected="true"] {
-  box-shadow: inset 0 -2px 0 var(--accent);
+.panel-head [aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.rail .icon-button[aria-expanded="true"] {
+  background: var(--hover);
   color: var(--ink);
 }
 
@@ -3266,7 +3301,7 @@ kbd {
   font-size: 11.5px;
 }
 
-/* A closed sidebar and a closed inspector: a bar of icons, one for each thing the open one lists. */
+/* A closed sidebar, and the inspector's bar, which is always there: a bar of icons, one for each thing the sidebar lists or each panel. */
 
 .rail {
   display: flex;
@@ -3285,6 +3320,36 @@ kbd {
 
 .rail:not(:first-child) {
   border-left: 1px solid var(--line);
+}
+
+/* The sidebar's sections over the page, beside its bar. */
+.sidebar-picker {
+  position: fixed;
+  z-index: 30;
+  top: 8px;
+  left: 50px;
+  width: 248px;
+  max-width: calc(100vw - 58px);
+  max-height: calc(100vh - 16px);
+  padding: 2px 6px 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  transition: opacity 0.12s;
+}
+
+.sidebar-picker .section-head {
+  margin-top: 6px;
+}
+
+.sidebar-picker[data-leaving] {
+  opacity: 0;
+}
+
+.sidebar-picker[data-dragging] {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .rail-brand {
@@ -3384,14 +3449,8 @@ kbd {
   background: var(--accent);
 }
 
-.rail .icon-button,
-.tabs [role="tab"] {
+.rail .icon-button {
   position: relative;
-}
-
-.tabs .unseen-dot {
-  top: 9px;
-  right: -9px;
 }
 
 /* History: a list of changes with a tick each, beside what everything picked did */
