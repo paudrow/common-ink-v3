@@ -113,4 +113,15 @@ describe("settings", () => {
     await expect(writeOn(asAgent, 1, "{}")).rejects.toMatchObject({ code: "forbidden", message: "An agent can't settings.write" });
     expect((await read(ada)).text).toBe('{"core.theme":"dark"}');
   });
+
+  it("whether HTML embeds run by themselves is the member's alone: their agent can't read it or set it", async () => {
+    const ada = await newMember();
+    await write(ada, '{"html.run":"ask first"}');
+    const { agent } = await connectAgent(env.DB, ada.personId, "Claude");
+    const asAgent: Actor = { kind: "agent", agentId: agent.id, personId: ada.personId, workspaceId: ada.workspaceId };
+
+    await expect(read(asAgent)).rejects.toMatchObject({ code: "forbidden" });
+    await expect(writeOn(asAgent, 1, '{"html.run":"automatically"}')).rejects.toMatchObject({ code: "forbidden", message: "An agent can't settings.write" });
+    expect((await read(ada)).text).toBe('{"html.run":"ask first"}');
+  });
 });

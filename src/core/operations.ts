@@ -1,10 +1,10 @@
 import { ChangeSet, MapMode } from "@codemirror/state";
 import { z } from "zod";
-import { SEEN, SEEN_FOLDER, allows, folderLevel, noteLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
+import { SEEN, SEEN_FOLDER, allows, canShare, folderLevel, noteAsked, noteLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { dailySettings, dailyText, dayFor, filedOn, type DailySettings } from "./daily.ts";
 import { lineDiff, textDiff } from "./diff.ts";
 import { following as lineFollowing } from "./follow.ts";
-import { dayIn, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
+import { dayIn, dayStartIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
 import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
@@ -29,6 +29,7 @@ import {
   type Note,
   type NoteDiff,
   type NoteRevertPreview,
+  type RevertConflict,
   type NoteSummary,
   type OpInput,
   type OpType,
@@ -42,12 +43,14 @@ import {
   type Written,
 } from "./protocol.ts";
 import { removing, forgetRemoved } from "./purge.ts";
-import { isEmpty, matchOf, matchesIn, parseQuery, titleMatchOf } from "./search.ts";
+import { FILTERS, MAX_BOUND, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
+import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, listContacts, listEvents, listSources, readRecord, refer, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, createEvent, listContacts, listEvents, listSources, readRecord, refer, updateEvent, type Sources } from "./sources.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
+import { ruleLabel } from "./recurrence.ts";
 import { changeTodo, checkedOff, completeTodo, nameKey, parseTodo, rolledForward, todoIndex, todosIn, type Completed } from "./todos.ts";
 
 /** Who is performing an operation, and where. */
@@ -174,8 +177,8 @@ export interface NoteRow extends SummaryRow {
   restores_to?: string | null;
 }
 
-/** What a note's `indexed` is once its links, todos, projects, tags, mentions and search text have been made from its text. */
-const MADE = 4;
+/** What a note's `indexed` is once its links, todos, tags, mentions and search text have been made from its text. */
+const MADE = 5;
 
 /** A note as it is made: live. */
 const NEW = { state: "live", state_at: null } as const;
@@ -247,6 +250,9 @@ const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx
 
 const NO_SUCH_NOTE = "No such note";
 const NO_SUCH_FOLDER = "No such folder";
+
+/** The folder bound as ?4 and every folder under it, for a listing narrowed to a folder. */
+const UNDER = "WITH RECURSIVE under (id) AS (SELECT ?4 UNION SELECT f.id FROM folders f JOIN under u ON f.parent_id = u.id)";
 
 const CANT_CHANGE = "You can read this note, and not change it";
 
@@ -480,16 +486,16 @@ function inParts(rows: readonly unknown[]): string[] {
 }
 
 const INDEXED = {
-  todos: "INSERT INTO todos (note_id, line, done, importance, due, text) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]')",
-  projects: "INSERT INTO todo_projects (note_id, line, project, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
+  todos:
+    "INSERT INTO todos (note_id, line, done, importance, due, text, words, recurs) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'), json_extract(value, '$[0]') IN (SELECT value FROM json_each(?4))",
   tags: "INSERT INTO note_tags (note_id, tag, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]')",
   mentions: "INSERT INTO mentions (note_id, line, who, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')",
 } as const;
-const INDEX_TABLE = { todos: "todos", projects: "todo_projects", tags: "note_tags", mentions: "mentions" } as const;
+const INDEX_TABLE = { todos: "todos", tags: "note_tags", mentions: "mentions" } as const;
 const indexOf = (text: string) => ({ ...todoIndex(text), mentions: mentionIndex(text) });
 
 /**
- * The statements that make the index of a note's todos, their projects, its tags, and its mentions what `text`
+ * The statements that make the index of a note's todos, its tags, and its mentions what `text`
  * says, or none for a part that `was` says the same of. Like `linking`, they go in the batch that
  * changes the text, and with `atRevision` do nothing unless the note is still at that revision.
  */
@@ -498,11 +504,14 @@ function indexing(ctx: Context, noteId: string, text: string, { was, atRevision 
   const before = was === undefined ? null : indexOf(was);
   const current = "(?2 IS NULL OR EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND revision = ?2))";
   const at = atRevision ?? null;
+  // Whether a todo recurs is said by its line, so it changes only when the todos do.
+  const recurring = JSON.stringify(todosIn(text).filter((todo) => todo.every).map((todo) => todo.line));
   return (Object.keys(INDEXED) as (keyof typeof INDEXED)[]).flatMap((part) => {
     if (before && JSON.stringify(before[part]) === JSON.stringify(now[part])) return [];
     return [
       ctx.db.prepare(`DELETE FROM ${INDEX_TABLE[part]} WHERE note_id = ?1 AND ${current}`).bind(noteId, at),
-      ...inParts(now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows)),
+      // Each todo with its line's words as the index folds them, a space before each, so a word is found by its start.
+      ...inParts(part === "todos" ? now.todos.map((row) => [...row, ` ${folded(row[4])}`]) : now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows, ...(part === "todos" ? [recurring] : []))),
     ];
   });
 }
@@ -523,7 +532,7 @@ function searching(ctx: Context, noteId: string, text: string, { was, atRevision
   ];
 }
 
-/** Everything that is made from a note's text and kept beside it: its links, its todos, projects and tags, and what search reads. */
+/** Everything that is made from a note's text and kept beside it: its links, its todos and tags, and what search reads. */
 const deriving = (ctx: Context, noteId: string, text: string, from: { was?: string; atRevision?: number } = {}): D1PreparedStatement[] => [
   ...linking(ctx, noteId, text, from),
   ...indexing(ctx, noteId, text, from),
@@ -539,7 +548,7 @@ function waiting(mending: Mending): string {
 }
 
 /**
- * Makes the links, todos, projects, tags and search rows of notes that have never had them made,
+ * Makes the links, todos, tags and search rows of notes that have never had them made,
  * from their text: notes written before there were tables for them, and every note after a rebuild
  * asks. It reads in the notes the asker is shown, so many a call, and is false when there are more.
  * A note they can't see waits for someone who can: whether it is waiting, and how many are, would
@@ -1119,6 +1128,16 @@ async function loadWithHistory(ctx: Context, ids: readonly string[]): Promise<Ma
   return new Map(notes!.results.map((row) => [row.id, { row, history: (recorded.get(row.id) ?? []).filter((r) => r.revision <= row.revision).map(toRecorded) }]));
 }
 
+/** A revert's conflicts as a preview tells them: who made the later changes, and where each is on the diffs of the changes asked for, a run of them at a time. */
+function toldConflicts(history: readonly Recorded[], found: Reverting, asked?: readonly number[]): RevertConflict[] {
+  const runs = asked ? runsOf(asked.filter((r) => r <= history.length)) : [];
+  return found.conflicts.map((c) => ({
+    ...c,
+    later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })),
+    runs: runs.map((run) => ({ revision: run.to, ...linesAsOf(history, found, run.to, c.line, c.kept.length) })),
+  }));
+}
+
 /** `takingBack` of a note already read with its changes. */
 function takingBackOf(row: NoteRow, history: Recorded[], choose: Choose, resolve?: Resolve): TakingBack {
   if (resolve && resolve.at !== row.revision) {
@@ -1229,6 +1248,147 @@ function takingBackItem(row: NoteRow, history: Recorded[], item: RevertedItem): 
 const titled = (row: NoteRow) => ({ noteId: row.id, noteTitle: row.title });
 
 /** As many diff lines as one answer of `history.diff` holds. A run past them comes without its diff. */
+const is = (word: string): Filter => ({ kind: "filter", key: "is", cmp: "=", value: word });
+/** Says a word of `is:` without narrowing by it, which is what the old fields that widen a listing do. */
+const either = (word: string): Node => ({ kind: "or", of: [is(word), { kind: "not", of: is(word) }] });
+
+const any = (of: Node[]): Node => (of.length > 1 ? { kind: "or", of } : of[0]!);
+
+/** What the fields a listing had before there was a query language say, as the query says it. */
+const OLD = {
+  archived: (includeArchived: boolean | "only"): Node[] => (includeArchived === "only" ? [is("archived")] : includeArchived ? [either("archived")] : []),
+  completed: (includeCompleted: boolean): Node[] => (includeCompleted ? [either("done")] : []),
+};
+
+/** What a query asks of the database: a condition over the notes row `n` and, for todos, the todos row `t`, with what it binds after the workspace and the asker's sight. */
+interface Finding {
+  query: Query;
+  covering: Covering;
+  condition: string;
+  /** Binds one more value, for what the operation asks besides the condition, and answers its placeholder. */
+  bind: (value: string | number) => string;
+  /** The statement that asks it, with every value bound: the workspace is `?1` and the asker's sight `?2`. */
+  prepare: (sql: string) => D1PreparedStatement;
+}
+
+/**
+ * What a statement's values are bound through: each is given a placeholder, the one it already has
+ * when it was bound before, so a statement holds each of its values once. D1 takes a hundred, and
+ * one more is refused here, in words, where the database would refuse the whole statement.
+ */
+export function binder(values: (string | number)[]): (value: string | number) => string {
+  return (value) => {
+    const had = values.indexOf(value);
+    if (had >= 0) return `?${had + 1}`;
+    if (values.length >= MAX_BOUND) throw new OpError("invalid", `This query asks for more than the ${MAX_BOUND} values a search can take: say it in fewer terms`);
+    return `?${values.push(value)}`;
+  };
+}
+
+/**
+ * Reads a query and makes it a condition, for `search` and for `todo.list` alike: the one place a
+ * query meets the database. Every value is bound. A name is looked up among what the asker can
+ * already see, so a folder they can't see, or someone who has changed no note they can see, is
+ * refused in the very words a name nobody has is. `also` is ANDed with it: the old fields of the
+ * operation, said as a query says them. Which states of a note it covers is read from its `is:`.
+ */
+async function finding(ctx: Context, scope: Scope, op: { query: string; today?: string; zone?: string }, also: readonly Bound[]): Promise<Finding> {
+  const parsed = parse(op.query, scope);
+  if (!parsed.ok) {
+    const { message, from, to } = parsed.error;
+    throw new OpError("invalid", `${message} (characters ${from + 1} to ${Math.max(to, from + 1)} of the query${to > from ? `: ${op.query.slice(from, to)}` : ""})`);
+  }
+  const { query } = parsed;
+  const said = (word: string) => names(query.where, word) || also.some((node) => names(node as Node, word));
+  const covering: Covering = said("trashed") ? "any" : said("archived") ? "kept" : "live";
+  // Todos are the open ones until a query says anything of whether one is done, a NOT of it included.
+  const open = scope === "todos" && !said("open") && !said("done");
+
+  let folders: Promise<{ id: string; parent_id: string | null; name: string }[]> | undefined;
+  const folderIds = async (named: string): Promise<string[]> => {
+    folders ??= ctx.db.prepare("SELECT id, parent_id, name FROM folders WHERE workspace_id = ?").bind(ctx.workspaceId).all<{ id: string; parent_id: string | null; name: string }>().then((r) => r.results);
+    const all = await folders;
+    const found = all.filter((f) => (f.id === named || f.name.toLowerCase() === named.toLowerCase()) && allows(folderLevel(ctx.sight, f.id), "view")).map((f) => f.id);
+    if (!found.length) throw new OpError("invalid", `No folder named "${named}"`);
+    const under = new Set(found);
+    // A folder's parent is listed before or after it, so the folders are gone over until none is added.
+    for (let added = true; added; ) {
+      added = false;
+      for (const f of all) if (f.parent_id && under.has(f.parent_id) && !under.has(f.id)) added = !!under.add(f.id);
+    }
+    return [...under];
+  };
+  const authors = async (named: string): Promise<string[]> => {
+    if (named.toLowerCase() === "@me") return [`${ctx.author.kind}:${authorId(ctx)}`];
+    const changed = (kind: string, id: string) => `EXISTS (SELECT 1 FROM changes c JOIN notes n ON n.id = c.note_id WHERE c.author_kind = '${kind}' AND c.author_id = ${id} AND n.workspace_id = ?1 AND ${SEEN("n", "?2", "any")})`;
+    const { results } = await ctx.db
+      .prepare(
+        `SELECT 'member:' || p.id AS author FROM people p WHERE p.name = ?3 COLLATE NOCASE AND ${changed("member", "p.id")}
+         UNION ALL SELECT 'agent:' || a.id FROM agents a WHERE a.name = ?3 COLLATE NOCASE AND ${changed("agent", "a.id")}`,
+      )
+      .bind(ctx.workspaceId, ctx.sight.bind, named)
+      .all<{ author: string }>();
+    if (!results.length) throw new OpError("invalid", `Nobody named "${named}" has changed a note you can see`);
+    return results.map((r) => r.author);
+  };
+  /**
+   * Who a mention of `named` is matched by: the name itself, which is how a mention by name alone is
+   * kept, and the id of each member so named for an asker who is told who the members are. `@me` is
+   * the asker, or an agent's member. Nobody is refused: a name no note mentions finds nothing, as a
+   * name in a note the asker can't see does.
+   */
+  const mentionedAs = async (named: string): Promise<string[]> => {
+    if (named.toLowerCase() === "@me") return ctx.personId ? [ctx.personId] : [];
+    const meant = await membersMeant(ctx, [named]);
+    return [...new Set([personKey(named), ...(meant.byId.has(named) ? [named] : []), ...(meant.byName.get(named.toLowerCase()) ?? []).map((m) => m.id)])];
+  };
+  let shared: Promise<string[]> | undefined;
+  /** The notes with a grant of their own that the asker may list the grants of: what sharing a note shows them, and no more. */
+  const sharedIds = () =>
+    (shared ??= (async () => {
+      if (ctx.actor.kind !== "member") return [];
+      const { results } = await ctx.db
+        .prepare(`SELECT DISTINCT n.id, n.folder_id, n.private_owner FROM grants g JOIN notes n ON n.id = g.note_id WHERE g.workspace_id = ?1 AND ${SEEN("n", "?2", "any")}`)
+        .bind(ctx.workspaceId, ctx.sight.bind)
+        .all<{ id: string; folder_id: string; private_owner: string | null }>();
+      return results.filter((note) => canShare(noteAsked(ctx.sight, note))).map((note) => note.id);
+    })());
+  const day = (written: string): string => {
+    if (!isRelative(written)) return written;
+    if (!op.today) throw new OpError("invalid", `"${written}" is counted from today, and the server doesn't know your day: pass today, as YYYY-MM-DD`);
+    return dayOf(written, op.today);
+  };
+  const resolved = async (node: Node | Bound): Promise<Bound> => {
+    if (node.kind === "and" || node.kind === "or") return { kind: node.kind, of: await Promise.all(node.of.map(resolved)) };
+    if (node.kind === "not") return { kind: "not", of: await resolved(node.of) };
+    if (node.kind !== "filter" || "ids" in node) return node;
+    const { type } = FILTERS[node.key].value;
+    if (type === "folder") return { ...node, ids: await folderIds(node.value) };
+    if (type === "person") return { ...node, ids: await authors(node.value) };
+    if (type === "mentioned") return { ...node, ids: await mentionedAs(node.value) };
+    if (type === "day") return { ...node, value: day(node.value), ...(node.to !== undefined && { to: day(node.to) }) };
+    if (node.key === "is" && node.value === "shared") return { ...node, ids: await sharedIds() };
+    return node;
+  };
+  const parts = [...(query.where ? [query.where] : []), ...also, ...(open ? [is("open")] : [])];
+  const where = parts.length > 1 ? await resolved({ kind: "and", of: parts as Bound[] }) : parts.length ? await resolved(parts[0]!) : null;
+
+  let zone: (day: string) => number;
+  let settingsZone: string | null | undefined;
+  const timed = [...walk(where as Node | null)].some(({ node }) => node.kind === "filter" && (node.key === "updated" || node.key === "created"));
+  if (timed && !op.zone) {
+    const row = await ctx.db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(ctx.workspaceId, ctx.personId).first<{ text: string }>();
+    settingsZone = dailySettings(row?.text).timeZone;
+  }
+  const start = () => (zone ??= dayStartIn(op.zone ?? settingsZone ?? "UTC"));
+
+  const binds: (string | number)[] = [ctx.workspaceId, ctx.sight.bind];
+  const bind = binder(binds);
+  const compiling: Compiling = { scope, workspaceId: ctx.workspaceId, in: query.in, bind, seen: (alias) => SEEN(alias, "?2", "kept"), dayStart: (d) => start()(d), dayEnd: (d) => start()(shift(d, 1)) };
+  return { query, covering, condition: conditionOf(where, compiling), bind, prepare: (sql) => ctx.db.prepare(sql).bind(...binds) };
+}
+
+
 export const MAX_ANSWER_LINES = 2000;
 
 const HANDLERS: { [K in OpType]: Handler<K> } = {
@@ -1292,42 +1452,31 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       await mend(ctx);
-      const { results } = await ctx.db
-        .prepare(
-          `SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
-             (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
-           FROM todos t JOIN notes n ON n.id = t.note_id
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))}
-             AND (?3 = 1 OR t.done = 0)
-             AND (?4 IS NULL OR EXISTS (SELECT 1 FROM todo_projects p WHERE p.note_id = t.note_id AND p.line = t.line AND p.project = ?4))
-             AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = t.note_id AND g.tag = ?5))
-             AND (?6 IS NULL OR t.due >= ?6)
-             AND (?7 IS NULL OR t.due <= ?7)
-             AND (?8 = 0 OR t.due IS NULL)
-             AND (?9 IS NULL OR t.importance IN (SELECT value FROM json_each(?9)))
-             AND (?10 IS NULL OR t.note_id = ?10)
-             AND (?13 IS NULL OR EXISTS (SELECT 1 FROM mentions a WHERE a.note_id = t.note_id AND a.line = t.line AND a.who = ?13))
-             AND (?14 IS NULL OR EXISTS (SELECT 1 FROM mentions a WHERE a.note_id = t.note_id AND a.line = t.line AND a.who = ?14))
-           ORDER BY t.done, t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE, t.note_id, t.line
-           LIMIT ?11 OFFSET ?12`,
-        )
-        .bind(
-          ctx.workspaceId,
-          ctx.sight.bind,
-          op.includeCompleted ? 1 : 0,
-          op.project === undefined ? null : nameKey(op.project),
-          op.tag === undefined ? null : nameKey(op.tag),
-          op.dueFrom ?? null,
-          op.dueTo ?? null,
-          op.noDue ? 1 : 0,
-          op.importance ? JSON.stringify(op.importance) : null,
-          op.noteId ?? null,
-          op.limit + 1,
-          op.offset,
-          op.assignee === undefined ? null : personKey(op.assignee),
-          op.assignedToMe ? ctx.personId : null,
-        )
-        .all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
+      // The folder narrows inside what the asker sees and never widens it: one they can't see is no folder.
+      const folder = op.folderId === undefined ? null : (await loadFolder(ctx, op.folderId, "view")).id;
+      const due = (cmp: Filter["cmp"], value: string): Filter => ({ kind: "filter", key: "due", cmp, value });
+      const { query, covering, condition, bind, prepare } = await finding(ctx, "todos", op, [
+        ...(folder ? [{ kind: "filter", key: "folder", cmp: "=", value: folder } as const] : []),
+        ...(op.tag === undefined ? [] : [{ kind: "filter", key: "tag", cmp: "=", value: nameKey(op.tag) } as const]),
+        ...(op.dueFrom ? [due(">=", op.dueFrom)] : []),
+        ...(op.dueTo ? [due("<=", op.dueTo)] : []),
+        ...(op.noDue ? [{ kind: "not", of: { kind: "filter", key: "has", cmp: "=", value: "due" } } as const] : []),
+        ...(op.importance ? [any(op.importance.map((level): Filter => ({ kind: "filter", key: "importance", cmp: "=", value: String(level) })))] : []),
+        ...(op.noteId ? [{ kind: "note", id: op.noteId } as const] : []),
+        ...(op.assignee === undefined ? [] : [{ kind: "filter", key: "assignee", cmp: "=", value: op.assignee } as const]),
+        ...(op.assignedToMe ? [{ kind: "filter", key: "assignee", cmp: "=", value: "@me" } as const] : []),
+        ...OLD.completed(op.includeCompleted),
+        ...OLD.archived(op.includeArchived),
+      ]);
+      const order = query.sort ? orderOf(query.sort) : "t.done, t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE";
+      const { results } = await prepare(
+        `SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
+           (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
+         FROM todos t JOIN notes n ON n.id = t.note_id
+         WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition}
+         ORDER BY ${order}, t.note_id, t.line
+         LIMIT ${bind(op.limit + 1)} OFFSET ${bind(op.offset)}`,
+      ).all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
       const page = results.slice(0, op.limit).map((r) => ({ r, todo: parseTodo(r.text) }));
       const members = (await membersMeant(ctx, page.flatMap(({ todo }) => todo?.assignees.map((a) => a.target).filter(isPersonId) ?? []))).byId;
       return {
@@ -1341,8 +1490,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             done: r.done === 1,
             importance: r.importance,
             due: r.due,
-            projects: todo?.projects.map((p) => p.name) ?? [],
             every: todo?.every?.written ?? null,
+            recurs: todo?.every ? ruleLabel(todo.every.rule) : null,
             lastDone: todo?.lastDone ? { on: todo.lastDone.on, times: todo.lastDone.times } : null,
             tags: JSON.parse(r.tags) as string[],
             assignees: mentionedIn(members, todo?.assignees ?? []),
@@ -1360,10 +1509,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       await mend(ctx);
       const covering = listing(op.includeArchived);
-      const [projects, tags, assigned] = await ctx.db.batch<{ name: string; who?: string }>([
-        ctx.db
-          .prepare(`SELECT MIN(p.name) AS name FROM todo_projects p JOIN notes n ON n.id = p.note_id WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} GROUP BY p.project ORDER BY p.project`)
-          .bind(ctx.workspaceId, ctx.sight.bind),
+      const [tags, assigned] = await ctx.db.batch<{ name: string; who?: string }>([
         ctx.db
           .prepare(
             `SELECT MIN(g.name) AS name FROM note_tags g JOIN notes n ON n.id = g.note_id
@@ -1381,7 +1527,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const assignees = assigned!.results.map((r) => mentioned(members, r.who!, r.name));
       // Members first, then everyone else, each by name.
       assignees.sort((a, b) => Number(b.member) - Number(a.member) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || (a.id ?? "").localeCompare(b.id ?? ""));
-      return { projects: projects!.results.map((r) => r.name), tags: tags!.results.map((r) => r.name), assignees };
+      return { tags: tags!.results.map((r) => r.name), assignees };
     },
   },
 
@@ -1399,7 +1545,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         const from = unassign === undefined ? undefined : [unassign, ...(taken ? [taken.id] : [])];
         if (from && !parseTodo(listedAs)?.assignees.some((a) => from.map(personKey).includes(mentionKey(a)))) throw new OpError("invalid", `This todo isn't assigned to ${quoted(unassign!)}`);
         const change = { ...rest, ...(from && { unassign: from }) };
-        const mine = change.done ? await completing(ctx, on) : null;
+        const mine = change.done || change.skip ? await completing(ctx, on) : null;
         let wanted: Completed;
         try {
           // Someone who isn't told the members assigns by an id the note already holds, as the Todos page does: the name is the one the note calls them.
@@ -1554,8 +1700,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const author = op.author;
       const choose: Choose = author ? revertBy(author) : op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!);
       const { row, history, reverts, found, changes } = await takingBack(ctx, op.id, "view", choose, op.resolve);
-      const conflicts = found.conflicts.map((c) => ({ ...c, later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })) }));
-      return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts };
+      return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts: toldConflicts(history, found, op.revisions) };
     },
   },
 
@@ -1832,7 +1977,6 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         if (!note) return { noteId: item.noteId, noteTitle: "", revision: 0, ...none, refused: NO_SUCH_NOTE };
         try {
           const { row, history, reverts, found, changes } = takingBackItem(note.row, note.history, item);
-          const conflicts = found.conflicts.map((c) => ({ ...c, later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })) }));
           return {
             ...titled(row),
             revision: row.revision,
@@ -1840,7 +1984,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             already: item.revisions ? revertible(history, item.revisions).already : [],
             diff: lineDiff(row.text, changes),
             overlaps: found.overlaps,
-            conflicts,
+            conflicts: toldConflicts(history, found, item.revisions),
           };
         } catch (err) {
           // One note that can't be reverted is no reason to show nothing of the others.
@@ -2001,51 +2145,38 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       if (op.folderId !== undefined) await loadFolder(ctx, op.folderId, "view");
-      const query = parseQuery(op.query);
-      if (isEmpty(query)) return { results: [], next: null, indexing: false };
+      const { query, covering, condition, bind, prepare } = await finding(ctx, "notes", op, [
+        // The folder's own notes, not those of the folders inside it, which `folder:` in the query covers.
+        ...(op.folderId === undefined ? [] : [{ kind: "filter", key: "folder", cmp: "=", value: op.folderId, ids: [op.folderId] } as const]),
+        ...(op.hasTodos ? [{ kind: "filter", key: "has", cmp: "=", value: "open-todo" } as const] : []),
+        ...OLD.archived(op.includeArchived),
+      ]);
+      if (!query.where) return { results: [], next: null, indexing: false };
       const indexing = !(await mend(ctx));
-      const worded = query.terms.length > 0;
-      const covering = listing(op.includeArchived);
-      const titleFirst = worded && op.sort === "match";
-      const order = { match: "n.updated_at DESC", recent: "n.updated_at DESC", created: "n.created_at DESC", title: "CASE WHEN n.title = '' THEN 'Untitled' ELSE n.title END COLLATE NOCASE" }[op.sort];
-      // What a note the asker isn't shown matches is joined away before anything is counted, ordered or read. The
+      const inTitle = !query.sort && op.sort === "match" ? topTerms(query.where) : [];
+      const order = query.sort ? orderOf(query.sort) : orderOf(({ match: "updated-desc", recent: "updated-desc", created: "created-desc", title: "title-asc" } as const)[op.sort]);
+      // What a note the asker isn't shown matches is left out before anything is counted, ordered or read. The
       // order asked for is of the note itself, as the title's match and then the time of the last change are: a rank worked
-      // out across every note would move with the notes that are hidden. The match names the workspace, so the
+      // out across every note would move with the notes that are hidden. Each match names the workspace, so the
       // index is walked for this workspace's notes and no other's.
-      const { results: found } = await ctx.db
-        .prepare(
-          `SELECT n.id FROM notes n ${worded ? "JOIN note_search_rows r ON r.note_id = n.id JOIN note_search s ON s.rowid = r.id" : ""}
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)}
-             ${worded ? "AND s.note_search MATCH ?3" : "AND ?3 IS NULL"}
-             AND NOT EXISTS (SELECT 1 FROM json_each(?5) j WHERE NOT EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = j.value))
-             AND NOT EXISTS (SELECT 1 FROM json_each(?6) j WHERE NOT EXISTS (SELECT 1 FROM todo_projects p WHERE p.note_id = n.id AND p.project = j.value))
-             AND (?9 IS NULL OR n.folder_id = ?9) AND (?10 = 0 OR n.open_todos > 0)
-           ORDER BY ${titleFirst ? "EXISTS (SELECT 1 FROM note_search t WHERE t.rowid = r.id AND t.note_search MATCH ?4) DESC," : "?4 IS NULL,"} ${order}, n.id
-           LIMIT ?7 OFFSET ?8`,
-        )
-        .bind(
-          ctx.workspaceId,
-          ctx.sight.bind,
-          worded ? matchOf(ctx.workspaceId, query.terms) : null,
-          titleFirst ? titleMatchOf(ctx.workspaceId, query.terms) : null,
-          JSON.stringify(query.tags),
-          JSON.stringify(query.projects),
-          op.limit + 1,
-          op.offset,
-          op.folderId ?? null,
-          op.hasTodos ? 1 : 0,
-        )
-        .all<{ id: string }>();
+      const titleFirst = inTitle.length ? `n.id IN (SELECT r.note_id FROM note_search s JOIN note_search_rows r ON r.id = s.rowid WHERE s.note_search MATCH ${bind(matchOf(ctx.workspaceId, inTitle, ["title"]))}) DESC,` : "";
+      const { results: found } = await prepare(
+        `SELECT n.id FROM notes n
+         WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition}
+         ORDER BY ${titleFirst} ${order}, n.id
+         LIMIT ${bind(op.limit + 1)} OFFSET ${bind(op.offset)}`,
+      ).all<{ id: string }>();
       const page = found.slice(0, op.limit).map((r) => r.id);
       const { results: rows } = await ctx.db
         .prepare(`SELECT n.text, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?3)) AND ${SEEN("n", "?2", covering)}`)
         .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(page))
         .all<SummaryRow & { text: string }>();
       const byId = new Map(rows.map((row) => [row.id, row]));
+      const sought = soughtIn(query);
       return {
         results: page.flatMap((id) => {
           const row = byId.get(id);
-          return row ? [{ note: toSummary(ctx, row), matches: matchesIn(row.text, query) }] : [];
+          return row ? [{ note: toSummary(ctx, row), matches: matchesIn(row.text, sought) }] : [];
         }),
         next: found.length > op.limit ? op.offset + op.limit : null,
         indexing,
@@ -2237,6 +2368,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   },
   "event.list": { needs: "view", own: true, run: (ctx, op) => listEvents(asker(ctx), op) },
   "event.update": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateEvent(asker(ctx), sourceId, id, etag, change) },
+  "event.create": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, calendarId, type: _, ...fields }) => createEvent(asker(ctx), sourceId, calendarId, fields) },
   "contact.list": { needs: "view", own: true, run: (ctx, op) => listContacts(asker(ctx), op.query) },
   "record.refer": { needs: "view", own: true, changes: true, run: (ctx, op) => refer(asker(ctx), op.sourceId, op.id) },
   "record.read": { needs: "view", own: true, run: (ctx, op) => readRecord(asker(ctx), op.ref) },

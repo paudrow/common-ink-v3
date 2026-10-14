@@ -57,6 +57,9 @@ const inField = (el: EventTarget | null) =>
 const PRESSED = 'button, summary, [role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="option"], [role="treeitem"], [role^="menuitem"]';
 const TAKES = { enter: `${PRESSED}, a[href], [role="link"]`, space: PRESSED };
 const SEQUENCE_MS = 1500;
+/** A list that takes focus itself and moves its own cursor with its own keys, as History's list of changes does. */
+const OWN_KEYS = '[role="listbox"][tabindex], [role="tree"][tabindex], [data-list][tabindex]';
+const hasOwnKeys = (el: EventTarget | null) => el instanceof Element && (el.closest<HTMLElement>(OWN_KEYS)?.tabIndex ?? -1) >= 0;
 const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 
 
@@ -556,8 +559,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       const next = advance(begun, chord, ready);
       if (!next) return;
       if (next === "dropped") {
-        // A key that finishes nothing is dropped only where the sequence was begun. Anywhere else it is that place's key.
-        if (e.target !== begunAt) return;
+        // A key that finishes nothing is dropped only where the sequence was begun. Anywhere else it is that place's key, and so it is in a list with keys of its own.
+        if (e.target !== begunAt || hasOwnKeys(e.target)) return;
       } else if ("pending" in next) {
         pending = next.pending;
         begunAt = e.target;
@@ -591,7 +594,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     moveNote,
     noteChanged: remember,
     refresh,
-    saveNote: (noteId: string) => void saveNow(noteId),
+    saveNote: async (noteId: string) => saveNow(noteId),
     markSeen,
     toggleOverlay: (id: string, state?: unknown) => setOverlay((open) => (open?.id === id ? null : { id, state })),
     notify: (notice: Notice) => tell({ ...notice }),

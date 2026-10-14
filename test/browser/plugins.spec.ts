@@ -79,8 +79,7 @@ test("turning the command palette off takes its command and its key away, and th
   await setPlugin(page, "Command palette", true);
   await expect(text(page)).toBeVisible();
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  // The palette lists its first fifty commands until something is typed.
-  await page.keyboard.type("Disable plugin: Command");
+  await palette(page).getByRole("combobox", { name: "Commands" }).fill("Disable plugin: Command palette");
   await expect(palette(page).getByRole("option", { name: "Disable plugin: Command palette" })).toBeVisible();
 });
 

@@ -10,12 +10,25 @@ import { formulasIn, type Formula, type MathBlock } from "./syntax.ts";
 
 const draw = (el: HTMLElement, { tex, display }: Formula) => katex.render(tex, el, { ...KATEX, displayMode: display });
 
+/**
+ * Each part of a formula in a line takes none of the line's height, so the formula sits on the line's
+ * baseline exactly where KaTeX sets it and the line is no taller. A part's strut says how far it
+ * reaches above and below the baseline, and the part's margins take back that much.
+ */
+function onTheLine(el: HTMLElement) {
+  for (const strut of el.querySelectorAll<HTMLElement>(".katex-html > .katex-base > .katex-strut")) {
+    const height = parseFloat(strut.style.height) || 0;
+    const depth = -(parseFloat(strut.style.verticalAlign) || 0);
+    strut.parentElement!.style.margin = `${depth - height}em 0 ${-depth}em`;
+  }
+}
+
 /** The faces a formula is set in, fetched before any is drawn, so a formula is its final size when it first appears. */
 const FACES = ["KaTeX_Main", "KaTeX_Math", "KaTeX_Size1", "KaTeX_Size2", "KaTeX_AMS"];
 export const facesLoaded = (): Promise<unknown> => Promise.race([Promise.allSettled(FACES.flatMap((face) => [document.fonts.load(`1em ${face}`), document.fonts.load(`italic 1em ${face}`)])), new Promise((done) => setTimeout(done, 1500))]);
 
 /**
- * Draws `$…$` and `$$…$$` as math with KaTeX. A formula on the cursor's line is shown as written.
+ * Draws `$…$` and `$$…$$` as math with KaTeX. A formula the cursor is on is shown as written, and another on the same line stays drawn.
  * A block is shown as written, whole, while the cursor is anywhere in it: its formula is one thing,
  * edited as one. `blocks` is where the note's blocks are found, and `heights` how tall each is.
  */
@@ -74,6 +87,7 @@ export function mathRendering(blocks: { field: StateField<{ found: readonly Math
     find: formulasIn,
     draw(el, token, source) {
       draw(el, token);
+      onTheLine(el);
       el.addEventListener("mousedown", (event) => {
         event.preventDefault();
         source.edit();
@@ -85,8 +99,10 @@ export function mathRendering(blocks: { field: StateField<{ found: readonly Math
 
   const look = EditorView.baseTheme({
     // A formula in a line never makes its line taller: one that is taller than the line reaches over it.
-    ".md-chip-math": { cursor: "text", display: "inline-block", height: "1lh", lineHeight: "1lh", verticalAlign: "top" },
-    ".md-chip-math .katex": { lineHeight: "inherit" },
+    ".md-chip-math": { cursor: "text", display: "inline-block", height: "1lh", lineHeight: "1lh", verticalAlign: "baseline" },
+    ".md-chip-math .katex": { lineHeight: "0" },
+    // What KaTeX lays over a letter, as the slash of \\neq, is placed by its own line, so that line keeps KaTeX's height.
+    ".md-chip-math .katex :is(.rlap, .llap, .clap)": { lineHeight: "1.2" },
     // No width of its own, then all of the column's: a formula wider than the column scrolls in its block and doesn't widen the note.
     ".math-block": { display: "flex", alignItems: "center", justifyContent: "safe center", boxSizing: "border-box", width: "0", minWidth: "100%", padding: "0.4em 0", overflowX: "auto", overflowY: "hidden", cursor: "text" },
     ".math-block .katex-display": { margin: "0" },

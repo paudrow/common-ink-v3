@@ -210,7 +210,7 @@ test("the offer to share can be turned off in settings, isn't made for a note th
   await expect(notice(page)).toHaveCount(0);
 });
 
-test("a person mentioned on a todo is its assignee, drawn as a chip, and the Todos page lists, filters and changes who a todo is assigned to", async ({ page }) => {
+test("a person mentioned on a todo is its assignee, drawn as a chip, and the Todos page lists them, finds them with assignee:, and changes who a todo is assigned to from the chip", async ({ page }) => {
   const { graceId, grace, workspaceId } = await team(page);
   const note = await perform(page, { type: "note.create", text: `# Plan\n\n- [ ] Book the venue\n- [ ] Call the bank @[[Sam Okafor]]\n- [ ] Send invites @[[Ada Lovelace]]\n\nThanks to @[[Grace Hopper]].` });
   await open(page, note.id, "Plan");
@@ -230,33 +230,50 @@ test("a person mentioned on a todo is its assignee, drawn as a chip, and the Tod
 
   await page.goto("/todos");
   const rows = page.getByRole("list", { name: "Todos" }).getByRole("listitem");
-  const filter = page.getByRole("group", { name: "Filters" }).getByLabel("Assignee");
+  const filter = async (on: Page, query: string) => {
+    const bar = on.getByRole("searchbox", { name: "Filter todos" });
+    await bar.fill(query);
+    await bar.press("Enter");
+  };
   await expect(rows).toHaveText([/Book the venue.*@Grace Hopper/, /Call the bank.*@Sam Okafor/, /Send invites.*@Ada Lovelace/]);
   await expect(rows.first().locator(".todo-assignee")).toHaveCSS("color", await colorOf(page, "--accent"));
   await expect(rows.nth(1).locator(".todo-assignee")).toHaveCSS("color", await colorOf(page, "--muted"));
-  await expect(filter.getByRole("option")).toHaveText(["Anyone", "Assigned to me", "Ada Lovelace", "Grace Hopper", "Sam Okafor"]);
 
-  await filter.selectOption({ label: "Assigned to me" });
+  await filter(page, "assignee:@me");
   await expect(rows).toHaveText([/Send invites/]);
-  await filter.selectOption({ label: "Sam Okafor" });
+  await filter(page, 'assignee:"Sam Okafor"');
   await expect(rows).toHaveText([/Call the bank/]);
-  await filter.selectOption({ label: "Grace Hopper" });
+  await filter(page, `assignee:${graceId}`);
+  await expect(rows).toHaveText([/Book the venue/]);
+  await filter(page, 'assigned:"grace hopper"');
   await expect(rows).toHaveText([/Book the venue/]);
 
   // Grace's own list of what is hers is the same todo.
   await grace.goto(`/note/${note.id}`);
   await expect(editor(grace)).toContainText("Book the venue");
   await grace.getByRole("link", { name: "Todos", exact: true }).click();
-  await grace.getByRole("group", { name: "Filters" }).getByLabel("Assignee").selectOption({ label: "Assigned to me" });
+  await filter(grace, "assignee:@me");
   await expect(grace.getByRole("list", { name: "Todos" }).getByRole("listitem")).toHaveText([/Book the venue/]);
 
-  await rows.first().getByLabel("Assigned to Grace Hopper").selectOption({ label: "Unassign" });
+  // An assignee's chip opens who the todo is assigned to, and a press takes it away or adds someone at once.
+  await rows.first().getByRole("button", { name: "Assigned to Grace Hopper" }).click();
+  const who = page.getByRole("dialog", { name: "Assignees of Book the venue" });
+  await expect(who.getByRole("button")).toHaveText([/@Grace Hopper/, "@Ada Lovelace", "@Sam Okafor"]);
+  await who.getByRole("button", { name: "Unassign Grace Hopper" }).click();
   await expect(rows).toHaveCount(0);
   await expect.poll(() => text(page, note.id, workspaceId)).toContain("- [ ] Book the venue\n");
-  await filter.selectOption({ label: "Sam Okafor" });
-  await rows.first().getByLabel("Assign to someone").selectOption({ label: "Ada Lovelace" });
-  await expect(rows.first().locator(".todo-assignee")).toHaveText([/^@Sam Okafor/, /^@Ada Lovelace/]);
+  await filter(page, 'assignee:"Sam Okafor"');
+  await rows.first().getByRole("button", { name: "Assigned to Sam Okafor" }).click();
+  await page.getByRole("dialog", { name: "Assignees of Call the bank" }).getByRole("button", { name: "Assign to Ada Lovelace" }).click();
+  await expect(rows.first().locator(".todo-assignee")).toHaveText(["@Sam Okafor", "@Ada Lovelace"]);
   await expect.poll(() => text(page, note.id)).toMatch(/- \[ \] Call the bank @\[\[Sam Okafor\]\] @\[\[[a-z0-9]{12}\|Ada Lovelace\]\]/);
+
+  // A todo with nobody is assigned from its "…".
+  await filter(page, "venue");
+  await rows.first().getByRole("button", { name: "More for Book the venue" }).click();
+  await page.getByRole("menuitem", { name: "Assign…" }).click();
+  await page.getByRole("dialog", { name: "Assignees of Book the venue" }).getByRole("button", { name: "Assign to Grace Hopper" }).click();
+  await expect.poll(() => text(page, note.id)).toContain(`- [ ] Book the venue @[[${graceId}|Grace Hopper]]`);
 });
 
 interface Place {

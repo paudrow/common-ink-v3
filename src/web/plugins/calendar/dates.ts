@@ -3,7 +3,7 @@ import type { CalendarEvent, EventWhen } from "../../plugin-api.ts";
 /** A calendar date, written YYYY-MM-DD. Days are counted as dates and never as 24 hours: a day a clock changes on is 23 or 25 hours long. */
 export type Day = string;
 
-export const VIEWS = { week: "Week", month: "Month", agenda: "Agenda" } as const;
+export const VIEWS = { month: "Month", week: "Week", day: "Day", agenda: "Agenda" } as const;
 export type View = keyof typeof VIEWS;
 
 /** How many days the agenda lists from the day it starts on. */
@@ -33,13 +33,14 @@ export function shiftMonth(day: Day, by: number): Day {
 /** Sunday is 0. */
 export const weekdayOf = (day: Day) => new Date(counted(day)).getUTCDay();
 
-const daysBetween = (from: Day, to: Day) => Math.round((counted(to) - counted(from)) / DAY_MS);
+export const daysBetween = (from: Day, to: Day) => Math.round((counted(to) - counted(from)) / DAY_MS);
 const daysFrom = (day: Day, count: number): Day[] => Array.from({ length: Math.max(0, count) }, (_, i) => shiftDay(day, i));
 const startOfWeek = (day: Day) => shiftDay(day, -weekdayOf(day));
 
-/** The days a view shows around `anchor`: its week from Sunday, the whole weeks its month touches, or the days from it on. */
+/** The days a view shows around `anchor`: its week from Sunday, the day itself, the whole weeks its month touches, or the days from it on. */
 export function daysOf(view: View, anchor: Day): Day[] {
   if (view === "week") return daysFrom(startOfWeek(anchor), 7);
+  if (view === "day") return [anchor];
   if (view === "agenda") return daysFrom(anchor, AGENDA_DAYS);
   const first = startOfWeek(shiftMonth(anchor, 0));
   const last = shiftDay(shiftMonth(anchor, 1), -1);
@@ -49,7 +50,7 @@ export function daysOf(view: View, anchor: Day): Day[] {
 /** The anchor of the view before or after. */
 export function step(view: View, anchor: Day, by: 1 | -1): Day {
   if (view === "month") return shiftMonth(anchor, by);
-  return shiftDay(anchor, (view === "week" ? 7 : AGENDA_DAYS) * by);
+  return shiftDay(anchor, { week: 7, day: 1, agenda: AGENDA_DAYS }[view] * by);
 }
 
 const clocks = new Map<string, Intl.DateTimeFormat>();
@@ -62,6 +63,9 @@ function clockAt(time: number, timeZone: string): { day: Day; minutes: number } 
   for (const { type, value } of clock.formatToParts(time)) read[type] = value;
   return { day: `${read.year!.padStart(4, "0")}-${read.month}-${read.day}`, minutes: Number(read.hour) * 60 + Number(read.minute) };
 }
+
+/** How many minutes into its day a clock in `timeZone` shows at `time`. */
+export const minutesIn = (time: number, timeZone: string) => clockAt(time, timeZone).minutes;
 
 /** The day it is in `timeZone` at `time`. */
 export const dayIn = (time: number, timeZone: string): Day => clockAt(time, timeZone).day;
@@ -132,8 +136,9 @@ const plain = (text: string) => text.replace(/[  ]/g, " ");
 /** A time of day as the member reads it, such as "11:30 AM". */
 export const timeLabel = (time: number, timeZone: string, locale?: string) => plain(new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(time));
 
-type DayStyle = "short" | "long" | "heading";
+type DayStyle = "short" | "long" | "heading" | "full";
 const DAY_STYLES: Record<DayStyle, Intl.DateTimeFormatOptions> = {
+  full: { weekday: "long", month: "long", day: "numeric", year: "numeric" },
   short: { month: "short", day: "numeric" },
   long: { weekday: "short", month: "short", day: "numeric", year: "numeric" },
   heading: { weekday: "long", month: "long", day: "numeric" },
@@ -156,7 +161,12 @@ export function whenLabel(when: EventWhen, timeZone: string, locale?: string): s
 /** What the days on show are called: "October 2026" for a month, and otherwise the first and last of them. */
 export function titleOf(view: View, anchor: Day, locale?: string): string {
   if (view === "month") return new Intl.DateTimeFormat(locale, { timeZone: "UTC", month: "long", year: "numeric" }).format(counted(anchor));
-  const days = daysOf(view, anchor);
+  return titleOfDays(daysOf(view, anchor), locale);
+}
+
+/** What days that follow one another are called: "Oct 11 – Oct 17, 2026", or the day in full when there is one. */
+export function titleOfDays(days: readonly Day[], locale?: string): string {
+  if (days.length === 1) return dayLabel(days[0]!, "full", locale);
   return `${dayLabel(days[0]!, "short", locale)} – ${dayLabel(days.at(-1)!, "long", locale).replace(/^[^,]*, /, "")}`;
 }
 

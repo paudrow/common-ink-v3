@@ -235,6 +235,10 @@ test("a link's page draws the note as the app does, and runs nothing in it until
   await expect(anyone.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
   await expect(editor(anyone)).toHaveAttribute("contenteditable", "false");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(text);
+  // In the workspace the same HTML runs by itself for its member, whose setting is the default: a link's page always asks.
+  await page.goto(`/note/${note.id}`);
+  await expect(page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Run HTML/ })).toHaveCount(0);
 });
 
 test("a folder's link lists and opens its notes, and not a private note inside it", async ({ page }) => {
@@ -520,4 +524,31 @@ test("reverting an agent's changes from the Agents page takes the notes the memb
   await dialog.getByRole("button", { name: /^Revert/ }).click();
   await expect.poll(async () => (await perform(admin, { type: "note.read", id: mine.id })).revision).toBe(3);
   await expect.poll(async () => (await perform(admin, { type: "note.read", id: shown.id })).revision).toBe(2);
+});
+
+test("a dropdown's arrow is the app's own, as far from the right edge as its words are from the left, in the Share dialog and beside it", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Plan" });
+  await page.goto(`/note/${note.id}`);
+  await expect(editor(page)).toContainText("Plan");
+  await openShare(page);
+  await expect(shareDialog(page).getByRole("combobox", { name: "Access" })).toBeVisible();
+
+  const insets = () =>
+    page.locator("select:visible").evaluateAll((all) =>
+      all.map((el) => {
+        const s = getComputedStyle(el);
+        const fromRight = /^calc\(100% - (\d+)px\)/.exec(s.backgroundPositionX)?.[1];
+        return { name: el.getAttribute("aria-label") ?? el.getAttribute("aria-labelledby") ?? "", native: s.appearance !== "none", drawn: s.backgroundImage.startsWith("url("), words: parseFloat(s.paddingLeft), arrow: Number(fromRight), room: parseFloat(s.paddingRight) };
+      }),
+    );
+  const found = await insets();
+  expect(found.map((s) => s.name)).toContain("Access");
+  expect(found.length).toBeGreaterThanOrEqual(3);
+  for (const s of found) {
+    expect(s, `${s.name}: the app draws the arrow`).toMatchObject({ native: false, drawn: true });
+    expect(s.arrow, `${s.name}: the arrow's inset is the words'`).toBe(s.words);
+    expect(s.words).toBe(8);
+    expect(s.room, `${s.name}: the words stop short of the arrow`).toBeGreaterThanOrEqual(s.arrow + 10 + 4);
+  }
 });

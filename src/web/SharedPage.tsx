@@ -32,8 +32,8 @@ export const sharedToken = (pathname: string) => ADDRESS.exec(pathname)?.[1] ?? 
 
 /**
  * The plugins that draw a note's text. None of them needs the server, and the page gives them no way
- * to it: what any asks for, the projects a todo's chip offers and who is in the workspace, is refused.
- * So nobody here can change a todo, and a mention is the name the note writes and nothing more.
+ * to it: who is in the workspace, the one thing any asks for, is refused. So a mention is the name
+ * the note writes and nothing more.
  */
 const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, mentions, tables, math, codeBlocks, bullets, labelledReferences];
 
@@ -73,7 +73,8 @@ function useDrawing(open: (noteId: string) => void) {
     const kept = new Map<string, unknown>();
     return createPluginHost({
       plugins: DRAWING,
-      settings: {},
+      // Whoever holds a link isn't a member and has no settings: HTML in a note it opens runs only when they press Run.
+      settings: { "html.run": "ask first" },
       write: () => {},
       mac: MAC,
       provide: (plugin) => ({

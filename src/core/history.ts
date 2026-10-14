@@ -383,6 +383,26 @@ export function reverting(history: readonly Recorded[], reverts: Reverts, text: 
   return { changes, overlaps, conflicts };
 }
 
+/**
+ * Where lines of the note after a revert, every later edit kept, were in the note as revision `at`
+ * left it: the lines there that they came of, by every change since and by the revert. `line` is
+ * counted from 1, as a conflict's is, and so is the answer's. No lines is the place before that line.
+ */
+export function linesAsOf(history: readonly Recorded[], { changes }: Pick<Reverting, "changes">, at: number, line: number, count: number): { line: number; lines: number } {
+  const made = [...replayed(history.map((h) => h.changes))];
+  const now = made.at(-1)?.next ?? Text.empty;
+  const then = made[at]?.doc ?? now;
+  const revert = anchored(lift(changes), now);
+  const kept = revert.apply(now);
+  const back = made.slice(at).reduce((all, m) => all.compose(m.change), ChangeSet.empty(then.length)).compose(revert).invertedDesc;
+  const startOf = (n: number) => (n < kept.lines ? kept.line(n + 1).from : kept.length);
+  // Text taken out since, at either end, is of these lines too: it is put back where they are.
+  const [from, to] = [back.mapPos(startOf(line - 1), -1), back.mapPos(startOf(line - 1 + count), 1)];
+  const first = then.lineAt(from).number - 1;
+  const last = to > from ? then.lineAt(to - 1).number : first;
+  return { line: first + 1, lines: last - first };
+}
+
 /** The lines of `a` that lines `from` up to `to` of `b` came of, given where the two differ. */
 function across(hunks: readonly { aFrom: number; aTo: number; bFrom: number; bTo: number }[], from: number, to: number): [number, number] {
   let [start, end] = [Infinity, -Infinity];
@@ -436,5 +456,22 @@ export function dayIn(timeZone: string): (time: number) => string {
   return (time) => {
     const parts = Object.fromEntries(format.formatToParts(time).map((p) => [p.type, p.value]));
     return `${parts.year}-${parts.month}-${parts.day}`;
+  };
+}
+
+/** When a calendar day begins in a zone, in milliseconds. A day that begins with an hour the zone skips begins when its clocks next read. */
+export function dayStartIn(timeZone: string): (day: string) => number {
+  const format = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  /** What the zone's clocks read at `time`, as if they were UTC's. */
+  const read = (time: number) => {
+    const parts = Object.fromEntries(format.formatToParts(time).map((p) => [p.type, Number(p.value)]));
+    return Date.UTC(parts.year!, parts.month! - 1, parts.day, parts.hour, parts.minute, parts.second);
+  };
+  return (day) => {
+    const wanted = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+    let time = wanted;
+    // The zone's offset at the first guess can differ from the one at the answer, across a change of clocks.
+    for (let i = 0; i < 3; i++) time -= read(time) - wanted;
+    return time;
   };
 }

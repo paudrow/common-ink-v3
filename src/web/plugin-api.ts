@@ -10,12 +10,45 @@
  * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary, Written } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
 export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH } from "../core/protocol.ts";
+/**
+ * The query language notes and todos are found by, as the server reads it: what is typed to a query
+ * and back, every filter there is with what it takes and means, and what is being typed at the
+ * cursor. A bar that takes a query, a builder of one and the help are all made from these.
+ */
+export {
+  EMPTY as EMPTY_QUERY,
+  FILTERS,
+  filterOf,
+  keyNamed,
+  keysFor,
+  keysStarting,
+  names as queryNames,
+  parse as parseQuery,
+  print as printQuery,
+  soughtIn,
+  syntax as querySyntax,
+  typingAt,
+  wordsFor,
+  wordsOf,
+  written as writtenValue,
+  type Cmp,
+  type Filter as QueryFilter,
+  type FilterKey,
+  type In as QueryIn,
+  type Key as QueryKey,
+  type Node as QueryNode,
+  type Query,
+  type QueryError,
+  type Scope as QueryScope,
+  type SortKey,
+  type SyntaxRow,
+} from "../core/query.ts";
 /** Where two lists of lines differ, for a view that marks what changed inside a line. */
 export { lineHunks } from "../core/text.ts";
 
@@ -26,13 +59,13 @@ export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../co
 export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, writtenMention, type WrittenMention } from "../core/mentions.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { changeTodo, completeTodo, isDay, isProjectName, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+export { changeTodo, completeTodo, skipTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
 
 /** The lines of a note that aren't in a fenced code block, which is where the core reads todos and tags. */
 export { linesOutsideCode } from "../core/lines.ts";
 
 /** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
-export { WEEKDAYS, describeRule, nextDue, parseRule, writeRule, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
+export { DAY_NAMES, MONTHS, MONTH_NAMES, WEEKDAYS, counted, describeRule, endLabel, isInterval, nextDue, occurrences, ordinal, parseRule, pastThe28th, ruleLabel, skippedTo, writeRule, type End, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
 
 /** The settings a daily note is made by, which the daily plugin declares under exactly these keys and the server reads. */
 export { DAILY_SETTINGS } from "../core/daily.ts";
@@ -102,7 +135,8 @@ export interface Screenshot {
  */
 export type Setting = { title: string; description?: string } & (
   | { type: "boolean"; default: boolean }
-  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number }
+  /** `unreadable` is what it reads as when the member's value isn't one it can take, if that is not the default: the safe choice, for a setting that guards something. */
+  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number; unreadable?: string }
   | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
   /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
   | { type: "chords"; default: readonly string[] }
@@ -756,8 +790,13 @@ export interface App {
   noteChanged(note: Note): void;
   /** Reads the folders and notes again, after a change the app wasn't told about. */
   refresh(): void;
-  /** Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a change that must reach the server as it is, before anything else is typed. */
-  saveNote(noteId: string): void;
+  /**
+   * Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a
+   * change that must reach the server as it is, before anything else is typed. It answers with the
+   * note as that write left it, `filed` saying whether it checked off a recurring todo, and with
+   * nothing when there was nothing to send, no editor of the note, or the write didn't land.
+   */
+  saveNote(noteId: string): Promise<Written | undefined>;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
   /** Tells the member something that just happened, such as that a note was moved to Trash. One notice shows at a time: the next takes its place. */

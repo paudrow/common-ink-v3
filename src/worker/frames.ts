@@ -47,6 +47,7 @@ if (parent !== window) {
     frame.setAttribute("sandbox", "allow-scripts");
     frame.title = "HTML embed";
     frame.srcdoc = event.data.html;
+    frame.addEventListener("load", function () { parent.postMessage({ embedFrame: "drawn" }, "*"); }, { once: true });
     document.body.append(frame);
   });
   parent.postMessage({ embedFrame: "ready" }, "*");
