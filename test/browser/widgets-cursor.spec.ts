@@ -283,6 +283,8 @@ test("Tab picks the highlighted item of the / menu, as Enter does", async ({ pag
   await expect(menu).toHaveCount(0);
   await page.keyboard.type(" /");
   await expect(menu.first()).toBeVisible();
+  // After words on the line nothing is highlighted until a key moves to an item.
+  await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await expect(menu.nth(1)).toHaveAttribute("aria-selected", "true");
   const second = (await menu.nth(1).locator(".cm-completionDetail").textContent())!;
@@ -592,4 +594,31 @@ test("with vim on, j and k go into each of two boards that have no line between 
   await expect.poll(at).toBe("plain");
   await expect(lines(page).filter({ hasText: ":::kanban" })).toHaveCount(0);
   await expect(column(page, "One")).toBeVisible();
+});
+
+test("a press on an embed at the very top of a note nobody has put the cursor in leaves it drawn, and where it was", async ({ page }) => {
+  const note = await open(page, "::timer{5m}\n\nAfter the timer.\n");
+  await fonts(page);
+  const card = editor(page).locator(".embed-card");
+  const before = { card: await boxOf(card), after: await boxOf(line(page, "After")) };
+
+  // The cursor starts at 0, where nobody put it, which is on the embed. The embed's own rewrite used to count as the member using it.
+  await editor(page).getByRole("button", { name: "Start timer" }).click();
+
+  await expect.poll(() => read(page, note.id)).toMatch(/^::timer\{5m since=/);
+  await expect(source(page)).toHaveCount(0);
+  await expect(sourceRows(page)).toHaveCount(0);
+  await expect(editor(page).getByRole("button", { name: "Pause timer" })).toBeVisible();
+  expect({ card: await boxOf(card), after: await boxOf(line(page, "After")) }).toEqual(before);
+});
+
+test("a card added to a board at the very top of a note nobody has put the cursor in leaves the board drawn", async ({ page }) => {
+  const note = await open(page, ":::kanban{}\n## To do\n- write\n\n## Done\n:::\n\nAfter the board.\n");
+  await column(page, "To do").getByRole("button", { name: "Add a card" }).click();
+  await page.keyboard.type("review");
+  await page.keyboard.press("Enter");
+
+  await expect.poll(() => read(page, note.id)).toContain("- write\n- review");
+  await expect(column(page, "To do")).toBeVisible();
+  await expect(editor(page).locator(".embed-source-line")).toHaveCount(0);
 });

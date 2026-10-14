@@ -428,6 +428,11 @@ export interface Completion {
   trigger: string;
   /** Whether what is typed after the trigger may hold spaces, as a note's title does. Without it a space closes the list. */
   spaces?: boolean;
+  /**
+   * Whether the trigger is written in prose too, as `/` is. After other words on its line Enter is
+   * then always a new line, and Tab, the arrow keys or a click pick from the list.
+   */
+  prose?: boolean;
   /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
   items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
 }

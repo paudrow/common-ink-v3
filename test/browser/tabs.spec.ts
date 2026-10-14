@@ -783,3 +783,31 @@ test("a key sequence begun and given up takes no key from a note: a press elsewh
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plum\n\nwordsxay");
 });
 
+
+test("a page whose plugin is turned off while it is in front leaves the other tabs where they were", async ({ page }) => {
+  await withNotes(page, "Alpha", "Beta");
+  await keep(page, "Alpha");
+  await keep(page, "Beta");
+  await page.goto("/history");
+  await expect(page.getByRole("heading", { name: "History", level: 1 })).toBeVisible();
+  await expect(tabs(page)).toHaveCount(3);
+  await expect(tab(page, "History")).toHaveAttribute("aria-selected", "true");
+
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "history.enabled": false }), baseRevision: 0 });
+  await page.reload();
+
+  // It used to take the whole editor area: no tab row, and the open notes out of sight.
+  await expect(page.getByRole("main", { name: "Editor" }).getByText("There's nothing at this address.")).toBeVisible();
+  await expect(tabs(page)).toHaveCount(3);
+  await expect(tab(page, "Page")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();
+  await tab(page, "Alpha").click();
+  await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
+  await expect(page).toHaveURL(/\/note\/alpha-[a-z0-9]{12}$/);
+
+  // An address nothing was ever at says so in a tab too, beside the ones that are open.
+  await page.goto("/nowhere/at/all");
+  await expect(page.getByRole("main", { name: "Editor" }).getByText("There's nothing at this address.")).toBeVisible();
+  await expect(tab(page, "Alpha")).toBeVisible();
+  await expect(tab(page, "Beta")).toBeVisible();
+});
