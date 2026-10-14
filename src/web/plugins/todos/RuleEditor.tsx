@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { DAY_NAMES, MONTH_NAMES, describeRule, ordinal, parseRule, pastThe28th, skippedTo, type Unit, type Weekday } from "../../plugin-api.ts";
-import { DATES, NTHS, PICKS, UNITS, WEEK, anotherDate, anotherNth, daysInMonth, everyOf, formOf, namesDays, preview, ruleOf, shortDay, toggledDay, type NthWeekday, type RuleForm } from "./recurrence.ts";
+import { useState, type ReactNode } from "react";
+import { DAY_NAMES, MONTH_NAMES, describeRule, ordinal, parseRule, pastThe28th, type Unit, type Weekday } from "../../plugin-api.ts";
+import { DATES, NTHS, UNITS, WEEK, anotherDate, anotherNth, daysInMonth, everyOf, formOf, namesDays, preview, ruleOf, toggledDay, type NthWeekday, type RuleForm } from "./recurrence.ts";
 
 interface Props {
   /** How the todo recurs now, as written after `every:`, or null. */
@@ -9,10 +9,8 @@ interface Props {
   due: string | null;
   /** Today, where the member is. */
   now: string;
-  /** Called with the rule that was chosen, or null for a todo that is to stop recurring. */
-  onSet: (every: string | null) => void;
-  /** Moves the todo to its next due date with nothing checked off. */
-  onSkip: () => void;
+  /** Called with the rule that was built. */
+  onSet: (every: string) => void;
   /** Shows the token as written in its note, to be typed over. Without it, the token is typed in a field here. */
   onText?: () => void;
 }
@@ -21,49 +19,14 @@ const numberOf = (value: string) => (value.trim() === "" ? Number.NaN : Number(v
 const shown = (n: number) => (Number.isNaN(n) ? "" : n);
 
 /**
- * The editor of how a todo recurs, in two stages. The first says the rule as a sentence and offers
- * the common ones, each a click that saves, with skipping this occurrence and stopping. The second
- * builds any rule the token can write as a sentence, with the dates it gives.
+ * Any rule the token can write, built as a sentence, with the dates it gives, and saved with Save or Enter.
+ * It sits in the recurrence chip's popover beside the picks that save at once. **Edit as text** shows the
+ * token in its note to be typed over, or, away from a note, the rule as written in one field here.
  */
-export function RuleEditor({ every, due, now, onSet, onSkip, onText }: Props) {
-  const rule = every === null ? null : parseRule(every);
-  const [stage, setStage] = useState<"picks" | "sentence" | "text">("picks");
-  const next = rule && skippedTo(rule, { due, on: now });
-
-  if (stage === "picks") {
-    return (
-      <div className="rule-editor" data-stage="picks">
-        <p className="rule-now">{rule ? describeRule(rule, due) : "Doesn't recur yet"}</p>
-        <div className="rule-picks">
-          {PICKS.map((pick) => (
-            <button key={pick.every} type="button" disabled={pick.every === every} onClick={() => onSet(pick.every)}>
-              {pick.label}
-              {pick.every === every && <span>now</span>}
-            </button>
-          ))}
-        </div>
-        <hr />
-        <div className="rule-picks">
-          {next && (
-            <button type="button" onClick={onSkip}>
-              Skip this one
-              <span>due {shortDay(next, now)}</span>
-            </button>
-          )}
-          {rule && (
-            <button type="button" onClick={() => onSet(null)}>
-              Stop recurring
-            </button>
-          )}
-          <button type="button" onClick={() => setStage("sentence")}>
-            More options…
-          </button>
-        </div>
-      </div>
-    );
-  }
-  if (stage === "text") return <AsText every={every} due={due} onSet={onSet} />;
-  return <Sentence every={every} due={due} now={now} onSet={onSet} onText={onText ?? (() => setStage("text"))} />;
+export function RuleEditor({ every, due, now, onSet, onText }: Props) {
+  const [asText, setAsText] = useState(false);
+  if (asText) return <AsText every={every} due={due} onSet={onSet} />;
+  return <Sentence every={every} due={due} now={now} onSet={onSet} onText={onText ?? (() => setAsText(true))} />;
 }
 
 function Choice<T extends string | number>({ name, value, options, onChange, disabled }: { name: string; value: T; options: readonly (readonly [T, string])[]; onChange: (value: T) => void; disabled?: boolean }) {
@@ -115,11 +78,6 @@ function Sentence({ every, due, now, onSet, onText }: Pick<Props, "every" | "due
   const [form, setForm] = useState<RuleForm>(() => formOf(every === null ? null : parseRule(every), due ?? now));
   const change = (fields: Partial<RuleForm>) => setForm({ ...form, ...fields });
   const rule = ruleOf(form);
-  const first = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    first.current?.focus();
-    first.current?.select();
-  }, []);
   const calendar = namesDays(form);
   const monthEnd = rule && pastThe28th(rule, due);
   const coming = rule && preview(rule, due, now);
@@ -129,7 +87,6 @@ function Sentence({ every, due, now, onSet, onText }: Pick<Props, "every" | "due
   return (
     <form
       className="rule-editor"
-      data-stage="sentence"
       onSubmit={(e) => {
         e.preventDefault();
         const chosen = everyOf(form);
@@ -138,7 +95,7 @@ function Sentence({ every, due, now, onSet, onText }: Pick<Props, "every" | "due
     >
       <div className="rule-row">
         Every
-        <input ref={first} type="number" aria-label="How many" min={1} max={999} value={shown(form.n)} onChange={(e) => change({ n: numberOf(e.target.value) })} />
+        <input type="number" aria-label="How many" min={1} max={999} value={shown(form.n)} onChange={(e) => change({ n: numberOf(e.target.value) })} />
         <Choice name="Unit" value={form.unit} options={UNITS.map(([unit, one, many]) => [unit, form.n === 1 ? one : many] as const)} onChange={(unit: Unit) => change({ unit })} />
       </div>
 
@@ -274,7 +231,6 @@ function AsText({ every, due, onSet }: Pick<Props, "every" | "due" | "onSet">) {
   return (
     <form
       className="rule-editor"
-      data-stage="sentence"
       onSubmit={(e) => {
         e.preventDefault();
         if (rule) onSet(written.trim());
@@ -282,7 +238,7 @@ function AsText({ every, due, onSet }: Pick<Props, "every" | "due" | "onSet">) {
     >
       <label className="rule-row">
         every:
-        <input type="text" className="rule-text" aria-label="The rule as written" data-autofocus autoFocus spellCheck={false} value={written} onChange={(e) => setWritten(e.target.value)} />
+        <input type="text" className="rule-text" aria-label="The rule as written" autoFocus spellCheck={false} value={written} onChange={(e) => setWritten(e.target.value)} />
       </label>
       <div className="rule-says" role="status">
         <p>{rule ? describeRule(rule, due) : "That isn't a rule. Such as 2w, mon,thu, 1st-day,15th-day, mar-1, 3d-after-done or 1m-times-5."}</p>

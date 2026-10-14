@@ -1,16 +1,18 @@
 import { StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
-import { createElement } from "react";
-import { parseTodo, rewriteTodo, skipTodo, type Importance, type LastDone, type PluginHost } from "../../plugin-api.ts";
+import { createElement, type ReactNode } from "react";
+import { changeTodo, parseTodo, rewriteTodo, type Importance, type LastDone, type PluginHost } from "../../plugin-api.ts";
+import { BOX_EM } from "../gfm/lists.ts";
 import { chips, type Chip, type Source, type Token } from "../lib/chips.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
+import { openPopover } from "../lib/Popover.tsx";
 import { replacing } from "../lib/rewrite.ts";
 import { onTodo, todoLines } from "../lib/todoLines.ts";
-import { openPopover } from "../lib/Popover.tsx";
+import { ChipMenu } from "./ChipMenu.tsx";
 import { Completions } from "./Completions.tsx";
 import { dueLabel, dueState, today } from "./dates.ts";
+import { CHIP_NAMES, IMPORTANCE, pickerLabel, type ChipKind } from "./picking.ts";
 import { doneLabel, doneName, everyLabel, everyName } from "./recurrence.ts";
-import { RuleEditor } from "./RuleEditor.tsx";
 
 interface Checkbox extends Token {
   checked: boolean;
@@ -35,8 +37,6 @@ export interface TodoChipsContext {
   /** Told of a recurring todo checked off in the note, once the server has completed it: the change that did. */
   onRecurred: (words: string, revision: number) => void;
 }
-
-export const IMPORTANCE = ["Normal", "!", "!!", "!!!"] as const;
 
 /**
  * What every chip of a todo shares. It is drawn on exactly the lines the server takes for todos, and
@@ -134,19 +134,58 @@ const checkbox = ({ host, noteId, onCompleted, onRecurred }: TodoChipsContext): 
   },
 });
 
-/** Draws what a chip says, with the browser's own control laid over it unseen: a click on the chip is a click on the control. */
-function over<C extends HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(el: HTMLElement, says: string, control: C, name: string, readOnly: boolean): C {
+/**
+ * Draws what a chip says, as a button that opens a panel under it. The press doesn't move the cursor, so
+ * the line stays drawn; the keyboard goes back to the note when the panel closes from inside.
+ */
+function panel(el: HTMLElement, says: string, name: string, label: string, disabled: boolean, open: (close: () => void) => ReactNode) {
   el.classList.add("md-todo-chip");
-  el.append(says, control);
-  control.disabled = readOnly;
-  control.setAttribute("aria-label", name);
-  return control;
+  el.append(says);
+  el.setAttribute("role", "button");
+  el.setAttribute("aria-label", name);
+  el.setAttribute("aria-haspopup", "dialog");
+  if (disabled) return el.setAttribute("aria-disabled", "true");
+  el.addEventListener("mousedown", (event) => event.button === 0 && event.preventDefault());
+  el.addEventListener("click", () => {
+    const editor = el.closest<HTMLElement>(".cm-editor");
+    const view = editor && EditorView.findFromDOM(editor);
+    el.setAttribute("aria-expanded", "true");
+    openPopover(el, label, open, (hadFocus) => {
+      el.removeAttribute("aria-expanded");
+      if (hadFocus) view?.focus();
+    });
+  });
 }
 
-function choice(options: readonly (readonly [value: string, label: string])[], chosen: string) {
-  const select = document.createElement("select");
-  for (const [value, label] of options) select.append(new Option(label, value, false, value === chosen));
-  return select;
+/**
+ * A chip that opens the popover the Todos page opens from the same chip. A pick there rewrites the line as
+ * the member's edit, as `todo.set` would: skipping by `skipTodo`, the rest by `rewriteTodo`.
+ */
+function opener(el: HTMLElement, says: string, chip: ChipKind, source: Source) {
+  panel(el, says, `${CHIP_NAMES[chip]}: ${says}`, pickerLabel(chip), source.readOnly, (close) => {
+    const line = source.line();
+    const read = line && parseTodo(line.text);
+    return createElement(ChipMenu, {
+      chip,
+      todo: { due: read?.due?.date ?? null, importance: read?.importance ?? 0, every: read?.every?.written ?? null },
+      now: today(),
+      onPick(change) {
+        close();
+        source.rewriteLine((text) => {
+          try {
+            return changeTodo(text, change, today()).line;
+          } catch {
+            // The line was written another way while the popover was open, and has no later time to skip to.
+            return text;
+          }
+        });
+      },
+      onText() {
+        close();
+        source.edit();
+      },
+    });
+  });
 }
 
 const importance: Chip<ImportanceMarks> = {
@@ -158,8 +197,7 @@ const importance: Chip<ImportanceMarks> = {
   },
   draw(el, token, source) {
     el.dataset.level = String(token.level);
-    const select = over(el, IMPORTANCE[token.level], choice(IMPORTANCE.map((label, level) => [String(level), label] as const), String(token.level)), "Importance", source.readOnly);
-    select.addEventListener("change", () => source.rewriteLine((line) => rewriteTodo(line, { importance: Number(select.value) as Importance })));
+    opener(el, IMPORTANCE[token.level], "importance", source);
   },
 };
 
@@ -175,32 +213,11 @@ const due: Chip<Due> = {
   draw(el, token, source) {
     const now = today();
     el.dataset.due = dueState(token.date, now);
-    const input = document.createElement("input");
-    input.type = "date";
-    input.value = token.date;
-    over(el, dueLabel(token.date, now), input, "Due date", source.readOnly);
-    input.addEventListener("click", () => {
-      try {
-        input.showPicker();
-      } catch {
-        // A browser that won't open its calendar from here still takes the date typed into the field.
-      }
-    });
-    input.addEventListener("change", () => source.rewriteLine((line) => rewriteTodo(line, { due: input.value || null })));
+    opener(el, dueLabel(token.date, now), "due", source);
   },
 };
 
-/** A button laid over what a chip says, which opens a panel under the chip. */
-function opener(el: HTMLElement, says: string, name: string, disabled: boolean, open: (anchor: HTMLButtonElement) => void) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.title = name;
-  button.setAttribute("aria-haspopup", "dialog");
-  over(el, says, button, name, disabled);
-  button.addEventListener("click", () => open(button));
-}
-
-/** How a todo recurs, in a few plain words. A click opens the editor of the rule, which rewrites the token, or takes it away with the space before it. */
+/** How a todo recurs, in a few plain words. A click opens the recurrence popover, which rewrites the token, or takes it away with the space before it. */
 const every: Chip<Every> = {
   ...onTodoLine,
   // Its words are longer than its token, so it takes its own width: what follows it on its row moves by the difference, and nothing else does.
@@ -213,34 +230,8 @@ const every: Chip<Every> = {
   draw(el, token, source) {
     // The chip doesn't hold its token as the chips drawn over theirs do, so it says here what it stands for.
     el.dataset.written = `every:${token.written}`;
-    opener(el, everyLabel(token.written), everyName(token.written), source.readOnly, (anchor) =>
-      openPopover(anchor, "Recurrence", (close) => {
-        const line = source.line();
-        const rewrite = (next: (line: string) => string) => {
-          source.rewriteLine(next);
-          close();
-        };
-        return createElement(RuleEditor, {
-          every: token.written,
-          due: (line && parseTodo(line.text)?.due?.date) ?? null,
-          now: today(),
-          onSet: (next) => rewrite((text) => rewriteTodo(text, { every: next })),
-          onSkip: () =>
-            rewrite((text) => {
-              try {
-                return skipTodo(text, today());
-              } catch {
-                // The line was written another way while the editor was open, and has no later time to skip to.
-                return text;
-              }
-            }),
-          onText() {
-            close();
-            source.edit();
-          },
-        });
-      }),
-    );
+    el.title = everyName(token.written);
+    opener(el, everyLabel(token.written), "every", source);
   },
 };
 
@@ -282,20 +273,17 @@ function lastDone(context: TodoChipsContext): Chip<Done> {
     draw(el, token, source) {
       const now = today();
       // Listing them changes nothing, so someone who can only read may look.
-      opener(el, doneLabel(token, now), doneName(token, now), false, (anchor) => {
-        const ask = () => completions(context, source);
-        openPopover(anchor, "Completions", (close) =>
-          createElement(Completions, {
-            ask,
-            done: token,
-            now,
-            onOpen(noteId) {
-              close();
-              context.host.app().openNote(noteId);
-            },
-          }),
-        );
-      });
+      panel(el, doneLabel(token, now), doneName(token, now), "Completions", false, (close) =>
+        createElement(Completions, {
+          ask: () => completions(context, source),
+          done: token,
+          now,
+          onOpen(noteId) {
+            close();
+            context.host.app().openNote(noteId);
+          },
+        }),
+      );
     },
   };
 }
@@ -317,14 +305,15 @@ const asWritten = drawnInView((view) => {
 
 const look = EditorView.baseTheme({
   // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark.
-  ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", cursor: "pointer" },
+  // The box starts where its `[` does, so it is in one place ticked or not, though `[x]` is wider than `[ ]`.
+  ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", paddingLeft: "0.35em", justifyContent: "flex-start", cursor: "pointer" },
   ".md-chip-task input": {
     appearance: "none",
     boxSizing: "border-box",
     flex: "none",
     margin: "0",
-    width: "1.1em",
-    height: "1.1em",
+    width: `${BOX_EM}em`,
+    height: `${BOX_EM}em`,
     font: "inherit",
     border: "1.5px solid color-mix(in srgb, var(--muted) 75%, transparent)",
     borderRadius: "0.28em",
@@ -339,16 +328,19 @@ const look = EditorView.baseTheme({
   ".md-chip-task input:disabled": { cursor: "default", opacity: "0.7" },
   ".md-chip-task:has(input:disabled) > :last-child": { cursor: "default" },
   ".md-todo-token": { whiteSpace: "nowrap" },
-  ".md-chip-sized > span.md-todo-chip": { top: "0.2em", bottom: "0.2em", borderRadius: "4px", overflow: "hidden", fontSize: "0.82em", lineHeight: "1", whiteSpace: "nowrap", background: "var(--hover)", color: "var(--muted)" },
-  // Smaller than the line and no taller, on the line's own baseline, so the line is as high with it as with its token.
-  ".md-chip-every": { position: "relative", display: "inline-block", padding: "0 0.45em", borderRadius: "4px", fontSize: "0.82em", lineHeight: "1.35", whiteSpace: "nowrap", background: "var(--hover)", color: "var(--muted)" },
-  ".md-chip-every:focus-within": { outline: "2px solid var(--accent)", outlineOffset: "1px" },
-  ".md-todo-chip > input, .md-todo-chip > select, .md-todo-chip > button": { position: "absolute", inset: "0", width: "100%", height: "100%", minWidth: "0", margin: "0", padding: "0", border: "0", opacity: "0", cursor: "pointer", font: "inherit" },
-  ".md-todo-chip > :disabled": { cursor: "default" },
-  ".md-chip-sized > span.md-todo-chip:focus-within": { outline: "2px solid var(--accent)", outlineOffset: "1px" },
-  ".md-chip-sized > span.md-todo-chip[data-due=overdue], .md-chip-sized > span.md-todo-chip[data-level='3']": { background: "var(--removed-soft)", color: "var(--danger)" },
-  ".md-chip-sized > span.md-todo-chip[data-due=today], .md-chip-sized > span.md-todo-chip[data-level='2']": { background: "var(--accent-soft)", color: "var(--accent)" },
+  // The Todos page's chips, in a note: only a due date's changes colour, as it comes and passes.
+  ".md-chip-sized > span.md-todo-chip": { top: "0.2em", bottom: "0.2em", borderRadius: "999px", overflow: "hidden", fontSize: "0.75em", fontWeight: "500", lineHeight: "1", whiteSpace: "nowrap", background: "var(--hover)", color: "var(--chip-ink)", cursor: "pointer" },
+  ".md-chip-sized > span.md-todo-chip:hover": { boxShadow: "inset 0 0 0 1px var(--line-strong)" },
+  ".md-chip-sized > span.md-todo-chip[aria-expanded]": { boxShadow: "inset 0 0 0 1px var(--accent)" },
+  ".md-chip-sized > span.md-todo-chip[aria-disabled]": { cursor: "default", boxShadow: "none" },
+  ".md-chip-sized > span.md-todo-chip[data-due=today]": { background: "color-mix(in srgb, var(--warn) 16%, transparent)", color: "var(--warn-ink)" },
+  ".md-chip-sized > span.md-todo-chip[data-due=overdue]": { background: "color-mix(in srgb, var(--danger) 14%, transparent)", color: "var(--danger)" },
   ".md-chip-importance > span.md-todo-chip": { fontWeight: "700" },
+  // A pill as the others are, smaller than the line and no taller, on the line's own baseline, so the line is as high with it as with its token.
+  ".md-chip-every": { position: "relative", display: "inline-block", padding: "0 0.6em", borderRadius: "999px", fontSize: "0.75em", fontWeight: "500", lineHeight: "1.5", whiteSpace: "nowrap", background: "var(--hover)", color: "var(--chip-ink)", cursor: "pointer" },
+  ".md-chip-every:hover": { boxShadow: "inset 0 0 0 1px var(--line-strong)" },
+  ".md-chip-every[aria-expanded]": { boxShadow: "inset 0 0 0 1px var(--accent)" },
+  ".md-chip-every[aria-disabled]": { cursor: "default", boxShadow: "none" },
 });
 
 /** Draws a todo's checkbox and its options as chips. */
