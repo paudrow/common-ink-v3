@@ -81,7 +81,8 @@ export interface Screenshot {
  */
 export type Setting = { title: string; description?: string } & (
   | { type: "boolean"; default: boolean }
-  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number }
+  /** `unreadable` is what it reads as when the member's value isn't one it can take, if that is not the default: the safe choice, for a setting that guards something. */
+  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number; unreadable?: string }
   | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
   /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
   | { type: "chords"; default: readonly string[] }

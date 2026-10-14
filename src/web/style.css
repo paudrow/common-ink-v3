@@ -1824,14 +1824,19 @@ button.link:hover {
   max-width: none;
 }
 
-/* The line of an address that is shown as media: a caption's size, and seen only with the pointer on it or on the media, or the cursor on it. It keeps its room either way, so nothing moves. */
+/* The line of an address that is shown as media: a caption's size, and seen only with the cursor on it. It keeps its room either way, so nothing moves. */
 .cm-line.embed-address {
   font-size: 0.8125rem;
   transition: opacity 120ms;
 }
 
-.cm-line.embed-address:not(.embed-address-seen):not(:hover) {
+.cm-line.embed-address:not(.embed-address-seen) {
   opacity: 0;
+}
+
+/* Out of sight, the address is no link: the pointer and a press reach the line, which puts the cursor there. */
+.cm-line.embed-address:not(.embed-address-seen) * {
+  pointer-events: none;
 }
 
 .embed-below-drawn {
@@ -1894,6 +1899,30 @@ button.link:hover {
   border: 0;
   background: none;
   color-scheme: normal;
+}
+
+/* What is below a line while it loads: a placeholder as big as its room, and what loads is there but unseen until it is drawn. */
+.embed-loading {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--muted) 14%, var(--bg));
+  animation: embed-loading 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes embed-loading {
+  to {
+    background: color-mix(in srgb, var(--muted) 7%, var(--bg));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .embed-loading {
+    animation: none;
+  }
+}
+
+.embed-arriving {
+  opacity: 0;
 }
 
 /* A video before it is played: its picture, what it is called along the top, and a play mark in the middle. */
