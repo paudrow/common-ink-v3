@@ -1,6 +1,7 @@
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorState, RangeSet, RangeValue, StateEffect, StateField, type Extension, type Range, type Text } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
+import { isReading } from "../../plugin-api.ts";
 import { drawnInView, touched, writable } from "../lib/live.ts";
 import { mathBlocksIn, type Formula } from "../math/syntax.ts";
 import { indent, itemAt, move, outdent, type Edit, type Item, type Lines } from "./outline.ts";
@@ -138,44 +139,15 @@ const clickingFolded = EditorState.transactionFilter.of((tr) => {
   return fold ? [tr, { selection: { anchor: fold.shown } }] : tr;
 });
 
-class Toggle extends WidgetType {
-  constructor(private readonly isFolded: boolean) {
-    super();
-  }
-
-  override eq(other: Toggle) {
-    return other.isFolded === this.isFolded;
-  }
-
-  override toDOM(view: EditorView) {
-    const el = document.createElement("span");
-    el.className = "bullet-toggle";
-    el.textContent = this.isFolded ? "▸" : "▾";
-    el.setAttribute("role", "button");
-    el.setAttribute("aria-label", this.isFolded ? "Unfold" : "Fold");
-    el.setAttribute("aria-expanded", String(!this.isFolded));
-    el.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      view.dispatch({ effects: toggleFold.of(view.state.doc.lineAt(view.posAtDOM(el)).from) });
-    });
-    return el;
-  }
-
-  override ignoreEvent() {
-    return true;
-  }
-}
-
 /** The mark stays in the line and a dot is painted over it, so a bullet's text is where it is when the mark is shown. */
 const dot = Decoration.mark({ class: "bullet-dot" });
 /** A task's box is its mark enough: its bullet's mark keeps its room and is painted as nothing. Only where the box is drawn, which is at the start of a line. */
 const blank = Decoration.mark({ class: "bullet-blank" });
 
-/** A dot for each bullet's mark, or nothing on a task's, except the mark the cursor is on, and a fold toggle beside each bullet with something under it. */
+/** A dot for each bullet's mark, or nothing on a task's, except the mark the cursor is on. */
 const bullets = drawnInView((view) => {
   const { state } = view;
   const drawn: Range<Decoration>[] = [];
-  const isFolded = new Set(state.field(folds).folds.map((f) => f.from));
   for (const { from, to } of view.visibleRanges) {
     syntaxTree(state).iterate({
       from,
@@ -183,23 +155,22 @@ const bullets = drawnInView((view) => {
       enter(node) {
         if (node.name !== "ListMark") return;
         const line = state.doc.lineAt(node.from);
-        const item = bulletAt(state, line.number - 1);
-        if (item && item.end - item.line > 1) drawn.push(Decoration.widget({ widget: new Toggle(isFolded.has(line.from)), side: -1 }).range(node.from));
         if (node.node.parent?.parent?.name === "BulletList" && !touched(state, node.from, node.to)) drawn.push((node.node.nextSibling?.name === "Task" && !state.sliceDoc(line.from, node.from).trim() ? blank : dot).range(node.from, node.to));
       },
     });
   }
   return drawn;
-}, (update) => update.startState.field(folds).folds !== update.state.field(folds).folds);
+});
 
 const look = EditorView.baseTheme({
   // The mark's own letter is there and not painted, as a ghost is, and the dot is painted over it.
   ".bullet-dot, .bullet-blank": { position: "relative", WebkitTextFillColor: "transparent" },
   ".bullet-dot::before": { content: '"•"', position: "absolute", left: "0", right: "0", textAlign: "center", WebkitTextFillColor: "var(--muted)" },
-  ".bullet-toggle": { position: "absolute", marginLeft: "-1.15em", width: "1em", textAlign: "center", color: "var(--muted)", cursor: "pointer", userSelect: "none", fontSize: "0.85em", opacity: "0.55" },
-  ".bullet-toggle:hover, .bullet-toggle[aria-expanded=false]": { opacity: "1", color: "var(--accent)" },
   ".bullet-folded": { marginLeft: "0.4em", padding: "0 0.4em", borderRadius: "4px", backgroundColor: "var(--accent-soft)", color: "var(--accent)", cursor: "pointer" },
 });
+
+/** A member who can only read the note folds its bullets by their key too, so its text takes the keyboard. A reading, as a folder's card is, is no place for keys. */
+const reachable = EditorView.contentAttributes.of((view) => (view.state.facet(EditorView.editable) || isReading(view.state) ? null : { tabindex: "0" }));
 
 /** The note editor that has the keyboard, if its cursor is on a bullet. */
 function onBullet(): { view: EditorView; line: number } | null {
@@ -286,5 +257,5 @@ export function bulletEditing(kept: readonly Kept[], keep: (folded: Kept[]) => v
     if (was.folds === now.folds || (!was.folds.length && !now.folds.length)) return;
     keep(now.folds.map((f) => ({ line: update.state.doc.lineAt(f.from).number - 1, text: update.state.doc.lineAt(f.from).text })));
   });
-  return [restored, clickingFolded, bullets, keeping, look];
+  return [restored, clickingFolded, bullets, keeping, reachable, look];
 }

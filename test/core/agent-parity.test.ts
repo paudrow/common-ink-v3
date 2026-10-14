@@ -99,4 +99,38 @@ describe("what an agent can do, against what the web app can", () => {
       expect(said.join("\n"), argv.join(" ")).toContain(`${argv[0]} doesn't take ${argv.find((arg) => arg.startsWith("--") && !["--revision", "--line", "--text"].includes(arg))}`);
     }
   });
+
+  it("refuses a flag a command doesn't take, and sends nothing", async () => {
+    const said: string[] = [];
+    let sent = 0;
+    const io = {
+      env: { INK_TOKEN: "cink_x" },
+      stdin: async () => "",
+      out: (line: string) => said.push(line),
+      fetch: (async () => (sent++, Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "OK" }] } }))) as unknown as typeof fetch,
+    };
+    const all = [...Object.values(COMMANDS).flat(), ["revert-author", AUTHOR], ["revert-author", AUTHOR, "--note", ID, "--preview"], ["undo", ID], ["redo", ID]];
+    for (const argv of all) {
+      expect(await run([...argv, "--frobnicate", "yes"], io), argv.join(" ")).toBe(2);
+      expect(said.at(-1), argv.join(" ")).toMatch(new RegExp(`^ink: ${argv[0]} doesn't take --frobnicate`));
+      // A switch another command takes is as unknown here as any other flag.
+      if (!argv.includes("--preview") && !["revert", "revert-many", "revert-author"].includes(argv[0]!)) {
+        expect(await run([...argv, "--preview"], io), `${argv.join(" ")} --preview`).toBe(2);
+        expect(said.at(-1)).toContain("doesn't take --preview");
+      }
+    }
+    expect(await run(["read", ID, "--rev", "3"], io)).toBe(2);
+    expect(await run(["notes", "--folder", ID, "--sinse", "2026-10-01", "--to", "x"], io)).toBe(2);
+    expect(said.at(-1)).toContain("--sinse or --to");
+    expect(sent).toBe(0);
+  });
+
+  it("prints its usage for --help, wherever it is", async () => {
+    for (const argv of [["--help"], ["-h"], ["help"], ["notes", "--help"], ["revert-author", "--help"]]) {
+      const said: string[] = [];
+      const io = { env: {}, stdin: async () => "", out: (line: string) => said.push(line), fetch: (async () => expect.unreachable()) as unknown as typeof fetch };
+      expect(await run(argv, io), argv.join(" ")).toBe(0);
+      expect(said.join("\n")).toMatch(/^Usage: ink/);
+    }
+  });
 });

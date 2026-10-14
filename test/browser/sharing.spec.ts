@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, folderRow, join, listedNote, listedNotes, me, openAllNotes, perform, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, connectAgent, folderRow, join, listedNote, listedNotes, me, openAllNotes, perform, pinPanel, showPanel, signInAsNewPerson, visitor } from "./helpers.ts";
 import { standIns } from "./media-helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
@@ -15,7 +15,8 @@ const emailOf = async (page: Page) => (await me(page)).person.email;
 const firstWorkspace = async (page: Page) => (await me(page)).workspaces[0]!.id;
 
 async function openShare(page: Page) {
-  await inspector(page).getByRole("tab", { name: "Info" }).click();
+  // Pinned, so the panel stays once the dialog is closed.
+  await pinPanel(page, "Info");
   await inspector(page).getByRole("button", { name: "Share" }).click();
   await expect(shareDialog(page)).toBeVisible();
 }
@@ -45,7 +46,8 @@ test("a guest given one note to view sees that note and nothing else, and can't 
   await expect(tree(grace).getByRole("treeitem")).toHaveText([/^All notes\s*1$/, /^Shared with me\s*1$/]);
   await expect(grace.getByRole("button", { name: "New folder" })).toHaveCount(0);
   await expect.poll(() => quickOpenTitles(grace)).toEqual(["Shared plan"]);
-  await expect(inspector(grace).getByRole("tabpanel")).toContainText("You can view this note");
+  await showPanel(grace, "Info");
+  await expect(inspector(grace)).toContainText("You can view this note");
   await expect(inspector(grace).getByRole("button", { name: "Share" })).toHaveCount(0);
 
   await folderRow(grace, "Shared with me").click();
@@ -94,7 +96,7 @@ test("a guest given a folder to edit sees what is in it, edits a note, sees its 
   await grace.keyboard.type("\nGrace adds a line.");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: kickoff.id })).text).toContain("Grace adds a line.");
 
-  await inspector(grace).getByRole("tab", { name: "History" }).click();
+  await showPanel(grace, "History");
   await expect(inspector(grace).getByRole("listbox", { name: "Changes" }).getByRole("option").first()).toContainText("You edited");
 
   await folderRow(grace, "Projects").click();
@@ -132,7 +134,7 @@ test("a note its maker makes private is hidden from an admin everywhere, and sha
   await expect(shareDialog(bob)).toContainText("This note is private to you.");
   await shareDialog(bob).getByRole("button", { name: "Close" }).click();
   await expect(bob.getByRole("tab", { name: "Diary" }).locator(".private-mark")).toBeVisible();
-  await expect(inspector(bob).getByRole("tabpanel")).toContainText("Private · Link off");
+  await expect(inspector(bob)).toContainText("Private · Link off");
   // Kept, so its tab is still there once a list is opened: a list from the tree takes a preview's place.
   await bob.getByRole("tab", { name: "Diary" }).dblclick();
   await openAllNotes(bob);
@@ -147,8 +149,8 @@ test("a note its maker makes private is hidden from an admin everywhere, and sha
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Index", "Target"]);
   await listedNote(page, "Target").click();
-  await inspector(page).getByRole("tab", { name: "Backlinks" }).click();
-  await expect(inspector(page).getByRole("tabpanel")).toContainText("No notes link here yet.");
+  await showPanel(page, "Backlinks");
+  await expect(inspector(page)).toContainText("No notes link here yet.");
   await page.goto(`/note/${diary.id}`);
   await expect(page.getByText(NOTHING)).toBeVisible();
   await expect(page.getByText("Bob's own words")).toHaveCount(0);
@@ -178,7 +180,7 @@ test("a public link made in the Share dialog shows the note read-only to someone
   await shareDialog(page).getByRole("combobox", { name: "Link" }).selectOption({ label: "Anyone with the link" });
   const address = await shareDialog(page).getByRole("textbox", { name: "Link address" }).inputValue();
   expect(new URL(address).pathname).toMatch(/^\/s\/[A-Za-z0-9_-]{20,64}$/);
-  await expect(inspector(page).getByRole("tabpanel")).toContainText("Link on: anyone with the link");
+  await expect(inspector(page)).toContainText("Link on: anyone with the link");
 
   const anyone = await visitor(page);
   const asked: string[] = [];
@@ -210,6 +212,8 @@ test("a public link made in the Share dialog shows the note read-only to someone
 
 test("a link's page draws the note as the app does, and runs nothing in it until the visitor asks", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
+  // The member has HTML run by itself, which is not the default on a server without an embed site (#40).
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "html.run": "automatically" }), baseRevision: 0 });
   const text = "# Demo\n\nSome **bold** words.\n\n:::html{}\n<p>Hello from HTML.</p>\n:::\n\nWatch this.\n\nhttps://youtu.be/dQw4w9WgXcQ\n";
   const note = await perform(page, { type: "note.create", text });
   const link = await perform(page, { type: "grant.link", noteId: note.id, link: "public" });
@@ -235,7 +239,7 @@ test("a link's page draws the note as the app does, and runs nothing in it until
   await expect(anyone.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
   await expect(editor(anyone)).toHaveAttribute("contenteditable", "false");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(text);
-  // In the workspace the same HTML runs by itself for its member, whose setting is the default: a link's page always asks.
+  // In the workspace the same HTML runs by itself for its member, who chose that: a link's page always asks.
   await page.goto(`/note/${note.id}`);
   await expect(page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Run HTML/ })).toHaveCount(0);
@@ -378,8 +382,9 @@ test("a grant taken back while the guest has the note open takes the note off th
   await expect(grace.getByText(HIDDEN)).toBeVisible({ timeout: 30_000 });
   await expect(grace.getByText("Grace may change this for now.")).toHaveCount(0);
   await expect(editor(grace)).toHaveCount(0);
-  // The inspector stays open on whatever is in front, with none of the note's tabs.
-  await expect(inspector(grace).getByRole("tab")).toHaveCount(0);
+  // The inspector has nothing of the note's: with no listed note in front its panel is empty.
+  await showPanel(grace, "Info");
+  await expect(inspector(grace).locator(".inspector-body")).toHaveText("");
   await expect(grace.getByRole("tab", { name: "Untitled" })).toBeVisible();
   await openAllNotes(grace);
   await expect(listedNotes(grace)).toHaveText(["Kept"]);

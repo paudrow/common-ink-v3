@@ -10,6 +10,8 @@ export type SettingsStatus =
   | { kind: "saving" }
   /** The server couldn't be reached. The write is tried again. */
   | { kind: "retrying" }
+  /** The session ended. The changes are kept here and sent on the next `refresh`, which is asked for once the member is signed in again. */
+  | { kind: "signedOut" }
   /** The server won't take the document, and said why. The change was taken back out. */
   | { kind: "refused"; message: string };
 
@@ -54,7 +56,8 @@ const SAVING: SettingsStatus = { kind: "saving" };
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const isConflict = (err: unknown) => err instanceof ApiError && err.code === "conflict";
 /** The server answered, and its answer was no. Asking again would get the same. */
-const isRefusal = (err: unknown) => err instanceof ApiError && err.status >= 400 && err.status < 500 && err.code !== "signed_out";
+const isSignedOut = (err: unknown) => err instanceof ApiError && err.status === 401;
+const isRefusal = (err: unknown) => err instanceof ApiError && err.status >= 400 && err.status < 500 && !isSignedOut(err);
 
 /**
  * A member's settings in one workspace, as this browser has them. A write names the revision it was
@@ -90,7 +93,7 @@ export function createSettingsStore(server: SettingsServer): SettingsStore {
   }
 
   function save(supersedes?: string) {
-    if (text === base.text) return tell(status.kind === "saving" || status.kind === "retrying" ? SAVED : status);
+    if (text === base.text) return tell(status.kind === "saving" || status.kind === "retrying" || status.kind === "signedOut" ? SAVED : status);
     const mine = (sending = { id: crypto.randomUUID(), text, count: pending.length });
     tell(SAVING);
     server.write(mine.text, { baseRevision: base.revision, writeId: mine.id, supersedes: supersedes ?? unanswered }).then(
@@ -121,6 +124,7 @@ export function createSettingsStore(server: SettingsServer): SettingsStore {
         }
         sending = null;
         unanswered = mine.id;
+        if (isSignedOut(err)) return tell({ kind: "signedOut" });
         tell({ kind: "retrying" });
         setTimeout(() => !sending && save(), RETRY_MS);
       },
@@ -180,9 +184,10 @@ export function createSettingsStore(server: SettingsServer): SettingsStore {
       if (!loaded) return load();
       const read = await server.read().catch(() => null);
       // A write in flight was made on what is here now, so it will be refused and read this for itself.
-      if (!read || sending || read.revision <= base.revision) return;
+      if (!read || sending) return;
+      if (read.revision <= base.revision) return status.kind === "signedOut" ? save() : undefined;
       rebase(read);
-      if (text === base.text) tell(status.kind === "saved" || status.kind === "refused" ? SAVED : status);
+      if (text === base.text) tell(status.kind === "saved" || status.kind === "refused" || status.kind === "signedOut" ? SAVED : status);
       else save();
     },
   };
@@ -201,6 +206,8 @@ export const statusLabel = (status: SettingsStatus) => {
       return "Saving…";
     case "retrying":
       return "Couldn't save. Retrying…";
+    case "signedOut":
+      return "Not saved: you're signed out";
     case "refused":
       return `Not saved, and put back as it was: ${status.message}`;
   }

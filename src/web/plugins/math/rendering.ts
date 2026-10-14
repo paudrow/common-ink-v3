@@ -1,4 +1,4 @@
-import type { Extension, StateField } from "@codemirror/state";
+import { Prec, type Extension, type StateField } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -8,7 +8,7 @@ import { roomFor, type Heights } from "./blocks.ts";
 import { KATEX } from "./options.ts";
 import { formulasIn, type Formula, type MathBlock } from "./syntax.ts";
 
-const draw = (el: HTMLElement, { tex, display }: Formula) => katex.render(tex, el, { ...KATEX, displayMode: display });
+export const draw = (el: HTMLElement, { tex, display }: Formula) => katex.render(tex, el, { ...KATEX, displayMode: display });
 
 /**
  * Each part of a formula in a line takes none of the line's height, so the formula sits on the line's
@@ -109,5 +109,7 @@ export function mathRendering(blocks: { field: StateField<{ found: readonly Math
   });
 
   // The blocks come along, so this stands on its own where an editor is given it alone. CodeMirror keeps one of them.
-  return [blocks.extension, drawn.extension, chips(formula), look];
+  // A formula is drawn inside what its words are drawn as, a heading at the heading's size, since CodeMirror puts a lower
+  // precedence's marks around what a higher one replaces and breaks a higher one's marks off at its edges.
+  return [blocks.extension, drawn.extension, Prec.high(chips(formula)), look];
 }

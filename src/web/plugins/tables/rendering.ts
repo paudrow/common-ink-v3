@@ -1,7 +1,8 @@
 import { syntaxTree } from "@codemirror/language";
 import { EditorState, StateField, type Extension } from "@codemirror/state";
-import { Decoration, EditorView, WidgetType } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, WidgetType } from "@codemirror/view";
 import { isReading } from "../../plugin-api.ts";
+import { drawnMath } from "../lib/drawnMath.ts";
 import { drawnInState, placed, writable } from "../lib/live.ts";
 import { replacing } from "../lib/rewrite.ts";
 import { inlineMarkdown } from "./inline.ts";
@@ -33,8 +34,24 @@ const keyOf = ([row, column]: At) => `${row},${column}`;
 const cellAt = (el: HTMLElement, at: At) => el.querySelector<HTMLElement>(`[data-focus="${keyOf(at)}"]`);
 
 function show(cell: HTMLElement, text: string) {
-  cell.replaceChildren(inlineMarkdown(text));
+  cell.replaceChildren(inlineMarkdown(text, drawnMath.get()));
 }
+
+/** The cells of this editor's tables, but the one being typed in, are drawn again once formulas can be drawn, and when they no longer can. */
+const followingMath = ViewPlugin.define((view) => ({
+  destroy: drawnMath.subscribe(() => {
+    for (const el of view.dom.querySelectorAll<HTMLElement>(".md-table")) {
+      const now = drawn.get(el);
+      now?.table.rows.forEach((cells, r) =>
+        cells.forEach((text, c) => {
+          const cell = cellAt(el, [r, c]);
+          if (cell && cell !== document.activeElement) show(cell, text);
+        }),
+      );
+    }
+    view.requestMeasure();
+  }),
+}));
 
 /** Each cell is a box inside its `td`, so that while it is typed in it can be held at the size it was drawn. */
 function build(el: HTMLElement, { table }: Drawn) {
@@ -501,11 +518,13 @@ const look = EditorView.baseTheme({
   ".md-table-add:hover, .md-table-add:focus-visible": { color: "var(--accent)", borderColor: "var(--accent)", outline: "none" },
   // The table's own lines, shown above it with the cursor in them: as written, in the face markdown is written in.
   ".cm-line.md-table-source": { font: "12.5px/1.6 var(--mono)", color: "var(--accent)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
-  ".cm-line.md-table-source *": { font: "inherit !important", color: "inherit !important", textDecoration: "none" },
+  // A formula in them is drawn by its own rule, in its own faces.
+  ".cm-line.md-table-source :not(.md-chip-math, .md-chip-math *)": { font: "inherit !important", color: "inherit !important", textDecoration: "none" },
 });
 
 export const tableRendering: Extension = [
   used,
+  followingMath,
   tables.extension,
   pressedOutside,
   deletedWhole,

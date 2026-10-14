@@ -504,7 +504,6 @@ test("a todo's menu opens at the pointer when there is room, and is moved wholly
 
   // A window barely taller than the menu with the inspector closed, and a press near the card's right end: the menu fits nowhere below and right of the pointer.
   const window = { width: 720, height: Math.ceil(roomy.height) + 40 };
-  await page.getByRole("button", { name: "Inspector", exact: true }).click();
   await expect(page.getByRole("complementary", { name: "Inspector" })).toHaveCount(0);
   await page.setViewportSize(window);
   await row(page, "Write notes").scrollIntoViewIfNeeded();

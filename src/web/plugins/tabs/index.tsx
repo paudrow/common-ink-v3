@@ -32,10 +32,21 @@ export const tabs: Plugin = {
      * through here. Back retraces every open and close. Moving between tabs already open is one
      * step however many moves it took, and never takes the place of an open.
      */
+    /** The group whose tab in front is to take the cursor once it is drawn. */
+    let cursorTo: string | null = null;
+    const cursorPut = () => {
+      if (cursorTo === null) return;
+      cursorTo = null;
+      for (const listener of [...listeners]) listener();
+    };
     const dispatch = (action: EditorAction) => {
       const next = editorReducer(layout, action);
-      // A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
-      if ((action.type === "split" || action.type === "send") && next !== layout) host.app().setFocus(false);
+      if ((action.type === "split" || action.type === "send") && next !== layout) {
+        // A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
+        host.app().setFocus(false);
+        // It is drawn anew where it went, and what had the cursor in it is gone, so the cursor is put in it there.
+        cursorTo = next.focusedGroupId;
+      }
       if (next !== layout) {
         layout = next;
         host.storage.set("layout", layout);
@@ -57,8 +68,9 @@ export const tabs: Plugin = {
     host.commands.register({ id: "tab.moveToPreviousGroup", title: "Move tab to previous group", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) });
     host.commands.register({ id: "tab.menu", title: "Show tab menu", run: showTabMenu });
 
-    function Editor({ app, renderNote, renderFolder, renderPage, empty, controls }: EditorProps) {
+    function Editor({ app, renderNote, renderFolder, renderPage, empty }: EditorProps) {
       const shown = useSyncExternalStore(subscribe, () => layout);
+      const cursorGroup = useSyncExternalStore(subscribe, () => cursorTo);
       const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
       const locked = useMemo(() => new Set((app.notes ?? []).filter((n) => n.private).map((n) => n.id)), [app.notes]);
       const home = app.path === "/";
@@ -82,9 +94,16 @@ export const tabs: Plugin = {
           iconOf={(tab) => (tab.kind === "folder" ? "folders" : tab.kind === "page" ? pages.get(tab.id)?.icon : undefined)}
           isPrivate={(tab) => tab.kind === "note" && locked.has(tab.id)}
           dispatch={dispatch}
-          render={(group, tab) => (tab.kind === "folder" ? renderFolder(tab.id) : tab.kind === "page" ? renderPage(tab.id, tab.path) : renderNote(tab.id, { onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }) }))}
+          render={(group, tab) =>
+            tab.kind === "folder"
+              ? renderFolder(tab.id)
+              : tab.kind === "page"
+                ? renderPage(tab.id, tab.path)
+                : renderNote(tab.id, { onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }), focus: group.id === cursorGroup, onFocused: cursorPut })
+          }
           empty={empty}
-          controls={controls}
+          cursorTo={cursorGroup}
+          onCursorPut={cursorPut}
           focusMode={{
             on: app.focus,
             keys: host.commands.list().find((c) => c.id === "view.toggleFocus")?.shortcut,

@@ -137,3 +137,76 @@ for (const scheme of ["light", "dark"] as const) {
     await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(`${NOTE}\nconst first = 1;\nconst second = 2;\nconst third = 3;`);
   });
 }
+
+const BLOCK = [
+  "# Lines",
+  "A paragraph above the block, long enough that it runs on past the width of the column and wraps onto a second row of its own here.",
+  "```python",
+  "def first(x):",
+  "    return x + 1",
+  "    # a comment in the block that is long enough to run on past the width of the column, wrapping or scrolling with the toggle",
+  "print(first(2))",
+  "```",
+  "- a list item under the block",
+  "  - and one under it",
+  "The end.",
+].join("\n");
+
+/**
+ * Where the selection is painted on the row through the middle of each line that says one of `texts`, left and right, as the
+ * union of every painted rectangle there, cut at the text's margin as the page cuts it; and where the line itself is.
+ */
+const paintedRows = (page: Page, texts: readonly string[]) =>
+  page.evaluate((texts) => {
+    const content = document.querySelector<HTMLElement>(".cm-content")!;
+    const margin = content.getBoundingClientRect().left + parseFloat(getComputedStyle(content).paddingLeft);
+    const rects = [...document.querySelectorAll(".cm-selectionBackground")].map((el) => el.getBoundingClientRect());
+    return texts.map((text) => {
+      const line = [...content.querySelectorAll<HTMLElement>(".cm-line")].find((el) => el.textContent!.startsWith(text))!.getBoundingClientRect();
+      const middle = line.top + line.height / 2;
+      const spans = rects.filter((r) => r.top <= middle && r.bottom >= middle && r.width > 0).map((r) => [Math.max(r.left, margin), r.right] as const).sort((a, b) => a[0] - b[0]);
+      let [from, to] = spans[0] ?? [NaN, NaN];
+      let gaps = 0;
+      for (const [l, r] of spans.slice(1)) {
+        if (l > to + 0.5) gaps++;
+        to = Math.max(to, r);
+      }
+      return { text, painted: [Math.round(from), Math.round(to)], line: [Math.round(line.left), Math.round(line.right)], gaps };
+    });
+  }, texts);
+
+/** The rows of `paintedRows` that are not painted in one piece from the line's left edge to its right: none, once the selection is drawn. */
+const unevenRows = async (page: Page, texts: readonly string[]) => (await paintedRows(page, texts)).filter((row) => row.gaps || row.painted.join() !== row.line.join());
+
+for (const wrap of ["wrap", "scroll"] as const) {
+  test(`with vim on, every line visual line mode selects is painted across its whole width, a code block's from edge to edge, selected down or up (long lines ${wrap})`, async ({ page }) => {
+    await signInAsNewPerson(page, "Ada Lovelace");
+    await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
+    const note = await perform(page, { type: "note.create", text: BLOCK });
+    await page.goto(`/note/${note.id}`);
+    await expect(statusLine(page)).toHaveText("--NORMAL--");
+    await expect(editor(page).locator(".tok-keyword").first()).toBeVisible();
+    if (wrap === "scroll") {
+      await editor(page).getByRole("button", { name: "Wrap long lines" }).click();
+      await expect(editor(page).locator(".code-nowrap").first()).toBeVisible();
+    }
+    await editor(page).focus();
+    await keys(page, "g", "g");
+
+    const CODE = ["def first", "    return", "    # a comment", "print(first"];
+    // Down from the block's first line of code to its last, then up from its last to its first.
+    for (const [from, keysTo] of [["j", "j"], ["k", "k"]] as const) {
+      await keys(page, "g", "g", ...(from === "j" ? ["j", "j", "j"] : ["j", "j", "j", "j", "j", "j"]));
+      await keys(page, "Shift+V", keysTo, keysTo, keysTo);
+      await expect(statusLine(page)).toHaveText("--VISUAL LINE--");
+      await expect.poll(() => unevenRows(page, CODE), `selected with ${keysTo}: each line runs from the block's left edge to its right`).toEqual([]);
+      await keys(page, "Escape");
+      await expect.poll(async () => (await paintedRows(page, CODE)).filter((row) => !Number.isNaN(row.painted[0])), "nothing is painted after Escape").toEqual([]);
+    }
+
+    // Prose and list items are painted across the column the same way, from the text's margin.
+    await keys(page, "g", "g", "j", "Shift+V");
+    for (let n = 0; n < 9; n++) await keys(page, "j");
+    await expect.poll(() => unevenRows(page, ["A paragraph above", "```python", ...CODE, "- a list item", "  - and one under", "The end."])).toEqual([]);
+  });
+}

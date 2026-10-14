@@ -758,12 +758,16 @@ export const MAX_AGENT_FOLDERS = 50;
 /** The folders to limit an agent to. Each stands for itself and the folders under it. */
 const FolderLimit = z.array(Id).min(1, "Name at least one folder, or leave folders out for all notes").max(MAX_AGENT_FOLDERS);
 
-/** What a member may ask for when connecting an agent. */
 /** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
 export const ExpiresIn = z.union([z.number().int().min(1).max(MAX_EXPIRY_DAYS), z.literal("never")]);
 export type ExpiresIn = z.infer<typeof ExpiresIn>;
 
-export const ConnectOptions = z.object({
+/**
+ * What a member may ask for when connecting an agent. Each option narrows the token and its default
+ * is the widest, so a key this doesn't know is refused: a misspelt `readOnly` or `workspaceId`
+ * left out without a word would mint a token that can do more than was asked for.
+ */
+export const ConnectOptions = z.strictObject({
   expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
   workspaceId: Id.optional(),
   readOnly: z.boolean().default(false),
@@ -801,7 +805,21 @@ export interface Me {
 /** What an operation answers anyone who isn't in the workspace, whether or not there is one. */
 export const NO_SUCH_WORKSPACE = "No such workspace";
 
+/** How the server the app is on is set up, where the app follows it. Only the server says it. */
+export interface Setup {
+  /** Whether HTML embeds are served from a host of their own (`EMBED_ORIGIN`), apart from the app's site. */
+  embedSite: boolean;
+}
+
+/** What `/api/me` answers: who is signed in, and how the server is set up. */
+export interface MeHere extends Me {
+  setup: Setup;
+}
+
 export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict";
+
+/** What a client is told of a fault that is no request's doing. The fault's own words stay in the server's log: they can name tables and rows. */
+export const BROKE = "Common Ink broke while doing that. Nothing says it was done: try again";
 
 export class OpError extends Error {
   constructor(

@@ -22,6 +22,9 @@ export interface Place {
  */
 export type Navigate = (path: string, options?: { replace?: boolean; move?: boolean; state?: unknown }) => void;
 
+/** Whether a tab can be kept at an address. One that starts with two slashes reads as another site's, and a stored layout that held it would be refused whole. */
+export const keepsATab = (pathname: string) => /^\/(?!\/)/.test(pathname);
+
 export function routeOf(pathname: string): Route {
   if (pathname === "/") return { kind: "home" };
   const folderId = FOLDER.exec(pathname)?.[1];
