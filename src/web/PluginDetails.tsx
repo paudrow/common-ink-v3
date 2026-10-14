@@ -28,7 +28,7 @@ const SLOT_WORDS: Record<keyof Slots, string> = {
   section: "A section of the sidebar",
   editor: "The editor area",
   folder: "A folder's list of notes",
-  inspector: "An inspector tab",
+  inspector: "An inspector panel",
   page: "A page",
   bar: "The bottom bar",
   overlay: "Something drawn over the app",

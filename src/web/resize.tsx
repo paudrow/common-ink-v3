@@ -19,9 +19,9 @@ interface Props {
   /** Double-click, or Enter, puts it back to how it starts. */
   onReset: () => void;
   /**
-   * For the edge of something that folds away to a bar `size` wide, as the sidebar does. Dragged well
-   * under `min` it folds, and the bar's edge dragged out opens it: see `draggedTo`. `value` is then
-   * the width it opens at.
+   * For the edge of something that folds away to a bar `size` wide, as the sidebar does, or to
+   * nothing, as the inspector's panel does beside a bar that stays. Dragged well under `min` it
+   * folds, and the edge dragged out opens it: see `draggedTo`. `value` is then the width it opens at.
    */
   fold?: { folded: boolean; size: number; onFold: (folded: boolean) => void };
 }
@@ -92,7 +92,7 @@ export function ResizeHandle({ label, orientation, value, min, max, step, perPix
         e.currentTarget.dataset.dragging = "";
         const each = perPixel?.() ?? 1;
         // In a narrow window a side is drawn narrower than it was dragged to. It folds by where the pointer is on what is drawn, and its kept width changes by as far as it is dragged.
-        const drawn = fold && (each > 0 ? e.currentTarget.previousElementSibling : e.currentTarget.nextElementSibling)?.getBoundingClientRect().width;
+        const drawn = fold && (fold.folded ? fold.size : (each > 0 ? e.currentTarget.previousElementSibling : e.currentTarget.nextElementSibling)?.getBoundingClientRect().width);
         const narrower = fold && !fold.folded && drawn ? Math.max(0, value - drawn) : 0;
         drag.current = { from: along(e), asked: drawn ?? value, perPixel: each, kept: value, narrower, side: grabbed(!fold?.folded, value - narrower), moved: false };
       }}

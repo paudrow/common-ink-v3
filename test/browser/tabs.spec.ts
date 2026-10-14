@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { listedNote, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, noteCard, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 /** Opens a note from the list of every note as a preview, which is what a click on its title does. */
 async function preview(page: Page, title: string) {
@@ -72,7 +72,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   const noteUrl = page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" });
   await keep(page, "Alpha");
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
-  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Info" }).click();
+  await showPanel(page, "Info");
 
   const { width } = (await group(1).boundingBox())!;
   await openAllNotes(page);

@@ -2894,34 +2894,55 @@ kbd {
   display: flex;
   flex: 0 1 auto;
   flex-direction: column;
-  width: var(--inspector-width, 300px);
-  min-width: 180px;
+  width: var(--inspector-width, 256px);
+  /* With its bar, the 180px the inspector gives way down to in a window too narrow for everything. */
+  min-width: 136px;
   min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--bg-side);
 }
 
-.tabs {
+/* Pinned, it is beside the page. Otherwise it lies over the page from the bar's edge, and nothing under it moves. */
+.inspector[data-layout="temporary"] {
+  position: absolute;
+  top: 0;
+  right: 44px;
+  bottom: 0;
+  z-index: 20;
+  max-width: calc(100% - 44px);
+  box-shadow: var(--shadow);
+}
+
+.app[data-bar] > .inspector[data-layout="temporary"] {
+  bottom: 26px;
+}
+
+.inspector:focus {
+  outline: none;
+}
+
+.panel-head {
   display: flex;
   flex: none;
-  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
   height: 38px;
-  padding: 0 14px;
+  padding: 0 8px 0 14px;
   border-bottom: 1px solid var(--line);
 }
 
-.tabs [role="tab"] {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
+.panel-head h2 {
+  margin: 0;
   font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
 }
 
-.tabs [role="tab"][aria-selected="true"] {
-  box-shadow: inset 0 -2px 0 var(--accent);
+.panel-head [aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.rail .icon-button[aria-expanded="true"] {
+  background: var(--hover);
   color: var(--ink);
 }
 
@@ -2983,7 +3004,7 @@ kbd {
   font-size: 11.5px;
 }
 
-/* A closed sidebar and a closed inspector: a bar of icons, one for each thing the open one lists. */
+/* A closed sidebar, and the inspector's bar, which is always there: a bar of icons, one for each thing the sidebar lists or each panel. */
 
 .rail {
   display: flex;
@@ -3131,14 +3152,8 @@ kbd {
   background: var(--accent);
 }
 
-.rail .icon-button,
-.tabs [role="tab"] {
+.rail .icon-button {
   position: relative;
-}
-
-.tabs .unseen-dot {
-  top: 9px;
-  right: -9px;
 }
 
 /* History: a list of changes with a tick each, beside what everything picked did */

@@ -233,7 +233,7 @@ test("typing elsewhere, someone else's change elsewhere, and a plugin turned off
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("Disable plugin: Backlinks");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("tab")).toHaveText(["History", "Info"]);
+  await expect(page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button")).toHaveCount(2);
   steady(await seen(page), first);
 });
 

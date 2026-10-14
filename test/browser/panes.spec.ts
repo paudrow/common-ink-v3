@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, noteCard, openAllNotes, perform, runCommand, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
+import { folderRow, noteCard, openAllNotes, panelIcons, perform, runCommand, showPanel, shownPanel, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
 
 const tabBar = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group);
 const tabs = (page: Page, group = 0) => tabBar(page, group).getByRole("tab");
@@ -325,28 +325,29 @@ test("a layout kept with an italic tab in each pane opens with one, in the pane 
   await expect.poll(() => previews(page)).toEqual(["Beta"]);
 });
 
-test("the inspector shows the tab last picked, on whatever has it, and one it does have on what doesn't, without forgetting the pick", async ({ page }) => {
+test("the inspector shows the panel last picked on whatever is in front, and says there is nothing to show where that panel has nothing", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta");
   await keep(page, "Alpha");
   await keep(page, "Beta");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  const shown = () => inspector.getByRole("tab", { selected: true });
+  const shown = () => shownPanel(page);
 
   // Nothing picked yet: Info.
   await expect(shown()).toHaveText("Info");
-  await inspector.getByRole("tab", { name: "Backlinks" }).click();
+  await showPanel(page, "Backlinks");
   await expect(shown()).toHaveText("Backlinks");
 
-  // A folder has no Backlinks: it shows what it has, and the note after it shows Backlinks again, as another note does.
+  // A folder has no backlinks: the panel is still Backlinks, with nothing to show, and the note after it shows Backlinks again, as another note does.
   await tab(page, "All notes").click();
-  await expect(shown()).toHaveText("History");
-  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
+  await expect(shown()).toHaveText("Backlinks");
+  await expect(inspector.locator(".inspector-body")).toHaveText("Nothing to show for this view");
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
   await tab(page, "Beta").click();
   await expect(shown()).toHaveText("Backlinks");
   await tab(page, "Alpha").click();
   await expect(shown()).toHaveText("Backlinks");
 
-  // A page has no tabs at all, and the pick is still there after it, and after a reload.
+  // A page that says nothing of what it shows has nothing for any panel, and the pick is still there after it, and after a reload.
   await modes(page).getByRole("link", { name: "Dashboard" }).click();
   await expect(inspector.getByText("Nothing to show for this view")).toBeVisible();
   await tab(page, "Alpha").click();
@@ -355,7 +356,7 @@ test("the inspector shows the tab last picked, on whatever has it, and one it do
   await expect(shown()).toHaveText("Backlinks");
 
   // Info picked on a note is Info on a folder, which has its own, and on the next note.
-  await inspector.getByRole("tab", { name: "Info" }).click();
+  await showPanel(page, "Info");
   await openAllNotes(page);
   await expect(inspector.getByText("2 notes")).toBeVisible();
   await tab(page, "Beta").click();

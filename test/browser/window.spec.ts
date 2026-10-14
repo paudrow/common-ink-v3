@@ -53,26 +53,26 @@ test("the sidebar is dragged wider and narrower by its inner edge, within its li
 test("the inspector is dragged by its inner edge, and both edges are moved with the keyboard and put back with Enter", async ({ page }) => {
   await withNote(page);
   await expect(inspector(page)).toBeVisible();
-  expect(await widthOf(inspector(page))).toBe(300);
+  expect(await widthOf(inspector(page))).toBe(256);
   const handle = edge(page, "Resize inspector");
 
   await drag(page, handle, -80);
-  expect(await widthOf(inspector(page))).toBe(380);
+  expect(await widthOf(inspector(page))).toBe(336);
   await page.reload();
   await expect(inspector(page)).toBeVisible();
-  expect(await widthOf(inspector(page))).toBe(380);
+  expect(await widthOf(inspector(page))).toBe(336);
 
   await handle.focus();
   await expect(handle).toBeFocused();
   await page.keyboard.press("ArrowLeft");
-  expect(await widthOf(inspector(page))).toBe(396);
+  expect(await widthOf(inspector(page))).toBe(352);
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
-  expect(await widthOf(inspector(page))).toBe(364);
-  for (let i = 0; i < 12; i++) await page.keyboard.press("ArrowRight");
+  expect(await widthOf(inspector(page))).toBe(320);
+  for (let i = 0; i < 9; i++) await page.keyboard.press("ArrowRight");
   expect(await widthOf(inspector(page))).toBe(180);
   await page.keyboard.press("Enter");
-  expect(await widthOf(inspector(page))).toBe(300);
+  expect(await widthOf(inspector(page))).toBe(256);
 
   await edge(page, "Resize sidebar").focus();
   await page.keyboard.press("ArrowRight");
@@ -179,33 +179,34 @@ for (const steps of [1, 4, 30]) {
   });
 }
 
-test("the inspector folds to its bar and opens again by its edge, the same way", async ({ page }) => {
+test("the inspector's pinned panel folds away by its edge, leaving its bar where it was, and opens again by that edge, pinned", async ({ page }) => {
   await withNote(page);
   await page.evaluate(() => document.fonts.ready);
   const handle = edge(page, "Resize inspector");
   const bar = page.getByRole("navigation", { name: "Inspector bar" });
   const main = page.getByRole("main", { name: "Editor" });
   const { x, y } = await middleOf(handle);
-  expect(x).toBe(1280 - 300);
-  const to = (wide: number) => page.mouse.move(1280 - wide, y, { steps: 5 });
+  expect(x).toBe(1280 - 256 - 44);
+  const barAt = await bar.boundingBox();
+  /** Moves the pointer to where the panel would be `wide` across, left of its bar. */
+  const to = (wide: number) => page.mouse.move(1280 - 44 - wide, y, { steps: 5 });
 
   await page.mouse.move(x, y);
   await page.mouse.down();
   await to(140);
   await expect(inspector(page)).toBeVisible();
   expect(await widthOf(inspector(page))).toBe(180);
-  // It folds under 100: half way from its least width to the bar, less a little.
-  await to(102);
+  // It folds under 78: half way from its least width to nothing, less a little.
+  await to(80);
   await expect(inspector(page)).toBeVisible();
-  await to(96);
-  await expect(bar).toBeVisible();
+  await to(74);
   await expect(inspector(page)).toHaveCount(0);
-  for (const wide of [108, 120, 99]) {
+  for (const wide of [86, 100, 77]) {
     await to(wide);
-    await expect(bar).toBeVisible();
+    await expect(inspector(page)).toHaveCount(0);
   }
   await page.mouse.up();
-  expect(await widthOf(bar)).toBe(44);
+  expect(await bar.boundingBox()).toEqual(barAt);
   expect(await widthOf(main)).toBe(1280 - 216 - 44);
   await expect(handle).toHaveAttribute("aria-valuetext", "Collapsed");
 
@@ -213,11 +214,13 @@ test("the inspector folds to its bar and opens again by its edge, the same way",
   await page.mouse.down();
   await to(130);
   await expect(inspector(page)).toBeVisible();
-  expect(await widthOf(inspector(page))).toBe(300);
+  expect(await widthOf(inspector(page))).toBe(256);
   await to(420);
   await expect.poll(() => widthOf(inspector(page))).toBe(420);
   await page.mouse.up();
   expect(await widthOf(inspector(page))).toBe(420);
+  expect(await bar.boundingBox()).toEqual(barAt);
+  await expect(inspector(page).getByRole("button", { name: "Pin beside the page" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("a press on a folded side's edge with no drag opens it, and from the keyboard its edge folds it and opens it", async ({ page }) => {
@@ -263,16 +266,16 @@ test("a press on a folded side's edge with no drag opens it, and from the keyboa
   const right = edge(page, "Resize inspector");
   await right.focus();
   await page.keyboard.press("Home");
-  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
+  await expect(inspector(page)).toHaveCount(0);
   await expect(right).toBeFocused();
   await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
+  await expect(inspector(page)).toHaveCount(0);
   await page.keyboard.press("ArrowLeft");
   await expect(inspector(page)).toBeVisible();
-  expect(await widthOf(inspector(page))).toBe(300);
+  expect(await widthOf(inspector(page))).toBe(256);
   await page.keyboard.press("Home");
   await page.keyboard.press("End");
-  expect(await widthOf(inspector(page))).toBe(300);
+  expect(await widthOf(inspector(page))).toBe(256);
 });
 
 test("a width kept from before the sides folded by their edges is the width they open at", async ({ page }) => {
@@ -281,17 +284,22 @@ test("a width kept from before the sides folded by their edges is the width they
     const person = Object.keys(localStorage).find((key) => key.startsWith("ink.widths."))!;
     localStorage.setItem(person, JSON.stringify({ sidebar: 333, inspector: 444 }));
     localStorage.setItem("ink.sidebar", "false");
+    // The inspector as it was kept before it had panels over the page: open or closed, and the tab last picked.
+    localStorage.removeItem(person.replace("ink.widths.", "ink.inspector."));
     localStorage.setItem("ink.inspector", "false");
+    localStorage.setItem(person.replace("ink.widths.", "ink.inspectorTab."), JSON.stringify("backlinks"));
   });
   await page.goto(`/note/${note.id}`);
   await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
+  await expect(inspector(page)).toHaveCount(0);
   await edge(page, "Resize sidebar").focus();
   await page.keyboard.press("Enter");
   expect(await widthOf(sidebar(page))).toBe(333);
   await edge(page, "Resize inspector").focus();
   await page.keyboard.press("Enter");
   expect(await widthOf(inspector(page))).toBe(444);
+  await expect(inspector(page).locator(".panel-head h2")).toHaveText("Backlinks");
 });
 
 test("the tab row has its tabs and Focus and no button for either side, whose commands and keys still close and open them", async ({ page }) => {
@@ -529,7 +537,7 @@ test(`in a pane 320px wide a note's bar is as tall before the name of its folder
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords.", folderId });
   await page.evaluate(() => {
     localStorage.setItem("ink.sidebar", "false");
-    localStorage.setItem("ink.inspector", "false");
+    localStorage.setItem(Object.keys(localStorage).find((key) => key.startsWith("ink.inspector."))!, JSON.stringify({ panel: "info", open: false, pinned: true }));
   });
   let arrive = () => {};
   const held = new Promise<void>((done) => (arrive = done));
@@ -605,38 +613,43 @@ test("a closed sidebar leaves a bar with an icon for each thing the sidebar list
   await expect(bar).toBeVisible();
 });
 
-test("a closed inspector leaves a bar with an icon for each of its tabs for what is in front, and an icon opens the inspector on its tab", async ({ page }) => {
+test("the inspector's bar has an icon for each panel whatever is in front, with its panel closed too, and an icon shows its panel", async ({ page }) => {
   await withNote(page);
   const main = page.getByRole("main", { name: "Editor" });
   const before = (await main.boundingBox())!;
-  await toggleInspector(page);
   const bar = page.getByRole("navigation", { name: "Inspector bar" });
+  const barAt = await bar.boundingBox();
+  await toggleInspector(page);
+  await expect(inspector(page)).toHaveCount(0);
   await expect(bar.getByRole("button")).toHaveCount(3);
   expect((await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Backlinks", "Info"]);
   await expect(bar.getByRole("button", { name: "Backlinks" })).toHaveAttribute("title", "Backlinks");
+  expect(await bar.boundingBox()).toEqual(barAt);
   expect(await widthOf(bar)).toBe(44);
-  expect(await widthOf(main)).toBe(Math.round(before.width) + 300 - 44);
+  expect(await widthOf(main)).toBe(Math.round(before.width) + 256);
   expect((await main.boundingBox())!.x).toBe(before.x);
 
   await bar.getByRole("button", { name: "History" }).click();
-  await expect(inspector(page).getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
-  await expect(inspector(page).getByRole("tabpanel").getByRole("listbox", { name: "Changes" }).getByRole("option")).toHaveCount(1);
-  await expect(bar).toHaveCount(0);
+  await expect(inspector(page).locator(".panel-head h2")).toHaveText("History");
+  await expect(inspector(page).locator(".inspector-body").getByRole("listbox", { name: "Changes" }).getByRole("option")).toHaveCount(1);
+  expect(await bar.boundingBox()).toEqual(barAt);
 
-  // A folder's list has its two tabs, and a mode has none: the bar is there, with nothing in it to press that would say nothing.
-  await toggleInspector(page);
+  // A folder's list and a mode have the same three, in the same places.
+  const icons = await listedIn(bar, "button");
   await page.getByRole("treeitem", { name: "Unsorted" }).click();
-  await expect.poll(async () => (await listedIn(bar, "button")).map((o) => o.name)).toEqual(["History", "Info"]);
+  await expect(page.getByRole("tab", { name: "Unsorted" })).toHaveAttribute("aria-selected", "true");
+  expect(await listedIn(bar, "button")).toEqual(icons);
   await bar.getByRole("button", { name: "Info" }).click();
   await expect(inspector(page).getByRole("definition")).toHaveText(["Unsorted", "1 note", "just now by Ada Lovelace"]);
 
-  await toggleInspector(page);
   await page.getByRole("link", { name: "Search" }).click();
   await expect(page.getByRole("heading", { name: "Search" })).toBeVisible();
-  await expect(bar).toBeVisible();
-  await expect(bar.getByRole("button")).toHaveCount(0);
+  expect(await listedIn(bar, "button")).toEqual(icons);
+  await expect(inspector(page).locator(".inspector-body")).toHaveText("Nothing to show for this view");
   await toggleInspector(page);
-  await expect(inspector(page)).toHaveText("Nothing to show for this view");
+  await expect(inspector(page)).toHaveCount(0);
+  expect(await listedIn(bar, "button")).toEqual(icons);
+  expect(await bar.boundingBox()).toEqual(barAt);
 });
 
 test("with nothing open Focus and both edges are still there", async ({ page }) => {

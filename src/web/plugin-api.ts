@@ -12,6 +12,7 @@
 import type { ComponentType, ReactNode } from "react";
 import type { Agent, AgentEdit, ConnectOptions, ListedFolder, Note, NoteSummary, OpInput, Results, WorkspaceSummary } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
+import type { Showing } from "./inspected.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
@@ -232,18 +233,14 @@ export interface Slots {
    */
   folder: { id: string; component: ComponentType<FolderProps> };
   /**
-   * A tab of the inspector. The inspector is about what the editor area has in front, and a view
-   * says which kind of thing it is `for`: it is a tab only while one of those is in front, and its
-   * component is handed that thing (see {@link Inspected}). A note's tabs and a folder's are
-   * different views, which may share a label, as History and Info do. With no view for what is in
-   * front, which today is every page, the inspector says there is nothing to show. With the
-   * inspector closed each view is an icon in the bar that stands in its place.
-   *
-   * One tab is remembered per person, across everything: the one they last picked. What shows is
-   * the view with the picked id, or else the view with the same label where what is in front has
-   * its own, or else the first view with no `badge`, or else the first. A person who has picked
-   * none is shown {@link UNPICKED}. A view with a `badge` counts what it flags as seen by being
-   * shown, as History does, so it is never shown unasked ahead of a view without one.
+   * A panel of the inspector. The inspector has a narrow bar of icons at the right of the window,
+   * one for each view, which is the same whatever the editor area has in front. An icon shows its
+   * panel over the page until the member goes elsewhere, or beside the page once they pin it; the
+   * app keeps which panel, and whether it is pinned, as the member last had them. A panel is about
+   * what is in front ({@link About}): the view says which kinds of thing it has something to show
+   * `for`, and its component is handed the thing. For any other kind, and for a page that says
+   * nothing of what it shows, the inspector says "Nothing to show for this view" in the panel's
+   * place. Each view gets an `inspector.<id>` command that does what its icon does.
    */
   inspector: InspectorView;
   /**
@@ -273,27 +270,34 @@ export interface Slots {
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void }> };
 }
 
-/** What an inspector view is handed besides `app`, by what it is `for`. */
-export interface Inspected {
-  note: { note: NoteSummary };
-  /** `folderId` is a folder's id, or {@link ALL_NOTES}; `name` is what its list is called; `notes` are the notes in it. */
-  folder: { folderId: string; name: string; notes: readonly NoteSummary[] };
-  page: { page: PageInfo };
+/**
+ * What the inspector is about: what the editor area has in front. A note; a folder's list, where
+ * `folderId` is a folder's id or {@link ALL_NOTES}, `name` is what the list is called and `notes`
+ * are the notes in it; or the notes a page says it is showing, under the name the page gave them.
+ */
+export type About =
+  | { kind: "note"; note: NoteSummary }
+  | { kind: "folder"; folderId: string; name: string; notes: readonly NoteSummary[] }
+  | { kind: "notes"; label: string; notes: readonly NoteSummary[] };
+
+export interface InspectorView {
+  id: string;
+  label: string;
+  icon: IconName;
+  /** The kinds of thing it has something to show for. With any other in front the inspector says there is nothing to show, and the component is not drawn. */
+  for: readonly About["kind"][];
+  component: ComponentType<ViewProps & { about: About }>;
+  /** Something to flag on its icon in the bar, by a dot and these words for a screen reader, or null. */
+  badge?: (app: App) => string | null;
 }
 
-export type InspectorView = {
-  [K in keyof Inspected]: {
-    id: string;
-    label: string;
-    icon: IconName;
-    for: K;
-    component: ComponentType<ViewProps & Inspected[K]>;
-    /** Something to flag on the tab and on its icon in the closed bar, by a dot and these words for a screen reader, or null. */
-    badge?: (app: App) => string | null;
-  };
-}[keyof Inspected];
-
-export { UNPICKED } from "./inspectorPick.ts";
+/**
+ * How a page says what it is showing, so the inspector's panels are about that while the page is
+ * in front: `useInspected(app, { kind: "notes", label: "Open todos", noteIds })`, or a single
+ * note with `{ kind: "note", noteId }`, or null while it has nothing to say. Notes the member
+ * can't see are left out.
+ */
+export { useInspected, type Showing } from "./inspected.ts";
 
 export interface FolderProps extends ViewProps {
   /** The folder whose notes to list: a folder's id, or {@link ALL_NOTES}. It may name no folder the member can see. */
@@ -579,6 +583,14 @@ export interface App {
   markSeen(noteId: string, revision: number): void;
   toggleOverlay(id: string): void;
   toggleSidebar(): void;
+  /** Does what a panel's icon in the inspector's bar does: shows that panel, or closes it if it is the one showing. */
+  togglePanel(viewId: string): void;
+  /**
+   * For a page: says what the page is showing, for the inspector to be about while the page is in
+   * front, or null for nothing. {@link useInspected} calls it and takes it back when the page goes.
+   * Anywhere but in a page it does nothing.
+   */
+  inspect(showing: Showing | null): void;
   /** Enters or leaves focus. */
   setFocus(on: boolean): void;
   switchWorkspace(workspaceId: string): void;

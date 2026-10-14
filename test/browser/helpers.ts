@@ -74,5 +74,25 @@ export async function runCommand(page: Page, title: string) {
 
 /** Closes the sidebar to its bar, or opens it, by its command: no button does it. */
 export const toggleSidebar = (page: Page) => runCommand(page, "Toggle sidebar");
-/** Closes the inspector to its bar, or opens it, by its command: no button does it. */
+/** Closes the inspector's panel, or shows the one last used, by its command. */
 export const toggleInspector = (page: Page) => runCommand(page, "Toggle inspector");
+
+/** A panel's icon in the inspector's bar, which is always there. */
+export const panelIcon = (page: Page, name: string) => page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button", { name, exact: true });
+
+/** Shows a panel of the inspector from its icon, unless it is the one showing: the same icon again would close it. */
+export async function showPanel(page: Page, name: string) {
+  const icon = panelIcon(page, name);
+  if ((await icon.getAttribute("aria-expanded")) !== "true") await icon.click();
+  await expect(icon).toHaveAttribute("aria-expanded", "true");
+}
+
+/** The names of the icons in the inspector's bar, in order: one for each panel, whatever is in front. */
+export const panelIcons = (page: Page) => () =>
+  page
+    .getByRole("navigation", { name: "Inspector bar" })
+    .getByRole("button")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
+
+/** The name of the panel the inspector shows, in the panel's header. */
+export const shownPanel = (page: Page) => page.getByRole("complementary", { name: "Inspector" }).locator(".panel-head h2");

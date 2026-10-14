@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Me, Note, OpInput } from "../../src/core/protocol.ts";
-import { connectAgent, listedNote, openAllNotes, perform, signInAsNewPerson, toggleInspector } from "./helpers.ts";
+import { connectAgent, listedNote, openAllNotes, panelIcon, panelIcons, perform, showPanel, shownPanel, signInAsNewPerson, toggleInspector } from "./helpers.ts";
 
 const UNSEEN = "Changes you haven't seen";
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -76,8 +76,8 @@ const THREE = ["You wrote Recipes", "Claude edited Trip", "You wrote Trip", "You
 
 async function openHistoryTab(page: Page, id: string) {
   await page.goto(`/note/${id}`);
-  await inspector(page).getByRole("tab", { name: "History" }).click();
-  return inspector(page).getByRole("tabpanel");
+  await showPanel(page, "History");
+  return inspector(page).locator(".inspector-body");
 }
 
 test("the inspector's History tab lists the note's changes with a tick each, over what the picked ones did: none on arriving, and no row of buttons", async ({ page }) => {
@@ -117,21 +117,21 @@ test("the inspector's History tab lists the note's changes with a tick each, ove
   await expect(added(pane(panel))).toHaveText(["", "Ada's last word", "", "Typed just now"]);
 });
 
-test("with Note info turned off a member who has picked no tab is shown Backlinks, not History, and the dot is still there", async ({ page }) => {
+test("with Note info turned off a member who has used no panel is shown none, so History is not shown unasked, and the dot is still there", async ({ page }) => {
   const { id } = await sharedNote(page);
   await page.goto("/plugins");
   await page.getByRole("checkbox", { name: "Note info", exact: true }).setChecked(false);
   await page.goto(`/note/${id}`);
 
-  await expect(inspector(page).getByRole("tab")).toHaveText(["History", "Backlinks"]);
-  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Backlinks");
-  const historyTab = inspector(page).getByRole("tab", { name: "History" });
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks"]);
+  await expect(inspector(page)).toHaveCount(0);
+  const historyTab = panelIcon(page, "History");
   await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
-  // A folder is left with History alone, which is then what shows, and a folder's History counts nothing as seen.
+  // A folder's list in front opens nothing either.
   await page.goto("/folder/all");
-  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("History");
+  await expect(listedNote(page, "Plan")).toBeVisible();
+  await expect(inspector(page)).toHaveCount(0);
   await page.goto(`/note/${id}`);
-  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Backlinks");
   await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
   await historyTab.click();
   await expect(historyTab).toHaveAccessibleDescription("");
@@ -155,16 +155,16 @@ test("focus shows no History mark: the way out is its only button, and the dot w
   await expect.poll(async () => (await page.locator(".group-body").filter({ visible: true }).boundingBox())!.width).toBe(1280);
 
   await page.getByRole("button", { name: "Focus" }).click();
-  await expect(page.getByRole("tab", { name: "History" })).toHaveAccessibleDescription(UNSEEN);
+  await expect(panelIcon(page, "History")).toHaveAccessibleDescription(UNSEEN);
 });
 
 test("a note someone else changed while the member was away shows the dot when it's opened", async ({ page }) => {
   const { id } = await sharedNote(page);
   await page.goto(`/note/${id}`);
 
-  // The member has picked no tab: Info shows, which counts nothing as seen.
-  const historyTab = inspector(page).getByRole("tab", { name: "History" });
-  await expect(inspector(page).getByRole("tab", { selected: true })).toHaveText("Info");
+  // The member has used no panel: Info shows, which counts nothing as seen.
+  const historyTab = panelIcon(page, "History");
+  await expect(shownPanel(page)).toHaveText("Info");
   await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
   await toggleInspector(page);
   const icon = page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button", { name: "History" });
@@ -1066,8 +1066,7 @@ test("an agent's edit read into the editor while the member types is never what 
 test("two members on one browser each have their own unseen changes", async ({ page }) => {
   const { id } = await sharedNote(page);
   await page.goto(`/note/${id}`);
-  const historyTab = inspector(page).getByRole("tab", { name: "History" });
-  await historyTab.click();
+  await showPanel(page, "History");
   await expect(rows(inspector(page))).toHaveCount(3);
   const mine = await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("ink.seen.")));
   const person = await page.evaluate(async () => ((await (await fetch("/api/me")).json()) as { person: { id: string } }).person.id);
@@ -1085,11 +1084,10 @@ test("with a folder's list in front the inspector's History tab lists that folde
   await perform(page, { type: "note.create", folderId: trips.id, text: "# Packing" });
 
   await page.goto(`/folder/${trips.id}`);
-  await expect(inspector(page).getByRole("tab")).toHaveText(["History", "Info"]);
   // Nothing picked yet: Info, as on a note.
-  await expect(inspector(page).getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
-  await inspector(page).getByRole("tab", { name: "History" }).click();
-  const panel = inspector(page).getByRole("tabpanel");
+  await expect(shownPanel(page)).toHaveText("Info");
+  await showPanel(page, "History");
+  const panel = inspector(page).locator(".inspector-body");
   const shown = read(tree(panel).locator('[aria-level="1"]'));
   await expect.poll(shown).toEqual(["+1 −0 Packing · 1 change · You", "+3 −0 Trip · 2 changes · Claude, You"]);
 
@@ -1106,7 +1104,7 @@ test("with a folder's list in front the inspector's History tab lists that folde
 
   // The tab picked for a folder stays picked on the next folder, and the list is that folder's.
   await page.getByRole("treeitem", { name: "Unsorted" }).click();
-  await expect(inspector(page).getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+  await expect(shownPanel(page)).toHaveText("History");
   await expect.poll(shown).toEqual(["+7 −0 Plan · 4 changes · You, Claude"]);
 
   await page.getByRole("treeitem", { name: "Empty" }).click();
@@ -1386,8 +1384,8 @@ test("a folder's History in the inspector lists its notes' changes by note or by
   await daysAgo(page, { Trip: { upTo: 1, days: 1 } });
 
   await page.goto(`/folder/${trips.id}`);
-  await inspector(page).getByRole("tab", { name: "History" }).click();
-  const panel = inspector(page).getByRole("tabpanel");
+  await showPanel(page, "History");
+  const panel = inspector(page).locator(".inspector-body");
   await expect(panel.getByRole("radio", { checked: true })).toHaveText(["By note"]);
   await expect.poll(byNote(panel)).toEqual(["Today", "+1 −0 Packing · 1 change · You", "+2 −0 Trip · 1 change · Claude", "Yesterday", "+1 −0 Trip · 1 change · You"]);
 

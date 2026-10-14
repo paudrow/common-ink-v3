@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, panelIcons, perform, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });
@@ -238,10 +238,10 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(folder(page, "Common Ink")).toHaveAttribute("aria-selected", "true");
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
-  // With no tab picked yet, Info shows.
-  await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
-  const panel = inspector.getByRole("tabpanel");
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  // A member's first time has Info.
+  await expect(shownPanel(page)).toHaveText("Info");
+  const panel = inspector.locator(".inspector-body");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
   await expect(panel.getByRole("definition").first().locator("span")).toHaveText("Projects / Common Ink");
   await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveValue(ink.id);
@@ -252,12 +252,12 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect(panel.getByRole("button", { name: "Copied" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Archive" })).toBeDisabled();
 
-  await inspector.getByRole("tab", { name: "History" }).click();
+  await showPanel(page, "History");
   await expect(panel.getByRole("listbox", { name: "Changes" }).getByRole("option")).toContainText("You wrote");
-  await inspector.getByRole("tab", { name: "Backlinks" }).click();
+  await showPanel(page, "Backlinks");
   await expect(panel).toHaveText("Notes that link here arrive with #13.");
 
-  await inspector.getByRole("tab", { name: "Info" }).click();
+  await showPanel(page, "Info");
   await panel.getByRole("combobox", { name: "Move to" }).selectOption({ label: "Projects" });
   await expect(panel.getByRole("definition").first().locator("span")).toHaveText("Projects");
   await expect(folder(page, "Projects")).toHaveAccessibleDescription("1");
@@ -323,7 +323,7 @@ test("focus shows neither bar when the sidebar and the inspector were closed, on
   await expect(page.getByRole("navigation", { name: "Inspector bar" })).toBeVisible();
 });
 
-test("the inspector stays open whatever is in front and shows what belongs to it: a note's tabs, a folder's Info, and one quiet line on a mode", async ({ page }) => {
+test("the inspector stays open whatever is in front, with the same icons in its bar, and shows what belongs to it: a note's Info, a folder's Info, and one quiet line on a mode", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const projects = await perform(page, { type: "folder.create", name: "Projects" });
   const plan = await perform(page, { type: "note.create", folderId: projects.id, text: "# Plan" });
@@ -332,24 +332,25 @@ test("the inspector stays open whatever is in front and shows what belongs to it
   await page.goto(`/note/plan-${plan.id}`);
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  const panel = inspector.getByRole("tabpanel");
-  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
-  await inspector.getByRole("tab", { name: "Info" }).click();
+  const panel = inspector.locator(".inspector-body");
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
+  await showPanel(page, "Info");
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
   const place = await inspector.boundingBox();
 
   await folder(page, "Projects").click();
   await expect(listHeading(page)).toHaveText("Projects");
-  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Notes", "Last changed"]);
   await expect(panel.getByRole("definition")).toHaveText(["Projects", "2 notes", "just now by Ada Lovelace"]);
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveCount(0);
   await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveCount(0);
   expect(await inspector.boundingBox()).toEqual(place);
 
-  // The tab picked on a note is the one a folder showed, and the one a note comes back to.
+  // The panel picked on a note is the one a folder showed, and the one a note comes back to.
   await page.goBack();
-  await expect(inspector.getByRole("tab", { name: "Info" })).toHaveAttribute("aria-selected", "true");
+  await expect(shownPanel(page)).toHaveText("Info");
+  await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
   expect(await inspector.boundingBox()).toEqual(place);
 
   await openAllNotes(page);
@@ -360,14 +361,13 @@ test("the inspector stays open whatever is in front and shows what belongs to it
 
   await page.getByRole("link", { name: "Calendar" }).click();
   await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
-  await expect(inspector).toHaveText("Nothing to show for this view");
-  await expect(inspector.getByRole("tab")).toHaveCount(0);
-  await expect(page.getByRole("navigation", { name: "Inspector bar" })).toHaveCount(0);
+  await expect(panel).toHaveText("Nothing to show for this view");
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
   expect(await inspector.boundingBox()).toEqual(place);
 
   await page.goto("/folder/nosuchfolder");
   await expect(page.getByText("This folder doesn't exist, or you can't see it.")).toBeVisible();
-  await expect(inspector).toHaveText("Nothing to show for this view");
+  await expect(panel).toHaveText("Nothing to show for this view");
 
 });
 
