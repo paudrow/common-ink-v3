@@ -5326,35 +5326,38 @@ button.diff-fold:hover {
   list-style: none;
 }
 
-/* A todo's row: its checkbox, its words and its chips, which wrap as one run of text, and its note's name at the right. */
+/* A todo's row, in two lines. The first is the todo: its checkbox, its words and, at the right, its note's name. The second, under
+   the words, is what is set on it and then what can be. Every row has both, so the list has one rhythm. */
 .todo-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1.02em minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 2px;
   align-items: baseline;
-  gap: 10px;
   margin: 0 -6px;
-  padding: 4px 6px;
+  padding: 6px 6px;
   border-radius: 7px;
   font-size: 14.5px;
   line-height: 1.45;
 }
 
-/* The row being changed, by a chip's popover, is tinted as a row under the pointer is. Colour only: nothing moves. */
+/* The row being changed, by a chip's popover or its menu, is tinted as a row under the pointer is. Colour only: nothing moves. */
 .todo-row:hover,
 .todo-row[data-picking] {
   background: var(--hover);
 }
 
 .todo-box {
-  flex: none;
+  grid-row: 1;
+  grid-column: 1;
+  align-self: start;
   box-sizing: border-box;
   width: 1.02em;
   height: 1.02em;
-  margin: 0;
+  margin: calc((1.45em - 1.02em) / 2) 0 0;
   border: 1.5px solid var(--faint);
   border-radius: 5px;
   background: var(--bg-elev) center / 100% no-repeat;
-  transform: translateY(0.15em);
   appearance: none;
   cursor: pointer;
   transition:
@@ -5382,16 +5385,12 @@ button.diff-fold:hover {
   opacity: 0.7;
 }
 
-/* Its words take the room before anything else: where a row is too narrow for them beside its note's name and buttons, those go under them. */
 .todo-text {
-  flex: 1 1 min(10em, calc(100% - 1.02em - 10px));
+  grid-row: 1;
+  grid-column: 2;
   min-width: 0;
   color: var(--ink);
   overflow-wrap: anywhere;
-}
-
-.todo-words {
-  margin-right: 4px;
 }
 
 .todo-words[role="button"] {
@@ -5418,13 +5417,14 @@ button.diff-fold:hover {
   color: var(--accent-ink);
 }
 
-/* The words being edited, in place: a one-line field as wide as v1's, as tall as it was, laid over the row's padding so nothing moves. */
+/* The words being edited, in place: a one-line field as wide as v1's where there is room, as tall as the line, laid over the row's
+   padding so nothing moves. */
 .todo-edit {
   display: inline-block;
   box-sizing: border-box;
-  max-width: 100%;
+  width: min(420px, 100%);
   height: 26px;
-  margin: -2.5px 4px -2.5px 0;
+  margin: -2.5px 0;
   padding: 0 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 6px;
@@ -5436,21 +5436,31 @@ button.diff-fold:hover {
   vertical-align: top;
 }
 
-/* What can be set on a todo, as pills after its words, as v1 drew them: each opens a popover under itself, and a tag's narrows the list. */
+/* The second line: what is set, then what isn't, starting under the words. */
+.todo-chips {
+  display: flex;
+  grid-row: 2;
+  grid-column: 2 / 4;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  min-height: 20px;
+}
+
+/* What is set on a todo, as pills, as v1 drew them: each opens a popover under itself, and a tag's narrows the list. */
 .todo-chip {
   display: inline-flex;
   box-sizing: border-box;
   align-items: center;
   gap: 4px;
   height: 20px;
-  margin: 0 2px;
   padding: 0 7px;
   border: 0;
   border-radius: 999px;
   background: var(--hover);
   color: var(--chip-ink);
   font: 500 11.5px/1 var(--prose);
-  vertical-align: middle;
   white-space: nowrap;
 }
 
@@ -5461,17 +5471,25 @@ button.diff-fold:hover {
   opacity: 0.75;
 }
 
-/* What isn't set yet: the same pill, quiet and dashed, as v1's empty filter pills. */
+.todo-chip .chip-hash {
+  width: auto;
+  color: inherit;
+}
+
+/* What isn't set yet: its icon and word, quiet and without a pill, which is drawn, dashed, while the row is pointed at or has the keyboard. */
 .todo-chip[data-unset] {
-  border: 1px dashed var(--line-strong);
+  padding: 0 6px;
+  border: 1px dashed transparent;
   background: none;
-  color: var(--faint);
+  color: color-mix(in srgb, var(--muted) 65%, var(--faint));
+  font-weight: 450;
 }
 
 .todo-row:hover .todo-chip[data-unset],
-.todo-chip[data-unset]:focus-visible,
-.todo-chip[data-unset][aria-expanded="true"] {
-  color: var(--muted);
+.todo-row:focus-within .todo-chip[data-unset],
+.todo-row[data-picking] .todo-chip[data-unset] {
+  border-color: var(--faint);
+  color: var(--chip-ink);
 }
 
 button.todo-chip {
@@ -5482,8 +5500,19 @@ button.todo-chip:enabled:hover {
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
+button.todo-chip[data-unset]:enabled:hover {
+  box-shadow: none;
+  color: var(--ink);
+}
+
 button.todo-chip[aria-expanded="true"] {
   box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+button.todo-chip[data-unset][aria-expanded="true"] {
+  border-color: var(--accent);
+  box-shadow: none;
+  color: var(--ink);
 }
 
 button.todo-chip:focus-visible {
@@ -5533,51 +5562,36 @@ button.todo-tag[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-/* Where a todo is: its note's name, quiet, at the row's right end, and the way to the note. */
-/* Its note's name and its buttons, at the row's right end, or under its words as one where the row is narrow: the name, at most 38% of
-   the row as v1's, gives way to the buttons. */
-.todo-end {
-  display: flex;
-  flex: 0 1 auto;
-  align-self: center;
-  align-items: center;
-  gap: 4px 10px;
-  max-width: calc(38% + 102px);
-  min-width: 0;
-  margin-left: auto;
-}
-
-.todo-where {
-  display: flex;
-  flex: 0 1 auto;
-  align-items: baseline;
-  gap: 4px;
-  min-width: 0;
-}
-
-/* In a list too narrow for a row's words beside its end, the end is a line of its own under them, and the note's name is not
-   squeezed: where it doesn't fit beside the buttons, they go under it. */
-@container todos (max-width: 360px) {
-  .todo-end {
-    flex-basis: 100%;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    max-width: none;
-  }
-}
-
+/* Where a todo is: its note's name, quiet, at the right of its first line, and the way to the note. It gives way to the words, up to
+   38% of the row as v1's label, and ends in an ellipsis. */
 .todo-note {
-  overflow: hidden;
+  display: flex;
+  grid-row: 1;
+  grid-column: 3;
+  gap: 6px;
+  justify-self: end;
+  max-width: 38cqi;
+  min-width: 0;
   margin: -3px -4px;
   padding: 3px 4px;
   border: 0;
   border-radius: 5px;
   background: none;
   color: var(--muted);
-  font: 11.5px var(--prose);
-  text-overflow: ellipsis;
+  font: 12px var(--prose);
   white-space: nowrap;
   cursor: pointer;
+}
+
+.todo-note-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Listed under its note's tag, not its own: the tag, said after the note's name, quieter still. */
+.todo-via {
+  flex: none;
+  color: var(--faint);
 }
 
 .todo-note:hover,
@@ -5589,6 +5603,31 @@ button.todo-tag[aria-pressed="true"] {
 .todo-note:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* In a narrow list the words have the whole first line, the note's name goes on a line of its own under the chips, where the words
+   start, and what isn't set is its icon alone, named on hover, so the second line still holds a row's chips. */
+@container todos (max-width: 440px) {
+  .todo-text {
+    grid-column: 2 / 4;
+  }
+
+  .todo-note {
+    grid-row: 3;
+    grid-column: 2 / 4;
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .todo-chip[data-unset] {
+    justify-content: center;
+    width: 22px;
+    padding: 0;
+  }
+
+  .todo-chip-word {
+    display: none;
+  }
 }
 
 /* What a todo's chip opens: its choices, as v1's. */
@@ -5687,50 +5726,6 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--ink);
   font: inherit;
   font-size: 14px;
-}
-
-/* v1's three buttons at a row's end: its fields, go to the note, open it in a split. Out of sight until the row is pointed at or has
-   the keyboard, keeping their room while hidden so nothing moves, and still reached with Tab. */
-.todo-acts {
-  display: flex;
-  flex: none;
-  gap: 10px;
-}
-
-.todo-act {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  color: var(--muted);
-  opacity: 0;
-  cursor: pointer;
-}
-
-.todo-act svg {
-  width: 13px;
-  height: 13px;
-}
-
-.todo-row:hover .todo-act,
-.todo-row:focus-within .todo-act,
-.todo-act[aria-expanded="true"] {
-  opacity: 1;
-}
-
-.todo-act:hover {
-  background: var(--hover);
-  color: var(--ink);
-}
-
-.todo-act:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
 }
 
 .todo-none {
