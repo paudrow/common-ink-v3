@@ -36,11 +36,13 @@ describe("what the Worker tells a browser about each response", () => {
     expect([res.status, res.headers.get("Content-Security-Policy")]).toEqual([301, PAGE.replace("https://commonink.app/", "https://www.commonink.app/")]);
   });
 
-  it("lets only Vite's dev server run its inline script, and keeps a policy a response brings with it", () => {
+  it("lets only Vite's dev server run its inline script, and keeps a policy or referrer rule a response brings with it", () => {
     const url = new URL("https://localhost/note/x");
     expect(secured(new Response("<p>"), url, { DEV_SERVER: "1" }).headers.get("Content-Security-Policy")).toBe(PAGE.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'").replace("https://commonink.app/", "https://localhost/"));
     expect(secured(new Response("{}"), new URL("https://localhost/api/me"), { DEV_SERVER: "1" }).headers.get("Content-Security-Policy")).toBe(DATA);
     const own = new Response("<p>", { headers: { "Content-Security-Policy": "default-src 'none'" } });
     expect(secured(own, url, {}).headers.get("Content-Security-Policy")).toBe("default-src 'none'");
+    // A page a link opens sends no referrer, so its address goes to no other site.
+    expect(secured(new Response("<p>", { headers: { "Referrer-Policy": "no-referrer" } }), new URL("https://localhost/s/abcdefghijklmnopqrstu"), {}).headers.get("Referrer-Policy")).toBe("no-referrer");
   });
 });

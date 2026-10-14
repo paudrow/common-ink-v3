@@ -29,13 +29,13 @@ export async function handleAgentsApi(req: Request, env: Env, url: URL): Promise
         return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
       }
       if (!req.headers.get("Content-Type")?.startsWith("application/json")) return json({ error: "invalid", message: "Send JSON" }, 400);
-      let body: { name?: unknown; expiresInDays?: unknown; workspaceId?: unknown; readOnly?: unknown };
+      let body: { name?: unknown; expiresInDays?: unknown; workspaceId?: unknown; readOnly?: unknown; folderIds?: unknown };
       try {
         body = (await req.json()) as typeof body;
       } catch {
         return json({ error: "invalid", message: "The body isn't JSON" }, 400);
       }
-      // An edit keeps its nulls: a null workspace there means every workspace.
+      // An edit keeps its nulls: a null workspace there means every workspace, and null folders all notes.
       if (one) return json({ agent: await editAgent(env.DB, personId, one[1]!, body as never) });
       if (typeof body !== "object" || body === null || Array.isArray(body)) return json({ error: "invalid", message: "Send a JSON object" }, 400);
       if (typeof body.name !== "string") return json({ error: "invalid", message: "Give the agent a name" }, 400);

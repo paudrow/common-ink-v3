@@ -296,12 +296,13 @@ interface PaneProps {
   selection: Selection;
   /** The picked changes as the list counts them: rows, and the saves in them. */
   counted: { changes: number; saves: number };
-  canEdit: boolean;
+  /** Whether the member may change a note. A selection can hold notes they may only read. */
+  canEdit: (noteId: string) => boolean;
   /** Changes when a note does, or a label, so the diffs are read again. */
   version: number;
   madeAt: (noteId: string, revision: number) => number | undefined;
   onOpenNote: (noteId: string) => void;
-  onRevert: (asks: RevertAsk[]) => void;
+  onRevert: (asks: RevertAsk[], beyond?: string) => void;
   /** Opens the revert of everything picked at one conflict of one note. */
   onConflict: (noteId: string, index: number) => void;
   onLabeled: () => void;
@@ -323,6 +324,7 @@ function SelectionPane({ host, selection, counted, canEdit, version, madeAt, onO
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const all = useMemo(() => asked(selection), [selection]);
+  const mine = all.filter((c) => canEdit(c.noteId));
   const wanted = JSON.stringify(all.slice(0, parts * MAX_NOTES_AT_ONCE));
   const shownFor = useRef(selection);
   if (!sameSelection(shownFor.current, selection)) {
@@ -346,7 +348,7 @@ function SelectionPane({ host, selection, counted, canEdit, version, madeAt, onO
         // The diffs and the preview of their revert are read together and shown together, so no mark arrives on a diff already drawn.
         for (let i = 0; i < changes.length; i += MAX_NOTES_AT_ONCE) {
           const part = changes.slice(i, i + MAX_NOTES_AT_ONCE);
-          const [diffs, previews] = await Promise.all([host.perform({ type: "history.diff", changes: part }), canEdit ? host.perform({ type: "history.previewRevert", changes: part }) : []]);
+          const [diffs, previews] = await Promise.all([host.perform({ type: "history.diff", changes: part }), part.some((c) => canEdit(c.noteId)) ? host.perform({ type: "history.previewRevert", changes: part }) : []]);
           read.push(...diffs.notes);
           previewed.push(...previews);
         }
@@ -422,7 +424,7 @@ function SelectionPane({ host, selection, counted, canEdit, version, madeAt, onO
               key={note.noteId}
               host={host}
               note={note}
-              canEdit={canEdit}
+              canEdit={canEdit(note.noteId)}
               onOpenNote={onOpenNote}
               onRevert={onRevert}
               onLabeled={onLabeled}
@@ -447,7 +449,8 @@ interface Props {
   host: PluginHost;
   /** The member, whose own changes read "You". */
   me: string;
-  canEdit: boolean;
+  /** Whether the member may change a note. A selection can hold notes they may only read. */
+  canEdit: (noteId: string) => boolean;
   /** What it is narrowed to. Null is every note and everyone. */
   scope: Scope | null;
   /** The page lays the list and what is picked side by side with room, and shows one at a time without. A panel is narrow: what is picked is under the list. */
@@ -690,6 +693,13 @@ export function History({ host, me, canEdit, scope, layout, version, empty, onSc
   }, [selection, known]);
   const titleOfNote = (noteId: string) => data.changes?.find((c) => c.noteId === noteId)?.noteTitle ?? "";
   const asks = (): RevertAsk[] => asked(selection).map((c) => ({ noteId: c.noteId, title: titleOfNote(c.noteId), revisions: c.revisions }));
+  /** The picked changes of notes the member may change, and what is said of the rest, which are left out of a revert. */
+  const revertable = (): [RevertAsk[], string | undefined] => {
+    const all = asks();
+    const mine = all.filter((a) => canEdit(a.noteId));
+    const out = all.length - mine.length;
+    return [mine, out ? `${count(out, "note")} you can read and not change ${out === 1 ? "is" : "are"} left out.` : undefined];
+  };
 
   const changed = () => {
     reload((n) => n + 1);
@@ -857,8 +867,8 @@ export function History({ host, me, canEdit, scope, layout, version, empty, onSc
             <button type="button" className="link hist-open" onClick={() => setDetail(true)}>
               See
             </button>
-            {canEdit && (
-              <button type="button" className="button small" onClick={() => reverts.ask(asks())}>
+            {asked(selection).some((c) => canEdit(c.noteId)) && (
+              <button type="button" className="button small" onClick={() => reverts.ask(...revertable())}>
                 Revert…
               </button>
             )}
@@ -874,7 +884,7 @@ export function History({ host, me, canEdit, scope, layout, version, empty, onSc
         madeAt={(noteId, revision) => known.get(keyOf(noteId, revision))?.createdAt}
         onOpenNote={onOpenNote}
         onRevert={reverts.ask}
-        onConflict={(noteId, conflict) => reverts.ask(asks(), undefined, { noteId, conflict })}
+        onConflict={(noteId, conflict) => reverts.ask(...revertable(), { noteId, conflict })}
         onLabeled={() => reload((n) => n + 1)}
         onBack={() => setDetail(false)}
       />

@@ -72,6 +72,7 @@ export const tabs: Plugin = {
       const shown = useSyncExternalStore(subscribe, () => layout);
       const cursorGroup = useSyncExternalStore(subscribe, () => cursorTo);
       const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
+      const locked = useMemo(() => new Set((app.notes ?? []).filter((n) => n.private).map((n) => n.id)), [app.notes]);
       const home = app.path === "/";
 
       useEffect(() => {
@@ -91,6 +92,7 @@ export const tabs: Plugin = {
           layout={shown}
           titleOf={titleOf}
           iconOf={(tab) => (tab.kind === "folder" ? "folders" : tab.kind === "page" ? pages.get(tab.id)?.icon : undefined)}
+          isPrivate={(tab) => tab.kind === "note" && locked.has(tab.id)}
           dispatch={dispatch}
           render={(group, tab) =>
             tab.kind === "folder"

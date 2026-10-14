@@ -10,7 +10,7 @@
  * them, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, AgentEdit, ConnectOptions, Invite, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 import type { Showing } from "./inspected.ts";
 
@@ -98,18 +98,38 @@ export type Setting = { title: string; description?: string } & (
 
 export type SettingValue = boolean | string | number | readonly string[];
 
-/** The operations `host.perform` won't take: the member's settings, and every change to who is in the workspace, which goes through `host.members`. */
-export type KeptFromPerform = `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave";
+/**
+ * The operations `host.perform` won't take: the member's settings, every change to who is in the
+ * workspace, which goes through `host.members`, who a note or folder is shared with, which goes
+ * through `host.sharing`, and what a link's holder asks, which nobody signed in does.
+ */
+export type KeptFromPerform =
+  | `settings.${string}`
+  | `invite.${string}`
+  | "member.invite"
+  | "member.setRole"
+  | "member.remove"
+  | "member.leave"
+  | `grant.${string}`
+  | "note.setPrivate"
+  | `shared.${string}`;
+
+/** What a grant is on: one note or one folder. */
+export type SharedItem = { noteId: string } | { folderId: string };
 
 /** What a folder's list is called. Null for a folder that isn't there, or that the member can't see. */
-export const folderTitle = (folders: Folders, folderId: string): string | null => (folderId === ALL_NOTES ? "All notes" : (folders.byId.get(folderId)?.name ?? null));
+export const folderTitle = (folders: Folders, folderId: string): string | null =>
+  folderId === ALL_NOTES ? "All notes" : folderId === SHARED_WITH_ME ? "Shared with me" : (folders.byId.get(folderId)?.name ?? null);
+
+/** What stands for a folder where the notes listed are the ones shared with a guest whose folders they can't see. */
+export const SHARED_WITH_ME = "shared-with-me";
 
 /** What stands for a folder where the notes listed are every note the member can see. */
 export const ALL_NOTES = "all";
 
 /**
  * What the editor area has in front, and what an address can name there: a note, a folder's list
- * of notes, or a page. A folder's `id` is a folder's id, or {@link ALL_NOTES}.
+ * of notes, or a page. A folder's `id` is a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}.
  * A page's `id` is the id it was registered with, and `path` is the address it is at:
  * `/plugins/tabs` for the page at `/plugins`. Wherever under its path a page is, it is the same page.
  */
@@ -161,7 +181,8 @@ export interface PluginHost {
   /**
    * Performs a workspace operation as the member, with the member's access. Typing in open editors
    * is saved before an operation that moves a note through its history or previews that, and the editors take the result.
-   * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites.
+   * A settings operation is refused, and so is one that changes who is in the workspace or reads its invites,
+   * and one that reads or changes who a note or folder is shared with.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
   /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
@@ -191,6 +212,24 @@ export interface PluginHost {
     leave(): Promise<void>;
     invites(): Promise<Invite[]>;
     revoke(inviteId: string): Promise<void>;
+  };
+  /**
+   * Who a note or a folder is shared with, read and changed as the member. The server lets a member
+   * who can change the item share it, lets only a note's maker make it private, and lets only an
+   * admin list every grant. A guest can ask `of` and nothing else.
+   */
+  readonly sharing: {
+    /** How one note or folder is shared: its grants, those on the folders above it, and for a note whether it is private. */
+    of(on: SharedItem): Promise<Sharing>;
+    /** Gives whoever signs in with `email` view or edit, or changes what they have. */
+    grant(on: SharedItem, email: string, access: GrantAccess): Promise<Grant>;
+    /** Sets who the item's link opens for, or takes the link away with null. The address is `/s/<token>`. */
+    link(on: SharedItem, kind: LinkKind | null): Promise<Grant | null>;
+    revoke(grantId: string): Promise<void>;
+    /** `removed` is how many grants and links other people had put on the note, which go as it becomes private. */
+    setPrivate(noteId: string, isPrivate: boolean): Promise<{ removed: number }>;
+    /** Every grant in the workspace, for an admin. */
+    all(): Promise<Grant[]>;
   };
   /** JSON this plugin keeps in this browser for this workspace and this member. Other plugins can't see it. */
   readonly storage: {
@@ -296,8 +335,8 @@ export interface Slots {
    * it is out of sight.
    */
   bar: { id: string; component: View; side?: "left" | "right"; order?: number };
-  /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it. */
-  overlay: { id: string; component: ComponentType<ViewProps & { close: () => void }> };
+  /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it, and what it hands over is `state`. */
+  overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
 }
 
 /**
@@ -330,7 +369,7 @@ export interface InspectorView {
 export { useInspected, type Showing } from "./inspected.ts";
 
 export interface FolderProps extends ViewProps {
-  /** The folder whose notes to list: a folder's id, or {@link ALL_NOTES}. It may name no folder the member can see. */
+  /** The folder whose notes to list: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. It may name no folder the member can see. */
   folderId: string;
   /**
    * Draws a note's text to be read and not changed, as its editor draws it: the same embeds and the
@@ -563,14 +602,15 @@ export interface EditorContext {
 
 /** A workspace's folders, indexed for drawing the tree and naming a folder's path. */
 export interface Folders {
-  unsortedId: string;
+  /** Null for a guest who wasn't given Unsorted. */
+  unsortedId: string | null;
   byId: ReadonlyMap<string, ListedFolder>;
   /** Children in display order; at the top level, Unsorted comes first. */
   childrenOf(parentId: string | null): readonly ListedFolder[];
   /** The folder and its ancestors, outermost first. */
   pathOf(id: string): ListedFolder[];
-  /** The names along `pathOf`, such as `Projects / Roadmap`. */
-  pathName(id: string): string;
+  /** The names along `pathOf`, such as `Projects / Roadmap`. For null, the folder of a note whose folder the guest can't see, "Shared with me". */
+  pathName(id: string | null): string;
 }
 
 export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav">;
@@ -581,8 +621,13 @@ export interface App {
   workspace: WorkspaceSummary;
   /** Every workspace the member is in. */
   workspaces: readonly WorkspaceSummary[];
-  /** Whether the member's role lets them change notes and folders. */
+  /**
+   * Whether the member may change something in this workspace: a member who isn't a viewer, or a
+   * guest. Whether they may change one note is that note's `access`.
+   */
   canEdit: boolean;
+  /** Whether `createNote` can make a note where it would put one. */
+  canCreateNote: boolean;
   /** The address the app is at, such as `/history`. */
   path: string;
   /** What `go` was handed for this address, if anything. It is handed over once: Back or a reload finds nothing. */
@@ -600,8 +645,9 @@ export interface App {
   /** Null while they load. */
   folders: Folders | null;
   /**
-   * The folder in front: the one whose list the address names, {@link ALL_NOTES} among them, or the
-   * folder of the note it names. Null on a page, and when nothing is open. The folder tree marks it.
+   * The folder in front: the one whose list the address names, {@link ALL_NOTES} and
+   * {@link SHARED_WITH_ME} among them, or the folder of the note it names. Null on a page, and when
+   * nothing is open. The folder tree marks it.
    */
   folderId: string | null;
   /**
@@ -638,7 +684,7 @@ export interface App {
    * front. Where the editor area has no tabs the note is opened as it otherwise would be.
    */
   openNote(noteId: string, options?: { preview?: boolean; focus?: boolean; background?: boolean }): void;
-  /** Opens a folder's list of notes: a folder's id, or {@link ALL_NOTES}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
+  /** Opens a folder's list of notes: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. A preview, which it is unless said, takes the place of the preview there, a note's or a folder's. */
   openFolder(folderId: string, options?: { preview?: boolean }): void;
   /**
    * Opens a note, a folder's list or a page in a split: a part of the editor area of its own, right
@@ -657,8 +703,9 @@ export interface App {
   /**
    * Creates a note and opens it. It goes in `folderId` when that is a folder; otherwise in the
    * folder in front, which is the open note's folder when a note is in front; otherwise in Unsorted.
+   * Refused with the server's reason where the member can't.
    */
-  createNote(folderId?: string): void;
+  createNote(folderId?: string): Promise<void>;
   moveNote(noteId: string, folderId: string): Promise<void>;
   /** Tells the app a note changed, with the note as it is now. */
   noteChanged(note: Note): void;
@@ -666,7 +713,8 @@ export interface App {
   refresh(): void;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
-  toggleOverlay(id: string): void;
+  /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
+  toggleOverlay(id: string, state?: unknown): void;
   toggleSidebar(): void;
   /** Does what a panel's icon in the inspector's bar does: shows that panel, or closes it if it is the one showing. */
   togglePanel(viewId: string): void;

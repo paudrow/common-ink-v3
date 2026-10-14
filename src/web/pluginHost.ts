@@ -53,7 +53,7 @@ export interface MemberSettings {
 }
 
 /** What the app gives each plugin beyond registering: its reach into the workspace, bound to that plugin. */
-export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "storage">;
+export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "sharing" | "storage">;
 
 export interface HostOptions {
   /**
@@ -63,6 +63,12 @@ export interface HostOptions {
    */
   plugins: readonly Plugin[];
   required?: readonly string[];
+  /**
+   * The plugins that are Common Ink's own, as the very values in `plugins`: nothing a plugin says of
+   * itself, such as its id, puts it here. Only they are given `host.agents`, `host.members` and
+   * `host.sharing`. Any other plugin is handed ones whose every method refuses.
+   */
+  trusted?: readonly Plugin[];
   /** The ids of the plugins that came with the app. */
   builtIn?: readonly string[];
   /** The member's settings as they are at the start. */
@@ -118,14 +124,28 @@ const RESERVED = ["plugins.", "go.", "settings.", "inspector."];
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
+/** The capabilities that act as the member where history can't take it back: minting a token, changing who is in the workspace, sharing with the world. */
+const OWN_ONLY = ["agents", "members", "sharing"] as const;
+
+/** Those capabilities for a plugin that isn't Common Ink's own: the same methods, each refusing. */
+function withheld(plugin: Plugin, given: Provided): Pick<Provided, (typeof OWN_ONLY)[number]> {
+  const refusing = (capability: (typeof OWN_ONLY)[number]) =>
+    Object.fromEntries(
+      Object.keys(given[capability] ?? {}).map((method) => [method, () => Promise.reject(new Error(`${plugin.name} isn't given host.${capability}.${method}: only Common Ink's own plugins are`))]),
+    );
+  return Object.fromEntries(OWN_ONLY.map((capability) => [capability, refusing(capability)])) as never;
+}
+
 /** Why `host.perform` won't take an operation, or null when it will. The type `KeptFromPerform` says the same to a plugin written in TypeScript. */
 function keptFromPerform(type: string): string | null {
   if (type.startsWith("settings.")) return "a plugin can't read or change the member's settings";
   if (type.startsWith("invite.") || (type.startsWith("member.") && type !== "member.list")) return "who is in a workspace is changed through host.members, by a plugin that is given it";
+  if (type.startsWith("grant.") || type === "note.setPrivate") return "who a note or folder is shared with is read and changed through host.sharing, by a plugin that is given it";
+  if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
   return null;
 }
 
-export function createPluginHost({ plugins: given, required = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
+export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
   const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
   const commands = new Map<string, Owned<Command>>();
   const embeds = new Map<string, Owned<Embed | AddressEmbed>>();
@@ -184,7 +204,8 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
   };
 
   function hostFor(plugin: Plugin, index: number, mine: Set<Dispose>): PluginHost {
-    const provided = provide({ id: plugin.id, name: plugin.name });
+    const given = provide({ id: plugin.id, name: plugin.name });
+    const provided = trusted.includes(plugin) ? given : { ...given, ...withheld(plugin, given) };
     const keep = (dispose: Dispose) => {
       mine.add(dispose);
       return dispose;

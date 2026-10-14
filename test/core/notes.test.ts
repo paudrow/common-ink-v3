@@ -187,6 +187,8 @@ describe("notes", () => {
       updatedBy: { kind: "member", personId: ada.personId, name: "Ada Lovelace" },
       snippet: "book a room",
       openTodos: 1,
+      access: "edit",
+      private: false,
     });
     expect(written).toEqual({
       ...created,

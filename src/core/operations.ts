@@ -1,5 +1,6 @@
 import { ChangeSet } from "@codemirror/state";
 import { z } from "zod";
+import { SEEN, SEEN_FOLDER, allows, folderLevel, noteLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { lineDiff, textDiff } from "./diff.ts";
 import { dayIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { newId } from "./ids.ts";
@@ -30,69 +31,99 @@ import {
   type RevertedNotes,
   type Reverts,
   type Role,
+  type SharedNote,
 } from "./protocol.ts";
+import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
+import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 
-/** Who is performing an operation, in which workspace. */
+/** Who is performing an operation, and where. */
 export type Actor =
+  /** A signed-in person, in a workspace they are a member of or a guest in. */
   | { kind: "member"; personId: string; workspaceId: string }
-  /** An agent acts as `personId`: their role in the workspace, so their access, and no more. */
+  /** An agent acts as `personId`: their role and grants in the workspace, so their access, and no more. */
   | { kind: "agent"; agentId: string; personId: string; workspaceId: string; scope?: AgentScope };
 
-/** What narrows an agent's token below its member: one workspace, and no changes. */
+/** Whoever holds a link, signed in or not. The link says which workspace, and what in it they can read. */
+export interface Visitor {
+  kind: "visitor";
+  token: string;
+  personId: string | null;
+}
+
+/** What narrows an agent's token below its member: one workspace, no changes, and only some folders. */
 export interface AgentScope {
   pinnedWorkspaceId?: string | null;
   readOnly?: boolean;
+  /** The folders it is limited to, each with the folders under it. Null or left out for every note its member can reach. */
+  folderIds?: readonly string[] | null;
 }
 
-const authorId = (actor: Actor) => (actor.kind === "agent" ? actor.agentId : actor.personId);
+const authorId = (ctx: Context) => (ctx.author.kind === "agent" ? ctx.author.agentId : ctx.author.personId);
 
-interface Context {
+export interface Context {
   db: D1Database;
-  actor: Actor;
+  actor: Actor | Visitor;
   author: Author;
-  /** The role of the member acting, or of the member an agent acts for. */
-  role: Role;
+  workspaceId: string;
+  /** The person acting, or the person an agent acts for. Null for whoever opened a link. */
+  personId: string | null;
+  /** Their role, or null for a guest and for whoever opened a link. */
+  role: Role | null;
+  /** What they can see and do. Every read of a note or a folder is checked against it. */
+  sight: Sight;
   now: number;
 }
 
 type Access = "view" | "edit" | "manage";
-const ALLOWS: Record<Role, ReadonlySet<Access>> = {
-  admin: new Set(["view", "edit", "manage"]),
-  editor: new Set(["view", "edit"]),
-  viewer: new Set(["view"]),
+const ALLOWS: Record<ActorStanding["most"], ReadonlySet<Access>> = {
+  manage: new Set(["view", "edit", "manage"]),
+  edit: new Set(["view", "edit"]),
+  view: new Set(["view"]),
 };
 
 type Handler<K extends OpType> = {
+  /**
+   * The most the operation needs of anything, which someone who has that of nothing is refused for
+   * before it runs. What it needs of each note and folder it touches is asked by `loadNote` and
+   * `loadFolder`, and of the notes it lists by `SEEN`.
+   */
   needs: Access;
-  /** Set when only the member themself may ask, and an agent acting for them may not. */
-  by?: "member";
+  /**
+   * Who alone may ask. `member`: the person themself, signed in, and not an agent acting for them.
+   * `visitor`: whoever holds a link, who may ask nothing else.
+   */
+  by?: "member" | "visitor";
+  /** Set when only a member of the workspace may ask, and one who sees all of it: not a guest, and not an agent limited to folders. */
+  members?: true;
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
 
 /** Every operation on a workspace. The web app, CLI, and MCP server all come through here. */
-export async function perform<T extends OpInput>(db: D1Database, actor: Actor, input: T, now = Date.now()): Promise<Results[T["type"]]> {
+export async function perform<T extends OpInput>(db: D1Database, actor: Actor | Visitor, input: T, now = Date.now()): Promise<Results[T["type"]]> {
   const parsed = Op.safeParse(input);
   if (!parsed.success) throw new OpError("invalid", z.prettifyError(parsed.error));
   const op = parsed.data;
   const handler = HANDLERS[op.type] as Handler<OpType>;
 
   if (actor.kind === "agent" && actor.scope?.pinnedWorkspaceId && actor.scope.pinnedWorkspaceId !== actor.workspaceId) throw new OpError("not_found", NO_SUCH_WORKSPACE);
-  const member = await db
-    .prepare("SELECT m.role, p.name, a.name AS agent_name FROM members m JOIN people p ON p.id = m.person_id LEFT JOIN agents a ON a.id = ? WHERE m.workspace_id = ? AND m.person_id = ?")
-    .bind(actor.kind === "agent" ? actor.agentId : null, actor.workspaceId, actor.personId)
-    .first<{ role: Role; name: string; agent_name: string | null }>();
-  if (!member) throw new OpError("not_found", NO_SUCH_WORKSPACE);
+  const standing = actor.kind === "visitor" ? await standingByLink(db, actor.token, actor.personId) : await standingIn(db, actor.personId, actor.workspaceId, actor.kind === "agent" ? (actor.scope?.folderIds ?? null) : null);
+  if (!standing) throw new OpError("not_found", NO_SUCH_WORKSPACE);
+  // Whoever holds a link is let into the operations made for them and no other, whatever is added later.
+  if ((actor.kind === "visitor") !== (handler.by === "visitor")) throw new OpError("forbidden", actor.kind === "visitor" ? `A link can't ${op.type}` : `Only a link can ${op.type}`);
   if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
   if (actor.kind === "agent" && actor.scope?.readOnly && handler.needs !== "view") throw new OpError("forbidden", `A read-only token can't ${op.type}`);
-  if (!ALLOWS[member.role].has(handler.needs)) throw new OpError("forbidden", `A ${member.role} can't ${op.type}`);
+  if (handler.members && standing.sight.within) throw new OpError("forbidden", `An agent limited to folders can't ${op.type}`);
+  if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
 
-  const author: Author =
-    actor.kind === "agent"
-      ? { kind: "agent", agentId: actor.agentId, name: member.agent_name ?? "An agent", onBehalfOf: actor.personId }
-      : { kind: "member", personId: actor.personId, name: member.name };
-  return handler.run({ db, actor, author, role: member.role, now }, op as never) as Promise<Results[T["type"]]>;
+  let author: Author = { kind: "member", personId: standing.personId ?? "", name: standing.name };
+  if (actor.kind === "agent") {
+    const agent = await db.prepare("SELECT name FROM agents WHERE id = ?").bind(actor.agentId).first<{ name: string }>();
+    author = { kind: "agent", agentId: actor.agentId, name: agent?.name ?? "An agent", onBehalfOf: actor.personId };
+  }
+  const ctx: Context = { db, actor, author, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now };
+  return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
 }
 
 interface SummaryRow {
@@ -105,16 +136,19 @@ interface SummaryRow {
   created_at: number;
   updated_at: number;
   updated_by: string;
-  updated_by_kind: Actor["kind"] | "plugin";
+  updated_by_kind: AuthorRef["kind"];
   updated_by_name: string | null;
   updated_by_owner: string | null;
+  private_owner: string | null;
 }
 
-interface NoteRow extends SummaryRow {
+export interface NoteRow extends SummaryRow {
   text: string;
+  /** The person who made it, or whose agent did. Null for a note made before that was kept. */
+  created_by: string | null;
 }
 
-const SUMMARY_COLUMNS = `n.id, n.folder_id, n.revision, n.title, n.snippet, n.open_todos, n.created_at, n.updated_at, n.updated_by, n.updated_by_kind,
+const SUMMARY_COLUMNS = `n.id, n.folder_id, n.revision, n.title, n.snippet, n.open_todos, n.created_at, n.updated_at, n.updated_by, n.updated_by_kind, n.private_owner,
     COALESCE(p.name, a.name) AS updated_by_name, a.person_id AS updated_by_owner
   FROM notes n
   LEFT JOIN people p ON n.updated_by_kind = 'member' AND p.id = n.updated_by
@@ -124,25 +158,34 @@ const SUMMARY_COLUMNS = `n.id, n.folder_id, n.revision, n.title, n.snippet, n.op
 const authorOf = (kind: string, id: string, name: string | null, owner: string | null): Author =>
   kind === "agent" ? { kind: "agent", agentId: id, name: name ?? "An agent", onBehalfOf: owner ?? "" } : { kind: "member", personId: id, name: name ?? "Someone" };
 
-const toSummary = (row: SummaryRow): NoteSummary => ({
+/** A note as the one asking is told of it. Only a row they can see is ever handed here. */
+const toSummary = (ctx: Context, row: SummaryRow): NoteSummary => ({
   id: row.id,
   title: row.title,
   slug: noteSlug(row.title),
-  folderId: row.folder_id,
+  folderId: allows(folderLevel(ctx.sight, row.folder_id), "view") ? row.folder_id : null,
   revision: row.revision,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   updatedBy: authorOf(row.updated_by_kind, row.updated_by, row.updated_by_name, row.updated_by_owner),
   snippet: row.snippet,
   openTodos: row.open_todos,
+  access: noteLevel(ctx.sight, row) === "edit" ? "edit" : "view",
+  private: row.private_owner !== null,
 });
 
-function toNote(row: NoteRow, text = row.text, revision = row.revision): Note {
+/** A note as whoever holds a link is told of it: nothing of who wrote it, or of how it is shared. */
+function toShared(ctx: Context, row: SummaryRow, within: (folderId: string | null) => string | null): SharedNote {
+  const { id, title, slug, folderId, updatedAt, snippet } = toSummary(ctx, row);
+  return { id, title, slug, folderId: within(folderId), updatedAt, snippet };
+}
+
+function toNote(ctx: Context, row: NoteRow, text = row.text, revision = row.revision): Note {
   if (text !== row.text) {
     const { title, snippet, openTodos } = summarize(text);
     row = { ...row, title, snippet, open_todos: openTodos };
   }
-  return { ...toSummary(row), revision, text };
+  return { ...toSummary(ctx, row), revision, text };
 }
 
 /** The columns every change to a note's text sets. */
@@ -155,8 +198,8 @@ function written(ctx: Context, text: string) {
     snippet,
     open_todos: openTodos,
     updated_at: ctx.now,
-    updated_by: authorId(ctx.actor),
-    updated_by_kind: ctx.actor.kind,
+    updated_by: authorId(ctx),
+    updated_by_kind: ctx.author.kind,
     updated_by_name: author.name,
     updated_by_owner: author.kind === "agent" ? author.onBehalfOf : null,
   };
@@ -165,14 +208,25 @@ function written(ctx: Context, text: string) {
 const kindOf = (by: "people" | "agents" | undefined) => (by === "people" ? "member" : by === "agents" ? "agent" : null);
 
 const sameAuthor = (a: AuthorRef, b: AuthorRef) => a.kind === b.kind && a.id === b.id;
-const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx.actor.kind, id: authorId(ctx.actor) });
+const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx.author.kind, id: authorId(ctx) });
 
-async function loadNote(ctx: Context, id: string): Promise<NoteRow> {
+const NO_SUCH_NOTE = "No such note";
+const NO_SUCH_FOLDER = "No such folder";
+
+const CANT_CHANGE = "You can read this note, and not change it";
+
+/**
+ * The note, for someone who may do `need` with it. This is the one place a single note is read, so
+ * it is where a note the actor can't see is the same as no note at all.
+ */
+export async function loadNote(ctx: Context, id: string, need: GrantLevel): Promise<NoteRow> {
   const row = await ctx.db
-    .prepare(`SELECT n.text, ${SUMMARY_COLUMNS} WHERE n.id = ? AND n.workspace_id = ?`)
-    .bind(id, ctx.actor.workspaceId)
+    .prepare(`SELECT n.text, n.created_by, ${SUMMARY_COLUMNS} WHERE n.id = ? AND n.workspace_id = ?`)
+    .bind(id, ctx.workspaceId)
     .first<NoteRow>();
-  if (!row) throw new OpError("not_found", "No such note");
+  const level = row ? noteLevel(ctx.sight, row) : "none";
+  if (!row || level === "none") throw new OpError("not_found", NO_SUCH_NOTE);
+  if (!allows(level, need)) throw new OpError("forbidden", CANT_CHANGE);
   return row;
 }
 
@@ -185,15 +239,23 @@ interface FolderRow {
 
 const FOLDER_COLUMNS = "f.id, f.parent_id, f.name, f.id = w.unsorted_folder_id AS unsorted FROM folders f JOIN workspaces w ON w.id = f.workspace_id";
 
-const toFolder = (row: FolderRow): Folder => ({ id: row.id, name: row.name, parentId: row.parent_id });
+/** A folder as the one asking is told of it: one whose parent they can't see is at the top for them. */
+const toFolder = (ctx: Context, row: FolderRow): Folder => ({ id: row.id, name: row.name, parentId: row.parent_id && allows(folderLevel(ctx.sight, row.parent_id), "view") ? row.parent_id : null });
 
-/** The folder `id` in the actor's workspace, or its Unsorted folder when `id` is undefined. */
-async function loadFolder(ctx: Context, id: string | undefined): Promise<FolderRow> {
+/**
+ * The folder `id` in the actor's workspace, or its Unsorted folder when `id` is undefined, for
+ * someone who may do `need` with it. The one place a single folder is read, as `loadNote` is for a note.
+ */
+export async function loadFolder(ctx: Context, id: string | undefined, need: GrantLevel): Promise<FolderRow> {
   const row = await ctx.db
     .prepare(`SELECT ${FOLDER_COLUMNS} WHERE f.workspace_id = ? AND f.id = COALESCE(?, w.unsorted_folder_id)`)
-    .bind(ctx.actor.workspaceId, id ?? null)
+    .bind(ctx.workspaceId, id ?? null)
     .first<FolderRow>();
-  if (!row) throw new OpError("not_found", "No such folder");
+  const level = row ? folderLevel(ctx.sight, row.id) : "none";
+  // Unsorted is no secret, so an agent that named no folder is told why it has none to fall back on.
+  if (row && level === "none" && id === undefined && ctx.sight.within) throw new OpError("invalid", "Say which folder: this agent is limited to folders, and Unsorted isn't one of them");
+  if (!row || level === "none") throw new OpError("not_found", NO_SUCH_FOLDER);
+  if (!allows(level, need)) throw new OpError("forbidden", "You can read this folder, and not change it");
   return row;
 }
 
@@ -203,7 +265,7 @@ async function intoFolder(write: Promise<unknown>, name?: string): Promise<void>
     await write;
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
-    if (/FOREIGN KEY constraint failed/.test(message)) throw new OpError("not_found", "No such folder");
+    if (/FOREIGN KEY constraint failed/.test(message)) throw new OpError("not_found", NO_SUCH_FOLDER);
     if (/UNIQUE constraint failed: index 'folders_by_name'/.test(message)) throw new OpError("invalid", `There's already a folder named "${name}" here`);
     throw err;
   }
@@ -216,8 +278,8 @@ async function intoFolder(write: Promise<unknown>, name?: string): Promise<void>
  */
 async function seenAmong(ctx: Context, among: string, ...binds: unknown[]): Promise<SummaryRow[]> {
   const { results } = await ctx.db
-    .prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (${among}) ORDER BY n.updated_at DESC, n.id`)
-    .bind(ctx.actor.workspaceId, ...binds)
+    .prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (${among}) AND ${SEEN("n", `?${binds.length + 2}`)} ORDER BY n.updated_at DESC, n.id`)
+    .bind(ctx.workspaceId, ...binds, ctx.sight.bind)
     .all<SummaryRow>();
   return results;
 }
@@ -315,8 +377,8 @@ function insertChange(ctx: Context, noteId: string, revision: number, baseRevisi
       noteId,
       revision,
       baseRevision,
-      ctx.actor.kind,
-      authorId(ctx.actor),
+      ctx.author.kind,
+      authorId(ctx),
       JSON.stringify(changes.toJSON()),
       ctx.now,
       writeId ?? null,
@@ -490,20 +552,24 @@ const RECORDED_COLUMNS = `c.note_id, c.revision, c.author_kind, c.author_id, COA
        LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
        LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id`;
 
-async function takingBack(ctx: Context, id: string, choose: Choose, resolve?: Resolve): Promise<TakingBack> {
-  const row = await loadNote(ctx, id);
+async function takingBack(ctx: Context, id: string, need: GrantLevel, choose: Choose, resolve?: Resolve): Promise<TakingBack> {
+  const row = await loadNote(ctx, id, need);
   const { results } = await ctx.db.prepare(`SELECT ${RECORDED_COLUMNS} WHERE c.note_id = ? AND c.revision <= ? ORDER BY c.revision`).bind(row.id, row.revision).all<RecordedRow>();
   return takingBackOf(row, results.map(toRecorded), choose, resolve);
 }
 
-/** The notes named, each with its changes up to the revision it was read at, in two reads however many they are. A note that isn't in the workspace is left out. */
+/**
+ * The notes named, each with its changes up to the revision it was read at, in two reads however
+ * many they are. A note that isn't in the workspace, or that the actor can't see, is left out: the
+ * two are the same to whoever asks. What they may do with each note that is here is still to ask.
+ */
 async function loadWithHistory(ctx: Context, ids: readonly string[]): Promise<Map<string, { row: NoteRow; history: Recorded[] }>> {
   const named = JSON.stringify(ids);
   const [notes, changes] = await ctx.db.batch<NoteRow & RecordedRow & { note_id: string }>([
-    ctx.db.prepare(`SELECT n.text, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ? AND n.id IN (SELECT value FROM json_each(?))`).bind(ctx.actor.workspaceId, named),
+    ctx.db.prepare(`SELECT n.text, n.created_by, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3")}`).bind(ctx.workspaceId, named, ctx.sight.bind),
     ctx.db
-      .prepare(`SELECT ${RECORDED_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ? AND c.note_id IN (SELECT value FROM json_each(?)) ORDER BY c.note_id, c.revision`)
-      .bind(ctx.actor.workspaceId, named),
+      .prepare(`SELECT ${RECORDED_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ?1 AND c.note_id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3")} ORDER BY c.note_id, c.revision`)
+      .bind(ctx.workspaceId, named, ctx.sight.bind),
   ]);
   const recorded = Map.groupBy(changes!.results, (r) => r.note_id);
   return new Map(notes!.results.map((row) => [row.id, { row, history: (recorded.get(row.id) ?? []).filter((r) => r.revision <= row.revision).map(toRecorded) }]));
@@ -546,10 +612,10 @@ function choicesFor({ conflicts }: Reverting, resolve?: Resolve): Choice[] {
 /** Records one change that takes other changes back out of a note. */
 function takeBack(ctx: Context, id: string, choose: Choose, resolve?: Resolve): Promise<Note> {
   return settle(async () => {
-    const { row, reverts, changes, resolution } = await takingBack(ctx, id, choose, resolve);
-    if (!reverts) return toNote(row);
+    const { row, reverts, changes, resolution } = await takingBack(ctx, id, "edit", choose, resolve);
+    if (!reverts) return toNote(ctx, row);
     const next = await record(ctx, row, changes, row.revision, { reverts, resolution });
-    return next && toNote(next);
+    return next && toNote(ctx, next);
   });
 }
 
@@ -569,7 +635,8 @@ function isJsonObject(text: string) {
   }
 }
 
-const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.actor.workspaceId, personId: ctx.actor.personId, now: ctx.now });
+/** Only for an operation that is `by: "member"`, which is always asked by a person. */
+const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now });
 
 /** Every change after `revision`: the note goes back to how it was then. */
 const revertBy =
@@ -620,38 +687,38 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       const { results } = await ctx.db
-        .prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR n.folder_id = ?2) AND (?3 IS NULL OR n.updated_at >= ?3) ORDER BY n.updated_at DESC`)
-        .bind(ctx.actor.workspaceId, op.folderId ?? null, op.updatedSince ?? null)
+        .prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR n.folder_id = ?2) AND (?3 IS NULL OR n.updated_at >= ?3) AND ${SEEN("n", "?4")} ORDER BY n.updated_at DESC`)
+        .bind(ctx.workspaceId, op.folderId ?? null, op.updatedSince ?? null, ctx.sight.bind)
         .all<SummaryRow>();
-      return results.map(toSummary);
+      return results.map((row) => toSummary(ctx, row));
     },
   },
 
   "note.create": {
     needs: "edit",
     async run(ctx, op) {
-      const folder = await loadFolder(ctx, op.folderId);
+      const folder = await loadFolder(ctx, op.folderId, "edit");
       const id = newId();
       const revision = op.text ? 1 : 0;
       const text = await linkedById(ctx, op.text, "", op.linkTitles);
-      const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, ...written(ctx, text) };
+      const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, ctx.actor.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind);
+        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by);
       await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text)), ...linking(ctx, id, text, { was: "" })] : [insertNote]));
-      return toNote(row);
+      return toNote(ctx, row);
     },
   },
 
   "note.read": {
     needs: "view",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id);
+      const row = await loadNote(ctx, op.id, "view");
       if (op.revision !== undefined && op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
-      const note = op.revision === undefined || op.revision === row.revision ? toNote(row) : toNote(row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
+      const note = op.revision === undefined || op.revision === row.revision ? toNote(ctx, row) : toNote(ctx, row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
       const ids = linkedIds(note.text);
       const titles = new Map(ids.length ? (await seenAmong(ctx, IDS_IN, JSON.stringify(ids))).map((r) => [r.id, r.title]) : []);
       return { ...note, links: ids.map((id) => ({ id, title: titles.get(id) ?? null })) };
@@ -661,8 +728,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.backlinks": {
     needs: "view",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id);
-      return (await seenAmong(ctx, "SELECT source_id FROM links WHERE target_id = ?2", row.id)).map(toSummary);
+      const row = await loadNote(ctx, op.id, "view");
+      return (await seenAmong(ctx, "SELECT source_id FROM links WHERE target_id = ?2", row.id)).map((from) => toSummary(ctx, from));
     },
   },
 
@@ -670,8 +737,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "manage",
     async run(ctx, op) {
       const { results } = await ctx.db
-        .prepare("SELECT id, revision, text FROM notes WHERE workspace_id = ?1 AND (?2 IS NULL OR id > ?2) ORDER BY id LIMIT ?3")
-        .bind(ctx.actor.workspaceId, op.after ?? null, REBUILD_NOTES + 1)
+        .prepare(`SELECT n.id, n.revision, n.text FROM notes n WHERE n.workspace_id = ?1 AND (?2 IS NULL OR n.id > ?2) AND ${SEEN("n", "?4")} ORDER BY n.id LIMIT ?3`)
+        .bind(ctx.workspaceId, op.after ?? null, REBUILD_NOTES + 1, ctx.sight.bind)
         .all<{ id: string; revision: number; text: string }>();
       const page = results.slice(0, REBUILD_NOTES);
       // A note written since it was read here is left to that write, which kept its record.
@@ -684,25 +751,25 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "edit",
     run: (ctx, op) =>
       settle(async () => {
-        const row = await loadNote(ctx, op.id);
+        const row = await loadNote(ctx, op.id, "edit");
         if (op.writeId) {
           const recorded = await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(row.id, op.writeId).first();
-          if (recorded) return toNote(row);
+          if (recorded) return toNote(ctx, row);
         }
         if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
         const base = op.baseRevision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, op.baseRevision, row.revision);
         const stored = await linkedById(ctx, op.text, base.text, op.linkTitles);
         const changes = base.since ? rebased(base.text, stored, base.since) : changesBetween(base.text, stored);
-        if (changes.empty) return toNote(row);
+        if (changes.empty) return toNote(ctx, row);
         const next = await record(ctx, row, changes, op.baseRevision, { writeId: op.writeId });
-        return next && toNote(next);
+        return next && toNote(ctx, next);
       }),
   },
 
   "note.history": {
     needs: "view",
     async run(ctx, op) {
-      await loadNote(ctx, op.id);
+      await loadNote(ctx, op.id, "view");
       await countLines(ctx, [op.id]);
       const { results } = await ctx.db.prepare(`SELECT ${CHANGE_COLUMNS} WHERE c.note_id = ? ORDER BY c.revision`).bind(op.id).all<ChangeRow>();
       const standing = standingOf(results.map(stepOf));
@@ -713,7 +780,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.diff": {
     needs: "view",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id);
+      const row = await loadNote(ctx, op.id, "view");
       if (op.revision > row.revision) throw new OpError("not_found", `The note has no change ${op.revision}`);
       const { text, since } = await replay(ctx, row.id, op.revision - 1, op.revision);
       return lineDiff(text, since[0]!);
@@ -723,7 +790,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.label": {
     needs: "edit",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id);
+      const row = await loadNote(ctx, op.id, "edit");
       if (op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
       if (op.name === null) {
         await ctx.db.prepare("DELETE FROM labels WHERE note_id = ? AND revision = ?").bind(row.id, op.revision).run();
@@ -734,7 +801,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
               `INSERT INTO labels (note_id, revision, name, author_kind, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT (note_id, revision) DO UPDATE SET name = excluded.name, author_kind = excluded.author_kind, author_id = excluded.author_id, created_at = excluded.created_at`,
             )
-            .bind(row.id, op.revision, op.name, ctx.actor.kind, authorId(ctx.actor), ctx.now)
+            .bind(row.id, op.revision, op.name, ctx.author.kind, authorId(ctx), ctx.now)
             .run();
         } catch (err) {
           if (err instanceof Error && /UNIQUE constraint failed: labels\.note_id, labels\.name/.test(err.message)) throw new OpError("invalid", `Another revision of this note is already labeled "${op.name}"`);
@@ -761,7 +828,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       const author = op.author;
       const choose: Choose = author ? revertBy(author) : op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!);
-      const { row, history, reverts, found, changes } = await takingBack(ctx, op.id, choose, op.resolve);
+      const { row, history, reverts, found, changes } = await takingBack(ctx, op.id, "view", choose, op.resolve);
       return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts: toldConflicts(history, found, op.revisions) };
     },
   },
@@ -789,13 +856,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "history.summary": {
     needs: "view",
     async run(ctx, op) {
-      const narrowed = `n.workspace_id = ?1
+      const narrowed = `n.workspace_id = ?1 AND ${SEEN("n", "?6")}
              AND (?2 IS NULL OR c.note_id IN (SELECT value FROM json_each(?2)))
              AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
              AND (?4 IS NULL OR c.created_at >= ?4)
              AND (?5 IS NULL OR c.created_at < ?5)
-             AND (?6 IS NULL OR c.author_kind = ?6)`;
-      const binds = [ctx.actor.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.authors ? JSON.stringify(op.authors) : null, op.from ?? null, op.to ?? null, kindOf(op.by)];
+             AND (?7 IS NULL OR c.author_kind = ?7)`;
+      const binds = [ctx.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.authors ? JSON.stringify(op.authors) : null, op.from ?? null, op.to ?? null, ctx.sight.bind, kindOf(op.by)];
       interface Row {
         note_id: string;
         title: string;
@@ -814,9 +881,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
              FROM changes c JOIN notes n ON n.id = c.note_id
              WHERE ${narrowed}
              GROUP BY c.note_id
-             HAVING ?7 IS NULL OR last_at < ?7 OR (last_at = ?7 AND c.note_id < ?8)
+             HAVING ?8 IS NULL OR last_at < ?8 OR (last_at = ?8 AND c.note_id < ?9)
              ORDER BY last_at DESC, c.note_id DESC
-             LIMIT ?9`,
+             LIMIT ?10`,
           )
           .bind(...binds, op.before?.lastAt ?? null, op.before?.noteId ?? null, op.limit + 1)
           .all<Row>();
@@ -835,7 +902,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
            JOIN notes n ON n.id = c.note_id
            LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
            LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
-           WHERE ${narrowed} AND c.note_id IN (SELECT value FROM json_each(?7))
+           WHERE ${narrowed} AND c.note_id IN (SELECT value FROM json_each(?8))
            GROUP BY c.note_id, c.author_kind, c.author_id
            ORDER BY MAX(c.created_at) DESC, c.author_id`,
         )
@@ -866,18 +933,18 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           .prepare(
             `SELECT n.title, ${CHANGE_COLUMNS}
              JOIN notes n ON n.id = c.note_id
-             WHERE n.workspace_id = ?1
+             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?10")}
                AND (?2 IS NULL OR c.note_id IN (SELECT value FROM json_each(?2)))
                AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
                AND (?4 IS NULL OR c.created_at >= ?4)
                AND (?5 IS NULL OR c.created_at < ?5)
                AND (?6 IS NULL OR (c.created_at, c.note_id, c.revision) < (?6, ?7, ?8))
-               AND (?10 IS NULL OR c.author_kind = ?10)
+               AND (?11 IS NULL OR c.author_kind = ?11)
              ORDER BY c.created_at DESC, c.note_id DESC, c.revision DESC
              LIMIT ?9`,
           )
           .bind(
-            ctx.actor.workspaceId,
+            ctx.workspaceId,
             op.noteIds ? JSON.stringify(op.noteIds) : null,
             op.authors ? JSON.stringify(op.authors) : null,
             op.from ?? null,
@@ -886,6 +953,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             op.before?.noteId ?? null,
             op.before?.revision ?? null,
             op.limit + 1,
+            ctx.sight.bind,
             kindOf(op.by),
           )
           .all<ChangeRow & { title: string }>();
@@ -933,9 +1001,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
            JOIN notes n ON n.id = c.note_id
            LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
            LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
-           WHERE n.workspace_id = ? ORDER BY name COLLATE NOCASE, c.author_id`,
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} ORDER BY name COLLATE NOCASE, c.author_id`,
         )
-        .bind(ctx.actor.workspaceId)
+        .bind(ctx.workspaceId, ctx.sight.bind)
         .all<Pick<ChangeRow, "author_kind" | "author_id" | "name" | "agent_owner">>();
       return results.map((r) => authorOf(r.author_kind, r.author_id, r.name, r.agent_owner));
     },
@@ -949,13 +1017,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const { results } = await ctx.db
         .prepare(
           `SELECT n.id, n.title FROM notes n
-           WHERE n.workspace_id = ?1
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?7")}
              AND (?2 IS NULL OR n.id IN (SELECT value FROM json_each(?2)))
              AND (?3 IS NULL OR n.id > ?3)
              AND EXISTS (SELECT 1 FROM changes c WHERE c.note_id = n.id AND c.author_kind = ?4 AND c.author_id = ?5)
            ORDER BY n.id LIMIT ?6`,
         )
-        .bind(ctx.actor.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.after ?? null, op.author.kind, op.author.id, REVERT_AUTHOR_NOTES + 1)
+        .bind(ctx.workspaceId, op.noteIds ? JSON.stringify(op.noteIds) : null, op.after ?? null, op.author.kind, op.author.id, REVERT_AUTHOR_NOTES + 1, ctx.sight.bind)
         .all<{ id: string; title: string }>();
       const page = results.slice(0, REVERT_AUTHOR_NOTES);
 
@@ -982,11 +1050,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const asked = new Map(op.changes.map((c) => [c.noteId, c.revisions]));
       const named = JSON.stringify([...asked.keys()]);
       const [read, recorded] = await ctx.db.batch<SummaryRow & ChangeRow & { diff: string }>([
-        ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ? AND n.id IN (SELECT value FROM json_each(?))`).bind(ctx.actor.workspaceId, named),
-        ctx.db.prepare(`SELECT c.diff, ${CHANGE_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ? AND c.note_id IN (SELECT value FROM json_each(?)) ORDER BY c.note_id, c.revision`).bind(ctx.actor.workspaceId, named),
+        ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3")}`).bind(ctx.workspaceId, named, ctx.sight.bind),
+        ctx.db
+          .prepare(`SELECT c.diff, ${CHANGE_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ?1 AND c.note_id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3")} ORDER BY c.note_id, c.revision`)
+          .bind(ctx.workspaceId, named, ctx.sight.bind),
       ]);
       const rows = Map.groupBy(recorded!.results, (r) => r.note_id);
-      if (read!.results.length < asked.size) throw new OpError("not_found", "No such note");
+      if (read!.results.length < asked.size) throw new OpError("not_found", NO_SUCH_NOTE);
       const notes = read!.results.map((note) => {
         const changes = rows.get(note.id) ?? [];
         const runs = runsOf(asked.get(note.id)!);
@@ -1030,7 +1100,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       return op.changes.map((item): NoteRevertPreview => {
         const note = read.get(item.noteId);
         const none = { revisions: [], already: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0, lines: 0 }, overlaps: [], conflicts: [] };
-        if (!note) return { noteId: item.noteId, noteTitle: "", revision: 0, ...none, refused: "No such note" };
+        if (!note) return { noteId: item.noteId, noteTitle: "", revision: 0, ...none, refused: NO_SUCH_NOTE };
         try {
           const { row, history, reverts, found, changes } = takingBackItem(note.row, note.history, item);
           return {
@@ -1059,11 +1129,16 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       for (const item of op.changes) {
         const note = read.get(item.noteId);
         if (!note) {
-          done.skipped.push({ noteId: item.noteId, noteTitle: "", why: "refused", message: "No such note" });
+          done.skipped.push({ noteId: item.noteId, noteTitle: "", why: "refused", message: NO_SUCH_NOTE });
           continue;
         }
         const { row, history } = note;
         const name = row.title || "Untitled";
+        // Asked of each note, as `loadNote` asks it of one: a role that may edit doesn't say this note may be.
+        if (!allows(noteLevel(ctx.sight, row), "edit")) {
+          done.skipped.push({ ...titled(row), why: "refused", message: CANT_CHANGE });
+          continue;
+        }
         const moved = () => done.skipped.push({ ...titled(row), why: "changed", message: `${name} has changed since this revert was previewed, so it was left as it is. Preview its revert again` });
         if (item.at !== undefined && item.at !== row.revision) {
           moved();
@@ -1091,10 +1166,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.move": {
     needs: "edit",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id);
-      const folder = await loadFolder(ctx, op.folderId);
+      const row = await loadNote(ctx, op.id, "edit");
+      const folder = await loadFolder(ctx, op.folderId, "edit");
       if (folder.id !== row.folder_id) await intoFolder(ctx.db.prepare("UPDATE notes SET folder_id = ? WHERE id = ?").bind(folder.id, row.id).run());
-      return toNote({ ...row, folder_id: folder.id });
+      return toNote(ctx, { ...row, folder_id: folder.id });
     },
   },
 
@@ -1103,21 +1178,22 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx) {
       const { results } = await ctx.db
         .prepare(
-          `SELECT (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id) AS note_count, ${FOLDER_COLUMNS}
-           WHERE f.workspace_id = ? ORDER BY f.name COLLATE NOCASE, f.id`,
+          `SELECT (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND ${SEEN("n", "?2")}) AS note_count, ${FOLDER_COLUMNS}
+           WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`,
         )
-        .bind(ctx.actor.workspaceId)
+        .bind(ctx.workspaceId, ctx.sight.bind)
         .all<FolderRow & { note_count: number }>();
-      return { unsortedId: results.find((row) => row.unsorted)!.id, folders: results.map((row) => ({ ...toFolder(row), noteCount: row.note_count })) };
+      return { unsortedId: results.find((row) => row.unsorted)?.id ?? null, folders: results.map((row) => ({ ...toFolder(ctx, row), noteCount: row.note_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view" })) };
     },
   },
 
   "folder.create": {
     needs: "edit",
     async run(ctx, op) {
-      if (op.parentId) await loadFolder(ctx, op.parentId);
+      if (op.parentId) await loadFolder(ctx, op.parentId, "edit");
+      else if (!seesEveryFolder(ctx.sight)) throw new OpError("forbidden", ctx.sight.within ? "An agent limited to folders can make a folder only inside one of them" : "A guest can make a folder only inside one shared with them");
       const folder: Folder = { id: newId(), name: op.name, parentId: op.parentId ?? null };
-      await intoFolder(ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) VALUES (?, ?, ?, ?)").bind(folder.id, ctx.actor.workspaceId, folder.parentId, folder.name).run(), folder.name);
+      await intoFolder(ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) VALUES (?, ?, ?, ?)").bind(folder.id, ctx.workspaceId, folder.parentId, folder.name).run(), folder.name);
       return folder;
     },
   },
@@ -1125,10 +1201,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "folder.rename": {
     needs: "edit",
     async run(ctx, op) {
-      const folder = await loadFolder(ctx, op.id);
+      const folder = await loadFolder(ctx, op.id, "edit");
       if (folder.unsorted) throw new OpError("invalid", "Unsorted can't be renamed");
+      // Beside a folder shared with a guest, or one an agent is limited to, are folders they can't see, and a name refused for being taken would name one.
+      if (!seesEveryFolder(ctx.sight) && !(folder.parent_id && allows(folderLevel(ctx.sight, folder.parent_id), "view")))
+        throw new OpError("forbidden", ctx.sight.within ? "An agent limited to folders can rename only the folders inside one of them" : "A guest can rename only the folders inside one shared with them");
       await intoFolder(ctx.db.prepare("UPDATE folders SET name = ? WHERE id = ?").bind(op.name, folder.id).run(), op.name);
-      return toFolder({ ...folder, name: op.name });
+      return toFolder(ctx, { ...folder, name: op.name });
     },
   },
 
@@ -1136,17 +1215,28 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "manage",
     async run(ctx, op) {
       // One statement, so a note or child folder added concurrently can't be left in a deleted folder.
-      const { meta } = await ctx.db
-        .prepare(
-          `DELETE FROM folders WHERE id = ? AND workspace_id = ?
-             AND id <> (SELECT unsorted_folder_id FROM workspaces WHERE id = folders.workspace_id)
-             AND NOT EXISTS (SELECT 1 FROM notes WHERE folder_id = folders.id)
-             AND NOT EXISTS (SELECT 1 FROM folders child WHERE child.parent_id = folders.id)`,
-        )
-        .bind(op.id, ctx.actor.workspaceId)
-        .run();
-      if (meta.changes) return { id: op.id };
-      const folder = await loadFolder(ctx, op.id);
+      const UNSORTED = "(SELECT unsorted_folder_id FROM workspaces WHERE id = ?2)";
+      const [, deleted] = await ctx.db.batch([
+        // A folder that holds only notes the admin can't see is empty to them, and refusing to delete it would say otherwise. Those notes go to Unsorted, where their owners find them.
+        ctx.db
+          .prepare(
+            `UPDATE notes SET folder_id = ${UNSORTED}
+             WHERE folder_id = ?1 AND workspace_id = ?2 AND ?1 <> ${UNSORTED} AND NOT ${SEEN("notes", "?3")}
+               AND EXISTS (SELECT 1 FROM folders f WHERE f.id = ?1 AND ${SEEN_FOLDER("f", "?3")})
+               AND NOT EXISTS (SELECT 1 FROM notes v WHERE v.folder_id = ?1 AND ${SEEN("v", "?3")})
+               AND NOT EXISTS (SELECT 1 FROM folders child WHERE child.parent_id = ?1)`,
+          )
+          .bind(op.id, ctx.workspaceId, ctx.sight.bind),
+        ctx.db
+          .prepare(
+            `DELETE FROM folders WHERE id = ?1 AND workspace_id = ?2 AND id <> ${UNSORTED} AND ${SEEN_FOLDER("folders", "?3")}
+               AND NOT EXISTS (SELECT 1 FROM notes WHERE folder_id = folders.id)
+               AND NOT EXISTS (SELECT 1 FROM folders child WHERE child.parent_id = folders.id)`,
+          )
+          .bind(op.id, ctx.workspaceId, ctx.sight.bind),
+      ]);
+      if (deleted!.meta.changes) return { id: op.id };
+      const folder = await loadFolder(ctx, op.id, "edit");
       if (folder.unsorted) throw new OpError("invalid", "Unsorted can't be deleted");
       throw new OpError("invalid", `"${folder.name}" isn't empty. Move or delete what's in it first.`);
     },
@@ -1158,7 +1248,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx) {
       const row = await ctx.db
         .prepare("SELECT text, revision, updated_at FROM settings WHERE workspace_id = ? AND person_id = ?")
-        .bind(ctx.actor.workspaceId, ctx.actor.personId)
+        .bind(ctx.workspaceId, ctx.personId)
         .first<{ text: string; revision: number; updated_at: number }>();
       return row ? { text: row.text, revision: row.revision, updatedAt: row.updated_at } : { text: "{}", revision: 0, updatedAt: null };
     },
@@ -1181,21 +1271,64 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           : `UPDATE settings SET text = ?3, updated_at = ?4, write_id = ?5, revision = revision + 1 WHERE workspace_id = ?1 AND person_id = ?2 AND (${taken}) RETURNING revision`;
       const row = await ctx.db
         .prepare(statement)
-        .bind(ctx.actor.workspaceId, ctx.actor.personId, op.text, ctx.now, op.writeId ?? null, op.baseRevision, op.supersedes ?? null)
+        .bind(ctx.workspaceId, ctx.personId, op.text, ctx.now, op.writeId ?? null, op.baseRevision, op.supersedes ?? null)
         .first<{ revision: number }>();
       if (!row) throw new OpError("conflict", "Your settings changed somewhere else since they were read here");
       return { text: op.text, revision: row.revision, updatedAt: ctx.now };
     },
   },
 
-  "member.list": { needs: "view", run: (ctx) => listMembers(ctx.db, ctx.actor.workspaceId, { emails: ctx.actor.kind === "member" && ctx.role === "admin" }) },
+  "member.list": { needs: "view", members: true, run: (ctx) => listMembers(ctx.db, ctx.workspaceId, { emails: ctx.author.kind === "member" && ctx.role === "admin" }) },
 
   // Who is in a workspace is not in history, so it can't be reverted the way a note can. Only the member changes it: see NOT_FOR_AGENTS.
   "member.invite": { needs: "manage", by: "member", run: (ctx, op) => invite(asking(ctx), op.email, op.as) },
   "member.setRole": { needs: "manage", by: "member", run: (ctx, op) => setRole(asking(ctx), op.memberId, op.as) },
   "member.remove": { needs: "manage", by: "member", run: (ctx, op) => removeMember(asking(ctx), op.memberId) },
   // A viewer can leave too, so this needs no more than belonging to the workspace.
-  "member.leave": { needs: "view", by: "member", run: (ctx) => leave(asking(ctx)) },
-  "invite.list": { needs: "manage", by: "member", run: (ctx) => listInvites(ctx.db, ctx.actor.workspaceId) },
+  "member.leave": { needs: "view", by: "member", members: true, run: (ctx) => leave(asking(ctx)) },
+  "invite.list": { needs: "manage", by: "member", run: (ctx) => listInvites(ctx.db, ctx.workspaceId) },
   "invite.revoke": { needs: "manage", by: "member", run: (ctx, op) => revokeInvite(asking(ctx), op.id) },
+
+  // Who a note is shared with is not in history either, and a link can put a note before the whole internet. Only the member decides it: see NOT_FOR_AGENTS.
+  "grant.list": { needs: "view", by: "member", run: (ctx, op) => listGrants(ctx, op) },
+  // What each needs of its item is `canShare`'s to say: a viewer who owns a private note shares it, and can change nothing else.
+  "grant.set": { needs: "view", by: "member", members: true, run: (ctx, op) => setGrant(ctx, op, op.email, op.access) },
+  "grant.link": { needs: "view", by: "member", members: true, run: (ctx, op) => linkTo(ctx, op, op.link) },
+  "grant.revoke": { needs: "view", by: "member", members: true, run: (ctx, op) => revokeGrant(ctx, op.id) },
+  // A viewer who made a note while they were an editor is still the one who made it.
+  "note.setPrivate": { needs: "view", by: "member", members: true, run: (ctx, op) => setPrivate(ctx, op.id, op.private) },
+
+  "shared.open": {
+    needs: "view",
+    by: "visitor",
+    async run(ctx) {
+      const token = ctx.actor.kind === "visitor" ? ctx.actor.token : "";
+      const [link, folders, notes] = await ctx.db.batch<{ kind: "public" | "signed_in"; note_id: string | null; folder_id: string | null; name: string | null } & FolderRow & SummaryRow>([
+        ctx.db.prepare("SELECT g.kind, g.note_id, g.folder_id, f.name FROM grants g LEFT JOIN folders f ON f.id = g.folder_id WHERE g.token = ?").bind(token),
+        ctx.db.prepare(`SELECT ${FOLDER_COLUMNS} WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`).bind(ctx.workspaceId, ctx.sight.bind),
+        ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} ORDER BY n.title COLLATE NOCASE, n.id`).bind(ctx.workspaceId, ctx.sight.bind),
+      ]);
+      const on = link!.results[0];
+      if (!on) throw new OpError("not_found", NO_SUCH_LINK);
+      // What is right inside the shared folder is at the top for the visitor, and the shared folder itself is named once, as `on`.
+      const within = (folderId: string | null) => (folderId === on.folder_id ? null : folderId);
+      return {
+        link: on.kind,
+        on: on.note_id !== null ? { kind: "note", id: on.note_id } : { kind: "folder", id: on.folder_id!, name: on.name! },
+        folders: folders!.results.filter((f) => f.id !== on.folder_id).map((f) => ({ ...toFolder(ctx, f), parentId: within(f.parent_id) })),
+        notes: notes!.results.map((row) => toShared(ctx, row, within)),
+      };
+    },
+  },
+
+  "shared.read": {
+    needs: "view",
+    by: "visitor",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "view");
+      const ids = linkedIds(row.text);
+      const titles = new Map(ids.length ? (await seenAmong(ctx, IDS_IN, JSON.stringify(ids))).map((r) => [r.id, r.title]) : []);
+      return { ...toShared(ctx, row, (folderId) => folderId), text: row.text, revision: row.revision, links: ids.map((id) => ({ id, title: titles.get(id) ?? null })) };
+    },
+  },
 };

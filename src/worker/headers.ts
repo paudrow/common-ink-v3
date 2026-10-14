@@ -69,7 +69,7 @@ const framed = (url: URL, env: { EMBED_ORIGIN?: string }): Policy => {
 
 /**
  * `res` with the headers for the route `url` asked for. Vite's dev server writes an inline script
- * into the page, which only it is allowed. A response that brings its own policy keeps it.
+ * into the page, which only it is allowed. A response that brings its own policy or referrer rule keeps it.
  */
 export function secured(res: Response, url: URL, env: { DEV_SERVER?: string; EMBED_ORIGIN?: string }): Response {
   const out = new Response(res.body, res);
@@ -78,6 +78,6 @@ export function secured(res: Response, url: URL, env: { DEV_SERVER?: string; EMB
   if (kind === PAGE && env.DEV_SERVER === "1") policy = { ...policy, "script-src": [...policy["script-src"]!, "'unsafe-inline'"] };
   if (!out.headers.has("Content-Security-Policy")) out.headers.set("Content-Security-Policy", written(policy));
   out.headers.set("X-Content-Type-Options", "nosniff");
-  out.headers.set("Referrer-Policy", kind === EMBED_FRAME ? "no-referrer" : "strict-origin-when-cross-origin");
+  if (!out.headers.has("Referrer-Policy")) out.headers.set("Referrer-Policy", kind === EMBED_FRAME ? "no-referrer" : "strict-origin-when-cross-origin");
   return out;
 }

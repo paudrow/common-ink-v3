@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ALL_NOTES, useInspected, type About, type NoteSummary, type Plugin, type PluginHost, type Showing, type ViewProps } from "../../plugin-api.ts";
 import { titleOf } from "../lib/historyView.ts";
 import { History, isScope, type Kept, type Left, type Scope } from "./History.tsx";
@@ -11,6 +11,15 @@ const MOST_NOTES = 200;
 
 /** Changes when any of the notes does. */
 const versionOf = (notes: readonly NoteSummary[]) => notes.reduce((sum, n) => sum + n.revision, 0);
+
+/** Which of the notes the member may change: each note says so of itself, since a grant or a private note can differ from the member's role. */
+function useEditable(notes: readonly NoteSummary[]): (noteId: string) => boolean {
+  const editable = useMemo(() => new Set(notes.filter((n) => n.access === "edit").map((n) => n.id)), [notes]);
+  return useCallback((noteId: string) => editable.has(noteId), [editable]);
+}
+
+const ANY = () => true;
+const NONE = () => false;
 
 /** Where each History that was shown keeps its ticks, by what it was of. */
 type Places = (place: string) => Left;
@@ -32,11 +41,12 @@ function Page({ host, app, places }: ViewProps & { host: PluginHost; places: Pla
     else if (handed === EVERYTHING) setScope(null);
   }, [handed]);
   // Each scope is a place of its own, with its own ticks: History starts again from what that place kept.
+  const canEdit = useEditable(app.notes ?? []);
   const place = `page ${scope ? ("author" in scope ? `by ${scope.author.kind} ${scope.author.id}` : `of ${scope.noteIds.join()}`) : "everything"}`;
   const [ticked, setTicked] = useState<readonly string[]>([]);
   useInspected(app, shows(ticked));
   return (
-    <History key={place} host={host} me={app.me.id} canEdit={app.canEdit} scope={scope} layout="page" version={versionOf(app.notes ?? [])} empty="Nothing has been written in this workspace yet." onScope={setScope} onTicked={setTicked} onOpenNote={app.openNote} onChanged={app.refresh} left={places(place)} />
+    <History key={place} host={host} me={app.me.id} canEdit={canEdit} scope={scope} layout="page" version={versionOf(app.notes ?? [])} empty="Nothing has been written in this workspace yet." onScope={setScope} onTicked={setTicked} onOpenNote={app.openNote} onChanged={app.refresh} left={places(place)} />
   );
 }
 
@@ -52,10 +62,11 @@ interface OfNotesProps extends ViewProps {
 
 /** History for the inspector, narrowed to a set of notes: a folder's, or the ones a page is showing. */
 function OfNotes({ host, app, name, notes, empty, left }: OfNotesProps) {
+  const canEdit = useEditable(notes);
   const ids = useMemo(() => [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MOST_NOTES).map((n) => n.id).join(","), [notes]);
   const scope = useMemo<Scope | null>(() => (name === null ? null : { label: name, noteIds: ids ? ids.split(",") : [] }), [name, ids]);
   if (name !== null && !notes.length) return <p className="empty">{empty}</p>;
-  return <History host={host} me={app.me.id} canEdit={app.canEdit} scope={scope} layout="panel" version={versionOf(notes)} empty={empty} onOpenHistory={() => app.go(PATH, { state: scope ?? EVERYTHING })} onOpenNote={app.openNote} onChanged={app.refresh} left={left} />;
+  return <History host={host} me={app.me.id} canEdit={canEdit} scope={scope} layout="panel" version={versionOf(notes)} empty={empty} onOpenHistory={() => app.go(PATH, { state: scope ?? EVERYTHING })} onOpenNote={app.openNote} onChanged={app.refresh} left={left} />;
 }
 
 /** The inspector's History, by what is in front. */
@@ -72,7 +83,7 @@ function Panel({ host, app, about, places }: ViewProps & { host: PluginHost; abo
       key={note.id}
       host={host}
       me={app.me.id}
-      canEdit={app.canEdit}
+      canEdit={note.access === "edit" ? ANY : NONE}
       scope={scope}
       layout="panel"
       version={note.revision}

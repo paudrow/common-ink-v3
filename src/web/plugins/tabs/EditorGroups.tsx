@@ -39,6 +39,7 @@ interface Props {
   layout: EditorLayout;
   titleOf: (tab: Opened) => string;
   iconOf: (tab: Opened) => IconName | undefined;
+  isPrivate: (tab: Opened) => boolean;
   dispatch: (action: EditorAction) => void;
   render: (group: Group, tab: Opened) => ReactNode;
   /** What a group with nothing open shows. */
@@ -59,7 +60,7 @@ export function showTabMenu() {
   tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: left, clientY: bottom }));
 }
 
-export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
+export function EditorGroups({ layout, titleOf, iconOf, isPrivate, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -179,6 +180,11 @@ export function EditorGroups({ layout, titleOf, iconOf, dispatch, render, empty,
                       {icon && (
                         <span className="tab-kind">
                           <Icon name={icon} />
+                        </span>
+                      )}
+                      {isPrivate(tab) && (
+                        <span className="private-mark" title="Private">
+                          <Icon name="lock" />
                         </span>
                       )}
                       <span className="tab-title">{title}</span>

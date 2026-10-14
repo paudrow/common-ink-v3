@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings and changes to members are kept from agents, which test/core/settings.test.ts and test/core/members.test.ts check. */
-type ToolOp = Exclude<OpType, `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave">;
+/** The operations an agent has a tool for. Settings, changes to members, and sharing are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts and test/core/grants.test.ts check. */
+type ToolOp = Exclude<OpType, `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}`>;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({

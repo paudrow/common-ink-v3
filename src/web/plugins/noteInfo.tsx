@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
-import { ago, useNow, type NoteSummary, type Plugin, type ViewProps } from "../plugin-api.ts";
+import { ago, useNow, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../plugin-api.ts";
 import { Soon } from "./lib/Soon.tsx";
+import { SharingSummary } from "./sharing/Summary.tsx";
 
 /** A set of notes: a folder's, under "Folder", or the ones a page is showing, under "Showing". */
 function NotesInfo({ heading, name, notes }: { heading: string; name: string; notes: readonly NoteSummary[] }) {
@@ -18,7 +19,7 @@ function NotesInfo({ heading, name, notes }: { heading: string; name: string; no
   );
 }
 
-function Info({ app, note }: ViewProps & { note: NoteSummary }) {
+function Info({ host, app, note }: ViewProps & { host: PluginHost; note: NoteSummary }) {
   const tree = app.folders;
   const url = `${location.origin}${app.notePath(note.id)}`;
   const urlField = useRef<HTMLInputElement>(null);
@@ -46,27 +47,28 @@ function Info({ app, note }: ViewProps & { note: NoteSummary }) {
       <dt>Folder</dt>
       <dd>
         <span>{tree.pathName(note.folderId)}</span>
-        <select
-          aria-label="Move to"
-          value={note.folderId}
-          disabled={!app.canEdit}
-          onChange={(e) => {
-            setError(null);
-            move(e.target.value).catch((err: Error) => setError(err.message));
-          }}
-        >
-          {targets.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
+        {note.folderId !== null && (
+          <select
+            aria-label="Move to"
+            value={note.folderId}
+            disabled={note.access !== "edit"}
+            onChange={(e) => {
+              setError(null);
+              move(e.target.value).catch((err: Error) => setError(err.message));
+            }}
+          >
+            {targets.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        )}
         {error && <span role="alert" className="error">{error}</span>}
       </dd>
       <dt>Sharing</dt>
       <dd>
-        <span>Everyone in this workspace</span>
-        <Soon issue={15}>Sharing with people and links arrives with</Soon>
+        <SharingSummary host={host} app={app} note={note} />
       </dd>
       <dt>Tags</dt>
       <dd>
@@ -102,7 +104,7 @@ export const noteInfo: Plugin = {
       icon: "info",
       for: ["note", "folder", "notes"],
       component: ({ app, about }) =>
-        about.kind === "note" ? <Info key={about.note.id} app={app} note={about.note} /> : <NotesInfo heading={about.kind === "folder" ? "Folder" : "Showing"} name={about.kind === "folder" ? about.name : about.label} notes={about.notes} />,
+        about.kind === "note" ? <Info key={about.note.id} host={host} app={app} note={about.note} /> : <NotesInfo heading={about.kind === "folder" ? "Folder" : "Showing"} name={about.kind === "folder" ? about.name : about.label} notes={about.notes} />,
     });
   },
 };

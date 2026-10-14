@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Me, Note, OpInput } from "../../src/core/protocol.ts";
-import { connectAgent, listedNote, openAllNotes, panelIcon, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, connectAgent, join, listedNote, openAllNotes, panelIcon, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector } from "./helpers.ts";
 
 const UNSEEN = "Changes you haven't seen";
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -691,15 +691,15 @@ test("a revision is labeled and the note reverted to it from the one menu on its
 });
 
 test("a viewer picks changes and reads what they did, with no way to revert or to label a revision", async ({ page }) => {
-  const { id } = await sharedNote(page);
-  await page.route("**/api/me", async (route) => {
-    const me = (await (await route.fetch()).json()) as Me;
-    await route.fulfill({ json: { ...me, workspaces: me.workspaces.map((w) => ({ ...w, role: "viewer" })) } });
-  });
-  const panel = await openHistoryTab(page, id);
+  const { note, admin } = await asViewerOfNote(page, "# Plan");
+  const claude = await connectAgent(admin, "Claude");
+  await perform(admin, { type: "note.write", id: note.id, baseRevision: 1, text: "# Plan\n\nAda's step" });
+  await claude.tool<Note>("write_note", { id: note.id, baseRevision: 2, text: "# Plan\n\nAda's step\n\nClaude's step" });
+  await perform(admin, { type: "note.write", id: note.id, baseRevision: 3, text: PLAN });
+  const panel = await openHistoryTab(page, note.id);
   await expect(rows(panel)).toHaveCount(3);
   await nothingPicked(panel);
-  await row(panel, "You edited").click();
+  await rows(panel).first().click();
   await tick(row(panel, "Claude edited")).click();
   await expect.poll(counted(panel)).toEqual(["2 changes", "1 note", "+4 −0"]);
   await expect(bar(panel).getByRole("button")).toHaveText(["Clear"]);
@@ -710,6 +710,39 @@ test("a viewer picks changes and reads what they did, with no way to revert or t
   await expect.poll(cards(historyMode(page))).toEqual(["Plan"]);
   await expect(bar(historyMode(page)).getByRole("button")).toHaveText(["Clear"]);
   await expect(historyMode(page).getByRole("button", { name: /Revert|More for/ })).toHaveCount(0);
+});
+
+test("a selection that holds a note the member may only read reverts the others, and says the one is left out", async ({ page }) => {
+  await signInAsNewPerson(page, "Ed Editor");
+  const admin = await anotherPerson(page, "Ada Lovelace");
+  await join(page, admin, "editor");
+  const email = await page.evaluate(async () => ((await (await fetch("/api/me")).json()) as Me).person.email);
+  const [mine, shown] = [await perform(admin, { type: "note.create", text: "# Mine to change" }), await perform(admin, { type: "note.create", text: "# Shown to me" })];
+  for (const n of [mine, shown]) await perform(admin, { type: "note.write", id: n.id, baseRevision: 1, text: `# ${n.title}\n\nA line to take back.` });
+  await perform(admin, { type: "grant.set", noteId: shown.id, email, access: "view" });
+
+  // Opening a note of Ada's workspace is what shows that workspace: History then lists its changes.
+  await openHistoryTab(page, mine.id);
+  await page.goto("/history");
+  const mode = historyMode(page);
+  // Its newest change is of the note that can only be read: picked alone, there is nothing to revert, and so no button.
+  await rows(mode).first().click();
+  await expect.poll(cards(mode)).toEqual(["Shown to me"]);
+  await expect(bar(mode).getByRole("button", { name: "Revert…" })).toHaveCount(0);
+
+  await mode.getByRole("checkbox", { name: "Select all" }).click();
+  await expect.poll(async () => (await cards(mode)()).sort()).toEqual(["Mine to change", "Shown to me"]);
+  // The note that can be changed has its menu, and the one that can only be read has none.
+  await expect(mode.getByRole("button", { name: "More for Mine to change" })).toBeVisible();
+  await expect(mode.getByRole("button", { name: "More for Shown to me" })).toHaveCount(0);
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
+  await expect(revertDialog(page)).toContainText("1 note you can read and not change is left out.");
+  await expect(revertDialog(page)).toContainText("Mine to change");
+  await expect(revertDialog(page)).not.toContainText("Shown to me");
+  await revertDialog(page).getByRole("button", { name: /^Revert/ }).click();
+  await expect(toast(page)).toContainText("1 note you can read and not change is left out.");
+  await expect.poll(async () => (await perform(admin, { type: "note.read", id: mine.id })).revision).toBe(3);
+  await expect.poll(async () => (await perform(admin, { type: "note.read", id: shown.id })).revision).toBe(2);
 });
 
 test("a selection of more notes than one request takes is read, previewed and reverted in parts, the list and the preview a page at a time, and undone in one press", async ({ page }) => {

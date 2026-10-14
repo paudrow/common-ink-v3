@@ -13,7 +13,7 @@ import { layoutOf, reduce, restored, showing, type Side, type SideAction } from 
 import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, typed } from "./keybindings.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { NoteReader } from "./NoteReader.tsx";
-import { ALL_NOTES, folderTitle, type App, type Embed, type Folders, type Opened, type Plugin } from "./plugin-api.ts";
+import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Folders, type Opened, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
@@ -47,6 +47,11 @@ const within = ({ min, max }: { min: number; max: number }, width: number) => Ma
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 /** How often the notes changed since the last look are listed, so an agent's or another member's change shows up. */
 const REFRESH_MS = 5000;
+/**
+ * How often every note and folder is listed again. A note that was hidden from the member, or that
+ * they may no longer change, is not a change to the note, so only a whole listing shows it.
+ */
+const REFRESH_ALL_MS = 15_000;
 
 const isAnything = (_: unknown): _ is unknown => true;
 const isRevisions = (v: unknown): v is Record<string, number> => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number");
@@ -97,7 +102,7 @@ function FolderNotes({ folderId, folders, notes, pathOf, onOpen }: { folderId: s
   if (!folders || !notes) return null;
   const title = folderTitle(folders, folderId);
   if (title === null) return <p className="notice">This folder doesn't exist, or you can't see it.</p>;
-  const listed = notes.filter((n) => folderId === ALL_NOTES || n.folderId === folderId);
+  const listed = notes.filter((n) => folderId === ALL_NOTES || n.folderId === (folderId === SHARED_WITH_ME ? null : folderId));
   return (
     <section className="folder-notes" aria-label={title}>
       <h1>{title}</h1>
@@ -139,7 +144,8 @@ interface Props {
 export function Workspace({ me, workspace, settings, place, navigate, onSwitch, noteIsHere, reloadWorkspaces }: Props) {
   const { route } = place;
   const workspaceId = workspace.id;
-  const canEdit = workspace.role !== "viewer";
+  const { role } = workspace;
+  const canEdit = role !== "viewer";
   const now = useNow();
   const [tree, setTree] = useState<Folders | null>(null);
   /** Every note in the workspace, for the note list, tab titles, and quick open. */
@@ -166,7 +172,9 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const [widths, setWidths] = useStored<Widths>(`ink.widths.${me.person.id}`, isWidths, {});
   const sidebarWidth = within(SIDEBAR, widths.sidebar ?? SIDEBAR.start);
   const inspectorWidth = within(INSPECTOR, widths.inspector ?? INSPECTOR.start);
-  const [overlay, setOverlay] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<{ id: string; state: unknown } | null>(null);
+  /** Notes the member could see that a later listing left out: hidden from them, or gone. An editor still open on one stops showing it. */
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   /** An undo or redo that didn't happen, and why, shown on its note until the member's next step. */
   const [stuck, setStuck] = useState<{ noteId: string; message: string } | null>(null);
 
@@ -174,8 +182,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const routeNoteId = route.kind === "note" ? route.id : null;
   const current = (routeNoteId && byId.get(routeNoteId)) || null;
   const routeFolderId = route.kind === "folder" ? route.id : null;
-  /** The folder in front: the one whose list is open, or the open note's. */
-  const frontFolderId = routeFolderId ?? current?.folderId ?? null;
+  /** The folder in front: the one whose list is open, or the open note's. A note whose folder the member can't see is among the ones shared with them. */
+  const frontFolderId = routeFolderId ?? (current ? (current.folderId ?? SHARED_WITH_ME) : null);
 
   const appNow = useRef<App>(null!);
   /** What the app's own commands do, as of the latest render. */
@@ -197,7 +205,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       activate(h) {
         h.commands.register({ id: "notes.all", title: "Open All notes", run: () => h.app().openFolder(ALL_NOTES) });
         if (canEdit) {
-          h.commands.register({ id: "note.new", title: "New note", run: () => h.app().createNote() });
+          h.commands.register({ id: "note.new", title: "New note", run: () => void h.app().createNote().catch(() => {}) });
           h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], leaveToFields: true, run: () => inner.current.step("note.undo") });
           h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], run: () => inner.current.save() });
           h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], leaveToFields: true, run: () => inner.current.step("note.redo") });
@@ -221,6 +229,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       plugins: [core, ...BUILT_INS, ...((window as { __INK_FIXTURE_PLUGINS__?: Plugin[] }).__INK_FIXTURE_PLUGINS__ ?? []), pages],
       builtIn: [core, ...BUILT_INS, pages].map((p) => p.id),
       required: [core.id, pages.id],
+      // Fixture plugins are a test's, and stand for anyone's: they are not among these.
+      trusted: [core, ...BUILT_INS, pages],
       settings: documentOf(settings.text()) ?? {},
       // The member's own controls come through here: the Settings and Plugins pages, and the commands that turn a plugin on or off.
       write: (key, value) => void settings.set(key, value),
@@ -239,6 +249,14 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           leave: () => perform(workspaceId, { type: "member.leave" }).then(() => {}),
           invites: () => perform(workspaceId, { type: "invite.list" }),
           revoke: (inviteId) => perform(workspaceId, { type: "invite.revoke", id: inviteId }).then(() => {}),
+        },
+        sharing: {
+          of: (on) => perform(workspaceId, { type: "grant.list", ...on }),
+          grant: (on, email, access) => perform(workspaceId, { type: "grant.set", ...on, email, access }),
+          link: (on, link) => perform(workspaceId, { type: "grant.link", ...on, link }),
+          revoke: (grantId) => perform(workspaceId, { type: "grant.revoke", id: grantId }).then(() => {}),
+          setPrivate: (noteId, isPrivate) => perform(workspaceId, { type: "note.setPrivate", id: noteId, private: isPrivate }),
+          all: () => perform(workspaceId, { type: "grant.list" }).then((all) => all.grants),
         },
         storage: {
           // By member too: two people who share a browser and a workspace don't share what a plugin keeps, such as which notes are open.
@@ -314,12 +332,25 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const loadFolders = useCallback(() => perform(workspaceId, { type: "folder.list" }).then((r) => setTree(folderTree(r))), [workspaceId]);
   useEffect(() => void loadFolders(), [loadFolders]);
 
+  const listedNotes = useRef(notes);
+  listedNotes.current = notes;
   /** Notes loaded, saved, or created since the last listing was asked for, which its answer can't know. */
   const learned = useRef(new Map<string, NoteSummary>());
   useEffect(() => {
     let live = true;
     const since = (learned.current = new Map());
-    perform(workspaceId, { type: "note.list" }).then((all) => live && setNotes((known) => newest(all, known, since)));
+    perform(workspaceId, { type: "note.list" }).then((all) => {
+      if (!live) return;
+      const known = listedNotes.current;
+      const listed = newest(all, known, since);
+      const there = new Set(listed.map((n) => n.id));
+      const lost = (known ?? []).filter((n) => !there.has(n.id)).map((n) => n.id);
+      setGone((was) => {
+        const now = [...was, ...lost].filter((id) => !there.has(id));
+        return now.length === was.size && !lost.length ? was : new Set(now);
+      });
+      setNotes(listed);
+    });
     return () => {
       live = false;
     };
@@ -330,8 +361,16 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     setListVersion((v) => v + 1);
   }, [loadFolders]);
 
-  const listedNotes = useRef(notes);
-  listedNotes.current = notes;
+  useEffect(() => {
+    const again = () => document.visibilityState === "visible" && refresh();
+    const timer = setInterval(again, REFRESH_ALL_MS);
+    addEventListener("focus", again);
+    return () => {
+      clearInterval(timer);
+      removeEventListener("focus", again);
+    };
+  }, [refresh]);
+
   useEffect(() => {
     const relist = async () => {
       const known = listedNotes.current;
@@ -359,6 +398,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       noteIsHere(note.id, workspaceId);
       learned.current.set(note.id, summary);
       setNotes((all) => all && [summary, ...all.filter((n) => n.id !== note.id)]);
+      setGone((was) => (was.has(note.id) ? new Set([...was].filter((id) => id !== note.id)) : was));
       if (location.pathname.startsWith("/note/") && location.pathname.endsWith(note.id)) navigate(notePath(note), { replace: true });
     },
     [navigate, noteIsHere, workspaceId],
@@ -418,9 +458,15 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const togglePanel = useCallback((viewId: string) => act({ type: "pick", panel: viewId }, true), [act]);
   const closeOverlay = useCallback(() => setOverlay(null), []);
 
-  /** Where a new note goes: the folder asked for, or else the folder in front, when that is a folder; otherwise Unsorted. */
-  const folderForNew = (asked: string | null) => (asked && tree?.byId.has(asked) ? asked : tree?.unsortedId) ?? null;
+  /**
+   * Where a new note goes: the folder asked for, or else the folder in front, when that is a folder
+   * the member can see; otherwise Unsorted. Null where there is no such place for this person, as
+   * for a guest looking at what was shared with them.
+   */
+  const folderForNew = (asked: string | null) => (asked === SHARED_WITH_ME ? null : ((asked && tree?.byId.has(asked) ? asked : tree?.unsortedId) ?? null));
   const newNoteFolderId = folderForNew(frontFolderId);
+  /** The server says of each folder what the person may do in it, so nothing here is worked out from their role. */
+  const canCreateNote = !!newNoteFolderId && tree?.byId.get(newNoteFolderId)?.access === "edit";
 
   const go = navigate;
   /** The note whose editor is to take the cursor once it is there, unless the member has put it somewhere else by then. */
@@ -620,12 +666,12 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     openBeside,
     folderPath,
     show,
-    createNote: (folderId?: string) => void createNote(folderId),
+    createNote,
     moveNote,
     noteChanged: remember,
     refresh,
     markSeen,
-    toggleOverlay: (id: string) => setOverlay((open) => (open === id ? null : id)),
+    toggleOverlay: (id: string, state?: unknown) => setOverlay((open) => (open?.id === id ? null : { id, state })),
     toggleSidebar,
     togglePanel,
     inspect: (_: Showing | null) => {},
@@ -639,6 +685,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     workspace,
     workspaces: me.workspaces,
     canEdit,
+    canCreateNote,
     path: place.path,
     pageState: place.state,
     opened,
@@ -654,7 +701,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     sections: null,
     sectionsOpening: () => null,
     readNote: () => null,
-    overlay,
+    overlay: overlay?.id ?? null,
     ...actions,
     openBeside: contributed.views.editor.at(-1)?.split ? actions.openBeside : null,
   };
@@ -663,7 +710,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const editorArea = contributed.views.editor.at(-1);
   /** The bottom bar's items, lowest order first. Sorting keeps those of one order as the plugins added them. */
   const bar = useMemo(() => [...contributed.views.bar].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.bar]);
-  const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay);
+  const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay?.id);
 
   /** The sections, each told when it opens something if the place they are drawn in wants to know. */
   const sections = (opened?: () => void) =>
@@ -712,7 +759,9 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           setToFocus(null);
           onFocused?.();
         }}
-        canEdit={canEdit}
+        access={note?.access}
+        gone={gone.has(noteId)}
+        onRejected={refresh}
         embeds={embeds}
         completions={contributed.completions}
         onContributionFailed={host.fail}
@@ -724,6 +773,12 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
             <span className="crumbs" title={(note && tree?.pathName(note.folderId)) || undefined}>
               {note && tree?.pathName(note.folderId)}
             </span>
+            {note?.private && (
+              <span className="private-mark">
+                <Icon name="lock" /> Private
+              </span>
+            )}
+            {note?.access === "view" && canEdit && <span className="private-mark">View only</span>}
             <span>{note && `edited ${ago(note.updatedAt, now)} by ${note.updatedBy.name}`}</span>
           </>
         }
@@ -846,7 +901,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           ))}
         </div>
       )}
-      {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} />}
+      {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} state={overlay?.state} />}
     </div>
   );
 }

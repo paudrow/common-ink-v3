@@ -63,6 +63,12 @@ export async function asViewerOfNote(page: Page, text: string, name = "Vera View
   return { note, admin, workspaceId };
 }
 
+/** A browser with no cookies at all, as someone who was only sent a link has. */
+export async function visitor(page: Page): Promise<Page> {
+  const context = await page.context().browser()!.newContext({ baseURL: test.info().project.use.baseURL });
+  return context.newPage();
+}
+
 export const noteIdIn = (page: Page) => /([a-z0-9]{12})$/.exec(new URL(page.url()).pathname)![1]!;
 
 /** A way to call the MCP tools as the agent `token` belongs to. `status` is what /mcp answers a call with. */
@@ -89,7 +95,7 @@ export async function connectAgent(page: Page, name: string) {
   return { id: agent.id, ...agentWith(page, token) };
 }
 
-/** The folder tree's row for a folder, or for the list that stands beside the folders: "All notes". */
+/** The folder tree's row for a folder, or for one of the lists that stand beside the folders: "All notes", "Shared with me". */
 export const folderRow = (page: Page, name: string) => page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name, exact: true });
 
 /** Opens the list of every note in a tab, which is where a note is found by its title. A second call comes back to it from a note opened since. */

@@ -58,6 +58,10 @@ const Email = z
   .max(254)
   .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "not an email address");
 const RoleName = z.enum(["admin", "editor", "viewer"]);
+const GrantAccess = z.enum(["view", "edit"]);
+const LinkKind = z.enum(["public", "signed_in"]);
+/** What a grant is on: one note or one folder, so exactly one of the two. The operation checks that. */
+const On = { noteId: Id.optional(), folderId: Id.optional() };
 
 const FolderName = z
   .string()
@@ -208,12 +212,48 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("invite.list") }),
   /** Takes back an invite nobody has taken up. */
   z.object({ type: z.literal("invite.revoke"), id: Id }),
+  /**
+   * How a note or a folder is shared: the grants on it, the grants on the folders above that cover
+   * it, its link, and for a note whether it is private. Anyone who can see the item may ask, and is
+   * told the grants only if they may share it. With neither a note nor a folder, every grant in the
+   * workspace, for an admin.
+   */
+  z.object({ type: z.literal("grant.list"), ...On }),
+  /**
+   * Gives whoever signs in with `email` view or edit on a note or a folder, or changes what they
+   * have. Someone who isn't a member becomes a guest, who sees that and nothing else. Naming a
+   * member only narrows what their role allows there, which an admin does; on a private note of
+   * one's own it lets that member in.
+   */
+  z.object({ type: z.literal("grant.set"), ...On, email: Email, access: GrantAccess }),
+  /**
+   * Sets the link on a note or a folder: `public` opens for anyone who has it, `signed_in` for
+   * anyone signed in to Common Ink who has it, and null takes the link away, which stops it at once.
+   * A link only ever lets its holder read.
+   */
+  z.object({ type: z.literal("grant.link"), ...On, link: LinkKind.nullable() }),
+  /** Takes a grant or a link away. */
+  z.object({ type: z.literal("grant.revoke"), id: Id }),
+  /**
+   * Makes a note private, which hides it from every other member, admins too, or stops it being so.
+   * Only the member who made the note can make it private, and they are then its owner. Every grant
+   * and link on the note that someone else made is taken away as it becomes private.
+   */
+  z.object({ type: z.literal("note.setPrivate"), id: Id, private: z.boolean() }),
+  /** What the link the visitor holds is on: a note, or a folder with the folders and notes in it. */
+  z.object({ type: z.literal("shared.open") }),
+  /** One note the visitor's link covers. */
+  z.object({ type: z.literal("shared.read"), id: Id }),
 ]);
 export type Op = z.output<typeof Op>;
 export type OpInput = z.input<typeof Op>;
 export type OpType = Op["type"];
 
 export type Role = z.output<typeof RoleName>;
+export type GrantAccess = z.output<typeof GrantAccess>;
+export type LinkKind = z.output<typeof LinkKind>;
+/** What a person is in a workspace: a member with a role, or a guest, who is in it only by a grant. */
+export type Standing = Role | "guest";
 
 export interface Member {
   personId: string;
@@ -237,7 +277,8 @@ export interface NoteSummary {
   id: string;
   title: string;
   slug: string;
-  folderId: string;
+  /** Null when the one asking can't see the folder the note is in, as a guest given only the note can't. */
+  folderId: string | null;
   revision: number;
   createdAt: number;
   updatedAt: number;
@@ -245,6 +286,10 @@ export interface NoteSummary {
   updatedBy: Author;
   snippet: string;
   openTodos: number;
+  /** What the one asking may do with the note. A note they can't see is never listed. */
+  access: GrantAccess;
+  /** Whether the note is private: hidden from every member but its owner and whoever the owner let in. */
+  private: boolean;
 }
 
 export interface Note extends NoteSummary {
@@ -269,9 +314,71 @@ export interface Folder {
   parentId: string | null;
 }
 
+/** A grant as someone who may share its item is told of it. */
+export interface Grant {
+  id: string;
+  on: { kind: "note" | "folder"; id: string; name: string };
+  access: GrantAccess;
+  to:
+    | {
+        kind: "person";
+        /** Kept from anyone but an admin and whoever made the grant, once a person has taken the grant up. */
+        email: string | null;
+        /** Null until someone signs in with the email. */
+        personId: string | null;
+        name: string | null;
+        /** Their role when they are a member, whom the grant narrows. Null for a guest. */
+        role: Role | null;
+      }
+    /** `token` is what the link's address ends in: `/s/<token>`. */
+    | { kind: "link"; link: LinkKind; token: string };
+  grantedBy: { personId: string; name: string };
+  createdAt: number;
+}
+
+export interface Sharing {
+  /** Whether the one asking may change any of this. When they can't, `grants` and `inherited` are empty. */
+  canShare: boolean;
+  /** The grants on the item itself, people first. */
+  grants: Grant[];
+  /** The grants on the folders above the item, nearest first. They cover it unless a grant on it says otherwise. */
+  inherited: Grant[];
+  /** Null for a folder, and for the whole workspace. */
+  note: {
+    private: boolean;
+    /** Whose it is while it is private. */
+    owner: { personId: string; name: string } | null;
+    /** Whether the one asking may make it private, or stop it being so. */
+    canSetPrivate: boolean;
+    /** Set for a note that stopped being private when its owner was removed from the workspace. */
+    released: { from: string; by: string; at: number } | null;
+  } | null;
+}
+
+/** A note as whoever holds a link reads it. It names nobody. */
+export interface SharedNote {
+  id: string;
+  title: string;
+  slug: string;
+  /** Null for the note a link is on, and for a note right in the folder a link is on. */
+  folderId: string | null;
+  updatedAt: number;
+  snippet: string;
+}
+
+export interface Shared {
+  link: LinkKind;
+  on: { kind: "note"; id: string } | { kind: "folder"; id: string; name: string };
+  /** The folders inside a shared folder, each with the folder it is in, or null right inside the shared one. */
+  folders: Folder[];
+  notes: SharedNote[];
+}
+
 export interface ListedFolder extends Folder {
-  /** Notes directly in this folder, not in its children. */
+  /** Notes directly in this folder that the one asking can see, not in its children. */
   noteCount: number;
+  /** What the one asking may do with the folder: with edit, make notes and folders in it. */
+  access: GrantAccess;
 }
 
 export type Author =
@@ -508,7 +615,8 @@ export interface Results {
   "history.diff": SelectionDiff;
   "history.previewRevert": NoteRevertPreview[];
   "history.revert": RevertedNotes;
-  "folder.list": { unsortedId: string; folders: ListedFolder[] };
+  /** `unsortedId` is null for a guest, who can't see Unsorted unless it was shared with them. */
+  "folder.list": { unsortedId: string | null; folders: ListedFolder[] };
   "folder.create": Folder;
   "folder.rename": Folder;
   "folder.delete": { id: string };
@@ -522,6 +630,14 @@ export interface Results {
   "member.leave": { memberId: string };
   "invite.list": Invite[];
   "invite.revoke": { id: string };
+  "grant.list": Sharing;
+  "grant.set": Grant;
+  "grant.link": Grant | null;
+  "grant.revoke": { id: string };
+  /** `removed` is how many grants and links other people had put on the note, which went as it became private. */
+  "note.setPrivate": { id: string; private: boolean; removed: number };
+  "shared.open": Shared;
+  "shared.read": SharedNote & { text: string; revision: number; links: LinkedNote[] };
 }
 
 export const MAX_AGENT_NAME = 60;
@@ -542,7 +658,17 @@ export interface Agent {
   workspaceId: string | null;
   /** A read-only token can't change anything, whatever its member's role. */
   readOnly: boolean;
+  /**
+   * The folders this token is limited to, in its one workspace: it reaches them, the folders under
+   * them, and the notes in those, and nothing else is there for it. Null for every note its member
+   * can reach. A folder deleted since is still listed, and stands for nothing.
+   */
+  folderIds: string[] | null;
 }
+
+export const MAX_AGENT_FOLDERS = 50;
+/** The folders to limit an agent to. Each stands for itself and the folders under it. */
+const FolderLimit = z.array(Id).min(1, "Name at least one folder, or leave folders out for all notes").max(MAX_AGENT_FOLDERS);
 
 /** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
 export const ExpiresIn = z.union([z.number().int().min(1).max(MAX_EXPIRY_DAYS), z.literal("never")]);
@@ -557,25 +683,30 @@ export const ConnectOptions = z.strictObject({
   expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
   workspaceId: Id.optional(),
   readOnly: z.boolean().default(false),
+  /** Limits the agent to these folders of `workspaceId`, which must then be given. Left out, it reaches all notes. */
+  folderIds: FolderLimit.optional(),
 });
 export type ConnectOptions = z.input<typeof ConnectOptions>;
 
 /**
  * What a member changes about an agent they connected: what its token may do, with the token itself
- * unchanged. A field left out stays as it is. `expiresInDays` counts from the edit, and a null
- * `workspaceId` lets the token reach every workspace its member can.
+ * unchanged. A field left out stays as it is. `expiresInDays` counts from the edit, a null
+ * `workspaceId` lets the token reach every workspace its member can, and a null `folderIds` lets it
+ * reach all notes. Folders are those of the token's one workspace, so an edit that moves a limited
+ * token to another workspace names its folders there, or null.
  */
 export const AgentEdit = z.strictObject({
   expiresInDays: ExpiresIn.optional(),
   workspaceId: Id.nullable().optional(),
   readOnly: z.boolean().optional(),
+  folderIds: FolderLimit.nullable().optional(),
 });
 export type AgentEdit = z.input<typeof AgentEdit>;
 
 export interface WorkspaceSummary {
   id: string;
   name: string;
-  role: Role;
+  role: Standing;
 }
 
 export interface Me {

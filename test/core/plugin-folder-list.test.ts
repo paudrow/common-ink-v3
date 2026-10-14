@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NoteSummary } from "../../src/core/protocol.ts";
-import { ALL_NOTES } from "../../src/web/plugin-api.ts";
+import { ALL_NOTES, SHARED_WITH_ME } from "../../src/web/plugin-api.ts";
 import { INITIAL_VIEW, listReducer, listed, notesIn } from "../../src/web/plugins/noteListView.ts";
 
 const note = (id: string, over: Partial<NoteSummary> = {}) =>
@@ -8,11 +8,12 @@ const note = (id: string, over: Partial<NoteSummary> = {}) =>
 const ids = (notes: readonly NoteSummary[]) => notes.map((n) => n.id);
 
 describe("which notes a folder's list is of", () => {
-  const notes = [note("a", { folderId: "f" }), note("b", { folderId: "g" })];
+  const notes = [note("a", { folderId: "f" }), note("b", { folderId: "g" }), note("c", { folderId: null })];
 
-  it("is the folder's own notes, and every note for All notes", () => {
+  it("is the folder's own notes, every note for All notes, and the ones with no folder to see for Shared with me", () => {
     expect(ids(notesIn(notes, "f"))).toEqual(["a"]);
-    expect(ids(notesIn(notes, ALL_NOTES))).toEqual(["a", "b"]);
+    expect(ids(notesIn(notes, ALL_NOTES))).toEqual(["a", "b", "c"]);
+    expect(ids(notesIn(notes, SHARED_WITH_ME))).toEqual(["c"]);
     expect(ids(notesIn(notes, "nowhere"))).toEqual([]);
   });
 });

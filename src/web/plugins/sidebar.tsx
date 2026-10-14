@@ -1,8 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { Icon, carry, useDismiss, type Opened, type PageInfo, type Plugin, type Role, type ViewProps } from "../plugin-api.ts";
+import { Icon, carry, useDismiss, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
+const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
 
 function Sidebar({ app }: ViewProps) {
   const under = (nav: PageInfo["nav"]) => app.pages.filter((p) => p.nav === nav);
@@ -127,15 +127,20 @@ function Picker({ app, anchor, onClose }: ViewProps & { anchor: RefObject<HTMLBu
 function NewNote({ app }: ViewProps) {
   if (!app.canEdit) return null;
   const folder = app.folderId && app.folders?.byId.get(app.folderId);
-  const title = `New note in ${folder ? folder.name : "Unsorted"}`;
+  const where = folder ? folder.name : "Unsorted";
+  const refused = app.canCreateNote ? null : folder ? `You can read ${folder.name}, and not add notes to it` : "Open a folder you can change to add a note to it";
+  const title = refused ?? `New note in ${where}`;
+  const create = () => {
+    if (!refused) app.createNote().catch(() => {});
+  };
   if (!app.sidebarOpen)
     return (
-      <button type="button" className="icon-button new-note" aria-label="New note" title={title} onClick={() => app.createNote()}>
+      <button type="button" className="icon-button new-note" aria-label="New note" aria-disabled={!!refused} title={title} onClick={create}>
         <Icon name="plus" />
       </button>
     );
   return (
-    <button type="button" className="button new-note" title={title} onClick={() => app.createNote()}>
+    <button type="button" className="button new-note" aria-disabled={!!refused} title={title} onClick={create}>
       <Icon name="plus" />
       New note
     </button>
