@@ -40,16 +40,22 @@ export type DueState = "overdue" | "today" | "later";
 
 export const dueState = (day: string, now: string): DueState => (day < now ? "overdue" : day === now ? "today" : "later");
 
-/** The due dates a member picks from, and the days each means today. */
-export const DUE_FILTERS = { any: "Any date", overdue: "Overdue", today: "Today", week: "Next 7 days", none: "No date" } as const;
-export type DueFilter = keyof typeof DUE_FILTERS;
-
-export function dueRange(filter: DueFilter, now: string): { dueFrom?: string; dueTo?: string; noDue?: boolean } {
-  if (filter === "overdue") return { dueTo: addDays(now, -1) };
-  if (filter === "today") return { dueFrom: now, dueTo: now };
-  if (filter === "week") return { dueFrom: now, dueTo: addDays(now, 6) };
-  if (filter === "none") return { noDue: true };
-  return {};
+/**
+ * The query the Todos page is left at. Before the page took a query it kept a choice from each of
+ * its filters, and what a browser still holds of those is read as the query that says the same.
+ */
+export function savedQuery(query: unknown, filters: unknown): string {
+  if (typeof query === "string") return query;
+  const kept = typeof filters === "object" && filters !== null ? (filters as Record<string, unknown>) : {};
+  const due = { overdue: "due:<today", today: "due:today", week: "due:today..+6d", none: "no:due" }[String(kept.due)];
+  return [
+    ...(typeof kept.folder === "string" && /^[a-z0-9]{12}$/.test(kept.folder) ? [`folder:${kept.folder}`] : []),
+    ...(typeof kept.tag === "string" && /^[\p{L}\p{N}_][\p{L}\p{N}_/-]*$/u.test(kept.tag) && /\D/.test(kept.tag) ? [`tag:${kept.tag.toLowerCase()}`] : []),
+    ...(due ? [due] : []),
+    ...(typeof kept.importance === "string" && /^[0-3]$/.test(kept.importance) ? [`importance:${kept.importance}`] : []),
+    ...(kept.completed === true ? ["(is:open OR is:done)"] : []),
+    ...(kept.archived === true ? ["(is:archived OR -is:archived)"] : []),
+  ].join(" ");
 }
 
 /** The days offered while a member types `due:`, soonest first, narrowed by what they have typed. */

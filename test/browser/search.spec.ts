@@ -35,12 +35,12 @@ const ERRANDS = "# Errands\n\n- [ ] Call the bank about the mortgage +Home\n";
 const READING = "# Reading\n\nNotes on gardening books #botany\n";
 const SCRAPS = "# Scraps\n\nfence the by, tomatoes later\n";
 
-test("search finds a note by a word of its text, a todo's words, a tag, a project, and a phrase in quotes", async ({ page }) => {
+test("search finds a note by a word of its text, a todo's words, a tag, and a phrase in quotes", async ({ page }) => {
   await searching(page, [GARDEN, ERRANDS, READING, SCRAPS]);
   // With nothing typed it is every note, as the list of All notes is.
   await expect(titles(page)).toHaveText(["Scraps", "Reading", "Errands", "Garden plan"]);
   await expect(status(page)).toHaveText("4 notes");
-  await expect(field(page)).toHaveAttribute("placeholder", 'Search all notes: words, "a phrase", #tag, +project');
+  await expect(field(page)).toHaveAttribute("placeholder", 'Search all notes: words, "a phrase", #tag, is:archived');
 
   await field(page).fill("tomat");
   await expect(titles(page)).toHaveText(["Scraps", "Garden plan"]);
@@ -60,7 +60,7 @@ test("search finds a note by a word of its text, a todo's words, a tag, a projec
 
   await field(page).fill("+home");
   await expect(titles(page)).toHaveText(["Errands"]);
-  await expect(results(page).locator("mark")).toHaveText(["+Home"]);
+  await expect(results(page).locator("mark")).toHaveText(["Home"]);
 
   await field(page).fill("by the fence");
   await expect(titles(page)).toHaveText(["Scraps", "Garden plan"]);
@@ -324,4 +324,323 @@ test("results that may be missing notes say the server is still indexing, and th
   expect(asks).toBe(2);
   await page.waitForTimeout(2000);
   expect(asks).toBe(2);
+});
+
+const advanced = (page: Page) => searchPage(page).getByRole("button", { name: "Advanced" });
+const builder = (page: Page) => searchPage(page).getByRole("group", { name: "Advanced search" });
+const condition = (page: Page, n: number) => builder(page).getByRole("group", { name: `Condition ${n}` });
+const offers = (page: Page) => searchPage(page).getByRole("listbox", { name: "Completions" }).getByRole("option");
+const unread = (page: Page) => searchPage(page).getByRole("status");
+
+/** Notes in two folders, by one member, for the filters to tell apart. */
+async function library(page: Page) {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const ink = await perform(page, { type: "folder.create", name: "Common Ink" });
+  const plans = await perform(page, { type: "folder.create", name: "Plans", parentId: ink.id });
+  const budget = await perform(page, { type: "note.create", folderId: ink.id, text: "# Budget\n\nThe second quarter #money\n\n- [ ] Call the bank\n" });
+  const roadmap = await perform(page, { type: "note.create", folderId: plans.id, text: `# Roadmap\n\nSee [[${budget.id}]] for the budget plan.\n\n- [x] Draft it\n` });
+  const recipes = await perform(page, { type: "note.create", text: "# Recipes\n\nA quarter cup of milk #food\n" });
+  const old = await perform(page, { type: "note.create", text: "# Old budget\n\nLast year's.\n" });
+  await perform(page, { type: "note.archive", id: old.id, archived: true });
+  await page.goto("/search");
+  await expect(field(page)).toBeFocused();
+  return { ink, plans, budget, roadmap, recipes, old };
+}
+
+test("the search field takes filters with words, OR, NOT and groups, and each is asked of the server with the member's own day", async ({ page }) => {
+  await library(page);
+  const asked = async (query: string, found: string[]) => {
+    await field(page).fill(query);
+    await expect.poll(async () => (await titles(page).allTextContents()).sort(), { message: query }).toEqual([...found].sort());
+  };
+  await asked('folder:"Common Ink"', ["Budget", "Roadmap"]);
+  await asked("folder:Plans OR #food", ["Recipes", "Roadmap"]);
+  await asked("budget -folder:Plans", ["Budget"]);
+  await asked("has:link", ["Roadmap"]);
+  await asked("has:backlink", ["Budget"]);
+  await asked("has:todo no:open-todo", ["Roadmap"]);
+  await asked("is:archived", ["Old budget"]);
+  await asked("budget (is:open OR is:archived)", ["Budget", "Old budget", "Roadmap"]);
+  await asked("is:trashed", []);
+  await perform(page, { type: "note.trash", id: (await perform(page, { type: "note.create", text: "# Scrapped\n\nNever mind.\n" })).id });
+  await asked("is:trashed OR milk", ["Recipes", "Scrapped"]);
+  await asked("editor:@me -tag:money -has:link", ["Recipes"]);
+  await asked("quarter NOT milk", ["Budget"]);
+  await asked("(milk OR bank) -#money", ["Recipes"]);
+  await asked("budget in:title", ["Budget"]);
+  // Today is the member's, said by the page: every note was made today, and none yesterday.
+  await asked("created:today", ["Budget", "Recipes", "Roadmap"]);
+  await asked("updated:>=yesterday has:tag", ["Budget", "Recipes"]);
+  await field(page).fill("created:<today");
+  await expect(nothing(page)).toContainText("No notes match");
+  // The order a query asks for is the order shown, and a sort: alone is the list in that order.
+  await field(page).fill("is:open sort:title-desc");
+  await expect(titles(page)).toHaveText(["Roadmap", "Recipes", "Budget"]);
+  await field(page).fill("sort:title-asc");
+  await expect(titles(page)).toHaveText(["Budget", "Recipes", "Roadmap"]);
+});
+
+test("a filter's name and its values are offered as they are typed: Tab takes one, the arrows and Enter pick, Escape closes, and Tab is left alone when nothing is offered", async ({ page }) => {
+  await library(page);
+  await field(page).pressSequentially("budget fo");
+  await expect(offers(page)).toHaveText([/^folder:\s*In a folder/]);
+  await page.keyboard.press("Tab");
+  await expect(field(page)).toHaveValue("budget folder:");
+  await expect(field(page)).toBeFocused();
+  // The folders the member has, by their paths. A name with a space is written in quotes.
+  await expect(offers(page)).toHaveText(["Common Ink", "Common Ink / Plans", "Unsorted"]);
+  await page.keyboard.press("ArrowDown");
+  await expect(offers(page).nth(0)).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await expect(field(page)).toHaveValue('budget folder:"Common Ink" ');
+  await expect(titles(page)).toHaveText(["Budget", "Roadmap"]);
+  await expect(offers(page)).toHaveCount(0);
+
+  // Typing narrows what is offered, and the words a filter takes come with what each means.
+  await field(page).fill("");
+  await field(page).pressSequentially("is:ar");
+  await expect(offers(page)).toHaveText([/^archived\s*Archived\./]);
+  await page.keyboard.press("Tab");
+  await expect(field(page)).toHaveValue("is:archived ");
+  await expect(titles(page)).toHaveText(["Old budget"]);
+  await field(page).pressSequentially("#");
+  await expect(offers(page)).toHaveText(["food", "money"]);
+  await field(page).pressSequentially("mo");
+  await expect(offers(page)).toHaveText(["money"]);
+  await page.keyboard.press("Tab");
+  await expect(field(page)).toHaveValue("is:archived #money ");
+  await field(page).fill("");
+  await field(page).pressSequentially("-editor:");
+  await expect(offers(page)).toHaveText(["@me", "Ada Lovelace"]);
+  await page.keyboard.press("Tab");
+  await expect(field(page)).toHaveValue("-editor:@me ");
+  await expect(nothing(page)).toContainText("No notes match");
+
+  // Enter with nothing picked runs the query as typed, and never takes an offer.
+  await field(page).fill("");
+  await field(page).pressSequentially("author");
+  await expect(offers(page)).toHaveText([/^author:/]);
+  await page.keyboard.press("Enter");
+  await expect(field(page)).toHaveValue("author");
+  // Escape closes what is offered and leaves the field as it is, and then Tab goes on to the next control.
+  await field(page).fill("");
+  await field(page).pressSequentially("has");
+  await expect(offers(page)).toHaveText([/^has:/]);
+  await page.keyboard.press("Escape");
+  await expect(offers(page)).toHaveCount(0);
+  await expect(field(page)).toHaveValue("has");
+  await expect(field(page)).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(advanced(page)).toBeFocused();
+  // A word that starts no filter is offered nothing, so Tab is not taken from it either.
+  await field(page).fill("");
+  await field(page).pressSequentially("budget");
+  await expect(offers(page)).toHaveCount(0);
+  await page.keyboard.press("Tab");
+  await expect(advanced(page)).toBeFocused();
+  await expect(field(page)).toHaveValue("budget");
+});
+
+test("a query that can't be read says where under the field and is not asked; one naming a folder nobody has is said by the server", async ({ page }) => {
+  await library(page);
+  const sent: string[] = [];
+  page.on("request", (request) => {
+    const body = request.postData();
+    if (body?.includes('"type":"search"')) sent.push((JSON.parse(body) as { query: string }).query);
+  });
+  await field(page).fill("budget titel:x");
+  await expect(unread(page)).toContainText('There is no filter "titel:"');
+  await expect(unread(page).locator("mark")).toHaveText("titel:");
+  await expect(unread(page).locator("code")).toHaveText("budget titel:x");
+  await expect(field(page)).toHaveAttribute("aria-invalid", "true");
+  // The list is the notes it was: nothing is searched for.
+  await expect(titles(page)).toHaveText(["Recipes", "Roadmap", "Budget"]);
+  await field(page).fill("is:opne");
+  await expect(unread(page)).toContainText("Did you mean open?");
+  await expect(unread(page).locator("mark")).toHaveText("opne");
+  await field(page).fill("(budget OR");
+  await expect(unread(page)).toContainText("OR needs a term on both sides");
+  await field(page).fill("due:today");
+  await expect(unread(page)).toContainText("due: is for todos");
+  expect(sent).toEqual([]);
+
+  await field(page).fill("budget -plan");
+  await expect(unread(page)).toHaveCount(0);
+  await expect(field(page)).not.toHaveAttribute("aria-invalid", "true");
+  await expect(titles(page)).toHaveText(["Budget"]);
+
+  await field(page).fill("folder:Nowhere budget");
+  await expect(searchPage(page).getByRole("alert")).toContainText('No folder named "Nowhere"');
+  await expect(results(page)).toHaveCount(0);
+});
+
+test("Advanced builds the query a row at a time, writes each change in the field, and reads back what is typed there", async ({ page }) => {
+  await library(page);
+  await expect(builder(page)).toHaveCount(0);
+  await advanced(page).click();
+  await expect(advanced(page)).toHaveAttribute("aria-expanded", "true");
+  await expect(condition(page, 1)).toHaveCount(0);
+
+  // From the builder to the field.
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 1).getByRole("textbox", { name: "Value" }).fill("budget");
+  await expect(field(page)).toHaveValue("budget");
+  await expect.poll(async () => (await titles(page).allTextContents()).sort()).toEqual(["Budget", "Roadmap"]);
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await expect(condition(page, 2).getByRole("combobox", { name: "Field" }).getByRole("option")).toHaveText(["Words", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "State", "Has"]);
+  await condition(page, 2).getByRole("combobox", { name: "Field" }).selectOption({ label: "Folder" });
+  // A row with nothing chosen is no part of the query yet.
+  await expect(field(page)).toHaveValue("budget");
+  await condition(page, 2).getByRole("combobox", { name: "Value" }).selectOption({ label: "Common Ink / Plans" });
+  await expect(field(page)).toHaveValue("budget folder:Plans");
+  await expect(titles(page)).toHaveText(["Roadmap"]);
+  await condition(page, 2).getByRole("combobox", { name: "Is or is not" }).selectOption("is not");
+  await expect(field(page)).toHaveValue("budget -folder:Plans");
+  await expect(titles(page)).toHaveText(["Budget"]);
+  await builder(page).getByRole("radio", { name: "Match any" }).check();
+  await expect(field(page)).toHaveValue("budget OR -folder:Plans");
+  await expect.poll(async () => (await titles(page).allTextContents()).sort()).toEqual(["Budget", "Recipes", "Roadmap"]);
+  await builder(page).getByRole("combobox", { name: "Sort" }).selectOption("title-desc");
+  await expect(field(page)).toHaveValue("budget OR -folder:Plans sort:title-desc");
+  await expect(titles(page)).toHaveText(["Roadmap", "Recipes", "Budget"]);
+  await builder(page).getByRole("combobox", { name: "Words in" }).selectOption("title");
+  await expect(field(page)).toHaveValue("budget OR -folder:Plans in:title sort:title-desc");
+  await condition(page, 1).getByRole("button", { name: "Remove condition 1" }).click();
+  await expect(field(page)).toHaveValue("-folder:Plans in:title sort:title-desc");
+  // The address holds the query the builder wrote, so it is linked and reloaded as any search is.
+  await expect(page).toHaveURL(/q=-folder%3APlans\+in%3Atitle\+sort%3Atitle-desc/);
+
+  // From the field to the builder: every kind of row.
+  await field(page).fill('"second quarter" -tag:food updated:>=7d created:2020-01-01..today no:link is:open');
+  await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(6);
+  await expect(condition(page, 1).getByRole("combobox", { name: "Field" })).toHaveValue("text");
+  await expect(condition(page, 1).getByRole("textbox", { name: "Value" })).toHaveValue("second quarter");
+  await expect(condition(page, 2).getByRole("combobox", { name: "Field" })).toHaveValue("tag");
+  await expect(condition(page, 2).getByRole("combobox", { name: "Is or is not" })).toHaveValue("not");
+  await expect(condition(page, 2).getByRole("combobox", { name: "Value" })).toHaveValue("food");
+  await expect(condition(page, 3).getByRole("combobox", { name: "Comparison" })).toHaveValue(">=");
+  await expect(condition(page, 3).getByRole("combobox", { name: "Value" })).toHaveValue("7d");
+  await expect(condition(page, 4).getByRole("combobox", { name: "Comparison" })).toHaveValue("between");
+  await expect(condition(page, 4).getByRole("combobox", { name: "Value" })).toHaveValue("2020-01-01");
+  await expect(condition(page, 4).getByRole("combobox", { name: "To" })).toHaveValue("today");
+  await expect(condition(page, 5).getByRole("combobox", { name: "Field" })).toHaveValue("has");
+  await expect(condition(page, 5).getByRole("combobox", { name: "Is or is not" })).toHaveValue("not");
+  await expect(condition(page, 5).getByRole("combobox", { name: "Value" })).toHaveValue("link");
+  await expect(condition(page, 6).getByRole("combobox", { name: "Value" })).toHaveValue("open");
+  await expect(builder(page).getByRole("radio", { name: "Match all" })).toBeChecked();
+  await expect(titles(page)).toHaveText(["Budget"]);
+  // A change in a row rewrites the field in the one way a query is written.
+  await condition(page, 2).getByRole("combobox", { name: "Is or is not" }).selectOption("is");
+  await expect(field(page)).toHaveValue('"second quarter" tag:food updated:>=7d created:2020-01-01..today no:link is:open');
+  await expect(nothing(page)).toContainText("No notes match");
+
+  // Escape in the panel closes it and gives the keyboard back to Advanced. The query stays.
+  await condition(page, 1).getByRole("textbox", { name: "Value" }).press("Escape");
+  await expect(builder(page)).toHaveCount(0);
+  await expect(advanced(page)).toBeFocused();
+  await expect(advanced(page)).toHaveAttribute("aria-expanded", "false");
+  await expect(field(page)).toHaveValue('"second quarter" tag:food updated:>=7d created:2020-01-01..today no:link is:open');
+});
+
+test("a row's value is read as it would be typed: a tag picked in capitals narrows by it, and a value that can't be read says why beside its row", async ({ page }) => {
+  await library(page);
+  await create(page, "# Trips\n\nBook the train #Travel\n");
+  await page.goto("/search");
+  await advanced(page).click();
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption("tag");
+  const value = condition(page, 1).getByRole("combobox", { name: "Value" });
+  // The list offers a tag as it is written in the notes, and picking one puts exactly that in the field.
+  await expect(condition(page, 1).locator("datalist option[value='Travel']")).toHaveCount(1);
+  await value.fill("Travel");
+  await expect(field(page)).toHaveValue("tag:travel");
+  await expect(titles(page)).toHaveText(["Trips"]);
+  await expect(value).toHaveValue("Travel");
+  await value.fill("#MONEY");
+  await expect(field(page)).toHaveValue("tag:money");
+  await expect(titles(page)).toHaveText(["Budget"]);
+
+  await value.fill("two words");
+  await expect(condition(page, 1)).toContainText("\"two words\" is not a tag's name");
+  await expect(value).toHaveAttribute("aria-invalid", "true");
+  await expect(field(page)).toHaveValue("");
+  await value.fill("food");
+  await expect(condition(page, 1)).not.toContainText("is not a tag's name");
+  await expect(field(page)).toHaveValue("tag:food");
+
+  // A word that is an operator's is looked for as the word.
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption("text");
+  await condition(page, 1).getByRole("textbox", { name: "Value" }).fill("AND");
+  await expect(field(page)).toHaveValue('"AND"');
+});
+
+test("a query the builder can't show as rows stays as typed, with one line saying so, and is never rewritten", async ({ page }) => {
+  await library(page);
+  await advanced(page).click();
+  for (const query of ["budget (milk OR bank)", "budget plan OR milk", "NOT (milk OR bank)"]) {
+    await field(page).fill(query);
+    await expect(builder(page)).toContainText("This query has groups, or AND and OR together, which rows can't show. It stays as it is typed");
+    await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(0);
+    await expect(builder(page).getByRole("button", { name: "Add a condition" })).toHaveCount(0);
+    await expect(field(page)).toHaveValue(query);
+  }
+  await expect(titles(page)).toHaveText(["Roadmap"]);
+  // One that can't be read is left alone too, and rows come back when it can be shown.
+  await field(page).fill("budget titel:x");
+  await expect(builder(page)).toContainText("The query in the bar can't be read yet");
+  await expect(field(page)).toHaveValue("budget titel:x");
+  await field(page).fill("budget -milk");
+  await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(2);
+  await expect(condition(page, 2).getByRole("combobox", { name: "Is or is not" })).toHaveValue("not");
+});
+
+test("the ? in Advanced lists every filter and operator with what it means, and an example is a button that puts its query in the field and runs it", async ({ page }) => {
+  await library(page);
+  await advanced(page).click();
+  const help = builder(page).getByRole("region", { name: "Query syntax" });
+  await expect(help).toHaveCount(0);
+  await builder(page).getByRole("button", { name: "Query syntax" }).click();
+  await expect(builder(page).getByRole("button", { name: "Query syntax" })).toHaveAttribute("aria-expanded", "true");
+  const forms = await help.getByRole("rowheader").allTextContents();
+  for (const form of ["word", '"a phrase"', "a OR b", "-a, NOT a", "( )", "key:A..B", "#NAME", "folder:NAME", "tag:NAME", "updated:DAY", "created:DAY", "editor:NAME, edited-by:NAME", "author:NAME", "is:open", "is:archived", "is:trashed", "is:shared", "is:private", "has:todo", "has:open-todo", "has:link", "has:backlink", "has:tag", "no:WORD", "in:title", "in:body", "sort:updated-desc", "sort:title-asc"]) {
+    expect(forms, form).toContain(form);
+  }
+  // What is for todos alone is not offered where notes are searched.
+  for (const form of ["due:DAY", "importance:N", "is:done", "has:recurrence", "sort:due-asc"]) expect(forms, form).not.toContain(form);
+  await expect(help.getByRole("row").filter({ hasText: "is:archived" }).first()).toContainText("Archived. A query that doesn't say so leaves archived notes out");
+
+  await help.getByRole("button", { name: "is:archived", exact: true }).click();
+  await expect(field(page)).toHaveValue("is:archived");
+  await expect(titles(page)).toHaveText(["Old budget"]);
+  await help.getByRole("button", { name: "has:link", exact: true }).click();
+  await expect(field(page)).toHaveValue("has:link");
+  await expect(titles(page)).toHaveText(["Roadmap"]);
+  await help.getByRole("button", { name: "(budget OR plan) -draft", exact: true }).click();
+  await expect(field(page)).toHaveValue("(budget OR plan) -draft");
+  // Roadmap has a todo to draft it, which the example's -draft leaves out.
+  await expect(titles(page)).toHaveText(["Budget"]);
+  // Every example reads: none leaves the field saying it can't be read.
+  for (const example of await help.getByRole("button").all()) {
+    await example.click();
+    await expect(field(page)).toHaveValue((await example.textContent())!);
+    await expect(field(page)).not.toHaveAttribute("aria-invalid", "true");
+  }
+  await builder(page).getByRole("button", { name: "Query syntax" }).click();
+  await expect(help).toHaveCount(0);
+});
+
+test("the bar, the builder and the help fit a window 380 wide, and nothing in them runs off its side", async ({ page }) => {
+  await library(page);
+  await page.setViewportSize({ width: 380, height: 800 });
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeHidden();
+  await field(page).fill('budget folder:"Common Ink" updated:2020-01-01..today');
+  await advanced(page).click();
+  await builder(page).getByRole("button", { name: "Query syntax" }).click();
+  await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(3);
+  const over = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".query-bar, .query-bar *")].filter((el) => el.getClientRects().length && (el.getBoundingClientRect().right > innerWidth + 0.5 || el.getBoundingClientRect().left < -0.5)).map((el) => `${el.tagName}.${el.className}`));
+  expect(over).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

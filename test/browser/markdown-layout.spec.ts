@@ -43,7 +43,8 @@ const places = (page: Page, words: readonly string[]) =>
   page.evaluate((all) => {
     const found: Record<string, Place> = {};
     for (const word of all) {
-      const box = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line, .cm-content tr")].find((el) => el.textContent!.includes(word));
+      // A word of a table is looked for in the table drawn first: its own lines, when they are shown above it, say the word too.
+      const box = [...document.querySelectorAll<HTMLElement>(".cm-content tr"), ...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")].find((el) => el.textContent!.includes(word));
       if (!box) throw new Error(`No line says "${word}"`);
       // The text node the word starts in, counting letters through the nodes before it.
       let start = box.textContent!.indexOf(word);
@@ -215,15 +216,17 @@ for (const width of [1600, 820]) {
       expectUnmoved(await places(page, WORDS), before, `with the cursor on "${word}"`);
     }
 
-    // Each of these is shown as written with the cursor on it, which is what was just measured.
+    // A heading's mark goes by its line. In a line, only what the cursor is on is shown as written: at the end of this
+    // one that is the link, and the bold and the code before it stay drawn. A box and a formula the cursor is not on stay drawn.
     await clickOn("Heading three");
     await expectShown(lineOf("Heading three"), "### Heading three");
     await clickOn("Some");
-    await expectShown(lineOf("Some"), "Some **b** `c` [l](x.co)");
+    await expectShown(lineOf("Some"), "Some b c [l](x.co)");
     await clickOn("Nested done task");
-    await expectShown(lineOf("Nested done task"), /^  ▾?- \[x\] Nested done task$/);
+    await expectShown(lineOf("Nested done task"), /^\s*▾?\s*Nested done task$/);
+    await expect(lineOf("Nested done task").getByRole("checkbox")).toHaveCount(1);
     await clickOn("With");
-    await expectShown(lineOf("mc^2"), "With $e = mc^2$ inline.");
+    await expect(lineOf("With").locator(".katex")).toHaveCount(1);
 
     // The rule, written out and drawn.
     await page.locator(".cm-line.md-rule").click();
@@ -291,6 +294,59 @@ for (const width of [1600, 820]) {
 
     await page.keyboard.press("ControlOrMeta+Home");
     expectUnmoved(await places(page, words), before, "with the cursor gone again");
+  });
+}
+
+for (const width of [1600, 820]) {
+  test(`the cursor moved into a table's lines with the keys shows them above the table, which stays drawn, and what follows is lower by exactly those lines; the two plus controls are on the table's edges and take no room (${width}px window)`, async ({ page }) => {
+    await open(page, NOTE, undefined, width);
+    await settled(page);
+    const before = await places(page, WORDS);
+    const above = WORDS.slice(0, WORDS.indexOf("Pens"));
+    const from = WORDS.slice(WORDS.indexOf("Pens"));
+    const source = editor(page).locator(".cm-line.md-table-source");
+    const table = editor(page).locator(".md-table");
+    await table.evaluate((el) => ((el as HTMLElement).dataset.first = "yes"));
+
+    // Down from the line above the table, through the blank line, into its first line.
+    await page.locator(".cm-line").filter({ hasText: "After wrapping math" }).click();
+    expectUnmoved(await places(page, WORDS), before, "with the cursor on the line above the table");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await expect(source).toHaveCount(4);
+    const rows = await source.evaluateAll((lines) => lines.reduce((sum, line) => sum + line.getBoundingClientRect().height, 0));
+    expect(rows).toBeGreaterThan(60);
+    const shown = await places(page, WORDS);
+    const part = (all: Record<string, Place>, words: readonly string[]) => Object.fromEntries(words.map((word) => [word, all[word]!]));
+    expectUnmoved(part(shown, above), part(before, above), "above the table with its lines shown");
+    const lowered = Object.fromEntries(from.map((word) => [word, { ...shown[word]!, top: shown[word]!.top - rows }]));
+    expectUnmoved(lowered, part(before, from), `from the table on, lifted by the ${rows}px of its lines`);
+    // It is the table that was drawn before, not one drawn anew.
+    await expect(table).toHaveAttribute("data-first", "yes");
+
+    // Through the lines and out below: all of it is back where it was.
+    // In the narrow column the long row is several rows as written, and the key goes through each.
+    for (let n = 0; n < 16 && (await source.count()) > 0; n++) await page.keyboard.press("ArrowDown");
+    await expect(source).toHaveCount(0);
+    await expect(table).toHaveAttribute("data-first", "yes");
+    expectUnmoved(await places(page, WORDS), before, "with the cursor below the table");
+
+    // The plus controls are not seen until the pointer is over the table. Seen, each is centered on its edge and nothing has moved.
+    const addRow = editor(page).getByRole("button", { name: "Add a row at the end" });
+    const addColumn = editor(page).getByRole("button", { name: "Add a column at the end" });
+    await expect(addRow).toHaveCSS("opacity", "0");
+    await expect(addColumn).toHaveCSS("opacity", "0");
+    await editor(page).locator('[data-focus="1,0"]').hover();
+    await expect(addRow).toHaveCSS("opacity", "1");
+    await expect(addColumn).toHaveCSS("opacity", "1");
+    expectUnmoved(await places(page, WORDS), before, "with the pointer over the table");
+    const frame = (await editor(page).locator(".md-table-frame").boundingBox())!;
+    const [row, column] = [(await addRow.boundingBox())!, (await addColumn.boundingBox())!];
+    expect(Math.abs(row.y + row.height / 2 - (frame.y + frame.height)), "the row's plus is on the bottom edge").toBeLessThanOrEqual(1);
+    expect(Math.abs(column.x + column.width / 2 - (frame.x + frame.width)), "the column's plus is on the right edge").toBeLessThanOrEqual(1);
+    // A table wider than the column scrolls inside it: its frame, and the plus on it, end where the column of text does.
+    const column0 = (await page.locator(".cm-line").filter({ hasText: "Top words" }).boundingBox())!;
+    expect(frame.x + frame.width).toBeLessThanOrEqual(column0.x + column0.width + 1);
   });
 }
 

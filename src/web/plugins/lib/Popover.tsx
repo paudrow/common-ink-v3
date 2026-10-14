@@ -37,6 +37,9 @@ export function openPopover(anchor: HTMLElement, label: string, content: (close:
   );
 }
 
+/** Closes the panel that is open, if one is. */
+export const closePopover = () => shown?.close();
+
 function Panel({ anchor, label, close, children }: { anchor: HTMLElement; label: string; close: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const from = useRef(anchor);
@@ -52,7 +55,8 @@ function Panel({ anchor, label, close, children }: { anchor: HTMLElement; label:
       // Above its anchor where there is no room below and there is above.
       const top = below + height > innerHeight - EDGE && at.top - GAP - height >= EDGE ? at.top - GAP - height : below;
       el.style.left = `${Math.max(EDGE, Math.min(at.left, innerWidth - EDGE - width))}px`;
-      el.style.top = `${Math.max(EDGE, top)}px`;
+      // Where it fits neither below nor above, it is kept inside the window, over its anchor.
+      el.style.top = `${Math.max(EDGE, Math.min(top, innerHeight - EDGE - height))}px`;
     };
     place();
     el.querySelector<HTMLElement>("[data-autofocus], button:enabled, input:enabled, select:enabled")?.focus();

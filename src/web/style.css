@@ -4,6 +4,7 @@
   --bg-elev: #ffffff;
   --ink: #1f1e1c;
   --muted: #6f6b66;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%236f6b66' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   --line: #e7e4df;
   --hover: rgb(31 30 28 / 0.06);
   --accent: #5b5bd6;
@@ -37,6 +38,7 @@
     --bg-elev: #22211f;
     --ink: #e8e6e3;
     --muted: #9a958f;
+    --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%239a958f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
     --line: #2c2b29;
     --hover: rgb(232 230 227 / 0.08);
     --accent: #8f8ff0;
@@ -61,6 +63,7 @@
   --bg-elev: #22211f;
   --ink: #e8e6e3;
   --muted: #9a958f;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%239a958f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   --line: #2c2b29;
   --hover: rgb(232 230 227 / 0.08);
   --accent: #8f8ff0;
@@ -112,6 +115,24 @@ body,
 
 .button.primary:hover {
   filter: brightness(1.08);
+}
+
+/* Every dropdown: the app's own arrow, as far from the right edge as the words are from the left. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-right: 24px;
+  padding-left: 8px;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
+}
+
+@media (forced-colors: active) {
+  select:not([multiple]):not([size]) {
+    appearance: auto;
+    background-image: none;
+  }
 }
 
 button.link {
@@ -315,6 +336,8 @@ button.link:hover {
   position: fixed;
   z-index: 40;
   min-width: 180px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 4px;
   border-radius: 8px;
   background: var(--bg-elev);
@@ -673,6 +696,273 @@ button.link:hover {
 
 .finder-scope button:hover {
   background: var(--accent-soft);
+}
+
+/* The bar a query is typed in, for notes and for todos: the field, Advanced beside it, and under them what is offered while typing, what can't be read, and the builder. */
+.query-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.query-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-line > .finder-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.query-advanced {
+  flex: none;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.query-advanced:hover,
+.query-advanced[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.query-offers {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: min(100%, 260px);
+  max-width: 100%;
+  margin: 0;
+  padding: 4px;
+  border-radius: 9px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  list-style: none;
+  font-size: 13px;
+}
+
+.query-offers li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.query-offers li > span {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.query-offers small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-offers li:hover,
+.query-offers li[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.query-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.query-error code {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.query-error mark {
+  border-bottom: 2px solid var(--danger);
+  background: var(--removed-soft);
+  color: var(--ink);
+}
+
+.query-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.query-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-panel > header strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.query-panel > header span {
+  flex: 1;
+  min-width: 0;
+}
+
+.query-help-toggle {
+  flex: none;
+  font-weight: 600;
+}
+
+.query-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.query-rows:empty {
+  display: none;
+}
+
+.query-row,
+.query-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.query-foot {
+  gap: 8px 14px;
+}
+
+.query-foot label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.query-foot select {
+  flex: 1 1 auto;
+}
+
+.query-panel select,
+.query-panel input[type="text"] {
+  height: 26px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.query-row input[type="text"] {
+  flex: 1 1 5rem;
+}
+
+.query-row select {
+  max-width: 12rem;
+}
+
+.query-why {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.query-unshown {
+  margin: 0;
+}
+
+.query-help {
+  max-height: 16rem;
+  overflow: auto;
+  padding: 2px 0;
+  border-block: 1px solid var(--line);
+}
+
+.query-help p {
+  margin: 6px 0;
+}
+
+.query-help table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.query-help th,
+.query-help td {
+  padding: 4px 8px 4px 0;
+  border-top: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.query-help code,
+.query-example {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.query-example {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.query-example:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 520px) {
+  .query-help th,
+  .query-help td {
+    display: block;
+    padding-right: 0;
+    border-top: 0;
+  }
+
+  .query-help tr {
+    display: block;
+    padding: 5px 0;
+    border-top: 1px solid var(--line);
+  }
 }
 
 .finder-scope button svg {
@@ -2426,7 +2716,8 @@ button.link:hover {
 }
 
 /* A plugin's card, in the look of a note's card in a folder's list. Its name is a link laid over the whole of it, and its switch lies above the link. */
-.plugin-card {
+.plugin-card,
+.todo-card {
   position: relative;
   align-items: center;
   padding: 12px 14px 12px 12px;
@@ -2435,7 +2726,8 @@ button.link:hover {
   background: var(--bg-elev);
 }
 
-.plugin-card:hover {
+.plugin-card:hover,
+.todo-card:hover {
   border-color: var(--line-strong);
 }
 
@@ -5165,96 +5457,71 @@ button.diff-fold:hover {
   font-size: 22px;
 }
 
-.todo-filters {
+/* A todo's card, in the look of a plugin's card and of a note's card in a folder's list. */
+.todo-card {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  color: var(--muted);
-  font-size: 12px;
+  gap: 10px;
+  font-size: 13.5px;
 }
 
-.todo-filters label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.todo-filters select {
-  max-width: 12rem;
-  padding: 2px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
-}
-
-.todo-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.todo-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 7px 4px;
-  border-bottom: 1px solid var(--line);
-  font-size: 14px;
-}
-
-.todo-row > input[type="checkbox"] {
+.todo-card > input[type="checkbox"] {
   flex: none;
-  width: 15px;
-  height: 15px;
-  margin: 3px 0 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   accent-color: var(--accent);
 }
 
-.todo-words {
+.todo-text {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 1px;
+  align-items: flex-start;
+  gap: 3px;
   min-width: 0;
+}
+
+.todo-words {
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: none;
   color: var(--ink);
   font: inherit;
-  line-height: 1.45;
+  font-weight: 600;
   text-align: left;
   overflow-wrap: anywhere;
   cursor: pointer;
 }
 
-.todo-words:hover > :first-child {
+.todo-words:hover {
   text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
 }
 
-.todo-row[data-done] .todo-words > :first-child {
+.todo-card[data-done] .todo-words {
   color: var(--muted);
+  font-weight: 400;
   text-decoration: line-through;
 }
 
-.todo-note {
-  color: var(--faint);
-  font-size: 12px;
+.todo-words .todo-tag {
+  color: var(--muted);
+  font-weight: 400;
 }
 
-.todo-chips {
+/* Under a todo's words: what is set on it, said and not pressed, and the note it is in. */
+.todo-meta {
   display: flex;
-  flex: none;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
-  max-width: 50%;
+  gap: 3px 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 .todo-chip {
-  position: relative;
   flex: none;
   padding: 1px 7px;
   border-radius: 5px;
@@ -5265,44 +5532,8 @@ button.diff-fold:hover {
   white-space: nowrap;
 }
 
-.todo-chip > input,
-.todo-chip > select,
-.todo-chip > button {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.todo-chip > :disabled {
-  cursor: default;
-}
-
-.todo-chip:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 .todo-importance {
-  min-width: 2.4em;
-  margin-top: 1px;
   font-weight: 700;
-  text-align: center;
-}
-
-.todo-importance[data-level="0"],
-.todo-due[data-due="none"],
-.todo-every:not([data-set]),
-.todo-add {
-  background: none;
-  color: var(--faint);
-  font-weight: 400;
 }
 
 .todo-due[data-due="overdue"],
@@ -5317,12 +5548,36 @@ button.diff-fold:hover {
   color: var(--accent);
 }
 
+.todo-pick {
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+/* The one way to everything else a todo can do: quiet until its card is pointed at or has the keyboard. */
+.todo-more {
+  width: 24px;
+  height: 24px;
+  margin: -2px -4px -2px 0;
+  opacity: 0.45;
+}
+
+.todo-card:hover .todo-more,
+.todo-card:focus-within .todo-more,
+.todo-more[aria-expanded="true"] {
+  opacity: 1;
+}
+
 .todo-none {
   color: var(--muted);
   font-size: 14px;
 }
 
-.todo-more {
+.todo-next {
   align-self: flex-start;
   padding: 4px 10px;
   border: 1px solid var(--line-strong);
@@ -5352,59 +5607,120 @@ button.diff-fold:hover {
   font-size: 13px;
 }
 
-.rule-form {
+/* The editor of how a todo recurs: a short list of picks, then a rule built as a sentence. */
+.rule-editor {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 244px;
+  max-width: 100%;
 }
 
-.rule-form button,
-.rule-form input,
-.rule-form select {
+.rule-editor[data-stage="sentence"] {
+  width: 324px;
+}
+
+.rule-editor p {
+  margin: 0;
+}
+
+.rule-editor hr {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.rule-now {
+  padding: 2px 8px 0;
+  font-weight: 600;
+}
+
+.rule-editor button,
+.rule-editor input,
+.rule-editor select {
   border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: var(--bg-elev);
+  background-color: var(--bg-elev);
   color: var(--ink);
   font: inherit;
 }
 
-.rule-form button {
+.rule-editor button {
   padding: 3px 8px;
   cursor: pointer;
 }
 
-.rule-form button:hover:enabled,
-.rule-form button:focus-visible {
-  background: var(--hover);
+.rule-editor button:hover:enabled,
+.rule-editor button:focus-visible {
+  background-color: var(--hover);
   outline: none;
 }
 
-.rule-form button:focus-visible,
+.rule-editor button:focus-visible,
+.rule-editor input:focus-visible,
+.rule-editor select:focus-visible,
 .completions button:focus-visible {
+  outline: none;
   box-shadow: 0 0 0 2px var(--accent);
 }
 
-.rule-form button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.rule-form button:disabled {
+.rule-editor button:disabled,
+.rule-editor select:disabled {
   color: var(--faint);
   cursor: default;
 }
 
-.rule-simple {
+.rule-picks {
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
-.rule-form .rule-simple button {
+.rule-editor .rule-picks button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   border-color: transparent;
   text-align: left;
+}
+
+.rule-picks button > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rule-in {
+  margin-left: 16px;
+}
+
+.rule-row input[type="number"] {
+  width: 4em;
+  padding: 2px 4px;
+}
+
+.rule-row input[type="date"],
+.rule-row input[type="text"] {
+  padding: 2px 6px;
+}
+
+.rule-row .rule-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.rule-row select {
+  max-width: 100%;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .rule-days {
@@ -5412,69 +5728,72 @@ button.diff-fold:hover {
   gap: 3px;
 }
 
-.rule-days button {
+.rule-editor .rule-days button {
   flex: 1;
   padding: 3px 0;
 }
 
-.rule-form .rule-more {
-  align-self: flex-start;
+.rule-editor button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rule-editor .rule-out {
+  padding: 0 6px;
   border-color: transparent;
-  padding-left: 0;
   color: var(--muted);
 }
 
-.rule-more::before {
-  content: "▸ ";
+.rule-editor .rule-add {
+  align-self: flex-start;
+  padding-left: 0;
+  border-color: transparent;
+  color: var(--muted);
 }
 
-.rule-more[aria-expanded="true"]::before {
-  content: "▾ ";
+.rule-hint,
+.rule-next {
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.rule-advanced {
+.rule-note {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12px;
 }
 
-.rule-advanced label {
+.rule-says {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.rule-advanced input[type="radio"] {
-  margin: 0 2px 0 0;
-  accent-color: var(--accent);
-}
-
-.rule-advanced input[type="number"] {
-  width: 3.6em;
-  padding: 2px 4px;
-}
-
-.rule-advanced select {
-  padding: 2px 2px;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
 }
 
 .rule-foot {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
 }
 
-.rule-says {
-  flex: 1;
+.rule-editor .rule-foot button:first-child {
+  padding-left: 0;
+  border-color: transparent;
   color: var(--muted);
 }
 
-.rule-form button.primary:enabled {
+.rule-editor button.primary:enabled {
   border-color: var(--accent);
-  background: var(--accent);
+  background-color: var(--accent);
   color: var(--on-accent);
 }
 
