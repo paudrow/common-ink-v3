@@ -61,6 +61,53 @@ test("the app's pages draw and run under the policy the Worker sends, and it ref
   await expect.poll(() => watch.refused()).toContainEqual("img-src https://example.com/pixel.png");
 });
 
+const CONSTRUCTS = [
+  "# Drawn $x^2$ heading",
+  "",
+  "A formula $\\frac{a}{b} + \\sqrt{2}$ in a line, **bold**, ~~gone~~, `code` and [a link](https://example.com).",
+  "",
+  "$$",
+  "\\int_0^1 x\\,dx = \\mathcal{A} + \\mathbf{v}",
+  "$$",
+  "",
+  "- [ ] open",
+  "- [x] done",
+  "  - nested",
+  "",
+  "> a quote",
+  "",
+  "| A | B |",
+  "| - | - |",
+  "| 1 | $y$ |",
+  "",
+  "```python",
+  "def f(x):",
+  "    return x + 1",
+  "```",
+  "",
+  "The end.",
+].join("\n");
+
+test("formulas, tables, code, tasks and the rest of what a note draws come in under the page's policy, KaTeX's fonts with them", async ({ page }) => {
+  const watch = await watchRefusals(page);
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: CONSTRUCTS });
+  await page.goto(`/note/${note.id}`);
+  const editor = page.getByRole("textbox", { name: "Note text" });
+  await expect(editor.locator(".katex")).toHaveCount(4);
+  await expect(editor.getByRole("table").locator(".katex")).toHaveCount(1);
+  await expect(editor.locator(".math-block .katex-display")).toBeVisible();
+  await expect(editor.getByRole("table")).toBeVisible();
+  await expect(editor.getByRole("checkbox")).toHaveCount(2);
+  // Each face these formulas use is loaded, from the app itself.
+  const faces = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return [...document.fonts].filter((f) => f.status === "loaded" && f.family.startsWith("KaTeX")).map((f) => f.family);
+  });
+  expect(faces).toEqual(expect.arrayContaining(["KaTeX_Main", "KaTeX_Math", "KaTeX_Caligraphic", "KaTeX_Size1"]));
+  expect(await watch.refused()).toEqual([]);
+});
+
 test("an HTML embed's document runs its own script and styles under the embed frame's policy, sandboxed, and can fetch nothing", async ({ page }) => {
   const watch = await watchRefusals(page);
   // Main has no embed document yet, so the Worker's answer for its address is given an embed's body, keeping every header the Worker sent.

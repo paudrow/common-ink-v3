@@ -1,5 +1,5 @@
 import { defaultKeymap, history } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, panels, placeholder } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
@@ -134,7 +134,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               history(),
               titleMarkOnce,
               keymap.of(defaultKeymap),
-              markdown(),
+              // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
+              markdown({ base: markdownLanguage }),
               noteHighlighting,
               embedding,
               embedded.of(embedsAre(embedsNow.current)),

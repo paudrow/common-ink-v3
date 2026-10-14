@@ -1,4 +1,4 @@
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -45,19 +45,20 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
         (note) => {
           if (!live || !el.current) return;
           setFailed(false);
+          const { text } = note;
           const view = viewRef.current;
           if (view) {
-            if (view.state.doc.toString() !== note.text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: note.text }, filter: false });
+            if (view.state.doc.toString() !== text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, selection: { anchor: 0 }, filter: false });
             return;
           }
           viewRef.current = new EditorView({
             parent: el.current,
             state: EditorState.create({
-              doc: note.text,
+              doc: text,
               extensions: [
                 reading,
                 added.of(now.current.extensions),
-                markdown(),
+                markdown({ base: markdownLanguage }),
                 noteHighlighting,
                 embedding,
                 embedded.of(embedsAre(now.current.embeds)),

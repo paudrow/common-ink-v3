@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { folderRow, listedNote, listedNotes, noteCard, openAllNotes, panelIcons, perform, pinPanel, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const tabs = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group).getByRole("tab");
@@ -16,6 +16,19 @@ async function run(page: Page, command: string) {
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
 }
+
+/** What a line shows: its text without the marks that are there but not painted. */
+const shown = (line: Locator) =>
+  line.evaluate((el) => {
+    let text = "";
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      let painted = true;
+      for (let up = node.parentElement; up && up !== el.parentElement; up = up.parentElement) if (getComputedStyle(up).opacity === "0") painted = false;
+      if (painted) text += node.textContent;
+    }
+    return text;
+  });
 
 const LONG = Array.from({ length: 60 }, (_, i) => `## Part ${i + 1}\n\nParagraph ${i + 1} of a long note, with **bold** words in it.\n`).join("\n");
 
@@ -178,10 +191,13 @@ test("a card expands to its note drawn to be read, which nothing in it changes, 
 
   await card.click();
   await expect(card.getByRole("button", { name: "Collapse Plan" })).toHaveAttribute("aria-expanded", "true");
-  await expect(card.locator(".cm-line").first()).toHaveText("# Plan");
-  await expect(card.locator(".cm-line").nth(2)).toHaveText("Write it **down**.");
+  await expect.poll(() => shown(card.locator(".cm-line").first())).toBe("Plan");
+  await expect.poll(() => shown(card.locator(".cm-line").nth(2))).toBe("Write it down.");
   await expect(card.locator(".card-preview")).toHaveCount(0);
   await expect(card.getByRole("textbox")).toHaveAttribute("contenteditable", "false");
+  const box = card.getByRole("checkbox");
+  await expect(box).toBeDisabled();
+  await box.click({ force: true });
   await card.locator(".cm-line").nth(2).click();
   await page.keyboard.type("typed into a card");
   expect((await perform(page, { type: "note.read", id: plan.id })).text).toBe("# Plan\n\nWrite it **down**.\n\n- [ ] buy ink\n");

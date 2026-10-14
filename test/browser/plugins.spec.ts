@@ -79,6 +79,8 @@ test("turning the command palette off takes its command and its key away, and th
   await setPlugin(page, "Command palette", true);
   await expect(text(page)).toBeVisible();
   await page.keyboard.press("ControlOrMeta+Shift+P");
+  // The palette shows the first 50 commands until something is typed.
+  await page.keyboard.type("Disable plugin: Command");
   await expect(palette(page).getByRole("option", { name: "Disable plugin: Command palette" })).toBeVisible();
 });
 
@@ -219,7 +221,8 @@ test("a stopwatch written in a note is drawn in it and runs, and is plain text a
 
   const watch = text(page).getByRole("button", { name: /^Stopwatch/ });
   await expect(watch).toHaveText(["0:00"]);
-  await expect(text(page)).toContainText("Time me 0:00 here, not `::stopwatch{}` there, nor ::sundial{}.");
+  // Code's backticks are hidden off the cursor's line, so the one in code reads as its own text.
+  await expect(text(page)).toContainText("Time me 0:00 here, not ::stopwatch{} there, nor ::sundial{}.");
   await watch.click();
   await expect(watch).toHaveText("0:01");
   await expect(watch).toHaveAttribute("aria-pressed", "true");
@@ -472,10 +475,9 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
   await expect(section(page, "Pictures")).toHaveCount(0);
 
   await page.setViewportSize({ width: 520, height: 800 });
-  await page.goto("/plugins/kanban");
+  await page.goto("/plugins/tables");
   await expect(section(page, "Pictures").locator("img:visible")).toHaveCount(1);
-  await page.locator(".plugin-details").getByRole("checkbox", { name: "Kanban", exact: true }).check();
-  await expect(section(page, "What it adds").getByRole("group", { name: "Embeds" })).toContainText("Kanban board");
+  await expect(section(page, "What it adds").getByRole("group", { name: "Commands" })).toContainText("Edit the next table");
   expect(await fits(page)).toBe(true);
 
   await page.goto("/plugins/no-such-plugin");
