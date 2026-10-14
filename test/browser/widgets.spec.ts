@@ -109,6 +109,103 @@ test("the menu is moved through with the arrow keys, picked from with a click, a
   await expect.poll(() => read(page, note.id)).toBe("# Tea\n\n::stopwatch{} then /x / y /zzz ::timer{5m}");
 });
 
+test("an ordinary word after a / and Enter or Tab stays as it was typed", async ({ page }) => {
+  const note = await open(page, "# Words\n\n");
+
+  // Each used to match "Kanban board" or "Timer" by scattered letters, and Enter wrote the embed over the word.
+  for (const typed of ["yes /no", "and /or", "km /h", "N /A", "/an", "> /tmr"]) {
+    await page.keyboard.type(typed);
+    await settled(page);
+    await expect(menu(page)).toHaveCount(0);
+    await page.keyboard.press("Enter");
+  }
+  await page.keyboard.type("in /or", { delay: 20 });
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("x /wat");
+  await settled(page);
+  await page.keyboard.press("Tab");
+  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /h\nN /A\n/an\n> /tmr\n> in /or\n> x /wat");
+});
+
+const highlighted = (page: Page) => options(page).and(page.locator("[aria-selected=true]"));
+
+test("after words on a line Enter is always a new line, and Tab, the arrow keys or a click pick from the list", async ({ page }) => {
+  const note = await open(page, "# Words\n\n");
+
+  // The list shows what was typed starts, nothing is highlighted, and Enter is the member's own however many letters were typed.
+  for (const [typed, shows] of [["A /B", /^Kanban board/], ["date /time", /^Timer/], ["start /stop", /^Stopwatch/]] as const) {
+    await slash(page, typed);
+    await expect(options(page)).toHaveText([shows]);
+    await expect(highlighted(page)).toHaveCount(0);
+    await page.keyboard.press("Enter");
+    await expect(menu(page)).toHaveCount(0);
+  }
+  await page.keyboard.type("A /B\nstart /stop\n", { delay: 20 });
+
+  // The arrow keys then Enter, Tab, and a click each pick.
+  await slash(page, "go /t");
+  await page.keyboard.press("ArrowDown");
+  await expect(highlighted(page)).toHaveText([/^Timer/]);
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("ControlOrMeta+End");
+  await slash(page, " then /st");
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Tab");
+  await page.keyboard.type(" and /kan");
+  await expect(menu(page)).toBeVisible();
+  await options(page).filter({ hasText: "Kanban board" }).click();
+  await page.keyboard.press("ControlOrMeta+End");
+
+  // At the start of a line the first item is highlighted and Enter picks it.
+  await slash(page, "/s");
+  await expect(highlighted(page)).toHaveText([/^Stopwatch/]);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("\n");
+
+  // A list closed with Escape takes no Enter, and a / that opens no list never did.
+  await slash(page, "/board");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Enter");
+  for (const typed of ["a/b", "src/web/timer", "https://example.com/board"]) {
+    await page.keyboard.type(typed);
+    await settled(page);
+    await expect(menu(page)).toHaveCount(0);
+    await page.keyboard.press("Enter");
+  }
+
+  // After a list item's box is the start of its line too.
+  await page.keyboard.type("- [ ] Tea\n");
+  await slash(page, "/time");
+  await expect(highlighted(page)).toHaveText([/^Timer/]);
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => read(page, note.id))
+    .toBe("# Words\n\nA /B\ndate /time\nstart /stop\nA /B\nstart /stop\ngo ::timer{5m} then ::stopwatch{} and \n:::kanban{}\n## To do\n\n## Doing\n\n## Done\n:::\n::stopwatch{}\n/board\na/b\nsrc/web/timer\nhttps://example.com/board\n- [ ] Tea\n- [ ] ::timer{5m}");
+});
+
+test("with vim on, in insert mode Enter after words is a new line and Tab picks, and at the start of a line Enter picks", async ({ page }) => {
+  const note = await open(page, "# Tea\n\nsteep", { "vim.enabled": true });
+  await page.keyboard.press("A");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--INSERT--");
+
+  await slash(page, " date /time");
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(menu(page)).toHaveCount(0);
+  await slash(page, "m /st");
+  await expect(highlighted(page)).toHaveCount(0);
+  await page.keyboard.press("Tab");
+  await expect(menu(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+  await page.keyboard.press("o");
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--INSERT--");
+  await slash(page, "/stop");
+  await expect(highlighted(page)).toHaveText([/^Stopwatch/]);
+  await page.keyboard.press("Enter");
+  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\nsteep date /time\nm ::stopwatch{}\n::stopwatch{}");
+});
+
 test("/ in the middle of a word, in a URL, in a path, or in code opens nothing", async ({ page }) => {
   const note = await open(page, "# Paths\n\n");
 
@@ -139,7 +236,7 @@ test("picking a kanban board writes its block on lines of its own and draws it, 
 
   await slash(page, "/kan");
   await expect(options(page)).toHaveText([/^Kanban board/]);
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
   await expect(editor(page).getByRole("region")).toHaveCount(3);
   await expect.poll(() => board(page)).toEqual({ "To do": [], Doing: [], Done: [] });
   await page.keyboard.type("after");
@@ -326,7 +423,7 @@ test("with vim on, / opens the embed menu in insert mode and is vim's search in 
   await page.keyboard.type("sto");
   await expect(options(page)).toHaveText([/^Stopwatch/]);
   await settled(page);
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
   await expect(statusLine).toHaveText("--INSERT--");
   await slash(page, " go /");
   await page.keyboard.press("Escape");
@@ -458,9 +555,9 @@ test("an embed's name typed after / without a pause and then Enter writes the em
   // A fast typist's keys are some 20 ms apart, so Enter comes 120 ms after the /.
   await page.keyboard.type("/timer\n", { delay: 20 });
   await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type(" and /kan\n", { delay: 20 });
+  await page.keyboard.type("\n/kan\n", { delay: 20 });
   await page.keyboard.type("/sto\n", { delay: 20 });
-  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\n::timer{5m} and \n:::kanban{}\n## To do\n\n## Doing\n\n## Done\n:::\n::stopwatch{}");
+  await expect.poll(() => read(page, note.id)).toBe("# Tea\n\n::timer{5m}\n:::kanban{}\n## To do\n\n## Doing\n\n## Done\n:::\n::stopwatch{}");
 });
 
 test("a member who can't change the note sees its embeds without their controls, and nothing they do in the editor changes it", async ({ page }) => {
@@ -535,7 +632,7 @@ test("completions whose triggers both fit share one list, in the order of their 
   await page.keyboard.type(" /tim");
   await expect(options(page)).toHaveText([/^Timer/]);
   await settled(page);
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
   await expect.poll(() => read(page, note.id)).toBe("# Tea\n\n<Standup notes> ::timer{5m}");
 });
 

@@ -15,7 +15,7 @@ import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
 import { ResizeHandle } from "./resize.tsx";
-import { folderPath, type Navigate, type Place } from "./router.ts";
+import { folderPath, keepsATab, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
 import { Settings } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
@@ -229,9 +229,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   const passing = routePage?.transient ? routePage : undefined;
   const routePageId = passing ? undefined : routePage?.id;
   const address = place.path;
+  /** An address no page is at is opened like one, under its own path as the id no page has, so it says so in a tab beside the ones that are open and never in their place. */
+  const nowhere = route.kind === "page" && !routePage && keepsATab(address);
   const opened = useMemo<Opened | null>(
-    () => (routeNoteId ? { kind: "note", id: routeNoteId } : routeFolderId ? { kind: "folder", id: routeFolderId } : routePageId ? { kind: "page", id: routePageId, path: address } : null),
-    [routeNoteId, routeFolderId, routePageId, address],
+    () => (routeNoteId ? { kind: "note", id: routeNoteId } : routeFolderId ? { kind: "folder", id: routeFolderId } : routePageId || nowhere ? { kind: "page", id: routePageId ?? address, path: address } : null),
+    [routeNoteId, routeFolderId, routePageId, nowhere, address],
   );
   useEffect(() => () => host.dispose(), [host]);
   /** Each embed as registered, but telling the host when it throws while being drawn. One is made per embed, so a drawn embed isn't redrawn when something else changes. */
@@ -632,8 +634,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   );
 
   /** Focus is of a group, and the way out of it is in that group. With none drawn the window stays whole, so nothing is hidden with no way back. */
-  const nothingThere = route.kind === "page" && !routePageId && !passing;
-  const focusable = !nothingThere && (!!editorArea || !passing);
+  const focusable = !!editorArea || !passing;
 
   return (
     <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100, "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
@@ -659,9 +660,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
           </div>
         )}
         {/* The editor area stays as it is under a page that only leads somewhere else, out of sight, so no open editor or embed is made again. */}
-        {nothingThere ? (
-          <p className="notice">There's nothing at this address.</p>
-        ) : editorArea ? (
+        {editorArea ? (
           <div className="editor-area" data-under={passing ? "" : undefined}>
             <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} controls={controls} fallback={loneEditor} />
           </div>
