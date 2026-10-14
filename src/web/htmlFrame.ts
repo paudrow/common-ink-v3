@@ -1,8 +1,10 @@
 import { EMBED_FRAME_PATH } from "../core/frames.ts";
 import { themeNow } from "./theme.ts";
 
-/** How long a frame's document is given to answer, in milliseconds. It is the app's own and holds nothing. */
-const WAIT = 4000;
+/** How long a frame's document is given to answer, in milliseconds. It is the app's own and holds nothing, but a server just woken can be slow. */
+const WAIT = 10_000;
+/** How long after the HTML is handed over it is shown though its page hasn't said it is drawn, in milliseconds. */
+const SHOWN_ANYWAY = 3000;
 
 const COLOUR = /^[\w\s(),.%#/-]+$/;
 
@@ -31,27 +33,41 @@ function opening(): string {
  *
  * `refused` is called when the document hasn't answered that way in a few seconds: the browser would
  * not load it, or it came without what shuts it in. Nothing of `html` has run then, and nothing will.
+ * `drawn` is called once the document has put `html` on its page, or a few seconds after `html` was
+ * handed over if the page never says so (HTML that stops its own loading).
  */
-export function sandboxed(html: string, { title, refused }: { title: string; refused?: () => void }): { frame: HTMLIFrameElement; stop: () => void } {
+export function sandboxed(html: string, { title, refused, drawn }: { title: string; refused?: () => void; drawn?: () => void }): { frame: HTMLIFrameElement; stop: () => void } {
   const frame = document.createElement("iframe");
   frame.title = title;
   frame.referrerPolicy = "no-referrer";
   frame.setAttribute("allow", "");
-  const ready = (event: MessageEvent) => {
-    if (event.source !== frame.contentWindow || event.origin !== "null" || (event.data as { embedFrame?: unknown } | null)?.embedFrame !== "ready") return;
-    stop();
-    // The document's origin is its own, which has no name to address it by. Only this frame's window is sent to.
-    frame.contentWindow!.postMessage({ html: opening() + html }, "*");
+  let handed = false;
+  const heard = (event: MessageEvent) => {
+    if (event.source !== frame.contentWindow || event.origin !== "null") return;
+    const said = (event.data as { embedFrame?: unknown } | null)?.embedFrame;
+    if (said === "ready" && !handed) {
+      handed = true;
+      clearTimeout(waited);
+      // The document's origin is its own, which has no name to address it by. Only this frame's window is sent to.
+      frame.contentWindow!.postMessage({ html: opening() + html }, "*");
+      waited = setTimeout(() => {
+        stop();
+        drawn?.();
+      }, SHOWN_ANYWAY);
+    } else if (said === "drawn" && handed) {
+      stop();
+      drawn?.();
+    }
   };
-  const waited = setTimeout(() => {
+  let waited = setTimeout(() => {
     stop();
     refused?.();
   }, WAIT);
   const stop = () => {
-    removeEventListener("message", ready);
+    removeEventListener("message", heard);
     clearTimeout(waited);
   };
-  addEventListener("message", ready);
+  addEventListener("message", heard);
   frame.src = EMBED_FRAME_PATH;
   return { frame, stop };
 }

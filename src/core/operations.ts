@@ -1,7 +1,7 @@
 import { ChangeSet } from "@codemirror/state";
 import { z } from "zod";
 import { lineDiff, textDiff } from "./diff.ts";
-import { dayIn, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
+import { dayIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
@@ -19,6 +19,7 @@ import {
   type Note,
   type NoteDiff,
   type NoteRevertPreview,
+  type RevertConflict,
   type NoteSummary,
   type OpInput,
   type OpType,
@@ -496,6 +497,16 @@ async function loadWithHistory(ctx: Context, ids: readonly string[]): Promise<Ma
   return new Map(notes!.results.map((row) => [row.id, { row, history: (recorded.get(row.id) ?? []).filter((r) => r.revision <= row.revision).map(toRecorded) }]));
 }
 
+/** A revert's conflicts as a preview tells them: who made the later changes, and where each is on the diffs of the changes asked for, a run of them at a time. */
+function toldConflicts(history: readonly Recorded[], found: Reverting, asked?: readonly number[]): RevertConflict[] {
+  const runs = asked ? runsOf(asked.filter((r) => r <= history.length)) : [];
+  return found.conflicts.map((c) => ({
+    ...c,
+    later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })),
+    runs: runs.map((run) => ({ revision: run.to, ...linesAsOf(history, found, run.to, c.line, c.kept.length) })),
+  }));
+}
+
 /** `takingBack` of a note already read with its changes. */
 function takingBackOf(row: NoteRow, history: Recorded[], choose: Choose, resolve?: Resolve): TakingBack {
   if (resolve && resolve.at !== row.revision) {
@@ -737,8 +748,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const author = op.author;
       const choose: Choose = author ? revertBy(author) : op.to !== undefined ? revertTo(op.to) : revertOf(op.revisions!);
       const { row, history, reverts, found, changes } = await takingBack(ctx, op.id, choose, op.resolve);
-      const conflicts = found.conflicts.map((c) => ({ ...c, later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })) }));
-      return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts };
+      return { revision: row.revision, revisions: reverts?.revisions ?? [], diff: lineDiff(row.text, changes), overlaps: found.overlaps, conflicts: toldConflicts(history, found, op.revisions) };
     },
   },
 
@@ -1009,7 +1019,6 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         if (!note) return { noteId: item.noteId, noteTitle: "", revision: 0, ...none, refused: "No such note" };
         try {
           const { row, history, reverts, found, changes } = takingBackItem(note.row, note.history, item);
-          const conflicts = found.conflicts.map((c) => ({ ...c, later: c.later.map((revision) => ({ revision, author: history[revision - 1]!.named })) }));
           return {
             ...titled(row),
             revision: row.revision,
@@ -1017,7 +1026,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             already: item.revisions ? revertible(history, item.revisions).already : [],
             diff: lineDiff(row.text, changes),
             overlaps: found.overlaps,
-            conflicts,
+            conflicts: toldConflicts(history, found, item.revisions),
           };
         } catch (err) {
           // One note that can't be reverted is no reason to show nothing of the others.

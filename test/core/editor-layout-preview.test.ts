@@ -56,7 +56,9 @@ describe("the window's preview tab", () => {
       for (let step = 0; step < 250; step++) {
         const action = anyAction(layout, pick);
         const was = previewsIn(layout)[0];
+        const groupsBefore = layout.groups.map((g) => g.id);
         layout = editorReducer(layout, action);
+        if (action.type === "open" && layout.groups.map((g) => g.id).join() !== groupsBefore.join()) throw new Error(`seed ${seed}, step ${step}: a group came or went by ${JSON.stringify(action)}`);
         const previews = previewsIn(layout);
         // The preview is still one, or has gone: it is a kept tab only by the member's saying so.
         const now = was && layout.groups.flatMap((g) => g.tabs).find((t) => keyOf(t) === keyOf(was));
@@ -74,6 +76,27 @@ describe("the window's preview tab", () => {
     expect(most).toBe(1);
     expect(split).toBeGreaterThan(3);
     expect(converted).toBeGreaterThan(50);
+  });
+
+  it("is where the next thing opens, in whichever group it is, so a group that holds nothing else is not closed by an open in another", () => {
+    const page = { kind: "page" as const, id: "todos", path: "/todos" };
+    const layout: EditorLayout = {
+      groups: [
+        { id: "1", tabs: [{ kind: "note", id: "a", preview: false }], active: { kind: "note", id: "a" } },
+        { id: "2", tabs: [{ kind: "folder", id: "all", preview: true }], active: { kind: "folder", id: "all" } },
+      ],
+      focusedGroupId: "1",
+    };
+    expect(editorReducer(layout, { type: "open", tab: page, preview: true })).toEqual({
+      groups: [layout.groups[0], { id: "2", tabs: [{ ...page, preview: true }], active: page }],
+      focusedGroupId: "2",
+    });
+    // With no preview anywhere, it opens in the group in front.
+    const kept = editorReducer(layout, { type: "pin", groupId: "2", tab: { kind: "folder", id: "all" } });
+    expect(editorReducer(kept, { type: "open", tab: page, preview: true })).toEqual({
+      groups: [{ id: "1", tabs: [{ kind: "note", id: "a", preview: false }, { ...page, preview: true }], active: page }, kept.groups[1]],
+      focusedGroupId: "1",
+    });
   });
 
   it("is one in any layout that is read, with every tab still there", () => {

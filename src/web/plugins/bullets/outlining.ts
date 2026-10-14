@@ -168,8 +168,10 @@ class Toggle extends WidgetType {
 
 /** The mark stays in the line and a dot is painted over it, so a bullet's text is where it is when the mark is shown. */
 const dot = Decoration.mark({ class: "bullet-dot" });
+/** A task's box is its mark enough: its bullet's mark keeps its room and is painted as nothing. Only where the box is drawn, which is at the start of a line. */
+const blank = Decoration.mark({ class: "bullet-blank" });
 
-/** A dot for each bullet's mark, except the mark the cursor is on, and a fold toggle beside each bullet with something under it. */
+/** A dot for each bullet's mark, or nothing on a task's, except the mark the cursor is on, and a fold toggle beside each bullet with something under it. */
 const bullets = drawnInView((view) => {
   const { state } = view;
   const drawn: Range<Decoration>[] = [];
@@ -183,7 +185,7 @@ const bullets = drawnInView((view) => {
         const line = state.doc.lineAt(node.from);
         const item = bulletAt(state, line.number - 1);
         if (item && item.end - item.line > 1) drawn.push(Decoration.widget({ widget: new Toggle(isFolded.has(line.from)), side: -1 }).range(node.from));
-        if (node.node.parent?.parent?.name === "BulletList" && !touched(state, node.from, node.to)) drawn.push(dot.range(node.from, node.to));
+        if (node.node.parent?.parent?.name === "BulletList" && !touched(state, node.from, node.to)) drawn.push((node.node.nextSibling?.name === "Task" && !state.sliceDoc(line.from, node.from).trim() ? blank : dot).range(node.from, node.to));
       },
     });
   }
@@ -192,7 +194,7 @@ const bullets = drawnInView((view) => {
 
 const look = EditorView.baseTheme({
   // The mark's own letter is there and not painted, as a ghost is, and the dot is painted over it.
-  ".bullet-dot": { position: "relative", WebkitTextFillColor: "transparent" },
+  ".bullet-dot, .bullet-blank": { position: "relative", WebkitTextFillColor: "transparent" },
   ".bullet-dot::before": { content: '"•"', position: "absolute", left: "0", right: "0", textAlign: "center", WebkitTextFillColor: "var(--muted)" },
   ".bullet-toggle": { position: "absolute", marginLeft: "-1.15em", width: "1em", textAlign: "center", color: "var(--muted)", cursor: "pointer", userSelect: "none", fontSize: "0.85em", opacity: "0.55" },
   ".bullet-toggle:hover, .bullet-toggle[aria-expanded=false]": { opacity: "1", color: "var(--accent)" },

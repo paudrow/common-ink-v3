@@ -288,7 +288,7 @@ describe("a folder's tab", () => {
     expect(editorReducer(behind, { type: "open", tab: note("b"), preview: true })).toEqual(group([[note("b"), true], [note("k"), false]], note("b")));
   });
 
-  it("is the window's one preview: opened in one group of a split, it closes the preview in the other, as it takes the place of one in its own", () => {
+  it("is the window's one preview: opened with another group in front, it takes the place of the preview where that is, and that group comes in front", () => {
     const split: EditorLayout = {
       groups: [
         { id: "1", tabs: [{ kind: "note", id: "j", preview: false }, { kind: "folder", id: "f", preview: true }], active: folder("f") },
@@ -297,18 +297,17 @@ describe("a folder's tab", () => {
       focusedGroupId: "2",
     };
     const opened = editorReducer(split, { type: "open", tab: folder("g"), preview: true });
-    expect(opened.groups).toEqual([
-      { id: "1", tabs: [{ kind: "note", id: "j", preview: false }], active: note("j") },
-      { id: "2", tabs: [{ kind: "note", id: "k", preview: false }, { kind: "folder", id: "g", preview: true }], active: folder("g") },
-    ]);
-    expect(opened.focusedGroupId).toBe("2");
+    expect(opened.groups).toEqual([{ id: "1", tabs: [{ kind: "note", id: "j", preview: false }, { kind: "folder", id: "g", preview: true }], active: folder("g") }, split.groups[1]]);
+    expect(opened.focusedGroupId).toBe("1");
 
-    // Back in the first group, the next preview leaves the second.
-    const back = editorReducer({ ...opened, focusedGroupId: "1" }, { type: "open", tab: note("b"), preview: true });
-    expect(back.groups.map((g) => g.tabs.map((t) => [t.id, t.preview]))).toEqual([[["j", false], ["b", true]], [["k", false]]]);
+    // Once the preview is kept there is none, and the next one opens in the group in front.
+    const kept = editorReducer(opened, { type: "pin", groupId: "1", tab: folder("g") });
+    const next = editorReducer({ ...kept, focusedGroupId: "2" }, { type: "open", tab: note("b"), preview: true });
+    expect(next.groups.map((g) => g.tabs.map((t) => [t.id, t.preview]))).toEqual([[["j", false], ["g", false]], [["k", false], ["b", true]]]);
+    expect(next.focusedGroupId).toBe("2");
   });
 
-  it("closes the group its preview was alone in when the next preview opens in another", () => {
+  it("keeps the group its preview is alone in when the next preview is opened with another group in front", () => {
     const split: EditorLayout = {
       groups: [
         { id: "1", tabs: [{ kind: "folder", id: "f", preview: true }], active: folder("f") },
@@ -317,8 +316,8 @@ describe("a folder's tab", () => {
       focusedGroupId: "2",
     };
     expect(editorReducer(split, { type: "open", tab: folder("g"), preview: true })).toEqual({
-      groups: [{ id: "2", tabs: [{ kind: "note", id: "k", preview: false }, { kind: "folder", id: "g", preview: true }], active: folder("g") }],
-      focusedGroupId: "2",
+      groups: [{ id: "1", tabs: [{ kind: "folder", id: "g", preview: true }], active: folder("g") }, split.groups[1]],
+      focusedGroupId: "1",
     });
   });
 
