@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, asViewerOfNote, join, listedNotes, me, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, join, listedNotes, me, noteCard, openAllNotes, perform, pinPanel, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const lines = (page: Page) => editor(page).locator(".cm-line");
@@ -23,7 +23,7 @@ const openNote = async (page: Page, note: { id: string }) => {
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toBeVisible();
 };
-const openInfo = (page: Page) => inspector(page).getByRole("tab", { name: "Info" }).click();
+const openInfo = (page: Page) => pinPanel(page, "Info");
 /** The app lists everything again when its window takes focus, so a test needn't wait for it to ask what changed. */
 const lookAgain = (page: Page) => page.evaluate(() => void window.dispatchEvent(new Event("focus")));
 const UNSAVED_IN_TRASH = "Your last changes aren't saved: this note is in Trash. Restore it to save them.";
@@ -158,7 +158,7 @@ test("a link to an archived note opens it, and the backlink from an archived not
   await perform(page, { type: "note.archive", id: old.id, archived: false });
   await perform(page, { type: "note.archive", id: diary.id, archived: true });
   await lookAgain(page);
-  await inspector(page).getByRole("tab", { name: "Backlinks" }).click();
+  await showPanel(page, "Backlinks");
   await expect(page.getByRole("navigation", { name: "Backlinks" }).getByRole("link")).toContainText(["Archived"]);
 });
 

@@ -102,6 +102,26 @@ describe("rewriting a todo's line", () => {
     expect(rewriteTodo("- [ ] a due:2026-10-14", { importance: 3, due: null })).toBe("- [ ] !!! a");
   });
 
+  it("says other words with the importance before them and the due date after them, and leaves a line that says them already as it is", () => {
+    expect(rewriteTodo("  - [x] !! a due:2026-10-14 b #c", { words: "new words #d" })).toBe("  - [x] !! new words #d due:2026-10-14");
+    expect(rewriteTodo("- [ ] a", { words: " spaced out " })).toBe("- [ ] spaced out");
+    expect(rewriteTodo("- [ ] a due:2026-10-14", { words: "b", due: null, importance: 1 })).toBe("- [ ] ! b");
+    expect(rewriteTodo("- [ ] a  b due:2026-10-14", { words: "a b" })).toBe("- [ ] a  b due:2026-10-14");
+    expect(() => rewriteTodo("- [ ] a", { words: "a\nb" })).toThrow(RangeError);
+    // Words that write their own importance or due date have it in place of the line's, once.
+    expect(rewriteTodo("- [ ] !! a due:2026-10-14", { words: "!!! b due:2026-01-01" })).toBe("- [ ] !!! b due:2026-01-01");
+    expect(rewriteTodo("- [ ] a due:2026-10-14", { words: "! b" })).toBe("- [ ] ! b due:2026-10-14");
+    // What is in inline code is written as it is typed.
+    expect(rewriteTodo("- [ ] a", { words: "run `x  y`" })).toBe("- [ ] run `x  y`");
+  });
+
+  it("keeps how a todo repeats and when it was last done after new words, unless the words write their own", () => {
+    expect(rewriteTodo("- [ ] ! a due:2026-10-14 every:2w done:2026-10-01x3 #c", { words: "b #c" })).toBe("- [ ] ! b #c due:2026-10-14 every:2w done:2026-10-01x3");
+    expect(rewriteTodo("- [ ] a every:2w", { words: "b every:mon" })).toBe("- [ ] b every:mon");
+    expect(rewriteTodo("- [ ] a every:1d done:2026-10-01x3", { words: "b done:2026-10-13x4" })).toBe("- [ ] b done:2026-10-13x4 every:1d");
+    expect(rewriteTodo("- [ ] a every:2w", { words: "b", every: null })).toBe("- [ ] b");
+  });
+
   it("writes nothing when the line already says it, and nothing to a line that isn't a todo", () => {
     const same: TodoChange[] = [{ done: false }, { importance: 2 }, { due: "2026-10-14" }, {}];
     for (const change of same) expect(rewriteTodo(line, change), JSON.stringify(change)).toBe(line);

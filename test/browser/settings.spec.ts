@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 import { category, group, json, openJson, openOptions, setPlugin, typeJson } from "./settings-helpers.ts";
 
 let errors: string[];
@@ -300,6 +300,7 @@ for (const width of [1700, 1280, 900, 560]) {
     await page.setViewportSize({ width, height: 480 });
     await openSettings(page);
     await page.goto("/settings/keyboard");
+    await pinPanel(page, "Info");
     await expect(page.getByRole("status")).toHaveText("Saved");
     const row = page.getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Toggle inspector/ });
     await row.scrollIntoViewIfNeeded();
@@ -722,4 +723,38 @@ test("Enter and Space given to commands leave buttons, links and checkboxes thei
   await page.keyboard.press("Space");
   await expect(recorder).toContainText("SPACE begins with a key that types, and that presses a button or checkbox in focus. So it runs only where nothing is being typed and focus is on no such control.");
   await page.keyboard.press("Escape");
+});
+
+test("the key recorder keeps Tab inside it and closes on Escape from any of its buttons", async ({ page }) => {
+  await openSettings(page);
+  const keys = await category(page, "Keyboard shortcuts");
+  await page.getByRole("searchbox", { name: "Search settings" }).fill("toggle focus");
+  const open = keys.getByRole("row", { name: /Toggle focus/ }).getByRole("button", { name: "Record a key for Toggle focus" });
+  await open.click();
+  const recorder = page.getByRole("dialog", { name: "Record a key for Toggle focus" });
+  const box = recorder.getByRole("group", { name: "Press the keys" });
+  await expect(box).toBeFocused();
+  const inside = () => page.evaluate(() => document.activeElement?.closest("[role=dialog]") !== null && document.activeElement !== document.body);
+
+  // Tab went on out of the dialog, to the page behind it, where Escape closed nothing.
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    expect(await inside()).toBe(true);
+  }
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Shift+Tab");
+    expect(await inside()).toBe(true);
+  }
+  await box.focus();
+  await page.keyboard.press("Tab");
+  await expect(box).not.toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(recorder).toHaveCount(0);
+
+  // A press on the dialog's own words leaves the keyboard in it, so Escape still closes it.
+  await open.click();
+  await recorder.getByText("Press Enter to save and Escape to cancel.").click();
+  await page.keyboard.press("Escape");
+  await expect(recorder).toHaveCount(0);
+  expect(await stored(page)).toEqual({});
 });

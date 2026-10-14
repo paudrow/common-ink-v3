@@ -78,7 +78,9 @@ describe("several tokens under one name", () => {
   it("are allowed, each its own author, with the name the only thing a member gives it", async () => {
     const ada = await newPerson();
     const laptop = await connectAgent(env.DB, ada.personId, "Claude");
-    const server = await connectAgent(env.DB, ada.personId, "Claude", { label: "server" } as never);
+    // A second name for it is refused with every other option nobody defined, and not dropped without a word.
+    await expect(connectAgent(env.DB, ada.personId, "Claude", { label: "server" } as never)).rejects.toMatchObject({ code: "invalid" });
+    const server = await connectAgent(env.DB, ada.personId, "Claude");
 
     expect(Object.keys(server.agent)).not.toContain("label");
     expect(laptop.agent.id).not.toBe(server.agent.id);

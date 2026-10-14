@@ -161,9 +161,9 @@ function Sentence({ every, due, now, onSet, onText }: Pick<Props, "every" | "due
       )}
 
       <div className="rule-row">
-        Recur from
+        Repeat from
         <Choice
-          name="Recur from"
+          name="Repeat from"
           value={calendar ? "due" : form.from}
           disabled={calendar}
           options={[

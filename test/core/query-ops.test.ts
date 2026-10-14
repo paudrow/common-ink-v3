@@ -281,8 +281,8 @@ describe("todo.list, by each filter", () => {
     expect(await todos(ada, "importance:0")).toEqual(["Tidy the roadmap"]);
     expect(await todos(ada, "importance:<2")).toEqual(["Tidy the roadmap"]);
     expect(await todos(ada, "importance:1..2 (is:archived OR is:open)")).toEqual(["Call the bank #urgent", "Shred it"]);
-    expect(await todos(ada, "has:recurrence")).toEqual(["Ship the plan"]);
-    expect(await todos(ada, "no:recurrence")).toEqual(["Call the bank #urgent", "Tidy the roadmap"]);
+    expect(await todos(ada, "has:repeat")).toEqual(["Ship the plan"]);
+    expect(await todos(ada, "no:repeat")).toEqual(["Call the bank #urgent", "Tidy the roadmap"]);
   });
 
   it("looks for words in the todo's own line, or with in:title in its note's title, and narrows by what its note is", async () => {
@@ -336,13 +336,13 @@ describe("todo.list, by each filter", () => {
   it("knows which todos recur from the index, and of a note indexed before it could say so once the note is read in again", async () => {
     const ada = await newMember();
     const note = await perform(env.DB, ada, { type: "note.create", text: "# Chores\n\n- [ ] Water plants every:3d\n- [ ] Read the docs on `every:2w`\n- [ ] Sweep" });
-    expect(await todos(ada, "has:recurrence")).toEqual(["Water plants"]);
+    expect(await todos(ada, "has:repeat")).toEqual(["Water plants"]);
     // As the migration leaves a line it can't read the rule of: marked by the look of it, until the note is read in again.
     await env.DB.batch([env.DB.prepare("UPDATE todos SET recurs = text LIKE '% every:%' WHERE note_id = ?").bind(note.id), env.DB.prepare("UPDATE notes SET indexed = 3 WHERE id = ?").bind(note.id)]);
-    expect(await todos(ada, "has:recurrence")).toEqual(["Water plants"]);
+    expect(await todos(ada, "has:repeat")).toEqual(["Water plants"]);
     expect((await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first<{ indexed: number }>())!.indexed).toBe(4);
     await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 1, line: 4, text: "- [ ] Sweep", every: "1w" });
-    expect((await todos(ada, "has:recurrence")).sort()).toEqual(["Sweep", "Water plants"]);
+    expect((await todos(ada, "has:repeat")).sort()).toEqual(["Sweep", "Water plants"]);
 
     // And a line's words, which the migration can only put in small letters: an accent is found once the note is read in again.
     const menu = await perform(env.DB, ada, { type: "note.create", text: "# Menu\n\n- [ ] Order Crème brûlée" });

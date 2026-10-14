@@ -192,7 +192,7 @@ export const FILTERS = {
         { word: "backlink", scopes: BOTH, means: "Linked to from a note you can see", sql: (c) => `EXISTS (SELECT 1 FROM links l JOIN notes b ON b.id = l.source_id WHERE l.target_id = n.id AND ${c.seen("b")})` },
         { word: "tag", scopes: BOTH, means: "Has any tag", sql: () => "EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id)" },
         { word: "due", scopes: TODOS, means: "Has a due date", sql: () => "t.due IS NOT NULL" },
-        { word: "recurrence", scopes: TODOS, means: "Recurs", sql: () => "t.recurs = 1" },
+        { word: "repeat", aliases: ["recurrence"], scopes: TODOS, means: "Repeats", sql: () => "t.recurs = 1" },
       ],
     },
     compares: false,

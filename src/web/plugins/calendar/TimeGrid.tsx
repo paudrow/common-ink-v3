@@ -23,10 +23,11 @@ function rangeLabel(from: number, to: number, timeZone: string): string {
   return plain(from === to ? format.format(from) : format.formatRange(from, to));
 }
 
-/** "11:00", a time of day without its AM or PM, for a card too narrow for more. */
+/** "11" or "1:45", a time of day without its AM or PM, and on the hour without its minutes, for a card too narrow for more. */
 function compactLabel(time: number, timeZone: string): string {
   const parts = new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit" }).formatToParts(time);
-  return plain(parts.filter((part) => part.type === "hour" || part.type === "minute" || (part.type === "literal" && part.value.trim())).map((part) => part.value).join(""));
+  const onTheHour = parts.some((part) => part.type === "minute" && part.value === "00");
+  return plain(parts.filter((part) => part.type === "hour" || (!onTheHour && (part.type === "minute" || (part.type === "literal" && part.value.trim())))).map((part) => part.value).join(""));
 }
 
 /** What a piece of an event says of its time: its span, its start, and its start in short, or, where it goes on from an earlier day, when it ends. */

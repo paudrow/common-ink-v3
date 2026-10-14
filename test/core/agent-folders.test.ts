@@ -533,7 +533,7 @@ describe("an agent limited to folders", () => {
     for (const query of ["Hideout", "importance:3", "sharedtodo importance:>2", "is:shared", "is:private", "has:backlink", "#hushtag", "sharedtodo -folder:Projects", "Hush-outside in:title", "is:done"]) {
       expect(await claude.call("list_todos", { query, today }), query).toEqual(none);
     }
-    for (const query of ["", "sharedtodo", "due:<today", "due:2026-10-01", "importance:>=2", "has:recurrence", "has:due", "#sharedtag", "sort:importance-desc", "sharedtodo OR Hideout", "-Hideout", "NOT is:shared", "Budget in:title", "is:open OR is:done"]) {
+    for (const query of ["", "sharedtodo", "due:<today", "due:2026-10-01", "importance:>=2", "has:repeat", "has:due", "#sharedtag", "sort:importance-desc", "sharedtodo OR Hideout", "-Hideout", "NOT is:shared", "Budget in:title", "is:open OR is:done"]) {
       expect(await listed(query), query).toEqual([tagged.id]);
       expect((await claude.json<Listed>("list_todos", { query, today, limit: 1 })).next, `${query}: one todo, and no page after it`).toBeNull();
     }

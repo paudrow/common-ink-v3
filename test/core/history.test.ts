@@ -919,6 +919,46 @@ describe("reverting an author", () => {
     expect(said.map((line) => JSON.parse(line).emptied)).toEqual([[{ noteId: draft.id, title: "Draft", trashed: false }]]);
   });
 
+  it("previews an author's revert from the ink command, in every note they changed or the ones named, and writes nothing", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const claude = await agentOf(ada);
+    const plan = await perform(env.DB, ada, { type: "note.create", text: "# Plan" }, T0);
+    await write(claude.actor, plan.id, "# Plan\n\nby the agent");
+    const draft = await perform(env.DB, claude.actor, { type: "note.create", text: "# Draft" });
+    const untouched = await perform(env.DB, ada, { type: "note.create", text: "# Mine" });
+    const said: string[] = [];
+    const io = {
+      env: { INK_TOKEN: (await agentOf(ada, "Reverter")).token, INK_URL: "https://ink.test" },
+      stdin: async () => "",
+      out: (line: string) => said.push(line),
+      fetch: ((url: string, init: RequestInit) => worker.fetch(new Request(url, init) as never, env)) as unknown as typeof fetch,
+    };
+    const author = `agent:${claude.ref.id}`;
+
+    expect(await run(["revert-author", author, "--preview"], io)).toBe(0);
+    expect(await run(["revert-author", author, "--preview", "--note", plan.id], io)).toBe(0);
+    expect(await run(["revert-author", author, "--note", plan.id, "--preview"], io)).toBe(0);
+
+    const previews = said.map((line) => (JSON.parse(line) as { noteId: string; revisions: number[] }[]).map((p) => [p.noteId, p.revisions]));
+    expect(previews[0]!.sort()).toEqual([[plan.id, [2]], [draft.id, [1]]].sort());
+    expect(previews.slice(1)).toEqual([[[plan.id, [2]]], [[plan.id, [2]]]]);
+    expect([await read(ada, plan.id), await read(ada, draft.id), await read(ada, untouched.id)]).toEqual(["# Plan\n\nby the agent", "# Draft", "# Mine"]);
+    expect((await history(ada, plan.id)).length).toBe(2);
+
+    expect(await run(["revert-author", author, "--preview", "--resolve", "{}"], io)).toBe(2);
+    expect(await run(["revert-author", "member:nobodynobody", "--preview"], io)).toBe(0);
+    expect(said.at(-1)).toBe("[]");
+    // A flag left without its value doesn't take the switch after it as one, which would send the revert for real.
+    expect(await run(["revert-author", author, "--note", "--preview"], io)).toBe(2);
+    expect(said.at(-1)).toBe("ink: --note needs a value");
+    expect(await read(ada, plan.id)).toBe("# Plan\n\nby the agent");
+
+    // More notes than one call previews are still printed as one list.
+    for (let i = 0; i < 45; i++) await perform(env.DB, claude.actor, { type: "note.create", text: `# Made ${i}` });
+    expect(await run(["revert-author", author, "--preview"], io)).toBe(0);
+    expect((JSON.parse(said.at(-1)!) as unknown[]).length).toBe(47);
+  });
+
   it("passes over a note that refuses the change, names it, and reverts the notes after it", async () => {
     const ada = await newMember("Ada Lovelace");
     const claude = await agentOf(ada);
@@ -930,14 +970,14 @@ describe("reverting an author", () => {
     await perform(env.DB, ada, { type: "note.revert", id: full!, revision: 0 });
     await write(ada, full!, long);
     await write(claude.actor, full!, "short");
-    await write(ada, full!, `short${long}`);
+    await write(ada, full!, `short\n${long}`);
 
     const { reverted, failed, next } = await revertAuthor(ada, claude.ref);
 
-    expect(failed).toEqual([{ noteId: full, title: `${`short${long}`.slice(0, 79)}…`, message: "With the other changes merged in, the note would be over 500000 characters" }]);
+    expect(failed).toEqual([{ noteId: full, title: "short", message: "With the other changes merged in, the note would be over 500000 characters" }]);
     expect(reverted.map((r) => r.note.id).sort()).toEqual(notes.map((n) => n.id).sort().slice(1));
     expect(next).toBeNull();
-    expect(await read(ada, full!)).toBe(`short${long}`);
+    expect(await read(ada, full!)).toBe(`short\n${long}`);
   });
 
   it("keeps to the notes named, and to the one token asked for when two share a name", async () => {

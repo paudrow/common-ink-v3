@@ -29,7 +29,7 @@ const COMMANDS: Record<string, string[][]> = {
   rebuild_links: [["links-rebuild"]],
   list_todos: [["todos", "due:<today -tag:someday", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--completed", "true", "--archived", "true", "--note", ID, "--limit", "5", "--offset", "5"]],
   todo_filters: [["todo-filters", "--archived", "true"]],
-  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--every", "2w", "--on", "2026-10-11"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w", "--skip", "true"]],
+  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--every", "2w", "--on", "2026-10-11", "--words", "Call the bank #money"], ["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w", "--skip", "true"]],
   todo_history: [["todo-history", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call every:2w"]],
   daily_note: [["daily", "--on", "2026-10-11"]],
   rebuild_todos: [["todos-rebuild"]],
@@ -118,6 +118,40 @@ describe("what an agent can do, against what the web app can", () => {
       const io = { env: { INK_TOKEN: "cink_x" }, stdin: async () => "", out: (text: string) => void said.push(text), fetch: (async () => expect.unreachable(argv.join(" "))) as unknown as typeof fetch };
       expect(await run(argv, io), argv.join(" ")).not.toBe(0);
       expect(said.join("\n"), argv.join(" ")).toContain(`${argv[0]} doesn't take ${argv.find((arg) => arg.startsWith("--") && !["--revision", "--line", "--text"].includes(arg))}`);
+    }
+  });
+
+  it("refuses a flag a command doesn't take, and sends nothing", async () => {
+    const said: string[] = [];
+    let sent = 0;
+    const io = {
+      env: { INK_TOKEN: "cink_x" },
+      stdin: async () => "",
+      out: (line: string) => said.push(line),
+      fetch: (async () => (sent++, Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "OK" }] } }))) as unknown as typeof fetch,
+    };
+    const all = [...Object.values(COMMANDS).flat(), ["revert-author", AUTHOR], ["revert-author", AUTHOR, "--note", ID, "--preview"], ["undo", ID], ["redo", ID]];
+    for (const argv of all) {
+      expect(await run([...argv, "--frobnicate", "yes"], io), argv.join(" ")).toBe(2);
+      expect(said.at(-1), argv.join(" ")).toMatch(new RegExp(`^ink: ${argv[0]} doesn't take --frobnicate`));
+      // A switch another command takes is as unknown here as any other flag.
+      if (!argv.includes("--preview") && !["revert", "revert-many", "revert-author"].includes(argv[0]!)) {
+        expect(await run([...argv, "--preview"], io), `${argv.join(" ")} --preview`).toBe(2);
+        expect(said.at(-1)).toContain("doesn't take --preview");
+      }
+    }
+    expect(await run(["read", ID, "--rev", "3"], io)).toBe(2);
+    expect(await run(["notes", "--folder", ID, "--sinse", "2026-10-01", "--to", "x"], io)).toBe(2);
+    expect(said.at(-1)).toContain("--sinse or --to");
+    expect(sent).toBe(0);
+  });
+
+  it("prints its usage for --help, wherever it is", async () => {
+    for (const argv of [["--help"], ["-h"], ["help"], ["notes", "--help"], ["revert-author", "--help"]]) {
+      const said: string[] = [];
+      const io = { env: {}, stdin: async () => "", out: (line: string) => said.push(line), fetch: (async () => expect.unreachable()) as unknown as typeof fetch };
+      expect(await run(argv, io), argv.join(" ")).toBe(0);
+      expect(said.join("\n")).toMatch(/^Usage: ink/);
     }
   });
 });

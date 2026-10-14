@@ -93,6 +93,8 @@ test("a sideways scroll slides the days continuously and settles on a day's edge
   await openWithSample(page);
   const week = thisWeek();
   expect(await daysInView(page)).toEqual(week);
+  // The hours open near now, which late in the day is the foot of the grid: from the morning there is room to scroll down whenever this runs.
+  await grid(page).locator(".cal-tg-scroll").evaluate((el) => (el.scrollTop = 7 * 48));
   const top = await grid(page).locator(".cal-tg-scroll").evaluate((el) => el.scrollTop);
   const header = await grid(page).locator(".cal-tg-head").boundingBox();
   const gutter = await grid(page).locator(".cal-hours").boundingBox();
