@@ -1824,19 +1824,29 @@ button.link:hover {
   max-width: none;
 }
 
-/* The line of an address that is shown as media: a caption's size, and seen only with the cursor on it. It keeps its room either way, so nothing moves. */
+/* The line of an address shown as media, with the cursor on it (out of sight it is out of the note): above the media, as v1 drew it. */
 .cm-line.embed-address {
-  font-size: 0.8125rem;
-  transition: opacity 120ms;
+  font-family: var(--mono);
+  font-size: 0.74em;
+  line-height: 1.6;
+  padding-top: 0.8em;
+  color: var(--accent);
 }
 
-.cm-line.embed-address:not(.embed-address-seen) {
-  opacity: 0;
+.cm-line.embed-address::after {
+  content: " \2197";
+  font-size: 0.9em;
 }
 
-/* Out of sight, the address is no link: the pointer and a press reach the line, which puts the cursor there. */
-.cm-line.embed-address:not(.embed-address-seen) * {
-  pointer-events: none;
+.cm-line.embed-address * {
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+/* The media whose address the cursor is on. */
+.embed-below.embed-below-on {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 0;
 }
 
 .embed-below-drawn {

@@ -1,10 +1,10 @@
 import { whoAmI } from "../core/accounts.ts";
 import { perform } from "../core/operations.ts";
-import { BROKE, OpError, type OpErrorCode } from "../core/protocol.ts";
+import { BROKE, OpError, type MeHere, type OpErrorCode } from "../core/protocol.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
-import { embedResponse } from "./frames.ts";
+import { embedOrigin, embedResponse } from "./frames.ts";
 import { secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
@@ -17,7 +17,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   const personId = await sessionPersonId(req, env, url);
   if (!personId) return json({ error: "signed_out" }, 401);
 
-  if (url.pathname === "/api/me" && req.method === "GET") return json(await whoAmI(env.DB, personId));
+  if (url.pathname === "/api/me" && req.method === "GET") return json({ ...(await whoAmI(env.DB, personId)), setup: { embedSite: embedOrigin(env) !== null } } satisfies MeHere);
 
   const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})\/ops$/.exec(url.pathname);
   if (opsRoute && req.method === "POST") {

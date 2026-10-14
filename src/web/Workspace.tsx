@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
+import type { MeHere, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, signOut } from "./api.ts";
 import { Drawn } from "./Drawn.tsx";
@@ -114,7 +114,7 @@ function FolderNotes({ folderId, folders, notes, pathOf, onOpen }: { folderId: s
 }
 
 interface Props {
-  me: Me;
+  me: MeHere;
   workspace: WorkspaceSummary;
   /** The member's settings in this workspace. */
   settings: SettingsStore;
@@ -198,6 +198,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
       // The member's own controls come through here: the Settings and Plugins pages, and the commands that turn a plugin on or off.
       write: (key, value) => void settings.set(key, value),
       mac: MAC,
+      embedSite: me.setup.embedSite,
       provide: (plugin) => ({
         workspace,
         app: () => appNow.current,

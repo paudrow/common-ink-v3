@@ -415,13 +415,32 @@ describe("plugin host", () => {
     expect(Object.keys(asked!.settings).sort()).toEqual(["get", "subscribe"]);
   });
 
+  it("defaults HTML embeds to asking first on a server whose embeds have no host of their own, and to running by themselves where they have, and the member's choice wins either way", () => {
+    for (const [embedSite, fallback, chosen] of [[false, "ask first", "automatically"], [true, "automatically", "ask first"]] as const) {
+      const { host, stored } = hostWith([htmlPlugin], { embedSite });
+      const declared = host.contributions().settings.declared.find((d) => d.key === "html.run")!;
+      expect([embedSite, declared.setting.default, host.contributions().settings.values["html.run"]]).toEqual([embedSite, fallback, fallback]);
+      host.setSetting("html.run", chosen);
+      expect([embedSite, host.contributions().settings.values["html.run"]]).toEqual([embedSite, chosen]);
+      // Choosing what is the default here is kept as the member's choice, so it holds on a server set up the other way.
+      host.setSetting("html.run", fallback);
+      expect([embedSite, stored()]).toEqual([embedSite, { "html.run": fallback }]);
+    }
+    // The default of a setting that gives none for such a server is its own on either.
+    const plain: Plugin = { id: "plain", name: "Plain", settings: { mode: { title: "Mode", type: "string", default: "on" } }, activate() {} };
+    expect(hostWith([plain]).host.contributions().settings.values["plain.mode"]).toBe("on");
+  });
+
   it("lets the HTML embeds plugin read whether to run HTML by itself, and no plugin change it or another read it", async () => {
     let html: PluginHost | null = null;
     let other: PluginHost | null = null;
-    const { host, stored, performed } = hostWith([
-      { ...htmlPlugin, activate: (h) => void (html = h) },
-      { id: "greedy", name: "Greedy", activate: (h) => void (other = h) },
-    ]);
+    const { host, stored, performed } = hostWith(
+      [
+        { ...htmlPlugin, activate: (h) => void (html = h) },
+        { id: "greedy", name: "Greedy", activate: (h) => void (other = h) },
+      ],
+      { embedSite: true },
+    );
     expect(host.contributions().settings.values["html.run"]).toBe("automatically");
     expect(html!.settings.get("run")).toBe("automatically");
     expect(() => other!.settings.get("run")).toThrow("Greedy declares no setting named run");

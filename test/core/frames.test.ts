@@ -74,6 +74,18 @@ describe("what the app's page may frame", () => {
   });
 });
 
+describe("what the app is told of where HTML embeds are served", () => {
+  it("is in what /api/me answers: a host of their own only where EMBED_ORIGIN names one", async () => {
+    for (const [setUp, embedSite] of [[{}, false], [{ EMBED_ORIGIN: "https://embed.commonink.app" }, true]] as const) {
+      const at = (path: string, init?: RequestInit) => worker.fetch(new Request(`http://localhost${path}`, init) as never, { ...env, DEV_SIGN_IN: "1", ...setUp });
+      const signedIn = await at("/auth/dev?email=setup@example.com&name=Setup");
+      const cookie = signedIn.headers.get("Set-Cookie")!.split(";")[0]!;
+      const me = (await (await at("/api/me", { headers: { Cookie: cookie } })).json()) as { person: unknown; setup: unknown };
+      expect([me.person, me.setup]).toEqual([expect.objectContaining({ email: "setup@example.com" }), { embedSite }]);
+    }
+  });
+});
+
 describe("a host given to HTML embeds alone", () => {
   it("answers with the embed's document and nothing else of the app", async () => {
     const frame = await withEmbedHost("https://embed.commonink.app/embed-frame");
