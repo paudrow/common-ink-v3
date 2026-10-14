@@ -126,8 +126,10 @@ const RecordId = z.string().min(1).max(1024);
  * When an event is. An all-day event is on calendar dates, `from` its first day and `to` its last,
  * with no time and no zone. Any other is between two instants.
  */
+/** An event's instant: up to the last a Date can hold, so a data source can always write it as a date. */
+const EventTime = Time.max(8_640_000_000_000_000);
 const EventWhen = z
-  .union([z.object({ allDay: z.literal(true), from: Day, to: Day }), z.object({ allDay: z.literal(false), from: Time, to: Time })])
+  .union([z.object({ allDay: z.literal(true), from: Day, to: Day }), z.object({ allDay: z.literal(false), from: EventTime, to: EventTime })])
   .refine((when) => when.from <= when.to, "an event can't end before it starts");
 export type EventWhen = z.output<typeof EventWhen>;
 
@@ -473,6 +475,20 @@ export const Op = z.discriminatedUnion("type", [
     location: z.string().max(1000).optional(),
     description: z.string().max(8000).optional(),
     when: EventWhen.optional(),
+  }),
+  /**
+   * Adds an event to one of the asker's calendars where it is kept, as the member whose it is.
+   * `calendarId` is one of the `calendars` `event.list` answers. A read-only data source refuses, and
+   * so does a calendar the member can only read.
+   */
+  z.object({
+    type: z.literal("event.create"),
+    sourceId: SourceId,
+    calendarId: RecordId,
+    title: z.string().max(1000),
+    when: EventWhen,
+    location: z.string().max(1000).optional(),
+    description: z.string().max(8000).optional(),
   }),
   /** The asker's contacts by name. `query` keeps those with every word of it at the start of a word of their name, email or organization. */
   z.object({ type: z.literal("contact.list"), query: z.string().max(100).optional() }),
@@ -1005,9 +1021,13 @@ export interface Results {
   /** `redirect` is where the member's browser goes to agree, or null when the data source is connected already. */
   "source.connect": { sources: Source[]; redirect: string | null };
   "source.disconnect": { sources: Source[] };
-  /** `sources` is every calendar the asker has, so one that needs reconnecting is said and not just missing. */
-  "event.list": { events: CalendarEvent[]; sources: Source[] };
+  /**
+   * `sources` is every calendar data source the asker has, so one that needs reconnecting is said and
+   * not just missing. `calendars` is every calendar in the connected ones, with or without events in the span.
+   */
+  "event.list": { events: CalendarEvent[]; sources: Source[]; calendars: Calendar[] };
   "event.update": CalendarEvent;
+  "event.create": CalendarEvent;
   /** `more` when a data source has more contacts than it lists. */
   "contact.list": { contacts: Contact[]; sources: Source[]; more: boolean };
   "record.refer": Reference;
@@ -1032,9 +1052,23 @@ export interface Source {
   account: string | null;
 }
 
+/** One calendar in a calendar data source, such as a member's work calendar in their Google account. */
+export interface Calendar {
+  sourceId: string;
+  /** Unique within its data source. */
+  id: string;
+  name: string;
+  /** As `#rrggbb`, or null when its data source says none. */
+  color: string | null;
+  /** Whether the member may add events to it and change its own. */
+  writable: boolean;
+}
+
 export interface CalendarEvent {
   sourceId: string;
   id: string;
+  /** The calendar it is in, by its id in the data source. */
+  calendarId: string;
   /** The name of the calendar it is in, and that calendar's color as `#rrggbb`. */
   calendar: string;
   color: string | null;

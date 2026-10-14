@@ -87,6 +87,9 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   event-update SOURCE EVENT --etag ETAG [--title TEXT] [--location TEXT] [--description TEXT]
                [--days DAY,DAY | --start TIME --end TIME]
                                       change an event where it is kept; --days makes it all-day, first and last day
+  event-new SOURCE CALENDAR --title TEXT (--days DAY,DAY | --start TIME --end TIME)
+            [--location TEXT] [--description TEXT]
+                                      add an event to one of the calendars events lists
   contacts [QUERY]                    your member's contacts, or those matching every word
   refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
   record REF                          the event or contact a reference stands for, as it is now
@@ -233,6 +236,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const truth = (_: string, value: string) => value !== "false";
     const archivedToo = (_: string, value: string) => (value === "only" ? "only" : value !== "false");
 
+    /** When an event is: --days makes it all-day, first and last day, and --start with --end two times. Undefined when neither is given. */
+    const whenGiven = () => {
+      if (flags.has("days") && (flags.has("start") || flags.has("end"))) throw new UsageError(`${command} takes --days, or --start and --end, not both`);
+      if (flags.has("start") !== flags.has("end")) throw new UsageError(`${command} needs --start and --end together`);
+      const [from, to = from] = (flags.get("days") ?? "").split(",");
+      return flags.has("days") ? { allDay: true, from, to } : flags.has("start") ? { allDay: false, from: time("--start", flags.get("start")!), to: time("--end", flags.get("end")!) } : undefined;
+    };
     /** What a query's days are read by: this machine's day and zone, unless they are given. */
     const days = () => {
       const now = new Date();
@@ -414,12 +424,16 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "event-update": {
         if (positional.length < 2) throw new UsageError("event-update needs a data source and an event id");
-        if (flags.has("days") && (flags.has("start") || flags.has("end"))) throw new UsageError("event-update takes --days, or --start and --end, not both");
-        if (flags.has("start") !== flags.has("end")) throw new UsageError("event-update needs --start and --end together");
-        const [from, to = from] = (flags.get("days") ?? "").split(",");
-        const when = flags.has("days") ? { allDay: true, from, to } : flags.has("start") ? { allDay: false, from: time("--start", flags.get("start")!), to: time("--end", flags.get("end")!) } : undefined;
+        const when = whenGiven();
         tool = "update_event";
         args = { sourceId: positional[0], id: positional[1], etag: needFlag("etag"), ...given({ title: ["title"], location: ["location"], description: ["description"] }), ...(when ? { when } : {}) };
+        break;
+      }
+      case "event-new": {
+        if (positional.length < 2) throw new UsageError("event-new needs a data source and a calendar id");
+        const when = whenGiven() ?? (() => { throw new UsageError("event-new needs --days, or --start and --end"); })();
+        tool = "create_event";
+        args = { sourceId: positional[0], calendarId: positional[1], title: needFlag("title"), when, ...given({ location: ["location"], description: ["description"] }) };
         break;
       }
       case "contacts":

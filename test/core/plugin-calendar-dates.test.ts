@@ -10,7 +10,7 @@ const KIRITIMATI = "Pacific/Kiritimati";
 const TOKYO_CALL: EventWhen = { allDay: false, from: at("2026-10-15T23:30:00Z"), to: at("2026-10-16T00:30:00Z") };
 const OFFSITE: EventWhen = { allDay: true, from: "2026-10-14", to: "2026-10-15" };
 
-const event = (title: string, when: EventWhen): CalendarEvent => ({ sourceId: "s", id: title, calendar: "Work", color: null, title, when, timeZone: null, location: null, description: null, recurring: false, editable: true, etag: "0", url: null });
+const event = (title: string, when: EventWhen): CalendarEvent => ({ sourceId: "s", id: title, calendarId: "work", calendar: "Work", color: null, title, when, timeZone: null, location: null, description: null, recurring: false, editable: true, etag: "0", url: null });
 
 describe("the days a view shows", () => {
   it("is the week from Sunday, the whole weeks a month touches, or two weeks from a day", () => {

@@ -162,6 +162,7 @@ describe("MCP protocol", () => {
       "list_sources",
       "list_events",
       "update_event",
+      "create_event",
       "list_contacts",
       "refer_record",
       "read_record",

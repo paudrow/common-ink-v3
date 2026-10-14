@@ -583,7 +583,8 @@ describe("an agent limited to folders", () => {
   it("is refused its member's calendar and contacts, which are in no folder, and reads a reference in its notes as its label alone", async () => {
     const w = await world();
     const asked: string[] = [];
-    const lunch = { sourceId: "cal", id: "a1", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
+    const lunch = { sourceId: "cal", id: "a1", calendarId: "mine", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
+    const mine = { sourceId: "cal", id: "mine", name: "Mine-calendar-outside", color: null, writable: true };
     const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null };
     const changed: unknown[] = [];
     const sources: Sources = {
@@ -591,7 +592,15 @@ describe("an agent limited to folders", () => {
         asked.push(personId);
         const info = (id: string, name: string) => ({ id, name, provider: "Test", state: "connected" as const, account: "ada-account-outside@test" });
         return [
-          { kind: "calendar", info: info("cal", "Calendar-source-outside"), list: async () => [lunch], get: async (id) => (id === "a1" ? lunch : null), update: async (id, change) => (changed.push([id, change]), lunch) },
+          {
+            kind: "calendar",
+            info: info("cal", "Calendar-source-outside"),
+            list: async () => ({ calendars: [mine], events: [lunch] }),
+            get: async (id) => (id === "a1" ? lunch : null),
+            calendar: async (id) => (id === mine.id ? mine : null),
+            update: async (id, change) => (changed.push([id, change]), lunch),
+            create: async (calendarId, fields) => (changed.push([calendarId, fields]), lunch),
+          },
           { kind: "contacts", info: info("people", "Contacts-source-outside"), list: async () => ({ contacts: [sam], more: false }), get: async (id) => (id === sam.id ? sam : null) },
         ];
       },
@@ -619,6 +628,7 @@ describe("an agent limited to folders", () => {
       const changes = token === readOnly.token ? (op: string) => ({ isError: true, text: `forbidden: A read-only token can't ${op}` }) : refused;
       expect(await claude.call("refer_record", { sourceId: "cal", id: "a1" })).toEqual(changes("record.refer"));
       expect(await claude.call("update_event", { sourceId: "cal", id: "a1", etag: "e1", title: "Taken" })).toEqual(changes("event.update"));
+      expect(await claude.call("create_event", { sourceId: "cal", calendarId: "mine", title: "Taken", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } })).toEqual(changes("event.create"));
       // What its note says of them is what every reader of the note is told: the reference and its label.
       expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n::event{${event.ref} Lunch with Sam} with ::contact{${contact.ref} Sam Okafor}`);
       await claude.json("search", { query: "Lunch" });

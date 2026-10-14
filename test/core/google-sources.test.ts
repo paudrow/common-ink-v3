@@ -175,6 +175,68 @@ describe("Google Calendar", () => {
     expect(google.asked("PATCH", /./)).toEqual([]);
   });
 
+  it("lists the calendars the member shows, and adds an event to one they may write as Google's events.insert takes it", async () => {
+    const { google, ask } = await connected();
+    expect((await ask({ type: "event.list", ...WEEK })).calendars).toEqual([
+      { sourceId: "google-calendar", id: "ada@example.com", name: "Ada", color: "#9fe1e7", writable: true },
+      { sourceId: "google-calendar", id: "en.usa#holiday@group.v.calendar.google.com", name: "Holidays", color: null, writable: false },
+    ]);
+    google.sent.length = 0;
+    const when = { allDay: false as const, from: Date.parse("2026-10-15T15:00:00Z"), to: Date.parse("2026-10-15T15:30:00Z") };
+    const made = await ask({ type: "event.create", sourceId: "google-calendar", calendarId: "ada@example.com", title: "Dentist", when, location: "Main St", description: "Bring the card" });
+    expect(made).toEqual({ sourceId: "google-calendar", id: "ada@example.com made5", calendarId: "ada@example.com", calendar: "Ada", color: "#9fe1e7", title: "Dentist", when, timeZone: null, location: "Main St", description: "Bring the card", recurring: false, editable: true, etag: '"1"', url: "https://www.google.com/calendar/event?eid=bWFkZQ" });
+    // The calendar is read once to say whether it may be added to, once more as it is added to, and the event is sent once.
+    expect(google.sent.map((s) => `${s.method} ${s.url.pathname}`)).toEqual([
+      "GET /calendar/v3/users/me/calendarList/ada%40example.com",
+      "GET /calendar/v3/users/me/calendarList/ada%40example.com",
+      "POST /calendar/v3/calendars/ada%40example.com/events",
+    ]);
+    const [insert] = google.asked("POST", /./);
+    expect(insert!.headers.get("Authorization")).toBe("Bearer at-1");
+    expect(JSON.parse(insert!.body)).toEqual({ summary: "Dentist", location: "Main St", description: "Bring the card", start: { dateTime: "2026-10-15T15:00:00.000Z", date: null }, end: { dateTime: "2026-10-15T15:30:00.000Z", date: null } });
+
+    await ask({ type: "event.create", sourceId: "google-calendar", calendarId: "ada@example.com", title: "Away", when: { allDay: true, from: "2026-10-16", to: "2026-10-17" } });
+    expect(JSON.parse(google.asked("POST", /./)[1]!.body)).toEqual({ summary: "Away", start: { date: "2026-10-16", dateTime: null, timeZone: null }, end: { date: "2026-10-18", dateTime: null, timeZone: null } });
+    expect((await ask({ type: "event.list", ...WEEK })).events.filter((e) => e.id.includes(" made")).map((e) => [e.title, e.when.allDay ? `${e.when.from}..${e.when.to}` : new Date(e.when.from).toISOString()])).toEqual([
+      ["Dentist", "2026-10-15T15:00:00.000Z"],
+      ["Away", "2026-10-16..2026-10-17"],
+    ]);
+  });
+
+  it("refuses to add to a calendar the member can only read, doesn't show, or doesn't have, and sends Google no event", async () => {
+    const { google, ask } = await connected();
+    const add = (calendarId: string) => refusal(ask({ type: "event.create", sourceId: "google-calendar", calendarId, title: "x", when: { allDay: true, from: "2026-10-16", to: "2026-10-16" } }));
+    expect(await add("en.usa#holiday@group.v.calendar.google.com")).toBe('forbidden: You can only read the calendar "Holidays"');
+    for (const calendarId of ["old@group.calendar.google.com", "nobody@example.com", "..", ".", "../../users/me/settings", "https://evil.example/", "ada@example.com/events"]) expect(await add(calendarId), calendarId).toBe("not_found: No such calendar");
+    for (const sent of google.sent) expect(sent.url.pathname, sent.url.href).toMatch(/^\/calendar\/v3\/users\/me\/calendarList\/[^/]+$/);
+    // A calendar the member stopped being able to write while it was being added to is refused by Google's side of it too.
+    const [ada] = google.calendars;
+    google.once.set("GET /calendar/v3/users/me/calendarList/ada%40example.com", () => {
+      ada!.accessRole = "reader";
+      return Response.json({ kind: "calendar#calendarListEntry", ...ada, accessRole: "owner", events: undefined });
+    });
+    expect(await add("ada@example.com")).toBe('forbidden: You can only read the calendar "Ada"');
+    expect(google.asked("POST", /./)).toEqual([]);
+  });
+
+  it("takes an answer to an insert that isn't JSON, isn't an event, or is an error as Google not answering, and says so", async () => {
+    const { google, ask } = await connected();
+    const add = () => refusal(ask({ type: "event.create", sourceId: "google-calendar", calendarId: "ada@example.com", title: "x", when: { allDay: true, from: "2026-10-16", to: "2026-10-16" } }));
+    const POST = "POST /calendar/v3/calendars/ada%40example.com/events";
+    google.once.set(POST, () => new Response("<html>ya29.token-in-a-page</html>", { status: 200 }));
+    expect(await add()).toBe("unavailable: Google answered with something Common Ink couldn't read. Try again in a moment.");
+    google.once.set(POST, () => Response.json({ id: "x", etag: '"1"' }));
+    expect(await add()).toBe("unavailable: Google answered with something Common Ink can't read");
+    google.once.set(POST, () => Response.json({ error: { code: 500, message: "Backend Error" } }, { status: 500 }));
+    expect(await add()).toBe("unavailable: Google is busy. Try again in a moment.");
+    google.once.set(POST, () => Response.json({ error: { code: 403, errors: [{ reason: "requiredAccessLevel" }] } }, { status: 403 }));
+    expect(await add()).toBe("forbidden: Google doesn't allow that change");
+    // Gone between being read and being added to: refused as a change to an event that went is.
+    google.once.set(POST, () => Response.json({ error: { code: 404 } }, { status: 404 }));
+    expect(await add()).toBe("forbidden: No such calendar");
+    expect(google.calendars[0]!.events).toHaveLength(5);
+  });
+
   it("sends a record's id nowhere but into one segment of a path on Google's host, whatever it says", async () => {
     const { google, ask } = await connected();
     const hostile = ["https://evil.example/steal lunch", "ada@example.com ../../../users/me/settings", "ada@example.com lunch?alt=media", "../../oauth2/v1/tokeninfo lunch", "ada@example.com lunch extra", " lunch", "ada@example.com ", "ada@example.com ..", "ada@example.com .", ".. lunch", ". lunch"];

@@ -142,6 +142,13 @@ const reverted = selected(
 );
 const SOURCES = "A data source is your member's own: no other member of the workspace sees its records, whatever their role, and you see no other member's. What you read from one is your member's private data, so put it in a note only where they asked for it there. A token limited to folders is refused every data source tool: the member's calendar and contacts are in no folder.";
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
+const when = {
+  description: "When it is: { allDay: true, from, to } with its first and last day as YYYY-MM-DD, or { allDay: false, from, to } with instants in milliseconds since 1970",
+  oneOf: [
+    { type: "object", properties: { allDay: { const: true }, from: { type: "string" }, to: { type: "string" } }, required: ["allDay", "from", "to"], additionalProperties: false },
+    { type: "object", properties: { allDay: { const: false }, from: { type: "integer", minimum: 0 }, to: { type: "integer", minimum: 0 } }, required: ["allDay", "from", "to"], additionalProperties: false },
+  ],
+};
 
 export const TOOLS: Tool[] = [
   {
@@ -473,7 +480,7 @@ export const TOOLS: Tool[] = [
   {
     name: "list_events",
     description:
-      `Your member's calendar events in a span of time of at most 400 days, soonest first, each occurrence of a recurring event on its own. An event's when is either two instants in milliseconds since 1970 (allDay false) or its first and last day as YYYY-MM-DD (allDay true), which has no time and no zone. An all-day event is in the span when one of its days is a day the span covers in timeZone. sources says whether each calendar answered: one in needs_reconnect has no events here until the member reconnects it. ${SOURCES}`,
+      `Your member's calendar events in a span of time of at most 400 days, soonest first, each occurrence of a recurring event on its own. An event's when is either two instants in milliseconds since 1970 (allDay false) or its first and last day as YYYY-MM-DD (allDay true), which has no time and no zone. An all-day event is in the span when one of its days is a day the span covers in timeZone. Each event's calendarId is the calendar it is in. sources says whether each calendar data source answered: one in needs_reconnect has no events here until the member reconnects it. calendars is every calendar in the connected ones, with or without events in the span, each with its sourceId, id, name, color and writable; create_event adds to one whose writable is true. ${SOURCES}`,
     inputSchema: object({ from: time("The start of the span"), to: time("The end of the span"), timeZone: { type: "string", description: 'The IANA zone whose days all-day events are matched by, such as "America/Chicago"' } }, ["from", "to", "timeZone"]),
     op: "event.list",
   },
@@ -489,17 +496,28 @@ export const TOOLS: Tool[] = [
         title: { type: "string", maxLength: 1000 },
         location: { type: "string", maxLength: 1000 },
         description: { type: "string", maxLength: 8000 },
-        when: {
-          description: "When it is: { allDay: true, from, to } with its first and last day as YYYY-MM-DD, or { allDay: false, from, to } with instants in milliseconds since 1970",
-          oneOf: [
-            { type: "object", properties: { allDay: { const: true }, from: { type: "string" }, to: { type: "string" } }, required: ["allDay", "from", "to"], additionalProperties: false },
-            { type: "object", properties: { allDay: { const: false }, from: { type: "integer", minimum: 0 }, to: { type: "integer", minimum: 0 } }, required: ["allDay", "from", "to"], additionalProperties: false },
-          ],
-        },
+        when,
       },
       ["sourceId", "id", "etag"],
     ),
     op: "event.update",
+  },
+  {
+    name: "create_event",
+    description:
+      `Add an event to one of your member's calendars where it is kept, such as in Google Calendar, as your member. Pass the calendar's sourceId and id from the calendars list_events answers: one whose writable is false is refused. Answers the event as it was made. This changes the member's real calendar and is not in Common Ink's history, so it can't be reverted from here. ${SOURCES}`,
+    inputSchema: object(
+      {
+        sourceId: { type: "string", description: "The data source the calendar is in, from list_events' calendars" },
+        calendarId: { type: "string", description: "The calendar's id, from list_events' calendars" },
+        title: { type: "string", maxLength: 1000 },
+        when,
+        location: { type: "string", maxLength: 1000 },
+        description: { type: "string", maxLength: 8000 },
+      },
+      ["sourceId", "calendarId", "title", "when"],
+    ),
+    op: "event.create",
   },
   {
     name: "list_contacts",
