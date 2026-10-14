@@ -834,22 +834,32 @@ const RECURRING = [
 ].map((token) => ({ ...token, from: WORDS.indexOf(token.text), to: WORDS.indexOf(token.text) + token.text.length }));
 const ALL_WORDS = ["Above words", ...RECURRING.flatMap((t) => [...t.before, ...t.after]), "Below words"];
 
-/** The column is 720px wide in the first and 314px in the second, where every todo but the nested and the numbered one wraps. */
-for (const width of [1600, 1100]) {
-  test(`a recurrence chip takes its own width: shown as written, the words before it stay, the words after it on its row move by the difference, and nothing else moves unless its row wraps (${width}px window)`, async ({ page }) => {
+/**
+ * The column is 720px wide in the first and 314px in the second, where every todo but the nested and the numbered one wraps with the Mac's
+ * letters. With wider letters more of them wrap, so which rows a chip and its token are on is measured and never taken from here: each
+ * window is walked a second time with the letters spread, which wraps the first todo in the wide column as the letters CI draws with do.
+ */
+for (const [width, spread] of [[1600, 0], [1100, 0], [1600, 0.8], [1100, 0.8]] as const) {
+  test(`a recurrence chip takes its own width: shown as written, the words before it stay, the words after it on its row move by the difference, and nothing else moves unless its row wraps (${width}px window${spread ? ", letters spread" : ""})`, async ({ page }) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width, height: 2000 });
     await open(page, WORDS);
+    if (spread) await page.addStyleTag({ content: `.cm-content { letter-spacing: ${spread}px }` });
     await expect(page.locator(".cm-content .md-chip-every")).toHaveText(SAID);
     await page.evaluate(() => document.fonts.ready);
     const before = await places(page, ALL_WORDS);
-    const boxes = (selector: string) => page.evaluate((s) => [...document.querySelectorAll<HTMLElement>(s)].map((el) => ({ text: el.textContent, x: el.getBoundingClientRect().x, top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom, width: el.getBoundingClientRect().width })), selector);
+    const boxes = (selector: string) => page.evaluate((s) => [...document.querySelectorAll<HTMLElement>(s)].map((el) => {
+      const [at, line] = [el.getBoundingClientRect(), el.closest<HTMLElement>(".cm-line")!];
+      return { text: el.textContent, x: at.x, top: at.top, bottom: at.bottom, width: at.width, rowEnd: line.getBoundingClientRect().right - parseFloat(getComputedStyle(line).paddingRight) };
+    }), selector);
     const chips = await boxes(".cm-content .md-chip-every");
     // Each chip is one piece on one row, no taller than the row it is on.
     const rowHigh = before["Above words"]!.height;
     for (const chip of chips) expect(chip.bottom - chip.top, `the height of "${chip.text}"`).toBeLessThan(rowHigh);
     const near = (a: number, b: number) => Math.abs(a - b) <= 1;
     const moved: string[] = [];
+    const wraps = new Set<string>();
+    const middle = (box: { top: number; bottom: number }) => (box.top + box.bottom) / 2;
 
     for (let down = 0; down < 4; down++) await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Home");
@@ -874,12 +884,22 @@ for (const width of [1600, 1100]) {
       const chip = chips[on]!;
       const [written] = (await boxes(".cm-content .md-todo-token")).filter((t) => t.text === token.text);
       expect(written, `"${token.text}" is shown as written ${when}`).toBeDefined();
-      // The token starts where its chip did, on the row it was on, in one piece.
-      expect(near(written!.x, chip.x), `the left edge of "${token.text}": ${chip.x} -> ${written!.x}`).toBe(true);
+      // The token starts where its chip did, on the row it was on, in one piece. The two are not the same width, so the wider one may not fit
+      // the room left on that row: then it starts the next row, and the narrower one is a row above it, where the wider one had no room.
+      const stayed = Math.abs(middle(written!) - middle(chip)) < rowHigh / 2;
+      if (stayed) expect(near(written!.x, chip.x), `the left edge of "${token.text}": ${chip.x} -> ${written!.x}`).toBe(true);
+      else {
+        const [upper, lower] = middle(written!) < middle(chip) ? [written!, chip] : [chip, written!];
+        const said = `"${token.text}" ${when}: its chip ${JSON.stringify(chip)}, as written ${JSON.stringify(written)}`;
+        expect(Math.round((middle(lower) - middle(upper)) / rowHigh), `one row apart: ${said}`).toBe(1);
+        expect(lower.x, `the lower one starts its row: ${said}`).toBeLessThan(upper.x);
+        expect(lower.width, `the lower one had no room on the row above: ${said}`).toBeGreaterThan(upper.rowEnd - upper.x);
+      }
       expect(written!.bottom - written!.top, `"${token.text}" is on one row`).toBeLessThan(rowHigh * 1.5);
       const by = written!.width - chip.width;
       const line = before[token.before[0]!]!;
       const grew = now[token.before[0]!]!.height - line.height;
+      if (!stayed || line.height > rowHigh * 1.5 || Math.abs(grew) >= 1) wraps.add(token.text);
       for (const [word, was] of Object.entries(before)) {
         const is = now[word]!;
         const said = `"${word}" ${when}: ${JSON.stringify(was)} -> ${JSON.stringify(is)}`;
@@ -887,8 +907,8 @@ for (const width of [1600, 1100]) {
           // Before the chip on its line: exactly where it was.
           expect(near(is.x, was.x) && near(is.y, was.y) && near(is.top, was.top), said).toBe(true);
         } else if (token.after.includes(word)) {
-          const sameRow = was.y < chip.bottom && was.y + rowHigh > chip.bottom;
-          // After it on its row: over by the difference between the token and the chip, and by nothing else. On a later row of a todo that wraps, it may be taken up or down a row.
+          const sameRow = stayed && was.y < chip.bottom && was.y + rowHigh > chip.bottom;
+          // After it on its row: over by the difference between the token and the chip, and by nothing else. On a later row of a todo that wraps, or after a token that is on another row than its chip was, it may be taken up or down a row.
           if (sameRow && near(is.y, was.y)) expect(near(is.x - was.x, by), `by ${by}: ${said}`).toBe(true);
           else if (!near(is.x, was.x) || !near(is.y, was.y)) moved.push(`${token.text}: "${word}" went from ${Math.round(was.x)},${Math.round(was.y)} to ${Math.round(is.x)},${Math.round(is.y)}`);
         } else {
@@ -906,7 +926,9 @@ for (const width of [1600, 1100]) {
     await page.keyboard.press("ControlOrMeta+Home");
     await expect.poll(async () => JSON.stringify(await places(page, ALL_WORDS))).toBe(JSON.stringify(before));
     await expect(page.locator(".cm-content .md-chip-every")).toHaveText(SAID);
-    if (width === 1600) expect(moved.filter((m) => !m.startsWith("every:1st-tue,3rd-tue")), "only the todo that wraps has words taken up or down a row").toEqual([]);
+    expect(moved.filter((m) => ![...wraps].some((token) => m.startsWith(`${token}: `))), "only a todo that wraps has words taken up or down a row").toEqual([]);
+    if (width === 1600) expect(wraps.has("every:1m") || wraps.has("every:mar-1"), "the two short todos are one row each in the wide column").toBe(false);
+    if (width === 1600 && spread) expect(wraps.has("every:2w-mon,thu-times-5"), "with the letters spread, the first todo wraps in the wide column").toBe(true);
   });
 }
 

@@ -85,10 +85,25 @@ test("the folder tree moves with j, k, gg and G, opens with l and Enter, and h c
   await expectSelected(item("Work"), "Work, collapsed");
 });
 
+/** Makes a note of each text, in order, in one visit to the page: a note at a time through `perform` is two requests each, which a slow deployment turns into the whole of a test's time. */
+async function createNotes(page: Page, texts: string[]) {
+  await page.evaluate(async (texts) => {
+    const me = (await (await fetch("/api/me")).json()) as { workspaces: { id: string }[] };
+    for (const text of texts) {
+      const res = await fetch(`/api/workspaces/${me.workspaces[0]!.id}/ops`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "note.create", text }),
+      });
+      if (!res.ok) throw new Error(`note.create answered ${res.status}`);
+    }
+  }, texts);
+}
+
 test("a folder's notes move with j, k, gg, G and half pages; / goes to the search box and Escape back; Enter opens the note with its text in normal mode", async ({ page }) => {
   await signIn(page);
   const titles = Array.from({ length: 30 }, (_, n) => `Note ${String(n).padStart(2, "0")}`);
-  for (const title of titles) await perform(page, { type: "note.create", text: `# ${title}\n\nplum` });
+  await createNotes(page, titles.map((title) => `# ${title}\n\nplum`));
   await open(page, "/folder/all");
   const cards = page.locator(".cards > li");
   await expect(cards).toHaveCount(30);
