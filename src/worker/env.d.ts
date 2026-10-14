@@ -7,6 +7,8 @@ interface InkSettings {
   DEV_SIGN_IN?: string;
   /** "1" under Vite's dev server, whose page has an inline script of its own. */
   DEV_SERVER?: string;
+  /** A host given to HTML embeds alone, such as https://embed.commonink.app. Without one the app's own host serves their document. */
+  EMBED_ORIGIN?: string;
 }
 
 interface Env extends InkSettings {}

@@ -1,4 +1,4 @@
-import type { Agent, AgentEdit, ConnectOptions, Me, OpErrorCode, OpInput, Results } from "../core/protocol.ts";
+import type { Agent, AgentEdit, ConnectOptions, MeHere, OpErrorCode, OpInput, Results } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -43,7 +43,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export const getMe = () => request<Me>("/api/me");
+export const getMe = () => request<MeHere>("/api/me");
 
 export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<Results[T["type"]]> {
   const body = JSON.stringify(op);

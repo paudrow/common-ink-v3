@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { Me } from "../core/protocol.ts";
+import type { MeHere } from "../core/protocol.ts";
 import { ApiError, getMe, perform, session } from "./api.ts";
 import { useRoute } from "./router.ts";
 import { createSettingsStore, type SettingsStore } from "./settingsStore.ts";
 import { isString, useStored } from "./stored.ts";
 import { Workspace } from "./Workspace.tsx";
 
-type Session = { kind: "loading" } | { kind: "signed-out" } | { kind: "signed-in"; me: Me } | { kind: "error"; message: string };
+type Session = { kind: "loading" } | { kind: "signed-out" } | { kind: "signed-in"; me: MeHere } | { kind: "error"; message: string };
 
 export function App() {
   const [session, setSession] = useState<Session>({ kind: "loading" });
@@ -47,7 +47,7 @@ function SignIn() {
 /** How long the workspace waits for the member's settings before it is drawn with the defaults. */
 const SETTINGS_WAIT_MS = 1500;
 
-function SignedIn({ me }: { me: Me }) {
+function SignedIn({ me }: { me: MeHere }) {
   const [place, navigate] = useRoute();
   const [chosenId, choose] = useStored("ink.workspace", isString, me.workspaces[0]!.id);
   const workspace = me.workspaces.find((w) => w.id === chosenId) ?? me.workspaces[0]!;

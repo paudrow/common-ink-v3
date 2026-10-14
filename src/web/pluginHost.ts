@@ -1,5 +1,5 @@
 import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
-import type { App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, SettingValue, Slots } from "./plugin-api.ts";
+import type { AddressEmbed, App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, Setting, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
 export interface PluginState {
@@ -23,7 +23,8 @@ export interface PluginState {
 export interface Added {
   commands: readonly { id: string; title: string }[];
   views: readonly { slot: keyof Slots; id: string; label: string | null }[];
-  embeds: readonly { name: string; title: string; block: boolean }[];
+  /** `address` is on one a note writes as a web address alone on a line, and not as `::name{}`. */
+  embeds: readonly { name: string; title: string; block: boolean; address?: true }[];
   completions: readonly { id: string; trigger: string }[];
   editorExtensions: readonly string[];
 }
@@ -35,7 +36,7 @@ export interface Contributions {
   keybindings: Readonly<Record<string, string>>;
   settings: MemberSettings;
   views: { readonly [S in keyof Slots]: readonly Slots[S][] };
-  embeds: readonly Embed[];
+  embeds: readonly (Embed | AddressEmbed)[];
   completions: readonly Completion[];
   editorExtensions: readonly EditorExtension[];
   plugins: readonly PluginState[];
@@ -55,7 +56,11 @@ export interface MemberSettings {
 export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "storage">;
 
 export interface HostOptions {
-  /** Every installed plugin, in the order their contributions are shown. */
+  /**
+   * Every installed plugin, in the order their contributions are shown. One whose id an earlier one
+   * has is left out: the id is what a plugin's settings and switch are kept under, so a second one
+   * would read and change the first one's.
+   */
   plugins: readonly Plugin[];
   required?: readonly string[];
   /** The ids of the plugins that came with the app. */
@@ -69,6 +74,8 @@ export interface HostOptions {
   write(key: string, value: SettingValue | undefined): void;
   /** Whether chords are labelled for a Mac. */
   mac: boolean;
+  /** Whether HTML embeds have a host of their own on this server, as the server says. A setting's `defaultWithoutEmbedSite` is its default where they don't. */
+  embedSite?: boolean;
   provide(plugin: PluginHost["plugin"]): Provided;
 }
 
@@ -109,9 +116,10 @@ const RESERVED = ["plugins.", "go.", "settings.", "inspector."];
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
 
-export function createPluginHost({ plugins, required = [], builtIn = [], settings, write, mac, provide }: HostOptions): Host {
+export function createPluginHost({ plugins: given, required = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
+  const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
   const commands = new Map<string, Owned<Command>>();
-  const embeds = new Map<string, Owned<Embed>>();
+  const embeds = new Map<string, Owned<Embed | AddressEmbed>>();
   const completions = new Map<string, Owned<Completion>>();
   const editorExtensions = new Map<string, Owned<EditorExtension>>();
   const views = new Map<keyof Slots, Map<string, Owned<Slots[keyof Slots]>>>(SLOTS.map((slot) => [slot, new Map()]));
@@ -176,7 +184,11 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
       plugin: { id: plugin.id, name: plugin.name },
       ...provided,
       // Settings are the member's. This is the one way a plugin reaches the server, so it is where a plugin is refused.
-      perform: (op) => ((op as OpInput).type.startsWith("settings.") ? Promise.reject(new Error(`${plugin.name} can't ${(op as OpInput).type}: a plugin can't read or change the member's settings`)) : provided.perform(op)),
+      // What is sent is a copy taken once, so the type that was looked at is the type that goes.
+      perform: (op) => {
+        const sent = { ...(op as OpInput) };
+        return typeof sent.type !== "string" || sent.type.startsWith("settings.") ? Promise.reject(new Error(`${plugin.name} can't ${String(sent.type)}: a plugin can't read or change the member's settings`)) : provided.perform(sent as typeof op);
+      },
       settings: {
         get<T extends SettingValue>(name: string) {
           if (!plugin.settings || !Object.hasOwn(plugin.settings, name)) throw new Error(`${plugin.name} declares no setting named ${name}`);
@@ -228,7 +240,10 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
           owners.set(embed, owner);
           return dispose;
         },
-        list: () => contributions().embeds.map(({ name, title, block, starts }) => ({ name, title, block, starts })),
+        list: () =>
+          contributions()
+            .embeds.filter((e): e is Embed => !("claims" in e))
+            .map(({ name, title, block, starts }) => ({ name, title, block, starts })),
       },
       completions: {
         register(completion) {
@@ -340,7 +355,9 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
   function setSetting(key: string, value: SettingValue | undefined) {
     const setting = contributions().settings.declared.find((d) => d.key === key)?.setting;
     const read = setting && value !== undefined ? readSetting(setting, value) : undefined;
-    const isDefault = read && "value" in read && sameValue(read.value, setting!.default);
+    // A value the same as a default that depends on the server is kept: it is the member's choice wherever the app is.
+    const followsServer = setting?.type === "string" && setting.defaultWithoutEmbedSite !== undefined;
+    const isDefault = !followsServer && read && "value" in read && sameValue(read.value, setting!.default);
     write(key, isDefault ? undefined : value);
   }
 
@@ -360,11 +377,16 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
   }
 
   /** The schema: each plugin's switch and options, then a keybinding for each command that is on. */
+  /** A setting as it is on this server: with no host of HTML embeds' own, its default is the one it gives for that. */
+  function onThisServer(setting: Setting): Setting {
+    return setting.type === "string" && !embedSite && setting.defaultWithoutEmbedSite !== undefined ? { ...setting, default: setting.defaultWithoutEmbedSite } : setting;
+  }
+
   function declare(all: readonly Command[]): Declared[] {
     const options = plugins.flatMap((p) => {
       const group = { id: p.id, name: p.name };
       const active = running.has(p.id);
-      const own = Object.entries(p.settings ?? {}).map(([name, setting]): Declared => ({ key: `${p.id}.${name}`, setting, group, active }));
+      const own = Object.entries(p.settings ?? {}).map(([name, setting]): Declared => ({ key: `${p.id}.${name}`, setting: onThisServer(setting), group, active }));
       if (required.includes(p.id)) return own;
       const on = p.enabledByDefault ?? true;
       const enabled: Declared = { switch: true, key: enabledKey(p.id), setting: { type: "boolean", default: on, title: "On", description: on ? `Turn ${p.name} off and what it adds goes away.` : `${p.name} is off until you turn it on here.` }, group, active: true };
@@ -380,7 +402,7 @@ export function createPluginHost({ plugins, required = [], builtIn = [], setting
     return {
       commands: mine(commands.values()).map(({ id, title }) => ({ id, title })),
       views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: "label" in view ? view.label : null }))),
-      embeds: mine(embeds.values()).map(({ name, title, block }) => ({ name, title, block: block ?? false })),
+      embeds: mine(embeds.values()).map((e) => ("claims" in e ? { name: e.name, title: e.title, block: false, address: true as const } : { name: e.name, title: e.title, block: e.block ?? false })),
       completions: mine(completions.values()).map(({ id, trigger }) => ({ id, trigger })),
       editorExtensions: mine(editorExtensions.values()).map((extension) => extension.id),
     };

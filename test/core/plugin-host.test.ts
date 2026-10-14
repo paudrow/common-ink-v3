@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { App, Dispose, OpInput, Plugin, PluginHost, SettingValue } from "../../src/web/plugin-api.ts";
 import { createPluginHost, type Host, type HostOptions } from "../../src/web/pluginHost.ts";
 import { onPlatform } from "../../src/web/keybindings.ts";
+import { html as htmlPlugin } from "../../src/web/plugins/html/index.ts";
 import { documentOf, editSetting } from "../../src/web/settings.ts";
 
 const View = () => null;
@@ -412,6 +413,75 @@ describe("plugin host", () => {
     expect(performed).toEqual([]);
     expect(stored()).toEqual({});
     expect(Object.keys(asked!.settings).sort()).toEqual(["get", "subscribe"]);
+  });
+
+  it("defaults HTML embeds to asking first on a server whose embeds have no host of their own, and to running by themselves where they have, and the member's choice wins either way", () => {
+    for (const [embedSite, fallback, chosen] of [[false, "ask first", "automatically"], [true, "automatically", "ask first"]] as const) {
+      const { host, stored } = hostWith([htmlPlugin], { embedSite });
+      const declared = host.contributions().settings.declared.find((d) => d.key === "html.run")!;
+      expect([embedSite, declared.setting.default, host.contributions().settings.values["html.run"]]).toEqual([embedSite, fallback, fallback]);
+      host.setSetting("html.run", chosen);
+      expect([embedSite, host.contributions().settings.values["html.run"]]).toEqual([embedSite, chosen]);
+      // Choosing what is the default here is kept as the member's choice, so it holds on a server set up the other way.
+      host.setSetting("html.run", fallback);
+      expect([embedSite, stored()]).toEqual([embedSite, { "html.run": fallback }]);
+    }
+    // The default of a setting that gives none for such a server is its own on either.
+    const plain: Plugin = { id: "plain", name: "Plain", settings: { mode: { title: "Mode", type: "string", default: "on" } }, activate() {} };
+    expect(hostWith([plain]).host.contributions().settings.values["plain.mode"]).toBe("on");
+  });
+
+  it("lets the HTML embeds plugin read whether to run HTML by itself, and no plugin change it or another read it", async () => {
+    let html: PluginHost | null = null;
+    let other: PluginHost | null = null;
+    const { host, stored, performed } = hostWith(
+      [
+        { ...htmlPlugin, activate: (h) => void (html = h) },
+        { id: "greedy", name: "Greedy", activate: (h) => void (other = h) },
+      ],
+      { embedSite: true },
+    );
+    expect(host.contributions().settings.values["html.run"]).toBe("automatically");
+    expect(html!.settings.get("run")).toBe("automatically");
+    expect(() => other!.settings.get("run")).toThrow("Greedy declares no setting named run");
+    for (const plugin of [html!, other!]) {
+      await expect((plugin.perform as (op: OpInput) => Promise<unknown>)({ type: "settings.write", text: '{"html.run":"automatically"}', baseRevision: 0 })).rejects.toThrow("a plugin can't read or change the member's settings");
+      await expect((plugin.perform as (op: OpInput) => Promise<unknown>)({ type: "settings.read" })).rejects.toThrow("a plugin can't read or change the member's settings");
+    }
+    // Only the member sets it, and what they set is what the plugin reads.
+    host.setSetting("html.run", "ask first");
+    expect(stored()).toEqual({ "html.run": "ask first" });
+    expect(html!.settings.get("run")).toBe("ask first");
+    // A value it can't read asks first, as does one written in other letters or as something other than words.
+    for (const value of ["whenever", "Ask first", ["ask first"], 1]) {
+      host.setSetting("html.run", "automatically");
+      host.setSetting("html.run", value as SettingValue);
+      expect(html!.settings.get("run"), JSON.stringify(value)).toBe("ask first");
+    }
+    expect(performed).toEqual([]);
+  });
+
+  it("sends a plugin's operation as it was looked at, so one whose type changes as it is read can't reach the member's settings", async () => {
+    let asked: PluginHost | null = null;
+    const { performed } = hostWith([{ id: "sly", name: "Sly", activate: (h) => void (asked = h) }]);
+    let reads = 0;
+    const shifty = { get type() { return reads++ === 0 ? "note.list" : "settings.write"; }, text: "{}", baseRevision: 0 };
+    await (asked!.perform as (op: unknown) => Promise<unknown>)(shifty);
+    expect(performed).toEqual([["sly", "note.list"]]);
+    await expect((asked!.perform as (op: unknown) => Promise<unknown>)({ type: 5 })).rejects.toThrow("a plugin can't read or change the member's settings");
+  });
+
+  it("leaves out a plugin whose id another has, so it never starts and can't read that one's settings", () => {
+    const started: string[] = [];
+    let impostor: PluginHost | null = null;
+    const { host } = hostWith([
+      { ...htmlPlugin, activate: () => void started.push("html") },
+      { id: "html", name: "Impostor", settings: { run: { title: "Run", type: "string", default: "x" } }, activate: (h) => void (started.push("impostor"), (impostor = h)) },
+    ]);
+    host.setSetting("html.run", "ask first");
+    expect(started).toEqual(["html"]);
+    expect(impostor).toBeNull();
+    expect(host.contributions().plugins.map((p) => p.name)).toEqual(["HTML embeds"]);
   });
 });
 

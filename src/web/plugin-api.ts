@@ -21,6 +21,10 @@ export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE
 export { lineHunks } from "../core/text.ts";
 
 export { dismissing, useDismiss } from "./dismiss.ts";
+export { sandboxed } from "./htmlFrame.ts";
+export { askSite } from "./otherSites.ts";
+/** The theme the app is drawn in, for what is drawn by someone else and has to be asked for in one: another site's frame. */
+export { onTheme, themeNow, type Theme } from "./theme.ts";
 /** Whether an editor state is that of a reading of a note, where nothing is shown as written whatever is selected. */
 export { isReading } from "./readOnly.ts";
 export { ResizeHandle } from "./resize.tsx";
@@ -78,7 +82,12 @@ export interface Screenshot {
  */
 export type Setting = { title: string; description?: string } & (
   | { type: "boolean"; default: boolean }
-  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number }
+  /**
+   * `unreadable` is what it reads as when the member's value isn't one it can take, if that is not the default: the safe choice, for a
+   * setting that guards something. `defaultWithoutEmbedSite` is its default instead on a server whose HTML embeds have no host of
+   * their own (`EMBED_ORIGIN`), as the server says: the safe choice there.
+   */
+  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number; unreadable?: string; defaultWithoutEmbedSite?: string }
   | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
   /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
   | { type: "chords"; default: readonly string[] }
@@ -122,8 +131,8 @@ export interface PluginHost {
     register<S extends keyof Slots>(slot: S, view: Slots[S]): Dispose;
   };
   readonly embeds: {
-    register(embed: Embed): Dispose;
-    /** Every embed from every plugin that is on, as a menu would offer them. */
+    register(embed: Embed | AddressEmbed): Dispose;
+    /** Every embed from every plugin that is on, as a menu would offer them. An {@link AddressEmbed} is not among them: nothing writes one but its address. */
     list(): EmbedInfo[];
   };
   readonly completions: {
@@ -345,6 +354,8 @@ export interface Embed {
    * while its plugin starts, not later, so a note never shows it as written first.
    */
   render(el: HTMLElement, embed: Embedded): void | (() => void) | Drawn;
+  /** What it keeps below the line that writes it, such as a video. */
+  below?: Below;
   /**
    * What a member can adjust about it without reading its config. The host draws one options button
    * in the embed's card, and opens beneath the card a field for each of these. An embed that has
@@ -389,6 +400,57 @@ export interface Drawn {
   update?(embed: Embedded): void;
   /** Stops whatever the embed started. */
   stop?(): void;
+}
+
+/**
+ * Something an embed keeps below its line: a video, a frame, a picture. It is there whether or not
+ * the cursor is on the line, in room kept for it from the first moment, so nothing in the note moves
+ * when it loads or when the cursor comes and goes. It is drawn once, the first time its room is on
+ * screen, in an element that then stays the same element, never made again and never moved in the
+ * page, for as long as the note says the same of the embed: through typing anywhere else, lines
+ * added and removed, another member's changes, and scrolling it far out of sight. So a video keeps
+ * playing while the note is written. Only a change to the embed's own config or body draws it again,
+ * in the same element once that has been emptied.
+ *
+ * A frame drawn here can't take the keyboard from the member. Unless their pointer is on it, a frame
+ * that focuses itself is stopped, and the member is told and can show it again.
+ */
+export interface Below {
+  /**
+   * The room to keep, from what the note says of the embed alone: as wide as the note's column up to
+   * a limit and `ratio` times as wide as tall, or `height` pixels tall. Null for one with nothing to
+   * show, such as a config that can't be read.
+   */
+  box(written: { config: string; body: string }): BelowBox | null;
+  /**
+   * Draws into `el`, which is as large as the room. May return a function that stops whatever it
+   * started. `update` rewrites the embed in the note as {@link Embedded.update} does, which is how
+   * what is only known once it has loaded, such as a picture's size, gets into the note for `box` to
+   * read. `resize` is for what the note can't hold, such as how tall a post turned out to be once it
+   * had loaded: it gives the room that height in pixels, which moves what is under it once, and does
+   * nothing for a room sized by a ratio.
+   */
+  render(el: HTMLElement, embed: Pick<Embedded, "config" | "body" | "readOnly" | "update"> & { resize(height: number): void }): void | (() => void);
+}
+
+/** The room kept below a line. `maxWidth` is a limit in pixels narrower than the host's own, for what is drawn no wider, such as a post. */
+export type BelowBox = ({ ratio: number } | { height: number }) & { maxWidth?: number };
+
+/**
+ * Something shown below a line that is one https address and nothing else: a video, a post. It has
+ * no syntax of its own and is in no menu. Pasting or typing the address is the only way to write
+ * one. The address is its config, and `update` does nothing for it. The line stays in the note, as
+ * small as a caption, and its text is seen only with the pointer over the line or over what is shown
+ * below it, or with the cursor on the line. So the address comes and goes and nothing moves.
+ */
+export interface AddressEmbed {
+  /** A name of its own among the embeds. A note that says `::name{}` is not this, and stays text. */
+  name: string;
+  /** What a person sees it called. */
+  title: string;
+  /** Whether `address` is this one's to show. The first registered to say so has it. */
+  claims(address: string): boolean;
+  below: Below;
 }
 
 /** What an embed is handed about one place a note writes it. */

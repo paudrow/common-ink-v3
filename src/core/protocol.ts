@@ -499,6 +499,17 @@ export interface Me {
   workspaces: WorkspaceSummary[];
 }
 
+/** How the server the app is on is set up, where the app follows it. Only the server says it. */
+export interface Setup {
+  /** Whether HTML embeds are served from a host of their own (`EMBED_ORIGIN`), apart from the app's site. */
+  embedSite: boolean;
+}
+
+/** What `/api/me` answers: who is signed in, and how the server is set up. */
+export interface MeHere extends Me {
+  setup: Setup;
+}
+
 export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict";
 
 /** What a client is told of a fault that is no request's doing. The fault's own words stay in the server's log: they can name tables and rows. */

@@ -1772,6 +1772,283 @@ button.link:hover {
   font-size: 0.85em;
 }
 
+/* What embeds keep below their lines. The layer lies over the note and holds each one over the room kept for it. */
+.embed-below-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* One box with one radius, and what is drawn in it is cut to that: nothing of another site's own frame shows past it. */
+.embed-below {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  pointer-events: auto;
+}
+
+/* A post's site draws the post's own border and corners. The box is cut to the same corners and adds nothing, so there is one edge and it is the post's. */
+.embed-below[data-embed="post"] {
+  border: 0;
+  border-radius: 12px;
+  background: none;
+}
+
+/* The rest of a block's card: the card above has the top corners and this has the bottom ones. */
+.embed-below-joined {
+  border-radius: 0 0 10px 10px;
+  background: var(--bg);
+}
+
+.embed-joined.embed-frame-block {
+  padding-bottom: 0;
+}
+
+.embed-joined > .embed-card {
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  box-shadow: none;
+}
+
+.embed-joined .embed-head {
+  padding-bottom: 6px;
+}
+
+.embed-joined .embed {
+  display: none;
+}
+
+/* As far in as a line's own text. */
+.embed-below-room {
+  padding-inline: 6px 2px;
+}
+
+.embed-below-room > div {
+  width: 100%;
+  max-width: 40rem;
+}
+
+.embed-below-room-joined > div {
+  max-width: none;
+}
+
+/* The line of an address shown as media, with the cursor on it (out of sight it is out of the note): above the media, as v1 drew it. */
+.cm-line.embed-address {
+  font-family: var(--mono);
+  font-size: 0.74em;
+  line-height: 1.6;
+  padding-top: 0.8em;
+  color: var(--accent);
+}
+
+.cm-line.embed-address::after {
+  content: " \2197";
+  font-size: 0.9em;
+}
+
+.cm-line.embed-address * {
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+/* The media whose address the cursor is on. */
+.embed-below.embed-below-on {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 0;
+}
+
+.embed-below-drawn {
+  width: 100%;
+  height: 100%;
+}
+
+/* Over a frame until the member's pointer moves on it, which is how the page knows the pointer is there. */
+.frame-shield {
+  display: none;
+  position: absolute;
+  inset: 0;
+}
+
+.embed-below:has(iframe):not(.open) > .frame-shield {
+  display: block;
+}
+
+.frame-back {
+  display: none;
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  translate: -50% 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--prose);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.embed-below.held > .frame-back {
+  display: block;
+}
+
+.embed-below-stopped {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 8px 16px;
+  color: var(--ink);
+  font-family: var(--prose);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* A frame whose page is in another colour scheme than the element is given an opaque backdrop by the browser, which would show as white corners round a dark post. */
+.embed-below iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: none;
+  color-scheme: normal;
+}
+
+/* What is below a line while it loads: a placeholder as big as its room, and what loads is there but unseen until it is drawn. */
+.embed-loading {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--muted) 14%, var(--bg));
+  animation: embed-loading 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes embed-loading {
+  to {
+    background: color-mix(in srgb, var(--muted) 7%, var(--bg));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .embed-loading {
+    animation: none;
+  }
+}
+
+.embed-arriving {
+  opacity: 0;
+}
+
+/* A video before it is played: its picture, what it is called along the top, and a play mark in the middle. */
+.media-play {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: #000;
+  cursor: pointer;
+}
+
+.media-play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.media-poster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-title {
+  position: absolute;
+  inset: 0 0 auto;
+  overflow: hidden;
+  padding: 12px 16px 28px;
+  background: linear-gradient(rgb(0 0 0 / 0.7), transparent);
+  color: #fff;
+  font: 600 15px/1.3 var(--prose);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-title:empty {
+  display: none;
+}
+
+.media-play-mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 64px;
+  height: 44px;
+  translate: -50% -50%;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.72);
+}
+
+.media-play-mark::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -40% -50%;
+  border-block: 9px solid transparent;
+  border-left: 15px solid #fff;
+}
+
+.media-play:hover .media-play-mark {
+  background: var(--accent);
+}
+
+/* What a frame asks before it runs anything. */
+.media-load {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-family: var(--prose);
+  cursor: pointer;
+}
+
+.media-load:hover {
+  background: var(--hover);
+}
+
+.media-load-action {
+  border-radius: 999px;
+  padding: 6px 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.media-load-from {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .kanban {
   font-family: var(--prose);
   font-size: 14px;

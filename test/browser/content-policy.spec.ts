@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { perform, signInAsNewPerson } from "./helpers.ts";
+import { standIns } from "./media-helpers.ts";
 
 /** Every report of something the page's policy refused, from every document the page loads, and the console's word on any. */
 async function watchRefusals(page: Page) {
@@ -105,6 +106,50 @@ test("formulas, tables, code, tasks and the rest of what a note draws come in un
     return [...document.fonts].filter((f) => f.status === "loaded" && f.family.startsWith("KaTeX")).map((f) => f.family);
   });
   expect(faces).toEqual(expect.arrayContaining(["KaTeX_Main", "KaTeX_Math", "KaTeX_Caligraphic", "KaTeX_Size1"]));
+  expect(await watch.refused()).toEqual([]);
+});
+
+const MEDIA = [
+  "# Media",
+  "",
+  "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "",
+  "https://x.com/jack/status/20",
+  "",
+  "https://bsky.app/profile/did:plc:z72i7hdynmk6r22z27h6tvur/post/3l6oveex3ii2l",
+  "",
+  ":::html{height=80}",
+  '<p id="ran">HTML ran</p><script>document.getElementById("ran").textContent += " and its script too"</script>',
+  ":::",
+  "",
+  "The end.",
+].join("\n");
+
+test("a video's picture and player, posts and an HTML embed are drawn and run under the page's one policy, which frames only them", async ({ page }) => {
+  const watch = await watchRefusals(page);
+  const played = await standIns(page, { postHeight: 200 });
+  // Tall enough that all of it is on screen, so all of it is drawn.
+  await page.setViewportSize({ width: 1280, height: 2400 });
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "html.run": "automatically" }), baseRevision: 0 });
+  const note = await perform(page, { type: "note.create", text: MEDIA });
+  const res = await page.goto(`/note/${note.id}`);
+  const policy = res!.headers()["content-security-policy"]!;
+  expect(policy.split(",")).toHaveLength(1);
+  expect(policy).toMatch(/frame-src \S+\/embed-frame https:\/\/www\.youtube-nocookie\.com https:\/\/platform\.twitter\.com https:\/\/embed\.bsky\.app;/);
+
+  const below = (embed: string) => page.locator(`.embed-below[data-embed="${embed}"]`);
+  // The video's picture and its title, from YouTube, then its player once play is pressed.
+  await expect(below("video").locator("img.media-poster")).toHaveJSProperty("complete", true);
+  await expect.poll(() => below("video").locator("img.media-poster").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  await below("video").getByRole("button", { name: "Play video: Stand-in video" }).click();
+  await expect.poll(() => played.length).toBe(1);
+  await expect.poll(() => page.frames().some((f) => f.url().startsWith("https://www.youtube-nocookie.com/") && f.url() !== "about:blank")).toBe(true);
+  // The posts, in their frames.
+  await expect.poll(() => page.frames().filter((f) => /platform\.twitter\.com|embed\.bsky\.app/.test(f.url())).length).toBe(2);
+  await expect(page.frameLocator('.embed-below[data-embed="post"] iframe').first().locator("body")).toContainText("post on");
+  // The HTML embed, run in its frame.
+  await expect(below("html").frameLocator("iframe").frameLocator("iframe").locator("#ran")).toHaveText("HTML ran and its script too");
   expect(await watch.refused()).toEqual([]);
 });
 

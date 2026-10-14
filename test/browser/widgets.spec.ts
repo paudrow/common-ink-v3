@@ -63,7 +63,7 @@ test("/ opens the embed menu, typing filters it, and picking a timer writes it w
   const note = await open(page, "# Tea\n\n");
 
   await page.keyboard.type("/");
-  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/]);
+  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/]);
   await expect(options(page).nth(0)).toContainText("::timer{5m}");
   await expect(options(page).nth(2)).toContainText(":::kanban{}");
   await page.keyboard.type("st");
@@ -113,7 +113,8 @@ test("an ordinary word after a / and Enter or Tab stays as it was typed", async 
   const note = await open(page, "# Words\n\n");
 
   // Each used to match "Kanban board" or "Timer" by scattered letters, and Enter wrote the embed over the word.
-  for (const typed of ["yes /no", "and /or", "km /h", "N /A", "/an", "> /tmr"]) {
+  // Not `/h`, which starts "HTML", an embed of its own.
+  for (const typed of ["yes /no", "and /or", "km /hr", "N /A", "/an", "> /tmr"]) {
     await page.keyboard.type(typed);
     await settled(page);
     await expect(menu(page)).toHaveCount(0);
@@ -124,7 +125,7 @@ test("an ordinary word after a / and Enter or Tab stays as it was typed", async 
   await page.keyboard.type("x /wat");
   await settled(page);
   await page.keyboard.press("Tab");
-  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /h\nN /A\n/an\n> /tmr\n> in /or\n> x /wat");
+  await expect.poll(() => read(page, note.id)).toBe("# Words\n\nyes /no\nand /or\nkm /hr\nN /A\n/an\n> /tmr\n> in /or\n> x /wat");
 });
 
 const highlighted = (page: Page) => options(page).and(page.locator("[aria-selected=true]"));
@@ -419,7 +420,7 @@ test("with vim on, / opens the embed menu in insert mode and is vim's search in 
   await page.keyboard.press("A");
   await expect(statusLine).toHaveText("--INSERT--");
   await page.keyboard.type(" /");
-  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/]);
+  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/]);
   await page.keyboard.type("sto");
   await expect(options(page)).toHaveText([/^Stopwatch/]);
   await settled(page);
@@ -464,7 +465,7 @@ test("the embed menu lists only the embeds of plugins that are on, and is gone w
   await open(page, "# Tea\n\n", { "timer.enabled": false });
 
   await page.keyboard.type("/");
-  await expect(options(page)).toHaveText([/^Stopwatch/, /^Kanban board/]);
+  await expect(options(page)).toHaveText([/^Stopwatch/, /^Kanban board/, /^HTML/]);
   await page.keyboard.press("Escape");
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("Disable plugin: Embed menu");
@@ -623,7 +624,7 @@ test("completions whose triggers both fit share one list, in the order of their 
   const note = await open(page, "# Tea\n\n");
 
   await slash(page, "/");
-  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, "Signature", "Standup notes", "Thanks"]);
+  await expect(options(page)).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/, "Signature", "Standup notes", "Thanks"]);
   await page.keyboard.type("st");
   await expect(options(page)).toHaveText([/^Stopwatch/, "Standup notes"]);
   await settled(page);

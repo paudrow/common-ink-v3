@@ -3,23 +3,28 @@
 // the same policy as the app. Files under /assets/ are served without the Worker and get neither.
 // HSTS is the zone's, not the Worker's.
 
+import { EMBED_FRAME_PATH } from "../core/frames.ts";
+import { embedOrigin, FRAME_ORIGINS } from "./frames.ts";
+
 /** A policy as each directive and its sources. A later PR that loads something new adds its source here. */
 type Policy = Readonly<Record<string, readonly string[]>>;
 
 /**
- * The app's pages and the sign-in pages. Everything is the app's own but two things: CodeMirror
- * writes its styles into `<style>` elements and the sign-in pages carry one, and the icons in
- * `style.css` are `data:` masks. The app frames nothing yet and is framed by nothing.
+ * The app's pages and the sign-in pages. Everything is the app's own but what media and embeds
+ * bring: CodeMirror writes its styles into `<style>` elements and the sign-in pages carry one, the
+ * icons in `style.css` are `data:` masks, a video's picture is YouTube's, `askSite` asks any https
+ * site for what it tells anyone, and the page frames the sites in `FRAME_ORIGINS` and the document an
+ * HTML embed runs in (`framed`). The app is framed by nothing.
  */
 export const PAGE: Policy = {
   "default-src": ["'none'"],
   "script-src": ["'self'"],
   "style-src": ["'self'", "'unsafe-inline'"],
-  "img-src": ["'self'", "data:"],
+  "img-src": ["'self'", "data:", "https://i.ytimg.com"],
   "font-src": ["'self'", "data:"],
-  "connect-src": ["'self'"],
+  "connect-src": ["'self'", "https:"],
   "manifest-src": ["'self'"],
-  "frame-src": ["'none'"],
+  "frame-src": [...FRAME_ORIGINS],
   "base-uri": ["'none'"],
   "form-action": ["'self'"],
   "frame-ancestors": ["'none'"],
@@ -54,18 +59,25 @@ export const written = (policy: Policy) =>
     .join("; ");
 
 const policyFor = (path: string): Policy =>
-  path === "/mcp" || path.startsWith("/api/") ? DATA : path === "/embed-frame" || path.startsWith("/embed-frame/") ? EMBED_FRAME : PAGE;
+  path === "/mcp" || path.startsWith("/api/") ? DATA : path === EMBED_FRAME_PATH || path.startsWith(`${EMBED_FRAME_PATH}/`) ? EMBED_FRAME : PAGE;
+
+/** The page's policy at `url`: it may also frame the HTML embed's document, from the app's own host and from the embeds' host when `EMBED_ORIGIN` names one. */
+const framed = (url: URL, env: { EMBED_ORIGIN?: string }): Policy => {
+  const origin = embedOrigin(env);
+  return { ...PAGE, "frame-src": [url.origin + EMBED_FRAME_PATH, ...(origin ? [origin + EMBED_FRAME_PATH] : []), ...PAGE["frame-src"]!] };
+};
 
 /**
  * `res` with the headers for the route `url` asked for. Vite's dev server writes an inline script
  * into the page, which only it is allowed. A response that brings its own policy keeps it.
  */
-export function secured(res: Response, url: URL, env: { DEV_SERVER?: string }): Response {
+export function secured(res: Response, url: URL, env: { DEV_SERVER?: string; EMBED_ORIGIN?: string }): Response {
   const out = new Response(res.body, res);
-  let policy = policyFor(url.pathname);
-  if (policy === PAGE && env.DEV_SERVER === "1") policy = { ...PAGE, "script-src": [...PAGE["script-src"]!, "'unsafe-inline'"] };
+  const kind = policyFor(url.pathname);
+  let policy = kind === PAGE ? framed(url, env) : kind;
+  if (kind === PAGE && env.DEV_SERVER === "1") policy = { ...policy, "script-src": [...policy["script-src"]!, "'unsafe-inline'"] };
   if (!out.headers.has("Content-Security-Policy")) out.headers.set("Content-Security-Policy", written(policy));
   out.headers.set("X-Content-Type-Options", "nosniff");
-  out.headers.set("Referrer-Policy", policy === EMBED_FRAME ? "no-referrer" : "strict-origin-when-cross-origin");
+  out.headers.set("Referrer-Policy", kind === EMBED_FRAME ? "no-referrer" : "strict-origin-when-cross-origin");
   return out;
 }

@@ -61,7 +61,7 @@ Add it to `BUILT_INS` in `src/web/plugins/index.ts`. Its place in that list is i
 
 - `host.commands` registers commands, lists every command, and runs one by id. A command's `keys` are its default chords.
 - `host.views.register(slot, view)` puts a view in a slot. The slots are `column`, `section`, `editor`, `folder`, `inspector`, `page`, `bar`, and `overlay`. A page gets a `go.<id>` command and an inspector view an `inspector.<id>` command. A page is also shown at every address under its path, so the Plugins page at `/plugins` is the page at `/plugins/tabs` too, and reads which from `app.path`. A page registered at exactly that address wins. A page is opened in the editor area as a note is, which with Tabs and splits on is in a tab, and it does nothing for that: see [Pages are tabs](#pages-are-tabs).
-- `host.embeds` registers an embed, drawn wherever a note says `::name{config}`, or `:::name{config}` … `:::` for a block embed. `host.embeds.list()` is every embed that is on, as a menu would offer them.
+- `host.embeds` registers an embed, drawn wherever a note says `::name{config}`, or `:::name{config}` … `:::` for a block embed. `host.embeds.list()` is every embed that is on, as a menu would offer them. It also registers an address embed (`{ name, title, claims, below }`), which has no syntax and is in no menu: a web address alone on a line that it claims is shown below that line. See "Below the line".
 - `host.completions` registers a completion: a list offered at the cursor while the member types after a trigger, such as the embed menu on `/`.
 - `host.editorExtensions` registers an editor extension, added to the editor of every note. It is a value, or a function of the editor that is told its note.
 - `host.onNavigate(listener)` calls the listener each time the app arrives at an address.
@@ -109,13 +109,13 @@ Nothing else on the Plugins page is written by hand. A plugin's details list wha
 
 ## Options
 
-A plugin's `settings` are its options, by name. Each is a `Setting`: a `type` (`boolean`, `string`, `number`, `integer`, or `chords`), a `default`, a `title`, and optionally a `description`, an `enum` or `maxLength` for a string, and a `minimum` and `maximum` for a number. The words are JSON Schema's. They are plain data, so the app lists them without running the plugin, and they stay listed while it is off.
+A plugin's `settings` are its options, by name. Each is a `Setting`: a `type` (`boolean`, `string`, `number`, `integer`, or `chords`), a `default`, a `title`, and optionally a `description`, an `enum`, `maxLength` or `defaultWithoutEmbedSite` for a string (its default on a server whose HTML embeds have no host of their own, as `/api/me` says: `html.run` asks first there), and a `minimum` and `maximum` for a number. A value the member wrote that the setting can't take reads as the default, or, for a string that gives `unreadable`, as that: a setting that guards something names its safe choice there (`html.run` reads an unreadable value as `ask first`). The words are JSON Schema's. They are plain data, so the app lists them without running the plugin, and they stay listed while it is off.
 
 An option named `unit` in the plugin `word-count` is the setting `word-count.unit`. The member changes it in the plugin: its details on the Plugins page have every option it declares, each with the control its schema asks for, the reason a value was refused, and Reset. The Settings page has the same options, in the plugin's own category under "Plugins" and in the JSON. Both draw one component (`SettingRow`) and write the one setting, so they are always in step, and only a value that differs from the default is kept. A plugin does nothing for either: declaring the option is all.
 
 `host.settings.get(name)` is the option's value now: the member's when it is valid, the default otherwise. A view is drawn again when settings change, so reading it while drawing is enough. Anything else calls `host.settings.subscribe(listener)`.
 
-A plugin cannot change settings. The host has no call for it, and `host.perform` refuses `settings.write` and `settings.read`, so a plugin can't change them through the server either, or read another plugin's. `test/core/plugin-host.test.ts` checks the refusal with a plugin that tries.
+A plugin cannot change settings. The host has no call for it, and `host.perform` refuses `settings.write` and `settings.read`, so a plugin can't change them through the server either, or read another plugin's. What it sends is a copy taken once, so an operation whose `type` reads one way when it is looked at and another when it is sent is sent as it was looked at. A plugin whose id an earlier plugin has is left out, since its settings would be that plugin's. `test/core/plugin-host.test.ts` checks the refusal with a plugin that tries.
 
 Some names are the app's. A command whose id starts with `go.`, `plugins.`, `settings.`, or `inspector.` is refused, and so is a page at an address another page has, and the plugin that asked doesn't start. A page still gets its `go.<id>` command and an inspector view its `inspector.<id>` command, which the host adds. The core and the Settings and Plugins pages start before every other plugin, so none can take an id they need.
 
@@ -129,10 +129,11 @@ A widget is a small live thing to glance at or press. There are three places one
 | --- | --- | --- | --- |
 | In a note, inline | `host.embeds.register({ name, render })`, written `::name{config}` | The note: its config | Timer (`timer`), Stopwatch (`stopwatch`) |
 | In a note, as a block | `host.embeds.register({ name, block: true, render })`, written `:::name{config}` … `:::` | The note: its config and body | Kanban board (`kanban`) |
+| In a note, below its line | An embed, inline or block, that also gives `below: { box, render }`, or an address embed: `host.embeds.register({ name, title, claims, below })` | The note: its config and body, or the address | A video's or a post's address alone on a line (`media`), HTML (`html`) |
 | The bottom bar | `host.views.register("bar", { id, component, side, order })` | Whatever it shows: the open note, the app | Note clocks (`note-clocks`) at the left end, Word count (`word-count`, from #31) at the right |
 | From the command palette only | A command that opens an `overlay` to ask what it needs, and a `bar` view that shows it | This browser, for this workspace: `host.storage` | Quick timer (`quick-timer`) |
 
-Every embed is in the `/` menu, and every command-started widget is a command in the palette.
+Every embed with a syntax is in the `/` menu, and every command-started widget is a command in the palette. An address embed is written by pasting or typing its address and by nothing else.
 
 The other slots are not places for widgets. `column`, `section`, `editor`, and `page` are the structure of the app: where notes are found and read. A `section` is not drawn with the sidebar closed, so a widget there would be out of sight just when a timer matters. The `inspector` holds panels about what is in front, and which panels it has is part of the product (History, Backlinks, Info), so a count or a clock is in the bottom bar and not a fourth icon. An `overlay` is where a command-started widget asks its question, not where it stays.
 
@@ -214,6 +215,74 @@ Each time the note says something else of an embed, whoever changed it, the embe
 `update` is checked against the note as it is when called. A drawing that has left the editor, or one of an embed that the note no longer writes that way, does nothing, so a rewrite computed from a stale body can't land on someone else's newer text. A config holding `{`, `}`, or a line break throws, and so does a body with a line that is only `:::`: an embed can't write its way out of its own range. `test/core/plugin-embed-syntax.test.ts` covers the syntax and the edits, and `test/browser/widgets.spec.ts` the rest.
 
 `starts` is what the embed menu writes for a new one: `{ config: "5m" }` for the timer, and a body of three empty columns for kanban.
+
+### Below the line
+
+An embed that shows more than fits in a line, such as a video or a frame, gives `below`:
+
+```ts
+host.embeds.register({
+  name: "clip",
+  title: "Clip",
+  render: (el, embed) => void (el.textContent = "Clip"), // what stands in the line
+  below: {
+    box: ({ config }) => (clipIn(config) ? { ratio: 16 / 9 } : null), // or { height: 320 }
+    render(el, { config }) {
+      el.append(playerFor(clipIn(config)!));
+      return () => {/* stop what was started */};
+    },
+  },
+});
+```
+
+**An address embed** is what is shown for a web address written alone on a line, which is how a video or a post is written (`plugins/media/`):
+
+```ts
+host.embeds.register({
+  name: "video",
+  title: "Video",
+  claims: (address) => videoIn(address) !== null,
+  below: { box, render }, // the address is `config`
+});
+```
+
+It has no syntax: a note that says `::video{…}` is text. The first registered whose `claims` answers true for an https address has it, and an address in a paragraph, a list or code is never asked about. `update` does nothing for one. While the cursor is elsewhere the address's line takes no room (a block replace), and what is below it is where the line was, a paragraph's gap below the words above. With the cursor on the line the address shows above it (`.embed-address`: the code face at 0.74em, the accent's colour, a ↗ after it) and the box gets an edge of the accent's colour (`.embed-below-on`); what is below it moves down by that line, and is not drawn again. Pointing at what is below it shows nothing, as nothing else in a note is shown as written under the pointer. A step from the line next to it, by the arrow keys or vim's `j` and `k`, stops on it, though the editor would step over a line out of its flow.
+
+**A block's `below` is the body of its card.** The card the host draws for the block has the block's title and its options and ends open, and the room under it has the bottom corners, as wide as the card. A block that keeps something below should draw nothing in `render`.
+
+`box` says what room to keep, from what the note says of the embed alone, so the room is there in the first frame painted and nothing moves when what fills it loads. The room is under the line that writes the embed, or under a block embed's closing line, and stays while the cursor is on that line: the line is shown as written and what is below it is not touched.
+
+`below.render` draws into an element the host keeps outside the note's text, laid over the room. CodeMirror makes its own elements again whenever it likes, and drops the ones scrolled out of sight, and a frame that is taken out of the page, or only moved in it, loads again. So the element is made once, the first time the room is on screen, is never moved in the page, and is only placed where its room is after each change. It lasts while the note says the same of the embed: through typing anywhere else, lines added and removed, the cursor, another member's change, and scrolling far away, where it goes on running. `keep` in `src/web/belowIdentity.ts` says which embed is which after a change. When the note says something else of the embed, what `render` returned is called, the element is emptied, and `render` is called again in it. An edit that passes through a config with nothing to show, such as a video's id with a letter deleted, takes the element out, and the next one is new.
+
+**The room comes from the note.** What is only known after loading gets into the note: `render` is handed `update`, which rewrites the embed as `Embedded.update` does, and `box` then reads it. This is the rule for pictures and files (#22): the upload writes a picture's size into its config when it is inserted (`::image{id 1200x800}`), so its room is right from the first frame for everyone. One written by hand without a size gets a usual room, and writes its size with `update` once it has loaded, which moves the lines below it once and never again. A test in `test/browser/media.spec.ts` does exactly that with a fixture embed. The exception is what the note has nowhere to hold: an address has no config. `render` is handed `resize(height)`, which gives a room sized by `height` another height for as long as that embed is kept, and moves what is under it once. A post uses it when its frame says how tall the post is, and keeps the height in `host.storage` so that `box` answers with it the next time and nothing moves then. `box` may also give `maxWidth`, in pixels, for what is drawn narrower than the column.
+
+**Nothing pops in.** What loads after its room is drawn, another site's frame or an HTML embed, holds the room with a placeholder its size until it is drawn: `arriving(into, frame)` in `plugins/lib/arriving.ts` lays a pulsing `.embed-loading` over the room and keeps the frame there but unseen (`.embed-arriving`, opacity 0) until `arrived()` is called. A post calls it when its frame says how tall it is, or a while after its page has loaded if it never says; `again()` puts the placeholder back while a post is asked for in the other theme. A room comes on screen when the note is scrolled, by the editor or by anything around it, and is drawn then: in sight means inside the window and inside every element around it that scrolls or clips, such as a pane of a split. A block the cursor is in is not drawn again at each key: what was drawn stays until the cursor has left the block, and then what the block says is drawn once, so HTML half written never runs.
+
+Not covered: a tab switch or a split makes the editor again, so what was below a line starts over (#36).
+
+`test/browser/media.spec.ts` holds a playing video to this through each kind of change, and checks every painted frame for a room without what fills it.
+
+### Frames
+
+What is asked of other sites when a note is opened, once its media has been on screen: a video's picture (`i.ytimg.com`) and what it is called (`www.youtube.com/oembed`, through `askSite`, with no cookie and no referrer), and each post's own frame (`platform.twitter.com`, `embed.bsky.app`), which loads what that site loads. So those sites learn that someone at this address opened something with that video or post in it, without a press. The maintainer chose this over a button to load each one. A video's player (`www.youtube-nocookie.com`) is still not asked for until play is pressed. An HTML embed runs by itself the first time its room is on screen, in its sandbox, unless the member's setting `html.run` is `ask first`, when it waits for Run (the maintainer's choice). It asks nothing of another site either way. A changed embed starts over: what was run is not remembered past the element it ran in, for any member.
+
+**The keyboard stays with the app** (`src/web/frameGuard.ts`). A frame can focus itself, and whatever is typed after that goes to it and not to the note. The host guards every frame drawn below a line: a frame may have the keyboard only while the member's pointer is on it, having moved or pressed there since their last key or press elsewhere in the app, or right after they pressed Tab. A frame that takes it any other way loses it before another key is typed, is stopped, and its room says so with a button to show it again. A shield lies over a frame until the pointer moves on it, since a frame swallows the pointer events over itself. While a frame has the keyboard its box shows "Back to the note", and a click anywhere in the app does the same. What this does not stop: a frame the member is pointing at can take the keyboard without being clicked. An embed's frame drawn anywhere but below a line is not guarded, and no built-in does that.
+
+**Another site's frame** is sandboxed (`allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation`: it runs as its own site and can open its own links in a new tab, and can't take the app's window anywhere), is sent the app's address and never the note's (`referrerpolicy="strict-origin"`; YouTube refuses to play with none), and its address is built from an id checked against a pattern, never from the note's text. The Worker lists the sites the app may frame (`FRAME_ORIGINS` in `src/worker/frames.ts`) in the page's `frame-src`, so an embed for a site that isn't there shows nothing. Social sites are the ones with a frame of their own that works sandboxed and whose address follows from the post's: X, and Bluesky for an address that carries the account's DID. A post is asked for in the app's theme (`themeNow`, and again on `onTheme`), is as wide as its site draws one (550 pixels), and its box has no border of its own and is cut to the post's corners, so there is one edge and it is the post's. Its height is taken only from a message that comes from its own frame and its own origin. A site that offers only a script to run in the page is left out. Once the member has started one, that site's frame is that site's: it can go to another address the page may frame, and it can add entries to what Back goes through.
+
+**HTML from a note** is never read as markup by the app. `sandboxed(html, { title, refused, drawn })` from the plugin API makes a frame for it; `drawn` is called once the shell has put the HTML on its page (the shell posts `{ embedFrame: "drawn" }` on its inner frame's `load`, and `drawn` is called anyway three seconds after the HTML was handed over, for HTML that stops its own page from loading), which is when the HTML embed takes its placeholder away. The frame element carries no `sandbox` attribute: the shell's own response header shuts it in, and the app hands the HTML over only to a document that answers from an origin with no name (`event.origin === "null"`), which is what the header gives it. If no such answer comes in ten seconds, `refused` is called, nothing has run, and the HTML embed says so in its room. With the attribute, the browser in the Claude desktop app refuses the request for the shell on a local address (`net::ERR_BLOCKED_BY_CLIENT`) and the embed was a white box. The HTML is given a first line of the app's own: a doctype, the theme as its colour scheme, and the app's background, ink and face on `:root`, so a bare snippet reads as the note does in either theme and the HTML's own styles win over it. The Worker serves a shell at `/embed-frame` that holds nothing, with `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; frame-src 'none'; …`. The app hands the shell the HTML as a string, and the shell puts it in a frame of its own as that frame's whole document (`srcdoc`). That inner frame has no address, an origin no other document has, and the shell's policy. What `test/browser/media.spec.ts` proves of it, by trying from inside:
+
+- It can't read the page around it, the member's session, cookies, or anything the browser keeps.
+- It can't fetch, send, or load anything: not from the app, not from anywhere.
+- It can't send its own frame, the shell's, or a frame inside it to any address, by `location`, a link, a refresh, or a form. The shell's policy governs it, not the page's, so the sites the app frames are out of reach too. It can't open a window, move the app's, or add to what Back goes through.
+
+What it can do, which nothing a browser offers today closes: **open a WebRTC peer connection.** Chrome does not recognize CSP's `webrtc 'block'` (sent as a header and as a `<meta>`, it logs "Unrecognized Content-Security-Policy directive" and candidates are still gathered), no `Permissions-Policy` feature names WebRTC, and deleting `RTCPeerConnection` before the embed runs is undone by a frame the embed makes inside itself from `srcdoc`, which runs script with one of its own (tried: it answered `function`). A running HTML embed got a `srflx` candidate from a public STUN server, which shows that server the reader's public address, and with a prepared peer a data channel carries anything the embed holds. So an HTML embed is without network except for WebRTC, from the moment it runs, which is as soon as it is on screen unless the member asks to be asked first.
+
+It can also post messages to the shell, which listens for nothing after the first one from the app, and spend the reader's processor. Where the browser keeps the frame in the app's own process, a loop in the HTML stops the whole tab: Chrome on a computer puts a sandboxed frame in a process of its own, so the app keeps answering there, but a browser without that (Safari today, and Chromium as Playwright starts it) does not. So the HTML embeds plugin lists, in `host.storage`, each HTML running in this browser (`plugins/html/running.ts`, by a hash of the text), and a page takes its own out when it is left (`pagehide`). A page that stopped answering is never left that way, so its HTML is still listed when it is opened again, in that tab or another, and it asks before it runs, saying why; pressing Run takes it off the list. HTML that runs in another tab at the same time asks too. A loop that only starts after the page is left as usual is not caught.
+
+Where the shell is served from: on this machine, in Previews, and in production it is the app's own host, which is the only host each of those has. Its origin is still its own, and the inner frame's another, because the response header says so. The member's session cookie goes with the request for the shell, which is the same empty document for everyone. Setting `EMBED_ORIGIN` on the Worker to a host kept for embeds (and routing that host to the Worker) serves it from there instead: that host answers with the shell and nothing else, and the app's host sends the frame to it (a redirect from `/embed-frame`, and the page's `frame-src` names it). Nothing sets that in production yet. For a loop in HTML to be unable to stop the app in a browser that keeps each site in its own process, that host must be another site, not only another origin: a registrable domain of its own (not `embed.commonink.app`, which is the same site), or a `*.workers.dev` name, each of which is its own site.
+
+**For #16.** `embedPolicy({ network })` in `src/worker/frames.ts` is the one switch that lets an embed fetch. A grant must never be a variant of the shell's address, a path or a query: any frame can be sent to any address its ancestors' `frame-src` allows, and `frame-src` ignores the query, so an embed could send a frame to the granted variant and get the network unasked. A grant is an unguessable token for that one grant which the Worker checks before answering with the wider policy, or a separate host for each policy. The inner frame keeps `frame-src 'none'` either way: a grant of the network is not a grant to leave. And an untrusted plugin's embed gets `sandboxed` and nothing else: not `Embed.render`, not `Below.render`.
 
 ## Completions
 
@@ -384,7 +453,8 @@ The built-in plugins are trusted, and the host gives them more than an untrusted
 - `host.perform` runs as the member with the member's whole access, and the server records the member, not the plugin, as the author.
 - `host.agents.connect` mints a token that acts as the member.
 - `host.commands.run` runs any command, including `plugins.toggle.<another plugin>`. That command writes the member's settings, so it is a way around the refusal in `host.perform`. The palette needs it to run what the member picks.
-- `Embed.render` is handed a real element inside the note, so it can reach the rest of the page from there.
+- `Embed.render` is handed a real element inside the note, so it can reach the rest of the page from there. So is `Below.render`, which can also rewrite the embed with `update`. The HTML embed is the pattern for an untrusted one: only a `sandboxed` frame, and nothing drawn by the plugin's own code.
+- A `sandboxed` frame can open a WebRTC peer connection once it runs, which no header stops. Until a browser offers a way, an untrusted embed has that one way out, and what it is handed must be chosen with that in mind.
 - `Embedded.update` changes the note as the member, recorded as the member's change. It can only rewrite the embed's own config and body, but an untrusted embed could do that without the member touching it.
 - A completion's `items` is told what the member types after its trigger, and what an item inserts is written into the note as the member.
 - An editor extension runs inside the editor with the note's text, every key typed, and the page. It must also be built from the app's own copy of `@codemirror/state`, which a plugin loaded from elsewhere doesn't have.

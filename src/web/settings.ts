@@ -27,7 +27,7 @@ export interface Problem {
 }
 
 export interface Resolved {
-  /** Every declared setting's value: the member's where it is valid, the default otherwise. */
+  /** Every declared setting's value: the member's where it is valid, the default otherwise (or what the setting says an unreadable value reads as). */
   values: Readonly<Record<string, SettingValue>>;
   problems: readonly Problem[];
   /** The keys whose value is the member's. */
@@ -80,8 +80,11 @@ export function resolve(declared: readonly Declared[], document: SettingsDocumen
     values[key] = setting.default;
     if (!Object.hasOwn(document, key)) continue;
     const read = readSetting(setting, document[key]);
-    if ("reason" in read) problems.push({ key, kind: "invalid", reason: `${read.reason}. The default is used.` });
-    else {
+    if ("reason" in read) {
+      const unreadable = setting.type === "string" ? setting.unreadable : undefined;
+      if (unreadable !== undefined) values[key] = unreadable;
+      problems.push({ key, kind: "invalid", reason: `${read.reason}. ${unreadable === undefined ? "The default is used" : `${JSON.stringify(unreadable)} is used`}.` });
+    } else {
       values[key] = read.value;
       chosen.add(key);
     }
