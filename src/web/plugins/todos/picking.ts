@@ -1,14 +1,17 @@
-import { parseRule, skippedTo, type Importance, type TodoChange } from "../../plugin-api.ts";
+import { nameKey, parseRule, skippedTo, tagsOn, type Importance, type TodoChange } from "../../plugin-api.ts";
 import { addDays, dueLabel } from "./dates.ts";
 import { PICKS, shortDay } from "./recurrence.ts";
 
 export const IMPORTANCE = ["Normal", "!", "!!", "!!!"] as const;
 
-/** The chips of a todo that open a popover to be set with. A tag's chip narrows the list instead. */
+/** The chips of a todo that open a popover of choices, in a note and on the Todos page. */
 export type ChipKind = "due" | "importance" | "every";
 
-/** A chip whose popover is open: one that sets the todo, or its last-done chip, which lists its completions. */
-export type Opened = ChipKind | "done";
+/** The chips of a row on the Todos page that open a popover: those, and Add tag. A tag's own chip narrows the list instead. */
+export type RowChip = ChipKind | "tag";
+
+/** What a row's popover can be open for: one of its chips, its last-done chip, which lists its completions, or its fields button, which lists what its chips set. */
+export type Opened = RowChip | "done" | "fields";
 
 /** Which todo's chip has its popover open, by the todo's key in the list, or nothing. One at a time, in the whole app. */
 export type Picking = { row: string; chip: Opened } | null;
@@ -45,7 +48,7 @@ export interface Choice {
 
 /**
  * What a chip's popover offers for a todo, in the order shown, on day `now`. A date of the member's own is
- * the popover's date field, and a rule of their own the recurrence popover's form.
+ * the popover's date field, and a rule of their own the Repeat popover's form.
  */
 export function choicesFor(chip: ChipKind, todo: Picked, now: string): Choice[] {
   if (chip === "importance") return ([3, 2, 1, 0] as const).map((level) => ({ label: IMPORTANCE[level], change: { importance: level }, current: todo.importance === level }));
@@ -55,7 +58,7 @@ export function choicesFor(chip: ChipKind, todo: Picked, now: string): Choice[] 
     return [
       ...PICKS.map(({ label, every }) => ({ label, change: { every }, current: every === todo.every })),
       ...(next ? [{ label: "Skip this one", detail: `due ${shortDay(next, now)}`, change: { skip: true }, current: false }] : []),
-      ...(todo.every === null ? [] : [{ label: "Stop recurring", change: { every: null }, current: false }]),
+      ...(todo.every === null ? [] : [{ label: "Stop repeating", change: { every: null }, current: false }]),
     ];
   }
   const day = (label: string, due: string, detail?: string): Choice => ({ label, ...(detail && { detail }), change: { due }, current: todo.due === due });
@@ -64,7 +67,35 @@ export function choicesFor(chip: ChipKind, todo: Picked, now: string): Choice[] 
 }
 
 /** What each chip is called, before what it says. */
-export const CHIP_NAMES: Record<ChipKind, string> = { due: "Due date", importance: "Importance", every: "Recurrence" };
+export const CHIP_NAMES: Record<RowChip, string> = { due: "Due date", importance: "Importance", every: "Repeat", tag: "Tag" };
 
 /** What a chip's popover is called, for the todo whose words are these where they are said. */
-export const pickerLabel = (chip: ChipKind, words?: string) => `${CHIP_NAMES[chip]}${words ? ` of ${words}` : ""}`;
+export const pickerLabel = (chip: RowChip | "fields", words?: string) => `${chip === "fields" ? "Fields" : CHIP_NAMES[chip]}${words ? ` of ${words}` : ""}`;
+
+/** One line of what a row's fields button lists: a chip it opens, and what that says now, or null where nothing is set. */
+export interface Field {
+  chip: RowChip;
+  name: string;
+  value: string | null;
+}
+
+/** What a row's fields button lists, as v1's did: each thing a todo can have, in the order of its chips, with what it is set to. */
+export function fieldsOf(todo: { due: string | null; importance: Importance; every: string | null; recurs?: string | null; words: string }, now: string): Field[] {
+  const tags = tagsOn(todo.words).map((tag) => `#${tag.name}`);
+  return [
+    { chip: "importance", name: CHIP_NAMES.importance, value: todo.importance ? IMPORTANCE[todo.importance] : null },
+    { chip: "due", name: CHIP_NAMES.due, value: todo.due && dueLabel(todo.due, now) },
+    { chip: "every", name: CHIP_NAMES.every, value: todo.every && (todo.recurs ?? todo.every) },
+    { chip: "tag", name: "Tags", value: tags.length ? tags.join(" ") : null },
+  ];
+}
+
+/** The tag typed into Add tag, without its #, or null when it can't be one: a tag is one word, and not only digits. */
+export function typedTag(typed: string): string | null {
+  const name = typed.trim().replace(/^#/, "");
+  const found = tagsOn(`#${name}`);
+  return found.length === 1 && found[0]!.name === name ? name : null;
+}
+
+/** A todo's words with a tag written after them, or as they are when they have it. */
+export const tagged = (words: string, name: string): string => (tagsOn(words).some((tag) => nameKey(tag.name) === nameKey(name)) ? words : `${words} #${name}`.trim());

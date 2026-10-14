@@ -31,7 +31,7 @@ const places = (page: Page) =>
       return [el.getAttribute("aria-label") ?? el.className, x, y, width, height];
     };
     return {
-      parts: [...document.querySelectorAll(".group, .group-body, .tab, [role=complementary], [role=separator], nav.rail, .focus-button, .window-controls button")].map(box),
+      parts: [...document.querySelectorAll(".group, .group-body, .tab, [role=complementary], [role=separator], nav.rail, .focus-button")].map(box),
       // How far down each thing that scrolls is.
       scrolled: [...document.querySelectorAll(".folder-list, .note-scroll, .page-pane")].map((el) => el.scrollTop),
       // The layout as it is kept, but for which group is the focused one.
@@ -171,7 +171,7 @@ test("leaving focus without a reload leaves every group scrolled as it was, and 
   await expect(page.getByRole("button", { name: "Focus" }).first()).toHaveAttribute("aria-pressed", "false");
 });
 
-test("focus hides nothing at an address with nothing there, where there is no group to leave it from", async ({ page }) => {
+test("focus stays on at an address with nothing there, which says so in a tab with the way out of focus beside it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nA line of the draft.\n" });
   await page.goto(`/note/${note.id}`);
@@ -181,12 +181,13 @@ test("focus hides nothing at an address with nothing there, where there is no gr
 
   await page.goto("/nowhere/at/all");
   await expect(page.getByText("There's nothing at this address.")).toBeVisible();
-  await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
-  await expect(page.getByRole("tree", { name: "Folders" })).toBeVisible();
-
-  // Focus was not left: back on the note it fills the window as before.
-  await page.goBack();
+  // The address is a tab of the group, so there is a group to leave focus from, and nothing is hidden with no way back.
   await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
   await expect(page.getByRole("button", { name: "Focus" }).filter({ visible: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("tree", { name: "Folders" })).toBeHidden();
+  await page.getByRole("button", { name: "Focus" }).filter({ visible: true }).click();
+  await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
+  await expect(page.getByRole("tree", { name: "Folders" })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("tab", { name: "Draft" })).toBeVisible();
+  await expect(page.locator(".cm-line").first()).toHaveText("# Draft");
 });

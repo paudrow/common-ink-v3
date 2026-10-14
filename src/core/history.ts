@@ -102,10 +102,180 @@ function over(mine: ChangeSet, theirs: ChangeSet, doc: Text): ChangeSet {
   return anchored(theirs.invert(doc).compose(kept).compose(made.map(kept)), theirs.apply(doc));
 }
 
+const WORD_CHAR = /[\p{L}\p{N}\p{M}_]/u;
+const WORD_RUNS = /[\p{L}\p{N}\p{M}_]+/gu;
+const STARTS_WORD = /^[\p{L}\p{N}\p{M}_]/u;
+const ENDS_WORD = /[\p{L}\p{N}\p{M}_]$/u;
+
+/** Whether the character at `pos` of `doc` is part of a word. */
+function wordAt(doc: Text, pos: number): boolean {
+  if (pos < 0 || pos >= doc.length) return false;
+  const code = doc.sliceString(pos, pos + 1).charCodeAt(0);
+  const low = code >= 0xdc00 && code <= 0xdfff;
+  const high = code >= 0xd800 && code <= 0xdbff;
+  return WORD_CHAR.test(doc.sliceString(low ? pos - 1 : pos, high ? pos + 2 : pos + 1));
+}
+
+/** Whether an edit puts in or takes out whole lines of `doc`, and changes no line that stays. */
+function wholeLines(edit: Edit, doc: Text): boolean {
+  if (edit.from !== doc.lineAt(edit.from).from) return false;
+  return (edit.from === edit.to || doc.sliceString(edit.to - 1, edit.to) === "\n") && (!edit.insert.length || endsLine(edit.insert));
+}
+
+/**
+ * What an edit is an edit of. `lines`: whole lines put in or taken out. `words`: text inside one
+ * line, with the rest of each word it changes. `block`: text that starts or ends inside a line and
+ * reaches or writes past a line end, where the edit doesn't say which line became which.
+ */
+interface Reach {
+  kind: "lines" | "words" | "block";
+  from: number;
+  to: number;
+  /** `from` and `to` with the words that touch them. */
+  near: [from: number, to: number];
+  /** The edit itself. */
+  edit: Edit;
+}
+
+function reachOf(edit: Edit, doc: Text): Reach {
+  let { from, to } = edit;
+  if (wholeLines(edit, doc)) return { kind: "lines", from, to, near: [from, to], edit };
+  const near: Reach["near"] = [from, to];
+  while (wordAt(doc, near[0] - 1)) near[0]--;
+  while (wordAt(doc, near[1])) near[1]++;
+  if (wordAt(doc, from - 1) && (wordAt(doc, from) || STARTS_WORD.test(edit.insert.sliceString(0, 2)))) from = near[0];
+  if (wordAt(doc, to) && (wordAt(doc, to - 1) || ENDS_WORD.test(edit.insert.sliceString(Math.max(edit.insert.length - 2, 0))))) to = near[1];
+  if (doc.lineAt(edit.from).number !== doc.lineAt(edit.to).number || edit.insert.lines > 1) return { kind: "block", from, to, near, edit };
+  return { kind: "words", from, to, near, edit };
+}
+
+/** Whether `left` and `right`, where what `left` is an edit of ends at the place `right` starts, leave one word across that place. */
+function joined(left: Reach, right: Reach, doc: Text): boolean {
+  if (left.to !== right.from) return false;
+  const [l, r] = [left.edit, right.edit];
+  // A word either of them leaves there, or took out from there, is a word the other one's text was part of.
+  const ends = wordAt(doc, left.to - 1) || (l.to === left.to && (l.insert.length ? ENDS_WORD.test(l.insert.sliceString(Math.max(l.insert.length - 2, 0))) : wordAt(doc, l.from - 1)));
+  return ends && (wordAt(doc, left.to) || (r.from === left.to && (r.insert.length ? STARTS_WORD.test(r.insert.sliceString(0, 2)) : wordAt(doc, r.to))));
+}
+
+/** Whether `a`, an edit of mine, and `b`, an edit of theirs to the same text, are edits of the same lines or words of it, so that mine can't be made to what theirs leaves. */
+function collide(a: Reach, b: Reach, doc: Text): boolean {
+  // Lines theirs wrote where mine would write the same lines are those lines, back already.
+  if (a.kind === "lines" && b.kind === "lines") return a.from < a.to && b.from < b.to ? a.from < b.to && b.from < a.to : a.from === b.from && a.to === b.to && a.edit.insert.eq(b.edit.insert);
+  if (a.kind === "lines" || b.kind === "lines") {
+    const [lines, part] = a.kind === "lines" ? [a, b] : [b, a];
+    // Lines put in are lines only while the line end before them stays.
+    if (lines.from === lines.to) return part.edit.from < lines.from && lines.from <= part.edit.to;
+    return part.from < lines.to && lines.from <= part.to;
+  }
+  // Text next to a block of mine may be of any line of it, and so may a place next to a block of theirs.
+  if (a.kind === "block") return a.from <= b.to && b.from <= a.to;
+  if (b.kind === "block") {
+    if (a.from === a.to) return b.from <= a.from && a.from <= b.to;
+    if (a.from < b.to && b.from < a.to) return true;
+    return joined(a, b, doc) || joined(b, a, doc);
+  }
+  if (a.from === a.to || b.from === b.to) {
+    const [point, other] = a.from === a.to ? [a, b] : [b, a];
+    if (other.from < point.from && point.from < other.to) return true;
+    // Where theirs wrote at the place mine would write, what mine gives back may be what they wrote, and which goes first is not known.
+    if (a.edit.to === b.edit.from && a.edit.from === b.edit.to) return true;
+  } else if (a.from < b.to && b.from < a.to) return true;
+  return false;
+}
+
+/** Whether making both mine and theirs, edits to the words of one line of `doc`, leaves a word that neither mine alone nor theirs alone leaves: two words run together, or a word in two. */
+function runTogether(mine: Edit[], theirs: Edit[], line: { from: number; to: number }, doc: Text): boolean {
+  const text = Text.of([doc.sliceString(line.from, line.to)]);
+  const [a, b] = [mine, theirs].map((edits) => ChangeSet.of(edits.map((e) => ({ from: e.from - line.from, to: e.to - line.from, insert: e.insert })), text.length));
+  const after = b!.apply(text);
+  const words = (of: Text) => of.toString().match(WORD_RUNS) ?? [];
+  const known = new Set([...words(a!.apply(text)), ...words(after)]);
+  return words(a!.map(b!).apply(after)).some((word) => !known.has(word));
+}
+
+/**
+ * `drop` without its edits of text that `change` edited too, both changes to the terminated text
+ * `doc`. Taking a change out gives back what it replaced only where what it wrote still stands as
+ * written: a word or a line that `change` edited or removed is no longer that text, and a piece of
+ * the old text put there would be part of neither. A line with such a word is left whole as it is.
+ * Of whole lines taken out, the ones `change` edited stay and the rest go, and a block is read as
+ * its lines taken out and the lines it replaced put in whole.
+ */
+function untouched(drop: ChangeSet, change: ChangeSet, doc: Text): ChangeSet {
+  const theirs = editsOf(change).map((e) => reachOf(e, doc));
+  if (!theirs.length || drop.empty) return drop;
+  // Blocks and words are not in the order of where they reach to, so what bounds the search is kept beside them.
+  const ends = theirs.map((r) => r.near[1]);
+  for (let i = 1; i < ends.length; i++) ends[i] = Math.max(ends[i]!, ends[i - 1]!);
+  const starts = theirs.map((r) => r.near[0]);
+  for (let i = starts.length - 2; i >= 0; i--) starts[i] = Math.min(starts[i]!, starts[i + 1]!);
+  const hit = (edit: Edit) => {
+    const mine = reachOf(edit, doc);
+    let [lo, hi] = [0, theirs.length];
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ends[mid]! < mine.near[0]) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < theirs.length && starts[i]! <= mine.near[1]; i++) if (collide(mine, theirs[i]!, doc)) return mine;
+    return null;
+  };
+  const lineEnd = (pos: number) => Math.min(doc.lineAt(pos).to + 1, doc.length);
+  /** Whole lines taken out, each as an edit of its own. */
+  const lines = (from: number, to: number) => {
+    const each: Edit[] = [];
+    for (; from < to; from = each.at(-1)!.to) each.push({ from, to: lineEnd(from), insert: Text.empty });
+    return each;
+  };
+  /** The lines with an edit to their words that is not made. */
+  const asIs = new Set<number>();
+  /** Theirs to the words of each line, and mine that are made so far. */
+  const words = new Map<number, { theirs: Edit[]; mine: Edit[] }>();
+  for (const { kind, edit } of theirs) {
+    if (kind !== "words") continue;
+    const line = doc.lineAt(edit.from).number;
+    words.set(line, { theirs: [...(words.get(line)?.theirs ?? []), edit], mine: [] });
+  }
+  let found = false;
+  const kept = editsOf(drop).flatMap((edit): Edit[] => {
+    const mine = hit(edit);
+    if (!mine) {
+      if (words.size && !wholeLines(edit, doc) && doc.lineAt(edit.from).number === doc.lineAt(edit.to).number && edit.insert.lines === 1) words.get(doc.lineAt(edit.from).number)?.mine.push(edit);
+      return [edit];
+    }
+    found = true;
+    if (mine.kind === "words") asIs.add(doc.lineAt(edit.from).number);
+    else if (mine.kind === "block") {
+      const [from, to] = [doc.lineAt(edit.from).from, lineEnd(edit.to)];
+      const put: Edit = { from, to: from, insert: doc.slice(from, edit.from).append(edit.insert).append(doc.slice(edit.to, to)) };
+      return [put, ...lines(from, to)].filter((piece) => !hit(piece));
+    } else if (!edit.insert.length) return lines(edit.from, edit.to).filter((line) => !hit(line));
+    return [];
+  });
+  for (const [line, both] of words) {
+    if (!both.mine.length || asIs.has(line) || !runTogether(both.mine, both.theirs, doc.line(line), doc)) continue;
+    asIs.add(line);
+    found = true;
+  }
+  if (!found) return drop;
+  const stays = (edit: Edit) => asIs.size > 0 && !wholeLines(edit, doc) && asIs.has(doc.lineAt(edit.from).number);
+  return ChangeSet.of(kept.filter((edit) => !stays(edit)), doc.length);
+}
+
+/** `drop`, a change to the terminated text `doc` that edits nothing `change` edited, moved over `change`: a line it puts in where `change` wrote goes before, and words go after, with the line they are words of. */
+function moved(drop: ChangeSet, change: ChangeSet, doc: Text): ChangeSet {
+  const edits = editsOf(drop);
+  const whole = edits.map((e) => wholeLines(e, doc));
+  if (whole.every((w) => w) || !whole.some((w) => w)) return drop.map(change, whole[0] ?? true);
+  const [lines, words] = [true, false].map((which) => ChangeSet.of(edits.filter((_, i) => whole[i] === which), doc.length).map(change, which));
+  return lines!.compose(words!.map(lines!));
+}
+
 /** `left` is for the text before `made`. This is it for the text after, with `made` left out too or kept. */
 function leaving(left: Left, { change, doc }: Made, out: boolean): Left {
   if (out) return { drop: change.invert(doc).compose(left.drop), loose: true };
-  return { drop: over(settled(left, doc), change, doc), loose: false };
+  return { drop: moved(untouched(settled(left, doc), change, doc), change, doc), loose: false };
 }
 
 /**
@@ -259,10 +429,9 @@ export function takeBackOut(history: readonly Recorded[], reverts: Reverts): Cha
  * that stays, and an edit that takes out the end of a line changes the line after it too.
  */
 function linesOf(edit: Edit, doc: Text): [number, number] | null {
-  const first = doc.lineAt(edit.from);
-  const whole = edit.from === first.from && (edit.from === edit.to || doc.sliceString(edit.to - 1, edit.to) === "\n") && (!edit.insert.length || endsLine(edit.insert));
-  if (!whole) return [first.number, doc.lineAt(edit.to).number];
-  return edit.from < edit.to ? [first.number, doc.lineAt(edit.to - 1).number] : null;
+  const first = doc.lineAt(edit.from).number;
+  if (!wholeLines(edit, doc)) return [first, doc.lineAt(edit.to).number];
+  return edit.from < edit.to ? [first, doc.lineAt(edit.to - 1).number] : null;
 }
 
 /**

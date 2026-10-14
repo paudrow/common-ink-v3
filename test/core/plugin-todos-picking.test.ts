@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choicesFor, picking, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
+import { choicesFor, fieldsOf, pickerLabel, picking, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
 
 const run = (events: PickingEvent[], from: Picking = null) => events.reduce(picking, from);
 const open = (row: string, chip: Opened): PickingEvent => ({ type: "open", row, chip });
@@ -62,11 +62,11 @@ describe("what a chip's popover offers", () => {
       ["Yearly", "1y"],
     ].map(([label, every]) => ({ label, change: { every }, current: every === current }));
 
-  it("for a recurrence: the six common rules, the one in force marked, then Skip this one with the day it moves to, and Stop recurring", () => {
+  it("for a recurrence: the six common rules, the one in force marked, then Skip this one with the day it moves to, and Stop repeating", () => {
     expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: "1w" }, now)).toEqual([
       ...picks("1w"),
       { label: "Skip this one", detail: "due Oct 21", change: { skip: true }, current: false },
-      { label: "Stop recurring", change: { every: null }, current: false },
+      { label: "Stop repeating", change: { every: null }, current: false },
     ]);
   });
 
@@ -75,10 +75,45 @@ describe("what a chip's popover offers", () => {
   });
 
   it("for a rule on its last time: no Skip, since there is no later one to move to, and Stop", () => {
-    expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: "1d-times-1" }, now)).toEqual([...picks(), { label: "Stop recurring", change: { every: null }, current: false }]);
+    expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: "1d-times-1" }, now)).toEqual([...picks(), { label: "Stop repeating", change: { every: null }, current: false }]);
   });
 
   it("for a rule that lands in another year: the skip says the year", () => {
     expect(choicesFor("every", { due: "2026-12-20", importance: 0, every: "1m" }, now).find((c) => c.label === "Skip this one")?.detail).toBe("due Jan 20, 2027");
+  });
+});
+
+describe("adding a tag from a row", () => {
+  it("takes a typed tag with or without its #, and nothing that can't be one tag", () => {
+    expect(["home", "#home", "  #Home/garden-2 ", "a_b"].map(typedTag)).toEqual(["home", "home", "Home/garden-2", "a_b"]);
+    expect(["", "#", "12", "two words", "#a#b", "a.b", "-a"].map(typedTag)).toEqual([null, null, null, null, null, null, null]);
+  });
+
+  it("writes the tag after the words, once, whatever case it is in there already", () => {
+    expect(tagged("Call the bank", "money")).toBe("Call the bank #money");
+    expect(tagged("Call the bank #Money", "money")).toBe("Call the bank #Money");
+    expect(tagged("", "money")).toBe("#money");
+  });
+});
+
+describe("what a row's fields button lists", () => {
+  const now = "2026-10-14";
+
+  it("each thing its chips set, in their order, with what it is now", () => {
+    expect(fieldsOf({ due: "2026-10-15", importance: 2, every: "2w", recurs: "every 2 weeks", words: "Call the bank #money #home" }, now)).toEqual([
+      { chip: "importance", name: "Importance", value: "!!" },
+      { chip: "due", name: "Due date", value: "Tomorrow" },
+      { chip: "every", name: "Repeat", value: "every 2 weeks" },
+      { chip: "tag", name: "Tags", value: "#money #home" },
+    ]);
+  });
+
+  it("nothing for what isn't set", () => {
+    expect(fieldsOf({ due: null, importance: 0, every: null, words: "Call the bank" }, now).map((f) => f.value)).toEqual([null, null, null, null]);
+  });
+
+  it("is one of what a row's popover can be open for, and is called by the todo's words", () => {
+    expect(run([{ type: "open", row: "a/2", chip: "fields" }, open("a/2", "due"), { type: "closed", row: "a/2", chip: "fields" }])).toEqual({ row: "a/2", chip: "due" });
+    expect(pickerLabel("fields", "Call the bank")).toBe("Fields of Call the bank");
   });
 });

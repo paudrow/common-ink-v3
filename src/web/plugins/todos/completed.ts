@@ -12,10 +12,10 @@ export const refused = (err: unknown) => ((err as { code?: unknown } | null)?.co
 
 /**
  * Says a todo was checked off, with an Undo that opens it again. Both places a todo is checked off
- * say it here: the Todos page and a note's checkbox. `undo` answers with what to say when the todo
- * couldn't be opened again, and with nothing when it was.
+ * say it here: the Todos page and a note's checkbox. It doesn't say which todo: the member has just
+ * pressed it. `undo` answers with what to say when the todo couldn't be opened again, and with nothing when it was.
  */
-export const completed = (words: string, undo: () => Promise<string | undefined> | string | undefined) => showToast({ text: `Completed ${words || "a todo"}`, undo });
+export const completed = (undo: () => Promise<string | undefined> | string | undefined) => showToast({ text: "Task completed", undo });
 
 /**
  * Takes back the completion of a recurring todo that the note's change `revision` made, whole: that

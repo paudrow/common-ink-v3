@@ -169,7 +169,7 @@ describe("what the recurrence and last-done chips say", () => {
       "every month · 5 left",
       "monthly on the 15th · until Jun 30",
     ]);
-    expect([everyName("2w"), everyName("mon,thu"), everyName("3d-after-done"), everyName("last-fri-times-2"), everyName(null)]).toEqual(["Recurs: Every 2 weeks", "Recurs: Every week on Monday and Thursday", "Recurs: 3 days after it's done", "Recurs: Every month on the last Friday, 2 more times", "Doesn't recur"]);
+    expect([everyName("2w"), everyName("mon,thu"), everyName("3d-after-done"), everyName("last-fri-times-2"), everyName(null)]).toEqual(["Repeats: Every 2 weeks", "Repeats: Every week on Monday and Thursday", "Repeats: 3 days after it's done", "Repeats: Every month on the last Friday, 2 more times", "Doesn't repeat"]);
   });
 
   it("is never wider than the token it is drawn over, counted in characters, for the last-done mark", () => {

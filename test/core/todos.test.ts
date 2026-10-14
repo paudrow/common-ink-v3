@@ -314,6 +314,18 @@ describe("changing a todo from a listing", () => {
     expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["garden", "work"] });
   });
 
+  it("rewrites its words, keeping its importance before them and its due date after them, is done once when asked again, and refuses words of more than one line", async () => {
+    const { ada, note, at } = await setUp();
+
+    const said = await perform(env.DB, ada, { type: "todo.set", ...at, words: "Call the credit union about the card #money" });
+    expect(said.text.split("\n")[2]).toBe("- [ ] !! Call the credit union about the card #money due:2026-10-14");
+    expect(said.text.replace("- [ ] !! Call the credit union about the card #money due:2026-10-14", "- [ ] !! Call the bank due:2026-10-14 +Home")).toBe(PLAN);
+    expect((await perform(env.DB, ada, { type: "todo.set", ...at, words: "Call the credit union about the card #money" })).revision).toBe(said.revision);
+    expect((await list(ada)).find((t) => t.line === 2)).toMatchObject({ words: "Call the credit union about the card #money", importance: 2, due: "2026-10-14" });
+    expect(await codeOf(perform(env.DB, ada, { type: "todo.set", id: note.id, revision: said.revision, line: 2, text: said.text.split("\n")[2]!, words: "Two\nlines" }))).toMatch(/^invalid: .*one line/);
+    expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).revision).toBe(said.revision);
+  });
+
   it("follows the todo through the changes made since it was listed, and refuses when the todo itself was changed", async () => {
     const { ada, note, at } = await setUp();
     await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `New first line\n- [ ] Another todo\n${PLAN}` });

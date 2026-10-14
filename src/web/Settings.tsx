@@ -2,13 +2,14 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { json } from "@codemirror/lang-json";
 import { HighlightStyle, ensureSyntaxTree, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { forceLinting, lintGutter, linter, type Diagnostic } from "@codemirror/lint";
-import { Annotation, EditorState } from "@codemirror/state";
+import { Annotation, Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { KeyboardShortcuts } from "./KeyboardShortcuts.tsx";
 import { SettingRow } from "./SettingRow.tsx";
 import type { Host, MemberSettings } from "./pluginHost.ts";
+import { readOnly } from "./readOnly.ts";
 import { documentOf, type Problem } from "./settings.ts";
 import { KEYBOARD, UNKNOWN, filterLayout, layoutOf } from "./settingsLayout.ts";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
@@ -74,7 +75,7 @@ export function Settings({ host, store, mac, path, go }: Props) {
       {/* Above the JSON, where each is underlined. Under the options, where each is said at its own row too, so one that comes or goes with a change moves nothing above it. */}
       {asJson && problemList}
       {asJson ? (
-        <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} onChange={typed} />
+        <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} locked={unread} onChange={typed} />
       ) : (
         <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} />
       )}
@@ -305,10 +306,16 @@ interface JsonProps {
   value: string;
   /** The schema's problems with `value`, or null when it isn't a JSON object and so has only that one. */
   problems: readonly Problem[] | null;
+  /**
+   * Whether nothing can be typed, as while the stored settings haven't been read: what was typed
+   * then couldn't be saved, and kept as a draft it would be written over them a key after they came.
+   */
+  locked: boolean;
   onChange: (text: string) => void;
 }
 
-function JsonEditor({ value, problems, onChange }: JsonProps) {
+function JsonEditor({ value, problems, locked, onChange }: JsonProps) {
+  const [lock] = useState(() => new Compartment());
   const parent = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const now = useRef({ value, problems, onChange });
@@ -320,6 +327,7 @@ function JsonEditor({ value, problems, onChange }: JsonProps) {
       state: EditorState.create({
         doc: now.current.value,
         extensions: [
+          lock.of(locked ? readOnly : []),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
           json(),
@@ -343,9 +351,14 @@ function JsonEditor({ value, problems, onChange }: JsonProps) {
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    if (view.state.doc.toString() !== value) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, annotations: external.of(true) });
+    // Not filtered, so the settings as they arrive reach an editor that is still locked.
+    if (view.state.doc.toString() !== value) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, filter: false, annotations: external.of(true) });
     forceLinting(view);
   }, [value, problems]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: lock.reconfigure(locked ? readOnly : []) });
+  }, [locked, lock]);
 
   return <div className="settings-json" ref={parent} />;
 }

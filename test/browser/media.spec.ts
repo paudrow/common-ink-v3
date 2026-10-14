@@ -18,9 +18,13 @@ const running = (page: Page) => page.frames().filter((f) => f.url() === "about:s
 const runHtml = (page: Page) => below(page, "html").getByRole("button", { name: "Run HTML" });
 const settled = (page: Page) => page.evaluate(() => new Promise((done) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 50)));
 
-async function open(page: Page, text: string, settings?: Record<string, unknown>) {
+/**
+ * Signs in and opens a note with this text, with the cursor at its start. The member has chosen to run HTML by itself unless
+ * `settings` say otherwise: this server has no site of HTML embeds' own, where they ask first until the member chooses.
+ */
+async function open(page: Page, text: string, settings: Record<string, unknown> = { "html.run": "automatically" }) {
   await signInAsNewPerson(page, "Ada Lovelace");
-  if (settings) await perform(page, { type: "settings.write", text: JSON.stringify(settings), baseRevision: 0 });
+  await perform(page, { type: "settings.write", text: JSON.stringify(settings), baseRevision: 0 });
   const note = await perform(page, { type: "note.create", text });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText(text.split("\n")[0]!.replace(/^# /, ""));
@@ -158,7 +162,7 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
 
   // Its own line: the cursor arriving shows the address, which is not a change to it.
   await goTo(page, 7);
-  await expect(line(page, "youtu.be")).toHaveClass(/embed-address-seen/);
+  await expect(line(page, "youtu.be")).toHaveClass(/embed-address/);
   await expectStillPlaying("with the cursor on its own line");
   await expectOverItsRoom(page, "video", "with the cursor on its own line");
 
@@ -203,7 +207,7 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
   // Its own source: the one thing that draws it again, once, in the element and the place it has.
   await page.evaluate(() => ((document.querySelector(".embed-below iframe")!.closest(".embed-below") as HTMLElement & { marked?: boolean }).marked = true));
   await goTo(page, 9);
-  await expect(line(page, "youtu.be/dQw4w9WgXcQ")).toHaveClass(/embed-address-seen/);
+  await expect(line(page, "youtu.be/dQw4w9WgXcQ")).toHaveClass(/embed-address/);
   await expectOverItsRoom(page, "video", "with the cursor in its source");
   const boxBefore = (await placed(page, "video")).el;
   // One change that leaves it a video's address: with a character short it would be no video, and gone.
@@ -221,7 +225,7 @@ test("a playing video is never loaded again, stopped, or moved in the page by an
   expect(asked).toHaveLength(2);
 });
 
-test("a video's address is out of sight until the cursor is on its line, not when the pointer is on the video or the line, and nothing in the note moves when it comes, goes, or the video loads", async ({ page }) => {
+test("a video's address takes no room until the cursor is on its line, not when the pointer is on the video, and then only it and what is below it move, by its line", async ({ page }) => {
   await standIns(page);
   await page.setViewportSize({ width: 1800, height: 1400 });
   await open(page, "# Video\n\nbefore it\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nbetween them\n\nhttps://youtu.be/aaaaaaaaaaa\n\nafter them\n");
@@ -240,27 +244,42 @@ test("a video's address is out of sight until the cursor is on its line, not whe
         shown: [...document.querySelectorAll(".embed-below")].map(box),
       };
     });
-  /** Which of the two addresses can be seen. */
-  const seen = () => page.evaluate(() => [...document.querySelectorAll(".cm-line.embed-address")].map((l) => getComputedStyle(l).opacity));
+  /** The addresses shown. */
+  const seen = () => page.locator(".cm-line.embed-address").allTextContents();
+  /** Everything as it was before, but what is at or below the address shown, which is lower by its line, and the address's own line. */
+  const movedBy = async (before: Awaited<ReturnType<typeof measured>>) => {
+    const address = (await page.locator(".cm-line.embed-address").boundingBox())!;
+    const lower = (box: number[]): number[] => (box[1]! >= address.y - 0.5 ? [box[0]!, box[1]! + address.height, box[2]!, box[3]!] : box);
+    const rounded = (boxes: number[][]) => boxes.map((box) => box.map((n) => Math.round(n! * 2) / 2));
+    const lines = before.lines.map(lower);
+    lines.splice(before.lines.filter((box) => box[1]! < address.y - 0.5).length, 0, [address.x, address.y, address.width, address.height]);
+    return { lines: rounded(lines), rooms: rounded(before.rooms.map(lower)), shown: rounded(before.shown.map(lower)) };
+  };
+  const roundedNow = async () => {
+    const now = await measured();
+    const rounded = (boxes: number[][]) => boxes.map((box) => box.map((n) => Math.round(n! * 2) / 2));
+    return { lines: rounded(now.lines), rooms: rounded(now.rooms), shown: rounded(now.shown) };
+  };
   await expect(below(page, "video")).toHaveCount(2);
   await expect(below(page, "video").getByRole("button", { name: "Play video: Stand-in video" })).toHaveCount(2);
   await expect.poll(async () => (await measured()).shown).toEqual((await measured()).rooms);
   const before = await measured();
   expect(before.rooms[0]![3], "a 16:9 box from the first moment").toBeCloseTo(before.rooms[0]![2]! * (9 / 16), 0);
   // The note opens with the cursor where nobody put it, which shows nothing as written.
-  await expect.poll(seen).toEqual(["0", "0"]);
+  await expect.poll(seen).toEqual([]);
 
-  for (const [lineNumber, shows] of [[5, ["1", "0"]], [9, ["0", "1"]], [3, ["0", "0"]], [11, ["0", "0"]]] as const) {
+  for (const [lineNumber, shows] of [[5, ["https://youtu.be/dQw4w9WgXcQ"]], [9, ["https://youtu.be/aaaaaaaaaaa"]], [3, []], [11, []]] as const) {
     await goTo(page, lineNumber);
     await expect.poll(seen, `with the cursor on line ${lineNumber}`).toEqual(shows);
     await settled(page);
-    await expect.poll(() => measured(), `with the cursor on line ${lineNumber}`).toEqual(before);
+    if (shows.length) await expect.poll(async () => (await roundedNow()), `with the cursor on line ${lineNumber}`).toEqual(await movedBy(before));
+    else await expect.poll(() => measured(), `with the cursor on line ${lineNumber}`).toEqual(before);
   }
-  // The pointer shows nothing: not on a video, and not on an address's line.
-  for (const [where, at] of [["the second video", below(page, "video").nth(1)], ["the first video", below(page, "video").first()], ["the first address's line", page.locator(".cm-line.embed-address").first()]] as const) {
+  // The pointer shows nothing on a video.
+  for (const [where, at] of [["the second video", below(page, "video").nth(1)], ["the first video", below(page, "video").first()]] as const) {
     await at.hover();
     await settled(page);
-    await expect.poll(seen, `with the pointer on ${where}`).toEqual(["0", "0"]);
+    await expect.poll(seen, `with the pointer on ${where}`).toEqual([]);
     await expect.poll(() => measured(), `with the pointer on ${where}`).toEqual(before);
   }
   await page.mouse.move(2, 2);
@@ -268,14 +287,14 @@ test("a video's address is out of sight until the cursor is on its line, not whe
   // The keys reach it as they reach any line, and it reads as it is written.
   await goTo(page, 5);
   await expect(page.locator(".cm-line").nth(4)).toHaveText("https://youtu.be/dQw4w9WgXcQ");
-  await expect.poll(seen).toEqual(["1", "0"]);
+  await expect.poll(seen).toEqual(["https://youtu.be/dQw4w9WgXcQ"]);
 
   await below(page, "video").first().getByRole("button", { name: /^Play video/ }).click();
   await expect.poll(() => player(page)).toBeDefined();
   await expect(below(page, "video").first().locator("iframe")).toBeVisible();
   await page.mouse.move(2, 2);
   await goTo(page, 1);
-  await expect.poll(seen).toEqual(["0", "0"]);
+  await expect.poll(seen).toEqual([]);
   await settled(page);
   await expect.poll(() => measured(), "after the video loaded").toEqual(before);
 });
@@ -841,32 +860,52 @@ test("HTML is not handed to a frame whose document came without what shuts it in
   await expect(page.locator("iframe")).toHaveCount(0);
 });
 
-test("an HTML embed runs by itself once its room is on screen, and only when Run is pressed for a member who asked to be asked first", async ({ page }) => {
+test("HTML asks first where embeds have no site of their own, runs by itself once its room is on screen where they have, and the member's choice wins either way", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 700 });
   const filler = Array.from({ length: 60 }, (_, n) => `line ${n}`).join("\n");
-  await open(page, `# Far\n\n${filler}\n\n:::html{height=80}\n<p>far down</p>\n:::\n\nlast\n`);
-  await settled(page);
-  expect(running(page), "nothing runs while its room is off screen").toEqual([]);
-  await page.keyboard.press("ControlOrMeta+End");
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
-  await expect(framed.getByText("far down")).toBeVisible();
-  await expect(runHtml(page)).toHaveCount(0);
+  const choice = page.getByLabel("Run HTML embeds", { exact: true });
+  const settings = async () => JSON.parse((await perform(page, { type: "settings.read" })).text);
 
-  // The member asks to be asked first, in Settings, where the option is the HTML embeds plugin's.
-  await page.goto("/settings/plugins/html");
-  const choice = page.getByLabel("Run HTML embeds");
-  await expect(choice).toHaveValue("automatically");
-  await expect(choice.locator("option")).toHaveText(["automatically", "ask first"]);
-  await choice.selectOption("ask first");
-  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)).toEqual({ "html.run": "ask first" });
-
-  const asked = await perform(page, { type: "note.create", text: "# Asked\n\n:::html{height=80}\n<p>asked</p>\n:::\n\nlast\n" });
-  await page.goto(`/note/${asked.id}`);
+  // This server has no site of HTML embeds' own, as no machine and no Preview has: a member who hasn't chosen is asked first.
+  await open(page, "# Asked\n\n:::html{height=80}\n<p>asked</p>\n:::\n\nlast\n", {});
   await expect(runHtml(page)).toBeVisible();
   await settled(page);
   expect(running(page)).toEqual([]);
   await runHtml(page).click();
-  await expect(page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("asked")).toBeVisible();
+  await expect(framed.getByText("asked")).toBeVisible();
+  // In Settings, where the option is the HTML embeds plugin's, that is the default here, and the member chooses otherwise.
+  await page.goto("/settings/plugins/html");
+  await expect(choice).toHaveValue("ask first");
+  await expect(choice.locator("option")).toHaveText(["automatically", "ask first"]);
+  await choice.selectOption("automatically");
+  await expect.poll(settings).toEqual({ "html.run": "automatically" });
+  const far = await perform(page, { type: "note.create", text: `# Far\n\n${filler}\n\n:::html{height=80}\n<p>far down</p>\n:::\n\nlast\n` });
+  await page.goto(`/note/${far.id}`);
+  await settled(page);
+  expect(running(page), "nothing runs while its room is off screen").toEqual([]);
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+End");
+  await expect(framed.getByText("far down")).toBeVisible();
+  await expect(runHtml(page)).toHaveCount(0);
+
+  // A server whose embeds have a site of their own says so, and there a member who hasn't chosen isn't asked. Asking first is theirs to choose.
+  await page.route("**/api/me", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), setup: { embedSite: true } } });
+  });
+  await open(page, "# Apart\n\n:::html{height=80}\n<p>apart</p>\n:::\n\nlast\n", {});
+  await expect(framed.getByText("apart")).toBeVisible();
+  await expect(runHtml(page)).toHaveCount(0);
+  await page.goto("/settings/plugins/html");
+  await expect(choice).toHaveValue("automatically");
+  await choice.selectOption("ask first");
+  await expect.poll(settings).toEqual({ "html.run": "ask first" });
+  const asked = await perform(page, { type: "note.create", text: "# Asked again\n\n:::html{height=80}\n<p>asked again</p>\n:::\n\nlast\n" });
+  await page.goto(`/note/${asked.id}`);
+  await expect(runHtml(page)).toBeVisible();
+  await settled(page);
+  expect(running(page)).toEqual([]);
 });
 
 /** Counts each time an HTML embed's shell is asked for, from here on. */
