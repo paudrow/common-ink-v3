@@ -1,4 +1,4 @@
-import { lineHunks, type Author, type Diff, type DiffLine, type HistoryEntry, type Reverts } from "../../plugin-api.ts";
+import { lineHunks, type Author, type AuthorRef, type Diff, type DiffLine, type HistoryEntry, type Reverts } from "../../plugin-api.ts";
 
 /** Saves to one note by one author closer together than this are one row. */
 export const SITTING_MS = 10 * 60_000;
@@ -104,6 +104,66 @@ export function dayLabel(time: number, now: number): string {
   return then.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: then.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 }
 
+/** The rows of one day, newest first. `at` is when the day began. */
+export interface Day {
+  at: number;
+  rows: Row[];
+}
+
+/** Rows, newest first, by the day each was last saved on. */
+export function byDay(rows: readonly Row[]): Day[] {
+  const days: Day[] = [];
+  for (const row of rows) {
+    const at = startOfDay(row.lastAt);
+    if (days.at(-1)?.at === at) days.at(-1)!.rows.push(row);
+    else days.push({ at, rows: [row] });
+  }
+  return days;
+}
+
+/** What was done to one note in one day. */
+export interface NoteOfDay {
+  noteId: string;
+  noteTitle: string;
+  /** Newest first. */
+  rows: Row[];
+  added: number;
+  removed: number;
+  saves: number;
+  /** Who made them, whoever was latest first. */
+  authors: Author[];
+}
+
+/** The notes a day's rows changed, the one changed latest first. */
+export function notesOf(rows: readonly Row[]): NoteOfDay[] {
+  const notes = new Map<string, NoteOfDay>();
+  for (const row of rows) {
+    const note = notes.get(row.noteId) ?? { noteId: row.noteId, noteTitle: row.noteTitle, rows: [], added: 0, removed: 0, saves: 0, authors: [] };
+    note.rows.push(row);
+    note.added += row.added;
+    note.removed += row.removed;
+    note.saves += row.revisions.length;
+    if (!note.authors.some((a) => authorKey(a) === authorKey(row.author))) note.authors.push(row.author);
+    notes.set(row.noteId, note);
+  }
+  return [...notes.values()];
+}
+
+/** What narrows the list: to some notes, to some authors, and to people's changes or agents'. */
+export interface Narrowing {
+  noteIds?: readonly string[];
+  authors?: readonly AuthorRef[];
+  by?: "people" | "agents";
+}
+
+/** Whether a change is listed under a narrowing. */
+export function lists({ noteIds, authors, by }: Narrowing, change: Pick<HistoryEntry, "noteId" | "author">): boolean {
+  const { author } = change;
+  if (noteIds && !noteIds.includes(change.noteId)) return false;
+  if (by && (by === "people") !== (author.kind === "member")) return false;
+  return !authors || authors.some((a) => authorKey(author) === `${a.kind}:${a.id}`);
+}
+
 export const clock = (time: number) => new Date(time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
 const HUES = [258, 285, 205, 330, 190, 20, 240];
@@ -159,6 +219,16 @@ export function within(selection: Selection): { selection: Selection; cut: boole
   return { selection: new Map([...selection].map(([noteId, revisions]) => [noteId, new Set([...revisions].sort((a, b) => b - a).slice(0, MOST_OF_A_NOTE))])), cut: true };
 }
 
+/** The picked changes that `listed` answers yes to. Ones it knows nothing of are dropped. The same selection is returned when all are kept. */
+export function kept(selection: Selection, listed: (noteId: string, revision: number) => boolean): Selection {
+  const next = new Map<string, ReadonlySet<number>>();
+  for (const [noteId, revisions] of selection) {
+    const still = [...revisions].filter((r) => listed(noteId, r));
+    if (still.length) next.set(noteId, still.length === revisions.size ? revisions : new Set(still));
+  }
+  return sameSelection(selection, next) ? selection : next;
+}
+
 export const only = (rows: readonly Pick<Row, "noteId" | "revisions">[]) => withRows(NOTHING, rows, true);
 
 export const sizeOf = (selection: Selection) => [...selection.values()].reduce((sum, revisions) => sum + revisions.size, 0);
@@ -168,15 +238,22 @@ export const sameSelection = (a: Selection, b: Selection) => a.size === b.size &
 /** The selection as the operations take it: each note once, its revisions in order. */
 export const asked = (selection: Selection) => [...selection].map(([noteId, revisions]) => ({ noteId, revisions: [...revisions].sort((a, b) => a - b) }));
 
-/** A piece of a diff as it is drawn. */
+/** A stretch of the text a diff leads to, to mark the changed lines of: lines `from` up to `to`, counted from 0, or the place before line `from` when they are the same. */
+export interface Stretch {
+  from: number;
+  to: number;
+}
+
+/** A piece of a diff as it is drawn. `mark` is the first of the stretches asked for that a changed piece is of. */
 export type Piece =
-  | { kind: "same" | "add" | "del"; text: string }
+  | { kind: "same"; text: string }
+  | { kind: "add" | "del"; text: string; mark?: number }
   /** Lines rewritten, shown once with the words that changed marked. */
-  | { kind: "mod"; words: Array<{ kind: "same" | "add" | "del"; text: string }> }
+  | { kind: "mod"; words: Array<{ kind: "same" | "add" | "del"; text: string }>; mark?: number }
   /** Unchanged lines left out: lines `from` up to `to` of the text before, counted from 0. */
   | { kind: "fold"; from: number; to: number }
   /** The rest of a long run of added or removed lines, shown when asked for. */
-  | { kind: "more"; of: "add" | "del"; lines: string[] };
+  | { kind: "more"; of: "add" | "del"; lines: string[]; mark?: number };
 
 /** Rewritten runs of at most this many lines a side are shown word by word. */
 const MOST_REWRITTEN = 12;
@@ -209,20 +286,26 @@ function words(before: string, after: string): Extract<Piece, { kind: "mod" }>["
  * A line diff as it is drawn: unchanged lines between its hunks folded away, a short rewrite shown
  * once with its changed words marked, and a long run of added or removed lines cut to its start.
  */
-export function pieces(diff: Diff): Piece[] {
+export function pieces(diff: Diff, marks: readonly Stretch[] = []): Piece[] {
   const out: Piece[] = [];
   let at = 0;
   const fold = (to: number) => {
     if (to > at) out.push({ kind: "fold", from: at, to });
   };
-  const run = (of: "add" | "del", lines: string[]) => {
+  /** The mark of changed lines that leave lines `from` up to `to` of the text after, if a stretch asked for meets them. */
+  const markOf = (from: number, to: number) => {
+    const hit = marks.findIndex((m) => (m.from < m.to && from < to ? m.from < to && from < m.to : m.from <= to && from <= m.to));
+    return hit < 0 ? {} : { mark: hit };
+  };
+  const run = (of: "add" | "del", lines: string[], mark: { mark?: number }) => {
     const shown = lines.length > LONG ? lines.slice(0, SHOWN) : lines;
-    for (const text of shown) out.push({ kind: of, text });
-    if (shown.length < lines.length) out.push({ kind: "more", of, lines: lines.slice(SHOWN) });
+    for (const text of shown) out.push({ kind: of, text, ...mark });
+    if (shown.length < lines.length) out.push({ kind: "more", of, lines: lines.slice(SHOWN), ...mark });
   };
   for (const hunk of diff.hunks) {
     fold(hunk.oldStart - 1);
     at = hunk.oldStart - 1;
+    let after = hunk.newStart - 1;
     const lines = hunk.lines;
     for (let i = 0; i < lines.length; ) {
       const kind = lines[i]!.kind;
@@ -232,19 +315,28 @@ export function pieces(diff: Diff): Piece[] {
       if (kind === "same") {
         for (const text of texts) out.push({ kind: "same", text });
         at += texts.length;
+        after += texts.length;
       } else if (kind === "del") {
         let addEnd = end;
         while (addEnd < lines.length && lines[addEnd]!.kind === "add") addEnd++;
         const added = lines.slice(end, addEnd).map((l) => l.text);
         at += texts.length;
+        // Lines taken out and the lines put in their place are one change, marked as one.
+        const mark = markOf(after, after + added.length);
         // As many lines after as before, or lines joined or split would read as words changed within a line.
         const rewritten = added.length === texts.length && texts.length <= MOST_REWRITTEN ? words(texts.join("\n"), added.join("\n")) : [];
         // Lines with no word in common were replaced, not rewritten, and read better as lines out and lines in.
-        if (rewritten.some((w) => w.kind === "same" && /\S/.test(w.text))) {
-          out.push({ kind: "mod", words: rewritten });
-          end = addEnd;
-        } else run("del", texts);
-      } else run("add", texts);
+        if (rewritten.some((w) => w.kind === "same" && /\S/.test(w.text))) out.push({ kind: "mod", words: rewritten, ...mark });
+        else {
+          run("del", texts, mark);
+          run("add", added, mark);
+        }
+        after += added.length;
+        end = addEnd;
+      } else {
+        run("add", texts, markOf(after, after + texts.length));
+        after += texts.length;
+      }
       i = end;
     }
   }
