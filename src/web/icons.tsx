@@ -55,6 +55,7 @@ const PATHS = {
   plus: <path d="M8 3.5v9M3.5 8h9" />,
   edit: <path d="M9.75 3.75 12.25 6.25M3 13l.6-2.85 7.4-7.4a1.2 1.2 0 0 1 1.7 0l.55.55a1.2 1.2 0 0 1 0 1.7l-7.4 7.4z" />,
   close: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,
+  pin: <path d="M6 2.5h4l-.5 4 2 2.25h-7l2-2.25zM8 8.75v4.75" />,
   chevron: <path d="m6 4.5 3.5 3.5L6 11.5" />,
   sidebar: (
     <>

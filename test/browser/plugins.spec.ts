@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { connectAgent, folderRow, listedNote, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, folderRow, listedNote, noteCard, openAllNotes, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson } from "./helpers.ts";
 import { openDetails, pluginRow } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });
@@ -96,8 +96,8 @@ test("turning the sidebar off takes the workspace menu, the page links, and the 
   await listedNote(page, "Alpha").click();
   await writes(page, note.id, "written with the sidebar off");
 
-  // With no sidebar there is nothing to close to a bar, so its button and its key do nothing here.
-  await expect(page.getByRole("button", { name: "Sidebar", exact: true })).toHaveCount(0);
+  // With no sidebar there is nothing to close to a bar, so it has no edge to drag and its key does nothing here.
+  await expect(page.getByRole("separator", { name: "Resize sidebar" })).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+\\");
   await expect(page.getByRole("navigation", { name: "Sidebar bar" })).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+\\");
@@ -195,19 +195,18 @@ test("with every plugin off a note still opens at its address, takes typing, and
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeVisible();
 });
 
-test("turning History off takes its page, its link, and its inspector tab away", async ({ page }) => {
+test("turning History off takes its page, its link, and its inspector panel away", async ({ page }) => {
   await withNote(page, "Alpha");
   await openNote(page, "Alpha");
-  const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
 
   await run(page, "Disable plugin: History");
-  await expect(inspector.getByRole("tab")).toHaveText(["Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["Backlinks", "Info"]);
   await page.getByRole("button", { name: "More" }).click();
   await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "Plugins"]);
 
   await run(page, "Enable plugin: History");
-  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info"]);
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
   await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
 });
 
@@ -527,17 +526,22 @@ test("only a plugin that came with the app is called Built-in", async ({ page })
   await expect(page.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
 });
 
-test("an inspector view a plugin adds is a tab only for what it says it is for, is handed that thing, and is found again by its label", async ({ page }) => {
+test("an inspector view a plugin adds is an icon in the bar whatever is in front, is handed what is in front where it says it is for that, and says nothing to show elsewhere", async ({ page }) => {
   await page.addInitScript(() => {
     type Register = (slot: string, view: unknown) => void;
+    type About = { kind: "note"; note: { title: string } } | { kind: "folder"; name: string; notes: unknown[] } | { kind: "notes"; label: string; notes: unknown[] };
     (window as unknown as { __INK_FIXTURE_PLUGINS__: unknown[] }).__INK_FIXTURE_PLUGINS__ = [
       {
         id: "fixture",
         name: "Fixture",
         activate(host: { views: { register: Register } }) {
-          host.views.register("inspector", { id: "count-note", label: "Count", icon: "info", for: "note", component: ({ note }: { note: { title: string } }) => `Counting the note ${note.title}` });
-          host.views.register("inspector", { id: "count-folder", label: "Count", icon: "info", for: "folder", component: ({ name, notes }: { name: string; notes: unknown[] }) => `Counting ${notes.length} in ${name}` });
-          host.views.register("inspector", { id: "about-page", label: "About", icon: "info", for: "page", component: ({ page }: { page: { label: string } }) => `About the page ${page.label}` });
+          host.views.register("inspector", {
+            id: "count",
+            label: "Count",
+            icon: "info",
+            for: ["note", "folder"],
+            component: ({ about }: { about: About }) => (about.kind === "note" ? `Counting the note ${about.note.title}` : about.kind === "folder" ? `Counting ${about.notes.length} in ${about.name}` : "Not asked for"),
+          });
         },
       },
     ];
@@ -545,25 +549,29 @@ test("an inspector view a plugin adds is a tab only for what it says it is for, 
   await withNote(page, "Alpha");
   await keepNote(page, "Alpha");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  const shown = inspector.getByRole("tab", { selected: true });
 
-  // Nothing picked yet is Info, whatever a plugin adds after it.
-  await expect(inspector.getByRole("tab")).toHaveText(["History", "Backlinks", "Info", "Count"]);
-  await expect(shown).toHaveText("Info");
-  await inspector.getByRole("tab", { name: "Count" }).click();
-  await expect(inspector.getByRole("tabpanel")).toHaveText("Counting the note Alpha");
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Count"]);
+  await pinPanel(page, "Info");
+  await expect(shownPanel(page)).toHaveText("Info");
+  await showPanel(page, "Count");
+  await expect(inspector.locator(".inspector-body")).toHaveText("Counting the note Alpha");
 
-  // A folder has its own view of that name, and it is the one that shows.
+  // A folder's list is handed to the same view, which is still the one that shows.
   await openAllNotes(page);
-  await expect(inspector.getByRole("tab")).toHaveText(["History", "Info", "Count"]);
-  await expect(shown).toHaveText("Count");
-  await expect(inspector.getByRole("tabpanel")).toHaveText("Counting 1 in All notes");
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Count"]);
+  await expect(shownPanel(page)).toHaveText("Count");
+  await expect(inspector.locator(".inspector-body")).toHaveText("Counting 1 in All notes");
 
-  // A page has only what was added for a page, and the pick is as it was when a note is in front again.
+  // A page is nothing the view said it is for: its icon and its panel are there, and the inspector says there is nothing to show.
   await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Dashboard" }).click();
-  await expect(inspector.getByRole("tab")).toHaveText(["About"]);
-  await expect(inspector.getByRole("tabpanel")).toHaveText("About the page Dashboard");
+  await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Count"]);
+  await expect(shownPanel(page)).toHaveText("Count");
+  await expect(inspector.locator(".inspector-body")).toHaveText("Nothing to show for this view");
   await tabs(page).filter({ hasText: "Alpha" }).click();
-  await expect(shown).toHaveText("Count");
-  await expect(inspector.getByRole("tabpanel")).toHaveText("Counting the note Alpha");
+  await expect(shownPanel(page)).toHaveText("Count");
+  await expect(inspector.locator(".inspector-body")).toHaveText("Counting the note Alpha");
+
+  // Its command does what its icon does.
+  await run(page, "Toggle Count panel");
+  await expect(inspector).toHaveCount(0);
 });

@@ -31,7 +31,7 @@ const places = (page: Page) =>
       return [el.getAttribute("aria-label") ?? el.className, x, y, width, height];
     };
     return {
-      parts: [...document.querySelectorAll(".group, .group-body, .tab, [role=complementary], [role=separator], nav.rail, .focus-button, .window-controls button")].map(box),
+      parts: [...document.querySelectorAll(".group, .group-body, .tab, [role=complementary], [role=separator], nav.rail, .focus-button")].map(box),
       // How far down each thing that scrolls is.
       scrolled: [...document.querySelectorAll(".folder-list, .note-scroll, .page-pane")].map((el) => el.scrollTop),
       // The layout as it is kept, but for which group is the focused one.
