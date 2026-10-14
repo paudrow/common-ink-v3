@@ -48,7 +48,7 @@ export interface Choice {
 
 /**
  * What a chip's popover offers for a todo, in the order shown, on day `now`. A date of the member's own is
- * the popover's date field, and a rule of their own the recurrence popover's form.
+ * the popover's date field, and a rule of their own the Repeat popover's form.
  */
 export function choicesFor(chip: ChipKind, todo: Picked, now: string): Choice[] {
   if (chip === "importance") return ([3, 2, 1, 0] as const).map((level) => ({ label: IMPORTANCE[level], change: { importance: level }, current: todo.importance === level }));
@@ -58,7 +58,7 @@ export function choicesFor(chip: ChipKind, todo: Picked, now: string): Choice[] 
     return [
       ...PICKS.map(({ label, every }) => ({ label, change: { every }, current: every === todo.every })),
       ...(next ? [{ label: "Skip this one", detail: `due ${shortDay(next, now)}`, change: { skip: true }, current: false }] : []),
-      ...(todo.every === null ? [] : [{ label: "Stop recurring", change: { every: null }, current: false }]),
+      ...(todo.every === null ? [] : [{ label: "Stop repeating", change: { every: null }, current: false }]),
     ];
   }
   const day = (label: string, due: string, detail?: string): Choice => ({ label, ...(detail && { detail }), change: { due }, current: todo.due === due });
@@ -67,7 +67,7 @@ export function choicesFor(chip: ChipKind, todo: Picked, now: string): Choice[] 
 }
 
 /** What each chip is called, before what it says. */
-export const CHIP_NAMES: Record<RowChip, string> = { due: "Due date", importance: "Importance", every: "Recurrence", tag: "Tag" };
+export const CHIP_NAMES: Record<RowChip, string> = { due: "Due date", importance: "Importance", every: "Repeat", tag: "Tag" };
 
 /** What a chip's popover is called, for the todo whose words are these where they are said. */
 export const pickerLabel = (chip: RowChip, words?: string) => `${CHIP_NAMES[chip]}${words ? ` of ${words}` : ""}`;

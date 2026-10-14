@@ -282,7 +282,16 @@ function Row({ todo, now, tag, tags, app, picked, completing, onChange, onOpen, 
         setMenu(underMore());
       }}
     >
-      <input type="checkbox" className="todo-box" checked={todo.done} disabled={readOnly || completing} aria-label={todo.done ? "Done" : "Not done"} onChange={(e) => onChange(todo, { done: e.target.checked })} />
+      <input
+        type="checkbox"
+        className="todo-box"
+        checked={todo.done}
+        disabled={readOnly}
+        // Not disabled while its completion is on its way: that would take the keyboard off it.
+        aria-disabled={completing || undefined}
+        aria-label={todo.done ? "Done" : "Not done"}
+        onChange={(e) => !completing && onChange(todo, { done: e.target.checked })}
+      />
       <span className="todo-text">
         {editing !== null ? (
           <input

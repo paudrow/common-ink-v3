@@ -26,10 +26,10 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   todo-filters                        the tags that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
         [--every RULE|none] [--skip true] [--on DAY]
-                                      check a todo off, change it, or skip a recurring todo to its next
+                                      check a todo off, change it, or skip a repeating todo to its next
                                       due date; ID, both Ns and LINE are from todos
   todo-history ID --revision N --line N --text LINE
-                                      each time a recurring todo was checked off, and by whom
+                                      each time a repeating todo was checked off, and by whom
   daily [--on DAY]                    your daily note for a day, made if it isn't there
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
@@ -76,14 +76,14 @@ leaves such text as it is.
 
 A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
 DAY is a calendar date, YYYY-MM-DD. Importance is 0 for normal and 1 to 3 for !, !! and !!!.
-RULE is how a todo recurs, written every:RULE on its line:
+RULE is how a todo repeats, written every:RULE on its line:
   2w (d, w, m or y)   every N after the due date     3d-after-done      N after it was last done
   mon,thu             those days of every week       2w-mon,thu         of every 2nd week
   3rd-day last-day    that day of every month        2nd-tue last-fri   that weekday of every month
   1st-day,15th-day    several of either, in order    3m-last-fri        of every 3rd month
   mar-1               that date every year           1st-mon-mar        that weekday of that month
   then -until-DAY (none after that day) or -times-N (N more times, counting the one due now)
-Checking off a todo that recurs leaves it open with its next due date and files the checked line on
+Checking off a todo that repeats leaves it open with its next due date and files the checked line on
 your daily note for --on, or for today when left out. Its last time checks it off for good.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;

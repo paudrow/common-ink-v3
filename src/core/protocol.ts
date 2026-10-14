@@ -82,7 +82,7 @@ const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
 /** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done`, `last-fri`, `mar-1` or `1m-times-5`. docs/todos.md has every rule. */
-const Recurrence = z.string().max(1000).refine((rule) => parseRule(rule) !== null, "not a way to recur, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 or 1m-times-5");
+const Recurrence = z.string().max(1000).refine((rule) => parseRule(rule) !== null, "not a way to repeat, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 or 1m-times-5");
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 
 export const Op = z.discriminatedUnion("type", [

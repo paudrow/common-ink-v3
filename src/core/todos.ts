@@ -180,7 +180,7 @@ export function todoEdits(line: string, change: Omit<TodoChange, "words">): Edit
   }
 
   if (change.every !== undefined && change.every !== (todo.every?.written ?? null)) {
-    if (change.every !== null && !parseRule(change.every)) throw new RangeError(`${change.every} isn't a way to recur. docs/todos.md has the rules, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 and 1m-times-5`);
+    if (change.every !== null && !parseRule(change.every)) throw new RangeError(`${change.every} isn't a way to repeat. docs/todos.md has the rules, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 and 1m-times-5`);
     if (!todo.every) tail += ` every:${change.every}`;
     else if (change.every) edits.push({ from: todo.every.from, to: todo.every.to, insert: `every:${change.every}` });
     else edits.push({ from: todo.every.from - 1, to: todo.every.to, insert: "" });
@@ -264,9 +264,9 @@ export function completeTodo(line: string, on: string): Completed {
  */
 export function skipTodo(line: string, on: string): string {
   const todo = parseTodo(line);
-  if (!todo?.every || todo.done) throw new RangeError("Only an open todo that recurs can be skipped");
+  if (!todo?.every || todo.done) throw new RangeError("Only an open todo that repeats can be skipped");
   const next = skippedTo(todo.every.rule, { due: todo.due?.date ?? null, on });
-  if (!next) throw new RangeError("This is the last time this todo recurs, so there is no later one to skip to. Check it off, or stop it recurring");
+  if (!next) throw new RangeError("This is the last time this todo repeats, so there is no later one to skip to. Check it off, or stop it repeating");
   return rewriteTodo(line, { due: next, every: writeRule(counted(todo.every.rule)) });
 }
 

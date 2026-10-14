@@ -62,11 +62,11 @@ describe("what a chip's popover offers", () => {
       ["Yearly", "1y"],
     ].map(([label, every]) => ({ label, change: { every }, current: every === current }));
 
-  it("for a recurrence: the six common rules, the one in force marked, then Skip this one with the day it moves to, and Stop recurring", () => {
+  it("for a recurrence: the six common rules, the one in force marked, then Skip this one with the day it moves to, and Stop repeating", () => {
     expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: "1w" }, now)).toEqual([
       ...picks("1w"),
       { label: "Skip this one", detail: "due Oct 21", change: { skip: true }, current: false },
-      { label: "Stop recurring", change: { every: null }, current: false },
+      { label: "Stop repeating", change: { every: null }, current: false },
     ]);
   });
 
@@ -75,7 +75,7 @@ describe("what a chip's popover offers", () => {
   });
 
   it("for a rule on its last time: no Skip, since there is no later one to move to, and Stop", () => {
-    expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: "1d-times-1" }, now)).toEqual([...picks(), { label: "Stop recurring", change: { every: null }, current: false }]);
+    expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: "1d-times-1" }, now)).toEqual([...picks(), { label: "Stop repeating", change: { every: null }, current: false }]);
   });
 
   it("for a rule that lands in another year: the skip says the year", () => {

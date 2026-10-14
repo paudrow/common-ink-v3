@@ -40,7 +40,7 @@ function iconOf(chip: ChipKind, change: TodoChange): IconName {
 /**
  * What a todo's chip opens, on the Todos page and in a note alike: its choices, each saved the moment it
  * is picked, and for a due date a field for any other day. Up and Down go from choice to choice. A
- * recurrence's is one flat panel: the rule in words, the common rules, Skip this one and Stop recurring,
+ * repeat's is one flat panel: the rule in words, the common rules, Skip this one and Stop repeating,
  * and beside them the form that builds any other rule, saved with its own Save.
  */
 export function ChipMenu({ chip, todo, now, onPick, onText }: Props) {
@@ -69,7 +69,7 @@ export function ChipMenu({ chip, todo, now, onPick, onText }: Props) {
     return (
       <div className="chip-menu recur-menu" onKeyDown={move}>
         <div className="recur-picks">
-          <p className="recur-now">{rule ? describeRule(rule, todo.due) : "Doesn't recur yet"}</p>
+          <p className="recur-now">{rule ? describeRule(rule, todo.due) : "Doesn't repeat yet"}</p>
           {picks.map(button)}
           {choices.length > picks.length && <hr />}
           {choices.slice(picks.length).map((choice, i) => button(choice, picks.length + i))}

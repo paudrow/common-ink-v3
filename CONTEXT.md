@@ -38,7 +38,7 @@ _Avoid_: Wikilink, reference
 A note whose text links to the note in front. The inspector's Backlinks panel lists the ones the member can see.
 
 **Todo**:
-A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, recurrence, importance, and assignees are written on that line and shown as chips. It has the tags written on its line and the tags of its note. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a recurring todo leaves the open line with its next due date and files the checked line on the daily note of the member who checked it off, however the box was checked. Taking the completion back takes the filed line back off the daily note. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, with a control to include completed ones.
+A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, repeat, importance, and assignees are written on that line and shown as chips. It has the tags written on its line and the tags of its note. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a repeating todo leaves the open line with its next due date and files the checked line on the daily note of the member who checked it off, however the box was checked. Taking the completion back takes the filed line back off the daily note. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, with a control to include completed ones.
 _Avoid_: Task, item
 
 **Importance**:
@@ -48,12 +48,12 @@ How urgent a todo is. Three raised levels, written `!`, `!!`, or `!!!` immediate
 The day a todo is due, written `due:2026-10-14` on its line. It is a calendar date with no time and no time zone. Overdue is a due date before today, where today is the viewing member's.
 _Avoid_: Deadline
 
-**Recurrence**:
-How a todo comes due again, written `every:` and a rule on its line: every N days, weeks, months or years after the due date (`every:2w`); N after it was last done (`every:3d-after-done`); days of the week, every week or every Nth (`every:mon,thu`, `every:2w-mon,thu`); days of the month from its start or end (`every:3rd-day`, `every:1st-day,15th-day`, `every:last-day`); the nth weekdays of the month (`every:2nd-tue`, `every:last-fri`); a date or a weekday of a month every year (`every:mar-1`, `every:1st-mon-mar`). A rule may end, on a day or after so many more times (`-until-2026-12-31`, `-times-5`), and its last time checks the todo off for good. A member can **skip** one occurrence: the due date moves to the next with nothing checked off. `docs/todos.md` has each rule and its next due date.
-_Avoid_: Repeat, schedule
+**Repeat**:
+How a todo comes due again, written `every:` and a rule on its line: every N days, weeks, months or years after the due date (`every:2w`); N after it was last done (`every:3d-after-done`); days of the week, every week or every Nth (`every:mon,thu`, `every:2w-mon,thu`); days of the month from its start or end (`every:3rd-day`, `every:1st-day,15th-day`, `every:last-day`); the nth weekdays of the month (`every:2nd-tue`, `every:last-fri`); a date or a weekday of a month every year (`every:mar-1`, `every:1st-mon-mar`). A rule may end, on a day or after so many more times (`-until-2026-12-31`, `-times-5`), and its last time checks the todo off for good. A member can **skip** one occurrence: the due date moves to the next with nothing checked off. `docs/todos.md` has each rule and its next due date. A todo with one is a repeating todo. In code the rule is `every` and its module `recurrence.ts`, which a person never reads.
+_Avoid_: Recurrence, recur, schedule
 
 **Completion**:
-One time a recurring todo was checked off, on a day, by a member or an agent. The todo's line carries the latest day and the count, written `done:2026-10-10x12`, and the record has each one.
+One time a repeating todo was checked off, on a day, by a member or an agent. The todo's line carries the latest day and the count, written `done:2026-10-10x12`, and the record has each one.
 
 **Daily note**:
 A note for one calendar date, belonging to one member. Its heading is that date in that member's timezone, written as a due date is: `# 2026-10-11`. Which member and day it belongs to is stored outside the note, so it stays their daily note when moved or retitled. It is made when first needed, private to its member unless their settings say otherwise, in the folder at the top of the workspace that their settings name, and the default is Daily. Changing that setting leaves daily notes already created where they are. An agent files a completion on the connecting member's daily note. A guest has none.
@@ -70,7 +70,7 @@ External structured data a member connects, such as their calendar events or con
 _Avoid_: Integration, connector
 
 **Event**:
-A calendar entry from a member's data source. It may recur.
+A calendar entry from a member's data source. It may repeat.
 
 **Dashboard**:
 A view for one member, not a stored object. It shows that member's events still ahead today, including all-day events; open todos they can see that are due today or earlier; their daily note for today and other notes they can see that were created or edited today; their pinned notes; and a summary of changes they can see since their last visit.

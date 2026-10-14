@@ -10,7 +10,7 @@ export const everyLabel = (written: string) => {
 /** What a recurrence chip is called, for a title and a screen reader. */
 export const everyName = (written: string | null) => {
   const rule = written === null ? null : parseRule(written);
-  return rule ? `Recurs: ${describeRule(rule)}` : "Doesn't recur";
+  return rule ? `Repeats: ${describeRule(rule)}` : "Doesn't repeat";
 };
 
 /** What a last-done chip says: the day beside today, and how many times. */

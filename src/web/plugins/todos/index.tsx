@@ -17,7 +17,7 @@ const MINUTE_MS = 60_000;
 export const todos: Plugin = {
   id: "todos",
   name: "Todos",
-  description: "Checkbox lines with due dates, importance and recurrence, and a page of every todo.",
+  description: "Checkbox lines with due dates, importance and repeats, and a page of every todo.",
   icon: "todos",
   screenshots: [{ src: "/plugin-shots/todos-light.png", dark: "/plugin-shots/todos-dark.png", alt: "The Todos page: every open todo with its importance, its due date and the note it is in." }],
   activate(host) {
