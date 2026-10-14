@@ -1,5 +1,5 @@
 import { EditorState, Prec, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, drawSelection } from "@codemirror/view";
+import { EditorView, RectangleMarker, ViewPlugin, drawSelection, layer } from "@codemirror/view";
 import { Vim, getCM, vim } from "@replit/codemirror-vim";
 import { TITLE_MARK, dismissing } from "../../plugin-api.ts";
 
@@ -62,6 +62,38 @@ const titleFirst = ViewPlugin.define((view) => {
 
 let byRows = false;
 
+/**
+ * In visual line mode every line selected is painted from its left edge to its right, a code block's across the whole block.
+ * The editor's own painting runs the first line from where its text starts and the last to where its text ends, which in a
+ * code block is short of the block's edges on both sides.
+ */
+const wholeLines = layer({
+  above: false,
+  class: "cm-selectionLayer",
+  markers(view) {
+    if (!getCM(view)?.state.vim?.visualLine) return [];
+    const scroller = view.scrollDOM.getBoundingClientRect();
+    const [left, top] = [scroller.left - view.scrollDOM.scrollLeft, scroller.top - view.scrollDOM.scrollTop];
+    const painted: RectangleMarker[] = [];
+    for (const range of view.state.selection.ranges) {
+      for (const seen of view.visibleRanges) {
+        for (let pos = Math.max(range.from, seen.from); pos <= Math.min(range.to, seen.to); ) {
+          const line = view.state.doc.lineAt(pos);
+          const { node } = view.domAtPos(line.from);
+          const el = (node instanceof HTMLElement ? node : node.parentElement)?.closest(".cm-line");
+          if (el) {
+            const box = el.getBoundingClientRect();
+            painted.push(new RectangleMarker("cm-selectionBackground", box.left - left, box.top - top, box.width, box.height));
+          }
+          pos = line.to + 1;
+        }
+      }
+    }
+    return painted;
+  },
+  update: (update) => update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged,
+});
+
 /** The editor extension for vim, with `runCommand` as the way it runs the app's commands. */
 export function vimEditing(runCommand: (commandId: string) => boolean): { extension: Extension; jumpsFrom: (focused: HTMLElement) => boolean; toNormal: (focused: HTMLElement) => void; moveByRows: (on: boolean) => void } {
   run = runCommand;
@@ -84,6 +116,7 @@ export function vimEditing(runCommand: (commandId: string) => boolean): { extens
       // Vim's library hides the browser's own selection in its modes and leaves the drawing of one to the editor.
       // Without this nothing selected in visual mode is painted anywhere.
       drawSelection(),
+      wholeLines,
       // Visual block mode is a selection on each of its lines, which an editor keeps only when told it may. A click still makes one.
       EditorState.allowMultipleSelections.of(true),
       EditorView.clickAddsSelectionRange.of(() => false),

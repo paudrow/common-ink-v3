@@ -96,6 +96,18 @@ function watch() {
 const seen = (page: Page) =>
   page.evaluate(() => new Promise<Seen>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done((window as unknown as { __SEEN__: () => Seen }).__SEEN__())))));
 
+/**
+ * Presses `key` `times` times with a frame drawn after each, as a held key repeats. Keys sent faster
+ * than frames are drawn can take the cursor through a whole block between two frames, and what the
+ * page showed on the way is never seen.
+ */
+async function pressEach(page: Page, key: string, times: number) {
+  for (let i = 0; i < times; i++) {
+    await page.keyboard.press(key);
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+  }
+}
+
 const running = () => new Date(Date.now() - 65_000).toISOString();
 const NOTE = () =>
   [
@@ -234,7 +246,7 @@ test("the cursor passing through the whole note, up and back down, leaves every 
   // A line at a time at the start of each. The lines start with words, so the cursor is never on an inline embed. It goes through each block's own lines, which are shown above the block while it is in them.
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
-  for (let i = 0; i < LINES; i++) await page.keyboard.press("ArrowUp");
+  await pressEach(page, "ArrowUp", LINES);
   await page.keyboard.press("End");
   await page.keyboard.type("!");
   await expect.poll(() => read(page, note.id)).toBe(written.replace("# Steady", "# Steady!"));
@@ -245,7 +257,7 @@ test("the cursor passing through the whole note, up and back down, leaves every 
   expect(up.embeds.filter((e) => e.boxes.length === 1).map((e) => e.id.split("#")[0])).toEqual(["timer", "stopwatch", "timer", "chip", "tag"]);
 
   await page.keyboard.press("Home");
-  for (let i = 0; i < LINES; i++) await page.keyboard.press("ArrowDown");
+  await pressEach(page, "ArrowDown", LINES);
   await page.keyboard.type("Back at the end.");
   await expect.poll(() => read(page, note.id)).toBe(`${written.replace("# Steady", "# Steady!")}Back at the end.`);
   back(await seen(page), first);

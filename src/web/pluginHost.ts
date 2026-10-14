@@ -193,7 +193,14 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
           return contributions().settings.values[`${plugin.id}.${name}`] as T;
         },
         subscribe(listener) {
-          const heard = () => listener();
+          // A listener that throws is its plugin's failure, and not the end of telling the others or of the change it was told of.
+          const heard = () => {
+            try {
+              listener();
+            } catch (err) {
+              record(plugin.id, err);
+            }
+          };
           watching.add(heard);
           return keep(() => void watching.delete(heard));
         },
@@ -271,7 +278,7 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
       running.set(plugin.id, mine);
     } catch (err) {
       // A plugin that can't start is left out whole, and the rest of the app carries on.
-      for (const dispose of mine) dispose();
+      undo(mine);
       errors.set(plugin.id, err instanceof Error ? err.message : String(err));
     }
   }
@@ -280,8 +287,22 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
     const mine = running.get(plugin.id) ?? [];
     // It stops running before its contributions go one by one, so what it added is remembered whole and not as it stood halfway out.
     running.delete(plugin.id);
-    for (const dispose of mine) dispose();
+    const failed = undo(mine);
     errors.delete(plugin.id);
+    if (failed.length) errors.set(plugin.id, failed.join("; "));
+  }
+
+  /** Takes back everything a plugin added. One part that throws as it goes doesn't keep the rest in, or stop whatever turned the plugin off: what it said is returned. */
+  function undo(disposes: Iterable<Dispose>): string[] {
+    const failed: string[] = [];
+    for (const dispose of disposes) {
+      try {
+        dispose();
+      } catch (err) {
+        failed.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    return failed;
   }
 
   /** The hint is the chord that runs the command now, which another command may have claimed first. */
@@ -386,7 +407,8 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
       .filter((p) => !required.includes(p.id))
       .map((p): Command => {
         const enable = off.has(p.id);
-        return { id: `plugins.${enable ? "enable" : "disable"}.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
+        // One id whichever way it goes, so a key given to it turns the plugin off and then on again. Only its title says which.
+        return { id: `plugins.toggle.${p.id}`, title: `${enable ? "Enable" : "Disable"} plugin: ${p.name}`, run: () => setEnabled(p.id, enable) };
       });
     const all = [...inOrder(commands.values()), ...toggles];
     const declared = declare(all);

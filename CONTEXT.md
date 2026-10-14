@@ -212,7 +212,7 @@ What a revert would do, worked out and not recorded: the changes it would revert
 A later change that still stands and edited a line a revert changes. A preview names each one. A line added or removed whole next to such a line is not an overlap.
 
 **Conflict**:
-A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
+A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was, or left whole as it is when the later edit was to the same words or removed the line; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
 
 **Undo**:
 Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.

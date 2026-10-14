@@ -1352,7 +1352,7 @@ button.link:hover {
   outline: none;
 }
 
-/* Room left of the text, inside the editor's own margin, for what hangs there: a heading's #s and a bullet's fold toggle. */
+/* Room left of the text, inside the editor's own margin, for what hangs there: a heading's #s. */
 .editor .cm-scroller {
   margin-left: -3rem;
 }
@@ -2633,6 +2633,11 @@ kbd {
   font-size: 13px;
 }
 
+.settings-banner .button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .settings-banner[role="alert"] {
   border-color: var(--danger);
 }
@@ -3019,6 +3024,10 @@ kbd {
   background: var(--bg-elev);
   box-shadow: var(--shadow);
   font-size: 13px;
+}
+
+.recorder:focus {
+  outline: none;
 }
 
 .recorder p {
