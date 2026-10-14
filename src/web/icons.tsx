@@ -171,6 +171,8 @@ const PATHS = {
       <path d="M4 10V6l1.75 2L7.5 6v4M11 6v4M9.5 8.5 11 10l1.5-1.5" />
     </>
   ),
+  flag: <path d="M4 14V2.75h8l-1.5 3 1.5 3H4" />,
+  check: <path d="m3.75 8.25 2.75 2.75 5.75-6" />,
 } as const;
 
 export type IconName = keyof typeof PATHS;

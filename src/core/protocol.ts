@@ -199,7 +199,7 @@ export const Op = z.discriminatedUnion("type", [
    * note, and what the line said. The line is followed through every change recorded since, so it is
    * found wherever it has moved to, and no other line is ever taken for it, however alike. Refused as
    * a conflict when the line itself was changed or deleted since. The same call made again changes
-   * nothing more. What is left out stays as written.
+   * nothing more. What is left out stays as written, and only `words` moves a token: the due date goes after them.
    */
   z.object({
     type: z.literal("todo.set"),
@@ -210,6 +210,8 @@ export const Op = z.discriminatedUnion("type", [
     done: z.boolean().optional(),
     importance: ImportanceLevel.optional(),
     due: Day.nullable().optional(),
+    /** What the todo says instead: its words and tags, as todo.list's `words`, on one line. */
+    words: z.string().max(MAX_NOTE_LENGTH).regex(/^[^\r\n]*$/, "A todo's words are one line").optional(),
   }).strict(),
   /** The same operation as links.rebuild, under the name of the other record it makes again. */
   z.object({ type: z.literal("todos.rebuild") }),

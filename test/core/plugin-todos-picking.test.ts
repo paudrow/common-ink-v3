@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choicesFor, picking, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
+import { choicesFor, picking, tagged, typedTag, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
 
 const run = (events: PickingEvent[], from: Picking = null) => events.reduce(picking, from);
 const open = (row: string, chip: "due" | "importance"): PickingEvent => ({ type: "open", row, chip });
@@ -46,5 +46,18 @@ describe("what a chip's popover offers", () => {
       { label: "!", change: { importance: 1 }, current: false },
       { label: "Normal", change: { importance: 0 }, current: false },
     ]);
+  });
+});
+
+describe("adding a tag from a row", () => {
+  it("takes a typed tag with or without its #, and nothing that can't be one tag", () => {
+    expect(["home", "#home", "  #Home/garden-2 ", "a_b"].map(typedTag)).toEqual(["home", "home", "Home/garden-2", "a_b"]);
+    expect(["", "#", "12", "two words", "#a#b", "a.b", "-a"].map(typedTag)).toEqual([null, null, null, null, null, null, null]);
+  });
+
+  it("writes the tag after the words, once, whatever case it is in there already", () => {
+    expect(tagged("Call the bank", "money")).toBe("Call the bank #money");
+    expect(tagged("Call the bank #Money", "money")).toBe("Call the bank #Money");
+    expect(tagged("", "money")).toBe("#money");
   });
 });

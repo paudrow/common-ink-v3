@@ -204,7 +204,7 @@ export const TOOLS: Tool[] = [
   {
     name: "set_todo",
     description:
-      "Check a todo off, or change its importance or due date, by rewriting its line in its note. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Check a todo off, or change its importance, its due date or its words, by rewriting its line in its note. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         id: noteId,
@@ -214,6 +214,7 @@ export const TOOLS: Tool[] = [
         done: { type: "boolean", description: "True checks it off, false opens it again" },
         importance: { type: "integer", minimum: 0, maximum: 3, description: "0 for normal, 1 to 3 for !, !! and !!!" },
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
+        words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, importance and due date, tags included, on one line. Its due date is written after them" },
       },
       ["id", "revision", "line", "text"],
     ),

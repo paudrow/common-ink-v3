@@ -23,7 +23,7 @@ const COMMANDS: Record<string, string[][]> = {
   rebuild_links: [["links-rebuild"]],
   list_todos: [["todos", "--folder", ID, "--tag", "money", "--due-from", "2026-10-01", "--due-to", "2026-10-31", "--no-due", "false", "--importance", "2,3", "--completed", "true", "--note", ID, "--limit", "5", "--offset", "5"]],
   todo_filters: [["todo-filters"]],
-  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none"]],
+  set_todo: [["todo", ID, "--revision", "4", "--line", "3", "--text", "- [ ] Call", "--done", "true", "--importance", "2", "--due", "none", "--words", "Call the bank #money"]],
   rebuild_todos: [["todos-rebuild"]],
   move_note: [["move", ID, "--folder", ID]],
   list_folders: [["folders"]],

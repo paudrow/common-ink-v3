@@ -1,6 +1,6 @@
-import { useRef, type KeyboardEvent } from "react";
-import { Icon, type Importance, type TodoChange } from "../../plugin-api.ts";
-import { choicesFor, type ChipKind } from "./picking.ts";
+import { useRef, useState, type KeyboardEvent } from "react";
+import { Icon, nameKey, type Importance, type TodoChange } from "../../plugin-api.ts";
+import { choicesFor, typedTag, type ChipKind } from "./picking.ts";
 
 interface Props {
   chip: ChipKind;
@@ -17,6 +17,16 @@ const STEPS: Record<string, (at: number, count: number) => number> = {
   End: (_, count) => count - 1,
 };
 
+/** Up and Down from choice to choice, and Home and End to the first and the last. */
+const move = (e: KeyboardEvent<HTMLDivElement>) => {
+  const all = [...e.currentTarget.querySelectorAll<HTMLElement>("[data-choice]")];
+  const at = all.indexOf(e.target as HTMLElement);
+  const step = STEPS[e.key];
+  if (at < 0 || !step || !all.length) return;
+  e.preventDefault();
+  all[step(at, all.length)]!.focus();
+};
+
 /**
  * What a todo's chip opens, on the Todos page and in a note alike: its choices, each saved the moment it
  * is picked, and for a due date a field for any other day. Up and Down go from choice to choice.
@@ -24,14 +34,6 @@ const STEPS: Record<string, (at: number, count: number) => number> = {
 export function ChipMenu({ chip, todo, now, onPick }: Props) {
   const choices = choicesFor(chip, todo, now);
   const first = Math.max(0, choices.findIndex((c) => c.current));
-  const move = (e: KeyboardEvent<HTMLDivElement>) => {
-    const all = [...e.currentTarget.querySelectorAll<HTMLElement>("[data-choice]")];
-    const at = all.indexOf(e.target as HTMLElement);
-    const step = STEPS[e.key];
-    if (at < 0 || !step) return;
-    e.preventDefault();
-    all[step(at, all.length)]!.focus();
-  };
   return (
     <div className="chip-menu" onKeyDown={move}>
       {chip === "due" && <DayField due={todo.due} onPick={onPick} />}
@@ -46,6 +48,7 @@ export function ChipMenu({ chip, todo, now, onPick }: Props) {
           data-autofocus={i === first || undefined}
           onClick={() => onPick(choice.change)}
         >
+          <Icon name={chip === "importance" ? "flag" : choice.change.due === null ? "close" : "calendar"} />
           <span>{choice.label}</span>
           {choice.detail && <span className="chip-detail">· {choice.detail}</span>}
           {choice.current && <span className="chip-now">now</span>}
@@ -80,5 +83,60 @@ function DayField({ due, onPick }: { due: string | null; onPick: (change: TodoCh
         onChange={(e) => !typed.current && e.target.value && onPick({ due: e.target.value })}
       />
     </label>
+  );
+}
+
+interface TagProps {
+  /** The tags in use, offered to pick from. */
+  tags: readonly string[];
+  /** The tags the todo has, which are not offered again. */
+  has: readonly string[];
+  onPick: (name: string) => void;
+}
+
+/**
+ * What Add tag on a row opens: a field for a tag and the tags in use under it, narrowed as it is typed
+ * into. A pick, or Enter on a tag typed whole, writes the tag after the todo's words.
+ */
+export function TagMenu({ tags, has, onPick }: TagProps) {
+  const [typed, setTyped] = useState("");
+  const name = typedTag(typed);
+  const looking = nameKey(typed.trim().replace(/^#/, ""));
+  const offered = tags.filter((tag) => !has.some((own) => nameKey(own) === nameKey(tag)) && nameKey(tag).includes(looking));
+  const fresh = name !== null && !tags.some((tag) => nameKey(tag) === nameKey(name));
+  return (
+    <div className="chip-menu" onKeyDown={move}>
+      <label className="chip-day">
+        <span className="chip-hash" aria-hidden="true" />
+        <input
+          aria-label="Tag"
+          placeholder="Add a tag…"
+          value={typed}
+          data-autofocus
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && name) {
+              e.preventDefault();
+              onPick(offered.find((tag) => nameKey(tag) === nameKey(name)) ?? name);
+            } else if (e.key === "ArrowDown") {
+              e.preventDefault();
+              e.currentTarget.closest(".chip-menu")?.querySelector<HTMLElement>("[data-choice]")?.focus();
+            }
+          }}
+        />
+      </label>
+      {offered.map((tag) => (
+        <button key={tag} type="button" className="chip-choice" data-choice onClick={() => onPick(tag)}>
+          <span className="chip-hash" aria-hidden="true" />
+          <span>#{tag}</span>
+        </button>
+      ))}
+      {fresh && (
+        <button type="button" className="chip-choice" data-choice onClick={() => onPick(name)}>
+          <Icon name="plus" />
+          <span>Add #{name}</span>
+        </button>
+      )}
+    </div>
   );
 }

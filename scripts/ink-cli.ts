@@ -24,7 +24,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
         [--completed true] [--note ID] [--limit N] [--offset N]
                                       the todos in the notes you can see, open ones unless --completed
   todo-filters                        the tags that todos can be narrowed by
-  todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none]
+  todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
                                       check a todo off or change it; ID, both Ns and LINE are from todos
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
@@ -261,7 +261,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           revision: integer("--revision", flags.get("revision")!),
           line: integer("--line", flags.get("line")!),
           text: flags.get("text")!,
-          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)] }),
+          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], words: ["words"] }),
         };
         break;
       case "todos-rebuild":

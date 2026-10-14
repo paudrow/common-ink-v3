@@ -1,15 +1,18 @@
-import type { Importance, TodoChange } from "../../plugin-api.ts";
+import { nameKey, tagsOn, type Importance, type TodoChange } from "../../plugin-api.ts";
 import { addDays, dueLabel } from "./dates.ts";
 
 export const IMPORTANCE = ["Normal", "!", "!!", "!!!"] as const;
 
-/** The chips of a todo that open a popover to be set with. A tag's chip narrows the list instead. */
+/** The chips of a todo that open a popover of choices, in a note and on the Todos page. */
 export type ChipKind = "due" | "importance";
 
-/** Which todo's chip has its popover open, by the todo's key in the list, or nothing. One at a time, in the whole app. */
-export type Picking = { row: string; chip: ChipKind } | null;
+/** The chips of a row on the Todos page that open a popover: those two, and Add tag. A tag's own chip narrows the list instead. */
+export type RowChip = ChipKind | "tag";
 
-export type PickingEvent = { type: "open" | "closed"; row: string; chip: ChipKind };
+/** Which todo's chip has its popover open, by the todo's key in the list, or nothing. One at a time, in the whole app. */
+export type Picking = { row: string; chip: RowChip } | null;
+
+export type PickingEvent = { type: "open" | "closed"; row: string; chip: RowChip };
 
 /**
  * Opening a chip's popover shows it, and opening the one that is open closes it. A popover tells it
@@ -40,5 +43,17 @@ export function choicesFor(chip: ChipKind, todo: { due: string | null; importanc
   return [day("Today", now), day("Tomorrow", addDays(now, 1)), day("Next week", week, dueLabel(week, now)), ...(todo.due ? [{ label: "Clear", change: { due: null }, current: false }] : [])];
 }
 
+export const CHIP_NAMES: Record<RowChip, string> = { due: "Due date", importance: "Importance", tag: "Tag" };
+
 /** What a chip's popover is called, for the todo whose words are these where they are said. */
-export const pickerLabel = (chip: ChipKind, words?: string) => `${chip === "due" ? "Due date" : "Importance"}${words ? ` of ${words}` : ""}`;
+export const pickerLabel = (chip: RowChip, words?: string) => `${CHIP_NAMES[chip]}${words ? ` of ${words}` : ""}`;
+
+/** The tag typed into Add tag, without its #, or null when it can't be one: a tag is one word, and not only digits. */
+export function typedTag(typed: string): string | null {
+  const name = typed.trim().replace(/^#/, "");
+  const found = tagsOn(`#${name}`);
+  return found.length === 1 && found[0]!.name === name ? name : null;
+}
+
+/** A todo's words with a tag written after them, or as they are when they have it. */
+export const tagged = (words: string, name: string): string => (tagsOn(words).some((tag) => nameKey(tag.name) === nameKey(name)) ? words : `${words} #${name}`.trim());
