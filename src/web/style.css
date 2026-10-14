@@ -5272,6 +5272,13 @@ button.todo-chip:disabled {
   font-weight: 700;
 }
 
+/* When it was last done: quieter than what is set on the todo, as v1's done chip was. */
+.todo-chip.todo-done {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+}
+
 .todo-due[data-due="today"] {
   background: color-mix(in srgb, var(--warn) 16%, transparent);
   color: var(--warn-ink);
@@ -5405,6 +5412,7 @@ button.todo-tag[aria-pressed="true"] {
 
 /* A panel opened from a chip, laid over the app. It is placed by its opener, under its chip. */
 .chip-popover {
+  box-sizing: border-box;
   position: fixed;
   z-index: 40;
   top: 0;
@@ -5421,33 +5429,69 @@ button.todo-tag[aria-pressed="true"] {
   font-size: 13px;
 }
 
-/* The editor of how a todo recurs: a short list of picks, then a rule built as a sentence. */
-.rule-editor {
+/*
+ * A recurrence chip's popover, flat: the rule in words, the common rules and Skip and Stop on the left, the form
+ * that builds any rule on the right. A window too narrow for both side by side has the form under them.
+ */
+.chip-popover:has(> .recur-menu) {
+  max-width: calc(100vw - 16px);
+}
+
+.chip-menu.recur-menu {
+  display: grid;
+  grid-template-columns: 210px 300px;
+  align-items: start;
+  width: auto;
+}
+
+.recur-picks {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: 244px;
-  max-width: 100%;
+  min-width: 0;
 }
 
-.rule-editor[data-stage="sentence"] {
-  width: 324px;
-}
-
-.rule-editor p {
-  margin: 0;
-}
-
-.rule-editor hr {
+.recur-picks hr {
   width: 100%;
-  margin: 0;
+  margin: 4px 0;
   border: 0;
   border-top: 1px solid var(--line);
 }
 
-.rule-now {
-  padding: 2px 8px 0;
+.recur-now {
+  margin: 0;
+  padding: 2px 8px 6px;
   font-weight: 600;
+}
+
+.recur-menu > .rule-editor {
+  margin-left: 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid var(--line);
+}
+
+@media (max-width: 560px) {
+  .chip-menu.recur-menu {
+    grid-template-columns: minmax(0, 300px);
+  }
+
+  .recur-menu > .rule-editor {
+    margin: 4px 0 0;
+    padding: 10px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+
+/* The form that builds any rule as a sentence. */
+.rule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rule-editor p {
+  margin: 0;
 }
 
 .rule-editor button,
@@ -5483,25 +5527,6 @@ button.todo-tag[aria-pressed="true"] {
 .rule-editor select:disabled {
   color: var(--faint);
   cursor: default;
-}
-
-.rule-picks {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.rule-editor .rule-picks button {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  border-color: transparent;
-  text-align: left;
-}
-
-.rule-picks button > span {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .rule-row {

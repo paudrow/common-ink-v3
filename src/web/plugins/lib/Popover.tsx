@@ -52,13 +52,19 @@ function Panel({ anchor, label, close, children }: { anchor: HTMLElement; label:
     const place = () => {
       if (!anchor.isConnected) return close();
       const at = anchor.getBoundingClientRect();
-      const { width, height } = el.getBoundingClientRect();
+      const width = el.getBoundingClientRect().width;
+      // Its whole height, however much of it is shown now.
+      const height = el.scrollHeight;
       const below = at.bottom + GAP;
-      // Above its anchor where there is no room below and there is above; where there is room on neither side, as low as it fits.
-      const roomBelow = below + height <= innerHeight - EDGE;
-      const top = roomBelow ? below : at.top - GAP - height >= EDGE ? at.top - GAP - height : Math.min(below, innerHeight - EDGE - height);
+      const roomBelow = innerHeight - EDGE - below;
+      const roomAbove = at.top - GAP - EDGE;
+      // Under its anchor, or above it where there is no room under it. Where it fits on neither side it is on the side with
+      // more room, as tall as that room, and scrolls: never over its anchor, so the thing it is for stays in sight.
+      const under = height <= roomBelow || (height > roomAbove && roomBelow >= roomAbove);
+      const room = under ? roomBelow : roomAbove;
+      el.style.maxHeight = height > room ? `${Math.max(room, 0)}px` : "";
       el.style.left = `${Math.max(EDGE, Math.min(at.left, innerWidth - EDGE - width))}px`;
-      el.style.top = `${Math.max(EDGE, top)}px`;
+      el.style.top = `${under ? below : Math.max(EDGE, at.top - GAP - Math.min(height, room))}px`;
     };
     place();
     (el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>("button:enabled, input:enabled, select:enabled"))?.focus();

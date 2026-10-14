@@ -6,9 +6,8 @@ import { ChipMenu } from "./ChipMenu.tsx";
 import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
 import { DUE_FILTERS, dayOf, dueLabel, dueRange, dueState, type DueFilter } from "./dates.ts";
-import { IMPORTANCE, pickerLabel, picking, type ChipKind, type PickingEvent } from "./picking.ts";
+import { CHIP_NAMES, IMPORTANCE, pickerLabel, picking, type ChipKind, type Opened, type PickingEvent } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
-import { RuleEditor } from "./RuleEditor.tsx";
 
 /** What the list is narrowed to. Kept in this browser, so the page opens the way it was left. */
 interface Filters {
@@ -123,7 +122,7 @@ interface RowProps {
   tag: string;
   app: App;
   /** Which of its chips has its popover open, if one does. */
-  picked: ChipKind | null;
+  picked: Opened | null;
   /** Whether its completion is on its way to the server. */
   completing: boolean;
   onChange: (todo: ListedTodo, change: TodoChange) => void;
@@ -159,38 +158,49 @@ function Row({ todo, now, tag, app, picked, completing, onChange, onOpen, comple
   // Listed under a tag its own line doesn't write: the tag is its note's, which is said beside the note's name.
   const ofNote = tag && !tagsOn(todo.text).some((own) => nameKey(own.name) === nameKey(tag)) ? (todo.tags.find((name) => nameKey(name) === nameKey(tag)) ?? null) : null;
 
-  /** Opens a chip's popover under `anchor`: the chip, or the "…" button for what has no chip yet. */
-  const pick = (chip: ChipKind, anchor: HTMLElement) => {
+  /** Opens a popover under `anchor` for one of the card's chips, with the card marked while it is open. */
+  const show = (chip: Opened, anchor: HTMLElement, label: string, content: (close: () => void) => ReactNode) => {
     onPicking({ type: "open", row, chip });
     openedOn.current = todo.text;
-    openPopover(
-      anchor,
-      pickerLabel(chip, words),
-      (close) => (
-        <ChipMenu
-          chip={chip}
-          todo={todo}
-          now={now}
-          onPick={(to) => {
-            close();
-            if (latest.current.text !== todo.text) return;
-            // A chip the pick takes away can't have the keyboard back: the card's "…" has it.
-            if (document.activeElement === anchor && (to.due === null || to.importance === 0)) more.current?.focus();
-            onChange(latest.current, to);
-          }}
-        />
-      ),
-      () => onPicking({ type: "closed", row, chip }),
-    );
+    openPopover(anchor, label, content, () => onPicking({ type: "closed", row, chip }));
   };
+  /** Opens a chip's popover under `anchor`: the chip, or the "…" button for what has no chip yet. */
+  const pick = (chip: ChipKind, anchor: HTMLElement) =>
+    show(chip, anchor, pickerLabel(chip, words), (close) => (
+      <ChipMenu
+        chip={chip}
+        todo={todo}
+        now={now}
+        onPick={(to) => {
+          close();
+          if (latest.current.text !== todo.text) return;
+          // A chip the pick takes away can't have the keyboard back: the card's "…" has it.
+          if (document.activeElement === anchor && (to.due === null || to.importance === 0 || to.every === null)) more.current?.focus();
+          onChange(latest.current, to);
+        }}
+      />
+    ));
   const chipProps = (chip: ChipKind, said: string) => ({
     type: "button" as const,
-    "aria-label": `${chip === "due" ? "Due date" : "Importance"}: ${said}`,
+    "aria-label": `${CHIP_NAMES[chip]}: ${said}`,
     "aria-haspopup": "dialog" as const,
     "aria-expanded": picked === chip,
     disabled: readOnly,
     onClick: (e: { currentTarget: HTMLElement }) => pick(chip, e.currentTarget),
   });
+  // Listing them changes nothing, so someone who can only read may look.
+  const listDone = (anchor: HTMLElement) =>
+    show("done", anchor, "Completions", (close) => (
+      <Completions
+        ask={() => completions(latest.current)}
+        done={todo.lastDone!}
+        now={now}
+        onOpen={(noteId) => {
+          close();
+          app.openNote(noteId);
+        }}
+      />
+    ));
 
   const underMore = () => {
     const box = more.current!.getBoundingClientRect();
@@ -200,33 +210,6 @@ function Row({ todo, now, tag, app, picked, completing, onChange, onOpen, comple
     setMenu(null);
     more.current?.focus();
   }, []);
-  /** Opens a panel under the "…" button, in place of any that is open. */
-  const panel = (label: string, content: (close: () => void) => ReactNode) => {
-    closePopover();
-    openPopover(more.current!, label, content);
-  };
-  const setEvery = () =>
-    panel("Recurrence", (close) => {
-      const set = (change: TodoChange) => {
-        close();
-        onChange(latest.current, change);
-      };
-      return <RuleEditor every={todo.every} due={todo.due} now={now} onSet={(every) => set({ every })} onSkip={() => set({ skip: true })} />;
-    });
-  const listDone = () => {
-    const ask = () => completions(latest.current);
-    panel("Completions", (close) => (
-      <Completions
-        ask={ask}
-        done={todo.lastDone!}
-        now={now}
-        onOpen={(noteId) => {
-          close();
-          app.openNote(noteId);
-        }}
-      />
-    ));
-  };
   const { openBeside } = app;
   const items: MenuItem[] = [
     { label: "Open the note", action: () => onOpen(todo) },
@@ -236,10 +219,8 @@ function Row({ todo, now, tag, app, picked, completing, onChange, onOpen, comple
       : [
           ...(todo.importance ? [] : [{ label: "Importance…", action: () => pick("importance", more.current!) }]),
           ...(todo.due ? [] : [{ label: "Due date…", action: () => pick("due", more.current!) }]),
-          { label: "Recurrence…", action: setEvery },
+          ...(todo.every ? [] : [{ label: "Recurrence…", action: () => pick("every", more.current!) }]),
         ]),
-    // Listing them changes nothing, so someone who can only read may look.
-    ...(todo.lastDone ? [{ label: "Completions", action: listDone }] : []),
   ];
   const due = todo.due && dueLabel(todo.due, now);
 
@@ -285,14 +266,15 @@ function Row({ todo, now, tag, app, picked, completing, onChange, onOpen, comple
           </button>
         )}
         {todo.every && (
-          <span className="todo-chip todo-every" title={everyName(todo.every)}>
+          <button className="todo-chip todo-every" title={everyName(todo.every)} {...chipProps("every", todo.recurs ?? todo.every)}>
+            <Icon name="repeat" />
             {todo.recurs ?? todo.every}
-          </span>
+          </button>
         )}
         {todo.lastDone && (
-          <span className="todo-chip todo-done" title={doneName(todo.lastDone, now)}>
+          <button type="button" className="todo-chip todo-done" aria-label={doneName(todo.lastDone, now)} aria-haspopup="dialog" aria-expanded={picked === "done"} onClick={(e) => listDone(e.currentTarget)}>
             {doneLabel(todo.lastDone, now)}
-          </span>
+          </button>
         )}
         {trailing.map((name, i) => (
           <button key={`${i} ${name}`} type="button" className="todo-chip todo-tag" aria-pressed={!!tag && nameKey(tag) === nameKey(name)} title={`Todos tagged #${name}`} onClick={() => onTag(name)}>

@@ -854,12 +854,14 @@ test("each chip opens its own popover directly under it and inside the window, o
   const placed = await hangsUnder(page, low);
   expect(placed.inside).toBe(true);
   await page.keyboard.press("Escape");
-  // Where it fits neither below nor above, it is as low as it fits, and still wholly inside.
+  // Where it fits neither below nor above, it is on the side with more room, wholly inside, and never over its chip.
   await page.setViewportSize({ width: 700, height: 300 });
   const tight = chipOf(page, "Call the bank", "Due date");
   await tight.scrollIntoViewIfNeeded();
   await tight.click();
   expect((await hangsUnder(page, tight)).inside).toBe(true);
+  const [chipBox, panelBox] = [(await tight.boundingBox())!, (await popover(page).boundingBox())!];
+  expect(panelBox.y >= chipBox.y + chipBox.height || panelBox.y + panelBox.height <= chipBox.y, "the popover is not over its chip").toBe(true);
   await page.keyboard.press("Escape");
   await expect.poll(lineIn).toBe("- [ ] !! Call the bank due:2026-10-14 +Home");
 });
