@@ -1,24 +1,66 @@
-import { expect, type Page } from "@playwright/test";
-import type { Me, OpInput, Results } from "../../src/core/protocol.ts";
+import { expect, test, type Page } from "@playwright/test";
+import type { Me, OpInput, Results, Role } from "../../src/core/protocol.ts";
 
-export async function signInAsNewPerson(page: Page, name: string) {
-  const email = `browser-${crypto.randomUUID()}@example.com`;
-  await page.goto(`/auth/dev?${new URLSearchParams({ email, name })}`);
+/** Signs in without Google, which only this machine and Previews allow (`devSignIn` in src/worker/auth.ts). `next` is where the app opens. */
+export async function signInAs(page: Page, email: string, name: string, next = "/") {
+  await page.goto(`/auth/dev?${new URLSearchParams({ email, name, next })}`);
 }
 
-/** Performs `op` in the signed-in person's first workspace, the way another tab or agent would. */
-export function perform<T extends OpInput>(page: Page, op: T): Promise<Results[T["type"]]> {
-  return page.evaluate(async (body) => {
-    const me = (await (await fetch("/api/me")).json()) as Me;
-    const res = await fetch(`/api/workspaces/${me.workspaces[0]!.id}/ops`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.message);
-    return json;
-  }, op as OpInput) as Promise<Results[T["type"]]>;
+export const newEmail = () => `browser-${crypto.randomUUID()}@example.com`;
+
+export async function signInAsNewPerson(page: Page, name: string) {
+  await signInAs(page, newEmail(), name);
+}
+
+export const me = (page: Page) => page.evaluate(async () => (await (await fetch("/api/me")).json()) as Me);
+
+/** Performs `op` as the signed-in person, the way another tab or agent would, in their first workspace unless one is named. */
+export function perform<T extends OpInput>(page: Page, op: T, workspaceId?: string): Promise<Results[T["type"]]> {
+  return page.evaluate(
+    async ({ body, workspaceId }) => {
+      const id = workspaceId ?? ((await (await fetch("/api/me")).json()) as Me).workspaces[0]!.id;
+      const res = await fetch(`/api/workspaces/${id}/ops`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message);
+      return json;
+    },
+    { body: op as OpInput, workspaceId },
+  ) as Promise<Results[T["type"]]>;
+}
+
+/** A new person signed in in a browser of their own, beside whoever `page` is. */
+export async function anotherPerson(page: Page, name: string): Promise<Page> {
+  const context = await page.context().browser()!.newContext({ baseURL: test.info().project.use.baseURL });
+  const theirs = await context.newPage();
+  await signInAsNewPerson(theirs, name);
+  return theirs;
+}
+
+/**
+ * Makes the person signed in on `page` a member of `admin`'s first workspace with `role`, the way
+ * anyone becomes one: the admin invites their email, and they open Common Ink.
+ */
+export async function join(page: Page, admin: Page, role: Role): Promise<{ workspaceId: string; inviteId: string }> {
+  const workspaceId = (await me(admin)).workspaces[0]!.id;
+  const { invite } = await perform(admin, { type: "member.invite", email: (await me(page)).person.email, as: role });
+  await me(page);
+  return { workspaceId, inviteId: invite!.id };
+}
+
+/**
+ * Signs `page` in as a new person who is a viewer of another new person's workspace, with a note there
+ * that its admin wrote. `admin` is that person, in a browser of their own.
+ */
+export async function asViewerOfNote(page: Page, text: string, name = "Vera Viewer") {
+  await signInAsNewPerson(page, name);
+  const admin = await anotherPerson(page, "Ada Lovelace");
+  const { workspaceId } = await join(page, admin, "viewer");
+  const note = await perform(admin, { type: "note.create", text });
+  return { note, admin, workspaceId };
 }
 
 export const noteIdIn = (page: Page) => /([a-z0-9]{12})$/.exec(new URL(page.url()).pathname)![1]!;

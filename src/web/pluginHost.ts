@@ -53,7 +53,7 @@ export interface MemberSettings {
 }
 
 /** What the app gives each plugin beyond registering: its reach into the workspace, bound to that plugin. */
-export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "storage">;
+export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "storage">;
 
 export interface HostOptions {
   /**
@@ -117,6 +117,13 @@ const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "ba
 const RESERVED = ["plugins.", "go.", "settings.", "inspector."];
 
 const inOrder = <T>(owned: Iterable<Owned<T>>) => [...owned].sort((a, b) => a.plugin - b.plugin || a.seq - b.seq).map((o) => o.value);
+
+/** Why `host.perform` won't take an operation, or null when it will. The type `KeptFromPerform` says the same to a plugin written in TypeScript. */
+function keptFromPerform(type: string): string | null {
+  if (type.startsWith("settings.")) return "a plugin can't read or change the member's settings";
+  if (type.startsWith("invite.") || (type.startsWith("member.") && type !== "member.list")) return "who is in a workspace is changed through host.members, by a plugin that is given it";
+  return null;
+}
 
 export function createPluginHost({ plugins: given, required = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
   const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
@@ -187,11 +194,13 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
     return {
       plugin: { id: plugin.id, name: plugin.name },
       ...provided,
-      // Settings are the member's. This is the one way a plugin reaches the server, so it is where a plugin is refused.
+      // This is the one way a plugin performs an operation of its own choosing, so it is where a plugin is refused.
       // What is sent is a copy taken once, so the type that was looked at is the type that goes.
-      perform: (op) => {
+      perform(op) {
         const sent = { ...(op as OpInput) };
-        return typeof sent.type !== "string" || sent.type.startsWith("settings.") ? Promise.reject(new Error(`${plugin.name} can't ${String(sent.type)}: a plugin can't read or change the member's settings`)) : provided.perform(sent as typeof op);
+        const type: unknown = sent.type;
+        const why = typeof type === "string" ? keptFromPerform(type) : "a plugin can't read or change the member's settings";
+        return why ? Promise.reject(new Error(`${plugin.name} can't ${String(type)}: ${why}`)) : provided.perform(sent as typeof op);
       },
       settings: {
         get<T extends SettingValue>(name: string) {

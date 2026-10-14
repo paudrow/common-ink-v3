@@ -130,9 +130,13 @@ interface Props {
   place: Place;
   navigate: Navigate;
   onSwitch: (workspaceId: string) => void;
+  /** Told of each note this workspace has, so its address is known to lead here. */
+  noteIsHere: (noteId: string, workspaceId: string) => void;
+  /** Reads again which workspaces the person is in, and their role in each. */
+  reloadWorkspaces: () => Promise<void>;
 }
 
-export function Workspace({ me, workspace, settings, place, navigate, onSwitch }: Props) {
+export function Workspace({ me, workspace, settings, place, navigate, onSwitch, noteIsHere, reloadWorkspaces }: Props) {
   const { route } = place;
   const workspaceId = workspace.id;
   const canEdit = workspace.role !== "viewer";
@@ -228,9 +232,18 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
         // Made for the one plugin that asked, so this is where its permissions will be checked. The server records the member as the author.
         perform: (op) => performInSync(workspaceId, op),
         agents: { list: listAgents, connect: connectAgent, edit: editAgent, disconnect: (id) => disconnectAgent(id).then(() => {}) },
+        members: {
+          invite: (email, as) => perform(workspaceId, { type: "member.invite", email, as }),
+          setRole: (memberId, as) => perform(workspaceId, { type: "member.setRole", memberId, as }),
+          remove: (memberId) => perform(workspaceId, { type: "member.remove", memberId }).then(() => {}),
+          leave: () => perform(workspaceId, { type: "member.leave" }).then(() => {}),
+          invites: () => perform(workspaceId, { type: "invite.list" }),
+          revoke: (inviteId) => perform(workspaceId, { type: "invite.revoke", id: inviteId }).then(() => {}),
+        },
         storage: {
-          get: (key) => readStored(`ink.plugin.${plugin.id}.${workspaceId}.${key}`, isAnything),
-          set: (key, value) => writeStored(`ink.plugin.${plugin.id}.${workspaceId}.${key}`, value),
+          // By member too: two people who share a browser and a workspace don't share what a plugin keeps, such as which notes are open.
+          get: (key) => readStored(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`, isAnything),
+          set: (key, value) => writeStored(`ink.plugin.${plugin.id}.${workspaceId}.${me.person.id}.${key}`, value),
         },
       }),
     });
@@ -335,14 +348,20 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     };
   }, [workspaceId]);
 
+  useEffect(() => {
+    for (const note of notes ?? []) noteIsHere(note.id, workspaceId);
+  }, [notes, noteIsHere, workspaceId]);
+
   const remember = useCallback(
     (note: Note) => {
       const summary = summaryOf(note);
+      // Before the app goes to a note it has just made, so it doesn't stop to ask where the note is.
+      noteIsHere(note.id, workspaceId);
       learned.current.set(note.id, summary);
       setNotes((all) => all && [summary, ...all.filter((n) => n.id !== note.id)]);
       if (location.pathname.startsWith("/note/") && location.pathname.endsWith(note.id)) navigate(notePath(note), { replace: true });
     },
-    [navigate],
+    [navigate, noteIsHere, workspaceId],
   );
 
   const byIdNow = useRef(byId);
@@ -612,6 +631,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     inspect: (_: Showing | null) => {},
     setFocus: setFocusMode,
     switchWorkspace: onSwitch,
+    reloadWorkspaces: () => void reloadWorkspaces(),
     signOut: () => void signOut().then(() => location.assign("/")),
   });
   const app: App = {

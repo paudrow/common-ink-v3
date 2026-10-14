@@ -1,4 +1,4 @@
-import type { Agent, AgentEdit, ConnectOptions, MeHere, OpErrorCode, OpInput, Results } from "../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -45,14 +45,42 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getMe = () => request<MeHere>("/api/me");
 
+const refused = new Set<() => void>();
+
+/**
+ * Calls `listener` when an operation is refused for who the member is: their role doesn't allow it,
+ * or they aren't in the workspace. Either may be news, such as a role an admin changed a moment ago.
+ */
+export function onRefused(listener: () => void): () => void {
+  refused.add(listener);
+  return () => void refused.delete(listener);
+}
+
+/** The workspace at the end of an address, among the member's own. Null when there is nothing there for them. */
+const where = (path: string) =>
+  request<{ workspaceId: string }>(path).then(
+    (found) => found.workspaceId,
+    (err) => {
+      if (err instanceof ApiError && err.code === "not_found") return null;
+      throw err;
+    },
+  );
+
+export const workspaceOfNote = (noteId: string) => where(`/api/notes/${noteId}`);
+export const workspaceOfInvite = (inviteId: string) => where(`/api/invites/${inviteId}`);
+
 export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<Results[T["type"]]> {
   const body = JSON.stringify(op);
-  return request(`/api/workspaces/${workspaceId}/ops`, {
+  const answer = request<Results[T["type"]]>(`/api/workspaces/${workspaceId}/ops`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
     keepalive: new TextEncoder().encode(body).byteLength < KEEPALIVE_BYTES,
   });
+  answer.catch((err) => {
+    if (err instanceof ApiError && (err.code === "forbidden" || err.message === NO_SUCH_WORKSPACE)) for (const listener of [...refused]) listener();
+  });
+  return answer;
 }
 
 export const listAgents = () => request<{ agents: Agent[] }>("/api/agents").then((r) => r.agents);

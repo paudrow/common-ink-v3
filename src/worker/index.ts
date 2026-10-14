@@ -1,4 +1,4 @@
-import { whoAmI } from "../core/accounts.ts";
+import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
 import { perform } from "../core/operations.ts";
 import { BROKE, OpError, type MeHere, type OpErrorCode } from "../core/protocol.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
@@ -17,7 +17,19 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   const personId = await sessionPersonId(req, env, url);
   if (!personId) return json({ error: "signed_out" }, 401);
 
-  if (url.pathname === "/api/me" && req.method === "GET") return json({ ...(await whoAmI(env.DB, personId)), setup: { embedSite: embedOrigin(env) !== null } } satisfies MeHere);
+  if (url.pathname === "/api/me" && req.method === "GET") {
+    // Opening the app is arriving: an invite made since the person signed in takes effect here.
+    await arrive(env.DB, personId);
+    return json({ ...(await whoAmI(env.DB, personId)), setup: { embedSite: embedOrigin(env) !== null } } satisfies MeHere);
+  }
+
+  // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
+  const lookup = /^\/api\/(notes|invites)\/([a-z0-9]{12})$/.exec(url.pathname);
+  if (lookup && req.method === "GET") {
+    if (lookup[1] === "invites") await arrive(env.DB, personId);
+    const workspaceId = await (lookup[1] === "notes" ? workspaceOfNote : workspaceOfInvite)(env.DB, personId, lookup[2]!);
+    return workspaceId ? json({ workspaceId }) : json({ error: "not_found" }, 404);
+  }
 
   const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})\/ops$/.exec(url.pathname);
   if (opsRoute && req.method === "POST") {

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Note } from "../../src/core/protocol.ts";
-import { agentWith, connectAgent, perform, signInAsNewPerson } from "./helpers.ts";
+import { agentWith, anotherPerson, connectAgent, join, perform, signInAsNewPerson } from "./helpers.ts";
 
 const agentsView = (page: Page) => page.getByRole("region", { name: "Agents" });
 const connected = (page: Page) => page.getByRole("list", { name: "Connected agents" }).getByRole("listitem");
@@ -409,11 +409,7 @@ test("reverting an agent takes back out the notes it made, which are left empty"
 
 test("reverting an agent that reaches every workspace says the member's other workspaces aren't covered", async ({ page }) => {
   await notesClaudeEdited(page);
-  await page.route("**/api/me", async (route) => {
-    const res = await route.fetch();
-    const me = await res.json();
-    await route.fulfill({ response: res, json: { ...me, workspaces: [...me.workspaces, { id: "aaaaaaaaaaaa", name: "Team", role: "editor" }] } });
-  });
+  await join(page, await anotherPerson(page, "Grace Hopper"), "editor");
   await page.goto("/agents");
 
   await revertClaude(page).click();

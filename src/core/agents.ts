@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { newId } from "./ids.ts";
-import { AgentEdit, ConnectOptions, MAX_AGENT_NAME, OpError, type Agent, type ExpiresIn } from "./protocol.ts";
+import { NO_SUCH_WORKSPACE, AgentEdit, ConnectOptions, MAX_AGENT_NAME, OpError, type Agent, type ExpiresIn } from "./protocol.ts";
 
 export const TOKEN_PREFIX = "cink_";
 export const MAX_ACTIVE_AGENTS = 20;
@@ -62,7 +62,7 @@ async function roomForOneMore(db: D1Database, personId: string, now: number) {
 
 async function ownWorkspace(db: D1Database, personId: string, workspaceId: string) {
   const member = await db.prepare("SELECT 1 FROM members WHERE workspace_id = ? AND person_id = ?").bind(workspaceId, personId).first();
-  if (!member) throw new OpError("not_found", "No such workspace");
+  if (!member) throw new OpError("not_found", NO_SUCH_WORKSPACE);
 }
 
 /** Connects an agent for `personId`. The returned token is the only time it can be seen. */

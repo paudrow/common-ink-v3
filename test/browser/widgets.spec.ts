@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { asViewerOfNote, perform, signInAsNewPerson } from "./helpers.ts";
 import { openPlugins } from "./plugins-helpers.ts";
 
 let errors: string[];
@@ -562,20 +562,13 @@ test("an embed's name typed after / without a pause and then Enter writes the em
 });
 
 test("a member who can't change the note sees its embeds without their controls, and nothing they do in the editor changes it", async ({ page }) => {
-  // There is no way to be made a viewer of a workspace before #14, so the app is told this member is one. The server would refuse a viewer's write; what is checked here is that the app sends none.
-  await page.route("**/api/me", async (route) => {
-    const response = await route.fetch();
-    const me = await response.json();
-    await route.fulfill({ response, json: { ...me, workspaces: me.workspaces.map((w: object) => ({ ...w, role: "viewer" })) } });
-  });
   const writes: string[] = [];
   page.on("request", (request) => request.url().endsWith("/ops") && /"note\.(write|undo|redo)"/.test(request.postData() ?? "") && writes.push(request.postData()!));
   const written = `# Plan\n\nSteep ::timer{5m} and ::stopwatch{at=5s} and ::timer{9m since=${new Date().toISOString()}}\n\n:::kanban{}\n## To do\n- write\n\n## Done\n:::\n\nwords`;
-  await signInAsNewPerson(page, "Vera Viewer");
-  const note = await perform(page, { type: "note.create", text: written });
+  const { note, admin } = await asViewerOfNote(page, written);
   await page.goto(`/note/${note.id}`);
 
-  await expect(page.getByRole("button", { name: "Vera's workspace Viewer" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ada's workspace Viewer" })).toBeVisible();
   await expect(column(page, "Done")).toBeVisible();
   await expect.poll(() => board(page)).toEqual({ "To do": ["write"], Done: [] });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
@@ -602,11 +595,11 @@ test("a member who can't change the note sees its embeds without their controls,
   await settled(page);
   expect(writes).toEqual([]);
 
-  // What someone else writes still reaches the editor. That write, made here, is the only one the page sent.
-  await perform(page, { type: "note.write", id: note.id, baseRevision: 1, text: written.replace("words", "words from an editor") });
+  // What someone else writes still reaches the editor, and the viewer's page has still sent no write.
+  await perform(admin, { type: "note.write", id: note.id, baseRevision: 1, text: written.replace("words", "words from an editor") });
   await expect(lines(page).last()).toHaveText("words from an editor", { timeout: 20_000 });
-  expect(writes).toHaveLength(1);
-  await expect.poll(() => authors(page, note.id)).toHaveLength(2);
+  expect(writes).toEqual([]);
+  await expect.poll(() => authors(admin, note.id)).toEqual(["member Ada Lovelace", "member Ada Lovelace"]);
 });
 
 test("completions whose triggers both fit share one list, in the order of their plugins", async ({ page }) => {

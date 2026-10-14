@@ -106,6 +106,7 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
     } catch (err) {
       return page("Sign-in didn't finish", `<p>${escape((err as Error).message)}. <a href="/auth/google">Try again</a>.</p>`, 400);
     }
+    // The list says who may use this Common Ink at all. An invite says which workspace, and lets nobody past the list.
     if (!allowedEmails(env.ALLOWED_EMAILS).has(granted.email)) {
       return page("Not on the list", `<p>${escape(granted.email)} can't use this Common Ink yet. <a href="/auth/google">Use another account</a>.</p>`, 403);
     }

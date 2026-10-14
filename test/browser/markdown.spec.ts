@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { asViewerOfNote, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -1029,19 +1029,13 @@ test("each side of a split draws its own note, a fold and a table edit stay with
 });
 
 test("a member who can't change the note sees it drawn, and no checkbox, cell, or bullet key changes it", async ({ page }) => {
-  // There is no way to be made a viewer of a workspace before #14, so the app is told this member is one, as the embeds' own test does.
-  await page.route("**/api/me", async (route) => {
-    const response = await route.fetch();
-    const me = await response.json();
-    await route.fulfill({ response, json: { ...me, workspaces: me.workspaces.map((w: object) => ({ ...w, role: "viewer" })) } });
-  });
   const writes: string[] = [];
   page.on("request", (request) => request.url().endsWith("/ops") && /"note\.(write|undo|redo)"/.test(request.postData() ?? "") && writes.push(request.postData()!));
   const written = "# Plan\n\n- [ ] sweep\n  - under\n- mop\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nSo $x^2$.\n\n```js\nlet a;\n```\n";
-  await signInAsNewPerson(page, "Vera Viewer");
-  const note = await perform(page, { type: "note.create", text: written });
+  const { note, admin } = await asViewerOfNote(page, written);
   await page.goto(`/note/${note.id}`);
 
+  await expect(page.getByRole("button", { name: "Ada's workspace Viewer" })).toBeVisible();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   // It takes the keyboard, for the keys that change nothing in it: folding a bullet.
   await expect(editor(page)).toHaveAttribute("tabindex", "0");
@@ -1065,5 +1059,5 @@ test("a member who can't change the note sees it drawn, and no checkbox, cell, o
   await expect(cell(page, 1, 0)).toHaveText("1");
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(writes).toEqual([]);
-  await expect.poll(() => read(page, note.id)).toBe(written);
+  await expect.poll(() => read(admin, note.id)).toBe(written);
 });

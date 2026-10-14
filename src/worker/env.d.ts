@@ -1,7 +1,7 @@
 interface InkSettings {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  /** Emails allowed to sign in with Google, separated by commas or spaces. */
+  /** Emails allowed to sign in with Google, separated by commas or spaces. An invite to a workspace doesn't add to them. */
   ALLOWED_EMAILS?: string;
   /** "1" on this machine and in Previews: /auth/dev signs in without Google. */
   DEV_SIGN_IN?: string;
