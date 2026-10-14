@@ -5274,7 +5274,8 @@ button.diff-fold:hover {
   max-width: calc(660px + 4rem);
   height: 100%;
   margin: 0 auto;
-  padding: 2rem 2rem 3rem;
+  /* Less room at the sides in a narrow column, which is the todos' room. */
+  padding: 2rem clamp(12px, 5%, 2rem) 3rem;
   overflow-y: auto;
 }
 
@@ -5296,9 +5297,11 @@ button.diff-fold:hover {
   display: flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
 }
 
 .todo-filters select {
+  min-width: 0;
   max-width: 12rem;
   padding: 2px 6px;
   border: 1px solid var(--line-strong);
@@ -5310,11 +5313,12 @@ button.diff-fold:hover {
 
 /* The list of todos, as v1's: one panel, a todo to a row. */
 .todo-list {
+  container: todos / inline-size;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 1px;
   margin: 0;
-  padding: 8px 14px 10px;
+  padding: 8px clamp(6px, 2.5%, 14px) 10px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--bg-elev);
@@ -5325,6 +5329,7 @@ button.diff-fold:hover {
 /* A todo's row: its checkbox, its words and its chips, which wrap as one run of text, and its note's name at the right. */
 .todo-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 10px;
   margin: 0 -6px;
@@ -5377,8 +5382,9 @@ button.diff-fold:hover {
   opacity: 0.7;
 }
 
+/* Its words take the room before anything else: where a row is too narrow for them beside its note's name and buttons, those go under them. */
 .todo-text {
-  flex: 1;
+  flex: 1 1 min(10em, calc(100% - 1.02em - 10px));
   min-width: 0;
   color: var(--ink);
   overflow-wrap: anywhere;
@@ -5406,6 +5412,10 @@ button.diff-fold:hover {
 
 .todo-words .todo-tag {
   color: var(--muted);
+}
+
+.todo-words .todo-link {
+  color: var(--accent-ink);
 }
 
 /* The words being edited, in place: a one-line field as wide as v1's, as tall as it was, laid over the row's padding so nothing moves. */
@@ -5524,13 +5534,36 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 /* Where a todo is: its note's name, quiet, at the row's right end, and the way to the note. */
+/* Its note's name and its buttons, at the row's right end, or under its words as one where the row is narrow: the name, at most 38% of
+   the row as v1's, gives way to the buttons. */
+.todo-end {
+  display: flex;
+  flex: 0 1 auto;
+  align-self: center;
+  align-items: center;
+  gap: 4px 10px;
+  max-width: calc(38% + 102px);
+  min-width: 0;
+  margin-left: auto;
+}
+
 .todo-where {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   align-items: baseline;
   gap: 4px;
-  max-width: 38%;
   min-width: 0;
+}
+
+/* In a list too narrow for a row's words beside its end, the end is a line of its own under them, and the note's name is not
+   squeezed: where it doesn't fit beside the buttons, they go under it. */
+@container todos (max-width: 360px) {
+  .todo-end {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: none;
+  }
 }
 
 .todo-note {
@@ -5614,6 +5647,21 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--muted);
 }
 
+/* What a field is set to, or Add, at the right of its line in a row's fields, as v1's. */
+.chip-value {
+  overflow: hidden;
+  max-width: 55%;
+  margin-left: auto;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-value[data-unset] {
+  color: var(--muted);
+}
+
 .chip-now {
   margin-left: auto;
   color: var(--muted);
@@ -5641,20 +5689,48 @@ button.todo-tag[aria-pressed="true"] {
   font-size: 14px;
 }
 
-/* The one way to everything else a todo can do: out of sight until its row is pointed at or has the keyboard, and still reached with Tab. */
-.todo-more {
+/* v1's three buttons at a row's end: its fields, go to the note, open it in a split. Out of sight until the row is pointed at or has
+   the keyboard, keeping their room while hidden so nothing moves, and still reached with Tab. */
+.todo-acts {
+  display: flex;
   flex: none;
-  align-self: center;
-  width: 24px;
-  height: 24px;
-  margin: 0 -4px 0 0;
-  opacity: 0;
+  gap: 10px;
 }
 
-.todo-row:hover .todo-more,
-.todo-row:focus-within .todo-more,
-.todo-more[aria-expanded="true"] {
+.todo-act {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.todo-act svg {
+  width: 13px;
+  height: 13px;
+}
+
+.todo-row:hover .todo-act,
+.todo-row:focus-within .todo-act,
+.todo-act[aria-expanded="true"] {
   opacity: 1;
+}
+
+.todo-act:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.todo-act:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .todo-none {

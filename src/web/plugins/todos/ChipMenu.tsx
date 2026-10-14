@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { Icon, describeRule, nameKey, parseRule, type IconName, type TodoChange } from "../../plugin-api.ts";
-import { choicesFor, typedTag, type ChipKind, type Choice, type Picked } from "./picking.ts";
+import { choicesFor, typedTag, type ChipKind, type Choice, type Field, type Picked, type RowChip } from "./picking.ts";
 import { RuleEditor } from "./RuleEditor.tsx";
 
 interface Props {
@@ -165,6 +165,28 @@ export function TagMenu({ tags, has, onPick }: TagProps) {
           <span>Add #{name}</span>
         </button>
       )}
+    </div>
+  );
+}
+
+const FIELD_ICONS: Record<ChipKind, IconName> = { importance: "flag", due: "calendar", every: "repeat" };
+
+/**
+ * What a row's fields button opens, as v1's did: each thing a todo can have, with what it is set to or
+ * Add, each opening that chip's own popover in its place.
+ */
+export function FieldsMenu({ fields, onPick }: { fields: readonly Field[]; onPick: (chip: RowChip) => void }) {
+  return (
+    <div className="chip-menu" onKeyDown={move}>
+      {fields.map(({ chip, name, value }, i) => (
+        <button key={chip} type="button" className="chip-choice" aria-label={`${name}: ${value ?? "none"}`} data-choice data-autofocus={i === 0 || undefined} onClick={() => onPick(chip)}>
+          {chip === "tag" ? <span className="chip-hash" aria-hidden="true" /> : <Icon name={FIELD_ICONS[chip]} />}
+          <span>{name}</span>
+          <span className="chip-value" data-unset={value === null || undefined}>
+            {value ?? "Add"}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }

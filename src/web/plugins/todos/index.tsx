@@ -42,9 +42,12 @@ export const todos: Plugin = {
       view.dispatch({ selection: { anchor: to }, effects: EditorView.scrollIntoView(from, { y: "center" }) });
     };
 
-    const open = (todo: ListedTodo) => {
+    /** Opens a todo's note with the cursor on its line: in front, or in a split beside it, whose editor arrives there once it is made. */
+    const open = (todo: ListedTodo, beside?: boolean) => {
       going = { noteId: todo.noteId, line: todo.line, text: todo.text };
-      host.app().openNote(todo.noteId, { focus: true });
+      const app = host.app();
+      if (beside && app.openBeside) return app.openBeside({ kind: "note", id: todo.noteId }, "right");
+      app.openNote(todo.noteId, { focus: true });
       const view = editors.get(todo.noteId);
       if (view) arrive(view);
     };

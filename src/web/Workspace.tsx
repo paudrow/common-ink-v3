@@ -331,7 +331,15 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     return chord && chordLabel(chord, MAC);
   };
 
-  const loadFolders = useCallback(() => perform(workspaceId, { type: "folder.list" }).then((r) => setTree(folderTree(r))), [workspaceId]);
+  // A listing that fails, as a request can under load, is asked for again at the next refresh, and leaves what was listed as it was.
+  const loadFolders = useCallback(
+    () =>
+      perform(workspaceId, { type: "folder.list" }).then(
+        (r) => setTree(folderTree(r)),
+        () => {},
+      ),
+    [workspaceId],
+  );
   useEffect(() => void loadFolders(), [loadFolders]);
 
   const listedNotes = useRef(notes);
@@ -341,18 +349,21 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   useEffect(() => {
     let live = true;
     const since = (learned.current = new Map());
-    perform(workspaceId, { type: "note.list" }).then((all) => {
-      if (!live) return;
-      const known = listedNotes.current;
-      const listed = newest(all, known, since);
-      const there = new Set(listed.map((n) => n.id));
-      const lost = (known ?? []).filter((n) => !there.has(n.id)).map((n) => n.id);
-      setGone((was) => {
-        const now = [...was, ...lost].filter((id) => !there.has(id));
-        return now.length === was.size && !lost.length ? was : new Set(now);
-      });
-      setNotes(listed);
-    });
+    perform(workspaceId, { type: "note.list" }).then(
+      (all) => {
+        if (!live) return;
+        const known = listedNotes.current;
+        const listed = newest(all, known, since);
+        const there = new Set(listed.map((n) => n.id));
+        const lost = (known ?? []).filter((n) => !there.has(n.id)).map((n) => n.id);
+        setGone((was) => {
+          const now = [...was, ...lost].filter((id) => !there.has(id));
+          return now.length === was.size && !lost.length ? was : new Set(now);
+        });
+        setNotes(listed);
+      },
+      () => {},
+    );
     return () => {
       live = false;
     };

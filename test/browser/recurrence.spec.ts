@@ -28,8 +28,7 @@ const completions = (page: Page) => page.getByRole("dialog", { name: "Completion
 /** Every word the window shows or names, in text, aria-label, title and placeholder: the app says Repeat, never recur. */
 const wordsShown = (page: Page) =>
   page.evaluate(() => [document.body.innerText, ...[...document.querySelectorAll("[aria-label], [title], [placeholder]")].flatMap((el) => ["aria-label", "title", "placeholder"].map((name) => el.getAttribute(name) ?? ""))].join("\n"));
-const more = (page: Page, text: string | RegExp) => row(page, text).getByRole("button", { name: /^More for / });
-const menu = (page: Page) => page.getByRole("menu", { name: /^More for / });
+const fieldsOf = (page: Page, text: string | RegExp) => row(page, text).getByRole("button", { name: /^Fields of / });
 const modes = (page: Page) => page.getByRole("navigation", { name: "Modes" });
 
 /** Today on the page's own clock, which is the day the app completes a todo on. */
@@ -117,10 +116,11 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(bins.locator(".todo-every")).toHaveText("every 2 weeks");
   await expect(bins.locator(".todo-every")).toHaveAttribute("title", "Repeats: Every 2 weeks");
   await expect(bins.locator(".todo-done")).toHaveCount(0);
-  // The recurrence is a chip to press, as the due date is; the menu only opens the note.
+  // The repeat is a chip to press, as the due date is; the row's fields list it with what it says, and open the same popover.
   await expect(bins.getByRole("button", { name: "Repeat: every 2 weeks" })).toBeEnabled();
-  await more(page, "Take out the bins").click();
-  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveCount(0);
+  await fieldsOf(page, "Take out the bins").click();
+  await page.locator(".chip-popover").getByRole("button", { name: "Repeat: every 2 weeks" }).click();
+  await expect(page.locator(".chip-popover")).toHaveAccessibleName("Repeat of Take out the bins");
   await page.keyboard.press("Escape");
 
   await bins.getByRole("checkbox").dblclick();
@@ -696,11 +696,9 @@ test("a viewer sees the recurrence and last-done chips, can list the completions
   await page.goto("/todos");
   await expect(row(page, "Feed the cat").locator(".todo-every")).toHaveAttribute("title", "Repeats: Every day");
   await expect(row(page, "Feed the cat").getByRole("checkbox")).toBeDisabled();
-  // Its recurrence chip opens nothing and the row's menu has no way to set it; its last-done chip still lists the completions.
+  // Its repeat chip opens nothing and the row has no fields button to set it with; its last-done chip still lists the completions.
   await expect(row(page, "Feed the cat").locator(".todo-every")).toBeDisabled();
-  await more(page, "Feed the cat").click();
-  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveCount(0);
-  await page.keyboard.press("Escape");
+  await expect(fieldsOf(page, "Feed the cat")).toHaveCount(0);
   await row(page, "Feed the cat").locator(".todo-done").click();
   await expect(completions(page)).toContainText("Done 3 times");
   await page.keyboard.press("Escape");
