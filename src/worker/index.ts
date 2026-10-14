@@ -4,6 +4,7 @@ import { BROKE, OpError, type OpErrorCode } from "../core/protocol.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
+import { secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
 
@@ -49,17 +50,21 @@ async function answered(what: string, answer: () => Promise<Response>, broke: ()
   }
 }
 
+function route(req: Request, env: Env, url: URL): Response | Promise<Response> {
+  const moved = redirectFor(url);
+  if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
+  if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
+  if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
+  if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
+  const broke = () => json({ error: "unknown", message: BROKE }, 500);
+  if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(url.pathname, () => handleAgentsApi(req, env, url), broke);
+  if (url.pathname.startsWith("/api/")) return answered(url.pathname, () => handleApi(req, env, url), broke);
+  return env.ASSETS.fetch(req);
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    const moved = redirectFor(url);
-    if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
-    if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
-    if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
-    if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
-    const broke = () => json({ error: "unknown", message: BROKE }, 500);
-    if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(url.pathname, () => handleAgentsApi(req, env, url), broke);
-    if (url.pathname.startsWith("/api/")) return answered(url.pathname, () => handleApi(req, env, url), broke);
-    return env.ASSETS.fetch(req);
+    return secured(await route(req, env, url), url, env);
   },
 } satisfies ExportedHandler<Env>;

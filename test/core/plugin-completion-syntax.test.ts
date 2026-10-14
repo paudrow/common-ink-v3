@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { picksAtOnce, placed, typedAfter } from "../../src/web/completionSyntax.ts";
+import { placed, startsLine, typedAfter } from "../../src/web/completionSyntax.ts";
 
 describe("what was typed after a trigger", () => {
   it("is read at the start of a line and after a space", () => {
@@ -28,19 +28,19 @@ describe("what was typed after a trigger", () => {
   });
 });
 
-describe("whether Enter picks as soon as the list shows", () => {
-  it("does at the start of a line, and after words once the letters the completion asks for are typed", () => {
-    expect(picksAtOnce("/", "", "/", 2)).toBe(true);
-    expect(picksAtOnce("  /b", "b", "/", 2)).toBe(true);
-    expect(picksAtOnce("A /", "", "/", 2)).toBe(false);
-    expect(picksAtOnce("A /B", "B", "/", 2)).toBe(false);
-    expect(picksAtOnce("- [ ] /t", "t", "/", 2)).toBe(false);
-    expect(picksAtOnce("A /bo", "bo", "/", 2)).toBe(true);
+describe("whether a trigger starts its line, where Enter picks from the list", () => {
+  it("does after nothing, blank space, a quote's mark, or a list item's mark and box", () => {
+    for (const [before, typed] of [["/", ""], ["/s", "s"], ["  /b", "b"], ["\t/t", "t"], ["- /t", "t"], ["* /", ""], ["12. /kan", "kan"], ["- [ ] /t", "t"], ["- [x] /time", "time"], ["> /st", "st"], ["> - [ ] /t", "t"]] as const) {
+      expect([before, startsLine(before, typed, "/")]).toEqual([before, true]);
+    }
   });
 
-  it("does anywhere for a completion that asks for none", () => {
-    expect(picksAtOnce("ask @", "", "@")).toBe(true);
-    expect(picksAtOnce("see [[R", "R", "[[")).toBe(true);
+  it("doesn't after other words, however much is typed after the trigger", () => {
+    for (const [before, typed] of [["A /B", "B"], ["date /time", "time"], ["start /stop", "stop"], ["A /", ""], ["- [ ] Feed /t", "t"], ["# Plan /kanban", "kanban"], ["-x /t", "t"]] as const) {
+      expect([before, startsLine(before, typed, "/")]).toEqual([before, false]);
+    }
+    expect(startsLine("see [[R", "R", "[[")).toBe(false);
+    expect(startsLine("[[R", "R", "[[")).toBe(true);
   });
 });
 

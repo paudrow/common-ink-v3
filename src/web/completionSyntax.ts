@@ -15,13 +15,16 @@ export function typedAfter(before: string, trigger: string, spaces = false): str
   return null;
 }
 
+/** Blank space, a quote's `>`, and a list item's mark and task box: what may come before a trigger at the start of a line. */
+const LEAD = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?$/;
+
 /**
- * Whether Enter and Tab pick from a list as soon as it shows, given the line up to the cursor and
- * what `typedAfter` read from it. With words before the trigger on its line, a completion can ask
- * for letters first: a `/` and a letter end many an ordinary line.
+ * Whether the trigger `typedAfter` found starts its line, given the line up to the cursor and what
+ * was typed after the trigger. For a prose trigger only there does Enter pick from the list: after
+ * other words, a `/` and what follows it are as likely the member's own words.
  */
-export function picksAtOnce(before: string, typed: string, trigger: string, picksAfter = 0): boolean {
-  return typed.length >= picksAfter || !before.slice(0, before.length - typed.length - trigger.length).trim();
+export function startsLine(before: string, typed: string, trigger: string): boolean {
+  return LEAD.test(before.slice(0, before.length - typed.length - trigger.length));
 }
 
 export interface Placing {
