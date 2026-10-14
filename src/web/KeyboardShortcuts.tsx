@@ -160,10 +160,26 @@ function Recorder({ shortcut, add, all, mac, onSave, onClose }: RecorderProps) {
     setPressed([...pressed, chordOf(e, mac)]);
   };
 
+  /** Keys pressed anywhere in the dialog but the box that writes them down: Escape closes it, and Tab goes round inside it. */
+  const onDialogKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      return onClose();
+    }
+    if (e.key !== "Tab") return;
+    const stops = [...e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]')];
+    const [from, to] = e.shiftKey ? [stops[0], stops.at(-1)] : [stops.at(-1), stops[0]];
+    if (document.activeElement !== from && e.currentTarget !== document.activeElement) return;
+    e.preventDefault();
+    to?.focus();
+  };
+
   return (
     <div className="recorder-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       {/* The app leaves a key pressed in here alone: it is one to write down, not one to run. */}
-      <div role="dialog" aria-modal="true" aria-label={`${add ? "Add another key for" : "Record a key for"} ${shortcut.title}`} className="recorder" data-records-keys>
+      {/* It can hold focus itself, so a press on its words leaves the keyboard in it. */}
+      <div role="dialog" aria-modal="true" aria-label={`${add ? "Add another key for" : "Record a key for"} ${shortcut.title}`} className="recorder" data-records-keys tabIndex={-1} onKeyDown={onDialogKey}>
         <p className="recorder-for">
           {add ? "Another key for" : "A key for"} <strong>{shortcut.title}</strong>
         </p>

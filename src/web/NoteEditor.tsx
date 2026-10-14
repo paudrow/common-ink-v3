@@ -2,9 +2,9 @@ import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, panels, placeholder } from "@codemirror/view";
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 import type { Note } from "../core/protocol.ts";
-import { ApiError, perform } from "./api.ts";
+import { ApiError, perform, session } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { completing } from "./completing.ts";
 import { dismissing } from "./dismiss.ts";
@@ -14,11 +14,18 @@ import { readOnly } from "./readOnly.ts";
 import { TITLE_MARK } from "./titleMark.ts";
 import { openNote } from "./openNotes.ts";
 import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
-import { NoteSync, committed, type SaveState } from "./sync.ts";
+import { NoteSync, committed, worthRetrying, type SaveState } from "./sync.ts";
 
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
+  signedOut: "Not saved: you're signed out",
   rejected: "Couldn't save this version. Edit the note to try again.",
 };
+
+/** Where reading a note has got to. Only a loaded note has text to say anything about, such as that it is saved. */
+type Load = { kind: "loading" } | { kind: "loaded" } | { kind: "missing" } | { kind: "failed"; message: string };
+
+/** How long after a read that failed the next is sent: a second, then twice as long each time, up to half a minute. */
+const retryAfter = (failures: number) => Math.min(30_000, 1000 * 2 ** (failures - 1));
 
 const typingIn = (el: Element | null) =>
   el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable);
@@ -92,16 +99,23 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const now = useRef({ focus, onFocused, extensions, canEdit });
   now.current = { focus, onFocused, extensions, canEdit };
   const [saveState, setSaveState] = useState<SaveState>("saved");
-  const [missing, setMissing] = useState(false);
+  const [load, setLoad] = useState<Load>({ kind: "loading" });
+  /** Counts up to read the note again after a read that failed. */
+  const [attempt, setAttempt] = useState(0);
+  const failures = useRef(0);
+  const signedOut = useSyncExternalStore(session.subscribe, session.signedOut);
 
   useEffect(() => {
     let view: EditorView | null = null;
     let sync: NoteSync | null = null;
     let cancelled = false;
+    let again: ReturnType<typeof setTimeout> | undefined;
 
     committed(noteId).then(() => perform(workspaceId, { type: "note.read", id: noteId })).then(
       (note) => {
         if (cancelled || !host.current) return;
+        failures.current = 0;
+        setLoad({ kind: "loaded" });
         onLoaded(note);
         const writable = now.current.canEdit;
         const fresh = writable && note.text === "";
@@ -145,18 +159,29 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         if (!dismissing() && (!note.text || (now.current.focus && !typingIn(document.activeElement)))) view.focus();
         if (now.current.focus) now.current.onFocused();
       },
-      (err) => {
-        if (!cancelled && err instanceof ApiError && err.code === "not_found") setMissing(true);
+      (err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.code === "not_found") return setLoad({ kind: "missing" });
+        setLoad({ kind: "failed", message: err instanceof ApiError && err.status === 401 ? "You're signed out." : err instanceof Error ? err.message : String(err) });
+        if (worthRetrying(err)) again = setTimeout(() => setAttempt((n) => n + 1), retryAfter(++failures.current));
       },
     );
 
     return () => {
       cancelled = true;
+      clearTimeout(again);
       syncRef.current = viewRef.current = null;
       void sync?.close();
       view?.destroy();
     };
-  }, [workspaceId, noteId, onLoaded, onSaved, embedded, completed, added, locked]);
+  }, [workspaceId, noteId, onLoaded, onSaved, embedded, completed, added, locked, attempt]);
+
+  // A read refused for want of a session is sent again once there is one.
+  const failedNow = useRef(false);
+  failedNow.current = load.kind === "failed";
+  useEffect(() => {
+    if (!signedOut && failedNow.current) setAttempt((n) => n + 1);
+  }, [signedOut]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: locked.reconfigure(canEdit ? [] : readOnly) });
@@ -201,16 +226,24 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
     view.focus();
   };
 
-  if (missing) return <p className="notice">This note doesn't exist, or you can't see it.</p>;
+  if (load.kind === "missing") return <p className="notice">This note doesn't exist, or you can't see it.</p>;
   return (
-    <section className="note" data-save-state={saveState}>
+    <section className="note" data-save-state={load.kind === "loaded" ? saveState : undefined}>
       <header className="note-bar">
         <div className="note-meta">{meta}</div>
         <div className="save-state" role="status">
-          {notice ?? SAVE_LABEL[saveState]}
+          {notice ?? (load.kind === "loaded" ? SAVE_LABEL[saveState] : load.kind === "failed" ? "Not loaded" : "")}
         </div>
       </header>
       <div className="note-scroll" onMouseDown={toEnd}>
+        {load.kind === "failed" && (
+          <div className="notice" role="alert">
+            <p>This note couldn't be loaded, so there is nothing here to type in yet. {load.message}</p>
+            <button type="button" className="button small" onClick={() => setAttempt((n) => n + 1)}>
+              Try again
+            </button>
+          </div>
+        )}
         <div className="editor" ref={host} />
       </div>
       <div className="note-foot" ref={foot} />

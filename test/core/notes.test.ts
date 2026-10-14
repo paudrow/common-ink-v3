@@ -29,6 +29,21 @@ describe("notes", () => {
     expect((await perform(env.DB, ada, { type: "note.read", id: note.id })).revision).toBe(2);
   });
 
+  it("takes ten writers to one note at once, and a writer it can't fit in is told to send again, not that the server broke", async () => {
+    const ada = await newMember();
+    for (const writers of [10, 40]) {
+      const note = await perform(env.DB, ada, { type: "note.create", text: "start" });
+      const answers = await Promise.allSettled(Array.from({ length: writers }, (_, i) => perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: `start\nline ${i}.` })));
+
+      const refused = answers.flatMap((a) => (a.status === "rejected" ? [a.reason as unknown] : []));
+      for (const reason of refused) expect(reason).toMatchObject({ name: "OpError", code: "conflict" });
+      if (writers === 10) expect(refused).toEqual([]);
+      const { text, revision } = await perform(env.DB, ada, { type: "note.read", id: note.id });
+      expect(revision).toBe(1 + writers - refused.length);
+      answers.forEach((a, i) => expect([i, text.includes(`line ${i}.`)]).toEqual([i, a.status === "fulfilled"]));
+    }
+  });
+
   it("lists only the notes changed at or after a time when asked to", async () => {
     const ada = await newMember();
     await perform(env.DB, ada, { type: "note.create", text: "# Old" }, 1000);

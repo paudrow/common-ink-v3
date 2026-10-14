@@ -45,8 +45,9 @@ const checkbox: Chip<Checkbox> = {
 };
 
 const look = EditorView.baseTheme({
-  // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark.
-  // The box starts where its `[` does, so it is in one place ticked or not, though `[x]` is wider than `[ ]`.
+  // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark. It is as wide
+  // as the box, and so is the `[ ]`, `[x]` or `[X]` it stands for when that is shown as written, so neither moves the words.
+  ".md-chip.md-chip-task": { width: `${BOX_EM}em` },
   ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", paddingLeft: "0.35em", justifyContent: "flex-start", cursor: "pointer" },
   ".md-chip-task input": {
     appearance: "none",
