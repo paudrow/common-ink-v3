@@ -9,7 +9,7 @@ import { addressOf, queryIn } from "./request.ts";
  * field, and with the query as its one control: which notes, whether they have todos and the order
  * are said in it, typed or built under Advanced. The address is the search. Typing writes it there
  * after a pause, and a link, a reload, or Back brings one back. Which cards are expanded is the
- * page's own, for as long as it is shown.
+ * page's own, for as long as it is shown. The inspector is about the notes it lists.
  */
 export function SearchPage({ host, app }: { host: PluginHost; app: App }) {
   const [expanded, setExpanded] = useState<ListView["expanded"]>({});
@@ -32,6 +32,7 @@ export function SearchPage({ host, app }: { host: PluginHost; app: App }) {
       heading="Search"
       queryOnly
       autoFocus
+      inspected
     />
   );
 }

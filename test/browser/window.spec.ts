@@ -677,8 +677,13 @@ test("the inspector's bar has an icon for each panel whatever is in front, with 
   await bar.getByRole("button", { name: "Info" }).click();
   await expect(inspector(page).getByRole("definition")).toHaveText(["Unsorted", "1 note", "just now by Ada Lovelace"]);
 
+  // The Search page says what it lists; a page that says nothing has nothing to show.
   await page.getByRole("link", { name: "Search" }).click();
   await expect(page.getByRole("heading", { name: "Search" })).toBeVisible();
+  expect(await listedIn(bar, "button")).toEqual(icons);
+  await expect(inspector(page).getByRole("definition")).toHaveText(["Search", "1 note", "just now by Ada Lovelace"]);
+  await page.getByRole("link", { name: "Calendar" }).click();
+  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
   expect(await listedIn(bar, "button")).toEqual(icons);
   await expect(inspector(page).locator(".inspector-body")).toHaveText("Nothing to show for this view");
   await toggleInspector(page);

@@ -1308,6 +1308,19 @@ test("the toast is v1's: in the bottom right corner in the app's colours, Task c
   expect(Date.now() - left).toBeGreaterThan(1500);
 });
 
+test("the todos of a note in Trash are listed as one the member can only view: no box to check, no words to edit, nothing to set", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Old\n\n- [ ] Shred it #paper\n" });
+  await perform(page, { type: "note.trash", id: note.id });
+  await page.goto("/todos?q=is%3Atrashed");
+  await expect(words(page)).toHaveText(["Shred it"]);
+  await expect(row(page, "Shred it").getByRole("checkbox")).toBeDisabled();
+  await expect(row(page, "Shred it").getByRole("button", { name: /^Edit / })).toHaveCount(0);
+  await expect(row(page, "Shred it").locator(".todo-chip[data-unset]")).toHaveCount(0);
+  await expect(fieldsOf(page, "Shred it")).toHaveCount(0);
+  await expect(row(page, "Shred it").getByRole("button", { name: "#paper", exact: true })).toBeVisible();
+});
+
 test("the inspector is about the notes the listed todos are in: Info counts them and History is theirs", async ({ page }) => {
   await twoNotes(page);
   await perform(page, { type: "note.create", text: "# No todos\n\nJust words." });

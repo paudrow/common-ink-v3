@@ -269,7 +269,7 @@ export const Op = z.discriminatedUnion("type", [
   /**
    * The todos in the notes the asker can see that `query` finds, in the same language as search's:
    * words are looked for in the todo's own line, and `is:done`, `due:`, `importance:`, `has:due` and
-   * `has:recurrence` are of the todo. With no query it is every open todo. Done ones are listed when
+   * `has:repeat` are of the todo. With no query it is every open todo. Done ones are listed when
    * the query says `is:done`, and both with `is:open OR is:done`. Open ones come first, then by due
    * date with those that have none last, then the most important, unless the query's `sort:` says otherwise.
    *

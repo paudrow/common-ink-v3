@@ -111,7 +111,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `has:backlink` | Linked to from a note you can see | `has:backlink` |
 | `has:tag` | Has any tag | `has:tag` |
 | `has:due` | Has a due date | `has:due` |
-| `has:recurrence` | Recurs | `has:recurrence` |
+| `has:repeat` | Repeats | `has:repeat` |
 | `no:WORD` | Lacks it: the same as -has:WORD | `no:link` |
 | `due:DAY` | The day a todo is due. Overdue is due:<today | `due:<today` |
 | `importance:N` | A todo's importance: 0 for normal, 1 to 3 for ! to !!! | `importance:>=2` |
@@ -135,6 +135,8 @@ Not filters yet: `has:attachment`, which waits for uploads, and `assignee:`, whi
 The search field is a plain text field that takes all of this. As a filter's name or its value is typed it is offered under the field: Tab takes the first offer, the arrows move and Enter takes the one they came to, and Escape closes the list. Folders, tags and people are offered from what the member can already list. A query that can't be read says so under the field, with the part that is wrong marked, and nothing is asked of the server until it reads.
 
 **Advanced**, beside the field, opens the builder: a row for each condition, with its field, is or is not, a comparison where the field has one, and its value. **Add a condition** adds a row, **Match all** or **any** joins them, and there is the order and where words are looked for. Every change is written into the field, and what is typed in the field is read back into the rows. A query rows can't show, one with a group inside it or AND and OR together, stays as it is typed, and the builder says so and changes nothing. **?** in the builder lists every form with what it means and an example, which is a button that puts the example in the field and runs it.
+
+On the Search page the inspector is about the notes found (`useInspected`, labelled "Search" and the query): Info counts them and History is theirs, and both follow the query as it is typed.
 
 The Todos page has the same bar and builder, for todos. Its query is kept in the browser, so the page opens the way it was left.
 

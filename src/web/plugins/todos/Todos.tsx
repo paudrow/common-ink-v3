@@ -164,7 +164,8 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
   }, [picked, todo.text]);
   // So is the field its words are edited in, and nothing typed there is saved to the one that came.
   const editedOn = useRef<string | null>(null);
-  const readOnly = todo.access !== "edit";
+  // A note in Trash takes no change until it is restored, so its todos are shown as one the member can only view.
+  const readOnly = todo.access !== "edit" || app.trashed.some((n) => n.id === todo.noteId);
   const words = plainly(todo.words, titleOf) || "Nothing written";
   const { lead, trailing } = splitTags(todo.words);
   const row = keyOf(todo);

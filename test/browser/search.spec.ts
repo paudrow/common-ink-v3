@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, noteIdIn, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -33,6 +33,47 @@ const GARDEN = "# Garden plan\n\nPlant the tomatoes by the fence.\n";
 const ERRANDS = "# Errands\n\n- [ ] Call the bank about the mortgage +Home\n";
 const READING = "# Reading\n\nNotes on gardening books #botany\n";
 const SCRAPS = "# Scraps\n\nfence the by, tomatoes later\n";
+
+test("the inspector is about the notes the search lists: Info counts them and History is theirs, and both follow the query", async ({ page }) => {
+  await searching(page, [GARDEN, ERRANDS, READING, SCRAPS]);
+  await pinPanel(page, "Info");
+  const panel = page.getByRole("complementary", { name: "Inspector" });
+  await expect(panel.getByRole("term")).toHaveText(["Showing", "Notes", "Last changed"]);
+  await expect(panel.getByRole("definition").first()).toHaveText("Search");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("4 notes");
+  await field(page).fill("fence");
+  await expect(titles(page)).toHaveCount(2);
+  await expect(panel.getByRole("definition").first()).toHaveText("Search: fence");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("2 notes");
+  await page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button", { name: "History" }).click();
+  const changed = panel.getByRole("tree", { name: "Notes that changed" }).locator('[aria-level="1"]');
+  await expect(changed).toHaveCount(2);
+  await expect(changed.filter({ hasText: "Garden plan" })).toHaveCount(1);
+  await expect(changed.filter({ hasText: "Scraps" })).toHaveCount(1);
+  await field(page).fill("tomatoes in:title");
+  await expect(nothing(page)).toBeVisible();
+  await expect(changed).toHaveCount(0);
+});
+
+test("while a search is on its way the inspector says what it said of the last answer, never the new query with the old notes", async ({ page }) => {
+  await searching(page, [GARDEN, ERRANDS, READING, SCRAPS]);
+  await pinPanel(page, "Info");
+  const panel = page.getByRole("complementary", { name: "Inspector" });
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("4 notes");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"type":"search"')) await held;
+    await route.fallback();
+  });
+  await field(page).fill("fence");
+  await expect(status(page)).toContainText("Searching");
+  await expect(panel.getByRole("definition").first()).toHaveText("Search");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("4 notes");
+  release();
+  await expect(panel.getByRole("definition").first()).toHaveText("Search: fence");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("2 notes");
+});
 
 test("search finds a note by a word of its text, a todo's words, a tag, and a phrase in quotes", async ({ page }) => {
   await searching(page, [GARDEN, ERRANDS, READING, SCRAPS]);
@@ -643,7 +684,7 @@ test("the ? in Advanced lists every filter and operator with what it means, and 
     expect(forms, form).toContain(form);
   }
   // What is for todos alone is not offered where notes are searched.
-  for (const form of ["due:DAY", "importance:N", "is:done", "has:recurrence", "sort:due-asc"]) expect(forms, form).not.toContain(form);
+  for (const form of ["due:DAY", "importance:N", "is:done", "has:repeat", "sort:due-asc"]) expect(forms, form).not.toContain(form);
   await expect(help.getByRole("row").filter({ hasText: "is:archived" }).first()).toContainText("Archived. A query that doesn't say so leaves archived notes out");
 
   await help.getByRole("button", { name: "is:archived", exact: true }).click();

@@ -669,7 +669,7 @@ const TODO_FILTERS: Record<string, Row[]> = {
     { query: "is:private", finds: ["secret", "vpriv"] },
     { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
   ],
-  has: [{ query: "has:due", finds: [] }, { query: "no:due", finds: NOTES }, { query: "has:recurrence", finds: [] }, { query: "no:recurrence has:tag", finds: NOTES }, { query: "has:link", finds: ["secret"] }, { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) }],
+  has: [{ query: "has:due", finds: [] }, { query: "no:due", finds: NOTES }, { query: "has:repeat", finds: [] }, { query: "no:repeat has:tag", finds: NOTES }, { query: "has:link", finds: ["secret"] }, { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) }],
   due: [{ query: "due:<today", finds: [] }, { query: "-due:<today", finds: NOTES }, { query: "due:2020-01-01..2030-01-01", finds: [] }],
   importance: [{ query: "importance:0", finds: NOTES }, { query: "importance:>=1", finds: [] }, { query: "importance:0..3", finds: NOTES }],
   in: [{ query: "todo-team", finds: ["team"] }, { query: "Title-team", finds: [] }, { query: "Title-team in:title", finds: ["team"] }, { query: "body-team in:body", finds: [] }],
