@@ -12,6 +12,7 @@
 import type { ComponentType, ReactNode } from "react";
 import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary, Written } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
+import type { Showing } from "./inspected.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
@@ -96,8 +97,12 @@ export interface Screenshot {
  */
 export type Setting = { title: string; description?: string } & (
   | { type: "boolean"; default: boolean }
-  /** `unreadable` is what it reads as when the member's value isn't one it can take, if that is not the default: the safe choice, for a setting that guards something. */
-  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number; unreadable?: string }
+  /**
+   * `unreadable` is what it reads as when the member's value isn't one it can take, if that is not the default: the safe choice, for a
+   * setting that guards something. `defaultWithoutEmbedSite` is its default instead on a server whose HTML embeds have no host of
+   * their own (`EMBED_ORIGIN`), as the server says: the safe choice there.
+   */
+  | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number; unreadable?: string; defaultWithoutEmbedSite?: string }
   | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
   /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
   | { type: "chords"; default: readonly string[] }
@@ -280,10 +285,11 @@ export interface Slots {
   /**
    * A column left of the editor: the sidebar. It is drawn closed too, when `app.sidebarOpen` is
    * false, and is then to be a narrow bar of icons (`<nav class="rail">`) for what it lists when
-   * open, with a way back to open (`app.toggleSidebar`). In focus it is still drawn, out of sight.
+   * open. Its edge is the member's way back to open, and `app.toggleSidebar` is the view's own.
+   * In focus it is still drawn, out of sight.
    */
   column: { id: string; component: View };
-  /** A section of the sidebar, such as the folder tree. A column places them with `app.sections`, while it is open. */
+  /** A section of the sidebar, such as the folder tree. A column places them with `app.sections` while it is open, and may show them over the page from its bar with `app.sectionsOpening`. */
   section: { id: string; component: View };
   /** What fills the editor area when a note, a folder's list, a page, or nothing is open. The last one registered is used; with none, the app shows what the address names alone. */
   editor: {
@@ -308,18 +314,14 @@ export interface Slots {
    */
   folder: { id: string; component: ComponentType<FolderProps> };
   /**
-   * A tab of the inspector. The inspector is about what the editor area has in front, and a view
-   * says which kind of thing it is `for`: it is a tab only while one of those is in front, and its
-   * component is handed that thing (see {@link Inspected}). A note's tabs and a folder's are
-   * different views, which may share a label, as History and Info do. With no view for what is in
-   * front, which today is every page, the inspector says there is nothing to show. With the
-   * inspector closed each view is an icon in the bar that stands in its place.
-   *
-   * One tab is remembered per person, across everything: the one they last picked. What shows is
-   * the view with the picked id, or else the view with the same label where what is in front has
-   * its own, or else the first view with no `badge`, or else the first. A person who has picked
-   * none is shown {@link UNPICKED}. A view with a `badge` counts what it flags as seen by being
-   * shown, as History does, so it is never shown unasked ahead of a view without one.
+   * A panel of the inspector. The inspector has a narrow bar of icons at the right of the window,
+   * one for each view, which is the same whatever the editor area has in front. An icon shows its
+   * panel over the page until the member goes elsewhere, or beside the page once they pin it; the
+   * app keeps which panel, and whether it is pinned, as the member last had them. A panel is about
+   * what is in front ({@link About}): the view says which kinds of thing it has something to show
+   * `for`, and its component is handed the thing. For any other kind, and for a page that says
+   * nothing of what it shows, the inspector says "Nothing to show for this view" in the panel's
+   * place. Each view gets an `inspector.<id>` command that does what its icon does.
    */
   inspector: InspectorView;
   /**
@@ -350,27 +352,34 @@ export interface Slots {
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
 }
 
-/** What an inspector view is handed besides `app`, by what it is `for`. */
-export interface Inspected {
-  note: { note: NoteSummary };
-  /** `folderId` is a folder's id, or {@link ALL_NOTES}; `name` is what its list is called; `notes` are the notes in it. */
-  folder: { folderId: string; name: string; notes: readonly NoteSummary[] };
-  page: { page: PageInfo };
+/**
+ * What the inspector is about: what the editor area has in front. A note; a folder's list, where
+ * `folderId` is a folder's id or {@link ALL_NOTES}, `name` is what the list is called and `notes`
+ * are the notes in it; or the notes a page says it is showing, under the name the page gave them.
+ */
+export type About =
+  | { kind: "note"; note: NoteSummary }
+  | { kind: "folder"; folderId: string; name: string; notes: readonly NoteSummary[] }
+  | { kind: "notes"; label: string; notes: readonly NoteSummary[] };
+
+export interface InspectorView {
+  id: string;
+  label: string;
+  icon: IconName;
+  /** The kinds of thing it has something to show for. With any other in front the inspector says there is nothing to show, and the component is not drawn. */
+  for: readonly About["kind"][];
+  component: ComponentType<ViewProps & { about: About }>;
+  /** Something to flag on its icon in the bar, by a dot and these words for a screen reader, or null. */
+  badge?: (app: App) => string | null;
 }
 
-export type InspectorView = {
-  [K in keyof Inspected]: {
-    id: string;
-    label: string;
-    icon: IconName;
-    for: K;
-    component: ComponentType<ViewProps & Inspected[K]>;
-    /** Something to flag on the tab and on its icon in the closed bar, by a dot and these words for a screen reader, or null. */
-    badge?: (app: App) => string | null;
-  };
-}[keyof Inspected];
-
-export { UNPICKED } from "./inspectorPick.ts";
+/**
+ * How a page says what it is showing, so the inspector's panels are about that while the page is
+ * in front: `useInspected(app, { kind: "notes", label: "Open todos", noteIds })`, or a single
+ * note with `{ kind: "note", noteId }`, or null while it has nothing to say. Notes the member
+ * can't see are left out.
+ */
+export { useInspected, type Showing } from "./inspected.ts";
 
 export interface FolderProps extends ViewProps {
   /** The folder whose notes to list: a folder's id, {@link ALL_NOTES} or {@link SHARED_WITH_ME}. It may name no folder the member can see. */
@@ -383,21 +392,18 @@ export interface FolderProps extends ViewProps {
 }
 
 export interface EditorProps extends ViewProps {
-  /** Draws the editor for a note. `onEdit` is called on each change typed or pasted. */
-  renderNote: (noteId: string, options?: { onEdit?: () => void }) => ReactNode;
+  /**
+   * Draws the editor for a note. `onEdit` is called on each change typed or pasted. With `focus`
+   * the editor takes the cursor once the note is there, and then calls `onFocused`: for a note the
+   * view moved to another part of itself, where its editor is drawn anew.
+   */
+  renderNote: (noteId: string, options?: { onEdit?: () => void; focus?: boolean; onFocused?: () => void }) => ReactNode;
   /** Draws a folder's list of notes, with whatever is in the `folder` slot. */
   renderFolder: (folderId: string) => ReactNode;
   /** Draws a page at the address it is at, which is {@link Opened}'s `path`. One no plugin has registered any more is drawn as nothing being there. */
   renderPage: (pageId: string, path: string) => ReactNode;
   /** What to show where nothing is open: a line saying to pick a note. */
   empty: ReactNode;
-  /**
-   * The buttons that act on the window and on no one note: the sidebar's and the inspector's, as
-   * one group. Put it once, where it stays whatever is open beneath: at the top left corner of the
-   * editor area, before the first tab. Focus is not among them. It belongs to whatever fills the
-   * window, so the view draws its own button for it from `app.focus` and `app.setFocus`.
-   */
-  controls: ReactNode;
 }
 
 /**
@@ -561,6 +567,11 @@ export interface Completion {
   spaces?: boolean;
   /** Whether the trigger opens the list anywhere outside code, such as right after a bracket or a word. For a trigger nobody types by accident, as `[[` is. */
   anywhere?: boolean;
+  /**
+   * Whether the trigger is written in prose too, as `/` is. After other words on its line Enter is
+   * then always a new line, and Tab, the arrow keys or a click pick from the list.
+   */
+  prose?: boolean;
   /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
   items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
 }
@@ -664,6 +675,12 @@ export interface App {
   pages: readonly PageInfo[];
   /** What plugins put in the `section` slot, for the column that shows them. Null when there is nothing in it. */
   sections: ReactNode;
+  /**
+   * The same sections, for a place that goes away once something is opened from it, as the closed
+   * sidebar's folder tree over the page does. `opened` is called each time one of them opens a
+   * note, a folder's list or a page, or goes to an address.
+   */
+  sectionsOpening: (opened: () => void) => ReactNode;
   /** Draws a note's text to be read and not changed, as {@link FolderProps.readNote} does, for a page that lists notes. */
   readNote: (noteId: string) => ReactNode;
   /** The overlay that is open. */
@@ -719,6 +736,14 @@ export interface App {
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
   toggleOverlay(id: string, state?: unknown): void;
   toggleSidebar(): void;
+  /** Does what a panel's icon in the inspector's bar does: shows that panel, or closes it if it is the one showing. */
+  togglePanel(viewId: string): void;
+  /**
+   * For a page: says what the page is showing, for the inspector to be about while the page is in
+   * front, or null for nothing. {@link useInspected} calls it and takes it back when the page goes.
+   * Anywhere but in a page it does nothing.
+   */
+  inspect(showing: Showing | null): void;
   /** Enters or leaves focus. */
   setFocus(on: boolean): void;
   switchWorkspace(workspaceId: string): void;

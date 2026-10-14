@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { StateEffect, StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { keep } from "./belowIdentity.ts";
 import { inlineIn, rewriteOf, type Written } from "./embedSyntax.ts";
@@ -46,23 +46,30 @@ class BoxWidget extends WidgetType {
     private readonly box: BelowBox,
     /** Whether it is the rest of a block's card. */
     private readonly joined: boolean,
+    /** Whether it is for an address alone on its line, which is out of sight while the cursor is elsewhere: the media is where that line was. */
+    private readonly bare: boolean,
   ) {
     super();
   }
 
   override eq(other: BoxWidget) {
-    return other.id === this.id && other.joined === this.joined && sameBox(other.box, this.box);
+    return other.id === this.id && other.joined === this.joined && other.bare === this.bare && sameBox(other.box, this.box);
+  }
+
+  /** The room's padding above and below what is drawn in it. */
+  get padding(): [number, number] {
+    return this.joined ? [0, UNDER_CARD] : this.bare ? [0, GAP] : [GAP, GAP];
   }
 
   override get estimatedHeight() {
     const inner = "height" in this.box ? this.box.height : heights.get(this.id);
-    return inner === undefined ? -1 : inner + (this.joined ? UNDER_CARD : 2 * GAP);
+    return inner === undefined ? -1 : inner + this.padding[0] + this.padding[1];
   }
 
   override toDOM() {
     const el = document.createElement("div");
     el.className = this.joined ? "embed-below-room embed-below-room-joined" : "embed-below-room";
-    el.style.paddingBlock = this.joined ? `0 ${UNDER_CARD}px` : `${GAP}px`;
+    el.style.paddingBlock = this.padding.map((px) => `${px}px`).join(" ");
     const box = el.appendChild(document.createElement("div"));
     box.dataset.below = String(this.id);
     this.size(box);
@@ -72,7 +79,7 @@ class BoxWidget extends WidgetType {
   /** A room that is only another size is the same element at that size, so what is over it is moved and not looked for again. */
   override updateDOM(el: HTMLElement) {
     const box = el.firstElementChild as HTMLElement | null;
-    if (!box || box.dataset.below !== String(this.id) || el.classList.contains("embed-below-room-joined") !== this.joined) return false;
+    if (!box || box.dataset.below !== String(this.id) || el.classList.contains("embed-below-room-joined") !== this.joined || el.style.paddingBlock !== this.padding.map((px) => `${px}px`).join(" ")) return false;
     this.size(box);
     return true;
   }
@@ -182,13 +189,20 @@ function inSight(el: Element): boolean {
 /** The height what is below a line turned out to have, once it had loaded. */
 const resized = StateEffect.define<{ id: number; height: number }>();
 
-const HIDDEN = Decoration.line({ class: "embed-address" });
-const SEEN = Decoration.line({ class: "embed-address embed-address-seen" });
+const HIDDEN = Decoration.replace({ block: true });
+const SEEN = Decoration.line({ class: "embed-address" });
+
+/** Whether the cursor is on the line of an address shown as media, which shows the address. */
+function addressOn(state: EditorState, shown: Shown, written: boolean): boolean {
+  const line = state.doc.lineAt(shown.from);
+  return shown.bare && written && state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from);
+}
 
 /**
- * An address shown as media keeps its line, as small as a caption, and the line's text is seen only
- * with the cursor on the line, as anything else in a note is shown as written only under the cursor.
- * So the address comes and goes and nothing in the note moves.
+ * An address shown as media takes no room while the cursor is elsewhere: its line is out of the
+ * note's flow and the media is where it was, as far below the line above as a paragraph is. With the
+ * cursor on its line the address is shown above the media, which moves down by that line and is
+ * otherwise left as it is.
  */
 function addressLines(state: EditorState, shown: readonly Shown[], written: boolean): DecorationSet {
   return Decoration.set(
@@ -196,9 +210,9 @@ function addressLines(state: EditorState, shown: readonly Shown[], written: bool
       .filter((s) => s.bare)
       .map((s) => {
         const line = state.doc.lineAt(s.from);
-        const on = written && state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from);
-        return (on ? SEEN : HIDDEN).range(line.from);
+        return addressOn(state, s, written) ? SEEN.range(line.from) : HIDDEN.range(line.from, line.to);
       }),
+    true,
   );
 }
 
@@ -211,7 +225,7 @@ function addressLines(state: EditorState, shown: readonly Shown[], written: bool
  * blocks the note writes.
  */
 export function keptBelow(reading: (state: EditorState) => Reading): Extension {
-  const rooms = (shown: readonly Shown[]) => Decoration.set(shown.map((s): Range<Decoration> => Decoration.widget({ widget: new BoxWidget(s.id, s.box, s.written.block), block: true, side: 1 }).range(s.at)), true);
+  const rooms = (shown: readonly Shown[]) => Decoration.set(shown.map((s): Range<Decoration> => Decoration.widget({ widget: new BoxWidget(s.id, s.box, s.written.block, s.bare), block: true, side: 1 }).range(s.at)), true);
 
   interface Value {
     shown: readonly Shown[];
@@ -313,7 +327,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           const was = this.live.get(id)?.place;
           const line = view.lineBlockAt(at);
           const part = (Array.isArray(line.type) ? line.type : [line]).find((b) => b.widget instanceof BoxWidget && b.widget.id === id);
-          if (was && part) places.set(id, { ...was, top: view.documentTop + part.top + GAP + dy, seen: false });
+          if (was && part) places.set(id, { ...was, top: view.documentTop + part.top + (part.widget as BoxWidget).padding[0] + dy, seen: false });
         }
         return places;
       }
@@ -346,6 +360,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           }
           // With no room, as inside something else that is drawn, it is kept and not shown.
           live.el.style.visibility = place ? "" : "hidden";
+          live.el.classList.toggle("embed-below-on", addressOn(view.state, shown, view.state.field(field).reading.written));
           if (!place) continue;
           const was = live.place;
           if (was && was.left === place.left && was.top === place.top && was.width === place.width && was.height === place.height) continue;
@@ -424,5 +439,24 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     },
   );
 
-  return [field, layer];
+  /**
+   * A step from a line to the next, as the arrow keys and vim's `j` and `k` take, stops on the line of
+   * an address that is out of sight, which shows it: out of the note's flow, it is still a line of the
+   * note, and the editor would step over it, and over the next address's line too. A move that goes
+   * over any other line is no step and is left as it is.
+   */
+  const stopping = EditorState.transactionFilter.of((tr) => {
+    if (tr.docChanged || !tr.selection || tr.isUserEvent("select.pointer")) return tr;
+    const { doc } = tr.startState;
+    const [was, now] = [doc.lineAt(tr.startState.selection.main.head).number, doc.lineAt(tr.newSelection.main.head).number];
+    const step = Math.sign(now - was);
+    const next = was + step;
+    if (Math.abs(now - was) < 2) return tr;
+    const hidden = new Set(tr.startState.field(field).shown.filter((s) => s.bare).map((s) => doc.lineAt(s.from).number));
+    for (let n = next; n !== now; n += step) if (!hidden.has(n)) return tr;
+    const { anchor, empty } = tr.newSelection.main;
+    return [tr, { selection: empty ? { anchor: doc.line(next).from } : { anchor, head: doc.line(next).from } }];
+  });
+
+  return [field, layer, stopping];
 }

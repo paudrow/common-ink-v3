@@ -141,6 +141,8 @@ test("a note read in a folder's card hangs its list items the same way", async (
   await card.getByRole("button", { name: "Expand Lists" }).click();
   await card.getByRole("button", { name: "Show whole note" }).click();
   await expect(card.locator(".cm-line").filter({ hasText: "Tabbed" })).toBeVisible();
+  // A reading takes no keys, so it is no stop for Tab, though a note a member can only read is.
+  await expect(card.locator(".cm-content")).not.toHaveAttribute("tabindex");
   for (const [mark, word] of ITEMS) {
     const item = await itemAt(card, word);
     expect(item.rows.length, `"${mark.trim()}" ${word} wraps`).toBeGreaterThanOrEqual(2);

@@ -63,6 +63,7 @@ const PATHS = {
   plus: <path d="M8 3.5v9M3.5 8h9" />,
   edit: <path d="M9.75 3.75 12.25 6.25M3 13l.6-2.85 7.4-7.4a1.2 1.2 0 0 1 1.7 0l.55.55a1.2 1.2 0 0 1 0 1.7l-7.4 7.4z" />,
   close: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,
+  pin: <path d="M6 2.5h4l-.5 4 2 2.25h-7l2-2.25zM8 8.75v4.75" />,
   chevron: <path d="m6 4.5 3.5 3.5L6 11.5" />,
   sidebar: (
     <>
@@ -178,6 +179,8 @@ const PATHS = {
       <path d="M4 10V6l1.75 2L7.5 6v4M11 6v4M9.5 8.5 11 10l1.5-1.5" />
     </>
   ),
+  flag: <path d="M4 14V2.75h8l-1.5 3 1.5 3H4" />,
+  check: <path d="m3.75 8.25 2.75 2.75 5.75-6" />,
 } as const;
 
 export type IconName = keyof typeof PATHS;

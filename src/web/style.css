@@ -23,6 +23,9 @@
   --warn-ink: #895913;
   --chip-ink: color-mix(in srgb, var(--muted) 70%, var(--ink));
   --shadow: 0 18px 48px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
+  --shadow-lg: 0 24px 60px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(30 24 12 / 0.05), 0 4px 14px -6px rgb(30 24 12 / 0.1);
+  --accent-ink: #4545b8;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-family: var(--prose);
@@ -58,6 +61,9 @@
     --removed-soft: rgb(240 138 93 / 0.14);
     --warn-ink: #c7811b;
     --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+    --shadow-lg: 0 24px 60px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -6px rgb(0 0 0 / 0.4);
+    --accent-ink: #a9a9ff;
   }
 }
 
@@ -84,6 +90,9 @@
   --removed-soft: rgb(240 138 93 / 0.14);
   --warn-ink: #c7811b;
   --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-lg: 0 24px 60px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -6px rgb(0 0 0 / 0.4);
+  --accent-ink: #a9a9ff;
 }
 
 html,
@@ -999,6 +1008,22 @@ button.link:hover {
   background: var(--accent);
 }
 
+/* The edge of a side that folds has a short grip half way down it, so there is something to see where it is taken hold of. */
+.resize-handle[data-folds]::before {
+  position: absolute;
+  top: calc(50% - 14px);
+  left: 1px;
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.resize-handle[data-folds]:is(:hover, [data-dragging], :focus-visible)::before {
+  background: var(--accent);
+}
+
 .resize-handle:focus-visible {
   outline: none;
 }
@@ -1069,15 +1094,6 @@ button.link:hover {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
-}
-
-/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
-.window-controls {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  padding: 0 6px;
 }
 
 /* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
@@ -1293,7 +1309,7 @@ button.link:hover {
   text-overflow: ellipsis;
 }
 
-/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
+/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. The folder has a line and the last edit has the next, each there before it has anything to say, so the bar is as tall while they load as after. */
 @container note (max-width: 520px) {
   .note-bar {
     flex-wrap: wrap;
@@ -1304,16 +1320,23 @@ button.link:hover {
   }
 
   .note-meta {
-    flex-wrap: wrap;
-    row-gap: 2px;
+    flex-direction: column;
+    gap: 2px;
     overflow: visible;
     white-space: normal;
   }
 
   .note-meta > * {
     max-width: 100%;
+    min-height: 1lh;
     overflow: visible;
     overflow-wrap: anywhere;
+  }
+
+  /* The folder's path arrives after the note and is as long as its folders' names: it has its one line and is cut short at the end of it. */
+  .note-meta > .crumbs {
+    overflow: hidden;
+    white-space: nowrap;
   }
 }
 
@@ -1385,7 +1408,7 @@ button.link:hover {
   outline: none;
 }
 
-/* Room left of the text, inside the editor's own margin, for what hangs there: a heading's #s and a bullet's fold toggle. */
+/* Room left of the text, inside the editor's own margin, for what hangs there: a heading's #s. */
 .editor .cm-scroller {
   margin-left: -3rem;
 }
@@ -1857,19 +1880,29 @@ button.link:hover {
   max-width: none;
 }
 
-/* The line of an address that is shown as media: a caption's size, and seen only with the cursor on it. It keeps its room either way, so nothing moves. */
+/* The line of an address shown as media, with the cursor on it (out of sight it is out of the note): above the media, as v1 drew it. */
 .cm-line.embed-address {
-  font-size: 0.8125rem;
-  transition: opacity 120ms;
+  font-family: var(--mono);
+  font-size: 0.74em;
+  line-height: 1.6;
+  padding-top: 0.8em;
+  color: var(--accent);
 }
 
-.cm-line.embed-address:not(.embed-address-seen) {
-  opacity: 0;
+.cm-line.embed-address::after {
+  content: " \2197";
+  font-size: 0.9em;
 }
 
-/* Out of sight, the address is no link: the pointer and a press reach the line, which puts the cursor there. */
-.cm-line.embed-address:not(.embed-address-seen) * {
-  pointer-events: none;
+.cm-line.embed-address * {
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+/* The media whose address the cursor is on. */
+.embed-below.embed-below-on {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 0;
 }
 
 .embed-below-drawn {
@@ -2330,8 +2363,7 @@ button.link:hover {
 }
 
 /* A plugin's card, in the look of a note's card in a folder's list. Its name is a link laid over the whole of it, and its switch lies above the link. */
-.plugin-card,
-.todo-card {
+.plugin-card {
   position: relative;
   align-items: center;
   padding: 12px 14px 12px 12px;
@@ -2340,8 +2372,7 @@ button.link:hover {
   background: var(--bg-elev);
 }
 
-.plugin-card:hover,
-.todo-card:hover {
+.plugin-card:hover {
   border-color: var(--line-strong);
 }
 
@@ -2648,6 +2679,11 @@ kbd {
   background: var(--bg-elev);
   box-shadow: var(--shadow);
   font-size: 13px;
+}
+
+.settings-banner .button {
+  flex: none;
+  white-space: nowrap;
 }
 
 .settings-banner[role="alert"] {
@@ -3038,6 +3074,10 @@ kbd {
   font-size: 13px;
 }
 
+.recorder:focus {
+  outline: none;
+}
+
 .recorder p {
   margin: 0;
 }
@@ -3175,34 +3215,55 @@ kbd {
   display: flex;
   flex: 0 1 auto;
   flex-direction: column;
-  width: var(--inspector-width, 300px);
-  min-width: 180px;
+  width: var(--inspector-width, 256px);
+  /* With its bar, the 180px the inspector gives way down to in a window too narrow for everything. */
+  min-width: 136px;
   min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--bg-side);
 }
 
-.tabs {
+/* Pinned, it is beside the page. Otherwise it lies over the page from the bar's edge, and nothing under it moves. */
+.inspector[data-layout="temporary"] {
+  position: absolute;
+  top: 0;
+  right: 44px;
+  bottom: 0;
+  z-index: 20;
+  max-width: calc(100% - 44px);
+  box-shadow: var(--shadow);
+}
+
+.app[data-bar] > .inspector[data-layout="temporary"] {
+  bottom: 26px;
+}
+
+.inspector:focus {
+  outline: none;
+}
+
+.panel-head {
   display: flex;
   flex: none;
-  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
   height: 38px;
-  padding: 0 14px;
+  padding: 0 8px 0 14px;
   border-bottom: 1px solid var(--line);
 }
 
-.tabs [role="tab"] {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
+.panel-head h2 {
+  margin: 0;
   font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
 }
 
-.tabs [role="tab"][aria-selected="true"] {
-  box-shadow: inset 0 -2px 0 var(--accent);
+.panel-head [aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.rail .icon-button[aria-expanded="true"] {
+  background: var(--hover);
   color: var(--ink);
 }
 
@@ -3274,7 +3335,7 @@ kbd {
   font-size: 11.5px;
 }
 
-/* A closed sidebar and a closed inspector: a bar of icons, one for each thing the open one lists. */
+/* A closed sidebar, and the inspector's bar, which is always there: a bar of icons, one for each thing the sidebar lists or each panel. */
 
 .rail {
   display: flex;
@@ -3293,6 +3354,36 @@ kbd {
 
 .rail:not(:first-child) {
   border-left: 1px solid var(--line);
+}
+
+/* The sidebar's sections over the page, beside its bar. */
+.sidebar-picker {
+  position: fixed;
+  z-index: 30;
+  top: 8px;
+  left: 50px;
+  width: 248px;
+  max-width: calc(100vw - 58px);
+  max-height: calc(100vh - 16px);
+  padding: 2px 6px 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  transition: opacity 0.12s;
+}
+
+.sidebar-picker .section-head {
+  margin-top: 6px;
+}
+
+.sidebar-picker[data-leaving] {
+  opacity: 0;
+}
+
+.sidebar-picker[data-dragging] {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .rail-brand {
@@ -3392,14 +3483,8 @@ kbd {
   background: var(--accent);
 }
 
-.rail .icon-button,
-.tabs [role="tab"] {
+.rail .icon-button {
   position: relative;
-}
-
-.tabs .unseen-dot {
-  top: 9px;
-  right: -9px;
 }
 
 /* History: a list of changes with a tick each, beside what everything picked did */
@@ -4183,6 +4268,84 @@ kbd {
 
 .toast .icon-button {
   color: inherit;
+}
+
+/* What just happened, in the window's bottom right corner, as v1's toasts. */
+.toasts {
+  position: fixed;
+  right: 18px;
+  bottom: 44px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast-card {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 10px;
+  min-width: 240px;
+  max-width: 340px;
+  padding: 10px 14px 10px 10px;
+  border-radius: 12px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-size: 13px;
+  animation: toast-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  transition:
+    opacity 0.35s,
+    transform 0.35s;
+}
+
+.toast-card[data-leaving] {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.toast-card:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+.toast-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-action {
+  margin-left: 4px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--accent-ink);
+  font: 650 12.5px var(--prose);
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: var(--accent-soft);
 }
 
 .change-stat {
@@ -5107,8 +5270,8 @@ button.diff-fold:hover {
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  /* About 690px of a todo's words and chips inside its card, as v1's list had: a todo is not far wider than what it says. */
-  max-width: calc(718px + 4rem);
+  /* A list as wide as v1's, about 660px: a todo is not far wider than what it says. */
+  max-width: calc(660px + 4rem);
   height: 100%;
   margin: 0 auto;
   padding: 2rem 2rem 3rem;
@@ -5145,78 +5308,125 @@ button.diff-fold:hover {
   font: inherit;
 }
 
-/* A todo's card, in the look of a plugin's card and of a note's card in a folder's list. Its words and its chips are one run of text that wraps as one. */
-.todos-page .cards {
-  container-type: inline-size;
-}
-
-.todo-card {
+/* The list of todos, as v1's: one panel, a todo to a row. */
+.todo-list {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(0, auto) auto;
-  align-items: start;
-  column-gap: 10px;
-  font-size: 13.5px;
-  line-height: 22px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  margin: 0;
+  padding: 8px 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+  list-style: none;
 }
 
-/* A card too narrow for the note's name beside the words has it under them. */
-@container (max-width: 400px) {
-  .todo-card {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .todo-card .todo-where {
-    grid-row: 2;
-    grid-column: 2;
-    max-width: none;
-  }
+/* A todo's row: its checkbox, its words and its chips, which wrap as one run of text, and its note's name at the right. */
+.todo-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 -6px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  font-size: 14.5px;
+  line-height: 1.45;
 }
 
-.todo-card > input[type="checkbox"] {
+/* The row being changed, by a chip's popover, is tinted as a row under the pointer is. Colour only: nothing moves. */
+.todo-row:hover,
+.todo-row[data-picking] {
+  background: var(--hover);
+}
+
+.todo-box {
   flex: none;
-  width: 16px;
-  height: 16px;
-  margin: 3px 0 0;
-  accent-color: var(--accent);
+  box-sizing: border-box;
+  width: 1.02em;
+  height: 1.02em;
+  margin: 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 5px;
+  background: var(--bg-elev) center / 100% no-repeat;
+  transform: translateY(0.15em);
+  appearance: none;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
 }
 
-/* The card whose chip has its popover open, so it is plain which todo is being changed. Colour only: nothing moves. */
-.todo-card[data-picking] {
+.todo-box:enabled:hover {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.todo-box:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4l2.6 2.6L12 5.5' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.todo-box:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.todo-box:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .todo-text {
   flex: 1;
   min-width: 0;
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 
 .todo-words {
   margin-right: 4px;
-  color: var(--ink);
-  font-weight: 600;
-  text-decoration: none;
 }
 
-.todo-words:hover {
-  text-decoration: underline;
-  text-decoration-color: var(--line-strong);
-  text-underline-offset: 3px;
+.todo-words[role="button"] {
+  cursor: text;
 }
 
-.todo-card[data-done] .todo-words {
+.todo-words:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.todo-row[data-done] .todo-words {
   color: var(--muted);
-  font-weight: 400;
   text-decoration: line-through;
+  text-decoration-color: var(--faint);
 }
 
 .todo-words .todo-tag {
   color: var(--muted);
-  font-weight: 400;
 }
 
-/* What is set on a todo, as pills straight after its words, as v1 drew them. Each opens a popover under itself; a tag's narrows the list. */
+/* The words being edited, in place: a one-line field as wide as v1's, as tall as it was, laid over the row's padding so nothing moves. */
+.todo-edit {
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  height: 26px;
+  margin: -2.5px 4px -2.5px 0;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg-elev);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  color: var(--ink);
+  font: inherit;
+  vertical-align: top;
+}
+
+/* What can be set on a todo, as pills after its words, as v1 drew them: each opens a popover under itself, and a tag's narrows the list. */
 .todo-chip {
   display: inline-flex;
   box-sizing: border-box;
@@ -5230,9 +5440,7 @@ button.diff-fold:hover {
   background: var(--hover);
   color: var(--chip-ink);
   font: 500 11.5px/1 var(--prose);
-  /* In the row's 22px line, so a card with chips is as tall as one without. */
-  vertical-align: top;
-  margin-top: 1px;
+  vertical-align: middle;
   white-space: nowrap;
 }
 
@@ -5241,6 +5449,19 @@ button.diff-fold:hover {
   width: 12px;
   height: 12px;
   opacity: 0.75;
+}
+
+/* What isn't set yet: the same pill, quiet and dashed, as v1's empty filter pills. */
+.todo-chip[data-unset] {
+  border: 1px dashed var(--line-strong);
+  background: none;
+  color: var(--faint);
+}
+
+.todo-row:hover .todo-chip[data-unset],
+.todo-chip[data-unset]:focus-visible,
+.todo-chip[data-unset][aria-expanded="true"] {
+  color: var(--muted);
 }
 
 button.todo-chip {
@@ -5264,12 +5485,16 @@ button.todo-chip:disabled {
   cursor: default;
 }
 
-.todo-card[data-done] .todo-chip {
+.todo-row[data-done] .todo-chip {
   opacity: 0.75;
 }
 
-.todo-importance {
-  font-weight: 700;
+.todo-importance[data-level="3"] {
+  color: var(--danger);
+}
+
+.todo-importance[data-level="2"] {
+  color: var(--warn-ink);
 }
 
 /* When it was last done: quieter than what is set on the todo, as v1's done chip was. */
@@ -5291,35 +5516,53 @@ button.todo-chip:disabled {
 
 .todo-chip.todo-tag {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 button.todo-tag[aria-pressed="true"] {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-/* Where a todo is: its note, quiet, at the card's end. */
+/* Where a todo is: its note's name, quiet, at the row's right end, and the way to the note. */
 .todo-where {
   display: flex;
-  align-items: center;
+  flex: none;
+  align-items: baseline;
   gap: 4px;
+  max-width: 38%;
   min-width: 0;
-  max-width: 14rem;
-  color: var(--muted);
-  font-size: 11.5px;
 }
 
 .todo-note {
   overflow: hidden;
+  margin: -3px -4px;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: 11.5px var(--prose);
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.todo-note:hover,
+.todo-note:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.todo-note:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* What a todo's chip opens: its choices, as v1's. */
 .chip-menu {
   display: flex;
   flex-direction: column;
-  width: 244px;
+  width: 246px;
 }
 
 .chip-choice {
@@ -5336,6 +5579,25 @@ button.todo-tag[aria-pressed="true"] {
   font-size: 13.5px;
   text-align: left;
   cursor: pointer;
+}
+
+.chip-choice svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+/* A tag's mark, as v1's picker drew it, beside the tag's name: drawn, so the name is all the choice says. */
+.chip-hash {
+  flex: none;
+  width: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.chip-hash::before {
+  content: "#";
 }
 
 .chip-choice:hover,
@@ -5362,8 +5624,8 @@ button.todo-tag[aria-pressed="true"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 4px;
-  padding: 2px 8px 8px;
+  margin: -6px -6px 6px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
 }
@@ -5379,16 +5641,18 @@ button.todo-tag[aria-pressed="true"] {
   font-size: 14px;
 }
 
-/* The one way to everything else a todo can do: quiet until its card is pointed at or has the keyboard. */
+/* The one way to everything else a todo can do: out of sight until its row is pointed at or has the keyboard, and still reached with Tab. */
 .todo-more {
+  flex: none;
+  align-self: center;
   width: 24px;
   height: 24px;
-  margin: -2px -4px -2px 0;
-  opacity: 0.45;
+  margin: 0 -4px 0 0;
+  opacity: 0;
 }
 
-.todo-card:hover .todo-more,
-.todo-card:focus-within .todo-more,
+.todo-row:hover .todo-more,
+.todo-row:focus-within .todo-more,
 .todo-more[aria-expanded="true"] {
   opacity: 1;
 }
@@ -5410,21 +5674,23 @@ button.todo-tag[aria-pressed="true"] {
   cursor: pointer;
 }
 
-/* A panel opened from a chip, laid over the app. It is placed by its opener, under its chip. */
+/* A panel opened from a chip, laid over the app, in the look of v1's pickers. It is placed by its opener, under its chip. */
 .chip-popover {
   box-sizing: border-box;
   position: fixed;
   z-index: 40;
   top: 0;
   left: 0;
+  box-sizing: border-box;
   width: max-content;
   max-width: min(22rem, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
-  padding: 8px;
+  padding: 6px;
   overflow-y: auto;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
   background: var(--bg-elev);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg);
   color: var(--ink);
   font-size: 13px;
 }

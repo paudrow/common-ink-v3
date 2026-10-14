@@ -73,7 +73,7 @@ export const todos: Plugin = {
     host.editorExtensions.register({
       id: "todos",
       extension: (editor) => [
-        todoChips({ host, noteId: editor.noteId, onCompleted: (view, words) => completed(words, () => reopen(editor.noteId, view)), onRecurred: (words, revision) => completed(words, () => takeBack(host, editor.noteId, revision)) }),
+        todoChips({ host, noteId: editor.noteId, onCompleted: (view) => completed(() => reopen(editor.noteId, view)), onRecurred: (revision) => completed(() => takeBack(host, editor.noteId, revision)) }),
         ViewPlugin.define((view) => {
           const key = editorKey(editor);
           editors.set(key, view);

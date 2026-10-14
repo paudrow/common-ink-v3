@@ -33,9 +33,9 @@ export interface TodoChipsContext {
   host: PluginHost;
   noteId: string;
   /** Told of a todo checked off in the note and left done, to be undone with `untick`. */
-  onCompleted: (view: EditorView, words: string) => void;
+  onCompleted: (view: EditorView) => void;
   /** Told of a recurring todo checked off in the note, once the server has completed it: the change that did. */
-  onRecurred: (words: string, revision: number) => void;
+  onRecurred: (revision: number) => void;
 }
 
 /**
@@ -116,12 +116,12 @@ const checkbox = ({ host, noteId, onCompleted, onRecurred }: TodoChipsContext): 
         // The server completes it, and says so of the write that checked it: that change is what Undo takes back.
         void Promise.all([saved, before]).then((writes) => {
           const completing = writes.find((note) => note?.filed);
-          if (completing) onRecurred(todo.words, completing.revision);
+          if (completing) onRecurred(completing.revision);
         });
         return;
       }
       view.dispatch({ effects: tick.of({ from: line.from, text: line.text }) });
-      onCompleted(view, todo.words);
+      onCompleted(view);
     });
     // The keyboard stays in the note: a box ticked with the pointer is not somewhere the next key goes.
     el.addEventListener("mousedown", (event) => {
@@ -304,8 +304,9 @@ const asWritten = drawnInView((view) => {
 });
 
 const look = EditorView.baseTheme({
-  // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark.
-  // The box starts where its `[` does, so it is in one place ticked or not, though `[x]` is wider than `[ ]`.
+  // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark. It is as wide
+  // as the box, and so is the `[ ]`, `[x]` or `[X]` it stands for when that is shown as written, so neither moves the words.
+  ".md-chip.md-chip-task": { width: `${BOX_EM}em` },
   ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", paddingLeft: "0.35em", justifyContent: "flex-start", cursor: "pointer" },
   ".md-chip-task input": {
     appearance: "none",

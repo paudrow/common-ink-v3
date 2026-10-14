@@ -208,7 +208,8 @@ export const Op = z.discriminatedUnion("type", [
    * note, and what the line said. The line is followed through every change recorded since, so it is
    * found wherever it has moved to, and no other line is ever taken for it, however alike. Refused as
    * a conflict when the line itself was changed or deleted since. The same call made again changes
-   * nothing more. What is left out stays as written.
+   * nothing more. What is left out stays as written, and only `words` moves a token: the due date and
+   * the rule go after them.
    *
    * `every` sets how it recurs, or with null stops it recurring. Checking off a todo that recurs
    * leaves it open with its next due date and a mark of when it was last done and how many times,
@@ -233,6 +234,8 @@ export const Op = z.discriminatedUnion("type", [
     every: Recurrence.nullable().optional(),
     skip: z.boolean().optional(),
     on: Day.optional(),
+    /** What the todo says instead: its words and tags, as todo.list's `words`, on one line. */
+    words: z.string().max(MAX_NOTE_LENGTH).regex(/^[^\r\n]*$/, "A todo's words are one line").optional(),
   }).strict(),
   /**
    * Each time a recurring todo was checked off: the day, and who did it, latest first. `revision`,
@@ -834,12 +837,16 @@ export const MAX_AGENT_FOLDERS = 50;
 /** The folders to limit an agent to. Each stands for itself and the folders under it. */
 const FolderLimit = z.array(Id).min(1, "Name at least one folder, or leave folders out for all notes").max(MAX_AGENT_FOLDERS);
 
-/** What a member may ask for when connecting an agent. */
 /** How long a token lasts from when it is set, in days, or "never" for one that doesn't expire. */
 export const ExpiresIn = z.union([z.number().int().min(1).max(MAX_EXPIRY_DAYS), z.literal("never")]);
 export type ExpiresIn = z.infer<typeof ExpiresIn>;
 
-export const ConnectOptions = z.object({
+/**
+ * What a member may ask for when connecting an agent. Each option narrows the token and its default
+ * is the widest, so a key this doesn't know is refused: a misspelt `readOnly` or `workspaceId`
+ * left out without a word would mint a token that can do more than was asked for.
+ */
+export const ConnectOptions = z.strictObject({
   expiresInDays: ExpiresIn.default(DEFAULT_EXPIRY_DAYS),
   workspaceId: Id.optional(),
   readOnly: z.boolean().default(false),
@@ -877,7 +884,21 @@ export interface Me {
 /** What an operation answers anyone who isn't in the workspace, whether or not there is one. */
 export const NO_SUCH_WORKSPACE = "No such workspace";
 
+/** How the server the app is on is set up, where the app follows it. Only the server says it. */
+export interface Setup {
+  /** Whether HTML embeds are served from a host of their own (`EMBED_ORIGIN`), apart from the app's site. */
+  embedSite: boolean;
+}
+
+/** What `/api/me` answers: who is signed in, and how the server is set up. */
+export interface MeHere extends Me {
+  setup: Setup;
+}
+
 export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict";
+
+/** What a client is told of a fault that is no request's doing. The fault's own words stay in the server's log: they can name tables and rows. */
+export const BROKE = "Common Ink broke while doing that. Nothing says it was done: try again";
 
 export class OpError extends Error {
   constructor(

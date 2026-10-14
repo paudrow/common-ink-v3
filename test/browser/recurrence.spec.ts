@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { anotherPerson, asViewerOfNote, join, listedNote, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, join, listedNote, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -27,11 +27,6 @@ const recurrence = (page: Page) => page.getByRole("dialog", { name: "Recurrence"
 const completions = (page: Page) => page.getByRole("dialog", { name: "Completions" });
 const more = (page: Page, text: string | RegExp) => row(page, text).getByRole("button", { name: /^More for / });
 const menu = (page: Page) => page.getByRole("menu", { name: /^More for / });
-/** Picks from a todo's one menu on the Todos page, which is where everything but its checkbox and its words is. */
-const pick = async (page: Page, text: string | RegExp, item: string) => {
-  await more(page, text).click();
-  await menu(page).getByRole("menuitem", { name: item, exact: true }).click();
-};
 const modes = (page: Page) => page.getByRole("navigation", { name: "Modes" });
 
 /** Today on the page's own clock, which is the day the app completes a todo on. */
@@ -119,10 +114,10 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(bins.locator(".todo-every")).toHaveText("every 2 weeks");
   await expect(bins.locator(".todo-every")).toHaveAttribute("title", "Recurs: Every 2 weeks");
   await expect(bins.locator(".todo-done")).toHaveCount(0);
-  // The recurrence is a chip to press, as the due date is; the menu has no Recurrence… for a todo that has one, only what has no chip.
+  // The recurrence is a chip to press, as the due date is; the menu only opens the note.
   await expect(bins.getByRole("button", { name: "Recurrence: every 2 weeks" })).toBeEnabled();
   await more(page, "Take out the bins").click();
-  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveText(["Importance…"]);
+  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
   await bins.getByRole("checkbox").dblclick();
@@ -163,10 +158,11 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(page.getByRole("dialog")).toHaveCount(1);
   await recurrence(page).getByRole("button", { name: "Stop recurring" }).click();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(rolled.replace(" every:2w", ""));
-  await expect(bins.locator(".todo-every")).toHaveCount(0);
-  await expect(row(page, "Plain one").locator(".todo-every")).toHaveCount(0);
-  // A todo that doesn't recur has Recurrence… in its menu, which opens the same popover under the "…", with nothing to skip and nothing to stop.
-  await pick(page, "Plain one", "Recurrence…");
+  await expect(bins.locator(".todo-every")).toHaveText("Repeat");
+  await expect(bins.locator(".todo-every")).toHaveAttribute("data-unset", "true");
+  await expect(row(page, "Plain one").locator(".todo-every")).toHaveAccessibleName("Recurrence: none");
+  // A todo that doesn't recur has a quiet Repeat chip, which opens the same popover under itself, with nothing to skip and nothing to stop.
+  await row(page, "Plain one").locator(".todo-every").click();
   await expect(recurrence(page).locator(".recur-now")).toHaveText("Doesn't recur yet");
   await expect(recurrence(page).locator("[data-choice]")).toHaveText(["Daily", "Every weekday", "Weekly", "Every 2 weeks", "Monthly", "Yearly"]);
   await recurrence(page).getByRole("button", { name: "Daily" }).click();
@@ -230,7 +226,7 @@ test("on the Todos page the recurrence chip opens one flat popover under itself 
 
   // By keyboard alone: Tab to the chip, Enter opens it on the rule in force, Down and Enter pick, and the keyboard is back on the chip.
   await plants.getByRole("checkbox").focus();
-  for (const name of ["Water the plants", "Due date: Jan 1, 2031", "Recurrence: every week"]) {
+  for (const name of ["Edit Water the plants", "Importance: none", "Due date: Jan 1, 2031", "Recurrence: every week"]) {
     await page.keyboard.press("Tab");
     await expect(page.locator(":focus")).toHaveAccessibleName(name);
   }
@@ -587,7 +583,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(recurrence(page).getByLabel("How many times")).toHaveValue("9");
     await inside();
     await page.screenshot({ path: test.info().outputPath(`sentence-${scheme}.png`) });
-    expect(await recurrence(page).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(await page.evaluate(() => getComputedStyle(document.querySelector(".todo-card")!).backgroundColor));
+    expect(await recurrence(page).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(await page.evaluate(() => getComputedStyle(document.querySelector(".todo-list")!).backgroundColor));
 
     // Away from the note there is no token to put the cursor on: the rule is typed in one field.
     await recurrence(page).getByRole("button", { name: "Edit as text" }).click();
@@ -611,7 +607,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expect.poll(lineIn).toBe("- [ ] Take out the bins due:2031-01-07 every:1st-tue,3rd-tue");
     await expect(bins.locator(".todo-due")).toHaveText("Jan 7, 2031");
     await expect(bins.locator(".todo-done")).toHaveCount(0);
-    await expect(page.locator(".toast")).toHaveCount(0);
+    await expect(page.locator(".toast-card")).toHaveCount(0);
 
     // Escape gives the keyboard back to the chip.
     await bins.locator(".todo-every").click();
@@ -621,7 +617,7 @@ for (const scheme of ["light", "dark"] as const) {
     await bins.locator(".todo-every").click();
     await recurrence(page).getByRole("button", { name: "Stop recurring" }).click();
     await expect.poll(lineIn).toBe("- [ ] Take out the bins due:2031-01-07");
-    await expect(bins.locator(".todo-every")).toHaveCount(0);
+    await expect(bins.locator(".todo-every")).toHaveAttribute("data-unset", "true");
   });
 }
 
@@ -686,10 +682,10 @@ test("a viewer sees the recurrence and last-done chips, can list the completions
   await page.goto("/todos");
   await expect(row(page, "Feed the cat").locator(".todo-every")).toHaveAttribute("title", "Recurs: Every day");
   await expect(row(page, "Feed the cat").getByRole("checkbox")).toBeDisabled();
-  // Its recurrence chip opens nothing and the card's menu has no way to set it; its last-done chip still lists the completions.
+  // Its recurrence chip opens nothing and the row's menu has no way to set it; its last-done chip still lists the completions.
   await expect(row(page, "Feed the cat").locator(".todo-every")).toBeDisabled();
   await more(page, "Feed the cat").click();
-  await expect(menu(page).getByRole("menuitem", { name: "Recurrence…", exact: true })).toHaveCount(0);
+  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await row(page, "Feed the cat").locator(".todo-done").click();
   await expect(completions(page)).toContainText("Done 3 times");
@@ -820,7 +816,7 @@ for (const width of [1600, 1100]) {
   });
 }
 
-const toast = (page: Page) => page.locator(".toast");
+const toast = (page: Page) => page.locator(".toast-card");
 /** Everything a completion writes: the todo's note, the daily note's filed lines, and the todo's history. */
 const completionOf = async (page: Page, noteId: string, day: string) => {
   const note = await perform(page, { type: "note.read", id: noteId });
@@ -840,8 +836,8 @@ test("checking off a recurring todo on the Todos page says so in the toast, and 
   expect(before).toEqual({ text, filed: [], completions: 0 });
 
   await bins.getByRole("checkbox").click();
-  await expect(toast(page)).toHaveText("Completed Take out the binsUndo");
-  await expect(toast(page).getByRole("button")).toHaveText(["Undo", ""]);
+  await expect(toast(page)).toHaveText("Task completedUndo");
+  await expect(toast(page).getByRole("button")).toHaveText(["Undo"]);
   // The todo is open, due next, with one fewer time left.
   await expect.poll(() => completionOf(page, note.id, today)).toEqual({ text: text.replace(`due:${today} every:2w-times-3 done:2026-01-05x4`, `due:${addDays(today, 14)} every:2w-times-2 done:${today}x5`), filed: [`- [x] Take out the bins due:${today} [[${note.id}]]`], completions: 1 });
   await expect(bins.locator(".todo-due")).toHaveText(dateSaid(addDays(today, 14), today));
@@ -862,7 +858,7 @@ test("checking off a recurring todo on the Todos page says so in the toast, and 
   await perform(page, { type: "note.write", id: note.id, baseRevision: 3, text: text.replace("times-3", "times-1") });
   await expect(bins.locator(".todo-every")).toHaveText("every 2 weeks · 1 left");
   await bins.getByRole("checkbox").check();
-  await expect(toast(page)).toHaveText("Completed Take out the binsUndo");
+  await expect(toast(page)).toHaveText("Task completedUndo");
   await expect.poll(async () => (await completionOf(page, note.id, today)).filed).toHaveLength(1);
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(`- [x] Take out the bins due:${today} every:2w-times-1 done:2026-01-05x4`);
   await toast(page).getByRole("button", { name: "Undo" }).click();
@@ -880,7 +876,7 @@ test("checking off a recurring todo in a note says so in the toast, and Undo tak
   await page.keyboard.press("End");
   await page.keyboard.type(" words");
   await line(page, "Stretch").getByRole("checkbox").click();
-  await expect(toast(page)).toHaveText("Completed StretchUndo");
+  await expect(toast(page)).toHaveText("Task completedUndo");
   const typed = text.replace("After", "After words");
   await expect.poll(() => completionOf(page, note.id, today)).toEqual({ text: typed.replace(`due:${today} every:1d-times-9`, `due:${addDays(today, 1)} every:1d-times-8 done:${today}x1`), filed: [`- [x] Stretch due:${today} [[${note.id}]]`], completions: 1 });
   await expectShown(line(page, "Stretch"), "Stretch Tomorrow every day · 8 left ✓ Today ×1");
@@ -905,7 +901,7 @@ test("Undo of a recurring todo's completion changes nothing when its line was wr
   const note = await open(page, text);
 
   await line(page, "Stretch").getByRole("checkbox").click();
-  await expect(toast(page)).toHaveText("Completed StretchUndo");
+  await expect(toast(page)).toHaveText("Task completedUndo");
   const rolled = `- [ ] Stretch due:${addDays(today, 1)} every:1d done:${today}x1`;
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(rolled);
   // The line is reworded before Undo is pressed, here and on the Todos page alike.
@@ -926,7 +922,7 @@ test("Undo of a recurring todo's completion changes nothing when its line was wr
   // A line written below the todo doesn't touch it: Undo still takes the completion back, and keeps that line.
   await page.goto("/todos");
   await row(page, "Stretch").getByRole("checkbox").click();
-  await expect(toast(page)).toHaveText("Completed Stretch slowlyUndo");
+  await expect(toast(page)).toHaveText("Task completedUndo");
   await expect.poll(async () => (await completionOf(page, note.id, today)).completions).toBe(2);
   const revision = (await perform(page, { type: "note.read", id: note.id })).revision;
   await perform(page, { type: "note.write", id: note.id, baseRevision: revision, text: `${await read(page, note.id)}Below\n` });
@@ -1205,7 +1201,7 @@ test("reverting a completion from History takes its line off the daily note open
   // The todo's note is in front on the left, and its History tab reverts the change that completed the todo.
   await left.click();
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await inspector.getByRole("tab", { name: "History" }).click();
+  await pinPanel(page, "History");
   const changes = inspector.getByRole("listbox", { name: "Changes" }).getByRole("option");
   await changes.first().click();
   await inspector.getByRole("group", { name: "Selection" }).getByRole("button", { name: "Revert…" }).click();

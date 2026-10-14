@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carry, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
 import { useKept } from "./lib/kept.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
@@ -245,6 +245,23 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
   visit(null, 1);
   if (editing?.kind === "create" && editing.parentId === null) rows.push(nameRow("new", 1, "", (name) => run({ type: "folder.create", name })));
 
+  /** The arrow keys move through the rows, Home and End go to the first and last, and Right and Left open a folder out and shut it. */
+  const move = (e: KeyboardEvent<HTMLDivElement>) => {
+    const row = e.target;
+    if (!(row instanceof HTMLElement) || row.role !== "treeitem" || e.altKey || e.ctrlKey || e.metaKey) return;
+    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    const at = rows.indexOf(row);
+    const to = { ArrowDown: rows[at + 1], ArrowUp: rows[at - 1], Home: rows[0], End: rows.at(-1) }[e.key];
+    const turns = { ArrowRight: "false", ArrowLeft: "true" }[e.key];
+    // Right on a folder that is open goes into it, and Left on a row inside one goes to the folder it is in.
+    const parent = rows.slice(0, at).findLast((r) => Number(r.ariaLevel) < Number(row.ariaLevel));
+    const through = e.key === "ArrowRight" ? (row.ariaExpanded === "true" ? rows[at + 1] : undefined) : e.key === "ArrowLeft" && row.ariaExpanded !== "true" ? parent : undefined;
+    if (to ?? through) (to ?? through)!.focus();
+    else if (turns && row.ariaExpanded === turns) row.querySelector<HTMLElement>("[data-row-toggle]")?.click();
+    else if (!(e.key in { ArrowDown: 0, ArrowUp: 0 })) return;
+    e.preventDefault();
+  };
+
   return (
     <div className="folders">
       <div className="section-head">
@@ -255,7 +272,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
           </button>
         )}
       </div>
-      <div role="tree" aria-labelledby={`${ids}-label`} className="tree">
+      <div role="tree" aria-labelledby={`${ids}-label`} className="tree" onKeyDown={move}>
         {rows}
         {loose > 0 && listRow(SHARED_WITH_ME, "Shared with me", loose)}
       </div>
@@ -300,6 +317,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
 
 function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit: (name: string) => void; onCancel: () => void }) {
   const [value, setValue] = useState(initial);
+  /** Ended from the keyboard, the cursor goes back to the tree's rows, where the arrow keys are. */
+  const toRows = (field: HTMLElement) => field.closest('[role="tree"]')?.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]')?.focus();
   return (
     <input
       className="name-input"
@@ -314,9 +333,11 @@ function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit:
           e.preventDefault();
           if (value.trim() && value.trim() !== initial) onCommit(value.trim());
           else onCancel();
+          toRows(e.currentTarget);
         } else if (e.key === "Escape") {
           e.stopPropagation();
           onCancel();
+          toRows(e.currentTarget);
         }
       }}
     />
