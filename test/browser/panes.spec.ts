@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, noteCard, openAllNotes, panelIcons, perform, runCommand, showPanel, shownPanel, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
+import { folderRow, noteCard, openAllNotes, panelIcons, perform, pinPanel, runCommand, showPanel, shownPanel, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
 
 const tabBar = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group);
 const tabs = (page: Page, group = 0) => tabBar(page, group).getByRole("tab");
@@ -332,8 +332,7 @@ test("the inspector shows the panel last picked on whatever is in front, and say
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const shown = () => shownPanel(page);
 
-  // Nothing picked yet: Info.
-  await expect(shown()).toHaveText("Info");
+  await pinPanel(page, "Info");
   await showPanel(page, "Backlinks");
   await expect(shown()).toHaveText("Backlinks");
 
@@ -565,6 +564,7 @@ for (const [name, splits, panes] of [
 ] as const) {
   test(`in a split ${name}, a page from the sidebar, the palette or the address opens where the italic tab is, with every pane and both sidebars where they were`, async ({ page }) => {
     await withNotes(page, "Alpha", "Beta", "Gamma");
+    await pinPanel(page, "Info");
     for (const title of ["Alpha", "Beta", "Gamma"]) await keep(page, title);
     // The italic tab, All notes, is split off last, so it is alone in the last pane.
     if (splits.length > 1) {

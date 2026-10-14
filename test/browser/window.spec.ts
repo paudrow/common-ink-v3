@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
+import { perform, pinPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
 
 const sidebar = (page: Page) => page.getByRole("complementary", { name: "Sidebar" });
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -52,6 +52,7 @@ test("the sidebar is dragged wider and narrower by its inner edge, within its li
 
 test("the inspector is dragged by its inner edge, and both edges are moved with the keyboard and put back with Enter", async ({ page }) => {
   await withNote(page);
+  await pinPanel(page, "Info");
   await expect(inspector(page)).toBeVisible();
   expect(await widthOf(inspector(page))).toBe(256);
   const handle = edge(page, "Resize inspector");
@@ -181,6 +182,7 @@ for (const steps of [1, 4, 30]) {
 
 test("the inspector's pinned panel folds away by its edge, leaving its bar where it was, and opens again by that edge, pinned", async ({ page }) => {
   await withNote(page);
+  await pinPanel(page, "Info");
   await page.evaluate(() => document.fonts.ready);
   const handle = edge(page, "Resize inspector");
   const bar = page.getByRole("navigation", { name: "Inspector bar" });
@@ -285,7 +287,7 @@ test("a width kept from before the sides folded by their edges is the width they
     localStorage.setItem(person, JSON.stringify({ sidebar: 333, inspector: 444 }));
     localStorage.setItem("ink.sidebar", "false");
     // The inspector as it was kept before it had panels over the page: open or closed, and the tab last picked.
-    localStorage.removeItem(person.replace("ink.widths.", "ink.inspector."));
+    localStorage.removeItem(person.replace("ink.widths.", "ink.inspectorPanel."));
     localStorage.setItem("ink.inspector", "false");
     localStorage.setItem(person.replace("ink.widths.", "ink.inspectorTab."), JSON.stringify("backlinks"));
   });
@@ -304,6 +306,7 @@ test("a width kept from before the sides folded by their edges is the width they
 
 test("the tab row has its tabs and Focus and no button for either side, whose commands and keys still close and open them", async ({ page }) => {
   await withNote(page);
+  await pinPanel(page, "Info");
   const controls = (part: Locator) => part.locator("a, button:not(.tab-close)").evaluateAll((els) => els.filter((el) => el.getClientRects().length).map((el) => el.getAttribute("aria-label") ?? el.textContent));
   expect(await controls(page.locator(".tab-row"))).toEqual(["Focus"]);
   await expect(page.getByRole("group", { name: "Window" })).toHaveCount(0);
@@ -537,7 +540,6 @@ test(`in a pane 320px wide a note's bar is as tall before the name of its folder
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords.", folderId });
   await page.evaluate(() => {
     localStorage.setItem("ink.sidebar", "false");
-    localStorage.setItem(Object.keys(localStorage).find((key) => key.startsWith("ink.inspector."))!, JSON.stringify({ panel: "info", open: false, pinned: true }));
   });
   let arrive = () => {};
   const held = new Promise<void>((done) => (arrive = done));
@@ -615,6 +617,7 @@ test("a closed sidebar leaves a bar with an icon for each thing the sidebar list
 
 test("the inspector's bar has an icon for each panel whatever is in front, with its panel closed too, and an icon shows its panel", async ({ page }) => {
   await withNote(page);
+  await pinPanel(page, "Info");
   const main = page.getByRole("main", { name: "Editor" });
   const before = (await main.boundingBox())!;
   const bar = page.getByRole("navigation", { name: "Inspector bar" });
@@ -665,6 +668,7 @@ for (const width of [900, 700, 480]) {
   test(`in a window ${width}px wide every control is inside it, and the sidebar and the inspector still open and close`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await withNote(page, "# Draft with a long title that takes room\n\nWords.");
+    await pinPanel(page, "Info");
 
     /** Every part named is wholly inside the window: none of it is past the right edge, or the left. */
     const inside = async (...parts: Locator[]) => {

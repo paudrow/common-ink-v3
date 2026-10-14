@@ -87,6 +87,14 @@ export async function showPanel(page: Page, name: string) {
   await expect(icon).toHaveAttribute("aria-expanded", "true");
 }
 
+/** Shows a panel of the inspector and pins it beside the page, as a member does to keep it there: a first visit has none pinned. */
+export async function pinPanel(page: Page, name: string) {
+  await showPanel(page, name);
+  const pin = page.getByRole("complementary", { name: "Inspector" }).getByRole("button", { name: "Pin beside the page" });
+  if ((await pin.getAttribute("aria-pressed")) !== "true") await pin.click();
+  await expect(pin).toHaveAttribute("aria-pressed", "true");
+}
+
 /** The names of the icons in the inspector's bar, in order: one for each panel, whatever is in front. */
 export const panelIcons = (page: Page) => () =>
   page

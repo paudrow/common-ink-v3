@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -204,6 +204,9 @@ test("a note that is read before the workspace's notes and folders are listed op
     await route.continue();
   });
   await open(page);
+  await pinPanel(page, "Info");
+  await page.reload();
+  await expect(column(page, "Done")).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
   steady(await seen(page));
 });

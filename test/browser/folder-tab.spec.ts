@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { folderRow, listedNote, listedNotes, noteCard, openAllNotes, panelIcons, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { folderRow, listedNote, listedNotes, noteCard, openAllNotes, panelIcons, perform, pinPanel, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const tabs = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group).getByRole("tab");
 const tab = (page: Page, title: string) => tabs(page).filter({ hasText: new RegExp(`^${title}$`) });
@@ -441,6 +441,7 @@ test("with the note list off a folder's notes are listed by title, and with tabs
 
 test("the inspector follows the tab in front: a note's Info, a folder tab's Info, a page tab's quiet line, and it stays open and in place across them, with the same icons in its bar", async ({ page }) => {
   await withFolders(page);
+  await pinPanel(page, "Info");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await folderRow(page, "Projects").dblclick();
   await listedNote(page, "Plan").click();

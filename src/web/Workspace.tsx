@@ -29,8 +29,8 @@ import { ago, useNow } from "./time.ts";
 const FOCUS_KEY = "ink.focus";
 const SIDEBAR_KEY = "ink.sidebar";
 /**
- * The panel a member who has used none is shown, pinned, as the inspector always began. It is not
- * History, which counts a note's changes as seen by being shown.
+ * The panel the inspector's command opens for a member who has used none. It is not History, which
+ * counts a note's changes as seen by being shown.
  */
 const FIRST_PANEL = "info";
 /** How wide the sidebar starts, and how far a member can drag it. */
@@ -146,12 +146,14 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
   /**
    * The inspector as the member last had it, kept in this browser as the widths are: which panel,
-   * whether it shows, and whether it is pinned. A member from before it was kept this way begins
-   * with the tab they had picked, open or closed as it was.
+   * whether it shows, and whether it is pinned. It begins closed and unpinned. A member from before
+   * panels could be pinned never chose to pin one, so they begin the same, with the tab they had
+   * picked as the panel last used. The key is not `ink.inspector.<id>`, which earlier builds wrote
+   * pinned on a first visit without the member choosing it.
    */
-  const sideKey = `ink.inspector.${me.person.id}`;
+  const sideKey = `ink.inspectorPanel.${me.person.id}`;
   const [side, setSide] = useState<Side>(() =>
-    restored(readStored(sideKey, isAnything), { panel: readStored(`ink.inspectorTab.${me.person.id}`, isString) ?? FIRST_PANEL, open: readStored("ink.inspector", isBoolean) ?? true, pinned: true }),
+    restored(readStored(sideKey, isAnything), { panel: readStored(`ink.inspectorTab.${me.person.id}`, isString) ?? FIRST_PANEL, open: false, pinned: false }),
   );
   useEffect(() => writeStored(sideKey, side), [sideKey, side]);
   /** What each page that is drawn says it is showing, by the page's id. */

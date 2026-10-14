@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { listedNote, noteCard, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 /** Opens a note from the list of every note as a preview, which is what a click on its title does. */
 async function preview(page: Page, title: string) {
@@ -72,7 +72,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   const noteUrl = page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" });
   await keep(page, "Alpha");
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
-  await showPanel(page, "Info");
+  await pinPanel(page, "Info");
 
   const { width } = (await group(1).boundingBox())!;
   await openAllNotes(page);
@@ -159,6 +159,7 @@ test("a tab's menu closes the others, those to its left, those to its right, or 
 test("⇧⌘P lists the commands, narrows them as you type, and runs the one chosen", async ({ page }) => {
   await withNotes(page, "Alpha");
   await preview(page, "Alpha");
+  await pinPanel(page, "Info");
   const text = page.getByRole("textbox", { name: "Note text" });
   await text.click();
   const palette = page.getByRole("dialog", { name: "Commands" });

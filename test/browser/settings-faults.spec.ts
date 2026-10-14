@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { category, group, json, openOptions, setPlugin, typeJson } from "./settings-helpers.ts";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -200,6 +200,7 @@ test("a key that types is a keybinding only where nothing is being typed, so Ent
   await expect(problems(page)).toHaveCount(0);
 
   await page.goto(`/note/${note.id}`);
+  await pinPanel(page, "Info");
   await text(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("Enter");

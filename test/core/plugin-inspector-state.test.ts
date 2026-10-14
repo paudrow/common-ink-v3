@@ -3,7 +3,7 @@ import { CLOSED, layoutOf, reduce, restored, showing, type Side, type SideAction
 
 const PANELS = ["history", "backlinks", "info"];
 const after = (from: Side, ...actions: SideAction[]) => actions.reduce((side, action) => reduce(side, action, PANELS), from);
-const FRESH: Side = { panel: "info", open: true, pinned: true };
+const FRESH: Side = { panel: "info", open: false, pinned: false };
 const pick = (panel: string): SideAction => ({ type: "pick", panel });
 
 describe("the inspector's panel", () => {

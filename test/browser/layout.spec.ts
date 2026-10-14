@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, panelIcons, perform, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });
@@ -239,8 +239,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  // A member's first time has Info.
-  await expect(shownPanel(page)).toHaveText("Info");
+  await pinPanel(page, "Info");
   const panel = inspector.locator(".inspector-body");
   await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
   await expect(panel.getByRole("definition").first().locator("span")).toHaveText("Projects / Common Ink");
@@ -274,6 +273,7 @@ test("⌘. toggles focus, which shows the note with neither side nor a bar of ic
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Draft\n\nWords." });
   await page.goto(`/note/draft-${note.id}`);
+  await pinPanel(page, "Info");
   await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
   expect(await width(page)).toBe(764);
 
@@ -334,7 +334,7 @@ test("the inspector stays open whatever is in front, with the same icons in its 
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const panel = inspector.locator(".inspector-body");
   await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  await showPanel(page, "Info");
+  await pinPanel(page, "Info");
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toBeVisible();
   const place = await inspector.boundingBox();
 

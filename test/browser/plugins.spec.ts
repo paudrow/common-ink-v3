@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { connectAgent, folderRow, listedNote, noteCard, openAllNotes, panelIcons, perform, showPanel, shownPanel, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, folderRow, listedNote, noteCard, openAllNotes, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson } from "./helpers.ts";
 import { openDetails, pluginRow } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });
@@ -550,8 +550,8 @@ test("an inspector view a plugin adds is an icon in the bar whatever is in front
   await keepNote(page, "Alpha");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
 
-  // A member's first time has Info, whatever a plugin adds after it.
   await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info", "Count"]);
+  await pinPanel(page, "Info");
   await expect(shownPanel(page)).toHaveText("Info");
   await showPanel(page, "Count");
   await expect(inspector.locator(".inspector-body")).toHaveText("Counting the note Alpha");

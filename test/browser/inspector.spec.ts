@@ -29,31 +29,55 @@ async function withNote(page: Page, text = "# Draft\n\nWords.") {
   return note;
 }
 
-/** A member's first time has Info pinned. This leaves the inspector closed, and not pinned for the next time it opens. */
-async function closeUnpinned(page: Page) {
-  await expect(pin(page)).toHaveAttribute("aria-pressed", "true");
+/** Shows a panel from its icon and pins it beside the page. */
+async function pinned(page: Page, name: string) {
+  await icon(page, name).click();
+  await expect(panel(page).getByRole("heading", { name })).toBeVisible();
   await pin(page).click();
-  await expect(pin(page)).toHaveAttribute("aria-pressed", "false");
-  await page.keyboard.press("Escape");
-  await expect(panel(page)).toHaveCount(0);
+  await expect(pin(page)).toHaveAttribute("aria-pressed", "true");
 }
 
 const write = async (page: Page, document: Record<string, unknown>) =>
   perform(page, { type: "settings.write", text: JSON.stringify(document), baseRevision: (await perform(page, { type: "settings.read" })).revision });
 
+test("a member's first visit has no panel open and none pinned, and the inspector's command opens Info over the page", async ({ page }) => {
+  await withNote(page);
+  expect((await drawn(page)).icons.map(([name]) => name)).toEqual(["History", "Backlinks", "Info"]);
+  await expect(panel(page)).toHaveCount(0);
+  for (const name of ["History", "Backlinks", "Info"]) await expect(icon(page, name)).toHaveAttribute("aria-expanded", "false");
+  await page.reload();
+  await expect(editor(page)).toContainText("Draft");
+  await expect(panel(page)).toHaveCount(0);
+
+  await runCommand(page, "Toggle inspector");
+  await expect(panel(page).getByRole("heading", { name: "Info" })).toBeVisible();
+  await expect(panel(page)).toHaveAttribute("data-layout", "temporary");
+  await expect(pin(page)).toHaveAttribute("aria-pressed", "false");
+});
+
+test("a member from before panels could be pinned begins with none open and none pinned, the tab they had as the panel last used, whatever an earlier build kept", async ({ page }) => {
+  await withNote(page);
+  await page.evaluate(() => {
+    const person = Object.keys(localStorage).find((key) => key.startsWith("ink.inspectorPanel."))!.slice("ink.inspectorPanel.".length);
+    for (const key of Object.keys(localStorage)) if (key.startsWith("ink.inspector")) localStorage.removeItem(key);
+    localStorage.setItem("ink.inspector", "true");
+    localStorage.setItem(`ink.inspectorTab.${person}`, JSON.stringify("backlinks"));
+    localStorage.setItem(`ink.inspector.${person}`, JSON.stringify({ panel: "info", open: true, pinned: true }));
+  });
+  await page.reload();
+  await expect(editor(page)).toContainText("Draft");
+  await expect(bar(page)).toBeVisible();
+  await expect(panel(page)).toHaveCount(0);
+  await runCommand(page, "Toggle inspector");
+  await expect(panel(page).getByRole("heading", { name: "Backlinks" })).toBeVisible();
+  await expect(panel(page)).toHaveAttribute("data-layout", "temporary");
+});
+
 test("a panel opened from the bar lies over the page, which is as wide with it as without, and a pinned panel is beside the page, which gives it its width", async ({ page }) => {
   await withNote(page);
-  await expect(panel(page).getByRole("heading", { name: "Info" })).toBeVisible();
-  const pinned = { main: await boxOf(main(page)), bar: await drawn(page), panel: await boxOf(panel(page)) };
-  expect(pinned.panel[2]).toBe(256);
-  expect(pinned.bar.box[2]).toBe(44);
-  expect(pinned.main[0] + pinned.main[2]).toBe(pinned.panel[0]);
-  expect(pinned.panel[0] + pinned.panel[2]).toBe(pinned.bar.box[0]);
-
-  await closeUnpinned(page);
+  await expect(panel(page)).toHaveCount(0);
   const closed = { main: await boxOf(main(page)), bar: await drawn(page) };
-  expect(closed.bar).toEqual(pinned.bar);
-  expect(closed.main).toEqual([pinned.main[0], pinned.main[1], pinned.main[2] + 256, pinned.main[3]]);
+  expect(closed.bar.box[2]).toBe(44);
   expect(closed.main[0] + closed.main[2]).toBe(closed.bar.box[0]);
 
   // Over the page: the page is exactly as wide, and the note's words are where they were.
@@ -73,18 +97,16 @@ test("a panel opened from the bar lies over the page, which is as wide with it a
   expect(await boxOf(main(page))).toEqual(closed.main);
   expect(await drawn(page)).toEqual(closed.bar);
 
-  // Pinned, the page is narrower by the panel's width, and the bar has not moved.
-  await icon(page, "History").click();
-  await pin(page).click();
-  await expect(pin(page)).toHaveAttribute("aria-pressed", "true");
-  expect(await boxOf(main(page))).toEqual(pinned.main);
-  expect(await boxOf(panel(page))).toEqual(pinned.panel);
+  // Pinned, the page is narrower by the panel's width, the panel is between it and the bar, and the bar has not moved.
+  await pinned(page, "History");
+  expect(await boxOf(main(page))).toEqual([closed.main[0], closed.main[1], closed.main[2] - 256, closed.main[3]]);
+  expect(await boxOf(panel(page))).toEqual([closed.bar.box[0] - 256, 0, 256, closed.bar.box[3]]);
   expect(await drawn(page)).toEqual(closed.bar);
 });
 
 test("the bar has the same icons in the same places whatever is in front and however its panel is shown, and a panel with nothing for what is in front says so", async ({ page }) => {
   const note = await withNote(page);
-  await closeUnpinned(page);
+  await expect(panel(page)).toHaveCount(0);
   const first = await drawn(page);
   expect(first.icons.map(([name]) => name)).toEqual(["History", "Backlinks", "Info"]);
 
@@ -118,7 +140,7 @@ test("a panel over the page goes on a press elsewhere and on Escape, with the cu
   await write(page, { "keybindings.inspector.history": ["f8"] });
   await page.reload();
   await expect(editor(page)).toContainText("Draft");
-  await closeUnpinned(page);
+  await expect(panel(page)).toHaveCount(0);
 
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+End");
@@ -177,7 +199,7 @@ test("each panel has a command, which takes a key of the member's choosing, and 
   await write(page, { "keybindings.inspector.info": ["f7"], "keybindings.inspector.backlinks": ["ctrl+k b"] });
   await page.reload();
   await expect(editor(page)).toContainText("Draft");
-  await closeUnpinned(page);
+  await expect(panel(page)).toHaveCount(0);
 
   await runCommand(page, "Toggle History panel");
   await expect(panel(page).getByRole("heading", { name: "History" })).toBeVisible();
@@ -211,7 +233,7 @@ test("each panel has a command, which takes a key of the member's choosing, and 
 
 test("a panel's command run from the palette takes the cursor and goes on Escape, and run again from the palette over the panel it closes it", async ({ page }) => {
   await withNote(page);
-  await closeUnpinned(page);
+  await expect(panel(page)).toHaveCount(0);
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+End");
 
@@ -245,7 +267,7 @@ test("with Vim on, ctrl+w h from a panel over the page goes to the note under it
   await write(page, { "vim.enabled": true, "keybindings.inspector.history": ["f8"] });
   await page.reload();
   await expect(editor(page)).toContainText("Draft");
-  await closeUnpinned(page);
+  await expect(panel(page)).toHaveCount(0);
   await editor(page).click();
   await page.keyboard.press("F8");
   await expect.poll(() => panel(page).evaluate((el) => el.contains(document.activeElement))).toBe(true);
@@ -257,8 +279,7 @@ test("with Vim on, ctrl+w h from a panel over the page goes to the note under it
 
 test("the panel that was pinned is there after a reload, one that lay over the page is not, and the next to open is as the last was", async ({ page }) => {
   await withNote(page);
-  await icon(page, "Backlinks").click();
-  await expect(pin(page)).toHaveAttribute("aria-pressed", "true");
+  await pinned(page, "Backlinks");
   await page.reload();
   await expect(panel(page).getByRole("heading", { name: "Backlinks" })).toBeVisible();
   await expect(pin(page)).toHaveAttribute("aria-pressed", "true");
@@ -289,6 +310,7 @@ test("the panel that was pinned is there after a reload, one that lay over the p
 
 test("focus shows neither the bar nor a panel, and leaving it puts a pinned panel back and leaves one that lay over the page closed", async ({ page }) => {
   await withNote(page);
+  await pinned(page, "Info");
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+.");
   await expect(bar(page)).toBeHidden();
@@ -336,6 +358,7 @@ test("a page says what it is showing, and History and Info are about that while 
 
   await page.goto("/fixture-list");
   await expect(main(page)).toContainText("Listing 2");
+  await pinned(page, "Info");
   await expect(panel(page).getByRole("definition")).toHaveText(["Fixture's notes", "2 notes", "just now by Ada Lovelace"]);
   await expect(panel(page).getByRole("term")).toHaveText(["Showing", "Notes", "Last changed"]);
   await icon(page, "History").click();

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Me, Note, OpInput } from "../../src/core/protocol.ts";
-import { connectAgent, listedNote, openAllNotes, panelIcon, panelIcons, perform, showPanel, shownPanel, signInAsNewPerson, toggleInspector } from "./helpers.ts";
+import { connectAgent, listedNote, openAllNotes, panelIcon, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector } from "./helpers.ts";
 
 const UNSEEN = "Changes you haven't seen";
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -76,7 +76,7 @@ const THREE = ["You wrote Recipes", "Claude edited Trip", "You wrote Trip", "You
 
 async function openHistoryTab(page: Page, id: string) {
   await page.goto(`/note/${id}`);
-  await showPanel(page, "History");
+  await pinPanel(page, "History");
   return inspector(page).locator(".inspector-body");
 }
 
@@ -162,9 +162,9 @@ test("a note someone else changed while the member was away shows the dot when i
   const { id } = await sharedNote(page);
   await page.goto(`/note/${id}`);
 
-  // The member has used no panel: Info shows, which counts nothing as seen.
+  // The member has used no panel: none shows, so nothing is counted as seen.
   const historyTab = panelIcon(page, "History");
-  await expect(shownPanel(page)).toHaveText("Info");
+  await expect(inspector(page)).toHaveCount(0);
   await expect(historyTab).toHaveAccessibleDescription(UNSEEN);
   await toggleInspector(page);
   const icon = page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button", { name: "History" });
@@ -784,6 +784,7 @@ test("History's panes are side by side with room, one over the other in a narrow
 
   await page.setViewportSize({ width: 1440, height: 800 });
   await page.goto("/history");
+  await pinPanel(page, "Info");
   await expect.poll(listed(historyMode(page))).toEqual(THREE);
   // By its tick, which shows nothing in place of the list where there is room for one pane only.
   await tick(row(historyMode(page), "You wrote Recipes")).click();
@@ -1084,8 +1085,7 @@ test("with a folder's list in front the inspector's History tab lists that folde
   await perform(page, { type: "note.create", folderId: trips.id, text: "# Packing" });
 
   await page.goto(`/folder/${trips.id}`);
-  // Nothing picked yet: Info, as on a note.
-  await expect(shownPanel(page)).toHaveText("Info");
+  await pinPanel(page, "Info");
   await showPanel(page, "History");
   const panel = inspector(page).locator(".inspector-body");
   const shown = read(tree(panel).locator('[aria-level="1"]'));
@@ -1384,7 +1384,7 @@ test("a folder's History in the inspector lists its notes' changes by note or by
   await daysAgo(page, { Trip: { upTo: 1, days: 1 } });
 
   await page.goto(`/folder/${trips.id}`);
-  await showPanel(page, "History");
+  await pinPanel(page, "History");
   const panel = inspector(page).locator(".inspector-body");
   await expect(panel.getByRole("radio", { checked: true })).toHaveText(["By note"]);
   await expect.poll(byNote(panel)).toEqual(["Today", "+1 −0 Packing · 1 change · You", "+2 −0 Trip · 1 change · Claude", "Yesterday", "+1 −0 Trip · 1 change · You"]);
