@@ -111,20 +111,28 @@ test("leaving a note while its save is on the way keeps the other writer's chang
   const id = noteIdIn(page);
 
   let held = false;
+  let reached = () => {};
+  let opened = () => {};
+  const saveReached = new Promise<void>((done) => (reached = done));
+  const nextOpened = new Promise<void>((done) => (opened = done));
   await page.route("**/ops", async (route) => {
     if (held || !isWrite(route.request().postData())) return route.continue();
     held = true;
     await writeElsewhere(page, { id, baseRevision: 1, text: "# Shared\n\nmine\n\ntheirs" });
     const response = await route.fetch();
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    reached();
+    await Promise.all([nextOpened, new Promise((resolve) => setTimeout(resolve, 1000))]);
     await route.fulfill({ response });
   });
   await page.keyboard.type(" too");
   await leaveEditor(page);
   await openAllNotes(page);
+  // The next note is made once the save has reached the server and its answer comes back once that note is open, however slow each request is.
+  await saveReached;
   await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(page).toHaveURL(/\/note\/untitled-[a-z0-9]{12}$/);
   await expect(page).not.toHaveURL(new RegExp(id));
+  opened();
   await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Info" }).click();
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" })).toHaveValue(new RegExp(`${noteIdIn(page)}$`));
 

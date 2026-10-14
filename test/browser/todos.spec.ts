@@ -254,9 +254,9 @@ for (const width of [1600, 1100]) {
 const HOME = "# Home\n\n- [ ] !! Call the bank due:2026-10-14 +Home\n- [x] Book flights\n- [ ] ! Water plants #outside\n";
 const WORK = "# Work #office\n\n- [ ] !!! Ship it due:2026-10-12\n- [ ] Write notes\n";
 
-async function twoNotes(page: Page) {
+async function twoNotes(page: Page, homeText = HOME) {
   await signInAsNewPerson(page, "Ada Lovelace");
-  const home = await perform(page, { type: "note.create", text: HOME });
+  const home = await perform(page, { type: "note.create", text: homeText });
   const work = await perform(page, { type: "note.create", text: WORK });
   await page.goto("/todos");
   return { home, work };
@@ -378,7 +378,10 @@ test("a todo's card looks like a plugin's card and has three things to press: it
 });
 
 test("everything else a todo can do is in one menu, from its button, a right-click and the keyboard, and each change rewrites its line in its note as the member's change", async ({ page }) => {
-  const { home } = await twoNotes(page);
+  // The bank is due on a day that is never today, whenever this runs: what a todo already is can't be chosen again, and "Due today" is chosen below.
+  const due = await localDay(page, 10);
+  const homeText = HOME.replace("due:2026-10-14", `due:${due}`);
+  const { home } = await twoNotes(page, homeText);
   const lineIn = async () => (await read(page, home.id)).split("\n")[2];
   const today = await localDay(page);
 
@@ -389,7 +392,7 @@ test("everything else a todo can do is in one menu, from its button, a right-cli
   // What it already is can't be chosen again.
   await expect(menu(page).getByRole("menuitem", { name: "Importance: !!", exact: true })).toBeDisabled();
   await pick(page, "Importance: !");
-  await expect.poll(lineIn).toBe("- [ ] ! Call the bank due:2026-10-14 +Home");
+  await expect.poll(lineIn).toBe(`- [ ] ! Call the bank due:${due} +Home`);
   await expect(menu(page)).toHaveCount(0);
   await expect(more(page, "Call the bank")).toBeFocused();
 
@@ -427,7 +430,7 @@ test("everything else a todo can do is in one menu, from its button, a right-cli
   await pick(page, "Open the note");
   await expect(page).toHaveURL(new RegExp(`${home.id}$`));
   expect(new Set(await authors(page, home.id))).toEqual(new Set(["member Ada Lovelace"]));
-  await expect.poll(async () => (await read(page, home.id)).replace("- [ ] !!! Call the bank +Home", "- [ ] !! Call the bank due:2026-10-14 +Home")).toBe(HOME);
+  await expect.poll(async () => (await read(page, home.id)).replace("- [ ] !!! Call the bank +Home", `- [ ] !! Call the bank due:${due} +Home`)).toBe(homeText);
 });
 
 test("a todo's menu opens at the pointer when there is room, and is moved wholly inside the window when there isn't", async ({ page }) => {
