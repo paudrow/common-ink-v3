@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -442,7 +442,7 @@ test("Ctrl-w h and l move between the sidebar, the sides of a split and the insp
   await expect(editor(page, 1)).toContainText("right words");
   const group = (n: number) => page.getByRole("region", { name: `Editor group ${n}` });
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  if (!(await inspector.isVisible())) await run("Toggle inspector");
+  await pinPanel(page, "Info");
   await expect(inspector).toBeVisible();
   const focusIn = (region: Locator) => expect.poll(() => region.evaluate((el) => el.contains(document.activeElement))).toBe(true);
 
@@ -510,7 +510,7 @@ test("Ctrl-w j and k move between the sides of a split down, and in focus the ke
   await run("Split editor down");
   await expect(editor(page, 1)).toContainText("lower words");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  if (!(await inspector.isVisible())) await run("Toggle inspector");
+  await pinPanel(page, "Info");
   await expect(inspector).toBeVisible();
 
   await editor(page, 1).click();
