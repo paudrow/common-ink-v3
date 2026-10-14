@@ -21,6 +21,18 @@ const listed = (scope: Page | Locator) => read(rows(scope));
 const picked = (scope: Page | Locator) => () => scope.locator('.hist-row[aria-selected="true"] .hist-line').evaluateAll((all) => all.map((el) => el.textContent!.trim().replace(/\s+/g, " ")));
 /** The other pane: what everything picked did. */
 const pane = (scope: Page | Locator) => scope.getByRole("region", { name: "What the selection did" });
+/** What is ticked and what to do with it, at the foot of the list while something is ticked. */
+const bar = (scope: Page | Locator) => scope.getByRole("group", { name: "Selection" });
+/** What the other pane says while nothing is ticked. */
+const hint = (scope: Page | Locator) => pane(scope).locator(".hist-hint");
+const HINT = "Tick changes to see what they did together";
+/** Nothing is ticked: no row, no bar at the foot of the list, and the other pane says what to do. */
+async function nothingPicked(scope: Page | Locator) {
+  await expect(hint(scope)).toContainText(HINT);
+  await expect.poll(counted(scope)).toEqual(["Nothing selected"]);
+  await expect(scope.locator('.hist-row[aria-selected="true"], .hist-check.some, .hist-check.all')).toHaveCount(0);
+  await expect(bar(scope)).toHaveCount(0);
+}
 /** The line that counts the selection, as its parts. */
 const counted = (scope: Page | Locator) => () => pane(scope).locator(".hist-sum-text > *").evaluateAll((parts) => parts.map((part) => part.textContent));
 const card = (scope: Page | Locator, title: string) => pane(scope).getByRole("region", { name: title, exact: true });
@@ -32,7 +44,7 @@ const revertDialog = (page: Page) => page.getByRole("dialog", { name: /^Revert/ 
 const toast = (page: Page) => page.locator(".toast");
 /** Opens the revert of everything picked and confirms it. */
 async function revertPicked(page: Page, scope: Page | Locator) {
-  await pane(scope).getByRole("button", { name: "Revert…" }).click();
+  await bar(scope).getByRole("button", { name: "Revert…" }).click();
   await revertDialog(page).getByRole("button", { name: "Revert", exact: true }).click();
   await expect(revertDialog(page)).toHaveCount(0);
 }
@@ -68,13 +80,16 @@ async function openHistoryTab(page: Page, id: string) {
   return inspector(page).getByRole("tabpanel");
 }
 
-test("the inspector's History tab lists the note's changes with a tick each, over what the picked ones did: the latest on arriving, and no row of buttons", async ({ page }) => {
+test("the inspector's History tab lists the note's changes with a tick each, over what the picked ones did: none on arriving, and no row of buttons", async ({ page }) => {
   const { id } = await sharedNote(page);
 
   const panel = await openHistoryTab(page, id);
 
   await expect.poll(listed(panel)).toEqual(["You edited", "Claude edited", "You wrote · 2 saves"]);
   await expect(rows(panel).locator(".change-stat")).toHaveText(["+2 −0", "+2 −0", "+3 −0"]);
+  await nothingPicked(panel);
+
+  await row(panel, "You edited").click();
   await expect.poll(picked(panel)).toEqual(["You edited"]);
   await expect.poll(counted(panel)).toEqual(["1 change", "1 note", "+2 −0"]);
   await expect(added(pane(panel))).toHaveText(["", "Ada's last word"]);
@@ -162,7 +177,7 @@ test("a note someone else changed while the member was away shows the dot when i
   await expect(historyTab).toHaveAccessibleDescription("");
 });
 
-test("History is two panes: every change by time under its day with a tick, the saves of one sitting as one row, and the first row's diff showing", async ({ page }) => {
+test("History is two panes: every change by time under its day with a tick, the saves of one sitting as one row, and no diff showing until a change is picked", async ({ page }) => {
   const { recipes } = await threeNotes(page);
 
   await page.goto("/");
@@ -178,7 +193,10 @@ test("History is two panes: every change by time under its day with a tick, the 
   await expect(row(mode, "You wrote Recipes").locator(".avatar")).toHaveText("AL");
   await expect(row(mode, "Claude edited Trip").locator(".avatar.agent svg")).toHaveCount(1);
 
-  // The first row is picked on arriving, so the other pane is never empty.
+  await nothingPicked(mode);
+  await expect(pane(mode).getByRole("button")).toHaveCount(0);
+
+  await row(mode, "You wrote Recipes").click();
   await expect.poll(picked(mode)).toEqual(["You wrote Recipes"]);
   await expect.poll(counted(mode)).toEqual(["1 change", "1 note", "+1 −0"]);
   await expect.poll(cards(mode)).toEqual(["Recipes"]);
@@ -196,8 +214,10 @@ test("History is two panes: every change by time under its day with a tick, the 
 
   // Nothing to press on a row, and one action for the selection.
   await expect(rows(mode).getByRole("button")).toHaveCount(0);
-  await expect(pane(mode).getByRole("button")).toHaveText(["Revert…", "Plan", ""]);
-  for (const gone of ["Clear", "Clear filters", "All notes", "Open note", "Label", "Revert note to here…"]) await expect(mode.getByRole("button", { name: gone, exact: true })).toHaveCount(0);
+  await expect(pane(mode).getByRole("button")).toHaveText(["Plan", ""]);
+  await expect(bar(mode).getByRole("status")).toHaveText("1 change selected");
+  await expect(bar(mode).getByRole("button")).toHaveText(["Clear", "Revert…"]);
+  for (const gone of ["See", "Clear filters", "All notes", "Open note", "Label", "Revert note to here…"]) await expect(mode.getByRole("button", { name: gone, exact: true })).toHaveCount(0);
   await expect(mode.locator('input[type="date"]')).toHaveCount(0);
 
   await row(mode, "You wrote Recipes").click();
@@ -247,15 +267,22 @@ test("a click shows one change, ⌘-click and the tick add or skip, shift-click 
   await expect.poll(picked(mode)).toEqual(["You wrote Recipes", "You wrote Trip", "You edited Plan"]);
 });
 
-test("the list is worked from the keyboard: j and k and the arrows move and show, x and space tick, a takes everything, Escape goes back to one, Enter opens the note", async ({ page }) => {
+test("the list is worked from the keyboard: nothing is picked until a key picks it, j and k and the arrows move and show, x and space tick, a takes everything, Escape goes back to one, Enter opens the note", async ({ page }) => {
   const { trip } = await threeNotes(page);
   await page.goto("/history");
   const mode = historyMode(page);
-  await expect.poll(picked(mode)).toEqual(["You wrote Recipes"]);
+  await expect.poll(listed(mode)).toEqual(THREE);
   const list = mode.getByRole("listbox", { name: "Changes" });
   await expect(list).toHaveAttribute("aria-multiselectable", "true");
 
+  // With the cursor on no row, Escape picks nothing and the first key down goes to the first row.
   await list.focus();
+  await page.keyboard.press("Escape");
+  await nothingPicked(mode);
+  await expect(list).not.toHaveAttribute("aria-activedescendant");
+  await page.keyboard.press("j");
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes"]);
+  await expect.poll(cards(mode)).toEqual(["Recipes"]);
   await page.keyboard.press("j");
   await expect.poll(picked(mode)).toEqual(["Claude edited Trip"]);
   await expect.poll(cards(mode)).toEqual(["Trip"]);
@@ -288,6 +315,7 @@ test("the list switches between By time and By note, each member's own pick kept
   await page.goto("/history");
   const mode = historyMode(page);
   await expect.poll(listed(mode)).toEqual(THREE);
+  await row(mode, "You wrote Recipes").click();
 
   await mode.getByRole("radio", { name: "By note" }).click();
   await expect(mode.getByRole("listbox")).toHaveCount(0);
@@ -333,10 +361,13 @@ test("History lists everyone's changes, people's or agents', and a note's Histor
   await page.goto("/history");
   const mode = historyMode(page);
   await expect.poll(listed(mode)).toEqual(THREE);
+  await row(mode, "You wrote Recipes").click();
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes"]);
 
   await mode.getByRole("radio", { name: "Agents" }).click();
   await expect.poll(listed(mode)).toEqual(["Claude edited Trip", "Claude edited Plan"]);
-  await expect.poll(picked(mode)).toEqual(["Claude edited Trip"]);
+  // The row that was picked is no longer listed, and nothing is picked in its place.
+  await nothingPicked(mode);
   await mode.getByRole("radio", { name: "By note" }).click();
   await expect.poll(read(tree(mode).locator('[aria-level="1"]'))).toEqual(["+2 −0 Trip · 1 change · Claude", "+2 −0 Plan · 1 change · Claude"]);
   await mode.getByRole("radio", { name: "By time" }).click();
@@ -362,7 +393,8 @@ test("Select all and one Revert undo a big chunk: one new change in each note, a
   const mode = historyMode(page);
   await expect.poll(listed(mode)).toEqual(THREE);
   const all = mode.getByRole("checkbox", { name: "Select all" });
-  await expect(all).toHaveAttribute("aria-checked", "mixed");
+  await expect(all).toHaveAttribute("aria-checked", "false");
+  await nothingPicked(mode);
 
   await all.click();
   await expect(all).toHaveAttribute("aria-checked", "true");
@@ -370,7 +402,7 @@ test("Select all and one Revert undo a big chunk: one new change in each note, a
   await expect.poll(counted(mode)).toEqual(["6 changes", "7 saves", "3 notes", "+11 −0"]);
   await expect.poll(cards(mode)).toEqual(["Recipes", "Trip", "Plan"]);
 
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   const dialog = revertDialog(page);
   await expect(dialog).toHaveAccessibleName("Revert 7 changes in 3 notes");
   await expect(dialog).toContainText("Each note gets one new change. Nothing is erased.");
@@ -406,8 +438,8 @@ test("Select all and one Revert undo a big chunk: one new change in each note, a
   await all.click();
   await expect(all).toHaveAttribute("aria-checked", "false");
   await expect.poll(counted(mode)).toEqual(["Nothing selected"]);
-  await expect(pane(mode)).toContainText("Select changes to see what they did.");
-  await expect(pane(mode).getByRole("button", { name: "Revert…" })).toHaveCount(0);
+  await expect(hint(mode)).toContainText(HINT);
+  await expect(bar(mode).getByRole("button", { name: "Revert…" })).toHaveCount(0);
 });
 
 test("a note that changes under the preview is left as it is and named, the others are reverted, and the one left is reverted from its fresh preview", async ({ page }) => {
@@ -417,7 +449,7 @@ test("a note that changes under the preview is left as it is and named, the othe
   await mode.getByRole("radio", { name: "Agents" }).click();
   await expect.poll(listed(mode)).toEqual(["Claude edited Trip", "Claude edited Plan"]);
   await mode.getByRole("checkbox", { name: "Select all" }).click();
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   const dialog = revertDialog(page);
   await expect(dialog).toHaveAccessibleName("Revert 2 changes in 2 notes");
   await expect(removed(dialog.getByRole("region", { name: "Trip" }))).toHaveText(["", "Pack light."]);
@@ -469,7 +501,7 @@ test("Undo after a revert puts back only the notes still as the revert left them
   // The revert that stays is a row like any other: picking it previews what bringing the change back does now.
   await mode.getByRole("radio", { name: "Everyone" }).click();
   await row(mode, "You reverted 1 change to Trip").click();
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   await expect(added(revertDialog(page))).toHaveText(["Pack light.", ""]);
   await revertDialog(page).getByRole("button", { name: "Revert", exact: true }).click();
   await expect.poll(() => text(page, trip)).toBe("# Trip\n\nPack light.\n\nA later thought.");
@@ -487,7 +519,7 @@ test("picking changes already reverted, or a revert with what it reverted, says 
   // A change that is already reverted: nothing to do.
   await row(mode, "Claude edited Plan").click();
   await expect(row(mode, "Claude edited Plan").locator(".hist-reverted")).toHaveText("reverted");
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   await expect(dialog).toContainText("1 change picked was already reverted, and is left as it is.");
   await expect(dialog).toContainText("Nothing in this note would change.");
   await expect(dialog.locator(".diff")).toHaveCount(0);
@@ -496,14 +528,14 @@ test("picking changes already reverted, or a revert with what it reverted, says 
 
   // The revert together with the change it reverted: as if neither was made, which is the note as it is.
   await row(mode, "You reverted 1 change to Plan").click({ modifiers: ["ControlOrMeta"] });
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   await expect(dialog).toContainText("Nothing in this note would change: what was picked comes to no change in its text.");
   await expect(confirm).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
   // With a change of another note that does revert, the revert is of that note, and says the first is left out.
   await row(mode, "Claude edited Trip").click({ modifiers: ["ControlOrMeta"] });
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   await expect(dialog).toHaveAccessibleName("Revert 1 change in 1 note");
   await expect(dialog).toContainText("Nothing would change in Plan: it is left out of this revert.");
   await expect(dialog.getByRole("region")).toHaveCount(1);
@@ -527,7 +559,7 @@ test("a note whose revert can't be made says why in the preview and is left out,
     await route.fulfill({ json: previews.map((p) => (p.noteTitle === "Plan" ? { ...p, revisions: [], diff: { hunks: [], added: 0, removed: 0, omitted: 0, lines: 0 }, refused: "With these choices the note would be over 500000 characters" } : p)) });
   });
 
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   const dialog = revertDialog(page);
   await expect(dialog).toHaveAccessibleName("Revert 1 change in 1 note");
   await expect(dialog.getByRole("region", { name: "Plan" }).getByRole("alert")).toHaveText("With these choices the note would be over 500000 characters. This note is left out of the revert.");
@@ -537,13 +569,15 @@ test("a note whose revert can't be made says why in the preview and is left out,
   await expect(dialog).toHaveCount(0);
   await expect(toast(page)).toContainText("Reverted 1 change to Trip");
   await expect.poll(async () => [await text(page, plan), await text(page, trip)]).toEqual([PLAN, "# Trip"]);
+  // The other pane previews the revert of what is still ticked, and may be doing so as the test ends.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("a revert is shown before it is made: the dialog has the diff of what it will do, leaving it any way changes nothing, and confirming records one change", async ({ page }) => {
   const { id } = await sharedNote(page);
   const panel = await openHistoryTab(page, id);
   await row(panel, "Claude edited").click();
-  const opener = pane(panel).getByRole("button", { name: "Revert…" });
+  const opener = bar(panel).getByRole("button", { name: "Revert…" });
 
   await opener.click();
 
@@ -597,14 +631,14 @@ test("a later change to the same line is a conflict to settle in the dialog, and
   await expect.poll(listed(panel)).toEqual(["Claude edited", "You edited", "Claude edited", "You wrote"]);
 
   await row(panel, "You edited").click();
-  await pane(panel).getByRole("button", { name: "Revert…" }).click();
+  await bar(panel).getByRole("button", { name: "Revert…" }).click();
   await expect(dialog.locator(".diff-line.mod del")).toHaveText([", edited"]);
   await expect(dialog.getByRole("radiogroup")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Revert", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
 
   await rows(panel).nth(2).click();
-  await pane(panel).getByRole("button", { name: "Revert…" }).click();
+  await bar(panel).getByRole("button", { name: "Revert…" }).click();
   const conflict = dialog.getByRole("list", { name: "Conflicts" }).getByRole("listitem");
   await expect(conflict.getByRole("term")).toHaveText(["Before", "Now, edited by Claude (agent)"]);
   await expect(conflict.getByRole("definition")).toHaveText(["one", "one, edited again"]);
@@ -664,13 +698,17 @@ test("a viewer picks changes and reads what they did, with no way to revert or t
   await perform(admin, { type: "note.write", id: note.id, baseRevision: 3, text: PLAN });
   const panel = await openHistoryTab(page, note.id);
   await expect(rows(panel)).toHaveCount(3);
+  await nothingPicked(panel);
+  await rows(panel).first().click();
   await tick(row(panel, "Claude edited")).click();
   await expect.poll(counted(panel)).toEqual(["2 changes", "1 note", "+4 −0"]);
+  await expect(bar(panel).getByRole("button")).toHaveText(["Clear"]);
   await expect(panel.getByRole("button", { name: /Revert|More for/ })).toHaveCount(0);
   await page.goto("/history");
   await expect(rows(historyMode(page))).toHaveCount(3);
-  await tick(row(historyMode(page), "Claude edited")).click();
+  await rows(historyMode(page)).first().click();
   await expect.poll(cards(historyMode(page))).toEqual(["Plan"]);
+  await expect(bar(historyMode(page)).getByRole("button")).toHaveText(["Clear"]);
   await expect(historyMode(page).getByRole("button", { name: /Revert|More for/ })).toHaveCount(0);
 });
 
@@ -687,16 +725,17 @@ test("a selection that holds a note the member may only read reverts the others,
   await openHistoryTab(page, mine.id);
   await page.goto("/history");
   const mode = historyMode(page);
-  // History opens with its newest change picked, which is of the note that can only be read: there is nothing to revert, and so no button.
+  // Its newest change is of the note that can only be read: picked alone, there is nothing to revert, and so no button.
+  await rows(mode).first().click();
   await expect.poll(cards(mode)).toEqual(["Shown to me"]);
-  await expect(pane(mode).getByRole("button", { name: "Revert…" })).toHaveCount(0);
+  await expect(bar(mode).getByRole("button", { name: "Revert…" })).toHaveCount(0);
 
   await mode.getByRole("checkbox", { name: "Select all" }).click();
   await expect.poll(async () => (await cards(mode)()).sort()).toEqual(["Mine to change", "Shown to me"]);
   // The note that can be changed has its menu, and the one that can only be read has none.
   await expect(mode.getByRole("button", { name: "More for Mine to change" })).toBeVisible();
   await expect(mode.getByRole("button", { name: "More for Shown to me" })).toHaveCount(0);
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   await expect(revertDialog(page)).toContainText("1 note you can read and not change is left out.");
   await expect(revertDialog(page)).toContainText("Mine to change");
   await expect(revertDialog(page)).not.toContainText("Shown to me");
@@ -739,9 +778,8 @@ test("a selection of more notes than one request takes is read, previewed and re
 
   await mode.getByRole("radio", { name: "By note" }).click();
   const notes = tree(mode).locator('[aria-level="1"]');
-  await expect(notes).toHaveCount(30);
-  await mode.getByRole("button", { name: "Show more notes" }).click();
-  await expect(notes).toHaveCount(60);
+  await expect(notes).toHaveCount(104);
+  await expect(mode.getByRole("button", { name: /Show more notes|Load older changes/ })).toHaveCount(0);
   await mode.getByRole("radio", { name: "By time" }).click();
 
   await mode.getByRole("checkbox", { name: "Select all" }).click();
@@ -750,7 +788,7 @@ test("a selection of more notes than one request takes is read, previewed and re
   await pane(mode).getByRole("button", { name: "Show 40 more of 64 notes" }).click();
   await expect(pane(mode).locator(".hist-file")).toHaveCount(80);
 
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   const dialog = revertDialog(page);
   await expect(dialog).toHaveAccessibleName("Revert 104 changes in 104 notes", { timeout: 20_000 });
   await expect(dialog.getByRole("region")).toHaveCount(8);
@@ -779,7 +817,11 @@ test("History's panes are side by side with room, one over the other in a narrow
 
   await page.setViewportSize({ width: 1440, height: 800 });
   await page.goto("/history");
+  await expect.poll(listed(historyMode(page))).toEqual(THREE);
+  // By its tick, which shows nothing in place of the list where there is room for one pane only.
+  await tick(row(historyMode(page), "You wrote Recipes")).click();
   await expect.poll(picked(historyMode(page))).toEqual(["You wrote Recipes"]);
+  await expect(bar(historyMode(page)).getByRole("button", { name: "See" })).toBeHidden();
   const wide = await boxes();
   expect(wide.list!.width).toBe(340);
   expect(wide.main!.x).toBe(wide.list!.x + 340);
@@ -802,7 +844,9 @@ test("History's panes are side by side with room, one over the other in a narrow
   await pane(mode).getByRole("button", { name: "Changes" }).click();
   await expect.poll(async () => (await boxes()).main).toBeNull();
   await tick(row(mode, "Claude edited Trip")).click();
-  await mode.getByRole("button", { name: "See 2 changes" }).click();
+  await expect(bar(mode).getByRole("status")).toHaveText("2 changes selected in 2 notes");
+  await bar(mode).getByRole("button", { name: "See" }).click();
+  await expect.poll(async () => (await boxes()).list).toBeNull();
   await expect.poll(cards(mode)).toEqual(["Trip", "Plan"]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -1082,7 +1126,10 @@ test("with a folder's list in front the inspector's History tab lists that folde
   const shown = read(tree(panel).locator('[aria-level="1"]'));
   await expect.poll(shown).toEqual(["+1 −0 Packing · 1 change · You", "+3 −0 Trip · 2 changes · Claude, You"]);
 
-  // The first note is open with all its changes picked, and what they did under the list.
+  // No note is open or picked until one is pressed: then it is open with all its changes picked, and what they did under the list.
+  await expect(tree(panel).locator('[aria-expanded="true"]')).toHaveCount(0);
+  await nothingPicked(panel);
+  await noteRow(panel, "Packing").click();
   await expect(noteRow(panel, "Packing")).toHaveAttribute("aria-expanded", "true");
   await expect(noteRow(panel, "Trip")).toHaveAttribute("aria-expanded", "false");
   await expect(added(card(panel, "Packing"))).toHaveText(["# Packing"]);
@@ -1112,6 +1159,323 @@ test("with a folder's list in front the inspector's History tab lists that folde
   await expect(page).toHaveURL(/\/history$/);
   await expect(historyMode(page).locator(".hist-scope")).toHaveText("Trips");
   await expect.poll(listed(historyMode(page))).toEqual(["Claude edited Trip", "You wrote Packing", "Claude edited Trip", "You wrote Trip"]);
+  await nothingPicked(historyMode(page));
+  await rows(historyMode(page)).first().click();
   await card(historyMode(page), "Trip").getByRole("button", { name: "Trip", exact: true }).click();
   await expect(editorLines(page).first()).toHaveText("# Trip");
+});
+
+/** Shows the changes to a note up to a revision as made some days ago, which no test can wait for: the times are changed on the way from the server. */
+async function daysAgo(page: Page, moved: Record<string, { upTo: number; days: number }>) {
+  await page.route("**/ops", async (route) => {
+    if (!route.request().postData()?.includes('"history.list"')) return route.fallback();
+    // The page may have left by the time the answer comes, and then there is no one to give it to.
+    const response = await route.fetch().catch(() => null);
+    const body = (await response?.json().catch(() => null)) as { changes: { noteTitle: string; revision: number; createdAt: number }[] } | null;
+    if (!response || !body) return;
+    for (const change of body.changes) {
+      const by = moved[change.noteTitle];
+      if (by && change.revision <= by.upTo) change.createdAt -= by.days * 86_400_000;
+    }
+    body.changes.sort((a, b) => b.createdAt - a.createdAt);
+    await route.fulfill({ response, json: body });
+  });
+}
+const day = (scope: Page | Locator, name: string) => scope.getByRole("checkbox", { name, exact: true });
+/** Where every heading and row of the list is. */
+const places = (scope: Page | Locator) => scope.locator(".hist-day, .hist-row").evaluateAll((all) => all.map((el) => [el.textContent, el.getBoundingClientRect().x, el.getBoundingClientRect().y - el.closest(".hist-list")!.getBoundingClientRect().y + el.closest(".hist-list")!.scrollTop, el.getBoundingClientRect().height]));
+/** The list by note as it reads: each day, and under it the notes changed that day. */
+const byNote = (scope: Page | Locator) => () =>
+  tree(scope)
+    .locator('.hist-day, [aria-level="1"]')
+    .evaluateAll((all) => all.map((el) => (el.matches(".hist-day") ? el.textContent : [el.querySelector(".hist-line")!.textContent!.trim().replace(/\s+/g, " "), ...[...el.querySelectorAll(".hist-meta > *")].map((m) => m.textContent)].join(" · "))));
+
+test("a day's tick box ticks or clears every change of that day, shows when only some are ticked, is reached with Tab and pressed with Space, and moves nothing", async ({ page }) => {
+  await threeNotes(page);
+  await daysAgo(page, { Plan: { upTo: 4, days: 1 } });
+  await page.goto("/history");
+  const mode = historyMode(page);
+  await expect.poll(listed(mode)).toEqual(THREE);
+  await expect(mode.locator(".hist-day")).toHaveText(["Today", "Yesterday"]);
+  await page.evaluate(() => document.fonts.ready);
+
+  // No day is ticked on arriving. With one of today's rows ticked, today is ticked in part and yesterday not at all.
+  await nothingPicked(mode);
+  for (const name of ["Today", "Yesterday"]) await expect(day(mode, name)).toHaveAttribute("aria-checked", "false");
+  await tick(row(mode, "You wrote Recipes")).click();
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes"]);
+  await expect(day(mode, "Today")).toHaveAttribute("aria-checked", "mixed");
+  await expect(day(mode, "Yesterday")).toHaveAttribute("aria-checked", "false");
+  const before = await places(mode);
+  const ticks = await mode.locator(".hist-list .hist-check").evaluateAll((all) => all.map((el) => el.getBoundingClientRect().x));
+  expect(new Set(ticks).size, "a day's tick is in line with its rows'").toBe(1);
+
+  await day(mode, "Yesterday").click();
+  await expect(day(mode, "Yesterday")).toHaveAttribute("aria-checked", "true");
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes", "You edited Plan", "Claude edited Plan", "You wrote Plan"]);
+  await expect.poll(counted(mode)).toEqual(["4 changes", "5 saves", "2 notes", "+8 −0"]);
+  expect(await places(mode)).toEqual(before);
+
+  // A day ticked in part is ticked whole, and a day ticked whole is cleared.
+  await day(mode, "Today").click();
+  await expect(day(mode, "Today")).toHaveAttribute("aria-checked", "true");
+  await expect(mode.getByRole("checkbox", { name: "Select all" })).toHaveAttribute("aria-checked", "true");
+  await day(mode, "Today").click();
+  await expect(day(mode, "Today")).toHaveAttribute("aria-checked", "false");
+  await expect.poll(picked(mode)).toEqual(["You edited Plan", "Claude edited Plan", "You wrote Plan"]);
+  await tick(row(mode, "Claude edited Plan")).click();
+  await expect(day(mode, "Yesterday")).toHaveAttribute("aria-checked", "mixed");
+  expect(await places(mode)).toEqual(before);
+
+  // From the keyboard: Tab goes from the list to each day's tick, Space presses it, and the list's keys still move its cursor.
+  await mode.getByRole("listbox", { name: "Changes" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(day(mode, "Today")).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(day(mode, "Today")).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Tab");
+  await expect(day(mode, "Yesterday")).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(day(mode, "Yesterday")).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Space");
+  await expect(day(mode, "Yesterday")).toHaveAttribute("aria-checked", "false");
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes", "Claude edited Trip", "You wrote Trip"]);
+  expect(await places(mode)).toEqual(before);
+});
+
+test("the selection is steady: changing whose changes are listed, or how, picks nothing by itself, keeps the ticks still listed and drops the rest", async ({ page }) => {
+  await threeNotes(page);
+  await page.goto("/history");
+  const mode = historyMode(page);
+  await expect.poll(listed(mode)).toEqual(THREE);
+  await nothingPicked(mode);
+  await tick(row(mode, "You wrote Recipes")).click();
+  await tick(row(mode, "Claude edited Trip")).click();
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes", "Claude edited Trip"]);
+  await page.evaluate(() => document.fonts.ready);
+  const top = async () => [await mode.locator(".hist-all").boundingBox(), await rows(mode).first().boundingBox()];
+  const was = await top();
+
+  // Agents: the agent's ticked change is still listed and still ticked, and the member's is dropped. Nothing else is picked.
+  await mode.getByRole("radio", { name: "Agents" }).click();
+  await expect.poll(listed(mode)).toEqual(["Claude edited Trip", "Claude edited Plan"]);
+  await expect.poll(picked(mode)).toEqual(["Claude edited Trip"]);
+  await expect.poll(counted(mode)).toEqual(["1 change", "1 note", "+2 −0"]);
+  expect(await top()).toEqual(was);
+
+  // People: nothing ticked is listed, so nothing is ticked, and the other side says what to do.
+  await mode.getByRole("radio", { name: "People" }).click();
+  await expect.poll(listed(mode)).toEqual(["You wrote Recipes", "You wrote Trip", "You edited Plan", "You wrote Plan · 2 saves"]);
+  await expect.poll(picked(mode)).toEqual([]);
+  await expect.poll(counted(mode)).toEqual(["Nothing selected"]);
+  await expect(hint(mode)).toContainText(HINT);
+  await expect(pane(mode).locator(".hist-file")).toHaveCount(0);
+  expect(await top()).toEqual(was);
+
+  // And it stays that way through every other switch.
+  await mode.getByRole("radio", { name: "Everyone" }).click();
+  await expect.poll(listed(mode)).toEqual(THREE);
+  await mode.getByRole("radio", { name: "By note" }).click();
+  await expect(tree(mode).locator('[aria-level="1"]')).toHaveCount(3);
+  await mode.getByRole("radio", { name: "Agents" }).click();
+  await expect(tree(mode).locator('[aria-level="1"]')).toHaveCount(2);
+  await mode.getByRole("radio", { name: "By time" }).click();
+  await expect.poll(listed(mode)).toEqual(["Claude edited Trip", "Claude edited Plan"]);
+  await expect(mode.locator('.hist-row[aria-selected="true"], .hist-check.some, .hist-check.all')).toHaveCount(0);
+  await expect(hint(mode)).toBeVisible();
+
+  // A tick made under one listing is kept under the next while its row is listed.
+  await tick(row(mode, "Claude edited Plan")).click();
+  await mode.getByRole("radio", { name: "By note" }).click();
+  await expect(noteRow(mode, "Plan")).toHaveAttribute("aria-selected", "true");
+  await expect(noteRow(mode, "Trip")).toHaveAttribute("aria-selected", "false");
+  await mode.getByRole("radio", { name: "Everyone" }).click();
+  await expect(tree(mode).locator('[aria-level="1"]')).toHaveCount(3);
+  await expect(noteRow(mode, "Plan").locator(".hist-check")).toHaveClass(/some/);
+  await expect.poll(counted(mode)).toEqual(["1 change", "1 note", "+2 −0"]);
+
+  // A range asked for after the row it was to start from has gone starts at the row that was pressed.
+  await noteRow(mode, "Recipes").click();
+  await mode.getByRole("radio", { name: "By time" }).click();
+  await row(mode, "You wrote Trip").click({ modifiers: ["Shift"] });
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes", "You wrote Trip"]);
+});
+
+test("a tick on a change that the list no longer reaches is dropped when the list is widened, so nothing unseen is ever reverted", async ({ page }) => {
+  test.slow();
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const claude = await connectAgent(page, "Claude");
+  const old = await perform(page, { type: "note.create", text: "# Old" });
+  await claude.tool<Note>("write_note", { id: old.id, baseRevision: 1, text: "# Old\n\nThe agent's line." });
+  for (let from = 0; from < 104; from += 8) await Promise.all(Array.from({ length: 8 }, (_, i) => perform(page, { type: "note.create", text: `# Note ${String(from + i).padStart(3, "0")}` })));
+
+  await page.goto("/history");
+  const mode = historyMode(page);
+  await expect(rows(mode)).toHaveCount(100);
+  await mode.getByRole("radio", { name: "Agents" }).click();
+  await expect.poll(listed(mode)).toEqual(["Claude edited Old"]);
+  await tick(row(mode, "Claude edited Old")).click();
+  await expect.poll(counted(mode)).toEqual(["1 change", "1 note", "+2 −0"]);
+
+  // Everyone's first hundred changes don't reach the agent's, which is older than all of them.
+  await mode.getByRole("radio", { name: "Everyone" }).click();
+  await expect(rows(mode)).toHaveCount(100);
+  await expect(row(mode, "Claude edited Old")).toHaveCount(0);
+  await expect.poll(counted(mode)).toEqual(["Nothing selected"]);
+  await expect(bar(mode).getByRole("button", { name: "Revert…" })).toHaveCount(0);
+});
+
+test("By note is by day too: under each day the notes changed that day, each with its tick and that day's changes of it", async ({ page }) => {
+  await threeNotes(page);
+  await daysAgo(page, { Plan: { upTo: 3, days: 1 }, Trip: { upTo: 1, days: 3 } });
+  await page.goto("/history");
+  const mode = historyMode(page);
+  await tick(row(mode, "You wrote Recipes")).click();
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes"]);
+  await mode.getByRole("radio", { name: "By note" }).click();
+
+  const older = await mode.locator(".hist-day").nth(2).textContent();
+  expect(older).toMatch(/^\w{3}, \w{3} \d+$/);
+  await expect.poll(byNote(mode)).toEqual([
+    "Today",
+    "+1 −0 Recipes · 1 change · You",
+    "+2 −0 Trip · 1 change · Claude",
+    "+2 −0 Plan · 1 change · You",
+    "Yesterday",
+    "+5 −0 Plan · 3 changes · Claude, You",
+    older,
+    "+1 −0 Trip · 1 change · You",
+  ]);
+  const notesOf = (name: string) => tree(mode).getByRole("group", { name }).locator('[aria-level="1"]');
+  await page.evaluate(() => document.fonts.ready);
+
+  // A note under a day is that day's changes of it, and opens to them.
+  await notesOf("Yesterday").filter({ hasText: "Plan" }).click();
+  await expect(notesOf("Yesterday").filter({ hasText: "Plan" })).toHaveAttribute("aria-expanded", "true");
+  await expect(notesOf("Today").filter({ hasText: "Plan" })).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(read(tree(mode).locator('[aria-level="2"]'))).toEqual(["Claude edited", "You wrote · 2 saves"]);
+  await expect.poll(counted(mode)).toEqual(["2 changes", "3 saves", "1 note", "+5 −0"]);
+  await expect(notesOf("Yesterday").filter({ hasText: "Plan" })).toHaveAttribute("aria-selected", "true");
+  await expect(notesOf("Today").filter({ hasText: "Plan" })).toHaveAttribute("aria-selected", "false");
+
+  // Its tick adds or skips that day's changes of it, and the day's tick everything under the day.
+  const before = await places(mode);
+  await tick(notesOf("Today").filter({ hasText: "Trip" })).click();
+  await expect.poll(cards(mode)).toEqual(["Trip", "Plan"]);
+  await expect(day(mode, "Today")).toHaveAttribute("aria-checked", "mixed");
+  await day(mode, "Today").click();
+  await expect(day(mode, "Today")).toHaveAttribute("aria-checked", "true");
+  await expect.poll(() => notesOf("Today").evaluateAll((all) => all.map((el) => el.ariaSelected))).toEqual(["true", "true", "true"]);
+  await expect.poll(counted(mode)).toEqual(["5 changes", "6 saves", "3 notes", "+10 −0"]);
+  expect(await places(mode)).toEqual(before);
+  await day(mode, "Yesterday").click();
+  await expect(day(mode, "Yesterday")).toHaveAttribute("aria-checked", "false");
+  await expect.poll(cards(mode)).toEqual(["Recipes", "Trip", "Plan"]);
+
+  // By time has the same days and the same ticks.
+  await mode.getByRole("radio", { name: "By time" }).click();
+  await expect(mode.locator(".hist-day")).toHaveText(["Today", "Yesterday", older!]);
+  await expect.poll(picked(mode)).toEqual(["You wrote Recipes", "Claude edited Trip", "You edited Plan"]);
+});
+
+test("a note's History in the inspector is History itself, narrower: the note's changes under their days with no By note, what is ticked below the list, and Open in History for the same beside it", async ({ page }) => {
+  const { id } = await sharedNote(page);
+  await daysAgo(page, { Plan: { upTo: 3, days: 1 } });
+  const panel = await openHistoryTab(page, id);
+  await expect.poll(listed(panel)).toEqual(["You edited", "Claude edited", "You wrote · 2 saves"]);
+  await expect(panel.locator(".hist-day")).toHaveText(["Today", "Yesterday"]);
+  await expect(panel.getByRole("radio")).toHaveCount(0);
+  await nothingPicked(panel);
+  await row(panel, "You edited").click();
+  await expect.poll(picked(panel)).toEqual(["You edited"]);
+
+  await day(panel, "Yesterday").click();
+  await expect.poll(counted(panel)).toEqual(["3 changes", "4 saves", "1 note", "+7 −0"]);
+  const [list, below] = [await panel.locator(".hist-side").boundingBox(), await pane(panel).boundingBox()];
+  expect(below!.y).toBeGreaterThanOrEqual(list!.y + list!.height - 1);
+  expect(below!.x).toBe(list!.x);
+  expect(below!.width).toBe(list!.width);
+
+  await panel.getByRole("button", { name: "Open in History" }).click();
+  await expect(page).toHaveURL(/\/history$/);
+  const mode = historyMode(page);
+  await expect.poll(listed(mode)).toEqual(["You edited", "Claude edited", "You wrote · 2 saves"]);
+  await expect(mode.locator(".hist-day")).toHaveText(["Today", "Yesterday"]);
+  await expect(mode.getByRole("radio", { checked: true })).toHaveText(["Everyone"]);
+  const [side, main] = [await mode.locator(".hist-side").boundingBox(), await pane(mode).boundingBox()];
+  expect(main!.y).toBe(side!.y);
+  expect(main!.x).toBe(side!.x + side!.width);
+  // With every note listed again, the list can be by note.
+  await mode.getByRole("button", { name: "Show every note" }).click();
+  await expect(mode.getByRole("radio", { checked: true })).toHaveText(["By time", "Everyone"]);
+});
+
+test("a folder's History in the inspector lists its notes' changes by note or by time, each under its days, with what is ticked below", async ({ page }) => {
+  const { claude } = await sharedNote(page);
+  const trips = await perform(page, { type: "folder.create", name: "Trips" });
+  const trip = await perform(page, { type: "note.create", folderId: trips.id, text: "# Trip" });
+  await claude.tool<Note>("write_note", { id: trip.id, baseRevision: 1, text: "# Trip\n\nPack light." });
+  await perform(page, { type: "note.create", folderId: trips.id, text: "# Packing" });
+  await daysAgo(page, { Trip: { upTo: 1, days: 1 } });
+
+  await page.goto(`/folder/${trips.id}`);
+  await inspector(page).getByRole("tab", { name: "History" }).click();
+  const panel = inspector(page).getByRole("tabpanel");
+  await expect(panel.getByRole("radio", { checked: true })).toHaveText(["By note"]);
+  await expect.poll(byNote(panel)).toEqual(["Today", "+1 −0 Packing · 1 change · You", "+2 −0 Trip · 1 change · Claude", "Yesterday", "+1 −0 Trip · 1 change · You"]);
+
+  await nothingPicked(panel);
+  await noteRow(panel, "Packing").click();
+  await panel.getByRole("radio", { name: "By time" }).click();
+  await expect.poll(listed(panel)).toEqual(["You wrote Packing", "Claude edited Trip", "You wrote Trip"]);
+  await expect(panel.locator(".hist-day")).toHaveText(["Today", "Yesterday"]);
+  // What was picked by note is still what is picked, and it is shown under the list.
+  await expect.poll(picked(panel)).toEqual(["You wrote Packing"]);
+  await day(panel, "Today").click();
+  await expect.poll(cards(panel)).toEqual(["Packing", "Trip"]);
+  const [list, below] = [await panel.locator(".hist-side").boundingBox(), await pane(panel).boundingBox()];
+  expect(below!.y).toBeGreaterThanOrEqual(list!.y + list!.height - 1);
+  await expect(panel.getByRole("radio", { name: /Everyone|People|Agents/ })).toHaveCount(0);
+
+  // The pick is kept for the next folder, and All notes is the whole workspace.
+  await openAllNotes(page);
+  await expect(panel.getByRole("radio", { checked: true })).toHaveText(["By time"]);
+  await expect.poll(listed(panel)).toEqual(["You wrote Packing", "Claude edited Trip", "You edited Plan", "Claude edited Plan", "You wrote Plan · 2 saves", "You wrote Trip"]);
+});
+
+test("the list takes Home, End, Page Up and Page Down: the first change, the last, and a page of them either way", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  for (let from = 0; from < 40; from += 8) await Promise.all(Array.from({ length: 8 }, (_, i) => perform(page, { type: "note.create", text: `# Note ${String(from + i).padStart(2, "0")}` })));
+  await page.setViewportSize({ width: 1280, height: 700 });
+  await page.goto("/history");
+  const mode = historyMode(page);
+  const list = mode.getByRole("listbox", { name: "Changes" });
+  await expect(rows(mode)).toHaveCount(40);
+  await nothingPicked(mode);
+  const cursor = () => list.evaluate((el) => [...el.querySelectorAll('[role="option"]')].findIndex((o) => o.id === el.getAttribute("aria-activedescendant")));
+  const page_ = await list.evaluate((el) => Math.floor(el.clientHeight / el.querySelector('[role="option"]')!.getBoundingClientRect().height));
+  expect(page_).toBeGreaterThan(3);
+  expect(page_).toBeLessThan(30);
+
+  await expect.poll(cursor).toBe(-1);
+  await list.focus();
+  await page.keyboard.press("End");
+  await expect.poll(cursor).toBe(39);
+  await expect(rows(mode).nth(39)).toHaveAttribute("aria-selected", "true");
+  await expect(rows(mode).nth(39)).toBeInViewport({ ratio: 0.9 });
+  await page.keyboard.press("Home");
+  await expect.poll(cursor).toBe(0);
+  await expect(rows(mode).first()).toHaveAttribute("aria-selected", "true");
+  await expect(rows(mode).first()).toBeInViewport({ ratio: 0.9 });
+  await page.keyboard.press("PageDown");
+  await expect.poll(cursor).toBe(page_ - 1);
+  await expect(rows(mode).nth(page_ - 1)).toHaveAttribute("aria-selected", "true");
+  await expect(rows(mode).nth(page_ - 1)).toBeInViewport({ ratio: 0.9 });
+  await page.keyboard.press("PageDown");
+  await expect.poll(cursor).toBe(2 * (page_ - 1));
+  await page.keyboard.press("PageUp");
+  await expect.poll(cursor).toBe(page_ - 1);
+  await page.keyboard.press("PageUp");
+  await page.keyboard.press("PageUp");
+  await expect.poll(cursor).toBe(0);
 });

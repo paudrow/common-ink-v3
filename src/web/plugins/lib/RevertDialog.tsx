@@ -13,6 +13,12 @@ export interface RevertAsk {
   author?: AuthorRef;
 }
 
+/** One conflict of a revert: of which note, and which of its conflicts in the order the preview lists them. */
+export interface ConflictAt {
+  noteId: string;
+  conflict: number;
+}
+
 type Item = Extract<OpInput, { type: "history.revert" }>["changes"][number];
 
 /** What becomes of one conflict: the later edits kept, the lines as they were before, or lines typed by hand. */
@@ -42,20 +48,29 @@ function Lines({ lines }: { lines: string[] }) {
 }
 
 /** Who edited a conflict's lines later. */
-function later(conflict: RevertConflict): string {
+export function later(conflict: RevertConflict): string {
   const names = [...new Map(conflict.later.map(({ author }) => [authorKey(author), nameOf(author)])).values()];
   return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "");
 }
 
 interface ConflictsProps {
   conflicts: RevertConflict[];
+  /** The conflict the dialog was opened for, which is brought into view with its choices in hand. */
+  at?: number;
   /** One for each conflict, in their order. */
   choices: Choice[];
   onChoose: (at: number | "all", choice: Picked) => void;
 }
 
 /** Each place a later change edited lines the revert changes: its lines before and now, who edited them, and the choice of what they become. */
-function Conflicts({ conflicts, choices, onChoose }: ConflictsProps) {
+function Conflicts({ conflicts, at, choices, onChoose }: ConflictsProps) {
+  const list = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const opened = at === undefined ? null : list.current?.children[at];
+    if (!opened) return;
+    opened.scrollIntoView({ block: "start" });
+    opened.querySelector<HTMLInputElement>("input:checked")?.focus({ preventScroll: true });
+  }, [at]);
   const ids = useId();
   return (
     <div className="conflicts">
@@ -71,13 +86,13 @@ function Conflicts({ conflicts, choices, onChoose }: ConflictsProps) {
         </div>
       )}
       {/* The role is spelled out because a list with no markers isn't read as one everywhere. */}
-      <ol role="list" aria-label="Conflicts">
+      <ol ref={list} role="list" aria-label="Conflicts">
         {conflicts.map((conflict, i) => {
           const choice = choices[i] ?? "keep";
           const made = typeof choice === "string" ? choice : "edit";
           const id = `${ids}-${i}`;
           return (
-            <li key={i} className="conflict">
+            <li key={i} className="conflict" aria-current={at === i || undefined}>
               <h4 id={`${id}-name`}>
                 Conflict {i + 1} of {conflicts.length}, line {conflict.line}
               </h4>
@@ -234,12 +249,14 @@ interface NoteRevertProps {
   ask: RevertAsk;
   state: Previewed;
   dispatch: (event: PreviewEvent) => void;
+  /** The conflict of this note the dialog was opened for. */
+  at?: number;
   /** Reads this note's preview again, after a refusal. */
   onRefused: (message: string) => void;
 }
 
 /** One note of a revert: what it would change, and its conflicts with the choice of how each is settled. */
-function NoteRevert({ host, ask, state, dispatch, onRefused }: NoteRevertProps) {
+function NoteRevert({ host, ask, state, dispatch, at, onRefused }: NoteRevertProps) {
   const ids = useId();
   const { preview, choices, diff, diffIs, reading } = state;
   const refused = useRef(onRefused);
@@ -280,7 +297,7 @@ function NoteRevert({ host, ask, state, dispatch, onRefused }: NoteRevertProps) 
           {state.startedOver && <p className="revert-started-over">The note has changed, so the choices made here start over with every later edit kept.</p>}
           {preview.conflicts.length > 0 ? (
             <>
-              <Conflicts conflicts={preview.conflicts} choices={choices} onChoose={(at, choice) => dispatch({ type: "chose", at, choice })} />
+              <Conflicts conflicts={preview.conflicts} at={at} choices={choices} onChoose={(at, choice) => dispatch({ type: "chose", at, choice })} />
               <section className="revert-result" aria-labelledby={`${ids}-result`} aria-busy={reading || diffIs === "due" || diffIs === "due soon"}>
                 <div className="revert-result-head">
                   <h4 id={`${ids}-result`}>This revert</h4>
@@ -308,6 +325,8 @@ interface RevertDialogProps {
   version: number;
   /** What the revert leaves untouched that the member might take it to cover. */
   beyond?: string;
+  /** A conflict to open at: the note it is of comes first, with that conflict in view. */
+  at?: ConflictAt;
   /** Called with what a revert did, each time one is made: the dialog stays open on the notes it skipped. */
   onReverted: (done: RevertedNotes) => void;
   onClose: () => void;
@@ -318,7 +337,7 @@ interface RevertDialogProps {
  * with a later change and the choice of how it is settled. Reverting makes one change in each note,
  * says which notes it reverted and which it left, and keeps the ones it left for another try.
  */
-export function RevertDialog({ host, asks, version, beyond, onReverted, onClose }: RevertDialogProps) {
+export function RevertDialog({ host, asks, version, beyond, at, onReverted, onClose }: RevertDialogProps) {
   const ids = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const inside = useRef<HTMLDivElement>(null);
@@ -424,7 +443,7 @@ export function RevertDialog({ host, asks, version, beyond, onReverted, onClose 
         : `Revert ${changes} to ${titleOf(first.title)}`
       : `Revert ${changes} in ${count(read ? changing.length : pending.length, "note")}`;
   // The notes with something to settle come first, then the ones that change, then the ones that don't.
-  const rank = ({ state }: (typeof states)[number]) => (state.error || state.preview?.refused ? 0 : state.preview?.conflicts.length ? 1 : state.diff?.hunks.length ? 2 : 3);
+  const rank = ({ ask, state }: (typeof states)[number]) => (ask.noteId === at?.noteId ? -1 : state.error || state.preview?.refused ? 0 : state.preview?.conflicts.length ? 1 : state.diff?.hunks.length ? 2 : 3);
   const ordered = pending.length > 1 ? [...states].sort((a, b) => rank(a) - rank(b)) : states;
   const drawn = ordered.filter((s) => rank(s) < 3 || pending.length === 1).slice(0, showing);
   const unchanged = pending.length > 1 ? ordered.filter((s) => rank(s) === 3 && s.state.preview) : [];
@@ -444,6 +463,7 @@ export function RevertDialog({ host, asks, version, beyond, onReverted, onClose 
             ask={ask}
             state={state}
             dispatch={(event) => dispatch({ noteIds: [ask.noteId], event })}
+            at={ask.noteId === at?.noteId ? at.conflict : undefined}
             onRefused={(message) => {
               dispatch({ noteIds: [ask.noteId], event: { type: "refused", message } });
               readAgain((n) => n + 1);
@@ -514,10 +534,10 @@ interface Reverts {
  * Reverting as a page offers it. `ask` opens the preview of a revert, with `beyond` said in it and
  * after it. What a revert did is then said with an Undo. `shown` is to be drawn by the page.
  */
-export function useReverts({ host, version, found = "in the list", onChanged }: Reverts): { ask: (asks: RevertAsk[], beyond?: string) => void; shown: ReactNode } {
-  const [asked, setAsked] = useState<{ asks: RevertAsk[]; beyond?: string } | null>(null);
+export function useReverts({ host, version, found = "in the list", onChanged }: Reverts): { ask: (asks: RevertAsk[], beyond?: string, at?: ConflictAt) => void; shown: ReactNode } {
+  const [asked, setAsked] = useState<{ asks: RevertAsk[]; beyond?: string; at?: ConflictAt } | null>(null);
   const [said, say] = useState<Said | null>(null);
-  const ask = useCallback((asks: RevertAsk[], beyond?: string) => setAsked({ asks, beyond }), []);
+  const ask = useCallback((asks: RevertAsk[], beyond?: string, at?: ConflictAt) => setAsked({ asks, beyond, at }), []);
   const close = useCallback(() => setAsked(null), []);
 
   const reverted = (done: { reverted: RevertedNote[] }) => {
@@ -551,7 +571,7 @@ export function useReverts({ host, version, found = "in the list", onChanged }: 
 
   const shown = (
     <>
-      {asked && <RevertDialog host={host} asks={asked.asks} version={version} beyond={asked.beyond} onReverted={reverted} onClose={close} />}
+      {asked && <RevertDialog host={host} asks={asked.asks} version={version} beyond={asked.beyond} at={asked.at} onReverted={reverted} onClose={close} />}
       {said && (
         <div className="toast" role="status">
           <span>{said.text}</span>
