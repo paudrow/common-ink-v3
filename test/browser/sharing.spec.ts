@@ -235,6 +235,10 @@ test("a link's page draws the note as the app does, and runs nothing in it until
   await expect(anyone.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
   await expect(editor(anyone)).toHaveAttribute("contenteditable", "false");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe(text);
+  // In the workspace the same HTML runs by itself for its member, whose setting is the default: a link's page always asks.
+  await page.goto(`/note/${note.id}`);
+  await expect(page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe").getByText("Hello from HTML.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Run HTML/ })).toHaveCount(0);
 });
 
 test("a folder's link lists and opens its notes, and not a private note inside it", async ({ page }) => {

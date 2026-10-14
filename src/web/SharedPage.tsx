@@ -66,7 +66,8 @@ function useDrawing(open: (noteId: string) => void) {
     const kept = new Map<string, unknown>();
     return createPluginHost({
       plugins: DRAWING,
-      settings: {},
+      // Whoever holds a link isn't a member and has no settings: HTML in a note it opens runs only when they press Run.
+      settings: { "html.run": "ask first" },
       write: () => {},
       mac: MAC,
       provide: (plugin) => ({
