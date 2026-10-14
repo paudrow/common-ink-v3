@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { folderRow, listedNote, openAllNotes, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
 const bar = (page: Page) => page.getByRole("navigation", { name: "Inspector bar" });
@@ -191,6 +191,33 @@ test("a panel over the page goes on a press elsewhere and on Escape, with the cu
   await expect(panel(page)).toBeVisible();
   await page.keyboard.press("F8");
   await expect(panel(page)).toHaveCount(0);
+});
+
+test("a note that arrives after the member opened a panel over the page leaves the panel open with the cursor in it", async ({ page }) => {
+  await withNote(page);
+  let asked!: () => void;
+  const reading = new Promise<void>((resolve) => (asked = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/workspaces/*/ops", async (route) => {
+    if (route.request().postDataJSON()?.type !== "note.read") return route.fallback();
+    asked();
+    await held;
+    await route.fallback();
+  });
+  await openAllNotes(page);
+  await listedNote(page, "Draft").click();
+  await reading;
+
+  await icon(page, "Info").click();
+  await expect(panel(page).getByRole("heading", { name: "Info" })).toBeVisible();
+  await expect.poll(() => panel(page).evaluate((el) => el.contains(document.activeElement))).toBe(true);
+  release();
+  await expect(editor(page)).toContainText("Words.");
+  await expect(panel(page).getByRole("heading", { name: "Info" })).toBeVisible();
+  await expect.poll(() => panel(page).evaluate((el) => el.contains(document.activeElement))).toBe(true);
+  await pin(page).click();
+  await expect(pin(page)).toHaveAttribute("aria-pressed", "true");
 });
 
 test("each panel has a command, which takes a key of the member's choosing, and Escape that a list in the panel has a use for is the list's", async ({ page }) => {

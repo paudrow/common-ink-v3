@@ -402,8 +402,14 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
   const newNoteFolderId = folderForNew(frontFolderId);
 
   const go = navigate;
-  /** The note whose editor is to take the cursor once it is there. */
+  /** The note whose editor is to take the cursor once it is there, unless the member has put it somewhere else by then. */
   const [toFocus, setToFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (toFocus === null) return;
+    const elsewhere = () => setToFocus(null);
+    addEventListener("focusin", elsewhere, true);
+    return () => removeEventListener("focusin", elsewhere, true);
+  }, [toFocus]);
   const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean } = {}) => {
     const area = host.contributions().views.editor.at(-1);
     if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true });
