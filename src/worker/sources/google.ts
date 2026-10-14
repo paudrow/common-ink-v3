@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { shiftDay } from "../../core/events.ts";
-import type { Calendar, CalendarEvent, Contact, EventWhen } from "../../core/protocol.ts";
+import type { Calendar, CalendarEvent, Contact, ContactCard, EventWhen } from "../../core/protocol.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type DataSource, type Described, type EventChange } from "../../core/sources.ts";
 import { SOURCE_SCOPES, isGoogleSource, refresh, revoke, type GoogleConfig, type GoogleSourceId } from "../google.ts";
 import type { Vault } from "../vault.ts";
@@ -413,11 +413,21 @@ const Person = z.object({
   names: z.array(z.object({ displayName: z.string().optional() })).optional(),
   emailAddresses: z.array(z.object({ value: z.string().optional() })).optional(),
   phoneNumbers: z.array(z.object({ value: z.string().optional() })).optional(),
-  organizations: z.array(z.object({ name: z.string().optional() })).optional(),
+  organizations: z.array(z.object({ name: z.string().optional(), title: z.string().optional() })).optional(),
+});
+const Detailed = Person.extend({
+  addresses: z.array(z.object({ formattedValue: z.string().optional() })).optional(),
+  birthdays: z.array(z.object({ date: z.object({ year: z.number().int().optional(), month: z.number().int().optional(), day: z.number().int().optional() }).optional() })).optional(),
+  biographies: z.array(z.object({ value: z.string().optional() })).optional(),
+  photos: z.array(z.object({ url: z.string().optional(), default: z.boolean().optional() })).optional(),
+  urls: z.array(z.object({ value: z.string().optional() })).optional(),
 });
 const Connections = z.object({ connections: z.array(z.unknown()).default([]), nextPageToken: z.string().optional() });
 const PERSON = /^people\/([A-Za-z0-9_-]{1,100})$/;
 const PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations";
+/** All a contact's page shows of them, which is read one contact at a time. */
+const CARD_FIELDS = `${PERSON_FIELDS},addresses,birthdays,biographies,photos,urls`;
+const pad = (n: number) => String(n).padStart(2, "0");
 
 function toContact(raw: unknown): Contact | null {
   const parsed = Person.safeParse(raw);
@@ -431,6 +441,25 @@ function toContact(raw: unknown): Contact | null {
   // A contact with nothing to call it by is nothing to list.
   if (!name) return null;
   return { sourceId: "google-contacts", id: parsed.data.resourceName, name, emails, phones, organization, url: `https://contacts.google.com/person/${key}` };
+}
+
+/** A contact with all Google holds of them that a page shows: a birthday without a year is --MM-DD, and only an https address is kept for a picture or a page. */
+export function toCard(raw: unknown): ContactCard | null {
+  const contact = toContact(raw);
+  const parsed = Detailed.safeParse(raw);
+  if (!contact || !parsed.success) return null;
+  const { organizations, addresses, birthdays, biographies, photos, urls } = parsed.data;
+  const date = birthdays?.find((b) => b.date?.month && b.date.day)?.date;
+  const https = (address: string | undefined) => (address && /^https:\/\//.test(address) ? address : null);
+  return {
+    ...contact,
+    title: organizations?.find((o) => o.title)?.title ?? null,
+    addresses: (addresses ?? []).flatMap((a) => (a.formattedValue ? [a.formattedValue] : [])),
+    birthday: date ? `${date.year ? String(date.year).padStart(4, "0") : "-"}-${pad(date.month!)}-${pad(date.day!)}` : null,
+    notes: biographies?.find((b) => b.value)?.value ?? null,
+    photo: https(photos?.find((p) => p.url && !p.default)?.url),
+    urls: (urls ?? []).flatMap((u) => https(u.value) ?? []),
+  };
 }
 
 function contactsSource(session: Session, info: Described): ContactsSource {
@@ -452,8 +481,8 @@ function contactsSource(session: Session, info: Described): ContactsSource {
     async get(id) {
       const key = PERSON.exec(id)?.[1];
       if (!key) return null;
-      const person = await ask(`${PEOPLE}/people/${key}?${new URLSearchParams({ personFields: PERSON_FIELDS })}`);
-      return person === null ? null : toContact(person);
+      const person = await ask(`${PEOPLE}/people/${key}?${new URLSearchParams({ personFields: CARD_FIELDS })}`);
+      return person === null ? null : toCard(person);
     },
   };
 }

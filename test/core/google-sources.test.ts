@@ -7,7 +7,7 @@ import { SOURCE_SCOPES } from "../../src/worker/google.ts";
 import worker from "../../src/worker/index.ts";
 import { sign } from "../../src/worker/session.ts";
 import { connectionOf, keepTokens } from "../../src/worker/sources/connections.ts";
-import { patchOf } from "../../src/worker/sources/google.ts";
+import { patchOf, toCard } from "../../src/worker/sources/google.ts";
 import { sourcesFor } from "../../src/worker/sources/index.ts";
 import { vault } from "../../src/worker/vault.ts";
 import { FakeGoogle, INSUFFICIENT, RATE_LIMITED, idToken, type FakeCalendar } from "./google.ts";
@@ -661,5 +661,39 @@ describe("signing in and connecting with Google", () => {
     const out = await local("/auth/google");
     const home = await local(`/auth/google/callback?state=${new URL(out.headers.get("Location")!).searchParams.get("state")}&code=the-code`, cookiesOf(out));
     expect([home.status, home.headers.get("Location")]).toEqual([302, "/"]);
+  });
+});
+
+describe("a Google contact's card", () => {
+  it("holds all a page shows: title, addresses, a birthday with or without its year, notes, and only https pictures and pages", () => {
+    const person = {
+      resourceName: "people/c42",
+      names: [{ displayName: "Sam Okafor" }],
+      emailAddresses: [{ value: "sam@example.com" }],
+      phoneNumbers: [{ value: "+1 555 0142" }],
+      organizations: [{ name: "Okafor Plumbing", title: "Owner" }],
+      addresses: [{ formattedValue: "12 Water Lane" }, {}],
+      birthdays: [{ date: { month: 4, day: 21 } }],
+      biographies: [{ value: "Prefers a text" }],
+      photos: [{ url: "https://lh3.example/default", default: true }, { url: "https://lh3.example/sam" }],
+      urls: [{ value: "https://okafor.example" }, { value: "javascript:alert(1)" }],
+    };
+    expect(toCard(person)).toEqual({
+      sourceId: "google-contacts",
+      id: "people/c42",
+      name: "Sam Okafor",
+      emails: ["sam@example.com"],
+      phones: ["+1 555 0142"],
+      organization: "Okafor Plumbing",
+      url: "https://contacts.google.com/person/c42",
+      title: "Owner",
+      addresses: ["12 Water Lane"],
+      birthday: "--04-21",
+      notes: "Prefers a text",
+      photo: "https://lh3.example/sam",
+      urls: ["https://okafor.example"],
+    });
+    expect(toCard({ ...person, birthdays: [{ date: { year: 1990, month: 4, day: 21 } }], photos: [{ url: "http://lh3.example/sam" }] })).toMatchObject({ birthday: "1990-04-21", photo: null });
+    expect(toCard({ resourceName: "people/c1" })).toBeNull();
   });
 });

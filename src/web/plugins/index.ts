@@ -19,7 +19,7 @@ import { links } from "./links/index.ts";
 import { math } from "./math/index.ts";
 import { media } from "./media/index.ts";
 import { members } from "./members/index.tsx";
-import { mentions } from "./mentions/index.ts";
+import { mentions } from "./mentions/index.tsx";
 import { noteClocks } from "./noteClocks.tsx";
 import { noteInfo } from "./noteInfo.tsx";
 import { noteList } from "./noteList.tsx";

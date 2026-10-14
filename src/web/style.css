@@ -7638,3 +7638,164 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 /* Calendar and Contacts: end */
+
+/* A person's page: what a mention leads to. */
+
+.person-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  max-width: 46rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.person-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.person-photo {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 20px;
+  object-fit: cover;
+}
+
+.person-title {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.person-title h1 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.person-what {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.person-page h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.person-contact {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.person-whose {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.person-fields {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.person-field {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 2px 12px;
+}
+
+.person-field dt {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.person-field dd {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.person-source {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.person-todos ul,
+.person-mentions ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.person-line:hover,
+.person-line:focus-visible {
+  background: var(--hover);
+}
+
+.person-text {
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+.person-note,
+.person-none {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.person-none {
+  padding: 8px 10px;
+}
+
+@media (max-width: 600px) {
+  .person-page {
+    padding: 1rem 16px 2rem;
+  }
+
+  .person-field {
+    grid-template-columns: 1fr;
+  }
+}
+
+.person-page a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+

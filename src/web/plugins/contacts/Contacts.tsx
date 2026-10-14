@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Contact, PluginHost, ViewProps } from "../../plugin-api.ts";
+import { personPath } from "../lib/person.ts";
 import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
 import { matches } from "./matching.ts";
 
@@ -57,7 +58,17 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
             {found.map((contact) => (
               <li key={`${contact.sourceId} ${contact.id}`} aria-label={contact.name || "No name"}>
                 <div className="contact-what">
-                  <span className="contact-name">{contact.name || "No name"}</span>
+                  <a
+                    className="contact-name"
+                    href={personPath(contact.name)}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                      e.preventDefault();
+                      app.go(personPath(contact.name));
+                    }}
+                  >
+                    {contact.name || "No name"}
+                  </a>
                   {contact.organization && <span className="contact-organization">{contact.organization}</span>}
                   <span className="contact-reach">
                     {contact.emails.map((email) => (

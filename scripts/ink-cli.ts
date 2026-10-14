@@ -93,6 +93,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
             [--location TEXT] [--description TEXT]
                                       add an event to one of the calendars events lists
   contacts [QUERY]                    your member's contacts, or those matching every word
+  person WHO [--limit N]              a person's page: the member they are, your member's contacts that are
+                                      them, their open todos, and the lines that mention them
   refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
   record REF                          the event or contact a reference stands for, as it is now
 
@@ -448,6 +450,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "contacts":
         tool = "list_contacts";
         args = id === undefined ? {} : { query: id };
+        break;
+      case "person":
+        tool = "read_person";
+        args = { who: need("a member's id or a name"), ...given({ limit: ["limit", integer] }) };
         break;
       case "refer":
         if (positional.length < 2) throw new UsageError("refer needs a data source and a record id");

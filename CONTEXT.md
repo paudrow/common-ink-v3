@@ -59,7 +59,11 @@ A reference to a person in a note's text, written `@[[id|name]]` for a member of
 _Avoid_: Tag, ping
 
 **Assignee**:
-A person mentioned on a todo's line. A todo can have several. The todos view narrows by assignee and to the todos assigned to the viewing member.
+A person mentioned on a todo's line. A todo can have several. The todos view narrows by assignee with `assignee:` in its query, `assignee:@me` for the viewing member, and an assignee's chip there changes who it is assigned to.
+
+**Person page**:
+What a click on a mention opens, at `/person/<who>`: a member's id or a name, as the mention names them. Each reader is shown only what they may be told: the member card (name, role, and the email where the member list shows it) to whoever can list the members; their own contacts that are this person, matched by name or by the member's email, with everything the contact holds, to that member and their agents alone; the open todos assigned to them and each line that mentions them, newest note first, from the notes the reader can see. Someone who is neither a member nor one of the reader's contacts is the name and nothing more. It searches the notes that mention them with `mentions:` and has one action, "New note about <name>", which makes an ordinary note that mentions them. There is no separate note per person and nothing is typed on the page itself.
+_Avoid_: Contact page (a member's card is one too), profile
 
 **Backlink**:
 A note whose text links to the open note. The inspector's Backlinks tab lists the ones the member can see.

@@ -18,7 +18,7 @@ import { kanban } from "./plugins/kanban/index.ts";
 import { links } from "./plugins/links/index.ts";
 import { math } from "./plugins/math/index.ts";
 import { media } from "./plugins/media/index.ts";
-import { mentions } from "./plugins/mentions/index.ts";
+import { mentions } from "./plugins/mentions/index.tsx";
 import { stopwatch } from "./plugins/stopwatch.ts";
 import { tables } from "./plugins/tables/index.ts";
 import { timer } from "./plugins/timer.ts";

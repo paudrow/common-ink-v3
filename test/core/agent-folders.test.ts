@@ -585,7 +585,7 @@ describe("an agent limited to folders", () => {
     const asked: string[] = [];
     const lunch = { sourceId: "cal", id: "a1", calendarId: "mine", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
     const mine = { sourceId: "cal", id: "mine", name: "Mine-calendar-outside", color: null, writable: true };
-    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null };
+    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null, title: "Plumber-outside", addresses: ["Lane-outside"], birthday: null, notes: "notes-outside", photo: null, urls: [] };
     const changed: unknown[] = [];
     const sources: Sources = {
       async of(personId) {
@@ -633,7 +633,9 @@ describe("an agent limited to folders", () => {
       expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n::event{${event.ref} Lunch with Sam} with ::contact{${contact.ref} Sam Okafor}`);
       await claude.json("search", { query: "Lunch" });
       await claude.json("note_history", { id: w.deep.id });
-      expect(claude.said.join("\n")).not.toMatch(/Cafe-Lula-outside|contract-outside|sam-outside@example\.com|Mine-calendar-outside|ada-account-outside|source-outside|people\/c1/);
+      // Sam's page tells it the name it asked by and nothing of its member's contact.
+      expect(await claude.json("read_person", { who: "Sam Okafor" })).toMatchObject({ who: "Sam Okafor", name: "Sam Okafor", member: null, contacts: [] });
+      expect(claude.said.join("\n")).not.toMatch(/Cafe-Lula-outside|contract-outside|sam-outside@example\.com|Plumber-outside|Lane-outside|notes-outside|Mine-calendar-outside|ada-account-outside|source-outside|people\/c1/);
       for (const mark of w.marks) expect(claude.said.join("\n")).not.toContain(mark);
     }
     // Refused before anything was asked of a data source, and nothing was changed there.

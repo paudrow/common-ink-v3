@@ -1,7 +1,7 @@
 import { inOrder, widened, within, type Span } from "./events.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type EventWhen, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type EventWhen, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -45,7 +45,8 @@ export interface ContactsSource {
   kind: "contacts";
   info: Described;
   list(): Promise<{ contacts: Contact[]; more: boolean }>;
-  get(id: string): Promise<Contact | null>;
+  /** One contact with all the source holds of them. */
+  get(id: string): Promise<ContactCard | null>;
 }
 
 export type DataSource = CalendarSource | ContactsSource;
@@ -213,6 +214,15 @@ export async function listContacts(asker: Asker, query: string | undefined): Pro
   const contacts = read.flatMap((r) => r.contacts).filter((contact) => !query || contactMatches(contact, query));
   contacts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || (a.id < b.id ? -1 : 1));
   return { contacts, sources, more: read.some((r) => r.more) };
+}
+
+/** The asker's own contacts that `is` says are someone, each with all its source holds. A source that can't be read gives none. */
+export async function contactCards(asker: Asker, is: (contact: Contact) => boolean): Promise<ContactCard[]> {
+  const { read } = await readEach<ContactsSource, ContactCard[]>(asker, "contacts", async (source) => {
+    const { contacts } = await source.list();
+    return (await Promise.all(contacts.filter(is).map((contact) => source.get(contact.id)))).filter((card) => card !== null);
+  });
+  return read.flat();
 }
 
 /**

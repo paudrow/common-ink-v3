@@ -524,6 +524,15 @@ export const Op = z.discriminatedUnion("type", [
   /** The asker's contacts by name. `query` keeps those with every word of it at the start of a word of their name, email or organization. */
   z.object({ type: z.literal("contact.list"), query: z.string().max(100).optional() }),
   /**
+   * A person, as a mention names them, as the asker may be told of them: what their page shows. `who`
+   * is a member's id, or a name. A name one member has is that member, for an asker told who the
+   * members are. The member they are, only for such an asker. The asker's own contacts that are them,
+   * matched by name or by the member's email, with all those contacts hold, and nobody else's. The
+   * open todos assigned to them, and each line that mentions them, in the notes the asker can see,
+   * the note changed latest first, `limit` of them.
+   */
+  z.object({ type: z.literal("person.read"), who: Person, limit: z.number().int().min(1).max(200).default(50) }),
+  /**
    * What a note writes to reference an event or a contact: `ref`, an id that says nothing of the
    * record, and `text`, the embed that carries it. Asked again of the same record it answers the same.
    */
@@ -1077,6 +1086,7 @@ export interface Results {
   "event.create": CalendarEvent;
   /** `more` when a data source has more contacts than it lists. */
   "contact.list": { contacts: Contact[]; sources: Source[]; more: boolean };
+  "person.read": PersonPage;
   "record.refer": Reference;
   "record.read": SourceRecord;
 }
@@ -1143,6 +1153,43 @@ export interface Contact {
   phones: string[];
   organization: string | null;
   url: string | null;
+}
+
+/** A contact with all its data source holds of them, as its owner alone is shown it. */
+export interface ContactCard extends Contact {
+  /** Their job title, where the organization is. */
+  title: string | null;
+  addresses: string[];
+  /** YYYY-MM-DD, or --MM-DD when the year isn't known. */
+  birthday: string | null;
+  notes: string | null;
+  /** An https address of their picture. */
+  photo: string | null;
+  urls: string[];
+}
+
+/** One line of a note that mentions a person, as the asker is shown it: each mention on it written as the name it shows. */
+export interface MentionLine {
+  noteId: string;
+  noteTitle: string;
+  line: number;
+  text: string;
+  updatedAt: number;
+}
+
+/** A person as one asker may be told of them. */
+export interface PersonPage {
+  /** Who it is, as a mention names them: a member's id, or a name. */
+  who: string;
+  name: string;
+  member: Member | null;
+  contacts: ContactCard[];
+  todos: ListedTodo[];
+  mentionedIn: MentionLine[];
+  /** Whether more lines mention them than are listed. */
+  more: boolean;
+  /** The query that finds the notes that mention them, which a search from their page is narrowed by. */
+  query: string;
 }
 
 export type SourceRecord = { kind: "event"; ref: string; event: CalendarEvent } | { kind: "contact"; ref: string; contact: Contact };

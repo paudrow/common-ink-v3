@@ -164,6 +164,7 @@ describe("MCP protocol", () => {
       "update_event",
       "create_event",
       "list_contacts",
+      "read_person",
       "refer_record",
       "read_record",
       "list_members",

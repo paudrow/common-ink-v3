@@ -534,6 +534,13 @@ export const TOOLS: Tool[] = [
     op: "contact.list",
   },
   {
+    name: "read_person",
+    description:
+      "A person, as a mention names them: their page. who is a member's id from list_members, or a name. A name one member has is that member. It answers the member they are (when your token is told who the members are), your member's own contacts that are them with all those contacts hold, the open todos assigned to them, and each line that mentions them in the notes you can see, the note changed latest first. query is what search_notes takes to find the notes that mention them; add words to it to search among those. Write nothing a contact told you into a note: every reader of the note sees it.",
+    inputSchema: object({ who: { type: "string", maxLength: 200, description: "A member's id, or a name as a mention writes it" }, limit: { type: "integer", minimum: 1, maximum: 200, description: "How many lines that mention them, at most. Default 50" } }, ["who"]),
+    op: "person.read",
+  },
+  {
     name: "refer_record",
     description:
       `What a note writes to reference one of your member's events or contacts without copying it: ref, and text, an embed such as ::event{ref Lunch with Sam} or ::contact{ref Sam Okafor} to put in the note. The app draws it for your member with the record's details as they are now. The words after the ref are plain text in the note, which every reader of the note sees, so change or drop them if the title shouldn't be shared; the rest of the record is never in the note. ${SOURCES}`,

@@ -4,7 +4,7 @@ import { signIn, whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { inOrder, within } from "../../src/core/events.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type OpInput } from "../../src/core/protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type ContactCard, type OpInput } from "../../src/core/protocol.ts";
 import { namedReferences } from "../../src/core/references.ts";
 import { SourceError, contactMatches, writtenReference, type CalendarSource, type ContactsSource, type DataSource, type Sources } from "../../src/core/sources.ts";
 import worker from "../../src/worker/index.ts";
@@ -36,13 +36,13 @@ const event = (id: string, title: string, more: Partial<CalendarEvent> = {}): Ca
 const calendar = (id: string, name: string, more: Partial<Calendar> = {}): Calendar => ({ sourceId: "cal", id, name, color: null, writable: true, ...more });
 const MINE = calendar("mine", "Mine");
 
-const contact = (id: string, name: string, more: Partial<Contact> = {}): Contact => ({ sourceId: "people", id, name, emails: [], phones: [], organization: null, url: null, ...more });
+const contact = (id: string, name: string, more: Partial<ContactCard> = {}): ContactCard => ({ sourceId: "people", id, name, emails: [], phones: [], organization: null, url: null, title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], ...more });
 
 /** Data sources held in memory, each person's their own, with a record of everything asked of them. */
 function world(options: { readOnly?: boolean; fails?: SourceError } = {}) {
   const events = new Map<string, CalendarEvent[]>();
   const calendars = new Map<string, Calendar[]>();
-  const contacts = new Map<string, Contact[]>();
+  const contacts = new Map<string, ContactCard[]>();
   const asked: string[] = [];
   const updates: unknown[] = [];
   const creates: unknown[] = [];

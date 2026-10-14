@@ -9,7 +9,7 @@ import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashe
 import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
-import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
+import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, mentionsOn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
 import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, type Asking } from "./membership.ts";
 import {
   NO_SUCH_WORKSPACE,
@@ -33,6 +33,8 @@ import {
   type NoteSummary,
   type OpInput,
   type OpType,
+  type PersonPage,
+  type Member as MemberCard,
   type Results,
   type Resolve,
   type RevertedNotes,
@@ -43,11 +45,11 @@ import {
   type Written,
 } from "./protocol.ts";
 import { removing, forgetRemoved } from "./purge.ts";
-import { FILTERS, MAX_BOUND, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
+import { FILTERS, MAX_BOUND, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, createEvent, listContacts, listEvents, listSources, readRecord, refer, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, contactCards, createEvent, listContacts, listEvents, listSources, readRecord, refer, updateEvent, type Sources } from "./sources.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
@@ -1389,6 +1391,77 @@ async function finding(ctx: Context, scope: Scope, op: { query: string; today?: 
 }
 
 
+/** As much of a line as a person's page shows of it, around where it first mentions them. */
+const MENTION_LINE = 300;
+
+/** What starts a line of a list, a task, a heading or a quote: the marks, not the words. */
+const BLOCK_MARKS = /^\s*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?|#{1,6}\s+|>\s*)/;
+
+/** The line's words with each mention written as the name it shows the asker, and no more of it than a page shows. */
+function lineAsShown(line: string, members: ReadonlyMap<string, Member>, keys: ReadonlySet<string>): string {
+  const words = line.replace(BLOCK_MARKS, (marks) => " ".repeat(marks.length));
+  const at = mentionsOn(words).find((m) => keys.has(mentionKey(m)))?.from ?? 0;
+  const shown = rementioned(words, (mention) => `@${members.get(mention.target)?.name ?? mentionName(mention)}`).trim();
+  if (shown.length <= MENTION_LINE) return shown;
+  const from = Math.max(0, Math.min(at - MENTION_LINE / 3, shown.length - MENTION_LINE));
+  return `${from > 0 ? "…" : ""}${shown.slice(Math.round(from), Math.round(from) + MENTION_LINE)}…`;
+}
+
+/**
+ * What a person's page shows the asker. Each part goes through what the asker may be told: the
+ * member only to whoever is told who the members are, their email only as member.list tells it,
+ * contacts only the asker's own and never to an agent limited to folders, and todos and lines only
+ * from the notes the asker can see.
+ */
+async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>): Promise<PersonPage> {
+  await mend(ctx);
+  const meant = await membersMeant(ctx, [op.who]);
+  const namesakes = meant.byName.get(op.who.toLowerCase()) ?? [];
+  const one = meant.byId.get(op.who) ?? (namesakes.length === 1 ? namesakes[0] : undefined);
+  const full = one ? (await listMembers(ctx.db, ctx.workspaceId, { emails: true })).find((m) => m.personId === one.id) : undefined;
+  const toldEmail = ctx.author.kind === "member" && ctx.role === "admin" ? full?.email : undefined;
+  const member: MemberCard | null = full ? { personId: full.personId, name: full.name, role: full.role, ...(toldEmail && { email: toldEmail }) } : null;
+  const who = member?.personId ?? op.who;
+  // Who their mentions are: as `mentions:` reads the name they are asked by, or a member's name when one member has it, so a
+  // mention written by name before they joined is theirs too, and the page's search finds what the page lists.
+  const byName = member && isPersonId(op.who) ? ((await membersMeant(ctx, [member.name])).byName.get(member.name.toLowerCase()) ?? []) : namesakes;
+  const searchedAs = member && byName.length > 1 ? member.personId : (member?.name ?? op.who);
+  const keys = new Set(member && byName.length > 1 ? [member.personId] : [personKey(searchedAs), ...byName.map((m) => m.id)]);
+
+  const { results } = await ctx.db
+    .prepare(
+      `SELECT a.note_id, a.line, a.name, n.title, n.text, n.updated_at FROM mentions a JOIN notes n ON n.id = a.note_id
+       WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "live")} AND a.who IN (SELECT value FROM json_each(?3))
+       ORDER BY n.updated_at DESC, n.id, a.line LIMIT ?4`,
+    )
+    .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify([...keys]), op.limit + 1)
+    .all<{ note_id: string; line: number; name: string; title: string; text: string; updated_at: number }>();
+  const listed = results.slice(0, op.limit).map((r) => ({ ...r, said: r.text.split("\n")[r.line] ?? "" }));
+  const ids = listed.flatMap((r) => mentionsOn(r.said).map((m) => m.target)).filter(isPersonId);
+  const shown = (await membersMeant(ctx, ids)).byId;
+  const name = member?.name ?? (isPersonId(op.who) ? (results[0]?.name ?? op.who) : op.who);
+
+  // A contact is the asker's own, read from their data sources: an agent limited to folders is refused those, as contact.list is.
+  const theirs = ctx.personId !== null && ctx.actor.kind !== "visitor" && !ctx.sight.within;
+  // Matched by the member's email only for an asker the member list tells it to: for anyone else a match would confirm a guess.
+  const emails = new Set(toldEmail ? [toldEmail.toLowerCase()] : []);
+  const contacts = theirs ? await contactCards(asker(ctx), (c) => folded(c.name) === folded(name) || c.emails.some((e) => emails.has(e.toLowerCase()))) : [];
+
+  const query = `mentions:${writtenValue(searchedAs)}`;
+  const todoList = Op.parse({ type: "todo.list", query: `assignee:${writtenValue(searchedAs)}` }) as Extract<Op, { type: "todo.list" }>;
+  const { todos } = await HANDLERS["todo.list"].run(ctx, todoList);
+  return {
+    who,
+    name,
+    member,
+    contacts,
+    todos,
+    mentionedIn: listed.map((r) => ({ noteId: r.note_id, noteTitle: r.title, line: r.line, text: lineAsShown(r.said, shown, keys), updatedAt: r.updated_at })),
+    more: results.length > op.limit,
+    query,
+  };
+}
+
 export const MAX_ANSWER_LINES = 2000;
 
 const HANDLERS: { [K in OpType]: Handler<K> } = {
@@ -2370,6 +2443,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "event.update": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateEvent(asker(ctx), sourceId, id, etag, change) },
   "event.create": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, calendarId, type: _, ...fields }) => createEvent(asker(ctx), sourceId, calendarId, fields) },
   "contact.list": { needs: "view", own: true, run: (ctx, op) => listContacts(asker(ctx), op.query) },
+  "person.read": { needs: "view", run: readPerson },
   "record.refer": { needs: "view", own: true, changes: true, run: (ctx, op) => refer(asker(ctx), op.sourceId, op.id) },
   "record.read": { needs: "view", own: true, run: (ctx, op) => readRecord(asker(ctx), op.ref) },
 };

@@ -257,6 +257,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "event.update": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none", etag: "none", title: "No" }) },
   "event.create": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } }) },
   "contact.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  // Asked in capitals, so the answer's echo of who it is about is no mark of the note: only a line of it would be.
+  "person.read": { on: "workspace", who: EVERYONE, args: () => ({ who: "WHO-TEAM" }) },
   "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.

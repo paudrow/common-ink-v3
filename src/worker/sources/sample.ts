@@ -1,6 +1,6 @@
 import { shiftDay } from "../../core/events.ts";
 import { newId } from "../../core/ids.ts";
-import type { Calendar, CalendarEvent, Contact, EventWhen } from "../../core/protocol.ts";
+import type { Calendar, CalendarEvent, Contact, ContactCard, EventWhen } from "../../core/protocol.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type Described } from "../../core/sources.ts";
 import { connectPlain, connectionOf } from "./connections.ts";
 import type { Provider } from "./index.ts";
@@ -64,12 +64,25 @@ const PATTERNS: readonly Pattern[] = [
   { key: "holiday", days: [5], title: "Company holiday", calendar: "holidays", lasts: 1 },
 ];
 
-const CONTACTS: readonly Omit<Contact, "sourceId" | "url">[] = [
-  { id: "ada", name: "Ada Lovelace", emails: ["ada@example.com"], phones: ["+1 555 0100"], organization: "Analytical Engines" },
-  { id: "grace", name: "Grace Hopper", emails: ["grace@example.com", "hopper@navy.example"], phones: [], organization: "Navy" },
-  { id: "sam", name: "Sam Okafor", emails: [], phones: ["+1 555 0142"], organization: "Okafor Plumbing" },
-  { id: "zoe", name: "Zoë Álvarez", emails: ["zoe@example.com"], phones: [], organization: null },
-  { id: "lin", name: "Lin Wei", emails: ["lin@example.org"], phones: ["+86 10 5550 0199"], organization: "Harbor Books" },
+const NOTHING_MORE = { title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [] };
+const CONTACTS: readonly Omit<ContactCard, "sourceId" | "url">[] = [
+  { ...NOTHING_MORE, id: "ada", name: "Ada Lovelace", emails: ["ada@example.com"], phones: ["+1 555 0100"], organization: "Analytical Engines", title: "Analyst", birthday: "1815-12-10" },
+  { ...NOTHING_MORE, id: "grace", name: "Grace Hopper", emails: ["grace@example.com", "hopper@navy.example"], phones: [], organization: "Navy", title: "Rear Admiral", notes: "Met at the compiler workshop." },
+  {
+    id: "sam",
+    name: "Sam Okafor",
+    emails: [],
+    phones: ["+1 555 0142"],
+    organization: "Okafor Plumbing",
+    title: "Owner",
+    addresses: ["12 Water Lane, Springfield"],
+    birthday: "--04-21",
+    notes: "Fixed the boiler in March. Prefers a text to a call.",
+    photo: null,
+    urls: ["https://okafor-plumbing.example"],
+  },
+  { ...NOTHING_MORE, id: "zoe", name: "Zoë Álvarez", emails: ["zoe@example.com"], phones: [], organization: null },
+  { ...NOTHING_MORE, id: "lin", name: "Lin Wei", emails: ["lin@example.org"], phones: ["+86 10 5550 0199"], organization: "Harbor Books", addresses: ["3 Harbor Road, Ningbo"] },
 ];
 
 const dayOf = (time: number) => new Date(time).toISOString().slice(0, 10);
@@ -175,8 +188,10 @@ function calendar(db: D1Database, personId: string, info: Described): CalendarSo
 }
 
 function contacts(info: Described): ContactsSource {
-  const all = CONTACTS.map((contact) => ({ ...contact, sourceId: "sample-contacts", url: null }));
-  return { kind: "contacts", info, list: async () => ({ contacts: all, more: false }), get: async (id) => all.find((c) => c.id === id) ?? null };
+  const all: ContactCard[] = CONTACTS.map((contact) => ({ ...contact, sourceId: "sample-contacts", url: null }));
+  // A listing holds what a contact is found by, as a source's listing does; the rest is read one contact at a time.
+  const listed = all.map(({ sourceId, id, name, emails, phones, organization, url }): Contact => ({ sourceId, id, name, emails, phones, organization, url }));
+  return { kind: "contacts", info, list: async () => ({ contacts: listed, more: false }), get: async (id) => all.find((c) => c.id === id) ?? null };
 }
 
 export function sample(db: D1Database, now: () => number): Provider {

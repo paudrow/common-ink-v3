@@ -86,6 +86,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "event.update": { sourceId: "google-calendar", id: "none", etag: "none", title: "No" },
   "event.create": { sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } },
   "contact.list": {},
+  "person.read": { who: "Sam Okafor" },
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },
 });

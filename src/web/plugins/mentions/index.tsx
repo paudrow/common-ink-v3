@@ -2,7 +2,9 @@ import { completionStatus, startCompletion } from "@codemirror/autocomplete";
 import { EditorView, ViewPlugin } from "@codemirror/view";
 import type { Member, Plugin } from "../../plugin-api.ts";
 import { editorKey, redraw } from "../lib/live.ts";
-import { mentionDrawing, noteMentions } from "./drawing.ts";
+import { mentionDrawing, noteMentions, type OpenPerson } from "./drawing.ts";
+import { PERSON_PATH, personPath, whoOn } from "../lib/person.ts";
+import { PersonPage } from "./PersonPage.tsx";
 import { newlyMentioned, offered, type People } from "./people.ts";
 
 /** How long the members are taken to be who they were, before `@` reads them again. */
@@ -24,6 +26,7 @@ const named = (members: readonly Member[]) => new Intl.ListFormat(undefined, { t
  * a mention: of a member by their id, drawn as their name is now in the theme colour, and of anyone
  * else by name alone, drawn in gray. On a todo a mention is who it is assigned to. A mention gives
  * nobody access: mentioning a member in a private note of one's own offers to share it with them.
+ * A click on a mention opens the person's page.
  *
  * The contacts are read once, when `@` is first typed, and kept in this browser's memory for the
  * list to narrow as the member types. Nothing typed after `@` is sent anywhere, and only the name
@@ -32,7 +35,7 @@ const named = (members: readonly Member[]) => new Intl.ListFormat(undefined, { t
 export const mentions: Plugin = {
   id: "mentions",
   name: "Mentions",
-  description: "Mentions a person in a note with @: a member of the workspace, one of your contacts, or a name. On a todo's line it assigns the todo.",
+  description: "Mentions a person in a note with @: a member of the workspace, one of your contacts, or a name. A click opens their page. On a todo's line it assigns the todo.",
   icon: "at",
   settings: {
     offerToShare: {
@@ -117,7 +120,38 @@ export const mentions: Plugin = {
       });
     }
 
-    const drawing = mentionDrawing(() => people);
+    /** Where a page asked a note to open, to put the cursor at the end of that line once its editor is there. */
+    let going: { noteId: string; line: number } | null = null;
+    const arrive = (view: EditorView, noteId: string) => {
+      if (going?.noteId !== noteId) return;
+      const { doc } = view.state;
+      const at = doc.line(Math.min(going.line + 1, doc.lines));
+      going = null;
+      view.dispatch({ selection: { anchor: at.to }, effects: EditorView.scrollIntoView(at.from, { y: "center" }) });
+    };
+    const opened = new Map<EditorView, string>();
+    const openAt = (noteId: string, line: number) => {
+      going = { noteId, line };
+      host.app().openNote(noteId, { focus: true });
+      for (const [view, id] of opened) if (id === noteId) arrive(view, noteId);
+    };
+    // A link's page has nowhere to go: there a click on a mention is for the cursor.
+    const open = (): OpenPerson => {
+      const { go } = host.app();
+      return typeof go === "function" ? (target) => go(personPath(target)) : null;
+    };
+    const drawing = mentionDrawing(() => people, open);
+
+    host.views.register("page", {
+      id: "person",
+      path: PERSON_PATH,
+      label: "Person",
+      icon: "at",
+      component: ({ app }) => {
+        const who = whoOn(app.path);
+        return who ? <PersonPage key={who} host={host} app={app} who={who} openAt={openAt} /> : null;
+      },
+    });
 
     host.editorExtensions.register({
       id: "mentions",
@@ -126,7 +160,14 @@ export const mentions: Plugin = {
         ViewPlugin.define((view) => {
           const key = editorKey(editor);
           editors.set(key, view);
-          return { destroy: () => void (editors.get(key) === view && editors.delete(key)) };
+          opened.set(view, editor.noteId);
+          queueMicrotask(() => arrive(view, editor.noteId));
+          return {
+            destroy: () => {
+              opened.delete(view);
+              if (editors.get(key) === view) editors.delete(key);
+            },
+          };
         }),
         // Only what the member writes here asks: a mention an agent or someone else wrote arrives as no input of theirs.
         EditorView.updateListener.of((update) => {
