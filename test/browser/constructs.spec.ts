@@ -300,7 +300,7 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-test("a task has no dot beside its box, a bullet with things under it keeps its fold toggle, and a plain bullet keeps its dot", async ({ page }) => {
+test("a task has no dot beside its box, nothing is drawn beside a bullet with things under it, and a plain bullet keeps its dot", async ({ page }) => {
   await open(page, DEPTHS.replace("- Plain bullet", "- Plain bullet\n> - [ ] Quoted task\n- - [ ] Inner task"));
   const marks = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")]
@@ -308,21 +308,21 @@ test("a task has no dot beside its box, a bullet with things under it keeps its 
       .map((line) => {
         const mark = line.querySelector<HTMLElement>(".bullet-dot, .bullet-blank");
         return {
-          line: line.textContent!.replace(/^[\s▾▸]+/, ""),
+          line: line.textContent!.trimStart(),
           painted: mark ? getComputedStyle(mark, "::before").content !== "none" || getComputedStyle(mark).webkitTextFillColor !== "rgba(0, 0, 0, 0)" : null,
-          toggle: line.querySelector(".bullet-toggle") !== null,
+          beside: line.querySelectorAll("[role=button]").length,
         };
       }),
   );
   expect(marks).toEqual([
-    { line: "- Bullet one", painted: true, toggle: true },
-    { line: "- Bullet two", painted: true, toggle: true },
-    { line: "- [ ] Task one", painted: false, toggle: true },
-    { line: "- [ ] Task two", painted: false, toggle: true },
-    { line: "- [ ] Mixed three", painted: false, toggle: true },
+    { line: "- Bullet one", painted: true, beside: 0 },
+    { line: "- Bullet two", painted: true, beside: 0 },
+    { line: "- [ ] Task one", painted: false, beside: 0 },
+    { line: "- [ ] Task two", painted: false, beside: 0 },
+    { line: "- [ ] Mixed three", painted: false, beside: 0 },
     // Where no box is drawn, in a quote or after another mark, the mark keeps its dot.
-    { line: "> - [ ] Quoted task", painted: true, toggle: false },
-    { line: "- - [ ] Inner task", painted: true, toggle: false },
+    { line: "> - [ ] Quoted task", painted: true, beside: 0 },
+    { line: "- - [ ] Inner task", painted: true, beside: 0 },
   ]);
 
   // With the cursor on a task's mark it is shown as written, and nothing on the line moves.
@@ -335,46 +335,66 @@ test("a task has no dot beside its box, a bullet with things under it keeps its 
   expect(await startsOf(page, ["Task two"])).toEqual(before);
 });
 
-test("a task's words start well clear of its box, the same distance ticked or not, and neither the cursor coming onto the box nor ticking it moves them", async ({ page }) => {
-  await open(page, "# Gap\n\n- [ ] Open task\n- [x] Done task\n- [X] Shouted task\n1. [ ] Numbered task\n\nLast words.");
-  const size = await editor(page).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  const gaps = () =>
-    page.evaluate((words) => {
-      const lines = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")];
-      return words.map((word) => {
-        const line = lines.find((el) => el.textContent!.includes(word))!;
-        const text = [...line.querySelectorAll("*")].flatMap((el) => [...el.childNodes]).concat([...line.childNodes]).find((node) => node.nodeType === Node.TEXT_NODE && node.textContent!.includes(word))!;
-        const range = document.createRange();
-        range.setStart(text, text.textContent!.indexOf(word));
-        range.setEnd(text, text.textContent!.indexOf(word) + 1);
-        const words = range.getBoundingClientRect().left;
-        const box = line.querySelector("input[type=checkbox]")?.getBoundingClientRect();
-        return { words, gap: box ? words - box.right : null, boxLeft: box?.left ?? null };
-      });
-    }, ["Open task", "Done task", "Shouted task", "Numbered task"]);
+/**
+ * A face whose X is twice as wide as the app's and whose letters are spread, put on the page before the note is drawn: its X
+ * loads only once one is on screen, so anything that measured `[X]` before then measured another face's. On Linux an `[X]`
+ * task's words once started 1.36px right of an `[ ]` one's, where the gap was made up from the letters' measured widths.
+ */
+const WIDE_X = `@font-face { font-family: "Ink wide X"; src: local("Helvetica"), local("Arial"), local("Liberation Sans"), local("DejaVu Sans"); unicode-range: U+58; size-adjust: 200%; }
+.editor .cm-content { font-family: "Ink wide X", var(--prose) !important; letter-spacing: 0.6px; }`;
 
-  const drawn = await gaps();
-  for (const [n, { gap }] of drawn.entries()) expect(gap!, `the gap after box ${n} is ${gap}, the text is ${size}px`).toBeGreaterThanOrEqual(0.55 * size);
-  expect(Math.abs(drawn[0]!.words - drawn[1]!.words), "an open and a done task's words start together").toBeLessThanOrEqual(0.5);
-  expect(Math.abs(drawn[0]!.words - drawn[2]!.words), "and an [X] one's").toBeLessThanOrEqual(0.5);
-  expect(Math.abs(drawn[0]!.boxLeft! - drawn[1]!.boxLeft!), "their boxes are in one place").toBeLessThanOrEqual(0.5);
+for (const face of ["the app's face", "a face with a wide X"] as const) {
+  test(`a task's words start well clear of its box, the same distance ticked or not, and neither the cursor coming onto the box nor ticking it moves them (${face})`, async ({ page }) => {
+    if (face === "a face with a wide X") await page.addInitScript((css) => document.addEventListener("DOMContentLoaded", () => document.head.append(Object.assign(document.createElement("style"), { textContent: css }))), WIDE_X);
+    await open(page, "# Gap\n\n- [ ] Open task\n- [x] Done task\n- [X] Shouted task\n1. [ ] Numbered task\n\nLast words.");
+    const size = await editor(page).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    const gaps = () =>
+      page.evaluate((words) => {
+        const lines = [...document.querySelectorAll<HTMLElement>(".cm-content .cm-line")];
+        return words.map((word) => {
+          const line = lines.find((el) => el.textContent!.includes(word))!;
+          const text = [...line.querySelectorAll("*")].flatMap((el) => [...el.childNodes]).concat([...line.childNodes]).find((node) => node.nodeType === Node.TEXT_NODE && node.textContent!.includes(word))!;
+          const range = document.createRange();
+          range.setStart(text, text.textContent!.indexOf(word));
+          range.setEnd(text, text.textContent!.indexOf(word) + 1);
+          const words = range.getBoundingClientRect().left;
+          const box = line.querySelector("input[type=checkbox]")?.getBoundingClientRect();
+          const written = line.querySelector(".md-chip-task > :first-child, .md-task-box")!.getBoundingClientRect().width;
+          return { words, gap: box ? words - box.right : null, boxLeft: box?.left ?? null, written };
+        });
+      }, ["Open task", "Done task", "Shouted task", "Numbered task"]);
 
-  // The cursor on the box shows `[ ]` as written in the box's place: the words stay put.
-  const first = editor(page).locator(".cm-line").filter({ hasText: "Open task" });
-  await first.getByText("Open task").click();
-  await page.keyboard.press("Home");
-  for (let n = 0; n < 2; n++) await page.keyboard.press("ArrowRight");
-  await expect(first.getByRole("checkbox")).toHaveCount(0);
-  expect(Math.abs((await gaps())[0]!.words - drawn[0]!.words), "the words with the box shown as written").toBeLessThanOrEqual(0.5);
+    const drawn = await gaps();
+    if (face === "a face with a wide X") expect(drawn[2]!.written - drawn[0]!.written, "the face's X is wider than a space by a lot").toBeGreaterThan(0.6 * size);
+    for (const [n, { gap }] of drawn.entries()) expect(gap!, `the gap after box ${n} is ${gap}, the text is ${size}px`).toBeGreaterThanOrEqual(0.55 * size);
+    expect(Math.abs(drawn[0]!.words - drawn[1]!.words), "an open and a done task's words start together").toBeLessThanOrEqual(0.5);
+    expect(Math.abs(drawn[0]!.words - drawn[2]!.words), "and an [X] one's").toBeLessThanOrEqual(0.5);
+    expect(Math.abs(drawn[0]!.boxLeft! - drawn[1]!.boxLeft!), "their boxes are in one place").toBeLessThanOrEqual(0.5);
 
-  // Ticked from elsewhere, the words stay put too.
-  await page.keyboard.press("ControlOrMeta+End");
-  await first.getByRole("checkbox").click();
-  await expect(first.getByRole("checkbox")).toBeChecked();
-  const ticked = await gaps();
-  expect(Math.abs(ticked[0]!.words - drawn[0]!.words), "the words once the box is ticked").toBeLessThanOrEqual(0.5);
-  expect(Math.abs(ticked[0]!.boxLeft! - drawn[0]!.boxLeft!), "the box once it is ticked").toBeLessThanOrEqual(0.5);
-});
+    // The cursor on the box shows `[ ]` as written in the box's place: the words stay put.
+    const first = editor(page).locator(".cm-line").filter({ hasText: "Open task" });
+    await first.getByText("Open task").click();
+    await page.keyboard.press("Home");
+    for (let n = 0; n < 2; n++) await page.keyboard.press("ArrowRight");
+    await expect(first.getByRole("checkbox")).toHaveCount(0);
+    expect(Math.abs((await gaps())[0]!.words - drawn[0]!.words), "the words with the box shown as written").toBeLessThanOrEqual(0.5);
+    // And an `[X]` as written, however wide its X.
+    const shouted = editor(page).locator(".cm-line").filter({ hasText: "Shouted task" });
+    await shouted.getByText("Shouted task").click();
+    await page.keyboard.press("Home");
+    for (let n = 0; n < 2; n++) await page.keyboard.press("ArrowRight");
+    await expect(shouted.getByRole("checkbox")).toHaveCount(0);
+    expect(Math.abs((await gaps())[2]!.words - drawn[2]!.words), "an [X] task's words with its box shown as written").toBeLessThanOrEqual(0.5);
+
+    // Ticked from elsewhere, the words stay put too.
+    await page.keyboard.press("ControlOrMeta+End");
+    await first.getByRole("checkbox").click();
+    await expect(first.getByRole("checkbox")).toBeChecked();
+    const ticked = await gaps();
+    expect(Math.abs(ticked[0]!.words - drawn[0]!.words), "the words once the box is ticked").toBeLessThanOrEqual(0.5);
+    expect(Math.abs(ticked[0]!.boxLeft! - drawn[0]!.boxLeft!), "the box once it is ticked").toBeLessThanOrEqual(0.5);
+  });
+}
 
 test("a formula in a line sits on the line's baseline where KaTeX itself puts it, and the line is no taller", async ({ page }) => {
   await open(page, "# Inline $\\frac{a}{b}$ head\n\nA fraction $\\frac{a}{b}$ and a square $x^2$ and a sum $\\sum_{i=1}^{n} i$ and $a \\neq b$ and $x \\notin S$ in words.\n\nLast words.");

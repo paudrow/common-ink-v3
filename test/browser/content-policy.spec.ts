@@ -78,7 +78,7 @@ const CONSTRUCTS = [
   "",
   "| A | B |",
   "| - | - |",
-  "| 1 | 2 |",
+  "| 1 | $y$ |",
   "",
   "```python",
   "def f(x):",
@@ -94,7 +94,8 @@ test("formulas, tables, code, tasks and the rest of what a note draws come in un
   const note = await perform(page, { type: "note.create", text: CONSTRUCTS });
   await page.goto(`/note/${note.id}`);
   const editor = page.getByRole("textbox", { name: "Note text" });
-  await expect(editor.locator(".katex")).toHaveCount(3);
+  await expect(editor.locator(".katex")).toHaveCount(4);
+  await expect(editor.getByRole("table").locator(".katex")).toHaveCount(1);
   await expect(editor.locator(".math-block .katex-display")).toBeVisible();
   await expect(editor.getByRole("table")).toBeVisible();
   await expect(editor.getByRole("checkbox")).toHaveCount(2);

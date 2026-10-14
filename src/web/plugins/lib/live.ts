@@ -108,12 +108,13 @@ export function drawnInState<T extends readonly { from: number; to: number }[]>(
 
 /**
  * Calls `seen` the first time text on screen in any editor passes `has`, and never again. It is how
- * a plugin whose drawing is heavy waits to load it until a note has something for it to draw.
+ * a plugin whose drawing is heavy waits to load it until a note has something for it to draw. Text
+ * drawn as something else on screen, such as a table's lines, is on screen.
  */
 export function whenSeen(has: (text: string) => boolean, seen: () => void): Extension {
   let done = false;
   const look = (view: EditorView) => {
-    if (done || !view.visibleRanges.some(({ from, to }) => has(view.state.sliceDoc(from, to)))) return;
+    if (done || !has(view.state.sliceDoc(view.viewport.from, view.viewport.to))) return;
     done = true;
     seen();
   };

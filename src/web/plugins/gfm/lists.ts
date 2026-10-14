@@ -63,6 +63,8 @@ interface Start {
 
 const hangs = (width: number) => Decoration.line({ class: "md-item", attributes: { style: `--md-hang: ${width.toFixed(3)}px` } });
 const indented = (width: number) => Decoration.mark({ class: "md-item-indent", attributes: { style: `width: ${width.toFixed(3)}px` } });
+/** A task's `[ ]`, `[x]` or `[X]` as written: as wide as the box drawn in its place, whatever its letters' widths. */
+const boxed = Decoration.mark({ class: "md-task-box" });
 /** The space after a task's box, made as wide as the gap after the box asks, the same with the box drawn or written. */
 const gap = (width: number) => Decoration.mark({ class: "md-task-gap", attributes: { style: `padding-right: ${width.toFixed(3)}px` } });
 
@@ -116,13 +118,16 @@ const hanging = drawnInView(
           const indent = /^[ \t]*/.exec(lead)![0];
           const written = widthOf(font, columns(indent));
           const wide = depth ? Math.max(written, depth * STEP_EM * size) : written;
-          // A task's words start a box and a gap after its `[`, whether it is `[ ]`, `[x]` or `[X]`, so ticking it moves nothing.
+          // A task's words start a box and a gap after its `[`, whether it is `[ ]`, `[x]` or `[X]`, so ticking it moves nothing. The box is
+          // as wide as it is drawn, written or not, so no letter's width is in it, measured or laid out.
           const task = /(\[[ xX]\])([ \t]+)$/.exec(lead);
-          const room = task ? Math.max(0, (BOX_EM + TASK_GAP_EM) * size - widthOf(font, task[0])) : 0;
-          const hang = wide + widthOf(font, columns(lead)) - written + room;
+          const space = task ? widthOf(font, task[2]!) : 0;
+          const room = task ? Math.max(0, TASK_GAP_EM * size - space) : 0;
+          const before = task ? lead.slice(0, task.index) : lead;
+          const hang = wide + widthOf(font, columns(before)) - written + (task ? BOX_EM * size + space + room : 0);
           if (!hang) return;
           drawn.push(hangs(hang).range(line.from));
-          if (task) drawn.push(gap(room).range(line.from + lead.length - task[2]!.length, line.from + lead.length));
+          if (task) drawn.push(boxed.range(line.from + task.index, line.from + task.index + 3), gap(room).range(line.from + lead.length - task[2]!.length, line.from + lead.length));
           if (indent && (wide !== written || indent.includes("\t"))) drawn.push(indented(wide).range(line.from, line.from + indent.length));
           // What is written under an item is indented to its mark, not to a task's box, and is drawn under the words all the same.
           const start = { column: columns(/^[ \t]*\S+[ \t]+/.exec(lead)![0]).length, hang };
@@ -166,6 +171,7 @@ const look = EditorView.baseTheme({
   // would be as wide as the way to the next stop, and the stops are counted from where the line's rows start, which the
   // pull has put to the right of the indent.
   ".md-item-indent": { display: "inline-block", whiteSpace: "pre", overflow: "hidden", verticalAlign: "bottom" },
+  ".md-task-box": { display: "inline-block", width: `${BOX_EM}em`, whiteSpace: "pre" },
 });
 
 export const hangingLists: Extension = [hanging, look];
