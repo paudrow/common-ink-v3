@@ -29,6 +29,10 @@ Vim.defineEx("redo", "red", () => void run("history.redo"));
 Vim.defineAction("typeTab", (cm) => cm.replaceSelection("\t"));
 Vim.mapCommand("<C-i>", "action", "typeTab", {}, { context: "insert" });
 
+// A link is the nearest thing a note has to a definition, so gd follows the one under the cursor: to its note, or to its page in a new tab.
+Vim.defineAction("followLink", () => void run("links.follow"));
+Vim.mapCommand("gd", "action", "followLink", {}, { context: "normal" });
+
 // A note's tabs are vim's tab pages. In a note g begins many of vim's own keys, so these two are vim's to map and not the window's.
 Vim.defineAction("nextTab", () => void run("vim.tab.next"));
 Vim.defineAction("previousTab", () => void run("vim.tab.previous"));

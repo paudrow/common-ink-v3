@@ -174,7 +174,7 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
   await expect(text).toBeFocused();
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("focus");
+  await page.keyboard.type("toggle focus");
   await expect(palette.getByRole("option")).toHaveText([/^Toggle focus/]);
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
@@ -183,7 +183,7 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
   await expect(page.getByRole("complementary")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("focus");
+  await page.keyboard.type("toggle focus");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("navigation", { name: "Left rail" })).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();

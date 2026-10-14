@@ -254,7 +254,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await showPanel(page, "History");
   await expect(panel.getByRole("listbox", { name: "Changes" }).getByRole("option")).toContainText("You wrote");
   await showPanel(page, "Backlinks");
-  await expect(panel).toHaveText("Notes that link here arrive with #13.");
+  await expect(panel).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
 
   await showPanel(page, "Info");
   await panel.getByRole("combobox", { name: "Move to" }).selectOption({ label: "Projects" });

@@ -190,7 +190,8 @@ export class NoteSync {
     this.onState("saving");
     this.inFlight = (async () => {
       try {
-        const saved = await perform(this.workspaceId, { type: "note.write", id: this.noteId, ...write });
+        // What is typed is what is stored: a link is by id once it is picked from the list, and typing is never refused for a title.
+        const saved = await perform(this.workspaceId, { type: "note.write", id: this.noteId, ...write, linkTitles: "keep" });
         this.apply(changesBetween(write.text, saved.text).map(this.typedSinceWrite!));
         this.unacknowledged = null;
         this.typedSinceWrite = null;

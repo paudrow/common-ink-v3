@@ -591,6 +591,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch }
     };
   }, [host]);
   useEffect(() => host.navigated(), [host, place.path]);
+  useEffect(() => host.notesChanged(), [host, notes]);
 
   const actions = useLatest({
     go,

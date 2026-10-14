@@ -14,11 +14,28 @@ import { isReading } from "../../plugin-api.ts";
  */
 export const touched = (state: EditorState, from: number, to: number) => !isReading(state) && state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 
+/**
+ * Whether the member is working inside `from` to `to`: a cursor past its first character and before
+ * its last, or a selection of part of it and nothing outside it. A selection that covers all of it,
+ * as selecting a paragraph does, is not.
+ */
+export const within = (state: EditorState, from: number, to: number) =>
+  !isReading(state) && state.selection.ranges.some((r) => (r.empty ? r.from > from && r.to < to : r.from >= from && r.to <= to && r.to - r.from < to - from));
+
 /** Whether the cursor or a selection is on the line `pos` is in. For what belongs to its whole line: a heading's mark, a code block's fence. */
 export function lineTouched(state: EditorState, pos: number) {
   const line = state.doc.lineAt(pos);
   return touched(state, line.from, line.to);
 }
+
+let readings = 0;
+
+/**
+ * What a plugin keeps an editor by. The note's editor is kept by the note's id, so it is found by
+ * it. A reading of the note gets a key of its own: it is drawn again with the editors, and never
+ * taken for the note's editor.
+ */
+export const editorKey = ({ noteId, reading }: { noteId: string; reading?: boolean }) => (reading ? `${noteId} reading ${++readings}` : noteId);
 
 /** Whether `pos` is in code, where nothing is drawn. */
 export const inCode = (state: EditorState, pos: number) => /Code/.test(syntaxTree(state).resolveInner(pos, 1).name);

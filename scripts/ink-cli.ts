@@ -12,10 +12,13 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
 
   workspaces                          the workspaces you can reach
   notes [--folder ID] [--since TIME]  the notes in a workspace, in one folder, or changed since a time
-  read ID [--revision N]              a note's markdown
-  create [--text TEXT] [--folder ID]  a new note (text from stdin if --text is left out)
-  write ID --base N [--text TEXT] [--write-id ANY]
+  read ID [--revision N]              a note's markdown, and the titles of the notes it links to
+  create [--text TEXT] [--folder ID] [--link-titles keep]
+                                      a new note (text from stdin if --text is left out)
+  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles keep]
                                       replace a note's text (from stdin if --text is left out)
+  backlinks ID                        the notes that link to a note
+  links-rebuild [--after ID]          make the record behind backlinks again from the notes' text
   move ID --folder ID                 put a note in another folder
   folders                             the folders in a workspace
   folder-create NAME [--parent ID]    a new folder
@@ -53,6 +56,10 @@ A flag a command doesn't take is refused, and nothing is sent.
 
 TIME is anything a date parses, such as 2026-10-09 or 2026-10-09T14:00:00Z. KIND:ID is an author
 from authors, such as agent:abc123def456. NEXT is the next of the page before, as JSON.
+
+A link to a note is [[ID]] or [[ID|display text]]. Write [[Title]] and create and write store it by
+the id of the one note with that title, or refuse when none or several have it. --link-titles keep
+leaves such text as it is.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
 
@@ -199,12 +206,20 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "create":
         tool = "create_note";
-        args = { text: flags.get("text") ?? (await io.stdin()), ...given({ folderId: ["folder"] }) };
+        args = { text: flags.get("text") ?? (await io.stdin()), ...given({ folderId: ["folder"], linkTitles: ["link-titles"] }) };
         break;
       case "write":
         if (!flags.has("base")) throw new UsageError("write needs --base, the revision you read");
         tool = "write_note";
-        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"] }) };
+        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"] }) };
+        break;
+      case "backlinks":
+        tool = "backlinks";
+        args = { id: needId() };
+        break;
+      case "links-rebuild":
+        tool = "rebuild_links";
+        args = given({ after: ["after"] });
         break;
       case "move":
         tool = "move_note";
@@ -361,8 +376,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
       const { answer, failed } = await call(tool, args);
       io.out(answer);
       if (failed) return 1;
-      // Reverting an author covers a few notes a call, so the command carries on until every note is covered.
-      const next = tool === "revert_author" ? nextOf(answer) : null;
+      // These cover a few notes a call, so the command carries on until every note is covered.
+      const next = tool === "revert_author" || tool === "rebuild_links" ? nextOf(answer) : null;
       if (!next) return 0;
       args = { ...args, after: next };
     }

@@ -76,8 +76,8 @@ describe("a note's title without a # heading", () => {
     expect(snippet.startsWith("word word")).toBe(true);
   });
 
-  it("passes over what is drawn and says nothing: an embed, an image, a rule, math's fence, a code block", () => {
-    expect(summarize("::timer{5m}\n![a cat](/files/abc)\n---\n```js\nconst a = 1;\n```\n$$\nReal words here").title).toBe("Real words here");
+  it("passes over what is drawn and says nothing: an embed, an image, a rule, math's fence, a link by id, a code block", () => {
+    expect(summarize("::timer{5m}\n![a cat](/files/abc)\n---\n[[abc123def456]]\n```js\nconst a = 1;\n```\n$$\nReal words here").title).toBe("Real words here");
   });
 
   it("passes over a line that is only a web address when another line says something, and is that address when none does", () => {
@@ -94,13 +94,14 @@ describe("a note's title without a # heading", () => {
   });
 
   it("is not a # heading with no words: the first heading that has words is", () => {
-    expect(summarize("# \n# Named").title).toBe("Named");
+    expect(summarize("# \n# [[abc123def456]]\n# Named").title).toBe("Named");
   });
 });
 
 describe("a note's title, as words", () => {
-  it("carries no marks: not bold, code, a link's address or an embed", () => {
-    expect(summarize("# **Bold** `plan` for [the trip](https://example.com) ::timer{5m}").title).toBe("Bold plan for the trip");
+  it("carries no marks: not bold, code, a link's address, a link's id, a mention's id or an embed", () => {
+    expect(summarize("# **Bold** `plan` for [the trip](https://example.com) with [[abc123def456|Groceries]] and @[[p1|Ada]] ::timer{5m}").title).toBe("Bold plan for the trip with Groceries and @Ada");
+    expect(summarize("# Notes on [[abc123def456]]").title).toBe("Notes on");
   });
 
   it("keeps a * or a backtick that is one of the words, and takes the marks around words", () => {

@@ -44,6 +44,8 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
 });
 
 const noteId = { type: "string", description: "The note id" };
+const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
+const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
 const revisions = { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, description: "The revisions of the changes, from note_history or history" };
@@ -114,30 +116,43 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version.",
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title now, or a null title for a note that doesn't exist or that you can't see.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "An earlier revision; default is the latest" } }, ["id"]),
     op: "note.read",
   },
   {
     name: "create_note",
-    description: "Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. Needs the editor or admin role.",
-    inputSchema: object({ text: { type: "string", description: "The note's markdown" }, folderId: folderId("The folder to put it in, from list_folders; default is Unsorted") }),
+    description: `Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} Needs the editor or admin role.`,
+    inputSchema: object({ text: { type: "string", description: "The note's markdown" }, folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"), linkTitles }),
     op: "note.create",
   },
   {
     name: "write_note",
     description:
-      "Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. Needs the editor or admin role. The change is recorded under your agent's name.",
+      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         id: noteId,
         baseRevision: { type: "integer", minimum: 0, description: "The revision your text is based on" },
         text: { type: "string", description: "The note's full new markdown" },
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
+        linkTitles,
       },
       ["id", "baseRevision", "text"],
     ),
     op: "note.write",
+  },
+  {
+    name: "backlinks",
+    description: "The notes whose text links to a note, latest change first, each as list_notes gives it. Only notes you can see are listed.",
+    inputSchema: object({ id: noteId }, ["id"]),
+    op: "note.backlinks",
+  },
+  {
+    name: "rebuild_links",
+    description: "Make the record behind backlinks again from the notes' text. Every write keeps that record, so this is only for a record that was changed some other way. It covers 40 notes a call: while the answer's next isn't null, call again with it as after. Needs the admin role.",
+    inputSchema: object({ after: { type: "string", description: "The next of the call before" } }),
+    op: "links.rebuild",
   },
   {
     name: "move_note",

@@ -98,6 +98,8 @@ export interface Host {
   settingsChanged(document: SettingsDocument): void;
   /** Tells the host the app has arrived at an address. */
   navigated(): void;
+  /** Tells the host the notes the member can see have changed. */
+  notesChanged(): void;
 }
 
 /** The setting that turns a plugin on and off. */
@@ -146,6 +148,8 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
   /** The plugins that asked to hear when the app arrives somewhere. */
   const arriving = new Set<() => void>();
   let arrived = false;
+  /** The plugins that asked to hear when the notes change. */
+  const listing = new Set<() => void>();
   let seq = 0;
   let snapshot: Contributions | null = null;
 
@@ -268,6 +272,11 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
         // A plugin turned on after the app arrived hears where it is, once it has finished starting.
         if (arrived) queueMicrotask(() => arriving.has(heard) && heard());
         return keep(() => void arriving.delete(heard));
+      },
+      onNotes(listener) {
+        const heard = () => listener();
+        listing.add(heard);
+        return keep(() => void listing.delete(heard));
       },
     };
   }
@@ -464,6 +473,9 @@ export function createPluginHost({ plugins: given, required = [], builtIn = [], 
     navigated() {
       arrived = true;
       for (const heard of [...arriving]) heard();
+    },
+    notesChanged() {
+      for (const heard of [...listing]) heard();
     },
   };
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { lineDiff, textDiff } from "./diff.ts";
 import { dayIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { newId } from "./ids.ts";
+import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
 import {
   MAX_NOTE_LENGTH,
@@ -204,6 +205,71 @@ async function intoFolder(write: Promise<unknown>, name?: string): Promise<void>
   }
 }
 
+/**
+ * The notes the actor can see among those `among` selects by id, latest change first. The other end
+ * of a link is only ever read through here: a backlink, a linked note's title, a title to link by.
+ * So a note the actor can't see is left out of all three by narrowing this one query.
+ */
+async function seenAmong(ctx: Context, among: string, ...binds: unknown[]): Promise<SummaryRow[]> {
+  const { results } = await ctx.db
+    .prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (${among}) ORDER BY n.updated_at DESC, n.id`)
+    .bind(ctx.actor.workspaceId, ...binds)
+    .all<SummaryRow>();
+  return results;
+}
+
+const IDS_IN = "SELECT value FROM json_each(?2)";
+
+const quoted = (title: string) => JSON.stringify(title);
+
+/**
+ * The text with each link the write introduces stored by its note's id. A write introduces a link
+ * when no link in `base`, the text it was based on, has the same target as written. So a link the
+ * note already had is left exactly as it is, wherever in the note it now stands and however often,
+ * and a writer is only ever refused for a link they wrote themselves. A new target is looked up as
+ * an id and as a title: a note with that id is the one meant, and otherwise the one note so titled.
+ */
+async function linkedById(ctx: Context, text: string, base: string, how: "resolve" | "keep"): Promise<string> {
+  if (how === "keep") return text;
+  const had = new Set(linksIn(base).map((link) => link.target));
+  const introduced = [...new Set(linksIn(text).map((link) => link.target))].filter((target) => !had.has(target));
+  if (!introduced.length) return text;
+  // Each title as written and in lower case: the database folds case for unaccented letters only.
+  const found = await seenAmong(
+    ctx,
+    "SELECT t.id FROM notes t WHERE t.workspace_id = ?1 AND (t.id IN (SELECT value FROM json_each(?2)) OR t.title COLLATE NOCASE IN (SELECT value FROM json_each(?3)))",
+    JSON.stringify(introduced.filter(isNoteId)),
+    JSON.stringify(introduced.flatMap((target) => [target, target.toLowerCase()])),
+  );
+  const ids = new Set(found.map((row) => row.id));
+  const byTitle = Map.groupBy(found, (row) => row.title.toLowerCase());
+  const stored = retargeted(text, (target) => {
+    if (had.has(target) || ids.has(target)) return undefined;
+    const notes = byTitle.get(target.toLowerCase()) ?? [];
+    if (notes.length > 1) throw new OpError("invalid", `${notes.length} notes are titled ${quoted(target)}: ${notes.map((n) => n.id).join(", ")}. Link the one you mean as [[id]].`);
+    if (!notes.length) throw new OpError("invalid", `No note ${isNoteId(target) ? "has the id or the title" : "is titled"} ${quoted(target)}. Link a note by its title or as [[id]], with ids from note.list, or pass linkTitles "keep" to leave [[${target}]] as text.`);
+    return notes[0]!.id;
+  });
+  if (stored.length > MAX_NOTE_LENGTH) throw new OpError("invalid", `With its links stored by id, the note would be over ${MAX_NOTE_LENGTH} characters`);
+  return stored;
+}
+
+/**
+ * The statements that make the record of a note's links what `text` says, or none when `was` says
+ * the same. They go in the batch that changes the text, so the record can't differ from it. With
+ * `atRevision`, they do nothing unless the note is still at that revision.
+ */
+function linking(ctx: Context, noteId: string, text: string, { was, atRevision }: { was?: string; atRevision?: number } = {}): D1PreparedStatement[] {
+  const ids = (of: string) => linkedIds(of).filter((id) => id !== noteId);
+  const targets = JSON.stringify(ids(text));
+  if (was !== undefined && JSON.stringify(ids(was)) === targets) return [];
+  const current = "(?3 IS NULL OR EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND revision = ?3))";
+  return [
+    ctx.db.prepare(`DELETE FROM links WHERE source_id = ?1 AND target_id NOT IN (${IDS_IN}) AND ${current}`).bind(noteId, targets, atRevision ?? null),
+    ctx.db.prepare(`INSERT OR IGNORE INTO links (source_id, target_id) SELECT ?1, value FROM json_each(?2) WHERE ${current}`).bind(noteId, targets, atRevision ?? null),
+  ];
+}
+
 /** The note's text at `revision`, and the changes after it up to `current`. */
 async function replay(ctx: Context, id: string, revision: number, current: number): Promise<{ text: string; since: ChangeSet[] }> {
   const { results } = await ctx.db
@@ -225,6 +291,8 @@ const MAX_WRITE_ATTEMPTS = 12;
 const WRITE_RETRY_MS = 15;
 /** Reverting an author reads each note's whole record and costs a few queries a note, and a request is allowed only so many. */
 const REVERT_AUTHOR_NOTES = 10;
+/** Two statements a note, in one batch. */
+const REBUILD_NOTES = 40;
 const isChangeTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: changes\./.test(err.message);
 
 /** What a change records beyond its diff. */
@@ -296,6 +364,7 @@ async function record(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevisi
       ctx.db
         .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ? WHERE id = ? AND revision = ?")
         .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, row.id, row.revision),
+      ...linking(ctx, row.id, text, { was: row.text }),
     ]);
   } catch (err) {
     if (isChangeTaken(err)) return null;
@@ -558,14 +627,15 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const folder = await loadFolder(ctx, op.folderId);
       const id = newId();
       const revision = op.text ? 1 : 0;
-      const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, ...written(ctx, op.text) };
+      const text = await linkedById(ctx, op.text, "", op.linkTitles);
+      const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
           `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(id, ctx.actor.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind);
-      await intoFolder(ctx.db.batch(op.text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", op.text))] : [insertNote]));
+      await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text)), ...linking(ctx, id, text, { was: "" })] : [insertNote]));
       return toNote(row);
     },
   },
@@ -574,9 +644,33 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     async run(ctx, op) {
       const row = await loadNote(ctx, op.id);
-      if (op.revision === undefined || op.revision === row.revision) return toNote(row);
-      if (op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
-      return toNote(row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
+      if (op.revision !== undefined && op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
+      const note = op.revision === undefined || op.revision === row.revision ? toNote(row) : toNote(row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
+      const ids = linkedIds(note.text);
+      const titles = new Map(ids.length ? (await seenAmong(ctx, IDS_IN, JSON.stringify(ids))).map((r) => [r.id, r.title]) : []);
+      return { ...note, links: ids.map((id) => ({ id, title: titles.get(id) ?? null })) };
+    },
+  },
+
+  "note.backlinks": {
+    needs: "view",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id);
+      return (await seenAmong(ctx, "SELECT source_id FROM links WHERE target_id = ?2", row.id)).map(toSummary);
+    },
+  },
+
+  "links.rebuild": {
+    needs: "manage",
+    async run(ctx, op) {
+      const { results } = await ctx.db
+        .prepare("SELECT id, revision, text FROM notes WHERE workspace_id = ?1 AND (?2 IS NULL OR id > ?2) ORDER BY id LIMIT ?3")
+        .bind(ctx.actor.workspaceId, op.after ?? null, REBUILD_NOTES + 1)
+        .all<{ id: string; revision: number; text: string }>();
+      const page = results.slice(0, REBUILD_NOTES);
+      // A note written since it was read here is left to that write, which kept its record.
+      if (page.length) await ctx.db.batch(page.flatMap((n) => linking(ctx, n.id, n.text, { atRevision: n.revision })));
+      return { notes: page.length, next: results.length > page.length ? page.at(-1)!.id : null };
     },
   },
 
@@ -590,13 +684,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           if (recorded) return toNote(row);
         }
         if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
-        let changes: ChangeSet;
-        if (op.baseRevision === row.revision) {
-          changes = changesBetween(row.text, op.text);
-        } else {
-          const base = await replay(ctx, row.id, op.baseRevision, row.revision);
-          changes = rebased(base.text, op.text, base.since);
-        }
+        const base = op.baseRevision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, op.baseRevision, row.revision);
+        const stored = await linkedById(ctx, op.text, base.text, op.linkTitles);
+        const changes = base.since ? rebased(base.text, stored, base.since) : changesBetween(base.text, stored);
         if (changes.empty) return toNote(row);
         const next = await record(ctx, row, changes, op.baseRevision, { writeId: op.writeId });
         return next && toNote(next);

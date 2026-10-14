@@ -57,10 +57,18 @@ const FolderName = z
   .max(100)
   .regex(/^[^/\p{Cc}]*$/u, "can't contain / or control characters");
 
+/**
+ * What a write does with a link written by title, `[[Title]]`, outside code. `resolve` stores it by
+ * the id of the one note with that title, ignoring case, and refuses the write when no note the
+ * writer can see has it or several do. `keep` leaves the text as written, where it links nothing.
+ */
+const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
+
 export const Op = z.discriminatedUnion("type", [
   /** `updatedSince` leaves out notes whose text hasn't changed since that time. */
   z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional() }),
-  z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional() }),
+  z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles }),
+  /** The note, and for each note its text links to by id, that note's title now. */
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
   z.object({
     type: z.literal("note.write"),
@@ -69,7 +77,10 @@ export const Op = z.discriminatedUnion("type", [
     text: NoteText,
     /** Chosen by the writer; a write sent again with the same id is recorded once. */
     writeId: z.string().min(1).max(64).optional(),
+    linkTitles: LinkTitles,
   }),
+  /** The notes whose text links to this one, latest change first. */
+  z.object({ type: z.literal("note.backlinks"), id: Id }),
   z.object({ type: z.literal("note.history"), id: Id }),
   /** What one change did to its note, as a line diff. */
   z.object({ type: z.literal("note.diff"), id: Id, revision: Revision.min(1) }),
@@ -133,6 +144,12 @@ export const Op = z.discriminatedUnion("type", [
   /** `resolve` settles the conflicts of the notes it names, by note id, as `note.previewRevert` with `author` listed them. A note it leaves out keeps every later edit. */
   z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional(), resolve: z.record(Id, Resolve).refine((byNote) => Object.keys(byNote).length <= 200, "resolve names at most 200 notes").optional() }),
   /**
+   * Makes the record of which notes link to which again from the notes' text. Nothing needs it while
+   * every write keeps the record, so it is for a record that was changed some other way. It covers
+   * some notes a call; pass the answer's `next` as `after` for the rest.
+   */
+  z.object({ type: z.literal("links.rebuild"), after: Id.optional() }),
+  /**
    * What a selection of changes did, note by note: the changes of each note that follow one another
    * are one run with one diff, from the note before the first of them to the note after the last.
    */
@@ -187,6 +204,18 @@ export interface NoteSummary {
 
 export interface Note extends NoteSummary {
   text: string;
+}
+
+/** A note that a note's text links to. */
+export interface LinkedNote {
+  id: string;
+  /** Null when there is no such note or the one asking can't see it. Nothing tells the two apart. */
+  title: string | null;
+}
+
+export interface ReadNote extends Note {
+  /** Each note the text links to by id, once, in the order they first appear. */
+  links: LinkedNote[];
 }
 
 export interface Folder {
@@ -414,8 +443,10 @@ export interface StoredSettings {
 export interface Results {
   "note.list": NoteSummary[];
   "note.create": Note;
-  "note.read": Note;
+  "note.read": ReadNote;
   "note.write": Note;
+  "note.backlinks": NoteSummary[];
+  "links.rebuild": { notes: number; next: string | null };
   "note.history": ChangeEntry[];
   "note.move": Note;
   "note.label": { id: string; revision: number; label: string | null };

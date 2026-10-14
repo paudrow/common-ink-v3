@@ -111,7 +111,7 @@ test("the bar has the same icons in the same places whatever is in front and how
   expect(first.icons.map(([name]) => name)).toEqual(["History", "Backlinks", "Info"]);
 
   const kinds: [string, () => Promise<unknown>, Record<string, RegExp>][] = [
-    ["a note", () => page.goto(`/note/${note.id}`), { History: /Open in History/, Backlinks: /Notes that link here/, Info: /Folder.*Unsorted/ }],
+    ["a note", () => page.goto(`/note/${note.id}`), { History: /Open in History/, Backlinks: /No notes link here yet/, Info: /Folder.*Unsorted/ }],
     ["a folder's list", () => folderRow(page, "Unsorted").click(), { History: /Open in History/, Backlinks: /^Nothing to show for this view$/, Info: /FolderUnsortedNotes1 note/ }],
     ["History", () => page.goto("/history"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/ }],
     ["Settings", () => page.goto("/settings"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/ }],
