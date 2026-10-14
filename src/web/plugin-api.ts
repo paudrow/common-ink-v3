@@ -7,7 +7,7 @@
  * `test/core/plugin-boundary.test.ts` checks.
  *
  * A plugin declares its options as `settings` and reads them through its host. It cannot change
- * them, or read anyone else's: settings are the member's.
+ * them, other than one it declares `remembered`, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
 import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary, Written } from "../core/protocol.ts";
@@ -131,7 +131,16 @@ export interface Screenshot {
  * One setting: what it holds, what it is when the member hasn't changed it, and what a person is
  * told about it. The words are JSON Schema's, and it is plain data: no functions and no classes.
  */
-export type Setting = { title: string; description?: string } & (
+export type Setting = {
+  title: string;
+  description?: string;
+  /**
+   * Set for an option the plugin remembers from what the member does in its own views, such as which
+   * calendars the Calendar shows, so it is kept on the server with the member's settings and not in one browser. The
+   * plugin may change it with `host.settings.set`; it can change no other, and the member can reset it.
+   */
+  remembered?: true;
+} & (
   | { type: "boolean"; default: boolean }
   /**
    * `unreadable` is what it reads as when the member's value isn't one it can take, if that is not the default: the safe choice, for a
@@ -142,6 +151,8 @@ export type Setting = { title: string; description?: string } & (
   | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
   /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
   | { type: "chords"; default: readonly string[] }
+  /** Words, each at most `maxLength` characters, at most `maxItems` of them. */
+  | { type: "list"; default: readonly string[]; maxItems: number; maxLength: number }
 );
 
 export type SettingValue = boolean | string | number | readonly string[];
@@ -233,10 +244,16 @@ export interface PluginHost {
    * and one that reads or changes who a note or folder is shared with.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
-  /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
+  /** This plugin's own options, as the member set them or as they default. Only one declared `remembered` can be changed. */
   readonly settings: {
     /** The option declared under `name` in the plugin's `settings`. A value the member got wrong reads as the default. */
     get<T extends SettingValue = SettingValue>(name: string): T;
+    /**
+     * Changes an option the plugin declared `remembered`, for the member, wherever they sign in. Any
+     * other throws. False when it wasn't changed: the member's settings aren't read yet, or the value
+     * isn't one the option takes.
+     */
+    set(name: string, value: SettingValue): boolean;
     /** Calls `listener` when the member's settings change. A view is drawn again without asking. */
     subscribe(listener: () => void): Dispose;
   };

@@ -77,7 +77,7 @@ export interface HostOptions {
    * Asked to set one key of the member's settings, or to take it out when `value` is undefined. Only
    * `setSetting` asks, on behalf of the member. Answer with `settingsChanged` once the document has changed.
    */
-  write(key: string, value: SettingValue | undefined): void;
+  write(key: string, value: SettingValue | undefined): boolean;
   /** Whether chords are labelled for a Mac. */
   mac: boolean;
   /** Whether HTML embeds have a host of their own on this server, as the server says. A setting's `defaultWithoutEmbedSite` is its default where they don't. */
@@ -98,8 +98,8 @@ export interface Host {
   fail(contribution: object, error: unknown): void;
   /** Turns every plugin off without forgetting which are on. They start again the next time contributions are read. */
   dispose(): void;
-  /** Sets one of the member's settings. A value that is the default is taken out of the document, as is `undefined`. */
-  setSetting(key: string, value: SettingValue | undefined): void;
+  /** Sets one of the member's settings. A value that is the default is taken out of the document, as is `undefined`. False when it wasn't changed. */
+  setSetting(key: string, value: SettingValue | undefined): boolean;
   /** Tells the host the member's document is now this one. Plugins it turns on or off start and stop. */
   settingsChanged(document: SettingsDocument): void;
   /** Tells the host the app has arrived at an address. */
@@ -118,6 +118,9 @@ interface Owned<T> {
 }
 
 const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
+
+/** The most a plugin may keep in one remembered setting, in characters of JSON: the member's settings are small, and theirs. */
+const MAX_REMEMBERED = 10_000;
 
 /** How the ids of the host's own commands start: turning a plugin on or off, going to a page, and settings. Only a required plugin adds another. */
 const RESERVED = ["plugins.", "go.", "settings.", "inspector."];
@@ -227,6 +230,15 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         get<T extends SettingValue>(name: string) {
           if (!plugin.settings || !Object.hasOwn(plugin.settings, name)) throw new Error(`${plugin.name} declares no setting named ${name}`);
           return contributions().settings.values[`${plugin.id}.${name}`] as T;
+        },
+        set(name, value) {
+          const key = `${plugin.id}.${name}`;
+          // The key must be this plugin's own declaration and nothing else's: a dotted name, or an id such as `keybindings`, would make another's key.
+          const own = contributions().settings.declared.some((d) => d.key === key && d.group.id === plugin.id);
+          if (!plugin.settings?.[name]?.remembered || !Object.hasOwn(plugin.settings, name) || name.includes(".") || key.startsWith(KEYBINDING) || !own)
+            throw new Error(`${plugin.name} can't change ${name}: a plugin changes only a setting it declares remembered`);
+          const read = readSetting(plugin.settings[name]!, value);
+          return "value" in read && JSON.stringify(read.value).length <= MAX_REMEMBERED && setSetting(key, read.value);
         },
         subscribe(listener) {
           // A listener that throws is its plugin's failure, and not the end of telling the others or of the change it was told of.
@@ -397,7 +409,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     // A value the same as a default that depends on the server is kept: it is the member's choice wherever the app is.
     const followsServer = setting?.type === "string" && setting.defaultWithoutEmbedSite !== undefined;
     const isDefault = !followsServer && read && "value" in read && sameValue(read.value, setting!.default);
-    write(key, isDefault ? undefined : value);
+    return write(key, isDefault ? undefined : value);
   }
 
   function settingsChanged(next: SettingsDocument) {

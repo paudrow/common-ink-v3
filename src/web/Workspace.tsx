@@ -263,7 +263,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       trusted: [core, ...BUILT_INS, pages],
       settings: documentOf(settings.text()) ?? {},
       // The member's own controls come through here: the Settings and Plugins pages, and the commands that turn a plugin on or off.
-      write: (key, value) => void settings.set(key, value),
+      write: (key, value) => settings.set(key, value),
       mac: MAC,
       embedSite: me.setup.embedSite,
       provide: (plugin) => ({
@@ -300,9 +300,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   useEffect(() => {
     let last: string | null = null;
     const read = () => {
-      if (settings.text() === last) return;
-      last = settings.text();
-      host.settingsChanged(documentOf(last) ?? {});
+      // Once the member's settings are read the plugins are told so even when nothing differs from what they had, as a plugin waiting to change one is.
+      const now = `${settings.status().kind === "loading" ? "loading" : "read"} ${settings.text()}`;
+      if (now === last) return;
+      last = now;
+      host.settingsChanged(documentOf(settings.text()) ?? {});
     };
     read();
     return settings.subscribe(read);

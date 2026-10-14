@@ -19,6 +19,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
     write(key: string, value: SettingValue | undefined) {
       text = editSetting(text, key, value);
       host.settingsChanged(documentOf(text)!);
+      return true;
     },
     provide: (plugin) => ({
       workspace: { id: "w1", name: "Acme", role: "editor" },
@@ -328,7 +329,7 @@ describe("plugin host", () => {
       plugins: [counted("a"), counted("b"), counted("c")],
       mac: true,
       settings: { "b.enabled": false },
-      write: () => {},
+      write: () => false,
       provide: () => ({}) as never,
     });
     const ids = () => host.contributions().commands.map((c) => c.id);
@@ -360,7 +361,7 @@ describe("plugin host", () => {
       plugins: [notes, drawing],
       mac: true,
       settings: {},
-      write: (key, value) => host.settingsChanged(value === undefined ? {} : { [key]: value }),
+      write: (key, value) => (host.settingsChanged(value === undefined ? {} : { [key]: value }), true),
       provide: (plugin) => ({ app: () => ({ path: `/as/${plugin.id}` }) as App }) as never,
     });
     const errorOf = (id: string) => host.contributions().plugins.find((p) => p.id === id)!.error;
@@ -414,7 +415,58 @@ describe("plugin host", () => {
     await expect(perform({ type: "settings.read" })).rejects.toThrow("Greedy can't settings.read");
     expect(performed).toEqual([]);
     expect(stored()).toEqual({});
-    expect(Object.keys(asked!.settings).sort()).toEqual(["get", "subscribe"]);
+    expect(Object.keys(asked!.settings).sort()).toEqual(["get", "set", "subscribe"]);
+  });
+
+  it("lets a plugin change only a setting it declares remembered, to a value the setting takes, and no other plugin's", () => {
+    let asked: PluginHost | null = null;
+    let html: PluginHost | null = null;
+    const calendar: Plugin = {
+      id: "calendar",
+      name: "Calendar",
+      settings: {
+        hidden: { type: "list", default: [], maxItems: 2, maxLength: 20, remembered: true, title: "Hidden calendars" },
+        weekends: { type: "boolean", default: true, title: "Highlight weekends" },
+      },
+      activate: (h) => void (asked = h),
+    };
+    const { stored } = hostWith([calendar, { ...htmlPlugin, activate: (h) => void (html = h) }]);
+    expect(asked!.settings.set("hidden", ["cal work", "cal work"])).toBe(true);
+    expect(stored()).toEqual({ "calendar.hidden": ["cal work"] });
+    expect(asked!.settings.get("hidden")).toEqual(["cal work"]);
+    expect(asked!.settings.set("hidden", ["a", "b", "c"]), "more than it takes").toBe(false);
+    expect(asked!.settings.set("hidden", "cal work" as never), "not a list").toBe(false);
+    expect(stored()).toEqual({ "calendar.hidden": ["cal work"] });
+    expect(asked!.settings.set("hidden", []), "the default is taken out").toBe(true);
+    expect(stored()).toEqual({});
+    expect(() => asked!.settings.set("weekends", false)).toThrow("Calendar can't change weekends: a plugin changes only a setting it declares remembered");
+    expect(() => asked!.settings.set("html.run" as never, "automatically")).toThrow("Calendar can't change html.run");
+    expect(() => html!.settings.set("run", "automatically")).toThrow("HTML embeds can't change run");
+    expect(asked!.settings.set("hidden", ["x".repeat(20)]), "within what the setting takes").toBe(true);
+    expect(stored()).toEqual({ "calendar.hidden": ["x".repeat(20)] });
+  });
+
+  it("refuses a remembered setting whose key would be another's: a dotted name, or an id that makes a keybinding's", () => {
+    const handed: Record<string, PluginHost> = {};
+    const remembered = (name: string) => ({ [name]: { type: "list", default: [], maxItems: 5, maxLength: 20, remembered: true, title: name } as const });
+    const { stored, host } = hostWith([
+      { id: "a", name: "A", settings: remembered("b.enabled"), activate: (h) => void (handed.a = h) },
+      { id: "a.b", name: "AB", activate: () => {} },
+      { id: "keybindings", name: "Keys", settings: remembered("palette"), activate: (h) => void (handed.keys = h) },
+      { id: "big", name: "Big", settings: { all: { type: "list", default: [], maxItems: 100, maxLength: 400, remembered: true, title: "All" } }, activate: (h) => void (handed.big = h) },
+    ]);
+    expect(() => handed.a!.settings.set("b.enabled", [])).toThrow("A can't change b.enabled");
+    expect(() => handed.keys!.settings.set("palette", ["mod+j"])).toThrow("Keys can't change palette");
+    expect(handed.big!.settings.set("all", Array.from({ length: 100 }, (_, i) => `${i}`.padEnd(200, "x"))), "over 10,000 characters is not kept").toBe(false);
+    expect(stored()).toEqual({});
+    expect(host.contributions().settings.values["a.b.enabled"]).not.toBe(false);
+  });
+
+  it("answers false, and changes nothing, while the member's settings can't be written", () => {
+    let asked: PluginHost | null = null;
+    const calendar: Plugin = { id: "calendar", name: "Calendar", settings: { hidden: { type: "list", default: [], maxItems: 2, maxLength: 20, remembered: true, title: "Hidden" } }, activate: (h) => void (asked = h) };
+    hostWith([calendar], { write: () => false });
+    expect(asked!.settings.set("hidden", ["x"])).toBe(false);
   });
 
   it("refuses a plugin that asks, as an operation, to change who is in the workspace or read its invites, and lets it list the members", async () => {
@@ -894,7 +946,7 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
       trusted: [own],
       mac: true,
       settings: {},
-      write: () => {},
+      write: () => false,
       provide: () =>
         ({
           app: () => ({}) as App,

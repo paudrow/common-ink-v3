@@ -540,6 +540,12 @@ export const TOOLS: Tool[] = [
     op: "record.read",
   },
   {
+    name: "notes_about_record",
+    description: `The notes that reference one of your member's events or contacts with your member's own reference (the one refer_record answers), among the notes your member can see and not in Trash, latest change first: id, title, updatedAt, and audience, who sees the note: private (only its owner), shared (its owner and the people it is shared with) or workspace (every member). ${SOURCES}`,
+    inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
+    op: "record.notes",
+  },
+  {
     name: "list_members",
     description: "Everyone in the workspace: person id, name and role (admin, editor or viewer), and no email, which only an admin is shown in the app. Members are the authors history names by person id. An agent can't invite, remove, or change anyone's role; a member does that in the app, on the Members page.",
     inputSchema: object({}),

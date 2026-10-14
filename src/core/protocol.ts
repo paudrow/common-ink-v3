@@ -502,6 +502,12 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("record.refer"), sourceId: SourceId, id: RecordId }),
   /** The event or contact a reference stands for, as it is now. A reference someone else made reads as none at all. */
   z.object({ type: z.literal("record.read"), ref: Id }),
+  /**
+   * The notes that reference one of the asker's records with the asker's own reference, among the
+   * notes they can see and not in Trash, latest change first. A note they can't see is left out, title
+   * and all. Each says who sees it: only its owner, the people it is shared with, or the workspace.
+   */
+  z.object({ type: z.literal("record.notes"), sourceId: SourceId, id: RecordId }),
 ]);
 export type Op = z.output<typeof Op>;
 export type OpInput = z.input<typeof Op>;
@@ -1035,6 +1041,7 @@ export interface Results {
   "contact.list": { contacts: Contact[]; sources: Source[]; more: boolean };
   "record.refer": Reference;
   "record.read": SourceRecord;
+  "record.notes": { notes: NoteAbout[] };
 }
 
 export type SourceKind = "calendar" | "contacts";
@@ -1102,6 +1109,20 @@ export interface Contact {
 }
 
 export type SourceRecord = { kind: "event"; ref: string; event: CalendarEvent } | { kind: "contact"; ref: string; contact: Contact };
+
+/**
+ * Who sees a note: `private`, a private note nobody else is let in to; `shared`, a private note its
+ * owner shared with some people or by a link; `workspace`, a note every member of the workspace sees.
+ */
+export type Audience = "private" | "shared" | "workspace";
+
+/** A note that references a record, as `record.notes` lists it. */
+export interface NoteAbout {
+  id: string;
+  title: string;
+  updatedAt: number;
+  audience: Audience;
+}
 
 export interface Reference {
   ref: string;

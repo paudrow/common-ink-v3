@@ -95,6 +95,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   contacts [QUERY]                    your member's contacts, or those matching every word
   refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
   record REF                          the event or contact a reference stands for, as it is now
+  notes-about SOURCE RECORD           the notes that reference a record with your member's reference, and who sees each
 
 A flag a command doesn't take is refused, and nothing is sent.
 
@@ -470,6 +471,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "record":
         tool = "read_record";
         args = { ref: need("a reference") };
+        break;
+      case "notes-about":
+        if (positional.length < 2) throw new UsageError("notes-about needs a data source and a record id");
+        tool = "notes_about_record";
+        args = { sourceId: positional[0], id: positional[1] };
         break;
       case "label":
         if (!flags.has("revision")) throw new UsageError("label needs --revision");

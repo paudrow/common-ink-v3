@@ -257,6 +257,12 @@ export async function refer(asker: Asker, sourceId: string, id: string): Promise
   return { ref: row!.id, kind: RECORD[source.kind], text: writtenReference(RECORD[source.kind], row!.id, label) };
 }
 
+/** The asker's own reference to one of their records, if they made one: what a note that references the record holds. Nobody else's is theirs. */
+export async function ownReference(asker: Asker, sourceId: string, id: string): Promise<string | null> {
+  const row = await asker.db.prepare("SELECT id FROM source_refs WHERE person_id = ? AND data_source = ? AND record_id = ?").bind(asker.personId, sourceId, id).first<{ id: string }>();
+  return row?.id ?? null;
+}
+
 /** The record a reference stands for, read where it is kept. Someone else's reference is no reference. */
 export async function readRecord(asker: Asker, ref: string): Promise<SourceRecord> {
   const row = await asker.db.prepare("SELECT data_source, record_id FROM source_refs WHERE id = ? AND person_id = ?").bind(ref, asker.personId).first<{ data_source: string; record_id: string }>();

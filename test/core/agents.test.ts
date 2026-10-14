@@ -166,6 +166,7 @@ describe("MCP protocol", () => {
       "list_contacts",
       "refer_record",
       "read_record",
+      "notes_about_record",
       "list_members",
     ]);
     for (const t of list.result.tools) expect(t.inputSchema.type).toBe("object");

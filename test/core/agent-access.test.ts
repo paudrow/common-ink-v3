@@ -88,6 +88,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "contact.list": {},
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },
+  "record.notes": { sourceId: "google-calendar", id: "none" },
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {

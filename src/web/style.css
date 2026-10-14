@@ -6969,10 +6969,17 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 .cal-head .cal-zone {
-  flex: 1;
+  flex: 1 1 12em;
 }
 
-.cal-choose {
+.cal-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.cal-choose,
+.cal-add {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -7404,6 +7411,15 @@ button.todo-tag[aria-pressed="true"] {
   background-color: color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
+.calendar-page[data-weekends] .cal-col[data-weekend]:not([data-today]),
+.calendar-page[data-weekends] .cal-day[data-weekend]:not([data-outside]) {
+  background-color: color-mix(in srgb, var(--ink) 3.5%, transparent);
+}
+
+.calendar-page[data-weekends] .cal-tg-day[data-weekend]:not([data-today]) .cal-tg-weekday {
+  color: var(--faint);
+}
+
 .cal-now {
   position: absolute;
   right: 0;
@@ -7788,6 +7804,85 @@ button.todo-tag[aria-pressed="true"] {
   gap: 10px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
+}
+
+.event-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.event-notes h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.event-new-note {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.event-new-note label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.event-new-note select {
+  max-width: 260px;
+}
+
+.event-new-note p {
+  flex-basis: 100%;
+}
+
+.event-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-note-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.event-note-list .link {
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-audience {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.event-audience[data-audience="private"] {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--ink);
+}
+
+.event-audience[data-audience="shared"] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
 }
 
 .event-form label:not(.check) {

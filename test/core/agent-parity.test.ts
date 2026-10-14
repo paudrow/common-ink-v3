@@ -70,6 +70,7 @@ const COMMANDS: Record<string, string[][]> = {
   list_contacts: [["contacts", "sam"]],
   refer_record: [["refer", "google-contacts", "people/c1"]],
   read_record: [["record", ID]],
+  notes_about_record: [["notes-about", "google-calendar", "primary e1"]],
 };
 
 describe("what an agent can do, against what the web app can", () => {

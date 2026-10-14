@@ -259,6 +259,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "contact.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
+  "record.notes": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
   "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
 };
@@ -292,7 +293,7 @@ const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].share
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
 const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "record.refer"];
 /** What answers from the asker's own data sources, which are in no folder. */
-const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "record.refer", "record.read"];
+const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "record.refer", "record.read", "record.notes"];
 const AGENTS = [
   "their agent",
   "their read-only agent",

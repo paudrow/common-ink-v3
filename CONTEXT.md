@@ -100,10 +100,11 @@ One thing in a data source: an event or a contact.
 A calendar entry from a member's data source. It may repeat, and each occurrence is then an event of its own. It is either between two instants, shown in the viewing member's timezone, or all-day: on calendar dates, with no time and no zone, the same dates wherever it is read. An event can be changed when its data source is read-write and its calendar lets the member change it.
 
 **Calendar**:
-One of the calendars in a calendar data source, such as a member's work calendar in their Google account. Every event is in one. A member may add events to a calendar, and change its own, when its data source is read-write and the calendar lets them; a calendar they can only read, such as a holidays calendar, refuses both.
+One of the calendars in a calendar data source, such as a member's work calendar in their Google account. Every event is in one. A member may add events to a calendar, and change its own, when its data source is read-write and the calendar lets them; a calendar they can only read, such as a holidays calendar, refuses both. Which calendars the Calendar page shows is the member's, kept on the server with their settings in the workspace. The page shows them by Day, 3 days, Week, Month or Agenda, from the first day of the week the member chose.
 
 **Record reference**:
 What a note writes to point at an event or a contact without copying it: an embed, `::event{ref label}` or `::contact{ref label}`. The ref says nothing of the record and leads to it only for the member who made the reference, who is shown the record as it is now. The label is plain text in the note that every reader sees, in gray. Anyone else sees the label and nothing more.
+The notes about a record are the notes that hold the member's own reference to it and that they can see, each said to be Private, Shared or Workspace by who sees it.
 _Avoid_: Link (that is to a note), mention (that is `@`)
 
 **Dashboard**:

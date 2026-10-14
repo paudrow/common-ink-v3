@@ -625,6 +625,8 @@ describe("an agent limited to folders", () => {
       expect(await claude.call("list_contacts", { query: "sam" })).toEqual(refused("contact.list"));
       // A reference in a note it reads, one in a note it can't, and one that was never made are refused alike.
       for (const ref of [event.ref, contact.ref, MISSING]) expect(await claude.call("read_record", { ref })).toEqual(refused("record.read"));
+      // Which notes reference an event, the one inside the limit or the one outside it, is refused too.
+      expect(await claude.call("notes_about_record", { sourceId: "cal", id: "a1" })).toEqual(refused("record.notes"));
       const changes = token === readOnly.token ? (op: string) => ({ isError: true, text: `forbidden: A read-only token can't ${op}` }) : refused;
       expect(await claude.call("refer_record", { sourceId: "cal", id: "a1" })).toEqual(changes("record.refer"));
       expect(await claude.call("update_event", { sourceId: "cal", id: "a1", etag: "e1", title: "Taken" })).toEqual(changes("event.update"));
