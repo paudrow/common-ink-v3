@@ -7,6 +7,7 @@ import type { Note } from "../core/protocol.ts";
 import { ApiError, perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { completing } from "./completing.ts";
+import { dismissing } from "./dismiss.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import { readOnly } from "./readOnly.ts";
@@ -140,8 +141,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
           }),
         });
         sync.attach(view);
-        // A note that took a while to load doesn't take the cursor from a field the member has since gone to.
-        if (!note.text || (now.current.focus && !typingIn(document.activeElement))) view.focus();
+        // A note that took a while to load doesn't take the cursor from a field the member has since gone to, or from a menu opened meanwhile.
+        if (!dismissing() && (!note.text || (now.current.focus && !typingIn(document.activeElement)))) view.focus();
         if (now.current.focus) now.current.onFocused();
       },
       (err) => {
