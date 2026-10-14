@@ -487,6 +487,14 @@ test("what a browser kept of the Todos page's old filters opens as the query tha
   await expect(words(page)).toHaveText(["Book flights"]);
   await page.goto("/todos");
   await expect(bar(page)).toHaveValue("is:done -tag:office");
+  // Once the bar is changed from a link's query, a reload opens what was left, not the link's.
+  await page.goto("/todos?q=is%3Adone");
+  await expect(words(page)).toHaveText(["Book flights"]);
+  await bar(page).fill("bank");
+  await expect(words(page)).toHaveText(["Call the bank +Home"]);
+  await expect(page).toHaveURL(/\/todos$/);
+  await page.reload();
+  await expect(bar(page)).toHaveValue("bank");
 });
 
 test("a todo has the tags on its own line and its note's: its own are drawn as chips after its words, and one listed for its note's tag says so beside the note's name", async ({ page }) => {

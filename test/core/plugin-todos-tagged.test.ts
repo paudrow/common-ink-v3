@@ -6,6 +6,7 @@ describe("the tags a todos query narrows the list to", () => {
     expect(narrowedTo("")).toEqual([]);
     expect(narrowedTo("#money")).toEqual(["money"]);
     expect(narrowedTo("bill #Money tag:home due:<today")).toEqual(["money", "home"]);
+    expect(narrowedTo("#money bill tag:Money #money")).toEqual(["money"]);
   });
 
   it("leave out a tag under OR or NOT, and a query that can't be read", () => {
@@ -27,6 +28,9 @@ describe("pressing a tag's chip", () => {
     expect(toggledTag("due:<today #money is:open", "money")).toBe("due:<today is:open");
     expect(toggledTag("tag:Money bill", "money")).toBe("bill");
     expect(toggledTag("#home #money", "Money")).toBe("#home");
+    expect(toggledTag("#to-do #a/b x", "to-do")).toBe("#a/b x");
+    expect(toggledTag("#to-do #a/b x", "a/b")).toBe("#to-do x");
+    expect(toggledTag("bill #money #money", "money")).toBe("bill");
   });
 
   it("narrows all of a query with OR, not only its last side", () => {

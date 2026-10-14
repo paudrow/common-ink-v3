@@ -9,10 +9,12 @@ const isTag = (node: QueryNode, name: string) => node.kind === "filter" && node.
 export function narrowedTo(text: string): string[] {
   const read = parseQuery(text, "todos");
   if (!read.ok) return [];
-  return conjuncts(read.query.where).flatMap((node) => (node.kind === "filter" && node.key === "tag" && node.cmp === "=" ? [node.value] : []));
+  const tags = conjuncts(read.query.where).flatMap((node) => (node.kind === "filter" && node.key === "tag" && node.cmp === "=" ? [node.value] : []));
+  return tags.filter((tag, i) => tags.findIndex((other) => nameKey(other) === nameKey(tag)) === i);
 }
 
-const escaped = (name: string) => name.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
+// A tag's name is letters, digits, `_`, `/` and `-`, and `-` may not be escaped in a `u` expression.
+const escaped = (name: string) => name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 /**
  * The query with a tag's chip pressed: the tag taken off where the query narrows to it, and `#name`

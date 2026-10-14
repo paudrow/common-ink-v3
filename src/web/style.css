@@ -975,6 +975,11 @@ button.link:hover {
   height: 11px;
 }
 
+/* Where the query is the list's one control, as on the Search page, the list is as far under the bar as under the tools a folder's list has. */
+.folder-list .query-bar:not(:has(+ .finder-tools)) {
+  margin-bottom: 16px;
+}
+
 .finder-tools {
   display: flex;
   flex-wrap: wrap;

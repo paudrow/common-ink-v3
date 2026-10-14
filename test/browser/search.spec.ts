@@ -17,7 +17,6 @@ const titles = (page: Page) => results(page).locator(".card-title");
 /** How many notes are listed, beside the heading, which is also where a search says it is on its way. */
 const status = (page: Page) => searchPage(page).locator(".folder-count");
 const nothing = (page: Page) => searchPage(page).locator(".empty");
-const show = (page: Page, which: "Open" | "Archived" | "All") => searchPage(page).getByRole("radio", { name: which, exact: true });
 const create = (page: Page, text: string) => perform(page, { type: "note.create", text });
 
 /** Signs in, makes the notes in order, and opens the Search page. */
@@ -92,36 +91,72 @@ test("a matched line is shown as the characters it is: HTML and markdown in a no
   await expect.poll(() => page.evaluate(() => (window as { pwned?: number }).pwned)).toBeUndefined();
 });
 
-test("an archived note is found only when Archived or All is chosen, and a note in Trash never", async ({ page }) => {
+test("an archived note is found only when the query asks for archived notes, and a note in Trash never; the query is the page's one control", async ({ page }) => {
   const [, archived, trashed, burrow] = await searching(page, ["# Live quokka\n\nquokka facts\n", "# Old quokka\n\nquokka history\n", "# Binned quokka\n\nquokka rubbish\n", "# Burrow\n\nwombat\n"]);
   await perform(page, { type: "note.archive", id: archived!.id, archived: true });
   await perform(page, { type: "note.archive", id: burrow!.id, archived: true });
   await perform(page, { type: "note.trash", id: trashed!.id });
 
+  // The page has the bar and Advanced, and no Open, Archived or All, Has todos or Sort beside them.
+  await expect(searchPage(page).getByRole("radio")).toHaveCount(0);
+  await expect(searchPage(page).getByRole("button", { name: "Has todos" })).toHaveCount(0);
+  await expect(searchPage(page).getByRole("combobox", { name: "Sort by" })).toHaveCount(0);
+  await expect(searchPage(page).locator(".finder-tools")).toHaveCount(0);
+
   await field(page).fill("quokka");
   await expect(titles(page)).toHaveText(["Live quokka"]);
-  await expect(show(page, "Open")).toBeChecked();
+  // The results are as far under the bar as a folder's list is under its tools.
+  const bar = (await searchPage(page).locator(".query-bar").boundingBox())!;
+  expect(Math.round((await results(page).first().boundingBox())!.y - (bar.y + bar.height))).toBe(16);
 
-  await show(page, "All").check();
+  await field(page).fill("quokka (is:open OR is:archived)");
   await expect(titles(page)).toHaveText(["Old quokka", "Live quokka"]);
   await expect(results(page).filter({ hasText: "Old quokka" }).locator(".card-details")).toContainText("Archived");
   await expect(results(page).filter({ hasText: "Live quokka" }).locator(".card-details")).not.toContainText("Archived");
-  await expect(page).toHaveURL(/\/search\?q=quokka&archived=1$/);
+  // Counted among the notes the query is of, archived ones included.
+  await expect(status(page)).toHaveText("2 of 3 notes");
+  await expect(page).toHaveURL(/\/search\?q=quokka\+%28is%3Aopen\+OR\+is%3Aarchived%29$/);
 
-  await show(page, "Archived").check();
+  await field(page).fill("quokka is:archived");
   await expect(titles(page)).toHaveText(["Old quokka"]);
-  await expect(page).toHaveURL(/\/search\?q=quokka&archived=only$/);
+  await expect(page).toHaveURL(/\/search\?q=quokka\+is%3Aarchived$/);
 
-  await field(page).fill("wombat");
+  await field(page).fill("wombat is:archived");
   await expect(titles(page)).toHaveText(["Burrow"]);
-  await show(page, "Open").check();
-  await expect(nothing(page)).toHaveText("No notes match “wombat”. Archived notes are left out: choose All to search them too.");
+  await field(page).fill("wombat");
+  await expect(nothing(page)).toHaveText("No notes match “wombat”. Archived notes are left out: add is:archived to search them.");
   await expect(results(page)).toHaveCount(0);
 
   await field(page).fill("rubbish");
-  await expect(nothing(page)).toHaveText("No notes match “rubbish”. Archived notes are left out: choose All to search them too.");
-  await show(page, "All").check();
-  await expect(nothing(page)).toHaveText("No notes match “rubbish”.");
+  await expect(nothing(page)).toHaveText("No notes match “rubbish”. Archived notes are left out: add is:archived to search them.");
+  await field(page).fill("wombat is:trashed");
+  await expect(nothing(page)).toHaveText("No notes match “wombat is:trashed”.");
+  await field(page).fill("rubbish (is:open OR is:archived)");
+  await expect(nothing(page)).toHaveText("No notes match “rubbish (is:open OR is:archived)”.");
+
+  // Whether a note has todos, and the order, are said in the query too, and the address keeps it.
+  await field(page).fill("quokka has:todo");
+  await expect(nothing(page)).toHaveText("No notes match “quokka has:todo”. Archived notes are left out: add is:archived to search them.");
+  await field(page).fill("is:open sort:title-desc");
+  await expect(titles(page)).toHaveText(["Live quokka"]);
+  await page.reload();
+  await expect(field(page)).toHaveValue("is:open sort:title-desc");
+  await expect(titles(page)).toHaveText(["Live quokka"]);
+
+  // Advanced writes each of them for a member who doesn't type them.
+  await field(page).fill("quokka");
+  await advanced(page).click();
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 2).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
+  await condition(page, 2).getByRole("combobox", { name: "Value" }).selectOption("archived");
+  await expect(field(page)).toHaveValue("quokka is:archived");
+  await expect(titles(page)).toHaveText(["Old quokka"]);
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 3).getByRole("combobox", { name: "Field" }).selectOption({ label: "Has" });
+  await condition(page, 3).getByRole("combobox", { name: "Value" }).selectOption("todo");
+  await expect(field(page)).toHaveValue("quokka is:archived has:todo");
+  await builder(page).getByRole("combobox", { name: "Sort" }).selectOption("title-asc");
+  await expect(field(page)).toHaveValue("quokka is:archived has:todo sort:title-asc");
 });
 
 test("the search is in the address: it survives a reload, and Back returns to it from a note it opened", async ({ page }) => {
@@ -315,7 +350,7 @@ test("results that may be missing notes say the server is still indexing, and th
   });
 
   await field(page).fill("zebra");
-  await expect(nothing(page)).toHaveText("No notes match “zebra”. Archived notes are left out: choose All to search them too.");
+  await expect(nothing(page)).toHaveText("No notes match “zebra”. Archived notes are left out: add is:archived to search them.");
   await expect(searchPage(page).getByText("Still indexing notes. Results may be missing some.")).toBeVisible();
 
   await expect(titles(page)).toHaveText(["Zebra"]);

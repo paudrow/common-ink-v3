@@ -297,6 +297,8 @@ export function TodosPage({ host, app, onOpen }: Props) {
     setQuery(text);
     setProblem(null);
     host.storage.set("query", text);
+    // A link's query stays in the address only while it is the page's: a reload then opens the query the member left.
+    if (linked !== null && text !== linked) app.go(app.path, { replace: true });
   };
   // A link's query is the one the page is left at, whether the link opened the page or was followed while it was open.
   const followed = useRef<string | null | undefined>(undefined);
@@ -438,7 +440,10 @@ export function TodosPage({ host, app, onOpen }: Props) {
               completions={completions}
               onPicking={onPicking}
               onTag={(name) => {
-                const next = toggledTag(typed, name);
+                // The chip does what it shows: a tag already typed and not yet run is not taken off by a chip that reads unpressed.
+                const typedHas = narrowedTo(typed).some((tag) => nameKey(tag) === nameKey(name));
+                const shownHas = tags.some((tag) => nameKey(tag) === nameKey(name));
+                const next = typedHas === shownHas ? toggledTag(typed, name) : typed.trim();
                 setTyped(next);
                 run(next);
               }}

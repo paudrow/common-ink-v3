@@ -31,6 +31,8 @@ export interface FinderProps extends FolderProps {
   kept: { scrollTop: number };
   /** What the list is called in place of its folder's name, as the Search page's is. */
   heading?: string;
+  /** Whether the query is the list's one control, with no Open/Archived/All, Has todos or Sort beside it, as on the Search page. */
+  queryOnly?: boolean;
   /** Whether the search field takes the keyboard when the list is drawn. */
   autoFocus?: boolean;
   /** Takes the search out of this folder to every note, for a list that is of one folder. */
@@ -91,7 +93,7 @@ function folderForNew(app: App, folderId: string) {
  * nothing typed it is the notes the app already holds, and nothing is asked of the server. With
  * something typed it is what the server's search finds in the folder, each card with the lines that matched.
  */
-export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, autoFocus, onWiden }: FinderProps) {
+export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, queryOnly, autoFocus, onWiden }: FinderProps) {
   const ids = useId();
   const now = useNow();
   const { setArchived, items: menuFor } = useMemo(() => lifecycle(host), [host]);
@@ -110,7 +112,6 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
 
   const title = app.folders && folderTitle(app.folders, folderId);
   const inFolder = app.notes && notesIn(app.notes, folderId);
-  const count = inFolder ? listed(inFolder, { ...INITIAL_VIEW, show: view.show }).length : 0;
   const ready = !!inFolder && !!title;
   /** A list of one folder says so in its search field. Every note, and what was shared with a guest, are of no one folder. */
   const scoped = folderId !== ALL_NOTES && folderId !== SHARED_WITH_ME;
@@ -142,6 +143,8 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
   /** The states the query itself asks for, which are then listed whatever Open, Archived or All is set to. */
   const namesArchived = read.ok && queryNames(read.query.where, "archived");
   const namesTrashed = read.ok && queryNames(read.query.where, "trashed");
+  /** The notes a search is of, which a query naming archived notes widens to them. */
+  const count = inFolder ? listed(inFolder, { ...INITIAL_VIEW, show: namesArchived && view.show === "open" ? "all" : view.show }).length : 0;
   const days = { today: dayOf(new Date(now)), zone: Intl.DateTimeFormat().resolvedOptions().timeZone };
   const ask = useMemo<Ask>(
     () => ({ query: ready ? asked : "", ...(scoped && { folderId }), includeArchived: includeArchivedOf(view.show), hasTodos: view.hasTodos, sort: view.sort ?? "match" }),
@@ -286,8 +289,10 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
       : found
         ? `${notes.length}${found.next === null ? "" : "+"} of ${count} ${count === 1 ? "note" : "notes"}`
         : `${count} ${count === 1 ? "note" : "notes"}`;
+  /** How a search that left archived notes out has them: by its query on the Search page, by All on a folder's list. */
+  const leftOut = view.show !== "open" || namesArchived || namesTrashed ? "" : queryOnly ? " Archived notes are left out: add is:archived to search them." : " Archived notes are left out: choose All to search them too.";
   const nothing = found
-    ? `No notes match “${found.ask.query}”${scoped ? ` in ${title}` : ""}.${view.show === "open" ? " Archived notes are left out: choose All to search them too." : ""}`
+    ? `No notes match “${found.ask.query}”${scoped ? ` in ${title}` : ""}.${leftOut}`
     : count
       ? "No notes match."
       : view.show === "archived"
@@ -380,38 +385,40 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
             }
           }}
         />
-        <div className="finder-tools">
-          <div role="radiogroup" aria-label="Show" className="segmented">
-            {SHOWS.map((s) => (
-              <label key={s.id}>
-                <input type="radio" name={`${ids}-show`} checked={view.show === s.id} onChange={() => act({ type: "show", show: s.id })} />
-                <span>{s.label}</span>
-              </label>
-            ))}
-          </div>
-          <button type="button" className="chip" aria-pressed={view.hasTodos} onClick={() => act({ type: "hasTodos" })}>
-            Has todos
-          </button>
-          <label className="finder-sort">
-            Sort
-            <select
-              aria-label="Sort by"
-              value={sort}
-              onChange={(e) => {
-                const picked = e.target.value as Sort | "match";
-                // The order a list has until one is picked is left unpicked, so a search made later is by its best match.
-                act({ type: "sort", sort: picked === "match" || (picked === "recent" && !view.query) ? null : picked });
-              }}
-            >
-              {view.query && <option value="match">Best match</option>}
-              {SORTS.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
+        {!queryOnly && (
+          <div className="finder-tools">
+            <div role="radiogroup" aria-label="Show" className="segmented">
+              {SHOWS.map((s) => (
+                <label key={s.id}>
+                  <input type="radio" name={`${ids}-show`} checked={view.show === s.id} onChange={() => act({ type: "show", show: s.id })} />
+                  <span>{s.label}</span>
+                </label>
               ))}
-            </select>
-          </label>
-        </div>
+            </div>
+            <button type="button" className="chip" aria-pressed={view.hasTodos} onClick={() => act({ type: "hasTodos" })}>
+              Has todos
+            </button>
+            <label className="finder-sort">
+              Sort
+              <select
+                aria-label="Sort by"
+                value={sort}
+                onChange={(e) => {
+                  const picked = e.target.value as Sort | "match";
+                  // The order a list has until one is picked is left unpicked, so a search made later is by its best match.
+                  act({ type: "sort", sort: picked === "match" || (picked === "recent" && !view.query) ? null : picked });
+                }}
+              >
+                {view.query && <option value="match">Best match</option>}
+                {SORTS.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
         {error && (
           <p role="alert" className="error">
             {error}

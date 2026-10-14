@@ -20,7 +20,7 @@ The notes in one folder, shown in the editor area as cards: each a title, a line
 _Avoid_: List column, feed
 
 **Search bar**:
-What heads every folder's list, and the Search page, which is the same list of every note: a field that takes a query, with the folder it searches shown in it and Advanced beside it, the choice of Open, Archived or All, and the order. With nothing typed the list is the folder's notes. With a query typed it is what the server's search finds among them, each card with the lines that matched. The Todos page is headed by the same field and Advanced, for todos.
+What heads every folder's list, and the Search page, which is the same list of every note: a field that takes a query, with the folder it searches shown in it and Advanced beside it. A folder's list also has the choice of Open, Archived or All, Has todos, and the order; on the Search page the query says all three (`is:archived`, `has:todo`, `sort:`), and the bar and Advanced are its only controls. With nothing typed the list is the folder's notes. With a query typed it is what the server's search finds among them, each card with the lines that matched. The Todos page is headed by the same field and Advanced, for todos.
 _Avoid_: Filter box
 
 **Query**:
@@ -36,7 +36,7 @@ The panel Advanced opens under a search bar: the bar's query as a row for each c
 _Avoid_: Filter panel, advanced search form
 
 **Open, Archived, All**:
-Which notes a list or a search is of, by where each is in its life: the live ones, the archived ones alone, or both. Never one in Trash.
+Which notes a folder's list or its search is of, by where each is in its life: the live ones, the archived ones alone, or both. Never one in Trash. The Search page says it in its query: `is:archived`, `is:open OR is:archived`.
 _Avoid_: Show archived, include archived (for a list of notes)
 
 **All notes**:

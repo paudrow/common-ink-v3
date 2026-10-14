@@ -1,5 +1,4 @@
 import { MAX_SEARCH_LENGTH, type OpInput, type SearchResult } from "../../plugin-api.ts";
-import { SHOWS, SORTS, type ListView } from "../noteListView.ts";
 
 /** The results in one answer when no number is asked for, and the most that can be. They are the server's own (`search` in the protocol). */
 const SEARCH_PAGE = 20;
@@ -86,32 +85,16 @@ export const queryOf = (typed: string) => typed.trim().slice(0, MAX_SEARCH_LENGT
 
 export const SEARCH_PATH = "/search";
 
-/** How the Search page's list is set, apart from which cards are expanded, which no address says. */
-export type Addressed = Omit<ListView, "expanded">;
-
 /**
- * The list an address's query names: `?q=` what was typed, `archived=1` to show archived notes too
- * and `archived=only` to show them alone, `sort=` an order, and `todos=1` for notes with open todos.
+ * The query an address names with `?q=`. It is the whole of the Search page's list: which notes
+ * (`is:archived`), whether they have todos (`has:todo`) and the order (`sort:`) are said in it.
  */
-export function viewOf(query: string): Addressed {
-  const params = new URLSearchParams(query);
-  const archived = params.get("archived");
-  return {
-    query: queryOf(params.get("q") ?? ""),
-    show: archived === "only" ? "archived" : archived === "1" ? "all" : "open",
-    sort: SORTS.find((s) => s.id === params.get("sort"))?.id ?? null,
-    hasTodos: params.get("todos") === "1",
-  };
-}
+export const queryIn = (address: string) => queryOf(new URLSearchParams(address).get("q") ?? "");
 
-/** The address of a list set so, which `viewOf` reads back. */
-export function addressOf({ query, show, sort, hasTodos }: Addressed): string {
+/** The address of a search, which `queryIn` reads back. */
+export function addressOf(query: string): string {
   const params = new URLSearchParams();
   if (query.trim()) params.set("q", query.trim());
-  const archived = SHOWS.find((s) => s.id === show)!.includeArchived;
-  if (archived) params.set("archived", archived === true ? "1" : archived);
-  if (sort) params.set("sort", sort);
-  if (hasTodos) params.set("todos", "1");
   const written = params.toString();
   return written ? `${SEARCH_PATH}?${written}` : SEARCH_PATH;
 }
