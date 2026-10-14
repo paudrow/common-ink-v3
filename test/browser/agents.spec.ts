@@ -14,6 +14,8 @@ const listed = (scope: Page | Locator) => () =>
     .evaluateAll((all) => all.map((el) => el.querySelector(".hist-line")!.textContent!.trim().replace(/\s+/g, " ")));
 /** The other pane of History: what everything picked did. */
 const pane = (scope: Page | Locator) => scope.getByRole("region", { name: "What the selection did" });
+/** What is ticked and what to do with it, at the foot of the list while something is ticked. */
+const bar = (scope: Page | Locator) => scope.getByRole("group", { name: "Selection" });
 const revertDialog = (page: Page) => page.getByRole("dialog", { name: /^Revert/ });
 const toast = (page: Page) => page.locator(".toast");
 /** One note of a revert, in its dialog. */
@@ -428,7 +430,7 @@ test("History, narrowed to one agent, reverts what is picked of its changes with
   await expect(mode.getByRole("button", { name: /^Revert .* changes…$/ })).toHaveCount(0);
 
   await mode.getByRole("option").filter({ hasText: "Plan" }).click();
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   const ask = revertDialog(page);
   await expect(ask).toHaveAccessibleName("Revert 1 change to Plan");
   await ask.getByRole("button", { name: "Revert", exact: true }).click();
@@ -443,7 +445,7 @@ test("History, narrowed to one agent, reverts what is picked of its changes with
   await page.goto("/agents");
   await connected(page).getByRole("button", { name: "See its changes" }).click();
   await mode.getByRole("checkbox", { name: "Select all" }).click();
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   await expect(ask).toHaveAccessibleName("Revert 2 changes in 1 note");
   await expect(ask).toContainText("Nothing would change in Plan");
 });

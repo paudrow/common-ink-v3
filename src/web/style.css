@@ -19,6 +19,9 @@
   --added: #15803d;
   --added-soft: rgb(21 128 61 / 0.12);
   --removed-soft: rgb(194 65 12 / 0.12);
+  --warn: #c7811b;
+  --warn-ink: #895913;
+  --chip-ink: color-mix(in srgb, var(--muted) 70%, var(--ink));
   --shadow: 0 18px 48px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -53,6 +56,7 @@
     --added: #6dc98a;
     --added-soft: rgb(109 201 138 / 0.14);
     --removed-soft: rgb(240 138 93 / 0.14);
+    --warn-ink: #c7811b;
     --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
   }
 }
@@ -78,6 +82,7 @@
   --added: #6dc98a;
   --added-soft: rgb(109 201 138 / 0.14);
   --removed-soft: rgb(240 138 93 / 0.14);
+  --warn-ink: #c7811b;
   --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
 }
 
@@ -1852,14 +1857,19 @@ button.link:hover {
   max-width: none;
 }
 
-/* The line of an address that is shown as media: a caption's size, and seen only with the pointer on it or on the media, or the cursor on it. It keeps its room either way, so nothing moves. */
+/* The line of an address that is shown as media: a caption's size, and seen only with the cursor on it. It keeps its room either way, so nothing moves. */
 .cm-line.embed-address {
   font-size: 0.8125rem;
   transition: opacity 120ms;
 }
 
-.cm-line.embed-address:not(.embed-address-seen):not(:hover) {
+.cm-line.embed-address:not(.embed-address-seen) {
   opacity: 0;
+}
+
+/* Out of sight, the address is no link: the pointer and a press reach the line, which puts the cursor there. */
+.cm-line.embed-address:not(.embed-address-seen) * {
+  pointer-events: none;
 }
 
 .embed-below-drawn {
@@ -1922,6 +1932,30 @@ button.link:hover {
   border: 0;
   background: none;
   color-scheme: normal;
+}
+
+/* What is below a line while it loads: a placeholder as big as its room, and what loads is there but unseen until it is drawn. */
+.embed-loading {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--muted) 14%, var(--bg));
+  animation: embed-loading 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes embed-loading {
+  to {
+    background: color-mix(in srgb, var(--muted) 7%, var(--bg));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .embed-loading {
+    animation: none;
+  }
+}
+
+.embed-arriving {
+  opacity: 0;
 }
 
 /* A video before it is played: its picture, what it is called along the top, and a play mark in the middle. */
@@ -3503,8 +3537,6 @@ kbd {
 }
 
 .hist-open-page {
-  align-self: flex-start;
-  margin-bottom: 6px;
   text-decoration: underline;
 }
 
@@ -3552,14 +3584,34 @@ kbd {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 12px 10px 6px;
+  padding: 10px 10px 4px;
   background: var(--bg);
+}
+
+/* A day's heading is its tick: the box stands in the column of its rows' boxes. */
+.hist-day-tick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
   color: var(--muted);
+  font: inherit;
   font-size: 10.5px;
   font-weight: 650;
   letter-spacing: 0.08em;
   line-height: 1;
+  text-align: left;
   text-transform: uppercase;
+  cursor: pointer;
+}
+
+.hist-day-tick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .hist-row {
@@ -3601,11 +3653,13 @@ kbd {
   background: var(--bg-elev);
 }
 
-.hist-all-tick .hist-check {
+.hist-all-tick .hist-check,
+.hist-day-tick .hist-check {
   margin-top: 0;
 }
 
 .hist-row:hover .hist-check,
+.hist-day-tick:hover .hist-check,
 .hist-all-tick:hover .hist-check {
   border-color: var(--muted);
 }
@@ -3898,8 +3952,69 @@ kbd {
   cursor: pointer;
 }
 
-.hist-open {
-  padding: 8px 18px 12px;
+/* What to do with what is ticked, at the foot of the list and only while something is. */
+.hist-picked {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 44px;
+  padding: 6px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.hist-picked-count {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.hist-picked .link {
+  text-decoration: underline;
+}
+
+.hist-sum-text .hist-conflicts {
+  color: var(--danger);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* Lines of a diff that a later change edited: reverting them asks what they become. */
+.diff-conflict {
+  display: block;
+  width: 100%;
+  margin: 2px 0;
+  padding: 0;
+  border: 0;
+  border-left: 3px solid var(--danger);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-conflict:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.diff-conflict:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.diff-conflict-says {
+  display: block;
+  padding: 4px 10px 1px calc(var(--diff-gutter, 14px) - 3px);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.diff-conflict.lone {
+  padding-bottom: 4px;
 }
 
 @container history (max-width: 720px) {
@@ -3947,7 +4062,7 @@ kbd {
   }
 
   .history-panes.page .hist-open {
-    display: block;
+    display: inline;
   }
 
   .history-panes.page .hist-summary,
@@ -3969,8 +4084,19 @@ kbd {
   padding-top: 10px;
 }
 
-.history-panes.panel .hist-open-page {
-  margin: 0 14px 2px;
+.history-panes.panel .hist-filters {
+  justify-content: space-between;
+  padding: 0 14px 2px;
+}
+
+.history-panes.panel .hist-day {
+  padding-right: 8px;
+  padding-left: 8px;
+  background: var(--bg-side);
+}
+
+.history-panes.panel .hist-day-tick {
+  gap: 8px;
 }
 
 .history-panes.panel .hist-all {
@@ -3990,6 +4116,13 @@ kbd {
 
 .history-panes.panel .hist-row[aria-level="2"] {
   margin-left: 14px;
+}
+
+.history-panes.panel .hist-picked {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 6px 12px;
 }
 
 .history-panes.panel .hist-more {
@@ -4023,9 +4156,10 @@ kbd {
   font-size: 13px;
 }
 
+/* It stands clear of the bar at the foot of History's list, which has what the toast may send the member to: Revert… */
 .toast {
   position: fixed;
-  bottom: 20px;
+  bottom: 84px;
   left: 50%;
   z-index: 50;
   display: flex;
@@ -4666,12 +4800,6 @@ button.diff-fold:hover {
   align-self: flex-start;
 }
 
-.hist-cut {
-  margin: 2px 10px 6px 36px;
-  color: var(--muted);
-  font-size: 11.5px;
-}
-
 .members .agent-head {
   flex-wrap: nowrap;
 }
@@ -4979,7 +5107,8 @@ button.diff-fold:hover {
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  max-width: 54rem;
+  /* About 690px of a todo's words and chips inside its card, as v1's list had: a todo is not far wider than what it says. */
+  max-width: calc(718px + 4rem);
   height: 100%;
   margin: 0 auto;
   padding: 2rem 2rem 3rem;
@@ -5016,41 +5145,58 @@ button.diff-fold:hover {
   font: inherit;
 }
 
-/* A todo's card, in the look of a plugin's card and of a note's card in a folder's list. */
+/* A todo's card, in the look of a plugin's card and of a note's card in a folder's list. Its words and its chips are one run of text that wraps as one. */
+.todos-page .cards {
+  container-type: inline-size;
+}
+
 .todo-card {
-  display: flex;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, auto) auto;
+  align-items: start;
+  column-gap: 10px;
   font-size: 13.5px;
+  line-height: 22px;
+}
+
+/* A card too narrow for the note's name beside the words has it under them. */
+@container (max-width: 400px) {
+  .todo-card {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .todo-card .todo-where {
+    grid-row: 2;
+    grid-column: 2;
+    max-width: none;
+  }
 }
 
 .todo-card > input[type="checkbox"] {
   flex: none;
   width: 16px;
   height: 16px;
-  margin: 0;
+  margin: 3px 0 0;
   accent-color: var(--accent);
 }
 
+/* The card whose chip has its popover open, so it is plain which todo is being changed. Colour only: nothing moves. */
+.todo-card[data-picking] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .todo-text {
-  display: flex;
   flex: 1;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .todo-words {
-  max-width: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
+  margin-right: 4px;
   color: var(--ink);
-  font: inherit;
   font-weight: 600;
-  text-align: left;
-  overflow-wrap: anywhere;
-  cursor: pointer;
+  text-decoration: none;
 }
 
 .todo-words:hover {
@@ -5070,51 +5216,160 @@ button.diff-fold:hover {
   font-weight: 400;
 }
 
-/* Under a todo's words: what is set on it, said and not pressed, and the note it is in. */
-.todo-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px 6px;
+/* What is set on a todo, as pills straight after its words, as v1 drew them. Each opens a popover under itself; a tag's narrows the list. */
+.todo-chip {
+  display: inline-flex;
+  box-sizing: border-box;
   align-items: center;
-  color: var(--muted);
-  font-size: 12.5px;
+  gap: 4px;
+  height: 20px;
+  margin: 0 2px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--chip-ink);
+  font: 500 11.5px/1 var(--prose);
+  /* In the row's 22px line, so a card with chips is as tall as one without. */
+  vertical-align: top;
+  margin-top: 1px;
+  white-space: nowrap;
 }
 
-.todo-chip {
+.todo-chip svg {
   flex: none;
-  padding: 1px 7px;
-  border-radius: 5px;
-  background: var(--hover);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: nowrap;
+  width: 12px;
+  height: 12px;
+  opacity: 0.75;
+}
+
+button.todo-chip {
+  cursor: pointer;
+}
+
+button.todo-chip:enabled:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+button.todo-chip[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+button.todo-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button.todo-chip:disabled {
+  cursor: default;
+}
+
+.todo-card[data-done] .todo-chip {
+  opacity: 0.75;
 }
 
 .todo-importance {
   font-weight: 700;
 }
 
-.todo-due[data-due="overdue"],
-.todo-importance[data-level="3"] {
-  background: var(--removed-soft);
+.todo-due[data-due="today"] {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn-ink);
+}
+
+.todo-due[data-due="overdue"] {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
 
-.todo-due[data-due="today"],
-.todo-importance[data-level="2"] {
+.todo-chip.todo-tag {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
-.todo-pick {
-  padding: 0 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 5px;
-  background: var(--bg-elev);
+button.todo-tag[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Where a todo is: its note, quiet, at the card's end. */
+.todo-where {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 14rem;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.todo-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What a todo's chip opens: its choices, as v1's. */
+.chip-menu {
+  display: flex;
+  flex-direction: column;
+  width: 244px;
+}
+
+.chip-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chip-choice:hover,
+.chip-choice:focus-visible {
+  outline: none;
+  background: var(--hover);
+}
+
+.chip-choice[aria-current] {
+  color: var(--muted);
+}
+
+.chip-detail {
+  color: var(--muted);
+}
+
+.chip-now {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chip-day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 2px 8px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.chip-day input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
 }
 
 /* The one way to everything else a todo can do: quiet until its card is pointed at or has the keyboard. */

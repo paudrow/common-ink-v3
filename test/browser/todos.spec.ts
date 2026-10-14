@@ -16,8 +16,11 @@ const authors = async (page: Page, id: string) => (await perform(page, { type: "
 const todosPage = (page: Page) => page.getByRole("region", { name: "Todos" });
 const rows = (page: Page) => todosPage(page).getByRole("list", { name: "Todos" }).getByRole("listitem");
 const row = (page: Page, text: string | RegExp) => rows(page).filter({ hasText: text });
+const popover = (page: Page) => page.locator(".chip-popover");
+/** Picks one of what the open chip's popover offers. */
+const choose = (page: Page, name: string) => popover(page).getByRole("button", { name, exact: true }).click();
 const filter = (page: Page, name: string) => todosPage(page).getByRole("group", { name: "Filters" }).getByLabel(name);
-const words = (page: Page) => rows(page).locator(".todo-words > :first-child");
+const words = (page: Page) => rows(page).locator(".todo-words");
 const cursorLine = (page: Page) => page.evaluate(() => getSelection()!.anchorNode?.parentElement?.closest(".cm-line")?.textContent);
 const localDay = (page: Page, days = 0) =>
   page.evaluate((d) => {
@@ -59,8 +62,8 @@ test("a todo's importance and due date are drawn as chips, on the lines the serv
   const note = await open(page, CHORES);
 
   await expect(editor(page).getByRole("checkbox")).toHaveCount(4);
-  await expect(editor(page).getByRole("combobox", { name: "Importance" })).toHaveCount(2);
-  await expect(editor(page).getByLabel("Due date")).toHaveCount(1);
+  await expect(editor(page).getByRole("button", { name: /^Importance: / })).toHaveCount(2);
+  await expect(editor(page).getByRole("button", { name: /^Due date: / })).toHaveCount(1);
   await expect(editor(page).locator(".md-chip-sized")).toHaveCount(4 + 2 + 1);
   await expectShown(line(page, "Call the bank"), "!! Call the bank Oct 14, 2031 +Home about the card");
   await expectShown(line(page, "in code"), "[ ] !!! in code due:2031-10-14 +Never");
@@ -84,9 +87,11 @@ test("changing a chip rewrites its token and nothing else, as the member's chang
   const bank = () => line(page, "Call the bank");
   const lineIn = async () => (await read(page, note.id)).split("\n")[2];
 
-  await bank().getByRole("combobox", { name: "Importance" }).selectOption("!!!");
+  await bank().getByRole("button", { name: /^Importance: / }).click();
+  await choose(page, "!!!");
   await expect.poll(lineIn).toBe("- [ ] !!! Call the bank due:2031-10-14 +Home about the card");
-  await bank().getByLabel("Due date").fill("2031-12-25");
+  await bank().getByRole("button", { name: /^Due date: / }).click();
+  await popover(page).getByLabel("Due on").fill("2031-12-25");
   await expect.poll(lineIn).toBe("- [ ] !!! Call the bank due:2031-12-25 +Home about the card");
   await expectShown(bank(), "!!! Call the bank Dec 25, 2031 +Home about the card");
   await bank().getByRole("checkbox").click();
@@ -94,13 +99,16 @@ test("changing a chip rewrites its token and nothing else, as the member's chang
   expect(new Set(await authors(page, note.id))).toEqual(new Set(["member Ada Lovelace"]));
 
   // Taking an option away takes its token and the space before it, and undo puts both back.
-  await bank().getByRole("combobox", { name: "Importance" }).selectOption("Normal");
+  await bank().getByRole("button", { name: /^Importance: / }).click();
+  await choose(page, "Normal");
   await expect.poll(lineIn).toBe("- [x] Call the bank due:2031-12-25 +Home about the card");
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(lineIn).toBe("- [x] !!! Call the bank due:2031-12-25 +Home about the card");
-  await bank().getByRole("combobox", { name: "Importance" }).selectOption("Normal");
-  await bank().getByLabel("Due date").fill("");
+  await bank().getByRole("button", { name: /^Importance: / }).click();
+  await choose(page, "Normal");
+  await bank().getByRole("button", { name: /^Due date: / }).click();
+  await choose(page, "Clear");
   await expect.poll(lineIn).toBe("- [x] Call the bank +Home about the card");
   await expect.poll(async () => (await read(page, note.id)).replace("- [x] Call the bank +Home about the card", "- [ ] !! Call the bank due:2031-10-14 +Home about the card")).toBe(CHORES);
 });
@@ -126,11 +134,14 @@ test("a viewer sees the chips and can change nothing through them, in the note o
   await page.goto(`/note/${note.id}`);
 
   await expectShown(line(page, "Call the bank"), "!! Call the bank Oct 14, 2031 +Home about the card");
-  for (const control of [editor(page).getByRole("checkbox").first(), editor(page).getByRole("combobox", { name: "Importance" }).first(), editor(page).getByLabel("Due date")]) await expect(control).toBeDisabled();
+  for (const control of [editor(page).getByRole("checkbox").first(), editor(page).getByRole("button", { name: /^Importance: / }).first(), editor(page).getByRole("button", { name: /^Due date: / })]) await expect(control).toBeDisabled();
+  await editor(page).getByRole("button", { name: /^Due date: / }).click({ force: true });
+  await expect(popover(page)).toHaveCount(0);
 
   await page.goto("/todos");
   await expect(words(page)).toHaveText(["Call the bank +Home about the card", "Deep one +Garden", "Plain one"]);
   for (const control of await rows(page).getByRole("checkbox").all()) await expect(control).toBeDisabled();
+  for (const control of await rows(page).getByRole("button", { name: /^(Importance|Due date): / }).all()) await expect(control).toBeDisabled();
   // Its menu opens the note and offers no change.
   await row(page, "Plain one").getByRole("button", { name: "More for Plain one" }).click();
   await expect(page.getByRole("menu", { name: "More for Plain one" }).getByRole("menuitem").first()).toHaveText("Open the note");
@@ -203,7 +214,7 @@ for (const width of [1600, 1100]) {
     test.setTimeout(180_000);
     await page.setViewportSize({ width, height: 2000 });
     await open(page, LAYOUT);
-    await expect(editor(page).getByLabel("Due date")).toHaveCount(4);
+    await expect(editor(page).getByRole("button", { name: /^Due date: / })).toHaveCount(4);
     await page.evaluate(() => document.fonts.ready);
     const before = await places(page, MEASURED);
     const drawn = await drawnIn(page);
@@ -265,6 +276,7 @@ async function twoNotes(page: Page, homeText = HOME) {
 const more = (page: Page, text: string) => row(page, text).getByRole("button", { name: /^More for / });
 const menu = (page: Page) => page.getByRole("menu", { name: /^More for / });
 const pick = (page: Page, item: string) => menu(page).getByRole("menuitem", { name: item, exact: true }).click();
+const chipOf = (page: Page, text: string, kind: "Importance" | "Due date") => row(page, text).getByRole("button", { name: new RegExp(`^${kind}: `) });
 const toast = (page: Page) => page.locator(".toast");
 /** Where everything on the page that isn't the toast is: each thing's box, to the pixel. */
 const laidOut = (page: Page, within: string) =>
@@ -275,12 +287,12 @@ test("the Todos page lists open todos from every note, and narrows by folder, ta
 
   await expect(todosPage(page).getByRole("heading", { level: 1 })).toHaveText("Todos");
   // A +Name is words of the todo: nothing is made of it.
-  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
   await expect(row(page, "Ship it").locator(".todo-note")).toHaveText("Work #office");
   await expect(filter(page, "Project")).toHaveCount(0);
 
   await filter(page, "Include completed").check();
-  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes", "Book flights"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes", "Book flights"]);
   await expect(row(page, "Book flights").getByRole("checkbox")).toBeChecked();
   await filter(page, "Include completed").uncheck();
 
@@ -293,9 +305,9 @@ test("the Todos page lists open todos from every note, and narrows by folder, ta
   await page.reload();
   await expect(filter(page, "Folder").getByRole("option")).toHaveText(["All folders", "Unsorted", "House", "House / Garden", "Office"]);
   await filter(page, "Folder").selectOption("House");
-  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside"]);
+  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
   await filter(page, "Folder").selectOption("House / Garden");
-  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside"]);
+  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
   await filter(page, "Folder").selectOption("Office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
   await filter(page, "Folder").selectOption("Unsorted");
@@ -309,12 +321,12 @@ test("the Todos page lists open todos from every note, and narrows by folder, ta
   await expect(words(page)).toHaveText(["Write notes"]);
   await filter(page, "Importance").selectOption("Any");
   await filter(page, "Due").selectOption("No date");
-  await expect(words(page)).toHaveText(["Water plants #outside", "Write notes"]);
+  await expect(words(page)).toHaveText(["Water plants", "Write notes"]);
 
   // The page opens the way it was left.
   await page.reload();
   await expect(filter(page, "Due")).toHaveValue("none");
-  await expect(words(page)).toHaveText(["Water plants #outside", "Write notes"]);
+  await expect(words(page)).toHaveText(["Water plants", "Write notes"]);
 
   // A folder the list was left narrowed to and that is gone since narrows nothing.
   await filter(page, "Due").selectOption("Any date");
@@ -324,33 +336,57 @@ test("the Todos page lists open todos from every note, and narrows by folder, ta
   await perform(page, { type: "folder.delete", id: office.id });
   await page.reload();
   await expect(filter(page, "Folder")).toHaveValue("");
-  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
   await expect(todosPage(page).getByRole("alert")).toHaveCount(0);
 });
 
-test("a todo has the tags on its own line and its note's: its own are drawn in its words, and one listed for its note's tag says so beside the note's name", async ({ page }) => {
+test("a todo has the tags on its own line and its note's: its own are drawn as chips after its words, and one listed for its note's tag says so beside the note's name", async ({ page }) => {
   await twoNotes(page);
-  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
 
-  // Its own tag is a tag where it is written, and no row says a tag its line doesn't write.
-  await expect(row(page, "Water plants").locator(".todo-words > :first-child .todo-tag")).toHaveText(["#outside"]);
+  // A tag written at the end of its words is a chip after them, and no row says a tag its line doesn't write.
+  await expect(row(page, "Water plants").locator(".todo-text .todo-tag")).toHaveText(["#outside"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
 
   // Under the tag of its own line: both todos of the note are tagged with it, and only the other one is told why.
   await filter(page, "Tag").selectOption("#outside");
-  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside"]);
-  await expect(row(page, "Call the bank").locator(".todo-meta .todo-tag")).toHaveText(["#outside"]);
-  await expect(row(page, "Water plants").locator(".todo-meta .todo-tag")).toHaveCount(0);
+  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
+  await expect(row(page, "Call the bank").locator(".todo-where .todo-tag")).toHaveText(["#outside"]);
+  await expect(row(page, "Water plants").locator(".todo-where .todo-tag")).toHaveCount(0);
 
   // Under a tag only the note's title writes: every todo of the note, each with the tag beside the note's name.
   await filter(page, "Tag").selectOption("#office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
-  await expect(rows(page).locator(".todo-meta .todo-tag")).toHaveText(["#office", "#office"]);
+  await expect(rows(page).locator(".todo-where .todo-tag")).toHaveText(["#office", "#office"]);
 });
 
-test("a todo's card looks like a plugin's card and has three things to press: its checkbox, its words, and one menu for everything else", async ({ page }) => {
+test("a tag's chip narrows the list to that tag, and pressed again takes that off; a tag inside the words stays in them", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "note.create", text: "# Home\n\n- [ ] Water plants #outside #garden\n" });
+  await perform(page, { type: "note.create", text: "# Fence\n\n- [ ] Ask #bob about the fence\n" });
+  await perform(page, { type: "note.create", text: "# Work\n\n- [ ] Write notes\n- [ ] #someday\n- [ ] Twice #twice #twice\n" });
+  const warned: string[] = [];
+  page.on("console", (m) => m.type() === "error" && warned.push(m.text()));
+  await page.goto("/todos");
+  await expect(words(page)).toHaveText(["Ask #bob about the fence", "Water plants", "Write notes", "#someday", "Twice"]);
+  await expect(row(page, "Water plants").locator(".todo-text button.todo-tag")).toHaveText(["#outside", "#garden"]);
+  await expect(row(page, "Twice").locator("button.todo-tag")).toHaveText(["#twice", "#twice"]);
+  await expect(row(page, "Ask").locator("button.todo-tag")).toHaveCount(0);
+  await expect(row(page, "#someday").locator("button.todo-tag")).toHaveCount(0);
+
+  await row(page, "Water plants").getByRole("button", { name: "#garden", exact: true }).click();
+  await expect(filter(page, "Tag")).toHaveValue("garden");
+  await expect(words(page)).toHaveText(["Water plants"]);
+  await expect(row(page, "Water plants").getByRole("button", { name: "#garden", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await row(page, "Water plants").getByRole("button", { name: "#garden", exact: true }).click();
+  await expect(filter(page, "Tag")).toHaveValue("");
+  await expect(words(page)).toHaveText(["Ask #bob about the fence", "Water plants", "Write notes", "#someday", "Twice"]);
+  expect(warned).toEqual([]);
+});
+
+test("a todo's card looks like a plugin's card, no wider than v1's list, with its chips straight after its words; its controls are its checkbox, its words, a chip for each thing set on it, and one menu", async ({ page }) => {
   await twoNotes(page);
-  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
   const look = (selector: string) =>
     page.evaluate((s) => {
       const card = getComputedStyle(document.querySelector(`${s}:not(:hover)`)!);
@@ -359,15 +395,30 @@ test("a todo's card looks like a plugin's card and has three things to press: it
     }, selector);
   const todo = await look(".todo-card");
 
-  // One tag, importance and a date: three controls, and importance and the date are said, not pressed.
+  // About 690px of words and chips inside the card, in a window with room for far more.
+  await page.setViewportSize({ width: 1800, height: 900 });
+  const text = await row(page, "Ship it").locator(".todo-text").boundingBox();
+  const card = (await row(page, "Ship it").boundingBox())!;
+  expect(card.width).toBeLessThanOrEqual(720);
+  expect(text!.width).toBeLessThan(card.width);
+
+  // Its chips follow its words on their row, as near as a pill's margin.
   const water = row(page, "Water plants");
-  await more(page, "Water plants").click();
-  await pick(page, "Due tomorrow");
+  await water.getByRole("button", { name: "More for Water plants #outside" }).click();
+  await pick(page, "Due date…");
+  await choose(page, "Tomorrow");
   await expect(water.locator(".todo-due")).toHaveText("Tomorrow");
   await expect(water.locator(".todo-importance")).toHaveText("!");
-  await expect(water.locator("button, input, select, a, [tabindex]")).toHaveCount(3);
+  const end = await water.locator(".todo-words").evaluate((el) => {
+    const rects = el.getClientRects();
+    return rects[rects.length - 1]!.right;
+  });
+  const first = (await water.locator(".todo-chip").first().boundingBox())!;
+  expect(first.x - end).toBeGreaterThanOrEqual(0);
+  expect(first.x - end).toBeLessThanOrEqual(8);
   await expect(water.getByRole("checkbox")).toHaveCount(1);
-  await expect(water.getByRole("button")).toHaveText([/^Water plants #outside/, ""]);
+  await expect(water.getByRole("link")).toHaveText(["Water plants"]);
+  await expect(water.getByRole("button")).toHaveText(["!", "Tomorrow", "#outside", ""]);
   // A todo with no date and no importance says neither.
   await expect(row(page, "Write notes").locator(".todo-chip")).toHaveCount(0);
   await expect(rows(page).filter({ hasText: "No date" })).toHaveCount(0);
@@ -377,54 +428,62 @@ test("a todo's card looks like a plugin's card and has three things to press: it
   expect(todo).toEqual(await look(".plugin-card"));
 });
 
-test("everything else a todo can do is in one menu, from its button, a right-click and the keyboard, and each change rewrites its line in its note as the member's change", async ({ page }) => {
-  // The bank is due on a day that is never today, whenever this runs: what a todo already is can't be chosen again, and "Due today" is chosen below.
+test("what has no chip is in one short menu, from its button, a right-click and the keyboard; each chip opens its own popover, and each pick rewrites the line in its note as the member's change", async ({ page }) => {
+  // The bank is due on a day that is never today, whenever this runs, and "Today" is picked below.
   const due = await localDay(page, 10);
   const homeText = HOME.replace("due:2026-10-14", `due:${due}`);
   const { home } = await twoNotes(page, homeText);
   const lineIn = async () => (await read(page, home.id)).split("\n")[2];
   const today = await localDay(page);
 
+  // A todo with importance and a date: the menu only opens it.
   await more(page, "Call the bank").click();
   await expect(menu(page)).toHaveAccessibleName("More for Call the bank +Home");
-  const offered = ["Importance: !!!", "Importance: !!", "Importance: !", "Importance: Normal", "Due today", "Due tomorrow", "Pick a due date…", "No due date", "Recurrence…"];
-  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveText(offered);
-  // What it already is can't be chosen again.
-  await expect(menu(page).getByRole("menuitem", { name: "Importance: !!", exact: true })).toBeDisabled();
-  await pick(page, "Importance: !");
-  await expect.poll(lineIn).toBe(`- [ ] ! Call the bank due:${due} +Home`);
+  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveText(["Recurrence…"]);
+  await page.keyboard.press("Escape");
   await expect(menu(page)).toHaveCount(0);
-  await expect(more(page, "Call the bank")).toBeFocused();
 
-  // A right-click anywhere on the card opens the same menu.
-  await row(page, "Call the bank").locator(".todo-note").click({ button: "right" });
-  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveText(offered);
-  await pick(page, "Due today");
+  // Importance from its chip: the one it has is marked, and a pick saves at once.
+  await chipOf(page, "Call the bank", "Importance").click();
+  await expect(popover(page)).toHaveAccessibleName("Importance of Call the bank +Home");
+  await expect(popover(page).getByRole("button")).toHaveText(["!!!", "!!now", "!", "Normal"]);
+  await expect(popover(page).getByRole("button", { name: "!!", exact: true })).toHaveAttribute("aria-current", "true");
+  await choose(page, "!");
+  await expect.poll(lineIn).toBe(`- [ ] ! Call the bank due:${due} +Home`);
+  await expect(popover(page)).toHaveCount(0);
+  await expect(chipOf(page, "Call the bank", "Importance")).toBeFocused();
+
+  // The date from its chip.
+  await chipOf(page, "Call the bank", "Due date").click();
+  await expect(popover(page).getByRole("button")).toHaveText(["Today", "Tomorrow", /^Next week· /, "Clear"]);
+  await choose(page, "Today");
   await expect.poll(lineIn).toBe(`- [ ] ! Call the bank due:${today} +Home`);
   await expect(row(page, "Call the bank").locator(".todo-due")).toHaveText("Today");
 
-  // So does Shift+F10 with the keyboard in the card, and Escape closes it without a change.
-  await row(page, "Call the bank").getByRole("checkbox").focus();
+  // Two picks one after the other, the second before the list has been read again: it is made to the line the first leaves.
+  await chipOf(page, "Call the bank", "Due date").click();
+  await choose(page, "Clear");
+  await expect(row(page, "Call the bank").locator(".todo-due")).toHaveCount(0);
+  // The chip it came from is gone: the keyboard is on the card's "…".
+  await expect(more(page, "Call the bank")).toBeFocused();
+  await chipOf(page, "Call the bank", "Importance").click();
+  await choose(page, "!!!");
+  await expect.poll(lineIn).toBe("- [ ] !!! Call the bank +Home");
+
+  // What has no chip is in the menu, from a right-click anywhere on the card or Shift+F10, and opens the same popover under the "…".
+  await row(page, "Write notes").locator(".todo-note").click({ button: "right" });
+  await expect(menu(page).getByRole("menuitem").filter({ hasNotText: /^Open / })).toHaveText(["Importance…", "Due date…", "Recurrence…"]);
+  await page.keyboard.press("Escape");
+  await row(page, "Write notes").getByRole("checkbox").focus();
   await page.keyboard.press("Shift+F10");
   await expect(menu(page).getByRole("menuitem").first()).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(menu(page)).toHaveCount(0);
-  await more(page, "Call the bank").focus();
-  await page.keyboard.press("ContextMenu");
-  // Two changes one after the other, the second before the list has been read again: it is made to the line the first leaves.
-  await pick(page, "No due date");
-  await more(page, "Call the bank").click();
-  await pick(page, "Importance: !!!");
-  await expect.poll(lineIn).toBe("- [ ] !!! Call the bank +Home");
-  await expect(row(page, "Call the bank").locator(".todo-due")).toHaveCount(0);
-
-  // A day of the member's choosing is typed or picked in a date field that is there only while it is asked for.
-  await more(page, "Write notes").click();
-  await pick(page, "Pick a due date…");
-  await row(page, "Write notes").getByLabel("Due date for Write notes").fill("2026-10-01");
-  await todosPage(page).getByRole("heading", { level: 1 }).click();
-  await expect(words(page)).toHaveText(["Write notes", "Ship it", "Call the bank +Home", "Water plants #outside"]);
-  await expect(rows(page).locator("input[type=date]")).toHaveCount(0);
+  await pick(page, "Due date…");
+  const under = (await more(page, "Write notes").boundingBox())!;
+  const panel = (await popover(page).boundingBox())!;
+  expect(Math.round(panel.y - (under.y + under.height))).toBe(4);
+  // A day of the member's choosing from the date field.
+  await popover(page).getByLabel("Due on").fill("2026-10-01");
+  await expect(words(page)).toHaveText(["Write notes", "Ship it", "Call the bank +Home", "Water plants"]);
 
   await more(page, "Call the bank").click();
   await pick(page, "Open the note");
@@ -435,7 +494,7 @@ test("everything else a todo can do is in one menu, from its button, a right-cli
 
 test("a todo's menu opens at the pointer when there is room, and is moved wholly inside the window when there isn't", async ({ page }) => {
   await twoNotes(page);
-  const card = (await row(page, "Call the bank").boundingBox())!;
+  const card = (await row(page, "Write notes").boundingBox())!;
   const at = { x: Math.round(card.x + 60), y: Math.round(card.y + 6) };
   await page.mouse.click(at.x, at.y, { button: "right" });
   const roomy = (await menu(page).boundingBox())!;
@@ -448,12 +507,14 @@ test("a todo's menu opens at the pointer when there is room, and is moved wholly
   await page.getByRole("button", { name: "Inspector", exact: true }).click();
   await expect(page.getByRole("complementary", { name: "Inspector" })).toHaveCount(0);
   await page.setViewportSize(window);
-  await row(page, "Call the bank").scrollIntoViewIfNeeded();
-  const tight = (await row(page, "Call the bank").boundingBox())!;
-  await page.mouse.click(tight.x + tight.width - 50, tight.y + tight.height - 6, { button: "right" });
+  await row(page, "Write notes").scrollIntoViewIfNeeded();
+  const tight = (await row(page, "Write notes").boundingBox())!;
+  // The menu of a todo with neither importance nor a date, which has the most in it. The press is on what of the card is in sight.
+  const press = { x: tight.x + tight.width - 50, y: Math.min(tight.y + tight.height - 6, window.height - 40) };
+  await page.mouse.click(press.x, press.y, { button: "right" });
   const moved = (await menu(page).boundingBox())!;
-  expect(tight.x + tight.width - 50 + moved.width, "it would have run off the right").toBeGreaterThan(window.width);
-  expect(tight.y + tight.height - 6 + moved.height, "it would have run off the foot").toBeGreaterThan(window.height);
+  expect(press.x + moved.width, "it would have run off the right").toBeGreaterThan(window.width);
+  expect(press.y + moved.height, "it would have run off the foot").toBeGreaterThan(window.height);
   expect(moved.x).toBeGreaterThanOrEqual(8);
   expect(moved.y).toBeGreaterThanOrEqual(8);
   expect(moved.x + moved.width).toBeLessThanOrEqual(window.width - 8);
@@ -466,7 +527,7 @@ test("checking a todo off on the Todos page says so in a toast, and Undo opens i
   const { home } = await twoNotes(page);
   const lineIn = async () => (await read(page, home.id)).split("\n")[2];
   await filter(page, "Include completed").check();
-  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes", "Book flights"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes", "Book flights"]);
   await page.evaluate(() => document.fonts.ready);
   const frame = ".todos-page h1, .todo-filters, .todo-filters label, .todos-page .cards";
   const before = await laidOut(page, frame);
@@ -480,12 +541,12 @@ test("checking a todo off on the Todos page says so in a toast, and Undo opens i
   // It is laid over the page: nothing that was there has moved for it, and nothing moves when it goes.
   expect(await toast(page).evaluate((el) => getComputedStyle(el).position)).toBe("fixed");
   expect(await laidOut(page, frame)).toEqual(before);
-  await expect(words(page)).toHaveText(["Ship it", "Water plants #outside", "Write notes", "Call the bank +Home", "Book flights"]);
+  await expect(words(page)).toHaveText(["Ship it", "Water plants", "Write notes", "Call the bank +Home", "Book flights"]);
 
   await toast(page).getByRole("button", { name: "Undo" }).click();
   await expect.poll(lineIn).toBe("- [ ] !! Call the bank due:2026-10-14 +Home");
   await expect(toast(page)).toHaveCount(0);
-  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes", "Book flights"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes", "Book flights"]);
   // The tick and its undo are two changes in History, the member's like any other.
   await expect.poll(() => authors(page, home.id)).toEqual(["member Ada Lovelace", "member Ada Lovelace", "member Ada Lovelace"]);
   await expect.poll(() => read(page, home.id)).toBe(HOME);
@@ -496,7 +557,7 @@ test("checking a todo off on the Todos page says so in a toast, and Undo opens i
   await row(page, "Write notes").getByRole("checkbox").check();
   await expect(toast(page)).toHaveText("Completed Write notesUndo");
   await expect(toast(page)).toHaveCount(1);
-  await expect(words(page)).toHaveText(["Ship it", "Water plants #outside", "Call the bank +Home", "Book flights", "Write notes"]);
+  await expect(words(page)).toHaveText(["Ship it", "Water plants", "Call the bank +Home", "Book flights", "Write notes"]);
   const withToast = await laidOut(page, ".todos-page *");
   await toast(page).getByRole("button", { name: "Dismiss" }).click();
   await expect(toast(page)).toHaveCount(0);
@@ -594,8 +655,8 @@ test("Undo opens a todo again after more was changed on it from the page, and af
   await filter(page, "Include completed").check();
   await row(page, "Call the bank").getByRole("checkbox").check();
   await expect(toast(page)).toContainText("Completed Call the bank +Home");
-  await more(page, "Call the bank").click();
-  await pick(page, "Importance: !");
+  await chipOf(page, "Call the bank", "Importance").click();
+  await choose(page, "!");
   await expect.poll(async () => (await read(page, home.id)).split("\n")[2]).toBe("- [x] ! Call the bank due:2026-10-14 +Home");
   await toast(page).getByRole("button", { name: "Undo" }).click();
   await expect.poll(async () => (await read(page, home.id)).split("\n")[2]).toBe("- [ ] ! Call the bank due:2026-10-14 +Home");
@@ -620,13 +681,13 @@ test("Undo still opens a todo checked off in a note after the note is left for t
   await line(page, "Call the bank").getByRole("checkbox").click();
   await expect(toast(page)).toContainText("Completed Call the bank +Home");
   await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Todos" }).click();
-  await expect(words(page)).toHaveText(["Water plants #outside"]);
+  await expect(words(page)).toHaveText(["Water plants"]);
 
   await toast(page).getByRole("button", { name: "Undo" }).click();
 
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe("- [ ] !! Call the bank due:2026-10-14 +Home");
   await expect(toast(page)).toHaveCount(0);
-  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants #outside"]);
+  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
 });
 
 test("clicking a todo opens its note with the cursor on its line, and the editor has what the Todos page changed", async ({ page }) => {
@@ -655,14 +716,14 @@ test("clicking a todo opens its note with the cursor on its line, and the editor
 
 test("a todo that changed since it was listed is not rewritten: the page says so and lists what is there now", async ({ page }) => {
   const { home } = await twoNotes(page);
-  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants #outside", "Write notes"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
   const changed = HOME.replace("- [ ] !! Call the bank due:2026-10-14 +Home", "- [ ] Email the landlord\n- [ ] !! Call the credit union due:2026-10-14 +Home");
   await perform(page, { type: "note.write", id: home.id, baseRevision: 1, text: changed });
 
   await row(page, "Call the bank").getByRole("checkbox").check();
 
   await expect(todosPage(page).getByRole("alert")).toHaveText("This todo was changed since it was listed. List the todos again.");
-  await expect(words(page)).toHaveText(["Ship it", "Call the credit union +Home", "Water plants #outside", "Email the landlord", "Write notes"]);
+  await expect(words(page)).toHaveText(["Ship it", "Call the credit union +Home", "Water plants", "Email the landlord", "Write notes"]);
   await expect.poll(() => read(page, home.id)).toBe(changed);
   // Nothing was checked off, so nothing says it was.
   await expect(toast(page)).toHaveCount(0);
@@ -687,7 +748,7 @@ test("an agent lists todos by folder and by tag and checks one off, and the Todo
 
   await expect.poll(async () => (await read(page, home.id)).split("\n")[2]).toBe("- [x] !! Call the bank due:2026-10-20 +Home");
   await expect.poll(() => authors(page, home.id)).toEqual(["member Ada Lovelace", "agent Claude"]);
-  await expect(words(page)).toHaveText(["Ship it", "Water plants #outside", "Write notes"], { timeout: 20_000 });
+  await expect(words(page)).toHaveText(["Ship it", "Water plants", "Write notes"], { timeout: 20_000 });
   // An agent's completion is not the member's to undo from a toast.
   await expect(toast(page)).toHaveCount(0);
 });
@@ -741,4 +802,159 @@ test("in vim, motions and operators go over a todo's tokens as the text they are
   await press("Escape", "j");
   await expect.poll(() => read(page, note.id)).toBe("# Vim\n\n- [ ] ! Call was:2026-10-14\nAfter");
   await expectShown(line(page, "Call"), "! Call was:2026-10-14");
+});
+
+/** Where a popover is beside the chip it was opened from, and whether it is wholly in the window. */
+async function hangsUnder(page: Page, chip: Locator) {
+  const at = (await chip.boundingBox())!;
+  const panel = (await popover(page).boundingBox())!;
+  const view = page.viewportSize()!;
+  return {
+    gap: Math.round(panel.y - (at.y + at.height)),
+    left: Math.round(panel.x - at.x),
+    inside: panel.x >= 0 && panel.y >= 0 && panel.x + panel.width <= view.width && panel.y + panel.height <= view.height,
+  };
+}
+
+test("each chip opens its own popover directly under it and inside the window, one at a time, with its card marked and nothing in the list moved", async ({ page }) => {
+  const { home } = await twoNotes(page);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
+  const lineIn = async () => (await read(page, home.id)).split("\n")[2];
+  const cards = () => page.evaluate(() => [...document.querySelectorAll(".todo-card")].map((el) => JSON.stringify(el.getBoundingClientRect())));
+  const shown = await cards();
+
+  // The second is opened over the first, which closes; the others after Escape, since an open popover lies over the cards under its own.
+  for (const [text, kind, after] of [["Call the bank", "Due date", ""], ["Call the bank", "Importance", "Escape"], ["Ship it", "Due date", "Escape"], ["Water plants", "Importance", ""]] as const) {
+    const chip = chipOf(page, text, kind);
+    await chip.click();
+    await expect(popover(page)).toHaveCount(1);
+    await expect(popover(page)).toHaveAccessibleName(new RegExp(`^${kind} of ${text}`));
+    expect(await hangsUnder(page, chip), `${kind} of ${text}`).toEqual({ gap: 4, left: 0, inside: true });
+    await expect(chip).toHaveAttribute("aria-expanded", "true");
+    // The card being changed is marked, and only it.
+    await expect(rows(page).and(page.locator("[data-picking]"))).toHaveText([new RegExp(`^${text}`)]);
+    expect(await cards(), "nothing in the list moves").toEqual(shown);
+    if (after) await page.keyboard.press(after);
+  }
+  // Pressed again, its chip closes it; a press outside closes it too.
+  await chipOf(page, "Water plants", "Importance").click();
+  await expect(popover(page)).toHaveCount(0);
+  await expect(page.locator(".todo-card[data-picking]")).toHaveCount(0);
+  await chipOf(page, "Ship it", "Importance").click();
+  await todosPage(page).getByRole("heading", { level: 1 }).click();
+  await expect(popover(page)).toHaveCount(0);
+  await expect(page.locator(".todo-card[data-picking]")).toHaveCount(0);
+  await expect(chipOf(page, "Ship it", "Importance")).toHaveAttribute("aria-expanded", "false");
+
+  // Near the foot of a short window it opens above its chip, still wholly inside.
+  await page.setViewportSize({ width: 900, height: 420 });
+  const low = chipOf(page, "Water plants", "Importance");
+  await low.scrollIntoViewIfNeeded();
+  await low.click();
+  const placed = await hangsUnder(page, low);
+  expect(placed.inside).toBe(true);
+  await page.keyboard.press("Escape");
+  // Where it fits neither below nor above, it is as low as it fits, and still wholly inside.
+  await page.setViewportSize({ width: 700, height: 300 });
+  const tight = chipOf(page, "Call the bank", "Due date");
+  await tight.scrollIntoViewIfNeeded();
+  await tight.click();
+  expect((await hangsUnder(page, tight)).inside).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(lineIn).toBe("- [ ] !! Call the bank due:2026-10-14 +Home");
+});
+
+test("a popover open on a card closes when the list is read again with another todo on that line, so a pick never lands on the one that came", async ({ page }) => {
+  test.setTimeout(90_000);
+  const { home } = await twoNotes(page);
+  await chipOf(page, "Call the bank", "Due date").click();
+  await expect(popover(page)).toHaveAccessibleName("Due date of Call the bank +Home");
+  // Someone else writes a todo above it: the card that held the bank's line now holds the new one.
+  const { revision, text } = await perform(page, { type: "note.read", id: home.id });
+  await perform(page, { type: "note.write", id: home.id, baseRevision: revision, text: text.replace("- [ ] !! Call", "- [ ] Inserted above due:2026-10-02\n- [ ] !! Call") });
+  await expect(row(page, "Inserted above")).toHaveCount(1, { timeout: 45_000 });
+  await expect(popover(page)).toHaveCount(0);
+  await expect(page.locator(".todo-card[data-picking]")).toHaveCount(0);
+  await expect.poll(async () => (await read(page, home.id)).split("\n").slice(2, 4)).toEqual(["- [ ] Inserted above due:2026-10-02", "- [ ] !! Call the bank due:2026-10-14 +Home"]);
+});
+
+test("the keyboard reaches every chip: Enter opens its popover on what it says now, arrows go through the choices, Enter picks, and Escape goes back to the chip changing nothing", async ({ page }) => {
+  const { home } = await twoNotes(page);
+  const lineIn = async () => (await read(page, home.id)).split("\n")[2];
+  const chip = chipOf(page, "Call the bank", "Importance");
+
+  await row(page, "Call the bank").getByRole("checkbox").focus();
+  await page.keyboard.press("Tab");
+  await expect(row(page, "Call the bank").getByRole("link")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(chip).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(popover(page).getByRole("button", { name: "!!", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(popover(page).getByRole("button", { name: "!", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await expect(popover(page).getByRole("button", { name: "!!!", exact: true })).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(popover(page).getByRole("button", { name: "Normal", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(popover(page)).toHaveCount(0);
+  await expect(chip).toBeFocused();
+  expect(await lineIn()).toBe("- [ ] !! Call the bank due:2026-10-14 +Home");
+
+  await page.keyboard.press(" ");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await expect.poll(lineIn).toBe("- [ ] !!! Call the bank due:2026-10-14 +Home");
+  await expect(chip).toBeFocused();
+
+  // On to the date's chip; a date typed into the field is saved on Enter, not on the way there.
+  await page.keyboard.press("Tab");
+  await expect(chipOf(page, "Call the bank", "Due date")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(popover(page).getByRole("button", { name: "Today", exact: true })).toBeFocused();
+  await popover(page).getByLabel("Due on").focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.type("2031");
+  await expect(popover(page)).toHaveCount(1);
+  expect(await lineIn()).toBe("- [ ] !!! Call the bank due:2026-10-14 +Home");
+  await page.keyboard.press("Enter");
+  await expect.poll(lineIn).toBe("- [ ] !!! Call the bank due:2031-10-14 +Home");
+  await expect(popover(page)).toHaveCount(0);
+});
+
+test("in a note, a todo's chip opens the same popover under it without moving the cursor, a pick is the member's edit undone like typing, and the keyboard goes back to the note", async ({ page }) => {
+  const note = await open(page, CHORES);
+  const lineIn = async () => (await read(page, note.id)).split("\n")[2];
+  const due = line(page, "Call the bank").getByRole("button", { name: /^Due date: / });
+  const importance = line(page, "Call the bank").getByRole("button", { name: /^Importance: / });
+
+  await due.click();
+  await expect(popover(page)).toHaveAccessibleName("Due date");
+  expect(await hangsUnder(page, due)).toEqual({ gap: 4, left: 0, inside: true });
+  await expect(popover(page).getByRole("button")).toHaveText(["Today", "Tomorrow", /^Next week· /, "Clear"]);
+  // Another chip's popover takes its place: one at a time.
+  await importance.click();
+  await expect(popover(page)).toHaveCount(1);
+  await expect(popover(page)).toHaveAccessibleName("Importance");
+  expect(await hangsUnder(page, importance)).toEqual({ gap: 4, left: 0, inside: true });
+  // The cursor stayed on the title, so the line is drawn as it was.
+  expect(await cursorLine(page)).toContain("Chores");
+  await expectShown(line(page, "Call the bank"), "!! Call the bank Oct 14, 2031 +Home about the card");
+
+  await choose(page, "!!!");
+  await expect.poll(lineIn).toBe("- [ ] !!! Call the bank due:2031-10-14 +Home about the card");
+  await expect(popover(page)).toHaveCount(0);
+  await expect(editor(page)).toBeFocused();
+  expect(new Set(await authors(page, note.id))).toEqual(new Set(["member Ada Lovelace"]));
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(lineIn).toBe("- [ ] !! Call the bank due:2031-10-14 +Home about the card");
+
+  // Escape closes it and gives the note the keyboard back, changing nothing.
+  await due.click();
+  await page.keyboard.press("Escape");
+  await expect(popover(page)).toHaveCount(0);
+  await expect(editor(page)).toBeFocused();
+  expect(await lineIn()).toBe("- [ ] !! Call the bank due:2031-10-14 +Home about the card");
 });

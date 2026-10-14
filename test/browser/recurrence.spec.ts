@@ -1084,8 +1084,8 @@ test("reverting a completion from History takes its line off the daily note open
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await inspector.getByRole("tab", { name: "History" }).click();
   const changes = inspector.getByRole("listbox", { name: "Changes" }).getByRole("option");
-  await expect(changes.first()).toBeVisible();
-  await inspector.getByRole("button", { name: "Revert…" }).click();
+  await changes.first().click();
+  await inspector.getByRole("group", { name: "Selection" }).getByRole("button", { name: "Revert…" }).click();
   const dialog = page.getByRole("dialog", { name: /^Revert/ });
   await dialog.getByRole("button", { name: "Revert", exact: true }).click();
   await expect(dialog).toHaveCount(0);

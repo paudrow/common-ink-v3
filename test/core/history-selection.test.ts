@@ -377,6 +377,8 @@ describe("reverting changes of several notes at once", () => {
     ];
     const previews = await perform(env.DB, ada, { type: "history.previewRevert", changes });
     expect(previews[0]!.conflicts).toMatchObject([{ line: 2, before: ["line"], now: ["LINE, edited later"], kept: ["line, edited later"] }]);
+    // Where the conflict is on the diff of the change asked for: its second line, as that change left the note.
+    expect(previews[0]!.conflicts[0]!.runs).toEqual([{ revision: 2, line: 2, lines: 1 }]);
     expect(previews[1]!.conflicts).toEqual([]);
 
     const back = await perform(env.DB, ada, { type: "history.previewRevert", changes: [{ ...changes[0]!, at: 3, choices: "back" }] });

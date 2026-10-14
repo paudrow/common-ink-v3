@@ -149,6 +149,23 @@ test("a post is asked for in the app's theme, and again when the theme changes, 
   await expect.poll(() => size()).toEqual([550, 222]);
 });
 
+test("a post asked for again in the other theme keeps its placeholder until the post in that theme says it is drawn", async ({ page }) => {
+  await standIns(page, { postHeight: 240 });
+  await open(page, `# Post\n\nabove\n\n${POST}\n\nafter\n`);
+  const placeholder = below(page, "post").locator(".embed-loading");
+  await expect(page.frameLocator('.embed-below[data-embed="post"] iframe').getByText("post on X, light")).toBeVisible();
+  await expect(placeholder).toHaveCount(0);
+  // Straight after the first one loaded: a wait for a post that says nothing must not be left over to end the next one's.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await standIns(page, { postHeight: 240, postDelay: 3500 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(placeholder).toHaveCount(1);
+  await page.waitForTimeout(2800);
+  await expect(placeholder, "still waiting for the dark post").toHaveCount(1);
+  await expect(page.frameLocator('.embed-below[data-embed="post"] iframe').getByText("post on X, dark")).toBeVisible();
+  await expect(placeholder).toHaveCount(0);
+});
+
 test("the address of a video is reached by the arrow keys, though it is out of sight, and typing there changes the video", async ({ page }) => {
   await standIns(page);
   const note = await open(page, `# Watch\n\nBefore.\n\n${VIDEO}\n\nAfter.`);
@@ -165,9 +182,48 @@ test("the address of a video is reached by the arrow keys, though it is out of s
   await expect(below(page, "video").locator("img")).toHaveAttribute("src", "https://i.ytimg.com/vi/NgRkyAlJx5t/hqdefault.jpg");
   await page.keyboard.press("ArrowDown");
   await expect(address).toHaveCSS("opacity", "0");
-  // With the pointer on the line itself it is seen too, as it is with the pointer on the video.
+  // The pointer on the line or on the video shows nothing: only the cursor does, as for anything else in a note.
   await address.hover();
+  await expect(address).toHaveCSS("opacity", "0");
+  await below(page, "video").hover();
+  await expect(address).toHaveCSS("opacity", "0");
+});
+
+test("the address of a post on X or Bluesky stays out of sight with the pointer on the post or on its line", async ({ page }) => {
+  await standIns(page, { postHeight: 300 });
+  await open(page, `# Posts\n\nBefore.\n\n${POST}\n\n${SKY}\n\nAfter.`);
+  await expect(below(page, "post")).toHaveCount(2);
+  const addresses = page.locator(".cm-line.embed-address");
+  for (const n of [0, 1]) {
+    await below(page, "post").nth(n).hover();
+    await expect(addresses.nth(n)).toHaveCSS("opacity", "0");
+    await addresses.nth(n).hover();
+    await expect(addresses.nth(n)).toHaveCSS("opacity", "0");
+  }
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await expect(addresses.first()).toHaveCSS("opacity", "1");
+});
+
+test("an address out of sight is no link: the pointer over it is no hand, and a press there puts the cursor on its line and opens nothing", async ({ page, context }) => {
+  await standIns(page);
+  await open(page, `# Watch\n\nBefore.\n\n${VIDEO}\n\nAfter.`);
+  const address = line(page, "youtube.com/watch");
+  await expect(below(page, "video").getByRole("button", { name: /^Play video/ })).toBeVisible();
+  await expect(address).toHaveCSS("opacity", "0");
+  const opened: string[] = [];
+  context.on("page", (other) => opened.push(other.url()));
+  const box = (await address.boundingBox())!;
+  const [x, y] = [box.x + 60, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  expect(await page.evaluate(([px, py]) => getComputedStyle(document.elementFromPoint(px!, py!)!).cursor, [x, y])).not.toBe("pointer");
+  await page.mouse.click(x, y);
   await expect(address).toHaveCSS("opacity", "1");
+  await page.waitForTimeout(500);
+  expect(opened).toEqual([]);
 });
 
 test("an address in the middle of a paragraph, in a list, in code, or of a site that isn't shown stays a link and nothing more", async ({ page, baseURL }) => {
