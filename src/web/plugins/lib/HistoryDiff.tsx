@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Icon, type Author, type Diff } from "../../plugin-api.ts";
-import { count, hueOf, initials, pieces, type Piece } from "./historyView.ts";
+import { count, hueOf, initials, pieces, type Piece, type Stretch } from "./historyView.ts";
 
 export function Stat({ added, removed }: { added: number; removed: number }) {
   return (
@@ -35,9 +35,19 @@ function Line({ kind, children }: { kind: keyof typeof MARK; children: ReactNode
 }
 
 const shown = (text: string) => text || " ";
+const NO_MARKS: readonly Marked[] = [];
+const markOf = (piece: Piece) => ("mark" in piece ? piece.mark : undefined);
+
+/** Changed lines to mark as a conflict: what to say of them, and what pressing them does. */
+export interface Marked extends Stretch {
+  says: string;
+  onOpen: () => void;
+}
 
 interface DiffViewProps {
   diff: Diff;
+  /** Stretches of the text the diff leads to whose changed lines are marked. */
+  marks?: readonly Marked[];
   /** Reads the text the diff is from, for the unchanged lines it leaves out. Without it they stay folded away. */
   readBefore?: () => Promise<string>;
 }
@@ -46,8 +56,9 @@ interface DiffViewProps {
  * A diff as prose: unchanged lines folded to a count that opens, a short rewrite shown once with the
  * words that changed marked, and added and removed lines each with a marker that is part of the line.
  */
-export function DiffView({ diff, readBefore }: DiffViewProps) {
-  const drawn = useMemo(() => pieces(diff), [diff]);
+export function DiffView({ diff, marks = NO_MARKS, readBefore }: DiffViewProps) {
+  const stretches = JSON.stringify(marks.map(({ from, to }) => ({ from, to })));
+  const drawn = useMemo(() => pieces(diff, JSON.parse(stretches) as Stretch[]), [diff, stretches]);
   const [before, setBefore] = useState<string[] | null>(null);
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
   const [failed, setFailed] = useState<string | null>(null);
@@ -81,7 +92,16 @@ export function DiffView({ diff, readBefore }: DiffViewProps) {
       case "more":
         if (open.has(at)) return piece.lines.map((text, i) => <Line key={`${at}-${i}`} kind={piece.of}>{shown(text)}</Line>);
         return (
-          <button key={at} type="button" className="diff-fold" onClick={() => setOpen((was) => new Set(was).add(at))}>
+          <button
+            key={at}
+            type="button"
+            className="diff-fold"
+            onClick={(e) => {
+              // Inside marked lines, showing the rest of them is not pressing the mark.
+              e.stopPropagation();
+              setOpen((was) => new Set(was).add(at));
+            }}
+          >
             ⋯ {piece.lines.length} more {piece.of === "add" ? "added" : "removed"} lines
           </button>
         );
@@ -99,9 +119,39 @@ export function DiffView({ diff, readBefore }: DiffViewProps) {
         );
     }
   };
+  /** The pieces in order, each run of one mark's as one thing to press. */
+  const all: ReactNode[] = [];
+  for (let i = 0; i < drawn.length; ) {
+    const mark = markOf(drawn[i]!);
+    const marked = mark === undefined ? undefined : marks[mark];
+    let end = i + 1;
+    while (marked && end < drawn.length && markOf(drawn[end]!) === mark) end++;
+    if (!marked) all.push(draw(drawn[i]!, i));
+    else
+      all.push(
+        <div
+          key={`mark-${i}`}
+          className="diff-conflict"
+          role="button"
+          tabIndex={0}
+          aria-label={`${marked.says}. Open the revert to settle it.`}
+          title="Open the revert to settle this"
+          onClick={marked.onOpen}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+            e.preventDefault();
+            marked.onOpen();
+          }}
+        >
+          <span className="diff-conflict-says">{marked.says}</span>
+          {drawn.slice(i, end).map((piece, n) => draw(piece, i + n))}
+        </div>,
+      );
+    i = end;
+  }
   return (
     <div className="diff">
-      {drawn.map(draw)}
+      {all}
       {diff.omitted > 0 && <p className="diff-none">{count(diff.omitted, "more changed line")} not shown: this change is long. Open the note to read it whole.</p>}
       {failed && <p role="alert" className="error">{failed}</p>}
     </div>

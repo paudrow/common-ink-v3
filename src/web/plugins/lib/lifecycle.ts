@@ -1,4 +1,4 @@
-import type { Note, NoteSummary, PluginHost } from "../../plugin-api.ts";
+import type { Note, NoteSummary, Notice, PluginHost } from "../../plugin-api.ts";
 import type { MenuItem } from "./Menu.tsx";
 
 const why = (err: unknown) => (err instanceof Error ? err.message : "Common Ink can't be reached.");
@@ -17,28 +17,31 @@ export function lifecycle(host: PluginHost) {
     // Folder counts are the server's, and leave out an archived or trashed note.
     app.refresh();
   };
-  const failed = (err: unknown) => host.app().notify({ message: why(err) });
+  const failed = (err: unknown) => {
+    host.app().notify({ message: why(err) });
+  };
+  /** A refusal said in the place of the notice whose Undo asked for the step. */
+  const refusal = (err: unknown): Notice => ({ message: why(err) });
 
   /** Throws with the server's reason when the note can't be restored. */
-  const restoring = async (noteId: string) => {
+  const restoring = async (noteId: string): Promise<Notice> => {
     const { folderGone, ...note } = await host.perform({ type: "note.restore", id: noteId });
     took(note);
-    return { folderGone };
+    return { message: restoredMessage(folderGone), icon: "check" };
   };
-  const restore = (noteId: string) =>
-    restoring(noteId).then(({ folderGone }) => host.app().notify({ message: restoredMessage(folderGone) }), failed);
+  const restore = (noteId: string) => restoring(noteId).then((said) => host.app().notify(said), failed);
 
+  const archiving = (noteId: string, archived: boolean) => host.perform({ type: "note.archive", id: noteId, archived }).then(took);
   /** Archiving says so with a way back, since the note leaves most listings as it is archived. */
   const setArchived = (noteId: string, archived: boolean): Promise<void> =>
-    host.perform({ type: "note.archive", id: noteId, archived }).then((note) => {
-      took(note);
-      if (archived) host.app().notify({ message: "Archived", action: { label: "Undo", run: () => void setArchived(noteId, false) } });
+    archiving(noteId, archived).then(() => {
+      if (archived) host.app().notify({ message: "Archived", icon: "archive", action: { label: "Undo", run: () => archiving(noteId, false).then(() => undefined, refusal) } });
     }, failed);
 
   const trash = (noteId: string) =>
     host.perform({ type: "note.trash", id: noteId }).then((note) => {
       took(note);
-      host.app().notify({ message: "Moved to Trash", action: { label: "Undo", run: () => void restore(noteId) } });
+      host.app().notify({ message: "Moved to Trash", icon: "trash", action: { label: "Undo", run: () => restoring(noteId).catch(refusal) } });
     }, failed);
 
   /** Removes a note in Trash for good. Throws with the server's reason, such as that the member didn't make the note. */

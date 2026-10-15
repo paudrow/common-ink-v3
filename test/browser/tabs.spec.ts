@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { listedNote, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 /** Opens a note from the list of every note as a preview, which is what a click on its title does. */
 async function preview(page: Page, title: string) {
@@ -72,7 +72,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   const noteUrl = page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" });
   await keep(page, "Alpha");
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
-  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Info" }).click();
+  await pinPanel(page, "Info");
 
   const { width } = (await group(1).boundingBox())!;
   await openAllNotes(page);
@@ -172,6 +172,7 @@ test("a tab's menu closes the others, those to its left, those to its right, or 
 test("⇧⌘P lists the commands, narrows them as you type, and runs the one chosen", async ({ page }) => {
   await withNotes(page, "Alpha");
   await preview(page, "Alpha");
+  await pinPanel(page, "Info");
   const text = page.getByRole("textbox", { name: "Note text" });
   await text.click();
   const palette = page.getByRole("dialog", { name: "Commands" });
@@ -735,6 +736,9 @@ test("a page that only leads somewhere else leaves the editor of a note open bes
   await page.evaluate((id) => ((window as unknown as { onwardTo: string }).onwardTo = id), gamma!.id);
   await keep(page, "Alpha");
   await keep(page, "Beta");
+  // With the italic list closed there is no italic tab, so what the page leads to opens in the pane in front, beside Alpha's.
+  await tab(page, "All notes").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Close", exact: true }).click();
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.keyboard.type("Split editor right");
   await page.keyboard.press("Enter");
@@ -817,7 +821,7 @@ test("a tab on a page that is no longer there keeps its place in the tab row und
     await expect(tabs(page)).toHaveText(["History", "Plugins"]);
     await expect(tab(page, "History")).toHaveAttribute("aria-selected", "true");
     await expect(main.getByText("There's nothing at this address.")).toBeVisible();
-    await expect(main.getByRole("group", { name: "Window" }).getByRole("button", { name: "Sidebar" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();
   };
   await tab(page, "History").click();
   await gone();
@@ -844,4 +848,32 @@ test("a tab kept on a page whose name was never kept is named by its address", a
   });
   await page.reload();
   await expect(tabs(page)).toHaveText(["/history", "Plugins"]);
+});
+
+test("a page whose plugin is turned off while it is in front leaves the other tabs where they were", async ({ page }) => {
+  await withNotes(page, "Alpha", "Beta");
+  await keep(page, "Alpha");
+  await keep(page, "Beta");
+  await page.goto("/history");
+  await expect(page.getByRole("heading", { name: "History", level: 1 })).toBeVisible();
+  await expect(tabs(page)).toHaveCount(3);
+  await expect(tab(page, "History")).toHaveAttribute("aria-selected", "true");
+
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "history.enabled": false }), baseRevision: 0 });
+  await page.reload();
+
+  // It used to take the whole editor area: no tab row, and the open notes out of sight.
+  await expect(page.getByRole("main", { name: "Editor" }).getByText("There's nothing at this address.")).toBeVisible();
+  await expect(tabs(page)).toHaveCount(3);
+  await expect(tab(page, "History")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();
+  await tab(page, "Alpha").click();
+  await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");
+  await expect(page).toHaveURL(/\/note\/alpha-[a-z0-9]{12}$/);
+
+  // An address nothing was ever at says so in a tab too, beside the ones that are open.
+  await page.goto("/nowhere/at/all");
+  await expect(page.getByRole("main", { name: "Editor" }).getByText("There's nothing at this address.")).toBeVisible();
+  await expect(tab(page, "Alpha")).toBeVisible();
+  await expect(tab(page, "Beta")).toBeVisible();
 });

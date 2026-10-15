@@ -16,6 +16,18 @@ export function typedAfter(before: string, trigger: string, { spaces = false, an
   return null;
 }
 
+/** Blank space, a quote's `>`, and a list item's mark and task box: what may come before a trigger at the start of a line. */
+const LEAD = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?$/;
+
+/**
+ * Whether the trigger `typedAfter` found starts its line, given the line up to the cursor and what
+ * was typed after the trigger. For a prose trigger only there does Enter pick from the list: after
+ * other words, a `/` and what follows it are as likely the member's own words.
+ */
+export function startsLine(before: string, typed: string, trigger: string): boolean {
+  return LEAD.test(before.slice(0, before.length - typed.length - trigger.length));
+}
+
 export interface Placing {
   /** Where the trigger starts and the cursor is. */
   from: number;
@@ -28,7 +40,7 @@ export interface Placing {
 }
 
 /** The edit that puts a picked item in the note in place of its trigger and what was typed, and where the cursor goes. */
-export function placed(item: CompletionItem, at: Placing): { from: number; to: number; insert: string; anchor: number; head: number } {
+export function placed(item: CompletionItem & { insert: string }, at: Placing): { from: number; to: number; insert: string; anchor: number; head: number } {
   if (!item.block) {
     const [a, b] = item.select ?? [item.insert.length, item.insert.length];
     return { from: at.from, to: at.to, insert: item.insert, anchor: at.from + a, head: at.from + b };

@@ -18,7 +18,7 @@ import { links } from "./links/index.ts";
 import { math } from "./math/index.ts";
 import { media } from "./media/index.ts";
 import { members } from "./members/index.tsx";
-import { mentions } from "./mentions/index.ts";
+import { mentions } from "./mentions/index.tsx";
 import { noteClocks } from "./noteClocks.tsx";
 import { noteInfo } from "./noteInfo.tsx";
 import { noteList } from "./noteList.tsx";
@@ -72,7 +72,7 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [todos, "todos/index.tsx"],
   [daily, "daily/index.tsx"],
   [links, "links/index.ts"],
-  [mentions, "mentions/index.ts"],
+  [mentions, "mentions/index.tsx"],
   [tables, "tables/index.ts"],
   [math, "math/index.ts"],
   [codeBlocks, "code/index.ts"],

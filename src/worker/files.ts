@@ -5,11 +5,12 @@
 // The bytes are whatever somebody uploaded, served from the app's own host, so every answer is made
 // unable to act as a page of the app: see `SEALED`.
 import { authenticateAgent } from "../core/agents.ts";
-import { disposition } from "../core/filetypes.ts";
+import { disposition, fileClass } from "../core/filetypes.ts";
 import { agentActor, perform, type Actor, type Visitor } from "../core/operations.ts";
 import { MAX_UPLOAD_BYTES, OpError, type OpErrorCode, type OpenedUpload } from "../core/protocol.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { sessionPersonId } from "./auth.ts";
+import { sign, verify } from "./session.ts";
 import { bearerToken } from "./mcp/mcp.ts";
 
 const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
@@ -27,7 +28,9 @@ const refused = (err: unknown, headers: Record<string, string> = {}) => {
  * - `sandbox` makes a file opened as a page a document with no origin and no script, so even a type
  *   that got through by mistake can't reach the member's session. It may show itself, and nothing else.
  * - Anything not on the list of pictures, video and sound is a download (`Content-Disposition`), an
- *   SVG too, which still draws as the source of an image.
+ *   SVG too, which still draws as the source of an image, and a PDF: the browser's own viewer draws
+ *   one in a page of its making that the sandbox doesn't reach, which at the app's address would be
+ *   the app's origin. A PDF is shown in place only from the site kept for files (below).
  * - `same-origin` keeps another site, and an HTML embed's frame, from loading the bytes with the member's session.
  * - `private, no-cache` lets only the member's own browser keep a copy, and has it ask before each
  *   use, which is answered through the same check. No shared cache keeps one.
@@ -42,8 +45,8 @@ const SEALED = {
   Vary: "Cookie, Authorization",
 } as const;
 
-function served(req: Request, { upload, body, etag, range }: OpenedUpload, more: Record<string, string> = {}): Response {
-  const headers = new Headers({ ...SEALED, ...more, ETag: etag, "Content-Type": upload.type, "Content-Disposition": disposition(upload.type, upload.name) });
+function served(req: Request, { upload, body, etag, range }: OpenedUpload, more: Record<string, string> = {}, inline?: boolean): Response {
+  const headers = new Headers({ ...SEALED, ...more, ETag: etag, "Content-Type": upload.type, "Content-Disposition": disposition(upload.type, upload.name, inline) });
   if (!body) return new Response(null, { status: 304, headers });
   headers.set("Content-Length", String(range ? range.length : upload.size));
   if (range) headers.set("Content-Range", `bytes ${range.offset}-${range.offset + range.length - 1}/${upload.size}`);
@@ -113,6 +116,67 @@ async function sharedUpload(req: Request, env: Env, url: URL, token: string, id:
   }
 }
 
+/** The site kept for opening files in a tab, when `FILE_ORIGIN` names one. */
+export function fileOrigin(env: { FILE_ORIGIN?: string }): string | null {
+  if (!env.FILE_ORIGIN) return null;
+  const url = new URL(env.FILE_ORIGIN);
+  if (url.protocol !== "https:" && !/(^|\.)localhost$/.test(url.hostname)) throw new Error("FILE_ORIGIN must be an https address");
+  return url.origin;
+}
+
+/** How long an address on the file site is good for: long enough for the browser's viewer to read the whole file. */
+const SITE_SECONDS = 600;
+const SITE_FILE = /^\/file\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/;
+/** What an address on the file site is signed with: a key of its own, so it can never be taken for a session, nor a session for it. */
+const siteKey = (env: Env) => `${env.SESSION_SECRET}\u0000file-site`;
+interface SiteFile extends Record<string, unknown> {
+  workspaceId: string;
+  uploadId: string;
+  personId: string;
+}
+
+/**
+ * Where a member's PDF opens in a tab: on the file site, at an address that names it and them and
+ * lapses in ten minutes. Null where it is downloaded: no file site, an agent, a file that isn't a PDF.
+ */
+async function siteAddress(env: Env, actor: Actor, workspaceId: string, id: string): Promise<string | null> {
+  const origin = fileOrigin(env);
+  if (!origin || actor.kind !== "member" || !env.SESSION_SECRET) return null;
+  const upload = await perform(env.DB, actor, { type: "upload.read", id });
+  if (fileClass(upload) !== "pdf") return null;
+  return `${origin}/file/${await sign({ workspaceId, uploadId: id, personId: actor.personId } satisfies SiteFile, siteKey(env), SITE_SECONDS)}`;
+}
+
+/**
+ * What the file site answers, or null for a request that is the app's. With `FILE_ORIGIN` set, that
+ * host answers a PDF at an address the app gave out, shown in place, and nothing else: no session
+ * reaches it, and whoever the address names is asked again on every request whether they may still
+ * see the file, so an address outlives no grant. Its origin is not the app's, so the browser's viewer
+ * draws there with nothing of the app's to reach.
+ */
+export function fileSiteResponse(req: Request, env: Env, url: URL): Promise<Response> | null {
+  const origin = fileOrigin(env);
+  if (!origin || url.origin !== origin) return null;
+  const gone = () => new Response("This address of a file has lapsed or was never one. Open the file again from Common Ink.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", ...UNLISTED } });
+  return (async () => {
+    const at = SITE_FILE.exec(url.pathname);
+    if (!at || !reads(req) || !env.SESSION_SECRET) return gone();
+    const named = await verify<SiteFile>(at[1], siteKey(env));
+    if (!named) return gone();
+    try {
+      const opened = await perform(env.DB, { kind: "member", personId: named.personId, workspaceId: named.workspaceId }, { type: "upload.open", id: named.uploadId }, Date.now(), undefined, { bucket: env.FILES, asked: req.headers });
+      if (fileClass(opened.upload) !== "pdf") {
+        void opened.body?.cancel();
+        return gone();
+      }
+      return served(req, opened, UNLISTED, true);
+    } catch (err) {
+      if (err instanceof OpError) return gone();
+      throw err;
+    }
+  })();
+}
+
 /** Answers a request that is for an upload's bytes, in or out. Null for any other. */
 export async function handleFiles(req: Request, env: Env, url: URL): Promise<Response | null> {
   const shared = SHARED_UPLOAD.exec(url.pathname);
@@ -125,6 +189,9 @@ export async function handleFiles(req: Request, env: Env, url: URL): Promise<Res
   const who = await asker(req, env, url, workspaceId!);
   if (who instanceof Response) return who;
   try {
+    // Asked to open in a tab: a PDF goes to the file site, where there is one, and anything else is answered here as ever.
+    const site = url.searchParams.get("open") === "tab" ? await siteAddress(env, who.actor, workspaceId!, id) : null;
+    if (site) return new Response(null, { status: 302, headers: { Location: site, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
     return served(req, await perform(env.DB, who.actor, { type: "upload.open", id }, Date.now(), undefined, { bucket: env.FILES, asked: req.headers }));
   } catch (err) {
     return refused(err);

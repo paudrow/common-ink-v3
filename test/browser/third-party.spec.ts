@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, perform, signInAsNewPerson, THEIR_FRAMES } from "./helpers.ts";
+import { anotherPerson, join, panelIcon, perform, showPanel, signInAsNewPerson, THEIR_FRAMES } from "./helpers.ts";
 import { asPlugin, codeHashOf, frameFor, install, openDetails, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn, type Written } from "./third-party-helpers.ts";
 
 let errors: string[];
@@ -173,10 +173,10 @@ test("a command reads notes and tells the member, a view and a page are drawn in
   await expect.poll(async () => (await end.boundingBox())!.y).toBe(before);
   expect(Math.round((await below.boundingBox())!.height)).toBe(96);
 
-  // The inspector's tab is there to pick, and the inspector didn't open on it.
+  // The inspector's panel is there to pick, and the inspector didn't open on it.
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await expect(inspector.getByRole("tab", { name: "Word counter plugin: Words", exact: true })).toHaveAttribute("aria-selected", "false");
-  await inspector.getByRole("tab", { name: "Word counter plugin: Words", exact: true }).click();
+  await expect(panelIcon(page, "Word counter plugin: Words")).toHaveAttribute("aria-expanded", "false");
+  await showPanel(page, "Word counter plugin: Words");
   const view = await frameFor(page, "view", "words");
   await expect(view.locator(".said").first()).toHaveText("View words in words, granted notes.read");
   await expect(view.locator(".said").nth(1)).toHaveText("7 words");
@@ -326,7 +326,7 @@ test("a plugin uninstalled while another page has it running is refused by the s
   await turnOn(page, "Word counter", workspaceId);
   await page.goto(`/note/${note.id}`);
   const inspector = page.getByRole("complementary", { name: "Inspector" });
-  await inspector.getByRole("tab", { name: "Word counter plugin: Words", exact: true }).click();
+  await showPanel(page, "Word counter plugin: Words");
   await frameFor(page, "view", "words");
   await frameFor(page, "embed", "wordcount");
   await runCommand(page, "Word counter plugin: Count notes");
@@ -349,7 +349,7 @@ test("a plugin uninstalled while another page has it running is refused by the s
   await relist(page);
   await expect.poll(() => running(page).length).toBe(0);
   await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
-  await expect(inspector.getByRole("tab", { name: "Word counter plugin: Words", exact: true })).toHaveCount(0);
+  await expect(panelIcon(page, "Word counter plugin: Words")).toHaveCount(0);
   await expect(editor(page)).toContainText("::x-wordcount{all}");
   await page.keyboard.press("ControlOrMeta+Shift+P");
   // The palette lists what matches, and nothing of the plugin's does.
@@ -391,11 +391,11 @@ test("what a plugin writes is recorded as the plugin's for the member it wrote f
     await expect.poll(lines).toEqual(listed);
   }
 
-  // Its change is picked and reverted as anyone's is.
-  await rows.first().click();
+  // Its change is ticked and reverted as anyone's is.
+  await rows.first().locator(".hist-check").click();
   const pane = mode.getByRole("region", { name: "What the selection did" });
   await expect(pane.locator("ins.diff-line .diff-text")).toHaveText(["", "The counter's step"]);
-  await pane.getByRole("button", { name: "Revert…" }).click();
+  await mode.getByRole("group", { name: "Selection" }).getByRole("button", { name: "Revert…" }).click();
   const dialog = page.getByRole("dialog", { name: /^Revert/ });
   await expect(dialog).toHaveAccessibleName("Revert 1 change to Plan");
   await dialog.getByRole("button", { name: "Revert", exact: true }).click();

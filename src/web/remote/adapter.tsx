@@ -341,7 +341,7 @@ export function adapt(installed: InstalledPlugin, reach: Reach): Plugin {
         );
         // One of the app's own keeps the id its view had when it ran in the page, which is what its tab is remembered by.
         const registered = own ? view.id : viewId;
-        if (view.slot === "inspector") host.views.register("inspector", { id: registered, for: "note", label, icon: view.icon ?? "info", component: ({ note }) => <Frame noteId={note.id} /> });
+        if (view.slot === "inspector") host.views.register("inspector", { id: registered, for: ["note"], label, icon: view.icon ?? "info", component: ({ about }) => (about.kind === "note" ? <Frame key={about.note.id} noteId={about.note.id} /> : null) });
         // The app's one bar: `end` is its right side. In it a frame is not told which note is in front, and so isn't started again for each: one that reads notes asks with `ink.onNote`.
         else if (view.slot === "bar") host.views.register("bar", { id: registered, side: view.end ? "right" : "left", component: () => <Frame noteId={null} width={view.width} /> });
         // Never the page shown at /: the manifest has no word for it, and the host refuses it to any plugin but the app's own.

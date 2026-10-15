@@ -1,0 +1,48 @@
+import { SELF } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
+import { secured } from "../../src/worker/headers.ts";
+
+const PAGE =
+  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https://*.googleusercontent.com; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' https:; manifest-src 'self'; frame-src https://commonink.app/embed-frame https://commonink.app/embed-frame/g/ https://www.youtube-nocookie.com https://platform.twitter.com https://embed.bsky.app; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
+const EMBED_FRAME =
+  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+const DATA = "default-src 'none'; frame-ancestors 'none'";
+
+const sent = async (path: string, init?: RequestInit) => {
+  const res = await SELF.fetch(`https://commonink.app${path}`, { redirect: "manual", ...init });
+  await res.arrayBuffer();
+  return [path, res.headers.get("Content-Security-Policy"), res.headers.get("X-Content-Type-Options"), res.headers.get("Referrer-Policy")];
+};
+
+describe("what the Worker tells a browser about each response", () => {
+  it("gives the app's pages, the sign-in pages and the retiring service worker the app's policy", async () => {
+    for (const path of ["/", "/note/abcdefghijkl", "/settings", "/auth/google", "/auth/nothing", "/sw.js"]) {
+      expect(await sent(path)).toEqual([path, PAGE, "nosniff", "strict-origin-when-cross-origin"]);
+    }
+  });
+
+  it("gives JSON for the app and for agents a policy that runs and draws nothing, whatever the answer", async () => {
+    for (const [path, init] of [["/api/me"], ["/api/workspaces/aaaaaaaaaaaa/ops", { method: "POST", body: "{}" }], ["/api/agents"], ["/mcp", { method: "POST", body: "{}" }]] as const) {
+      expect(await sent(path, init)).toEqual([path, DATA, "nosniff", "strict-origin-when-cross-origin"]);
+    }
+  });
+
+  it("gives the document an HTML embed runs in a sandbox of its own, and sends no referrer from it", async () => {
+    for (const path of ["/embed-frame", "/embed-frame/x"]) expect(await sent(path)).toEqual([path, EMBED_FRAME, "nosniff", "no-referrer"]);
+  });
+
+  it("sends them on a redirect too", async () => {
+    const res = await SELF.fetch("https://www.commonink.app/note/x", { redirect: "manual" });
+    expect([res.status, res.headers.get("Content-Security-Policy")]).toEqual([301, PAGE.replaceAll("https://commonink.app/", "https://www.commonink.app/")]);
+  });
+
+  it("lets only Vite's dev server run its inline script, and keeps a policy or referrer rule a response brings with it", () => {
+    const url = new URL("https://localhost/note/x");
+    expect(secured(new Response("<p>"), url, { DEV_SERVER: "1" }).headers.get("Content-Security-Policy")).toBe(PAGE.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'").replaceAll("https://commonink.app/", "https://localhost/"));
+    expect(secured(new Response("{}"), new URL("https://localhost/api/me"), { DEV_SERVER: "1" }).headers.get("Content-Security-Policy")).toBe(DATA);
+    const own = new Response("<p>", { headers: { "Content-Security-Policy": "default-src 'none'" } });
+    expect(secured(own, url, {}).headers.get("Content-Security-Policy")).toBe("default-src 'none'");
+    // A page a link opens sends no referrer, so its address goes to no other site.
+    expect(secured(new Response("<p>", { headers: { "Referrer-Policy": "no-referrer" } }), new URL("https://localhost/s/abcdefghijklmnopqrstu"), {}).headers.get("Referrer-Policy")).toBe("no-referrer");
+  });
+});

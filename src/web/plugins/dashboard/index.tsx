@@ -1,7 +1,8 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { NoteSummary, Plugin } from "../../plugin-api.ts";
 import { todoOpener } from "../lib/openTodo.ts";
-import { Dashboard, PinIcon } from "./Dashboard.tsx";
+import { DEFAULT_LAYOUT, Dashboard, PinIcon } from "./Dashboard.tsx";
+import { writeLayout } from "./layout.ts";
 import { pinsOf, type Pins } from "./pins.ts";
 import { membersStamp } from "./today.ts";
 
@@ -27,13 +28,24 @@ function PinMark({ pins, note }: { pins: Pins; note: NoteSummary }) {
 /**
  * The Dashboard: what is ahead of one member today, drawn from the operations every other view uses.
  * It is the home page, so it is what the app opens to when no note is addressed and no tab is open. Pins are the
- * member's own and kept by the server, outside any note.
+ * member's own and kept by the server, outside any note, and so is which panels it shows and how.
  */
 export const dashboard: Plugin = {
   id: "dashboard",
   name: "Dashboard",
   description: "The home page: what is ahead of you today, your pinned notes, and what changed.",
   icon: "dashboard",
+  settings: {
+    layout: {
+      type: "list",
+      default: writeLayout(DEFAULT_LAYOUT),
+      maxItems: 20,
+      maxLength: 40,
+      remembered: true,
+      title: "Dashboard panels",
+      description: "The panels your Dashboard shows, in order, each with its size: small, wide, tall or large. Change them with Edit dashboard on the Dashboard. They are kept on the server with your settings for this workspace, so the Dashboard looks the same in every browser you sign in on.",
+    },
+  },
   activate(host) {
     const pins = pinsOf(host);
     const openTodo = todoOpener(host);

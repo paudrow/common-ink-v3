@@ -1,35 +1,79 @@
 import { describe, expect, it } from "vitest";
 import { matching } from "../../src/web/plugins/lib/match.ts";
-import { narrowed, openable, selectedIn, uploadItem, uploadPath, writtenFor } from "../../src/web/plugins/uploads/finding.ts";
+import { MINE, onlyMine, openable, reachWords, selectedIn, uploaderWords, uploadItem, uploadPath, withMine, writtenFor } from "../../src/web/plugins/uploads/finding.ts";
 import { droppedFiles, onItsOwnLine, pastedFiles, refusal } from "../../src/web/plugins/uploads/pasting.ts";
-import { boxFor, formatBytes } from "../../src/web/plugins/uploads/sizing.ts";
+import { boxFor, formatBytes, nearest, stepped, widthsIn } from "../../src/web/plugins/uploads/sizing.ts";
 import { referredUploads } from "../../src/web/referredUploads.ts";
 
 const ID = "abcdefgh1234";
 
 describe("the room an upload's embed keeps", () => {
-  it("is the size the note writes, at its own shape", () => {
+  it("is the column's width at the note's shape, and never wider than the picture or the video is", () => {
     expect(boxFor("image", `${ID} 640x480`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
     expect(boxFor("video", `${ID} 640x360`)).toEqual({ ratio: 16 / 9, maxWidth: 640 });
+    expect(boxFor("image", `${ID} 20x10`)).toEqual({ ratio: 2, maxWidth: 20 });
+    expect(boxFor("image", `${ID} 300x900`)).toEqual({ ratio: 1 / 3, maxWidth: 300 });
+    expect(boxFor("image", `${ID} 4000x3000`)).toEqual({ ratio: 4 / 3, maxWidth: 4000 });
+    expect(boxFor("video", `${ID} 1920x1080`)).toEqual({ ratio: 16 / 9, maxWidth: 1920 });
   });
 
-  it("is never larger than the picture, never taller than 480 pixels and never wider than 640", () => {
-    expect(boxFor("image", `${ID} 20x10`)).toEqual({ ratio: 2, maxWidth: 20 });
-    expect(boxFor("image", `${ID} 300x900`)).toEqual({ ratio: 1 / 3, maxWidth: 160 });
-    expect(boxFor("image", `${ID} 4000x3000`)).toEqual({ ratio: 4 / 3, maxWidth: 640 });
-    expect(boxFor("video", `${ID} 1920x1080`)).toEqual({ ratio: 16 / 9, maxWidth: 640 });
+  it("is a share of the column for a size word, at the same shape and no wider than the picture", () => {
+    expect(boxFor("image", `${ID} 640x480 small`)).toEqual({ ratio: 640 / 480, maxWidth: 640, share: 1 / 3 });
+    expect(boxFor("image", `${ID} 640x480 medium`)).toEqual({ ratio: 640 / 480, maxWidth: 640, share: 1 / 2 });
+    expect(boxFor("video", `${ID} 640x360 large`)).toEqual({ ratio: 16 / 9, maxWidth: 640, share: 3 / 4 });
+    expect(boxFor("image", `${ID} 640x480 full`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
+  });
+
+  it("is the whole column for a size it can't read, which is no error", () => {
+    expect(boxFor("image", `${ID} 640x480 huge`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
+    expect(boxFor("image", `${ID} 640x480 300`)).toEqual({ ratio: 640 / 480, maxWidth: 640 });
   });
 
   it("is a fixed box for a picture or a video written without a size, or with one that can't be read", () => {
     expect(boxFor("image", ID)).toEqual({ ratio: 16 / 9, maxWidth: 480 });
     expect(boxFor("video", `${ID} wide`)).toEqual({ ratio: 16 / 9, maxWidth: 480 });
     expect(boxFor("image", `${ID} 0x100`)).toEqual({ ratio: 16 / 9, maxWidth: 480 });
+    expect(boxFor("image", `${ID} small`)).toEqual({ ratio: 16 / 9, maxWidth: 480, share: 1 / 3 });
   });
 
   it("is a fixed height for a recording, whatever else its embed says, and nothing for a file", () => {
     expect(boxFor("audio", ID)).toEqual({ height: 56 });
-    expect(boxFor("audio", `${ID} 640x480`)).toEqual({ height: 56 });
+    expect(boxFor("audio", `${ID} 640x480 small`)).toEqual({ height: 56 });
     expect(boxFor("file", `${ID} 640x480`)).toBeNull();
+  });
+});
+
+describe("the widths the size handle snaps to", () => {
+  it("are a third, a half, three quarters and all of the column, narrowest first", () => {
+    expect(widthsIn(600, 2000)).toEqual([
+      { word: "small", width: 200 },
+      { word: "medium", width: 300 },
+      { word: "large", width: 450 },
+      { word: "full", width: 600 },
+    ]);
+  });
+
+  it("are never wider than the picture, and two words that draw it as wide are one width, the wider word's", () => {
+    expect(widthsIn(600, 320)).toEqual([
+      { word: "small", width: 200 },
+      { word: "medium", width: 300 },
+      { word: "full", width: 320 },
+    ]);
+    expect(widthsIn(600, 100)).toEqual([{ word: "full", width: 100 }]);
+  });
+
+  it("snap a dragged width to the nearest", () => {
+    const widths = widthsIn(600, 2000);
+    expect([0, 240, 260, 380, 520, 530, 900].map((w) => nearest(widths, w))).toEqual(["small", "small", "medium", "large", "large", "full", "full"]);
+  });
+
+  it("step one at a time from the width a word draws, and stop at either end", () => {
+    const widths = widthsIn(600, 320);
+    expect(stepped(widths, "small", 1)).toBe("medium");
+    expect(stepped(widths, "medium", 1)).toBe("full");
+    expect(stepped(widths, "large", -1)).toBe("medium");
+    expect(stepped(widths, "full", 1)).toBe("full");
+    expect(stepped(widths, "small", -1)).toBe("small");
   });
 });
 
@@ -118,11 +162,42 @@ describe("finding an upload", () => {
     { id: "dddddddddddd", name: "old-harbour.png", kind: "image", state: "trashed" },
   ] as const;
 
-  it("narrows the Uploads page by name, ignoring case, and by kind, keeping the order", () => {
-    expect(narrowed(uploads, { text: " harb ", kind: null }).map((u) => u.name)).toEqual(["Harbour.PNG", "harbour-walk.mp4", "old-harbour.png"]);
-    expect(narrowed(uploads, { text: "harb", kind: "image" }).map((u) => u.name)).toEqual(["Harbour.PNG", "old-harbour.png"]);
-    expect(narrowed(uploads, { text: "", kind: "file" }).map((u) => u.name)).toEqual(["minutes.txt"]);
-    expect(narrowed(uploads, { text: "zebra", kind: null })).toEqual([]);
+  const ada = { kind: "member", personId: "ada", name: "Ada Lovelace" } as const;
+  const bob = { kind: "member", personId: "bob", name: "Bob Babbage" } as const;
+  const scribe = { kind: "agent", agentId: "ada", name: "Scribe", onBehalfOf: "ada" } as const;
+
+  it("says who uploaded a file: You for the member, and anyone else by name, an agent of theirs too", () => {
+    expect(uploaderWords({ uploadedBy: ada }, "ada")).toBe("You");
+    expect(uploaderWords({ uploadedBy: bob }, "ada")).toBe("Bob Babbage");
+    expect(uploaderWords({ uploadedBy: scribe }, "ada")).toBe("Scribe");
+  });
+
+  it("says how far a file is seen in plain words, from the notes the member can see", () => {
+    expect(reachWords({ uploadedBy: ada, private: true, uses: 0 }, "ada")).toBe("Only you");
+    expect(reachWords({ uploadedBy: ada, private: true, uses: 2 }, "ada")).toBe("Only you");
+    expect(reachWords({ uploadedBy: ada, private: false, uses: 1 }, "ada")).toBe("In 1 note");
+    expect(reachWords({ uploadedBy: bob, private: false, uses: 3 }, "ada")).toBe("In 3 notes");
+    expect(reachWords({ uploadedBy: bob, private: false, uses: 0 }, "ada")).toBe("Not in a note");
+    expect(reachWords({ uploadedBy: bob, private: true, uses: 0 }, "ada")).toBe("Not in a note");
+  });
+
+  it("chooses Mine by writing uploader:@me into the query, and Everyone's by taking it out", () => {
+    expect(onlyMine("")).toBe(false);
+    expect(onlyMine("uploader:@me")).toBe(true);
+    expect(onlyMine("type:image uploaded-by:@ME")).toBe(true);
+    expect(onlyMine("-uploader:@me")).toBe(false);
+    expect(onlyMine("uploader:@me OR type:image")).toBe(false);
+    expect(withMine("", true)).toBe(MINE);
+    expect(withMine("type:image ", true)).toBe("type:image uploader:@me");
+    expect(withMine("type:image uploader:@me", true)).toBe("type:image uploader:@me");
+    expect(withMine("type:image uploader:@me used:no", false)).toBe("type:image used:no");
+    expect(withMine("uploader:@me", false)).toBe("");
+    expect(withMine("report", false)).toBe("report");
+    expect(withMine("(type:pdf OR type:text) uploaded-by:@me", false)).toBe("(type:pdf OR type:text)");
+    // Mine after an OR keeps to the member's own on both sides, and is read back as Mine.
+    expect(withMine("type:image OR type:text", true)).toBe("(type:image OR type:text) uploader:@me");
+    expect(onlyMine(withMine("type:image OR type:text", true))).toBe(true);
+    expect(withMine(withMine("type:image OR type:text", true), false)).toBe("(type:image OR type:text)");
   });
 
   const notes = [

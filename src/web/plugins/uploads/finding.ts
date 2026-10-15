@@ -1,17 +1,55 @@
-import type { Upload, UploadEmbed, UploadKind } from "../../plugin-api.ts";
-import { writtenUpload } from "../../plugin-api.ts";
+import { parseQuery, printQuery, writtenUpload, type Query, type QueryNode, type Upload, type UploadEmbed, type UploadKind } from "../../plugin-api.ts";
 import { DEFAULT_VIDEO } from "./sizing.ts";
 
-/** What the Uploads page is narrowed to. An empty `text` and a null `kind` leave nothing out. */
-export interface Narrowing {
-  text: string;
-  kind: UploadKind | null;
+/** Who uploaded a file, as the member reads it: "You" for themself, or the uploader's name. */
+export const uploaderWords = ({ uploadedBy }: Pick<Upload, "uploadedBy">, me: string): string => (uploadedBy.kind === "member" && uploadedBy.personId === me ? "You" : uploadedBy.name);
+
+/**
+ * How far a file is seen, in plain words: "Only you" while it is private to the member, otherwise by
+ * how many notes they can see show it. A note they can't see is in no count, so this says nothing of it.
+ */
+export function reachWords(upload: Pick<Upload, "uploadedBy" | "private"> & { uses: number }, me: string): string {
+  if (upload.private && uploaderWords(upload, me) === "You") return "Only you";
+  if (!upload.uses) return "Not in a note";
+  return upload.uses === 1 ? "In 1 note" : `In ${upload.uses} notes`;
 }
 
-/** The uploads of one kind whose name holds what was typed, ignoring case, in the order they came in. */
-export function narrowed<U extends Pick<Upload, "name" | "kind">>(uploads: readonly U[], { text, kind }: Narrowing): U[] {
-  const needle = text.trim().toLowerCase();
-  return uploads.filter((u) => (kind === null || u.kind === kind) && (!needle || u.name.toLowerCase().includes(needle)));
+/** The filter that keeps the member's own uploads. */
+export const MINE = "uploader:@me";
+
+const conjuncts = (where: QueryNode | null): QueryNode[] => (where === null ? [] : where.kind === "and" ? where.of : [where]);
+const isMine = (node: QueryNode) => node.kind === "filter" && node.key === "uploader" && node.cmp === "=" && node.value.toLowerCase() === "@me";
+
+/** Whether an uploads query keeps only the member's own: `uploader:@me` at its top. */
+export function onlyMine(text: string): boolean {
+  const read = parseQuery(text, "uploads");
+  return read.ok && conjuncts(read.query.where).some(isMine);
+}
+
+/**
+ * The query with Mine or Everyone's chosen: `uploader:@me` added at its end, or taken from its top.
+ * What was typed is kept as typed where that reads as the same query, and is otherwise printed.
+ */
+export function withMine(text: string, mine: boolean): string {
+  const typed = text.trim();
+  if (mine === onlyMine(typed)) return typed;
+  if (mine) {
+    const read = parseQuery(typed, "uploads");
+    // Words after an OR would bind to its last side only, so the whole is put in parentheses by writing it again from its tree.
+    if (!read.ok || read.query.where?.kind !== "or") return `${typed} ${MINE}`.trim();
+    const mineOnly = parseQuery(MINE, "uploads");
+    return mineOnly.ok ? printQuery({ ...read.query, where: { kind: "and", of: [read.query.where, mineOnly.query.where!] } }) : typed;
+  }
+  const read = parseQuery(typed, "uploads");
+  if (!read.ok) return typed;
+  const left = conjuncts(read.query.where).filter((node) => !isMine(node));
+  const wanted: Query = { ...read.query, where: left.length === 0 ? null : left.length === 1 ? left[0]! : { kind: "and", of: left } };
+  const cut = typed
+    .replace(/(^|\s)(uploader|uploaded-by):@me(?=\s|$)/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const again = parseQuery(cut, "uploads");
+  return again.ok && printQuery(again.query) === printQuery(wanted) ? cut : printQuery(wanted);
 }
 
 /** An upload's place in quick open's list: its id marked as an upload's, since a note's id is written the same way. */

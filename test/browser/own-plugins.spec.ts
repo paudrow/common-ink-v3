@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, me, newEmail, ownFrame, ownPlugin, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, me, newEmail, ownFrame, ownPlugin, perform, showPanel, signInAs, signInAsNewPerson } from "./helpers.ts";
 import { asPlugin, frameFor, install, openDetails, pluginRow, relist, runCommand, toast, turnOn, type Written } from "./third-party-helpers.ts";
 
 /*
@@ -52,7 +52,7 @@ test("the three run in frames with no way to the page, each held to what it decl
   });
   await page.goto(`/note/${plan.id}`);
   await expect(wordCount(page)).toHaveText("4 words · 1 min read");
-  await page.getByRole("tab", { name: "Backlinks" }).click();
+  await showPanel(page, "Backlinks");
   await expect(backlinks(page)).toHaveText([/^Diary/]);
 
   // What Backlinks asked went to its own address, where the server holds it to its manifest, and never out as the member's own.
@@ -327,7 +327,7 @@ test("a guest has the three too, as that guest: nothing of a note they weren't s
 
   await grace.goto(`/note/${plan.id}`);
   await expect(wordCount(grace)).toHaveText("6 words · 1 min read");
-  await grace.getByRole("tab", { name: "Backlinks" }).click();
+  await showPanel(grace, "Backlinks");
   await expect(ownPlugin(grace, "Backlinks").locator("body")).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
   expect(await inside(ownPlugin(grace, "Backlinks"), "(ink) => ink.perform({ type: 'note.list' }).then((notes) => notes.map((n) => n.title))")).toBe('done: ["Shared plan"]');
   expect(await inside(ownPlugin(grace, "Backlinks"), "(ink) => ink.perform({ type: 'search', query: 'Secret' }).then((found) => JSON.stringify(found).includes('Not for Grace'))")).toBe("done: false");
@@ -339,7 +339,7 @@ test("a guest has the three too, as that guest: nothing of a note they weren't s
   expect(draft).toBe(403);
   // Ada, who wrote it, is shown the note that links here.
   await page.goto(`/note/${plan.id}`);
-  await page.getByRole("tab", { name: "Backlinks" }).click();
+  await showPanel(page, "Backlinks");
   await expect(backlinks(page)).toHaveText([/^Secret/]);
 });
 

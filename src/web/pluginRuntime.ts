@@ -3,7 +3,7 @@ import * as codemirrorState from "@codemirror/state";
 import * as codemirrorView from "@codemirror/view";
 import * as react from "react";
 import { codeHash, type DraftSummary, type InstalledPlugin, type PluginRecord } from "../core/plugins.ts";
-import { ApiError, perform, performAsPlugin } from "./api.ts";
+import { ApiError, perform, performAsPlugin, trustedModule } from "./api.ts";
 import type { Plugin } from "./plugin-api.ts";
 import type { Installed } from "./pluginHost.ts";
 import { OWN_RECORDS, WRONG_CODE, decideRun, whyNotTrusted, type Run } from "./pluginRun.ts";
@@ -58,19 +58,31 @@ const idlePlugin = (plugin: InstalledPlugin): Plugin => ({ ...refusedPlugin(plug
 /** What code that runs in the page is handed beside its host: the app's own copies of the libraries a plugin is written against, since two copies of either don't work together. */
 const MODULES = { react, "@codemirror/state": codemirrorState, "@codemirror/view": codemirrorView, "@codemirror/language": codemirrorLanguage };
 
+/** A full-trust plugin's code as the module the server wraps it in: the body of a function handed `host` and `modules`. */
+type Start = (host: unknown, modules: unknown) => unknown;
+
 /**
- * A full-trust plugin as the host knows a plugin: its code, run in the page as the body of a
- * function that is handed `host`, the plugin host the app's own plugins are handed, and `modules`.
- * Whoever calls this has itself found `code` to be the code an admin granted. `ran` is told when
- * the code is run and `stopped` when the host stops it, since code that has run in a page is ended
- * only by loading the app again.
+ * A full-trust plugin as the host knows a plugin: its code, loaded and run in the page only once the
+ * host starts it, handed `host`, the plugin host the app's own plugins are handed, and `modules`.
+ * Whoever calls this has itself found the code to be the code an admin granted. `ran` is told before
+ * any of it is loaded, since loading a module runs whatever its text puts outside the function the
+ * server wraps it in, and `stopped` when the host stops it: code that has run in a page is ended only
+ * by loading the app again.
  */
-export const inPagePlugin = (plugin: InstalledPlugin, code: string, ran: () => void = () => {}, stopped: () => void = () => {}): Plugin => ({
+export const inPagePlugin = (plugin: InstalledPlugin, load: () => Promise<Start>, ran: () => void = () => {}, stopped: () => void = () => {}): Plugin => ({
   ...idlePlugin(plugin),
   activate(host) {
     ran();
-    const stop: unknown = new Function("host", "modules", `"use strict";\n${code}\n//# sourceURL=ink-plugin-${plugin.id}.js`)(host, MODULES);
+    let stop: unknown;
+    let over = false;
+    load().then(
+      (start) => {
+        if (!over) stop = start(host, MODULES);
+      },
+      (err: unknown) => console.error(`${plugin.manifest.name} couldn't be started`, err),
+    );
     return () => {
+      over = true;
       try {
         if (typeof stop === "function") (stop as () => void)();
       } finally {
@@ -101,18 +113,18 @@ export interface InstallerOptions {
 
 /** Makes the plugins the host is to run of the record and the member's drafts, keeping the code it has already fetched. */
 export function createInstaller({ workspaceId, record, drafts, reread, changed, ended }: InstallerOptions): { list(): Installed[] } {
-  const asked = new Map<string, Promise<string>>();
+  const asked = new Map<string, Promise<unknown>>();
   /** Asks once for each key, and again only after a failure. */
-  const once = (key: string, load: () => Promise<string>) => {
-    const known = asked.get(key);
+  const once = <T,>(key: string, load: () => Promise<T>): Promise<T> => {
+    const known = asked.get(key) as Promise<T> | undefined;
     if (known) return known;
     const loading = load();
     asked.set(key, loading);
     loading.catch(() => asked.delete(key));
     return loading;
   };
-  /** Full-trust code by plugin, granted hash and update, once the app has hashed what the server sent: the code, or null when it was other code. */
-  const checked = new Map<string, string | null>();
+  /** Full-trust code by plugin, granted hash and update, once the app has hashed what the server sent: whether it was the granted code. */
+  const checked = new Map<string, boolean>();
   /** The full-trust code that has run in this page, by plugin: the key it was checked under. */
   const ran = new Map<string, string>();
 
@@ -124,12 +136,16 @@ export function createInstaller({ workspaceId, record, drafts, reread, changed, 
     ended();
   };
 
-  /** Reads a full-trust plugin's code and hashes it here, in the app, so what runs in the page is what was granted whatever the server says of it. */
+  /**
+   * Reads a full-trust plugin's code and hashes it here, in the app, so what runs in the page is what
+   * was granted whatever the server says of it. Code that is the granted code is loaded only when the
+   * host starts it, from the address that answers only code of that hash, worked out again there.
+   */
   function check(id: string, key: string, grantedHash: string) {
     void once(key, async () => {
       const { code } = await perform(workspaceId, { type: "plugin.read", id });
       const same = (await codeHash(code)) === grantedHash;
-      checked.set(key, same ? code : null);
+      checked.set(key, same);
       // Other code than was granted: the record this was decided from may be behind.
       if (!same) reread();
       changed();
@@ -178,19 +194,19 @@ export function createInstaller({ workspaceId, record, drafts, reread, changed, 
   }
 
   function inPage(plugin: InstalledPlugin, base: Pick<Installed, "origin" | "after">, grantedHash: string, key: string): Installed {
-    const code = checked.get(key);
-    if (code === undefined) {
+    const same = checked.get(key);
+    if (same === undefined) {
       check(plugin.id, key, grantedHash);
       // Nothing of it runs until its code has been checked.
       return { ...base, version: `checking ${key}`, plugin: idlePlugin(plugin) };
     }
-    if (code === null) return { ...base, version: `wrong ${key}`, plugin: refusedPlugin(plugin, WRONG_CODE) };
+    if (!same) return { ...base, version: `wrong ${key}`, plugin: refusedPlugin(plugin, WRONG_CODE) };
     const asPlugin: typeof perform = (workspace, op) =>
       performAsPlugin(workspace, plugin.id, op).catch((err: unknown) => {
         if (err instanceof ApiError && err.code === "forbidden") reread();
         throw err;
       });
-    return { ...base, version: `in page ${key}`, plugin: inPagePlugin(plugin, code, () => ran.set(plugin.id, key), end), inPage: { perform: (op) => performInSync(workspaceId, op, asPlugin) } };
+    return { ...base, version: `in page ${key}`, plugin: inPagePlugin(plugin, () => trustedModule(workspaceId, plugin.id, grantedHash), () => ran.set(plugin.id, key), end), inPage: { perform: (op) => performInSync(workspaceId, op, asPlugin) } };
   }
 
   return {

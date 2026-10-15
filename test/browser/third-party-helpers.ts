@@ -93,4 +93,5 @@ export async function runCommand(page: Page, title: string) {
   await page.keyboard.press("Enter");
 }
 
-export const toast = (page: Page) => page.getByRole("group", { name: "Notice" });
+/** The newest notice: notices stack, the newest last. */
+export const toast = (page: Page) => page.getByRole("group", { name: "Notice" }).last();

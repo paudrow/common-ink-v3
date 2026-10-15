@@ -1,78 +1,67 @@
-import { useId } from "react";
+import type { Ref } from "react";
 import { Drawn } from "./Drawn.tsx";
-import { pickView } from "./inspectorPick.ts";
-import type { App, Inspected, InspectorView } from "./plugin-api.ts";
+import { Icon } from "./icons.tsx";
+import type { About, App, InspectorView } from "./plugin-api.ts";
 import type { Host } from "./pluginHost.ts";
 
-/**
- * What the inspector is about: the thing in front, with what a view for that kind of thing is
- * handed. It is nothing where no note, folder or page is in front, such as at an address nothing is at.
- */
-export type Subject = { [K in keyof Inspected]: { kind: K; props: Inspected[K] } }[keyof Inspected] | { kind: "nothing"; props?: undefined };
+/** What is in front, for the inspector to be about. It is nothing where no note, folder or page that says what it shows is in front. */
+export type Subject = About | { kind: "nothing" };
 
-/** The views plugins have added for what is in front, in order. */
-export const viewsFor = (views: readonly InspectorView[], subject: Subject | null) => views.filter((v) => v.for === subject?.kind);
-
-/** Draws a view with what it is for. `viewsFor` saw to it that the view is for what is in front. */
-function drawn(host: Host, view: InspectorView, subject: Subject) {
-  if (view.for === "note" && subject.kind === "note") return <Drawn key={view.id} host={host} view={view} {...subject.props} />;
-  if (view.for === "folder" && subject.kind === "folder") return <Drawn key={view.id} host={host} view={view} {...subject.props} />;
-  if (view.for === "page" && subject.kind === "page") return <Drawn key={view.id} host={host} view={view} {...subject.props} />;
-  return null;
-}
-
-interface Props {
-  host: Host;
-  /** Every inspector view there is, whatever it is for. */
+interface BarProps {
+  ref: Ref<HTMLElement>;
+  /** Every panel there is. The bar is the same whatever is in front. */
   views: readonly InspectorView[];
   app: App;
-  /** Null while what is in front is still loading: the inspector keeps its place and shows nothing. */
-  subject: Subject | null;
-  /** The tab the member last picked, whatever was in front then. */
-  picked: string | null;
-  /** Whether a view may show before the member picks it. One an installed plugin added may not. */
-  unasked: (view: InspectorView) => boolean;
+  /** The id of the panel that shows, or null. */
+  shown: string | null;
+  /** The id panels are named by for a screen reader, which the one that shows carries. */
+  panelId: string;
   onPick: (viewId: string) => void;
 }
 
-export function Inspector({ host, views: all, app, subject, picked, unasked, onPick }: Props) {
-  const ids = useId();
-  const views = viewsFor(all, subject);
-  const shown = pickView(all, views, picked, unasked);
+/** The inspector's bar: an icon for each panel, always there. An icon shows its panel, or closes it if it is the one showing. */
+export function InspectorBar({ ref, views, app, shown, panelId, onPick }: BarProps) {
   return (
-    <aside className="inspector" aria-label="Inspector">
-      {subject && views.length > 0 ? (
-        <>
-          <div role="tablist" className="tabs">
-            {views.map((v) => {
-              const badge = v.badge?.(app) ?? null;
-              return (
-                <button
-                  key={v.id}
-                  type="button"
-                  role="tab"
-                  id={`${ids}-${v.id}`}
-                  aria-selected={v === shown}
-                  aria-controls={`${ids}-panel`}
-                  aria-description={badge ?? undefined}
-                  onClick={() => onPick(v.id)}
-                >
-                  {v.label}
-                  {badge && <span className="unseen-dot" />}
-                </button>
-              );
-            })}
-          </div>
-          {/* With only tabs that wait to be picked, it waits. */}
-          {shown && (
-            <div role="tabpanel" id={`${ids}-panel`} aria-labelledby={`${ids}-${shown.id}`} className="panel">
-              {drawn(host, shown, subject)}
-            </div>
-          )}
-        </>
-      ) : (
-        subject && <p className="inspector-empty">Nothing to show for this view</p>
-      )}
+    <nav ref={ref} className="rail" aria-label="Inspector bar">
+      {views.map((v) => {
+        const badge = v.badge?.(app) ?? null;
+        return (
+          // An empty description keeps the tooltip, which says the name again, from being read out as one.
+          <button key={v.id} type="button" className="icon-button" aria-label={v.label} title={v.label} aria-description={badge ?? ""} aria-expanded={v.id === shown} aria-controls={v.id === shown ? panelId : undefined} onClick={() => onPick(v.id)}>
+            <Icon name={v.icon} />
+            {badge && <span className="unseen-dot" />}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+interface PanelProps {
+  ref: Ref<HTMLElement>;
+  id: string;
+  host: Host;
+  view: InspectorView;
+  /** Null while what is in front is still loading: the panel keeps its place and shows nothing. */
+  subject: Subject | null;
+  /** Pinned, it is beside the page. Otherwise it lies over the page until the member goes elsewhere. */
+  pinned: boolean;
+  onPin: () => void;
+}
+
+/** One panel of the inspector, about what is in front. Its one control is the pin. */
+export function InspectorPanel({ ref, id, host, view, subject, pinned, onPin }: PanelProps) {
+  return (
+    <aside ref={ref} id={id} className="inspector" aria-label="Inspector" data-layout={pinned ? "pinned" : "temporary"} tabIndex={-1}>
+      <header className="panel-head">
+        <h2>{view.label}</h2>
+        <button type="button" className="icon-button" aria-label="Pin beside the page" title={pinned ? "Unpin: show it over the page" : "Pin beside the page"} aria-pressed={pinned} onClick={onPin}>
+          <Icon name="pin" />
+        </button>
+      </header>
+      <div className="panel inspector-body">
+        {subject && (subject.kind !== "nothing" && view.for.includes(subject.kind) ? <Drawn key={view.id} host={host} view={view} about={subject} /> : <p className="inspector-empty">Nothing to show for this view</p>)}
+      </div>
     </aside>
   );
 }

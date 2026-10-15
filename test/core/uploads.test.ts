@@ -4,7 +4,7 @@ import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { TRASH_MS } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
-import { MAX_UPLOAD_BYTES, WORKSPACE_UPLOAD_BYTES } from "../../src/core/protocol.ts";
+import { MAX_UPLOAD_BYTES, OpError, WORKSPACE_UPLOAD_BYTES } from "../../src/core/protocol.ts";
 import { PENDING_MS, clearUploads } from "../../src/core/purge.ts";
 import worker from "../../src/worker/index.ts";
 import { addMember, newMember } from "./members.ts";
@@ -147,7 +147,7 @@ describe("a note that refers to an upload", () => {
     const read = await perform(env.DB, ada, { type: "note.read", id: note.id });
     expect(read.uploads).toEqual([
       { id: picture.id, upload: { name: "picture.png", type: "image/png", kind: "image", size: PNG.byteLength, width: 1, height: 1, state: "live" } },
-      { id: paper.id, upload: { name: "paper.pdf", type: "application/octet-stream", kind: "file", size: 8, width: null, height: null, state: "live" } },
+      { id: paper.id, upload: { name: "paper.pdf", type: "application/pdf", kind: "file", size: 8, width: null, height: null, state: "live" } },
     ]);
     // A link is to a note, whatever id it holds: an upload's id in one links nothing.
     expect(read.links).toEqual([{ id: picture.id, title: null, state: null }]);
@@ -163,7 +163,7 @@ describe("a note that refers to an upload", () => {
     const note = await perform(env.DB, ada, { type: "note.create", text: `::image{${picture.id}}` });
     await env.DB.batch([env.DB.prepare("DELETE FROM upload_refs WHERE note_id = ?").bind(note.id), env.DB.prepare("UPDATE notes SET indexed = 4 WHERE id = ?").bind(note.id)]);
     expect((await perform(env.DB, ada, { type: "upload.read", id: picture.id })).usedIn.map((n) => n.id)).toEqual([note.id]);
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 6 });
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 7 });
   });
 
   it("tells a reader who can't see the upload nothing of it: the same as for an upload that never was", async () => {
@@ -393,5 +393,184 @@ describe("who an upload is shown to", () => {
     await perform(env.DB, ada, { type: "member.remove", memberId: ed.personId });
     expect(await perform(env.DB, ada, { type: "upload.read", id })).toMatchObject({ name: "mine.png", private: false });
     expect(await env.DB.prepare("SELECT released_from, released_by FROM uploads WHERE id = ?").bind(id).first()).toEqual({ released_from: ed.personId, released_by: ada.personId });
+  });
+});
+
+describe("finding uploads", () => {
+  /** Ada's workspace: an upload of every class, one by Eve and one by Ada's agent, and notes that show some of them. */
+  async function shelf() {
+    const ada = await newMember("Ada Lovelace");
+    const eve = await addMember(ada, "editor", "Eve Editor");
+    const projects = await perform(env.DB, ada, { type: "folder.create", name: "Projects" });
+    const scribe = await connectAgent(env.DB, ada.personId, "Scribe");
+    const asScribe: Actor = { kind: "agent", agentId: scribe.agent.id, personId: ada.personId, workspaceId: ada.workspaceId };
+    const DAY = 86_400_000;
+    const files = {
+      dot: await upload(ada, "dot.png", PNG, {}, T0),
+      paper: await upload(ada, "Q2-report.pdf", bytesOf("%PDF-1.7 the report"), { folderId: projects.id }, T0 + DAY),
+      notes: await upload(ada, "notes.md", bytesOf(`# Notes\n${"x".repeat(100)}`), {}, T0 + 2 * DAY),
+      zip: await upload(ada, "50%_off.zip", bytesOf("zip"), {}, T0 + 3 * DAY),
+      theirs: await upload(eve, "eve.png", PNG, { folderId: projects.id }, T0 + 4 * DAY),
+      agents: await upload(asScribe, "by-agent.png", PNG, {}, T0 + 5 * DAY),
+    };
+    await perform(env.DB, ada, { type: "note.create", text: `# Shows dot\n\n::image{${files.dot.id} 1x1}` });
+    const hidden = await perform(env.DB, eve, { type: "note.create", text: `# Eve's own\n\n::image{${files.dot.id} 1x1}\n\n::file{${files.paper.id}}` });
+    await perform(env.DB, eve, { type: "note.setPrivate", id: hidden.id, private: true });
+    // A note in another workspace may write any id at all: it shows nothing, and is no use of the upload here.
+    const stranger = await newMember("Stranger");
+    await perform(env.DB, stranger, { type: "note.create", text: `# Elsewhere\n\n::image{${files.zip.id} 1x1}\n\n::image{${files.dot.id} 1x1}` });
+    return { ada, eve, projects, scribe, asScribe, files };
+  }
+
+  const names = (listed: { name: string }[]) => listed.map((u) => u.name);
+
+  it("reads the query language over the uploads the asker can see, each with who uploaded it and how many of their notes show it", async () => {
+    const { ada, eve, projects, files } = await shelf();
+    const find = (query: string, as: Actor = ada) => perform(env.DB, as, { type: "upload.list", query, today: "2026-10-20", zone: "UTC" }).then(names);
+    const listed = await perform(env.DB, ada, { type: "upload.list" });
+    expect(listed.map((u) => [u.name, u.uploadedBy.name, u.uses])).toEqual([
+      ["by-agent.png", "Scribe", 0],
+      ["eve.png", "Eve Editor", 0],
+      ["50%_off.zip", "Ada Lovelace", 0],
+      ["notes.md", "Ada Lovelace", 0],
+      ["Q2-report.pdf", "Ada Lovelace", 0],
+      ["dot.png", "Ada Lovelace", 1],
+    ]);
+    // Eve sees her private note too, so for her the picture is in two notes and the report in one.
+    expect((await perform(env.DB, eve, { type: "upload.list", query: "used:yes" })).map((u) => [u.name, u.uses])).toEqual([
+      ["Q2-report.pdf", 1],
+      ["dot.png", 2],
+    ]);
+
+    expect(await find("type:image")).toEqual(["by-agent.png", "eve.png", "dot.png"]);
+    expect(await find("kind:pdf")).toEqual(["Q2-report.pdf"]);
+    expect(await find("type:text")).toEqual(["notes.md"]);
+    expect(await find("type:other")).toEqual(["50%_off.zip"]);
+    expect(await find("type:video OR type:audio")).toEqual([]);
+    expect(await find("used:yes")).toEqual(["dot.png"]);
+    expect(await find("used:no -type:image")).toEqual(["50%_off.zip", "notes.md", "Q2-report.pdf"]);
+    expect(await find("uploader:@me")).toEqual(["50%_off.zip", "notes.md", "Q2-report.pdf", "dot.png"]);
+    expect(await find('uploader:"eve editor" OR uploaded-by:Scribe')).toEqual(["by-agent.png", "eve.png"]);
+    expect(await find("report")).toEqual(["Q2-report.pdf"]);
+    expect(await find('"q2 report" OR dot')).toEqual(["Q2-report.pdf", "dot.png"]);
+    expect(await find("name:%_")).toEqual(["50%_off.zip"]);
+    expect(await find("name:_")).toEqual(["50%_off.zip"]);
+    expect(await find("size:>100b")).toEqual(["notes.md"]);
+    expect(await find(`size:${PNG.byteLength}`)).toEqual(["by-agent.png", "eve.png", "dot.png"]);
+    expect(await find("size:<1kb size:3..19")).toEqual(["50%_off.zip", "Q2-report.pdf"]);
+    expect(await find("uploaded:2026-10-12..2026-10-13")).toEqual(["notes.md", "Q2-report.pdf"]);
+    expect(await find("uploaded:>=2026-10-15 OR uploaded:<2026-10-12")).toEqual(["by-agent.png", "eve.png", "dot.png"]);
+    expect(await find("uploaded:<=8d")).toEqual(["Q2-report.pdf", "dot.png"]);
+    expect(await find("folder:Projects")).toEqual(["eve.png", "Q2-report.pdf"]);
+    expect(await find("type:image sort:uploaded-asc")).toEqual(["dot.png", "eve.png", "by-agent.png"]);
+    expect(await find("sort:name-asc")).toEqual(["50%_off.zip", "by-agent.png", "dot.png", "eve.png", "notes.md", "Q2-report.pdf"]);
+    expect(await find("sort:size-desc -type:image")).toEqual(["notes.md", "Q2-report.pdf", "50%_off.zip"]);
+
+    // The fields from before there was a query narrow it further: the folder's own uploads, and archived ones too.
+    await perform(env.DB, ada, { type: "upload.archive", id: files.paper.id, archived: true });
+    expect(await find("is:archived")).toEqual(["Q2-report.pdf"]);
+    expect(await find("folder:Projects")).toEqual(["eve.png"]);
+    expect(names(await perform(env.DB, ada, { type: "upload.list", query: "type:pdf", folderId: projects.id, includeArchived: true }))).toEqual(["Q2-report.pdf"]);
+    expect(await find("is:open is:private")).toEqual([]);
+  });
+
+  it("refuses a query it can't read, saying where, and a name nobody it can see has uploaded under in the same words as one nobody has", async () => {
+    const { ada, eve } = await shelf();
+    const refused = (query: string, as: Actor = ada) => perform(env.DB, as, { type: "upload.list", query }).then(
+      () => "found",
+      (err: OpError) => `${err.code}: ${err.message}`,
+    );
+    expect(await refused("type:spreadsheet")).toBe('invalid: type: doesn\'t take "spreadsheet". It takes image, video, audio, pdf, text or other (characters 6 to 16 of the query: spreadsheet)');
+    expect(await refused("size:>lots")).toMatch(/^invalid: size: takes a number of bytes.*\(characters 7 to 10 of the query: lots\)$/);
+    expect(await refused("tag:money")).toMatch(/^invalid: tag: is for notes and todos, and this is a search of uploads/);
+    expect(await refused('uploader:"Nobody At All"')).toBe('invalid: Nobody named "Nobody At All" has uploaded a file you can see');
+    expect(await refused("uploaded:today")).toMatch(/pass today, as YYYY-MM-DD/);
+    // Eve made a private upload. Ada can't see it, so to Ada she has uploaded nothing more than before, and Grace, who uploaded only privately, is nobody.
+    const grace = await addMember(ada, "editor", "Grace Hopper");
+    await upload(grace, "grace.png", PNG, { private: true });
+    expect(await refused('uploader:"Grace Hopper"')).toBe('invalid: Nobody named "Grace Hopper" has uploaded a file you can see');
+    expect(await refused('uploader:"Grace Hopper"', grace)).toBe("found");
+    expect(await refused('uploader:"Eve Editor"', eve)).toBe("found");
+  });
+
+  it("answers its plan from the indexes: no listing reads every upload or every use", async () => {
+    const { ada } = await shelf();
+    const asked: { sql: string; binds: unknown[] }[] = [];
+    const watched = new Proxy(env.DB, {
+      get(db, key) {
+        if (key !== "prepare") return Reflect.get(db, key);
+        return (sql: string) => {
+          const statement = db.prepare(sql);
+          return new Proxy(statement, { get: (s, k) => (k === "bind" ? (...binds: unknown[]) => (asked.push({ sql, binds }), s.bind(...binds)) : Reflect.get(s, k)) });
+        };
+      },
+    });
+    for (const query of ["", "type:image uploader:@me", "used:no size:>1mb", 'name:report uploaded:>=2026-10-01 folder:Unsorted', "is:shared OR is:private sort:size-desc", 'uploader:"Ada Lovelace" used:yes']) {
+      asked.length = 0;
+      await perform(watched, ada, { type: "upload.list", query });
+      for (const { sql, binds } of asked.filter((a) => /FROM uploads u/.test(a.sql))) {
+        const plan = (await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(...binds).all<{ detail: string }>()).results.map((r) => r.detail);
+        // Each use is found from the upload by the index on it, and its note by its id: never by walking the workspace's notes.
+        const wrong = plan.filter((line) => /^SCAN (u|uploads|r|upload_refs|rn|notes|p|a|people|agents)\b/.test(line) || (/^SEARCH rn\b/.test(line) && !/\(id=\?\)/.test(line)) || (/^SEARCH r\b/.test(line) && !/upload_refs_by_upload/.test(line)));
+        // Who is named is looked up by their own uploads, never by walking the workspace's.
+        if (/uploaded_by = p\.id/.test(sql)) expect(plan.filter((line) => /^SEARCH u\b/.test(line)), sql).toEqual(["SEARCH u EXISTS USING INDEX uploads_by_uploader (uploaded_by=? AND uploaded_by_kind=?)", "SEARCH u EXISTS USING INDEX uploads_by_uploader (uploaded_by=? AND uploaded_by_kind=?)"]);
+        expect(wrong, `${query}: ${plan.join(" / ")}`).toEqual([]);
+      }
+    }
+  });
+});
+
+describe("putting an upload in a note", () => {
+  it("moves an upload that is its owner's alone to the note's folder, where whoever reads the note sees it, and leaves it theirs in a private note", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const ed = await addMember(ada, "editor", "Ed Editor");
+    const projects = await perform(env.DB, ada, { type: "folder.create", name: "Projects" });
+    const { unsortedId } = await perform(env.DB, ada, { type: "folder.list" });
+    const shared = await perform(env.DB, ada, { type: "note.create", folderId: projects.id, text: "# Shared" });
+    const own = await perform(env.DB, ada, { type: "note.create", folderId: projects.id, text: "# Mine" });
+    await perform(env.DB, ada, { type: "note.setPrivate", id: own.id, private: true });
+    const loose = await upload(ada, "loose.png", PNG, { private: true });
+    const kept = await upload(ada, "kept.png", PNG, { private: true });
+    const team = await upload(ada, "team.png", PNG);
+    const seenByEd = async () => names(await perform(env.DB, ed, { type: "upload.list" }));
+    const names = (listed: { name: string }[]) => listed.map((u) => u.name).sort();
+    expect(await seenByEd()).toEqual(["team.png"]);
+
+    const placed = await perform(env.DB, ada, { type: "upload.place", id: loose.id, noteId: shared.id });
+    expect(placed).toMatchObject({ id: loose.id, folderId: projects.id, private: false, access: "edit" });
+    expect(await seenByEd()).toEqual(["loose.png", "team.png"]);
+    // Asked again it changes nothing more, and an upload that isn't private stays where it is.
+    expect(await perform(env.DB, ada, { type: "upload.place", id: loose.id, noteId: own.id })).toMatchObject({ folderId: projects.id, private: false });
+    expect(await perform(env.DB, ada, { type: "upload.place", id: team.id, noteId: shared.id })).toMatchObject({ folderId: unsortedId, private: false });
+    // In a private note a private upload stays its owner's, where it was.
+    expect(await perform(env.DB, ada, { type: "upload.place", id: kept.id, noteId: own.id })).toMatchObject({ folderId: unsortedId, private: true });
+    expect(await seenByEd()).toEqual(["loose.png", "team.png"]);
+  });
+
+  it("needs edit on both, refuses what is in Trash, and is told nothing of an upload or a note the asker can't see", async () => {
+    const ada = await newMember("Ada Lovelace");
+    const vi = await addMember(ada, "viewer", "Vi Viewer");
+    const ed = await addMember(ada, "editor", "Ed Editor");
+    const note = await perform(env.DB, ada, { type: "note.create", text: "# Note" });
+    const binned = await perform(env.DB, ada, { type: "note.create", text: "# Binned" });
+    await perform(env.DB, ada, { type: "note.trash", id: binned.id });
+    const theirs = await upload(ed, "eds.png", PNG, { private: true });
+    const mine = await upload(ada, "mine.png", PNG, { private: true });
+    const place = (as: Actor, id: string, noteId: string) => perform(env.DB, as, { type: "upload.place", id, noteId }).then(
+      (u) => `done: ${u.private}`,
+      (err: OpError) => `${err.code}: ${err.message}`,
+    );
+    expect(await place(vi, mine.id, note.id)).toBe("forbidden: A viewer can't upload.place");
+    expect(await place(ada, theirs.id, note.id)).toBe("not_found: No such upload");
+    expect(await place(ed, mine.id, note.id)).toBe("not_found: No such upload");
+    expect(await place(ada, mine.id, binned.id)).toMatch(/^conflict: .*Trash/);
+    expect(await place(ed, theirs.id, "zzzzzzzzzzzz")).toBe("not_found: No such note");
+    expect(await place(ada, mine.id, note.id)).toBe("done: false");
+    // Making a private upload seen by others is the member's, in the app, as upload.setPrivate is: an agent is refused, and it stays private.
+    const scribe = await connectAgent(env.DB, ed.personId, "Scribe");
+    const asScribe: Actor = { kind: "agent", agentId: scribe.agent.id, personId: ed.personId, workspaceId: ed.workspaceId };
+    expect(await place(asScribe, theirs.id, note.id)).toBe("forbidden: Only your member can let others see their private upload, in the app. It stays private");
+    expect(await perform(env.DB, ed, { type: "upload.read", id: theirs.id })).toMatchObject({ private: true });
+    expect(await place(ed, theirs.id, note.id)).toBe("done: false");
   });
 });

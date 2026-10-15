@@ -1,14 +1,15 @@
 import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
-import { perform, type Actor, type Visitor } from "../core/operations.ts";
-import { OpError, type OpErrorCode, type OpInput } from "../core/protocol.ts";
+import { perform, trustedCode, type Actor, type Visitor } from "../core/operations.ts";
 import { redeemFrame } from "../core/pluginRecord.ts";
+import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../core/protocol.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
-import { handleFiles } from "./files.ts";
-import { embedResponse, framing } from "./frames.ts";
+import { fileOrigin, fileSiteResponse, handleFiles } from "./files.ts";
+import { embedOrigin, embedResponse } from "./frames.ts";
+import { secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
@@ -61,7 +62,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === "/api/me" && req.method === "GET") {
     // Opening the app is arriving: an invite made since the person signed in takes effect here.
     await arrive(env.DB, personId);
-    return json(await whoAmI(env.DB, personId, devSignIn(env, url)));
+    return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
   }
 
   // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
@@ -70,6 +71,17 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if (lookup[1] === "invites") await arrive(env.DB, personId);
     const workspaceId = await (lookup[1] === "notes" ? workspaceOfNote : workspaceOfInvite)(env.DB, personId, lookup[2]!);
     return workspaceId ? json({ workspaceId }) : json({ error: "not_found" }, 404);
+  }
+
+  // A full-trust plugin's code as a module, for the app's page to load under its own policy. It is the body of a function handed `host` and `modules`.
+  const trusted = /^\/api\/workspaces\/([a-z0-9]{12})\/plugins\/([a-z0-9]{12})\/trusted\/([0-9a-f]{64})\.js$/.exec(url.pathname);
+  if (trusted && req.method === "GET") {
+    const [, workspaceId, pluginId, hash] = trusted as unknown as [string, string, string, string];
+    const code = await trustedCode(env.DB, { kind: "member", personId, workspaceId }, pluginId, hash);
+    if (code === null) return json({ error: "not_found" }, 404);
+    return new Response(`export default function (host, modules) {"use strict";\n${code}\n}\n//# sourceURL=ink-plugin-${pluginId}.js\n`, {
+      headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "Cross-Origin-Resource-Policy": "same-origin" },
+    });
   }
 
   // A plugin's operations come from the app too, which says in the address which install it made the frame for. Nothing the plugin sent names it.
@@ -99,23 +111,42 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   return json({ error: "not_found" }, 404);
 }
 
+/** A fault that is no request's doing is logged, and answered in the shape its client reads: a bare 500 is a page of HTML to a client that asked for JSON. */
+async function answered(what: string, answer: () => Promise<Response>, broke: () => Response): Promise<Response> {
+  try {
+    return await answer();
+  } catch (err) {
+    console.error(`${what} broke`, err);
+    return broke();
+  }
+}
+
+async function route(req: Request, env: Env, url: URL): Promise<Response> {
+  const moved = redirectFor(url);
+  if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
+  const embed = await embedResponse(url, env, (token) => redeemFrame(env.DB, token, Date.now()));
+  if (embed) return embed;
+  const fileSite = fileSiteResponse(req, env, url);
+  if (fileSite) return fileSite;
+  if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
+  if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
+  if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
+  const broke = () => json({ error: "unknown", message: BROKE }, 500);
+  if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(url.pathname, () => handleAgentsApi(req, env, url), broke);
+  if (url.pathname.startsWith("/api/")) return answered(url.pathname, () => handleApi(req, env, url), broke);
+  return SHARED_PAGE.test(url.pathname) ? env.ASSETS.fetch(req).then(unlistedPage) : env.ASSETS.fetch(req);
+}
+
+const unlistedPage = (page: Response) => {
+  const unlisted = new Response(page.body, page);
+  for (const [name, value] of Object.entries(UNLISTED)) unlisted.headers.set(name, value);
+  return unlisted;
+};
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    const moved = redirectFor(url);
-    if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
-    const embed = await embedResponse(url, env, (token) => redeemFrame(env.DB, token, Date.now()));
-    if (embed) return embed;
-    if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
-    if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
-    if (url.pathname === "/mcp") return handleMcp(req, env, sourcesFor(env, url));
-    if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return handleAgentsApi(req, env, url);
-    if (url.pathname.startsWith("/api/")) return handleApi(req, env, url);
-    const page = framing(await env.ASSETS.fetch(req), url, env);
-    if (!SHARED_PAGE.test(url.pathname)) return page;
-    const unlisted = new Response(page.body, page);
-    for (const [name, value] of Object.entries(UNLISTED)) unlisted.headers.set(name, value);
-    return unlisted;
+    return secured(await route(req, env, url), url, env);
   },
   // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, and uploads that never finished. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env) {

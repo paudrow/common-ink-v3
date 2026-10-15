@@ -1,4 +1,4 @@
-import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type Me, type OpErrorCode, type OpInput, type Results, type Shared, type Upload } from "../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type Shared, type Upload } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -10,17 +10,40 @@ export class ApiError extends Error {
   }
 }
 
+const sessionListeners = new Set<() => void>();
+let signedOut = false;
+const sessionIs = (out: boolean) => {
+  if (out === signedOut) return;
+  signedOut = out;
+  for (const listener of [...sessionListeners]) listener();
+};
+
+/**
+ * Whether the server last said this browser is signed out, as it does once a session ends under an
+ * open page. Nothing is worth sending again until it is false, which any answered request makes it.
+ */
+export const session = {
+  subscribe(listener: () => void) {
+    sessionListeners.add(listener);
+    return () => void sessionListeners.delete(listener);
+  },
+  signedOut: () => signedOut,
+};
+
 /** Browsers cap a keepalive request body at 64 KiB, counted in bytes. */
 const KEEPALIVE_BYTES = 60_000;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, credentials: "same-origin" });
   const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+  // A refusal is an answer to whoever is signed in, as much as a result is. A fault says nothing either way.
+  if (res.status === 401) sessionIs(true);
+  else if (res.status < 500) sessionIs(false);
   if (!res.ok) throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? res.statusText);
   return body as T;
 }
 
-export const getMe = () => request<Me>("/api/me");
+export const getMe = () => request<MeHere>("/api/me");
 
 const refused = new Set<() => void>();
 
@@ -68,6 +91,13 @@ export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<
 export const performAsPlugin = <T extends OpInput>(workspaceId: string, pluginId: string, op: T, draft = false) =>
   request<Results[T["type"]]>(`/api/workspaces/${workspaceId}/plugins/${pluginId}${draft ? "/draft" : ""}/ops`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(op) });
 
+/**
+ * Loads a full-trust plugin's code as a module from the app's own address, which the page's policy
+ * allows where it allows no `eval`. The server answers only code of `hash` that runs for this member.
+ */
+export const trustedModule = async (workspaceId: string, pluginId: string, hash: string) =>
+  ((await import(/* @vite-ignore */ `/api/workspaces/${workspaceId}/plugins/${pluginId}/trusted/${hash}.js`)) as { default: (host: unknown, modules: unknown) => unknown }).default;
+
 /** Where an upload's bytes are asked for by the member's session. */
 export const uploadAddress = (workspaceId: string, id: string) => `/api/workspaces/${workspaceId}/uploads/${id}`;
 
@@ -94,6 +124,16 @@ export function sendUpload(workspaceId: string, file: Blob, as: { name: string; 
     };
     xhr.send(file);
   });
+}
+
+/** The first `upTo` bytes of an upload, from the address its bytes are asked for, which answers as it answers a picture: by the session, through the same check. */
+export async function readUpload(address: string, upTo: number): Promise<Uint8Array> {
+  const res = await fetch(address, { headers: { Range: `bytes=0-${upTo - 1}` }, credentials: "same-origin", cache: "no-store" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? "The file couldn't be read.");
+  }
+  return new Uint8Array(await res.arrayBuffer()).subarray(0, upTo);
 }
 
 /** What a link opens, asked as whoever holds it. Neither asks who that is unless the link is for people signed in. */

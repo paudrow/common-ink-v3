@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { textDiff } from "../../src/core/diff.ts";
 import type { Author, HistoryEntry, Reverts } from "../../src/core/protocol.ts";
-import { MOST_OF_A_NOTE, NOTHING, asked, dayLabel, did, groupSaves, initials, only, picked, pieces, sameSelection, sizeOf, who, within, withRows } from "../../src/web/plugins/lib/historyView.ts";
+import { MOST_OF_A_NOTE, NOTHING, asked, byDay, dayLabel, did, groupSaves, initials, kept, lists, notesOf, only, picked, pieces, sameSelection, sizeOf, who, within, withRows } from "../../src/web/plugins/lib/historyView.ts";
 
 const ADA: Author = { kind: "member", personId: "ada000000000", name: "Ada Lovelace" };
 const CLAUDE: Author = { kind: "agent", agentId: "claude000000", name: "Claude", onBehalfOf: "ada000000000" };
@@ -144,5 +144,74 @@ describe("a diff as it is drawn", () => {
     const diff = textDiff("", lines(260).join("\n"));
     expect(diff.omitted).toBe(60);
     expect(pieces(diff).some((p) => p.kind === "fold")).toBe(false);
+  });
+});
+
+describe("the list by day", () => {
+  const DAY = 24 * 60;
+  const noon = new Date(2026, 9, 12, 12).getTime() / MINUTE;
+  const trip = { noteId: "trip00000000", noteTitle: "Trip" };
+  const rows = groupSaves([change(5, ADA, noon + 30), change(2, CLAUDE, noon + 20, trip), change(4, CLAUDE, noon + 10), change(1, ADA, noon, trip), change(3, ADA, noon - DAY), change(2, ADA, noon - DAY - 1), change(1, ADA, noon - 3 * DAY)]);
+
+  it("puts each row under the day it was last saved on, newest day first, with no day that has none", () => {
+    const days = byDay(rows);
+    expect(days.map((d) => d.rows.map((r) => r.key))).toEqual([["note00000000/5", "trip00000000/2", "note00000000/4", "trip00000000/1"], ["note00000000/3"], ["note00000000/1"]]);
+    expect(days.map((d) => new Date(d.at).getDate())).toEqual([12, 11, 9]);
+    expect(byDay([])).toEqual([]);
+  });
+
+  it("lists a day's notes, the one changed latest first, each with that day's rows, lines, saves and authors", () => {
+    const [today, yesterday] = byDay(rows);
+    expect(notesOf(today!.rows).map((n) => [n.noteTitle, n.rows.map((r) => r.revisions), n.added, n.removed, n.saves, n.authors.map((a) => a.name)])).toEqual([
+      ["Plan", [[5], [4]], 2, 0, 2, ["Ada Lovelace", "Claude"]],
+      ["Trip", [[2], [1]], 2, 0, 2, ["Claude", "Ada Lovelace"]],
+    ]);
+    expect(notesOf(yesterday!.rows).map((n) => [n.noteTitle, n.saves])).toEqual([["Plan", 2]]);
+  });
+});
+
+describe("what stays picked when the list is narrowed", () => {
+  const trip = { noteId: "trip00000000", noteTitle: "Trip" };
+  const changes = [change(3, ADA, 3), change(2, CLAUDE, 2), change(1, ADA, 1), change(1, CLAUDE, 0, trip)];
+  const known = (narrowing: Parameters<typeof lists>[0]) => (noteId: string, revision: number) => {
+    const found = changes.find((c) => c.noteId === noteId && c.revision === revision);
+    return !!found && lists(narrowing, found);
+  };
+  const all = only(groupSaves(changes));
+
+  it("is every picked change the narrowing still lists: by people or agents, by note, by author", () => {
+    expect(asked(kept(all, known({ by: "agents" })))).toEqual([{ noteId: "note00000000", revisions: [2] }, { noteId: "trip00000000", revisions: [1] }]);
+    expect(asked(kept(all, known({ by: "people" })))).toEqual([{ noteId: "note00000000", revisions: [1, 3] }]);
+    expect(asked(kept(all, known({ noteIds: ["trip00000000"] })))).toEqual([{ noteId: "trip00000000", revisions: [1] }]);
+    expect(asked(kept(all, known({ authors: [{ kind: "member", id: "ada000000000" }], noteIds: ["note00000000"] })))).toEqual([{ noteId: "note00000000", revisions: [1, 3] }]);
+  });
+
+  it("is the same selection when nothing is dropped, and drops a change nothing is known of", () => {
+    expect(kept(all, known({}))).toBe(all);
+    expect(asked(kept(only([{ noteId: "gone00000000", revisions: [7] }]), known({})))).toEqual([]);
+  });
+});
+
+describe("the changed lines of a diff that a stretch of its text marks", () => {
+  const diff = textDiff("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight", "one\nTWO two\nthree\nfour\nfive\nsix\nseven\nnine\nten");
+  const marksOf = (...marks: { from: number; to: number }[]) => pieces(diff, marks).flatMap((p) => (p.kind === "fold" || p.kind === "same" ? [] : [[p.kind, p.mark]]));
+
+  it("are none with no stretch, and the pieces are as they are without", () => {
+    expect(marksOf()).toEqual([["mod", undefined], ["del", undefined], ["add", undefined], ["add", undefined]]);
+    expect(pieces(diff, [])).toEqual(pieces(diff));
+  });
+
+  it("are the lines rewritten when the stretch is of them, and no other change of the diff", () => {
+    expect(marksOf({ from: 1, to: 2 })).toEqual([["mod", 0], ["del", undefined], ["add", undefined], ["add", undefined]]);
+  });
+
+  it("are lines taken out and the lines put in their place together, each stretch its own mark", () => {
+    expect(marksOf({ from: 1, to: 2 }, { from: 8, to: 9 })).toEqual([["mod", 0], ["del", 1], ["add", 1], ["add", 1]]);
+  });
+
+  it("are lines taken out, by the place they were at", () => {
+    const cut = textDiff("a\nb\nc", "a\nc");
+    expect(pieces(cut, [{ from: 1, to: 1 }]).filter((p) => p.kind === "del")).toEqual([{ kind: "del", text: "b", mark: 0 }]);
+    expect(pieces(cut, [{ from: 0, to: 0 }]).filter((p) => p.kind === "del")).toEqual([{ kind: "del", text: "b" }]);
   });
 });

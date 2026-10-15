@@ -1,6 +1,6 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { Capability } from "../../src/core/plugins.ts";
-import { anotherPerson, join, listedNote, me, openAllNotes, perform, signInAsNewPerson, ownFrame, THEIR_FRAMES } from "./helpers.ts";
+import { anotherPerson, join, listedNote, me, openAllNotes, panelIcon, perform, pinPanel, showPanel, signInAsNewPerson, ownFrame, THEIR_FRAMES } from "./helpers.ts";
 import { asPlugin, codeHashOf, frameFor, install, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn } from "./third-party-helpers.ts";
 import { hostileCode, hostileManifest, VICTIM, VICTIM_CODE } from "./third-party-hostile.ts";
 
@@ -184,8 +184,8 @@ test("over its own port a plugin is answered only for what it was permitted: wha
   await expect.poll(async () => (await perform(admin, { type: "note.list" })).map((n) => n.title).sort()).toEqual(["Ada's secret", "Other", "Shared"]);
   await expect.poll(async () => (await perform(admin, { type: "member.list" })).map((m) => m.name).sort()).toEqual(["Ada Lovelace", "Mel Member"]);
 
-  // The harmless plugin is running beside it, to show what the flood leaves alone.
-  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Victim plugin: Victim", exact: true }).click();
+  // The harmless plugin is running beside it, to show what the flood leaves alone: pinned, so typing in the note leaves its panel there.
+  await pinPanel(page, "Victim plugin: Victim");
   const beside = await frameFor(page, "view", "panel");
   await expect(beside.locator("#out")).toContainText("Victim view listed 2");
 
@@ -218,7 +218,8 @@ test("a plugin can't read another plugin's frames, hand one a port or a document
 
   // Forging from before the other plugin's frames exist, through their start, and on after it.
   await expect.poll(() => attack(frame, "forge")).toBe("forging");
-  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Victim plugin: Victim", exact: true }).click();
+  // Pinned, so the panel is there again when the next note is in front.
+  await pinPanel(page, "Victim plugin: Victim");
   const view = await frameFor(page, "view", "panel");
   await openAllNotes(page);
   await listedNote(page, "Second").click();
@@ -302,7 +303,7 @@ test("a plugin's frame can't take the keyboard from the note, wherever it is dra
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   await editor(page).click({ position: { x: 300, y: 12 } });
   await page.keyboard.press("ControlOrMeta+End");
-  await inspector.getByRole("tab", { name: "Hostile plugin: Thief", exact: true }).click();
+  await showPanel(page, "Hostile plugin: Thief");
   await page.mouse.move(5, 5);
   await expect(inspector.getByRole("alert")).toContainText("Hostile plugin: Thief was stopped: it tried to take the keyboard while you were typing.");
   await expect(inspector.locator("iframe")).toHaveCount(0);
@@ -367,7 +368,7 @@ test("every write a plugin manages is recorded as the plugin's, whatever it puts
 test("an uninstalled plugin is refused by the server at once, and its frames are gone when the app next reads the record", async ({ page, baseURL }) => {
   const { admin, workspaceId, hostile } = await withHostile(page, baseURL!);
   const frame = await background(page);
-  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Hostile plugin: Probe", exact: true }).click();
+  await showPanel(page, "Hostile plugin: Probe");
   await frameFor(page, "view", "probe");
   await expect.poll(() => attack(frame, "perform", { type: "note.list" })).toBe("ok");
   // The app reads the record again as soon as the server refuses a plugin. That read is held here, so the frame is still there to say what it was answered.
@@ -389,7 +390,7 @@ test("an uninstalled plugin is refused by the server at once, and its frames are
   await expect.poll(() => running(page).length).toBe(0);
   expect(frame.isDetached()).toBe(true);
   await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
-  await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Hostile plugin: Probe", exact: true })).toHaveCount(0);
+  await expect(panelIcon(page, "Hostile plugin: Probe")).toHaveCount(0);
   await relist(page);
   await expect.poll(() => asPlugin(page, workspaceId, hostile, { type: "note.list" })).toMatchObject({ status: 403, body: { error: "forbidden" } });
 });

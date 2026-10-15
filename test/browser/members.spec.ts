@@ -345,9 +345,11 @@ test("the address of a note in a workspace the person isn't in shows what the ad
     await expect(mallory.getByText("Team plan")).toHaveCount(0);
     shown.push(await mallory.getByRole("main", { name: "Editor" }).innerText());
   }
-  expect(new Set(shown)).toEqual(new Set(["There's nothing at this address."]));
+  // One answer for all three: the page of an address with nothing at it, in its tab.
+  expect(new Set(shown)).toEqual(new Set(["Page\n\nThere's nothing at this address."]));
   await mallory.goto("/");
-  await expect(tabs(mallory), "no tab was opened for any of them").toHaveText(["Mallory's"]);
+  // The page of an address with nothing at it took the preview tab, as it does for any address; none opened for the team's note.
+  await expect(tabs(mallory), "no tab was opened for any of them").toHaveText(["Page"]);
 });
 
 test("a plugin under an admin can't change who is in the workspace, or read its invites, by performing an operation", async ({ page }) => {

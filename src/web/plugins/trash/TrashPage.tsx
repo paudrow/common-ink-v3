@@ -10,7 +10,8 @@ const titleOf = (note: { title: string }) => note.title || "Untitled";
 export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   const now = useNow();
   const [listed, setListed] = useState<TrashedNote[] | null>(null);
-  const [said, say] = useState<{ text: string; failed?: boolean } | null>(null);
+  /** Why Trash couldn't be read, until it is. */
+  const [unread, setUnread] = useState<string | null>(null);
   const [asked, setAsked] = useState(0);
   const [files, setFiles] = useState<TrashedUpload[]>([]);
   const { restoring, purge } = lifecycle(host);
@@ -20,8 +21,12 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   useEffect(() => {
     let live = true;
     host.perform({ type: "trash.list" }).then(
-      (notes) => live && setListed(notes),
-      (err: Error) => live && say({ text: err.message, failed: true }),
+      (notes) => {
+        if (!live) return;
+        setListed(notes);
+        setUnread(null);
+      },
+      (err: Error) => live && setUnread(err.message),
     );
     return () => {
       live = false;
@@ -45,26 +50,26 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
     host.perform({ type: "upload.restore", id: file.id }).then(
       ({ folderGone, name, type, kind, size, width, height, state }) => {
         host.uploads.learn([{ id: file.id, upload: { name, type, kind, size, width, height, state } }]);
-        say({ text: `${file.name}: ${restoredMessage(folderGone)}` });
+        host.app().notify({ message: `${file.name}: ${restoredMessage(folderGone)}`, icon: "check" });
         setAsked((n) => n + 1);
         app.refresh();
       },
-      (err: Error) => say({ text: err.message, failed: true }),
+      (err: Error) => host.app().notify({ message: err.message }),
     );
 
   const restore = (note: TrashedNote) =>
     restoring(note.id).then(
-      ({ folderGone }) => say({ text: `${titleOf(note)}: ${restoredMessage(folderGone)}` }),
-      (err: Error) => say({ text: err.message, failed: true }),
+      (said) => host.app().notify({ ...said, message: `${titleOf(note)}: ${said.message}` }),
+      (err: Error) => host.app().notify({ message: err.message }),
     );
 
   return (
     <section className="mode-view trash-page" aria-label="Trash">
       <h1>Trash</h1>
       <p className="trash-lede">A note or a file moved to Trash waits here for 30 days and is then removed for good: a note with its history, a file with its bytes. Until then it can be restored.</p>
-      {said && (
-        <p role={said.failed ? "alert" : "status"} className={said.failed ? "said failed" : "said"}>
-          {said.text}
+      {unread && (
+        <p role="alert" className="said failed">
+          {unread}
         </p>
       )}
       {listed && !listed.length && !files.length && <p className="trash-none">Trash is empty.</p>}
@@ -103,7 +108,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
                       title={note.title}
                       onPurge={async () => {
                         await purge(note.id);
-                        say({ text: `${titleOf(note)} was deleted forever.` });
+                        host.app().notify({ message: `${titleOf(note)} was deleted forever.`, icon: "trash" });
                         setAsked((n) => n + 1);
                       }}
                     />
@@ -143,7 +148,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
                         onPurge={async () => {
                           await host.perform({ type: "upload.purge", id: file.id });
                           host.uploads.learn([{ id: file.id, upload: null }]);
-                          say({ text: `${file.name} was deleted forever.` });
+                          host.app().notify({ message: `${file.name} was deleted forever.`, icon: "trash" });
                           setAsked((n) => n + 1);
                         }}
                       />

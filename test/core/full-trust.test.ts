@@ -605,6 +605,52 @@ describe("over HTTP", () => {
     expect((await post(vera, `/plugins/${id}/ops`, read)).status).toBe(403);
   });
 
+  it("the code's address answers a module only to a member it runs for now, of the hash named, and only while the grant and their switch stand", async () => {
+    const { ada, eve, vera, gus } = await team();
+    const id = await install(ada, [FULL]);
+    const hash = await codeHash(CODE);
+    const cookie = async (who: Actor) => `__Host-ink_session=${encodeURIComponent(await sign({ personId: who.personId }, SECRET, 3600))}`;
+    const fetchCode = async (headers: Record<string, string>, workspaceId: string, path: string) => {
+      const res = await worker.fetch(new Request(`https://ink.test/api/workspaces/${workspaceId}/plugins/${path}`, { headers }) as never, { ...env, SESSION_SECRET: SECRET });
+      return { status: res.status, type: res.headers.get("Content-Type"), text: await res.text() };
+    };
+    const asked = async (who: Actor, path = `${id}/trusted/${hash}.js`) => fetchCode({ Cookie: await cookie(who) }, ada.workspaceId, path);
+    const NONE = { status: 404, type: "application/json", text: JSON.stringify({ error: "not_found" }) };
+
+    // Installed, not granted, granted and not turned on: nothing, the same for each.
+    expect(await asked(eve)).toEqual(NONE);
+    await grant(ada, id);
+    expect(await asked(eve)).toEqual(NONE);
+    await turnOn(eve, id);
+    const module = await asked(eve);
+    expect([module.status, module.type, module.text]).toEqual([200, "text/javascript; charset=utf-8", `export default function (host, modules) {"use strict";\n${CODE}\n}\n//# sourceURL=ink-plugin-${id}.js\n`]);
+    // The bytes served are of the hash named, worked out again: code changed under a hash it doesn't have is served to nobody.
+    await env.DB.prepare("UPDATE plugin_installs SET code = ? WHERE id = ?").bind(OTHER, id).run();
+    expect(await asked(eve)).toEqual(NONE);
+    await env.DB.prepare("UPDATE plugin_installs SET code = ? WHERE id = ?").bind(CODE, id).run();
+    expect((await asked(eve)).status).toBe(200);
+    // Only to the member it runs for: not Vera, who didn't turn it on, not a guest, not someone of another workspace, not without a session, and not to an agent's token.
+    expect(await asked(vera)).toEqual(NONE);
+    expect(await asked(gus)).toEqual(NONE);
+    const stranger = await newMember("Mallory");
+    expect(await asked(stranger)).toEqual(NONE);
+    expect((await fetchCode({}, ada.workspaceId, `${id}/trusted/${hash}.js`)).status).toBe(401);
+    const { token } = await connectAgent(env.DB, eve.personId, "Claude");
+    expect((await fetchCode({ Authorization: `Bearer ${token}` }, ada.workspaceId, `${id}/trusted/${hash}.js`)).status).toBe(401);
+    // Only of the hash named, and not of one of the app's own.
+    expect(await asked(eve, `${id}/trusted/${await codeHash(OTHER)}.js`)).toEqual(NONE);
+    expect((await asked(eve, `word-count/trusted/${hash}.js`)).status).toBe(404);
+    // A change of code ends it at once, under either hash, and so does the member turning it off.
+    await update(ada, id, OTHER);
+    expect(await asked(eve)).toEqual(NONE);
+    expect(await asked(eve, `${id}/trusted/${await codeHash(OTHER)}.js`)).toEqual(NONE);
+    await grant(ada, id, "full-trust", OTHER);
+    await turnOn(eve, id, OTHER);
+    expect((await asked(eve, `${id}/trusted/${await codeHash(OTHER)}.js`)).status).toBe(200);
+    await perform(env.DB, eve, { type: "plugin.trust", id, on: false });
+    expect(await asked(eve, `${id}/trusted/${await codeHash(OTHER)}.js`)).toEqual(NONE);
+  });
+
   it("an admin's own session is an admin, which is what code in her page has: said here so that it is known, not hidden", async () => {
     const { ada, eve, shared } = await team();
     const id = await install(ada, [FULL]);

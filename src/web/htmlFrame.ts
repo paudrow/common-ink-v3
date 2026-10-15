@@ -1,8 +1,10 @@
 import { EMBED_FRAME_PATH } from "../core/frames.ts";
 import { themeNow } from "./theme.ts";
 
-/** How long a frame's document is given to answer, in milliseconds. It is the app's own and holds nothing. */
-const WAIT = 4000;
+/** How long a frame's document is given to answer, in milliseconds. It is the app's own and holds nothing, but a server just woken can be slow. */
+const WAIT = 10_000;
+/** How long after the HTML is handed over it is shown though its page hasn't said it is drawn, in milliseconds. */
+const SHOWN_ANYWAY = 3000;
 
 const COLOUR = /^[\w\s(),.%#/-]+$/;
 
@@ -37,28 +39,43 @@ function opening(): string {
  * speaking. `scheme` is what the document shows behind what it runs. `grant` is a token from
  * `plugin.frame`, good once, for a document whose policy lets it reach the sites an admin allowed.
  * `name` names the frame, which is how the frames of the app's own plugins are told from a workspace's.
+ *
+ * `drawn` is called once the document has put `html` on its page, or a few seconds after `html` was
+ * handed over if the page never says so (HTML that stops its own loading).
  */
-export function sandboxed(html: string, { title, port, scheme, grant, refused, name }: { title: string; refused?: () => void; port?: MessagePort; scheme?: "light" | "dark"; grant?: string | null; name?: string }): { frame: HTMLIFrameElement; stop: () => void } {
+export function sandboxed(html: string, { title, port, scheme, grant, refused, drawn, name }: { title: string; refused?: () => void; drawn?: () => void; port?: MessagePort; scheme?: "light" | "dark"; grant?: string | null; name?: string }): { frame: HTMLIFrameElement; stop: () => void } {
   const frame = document.createElement("iframe");
   frame.title = title;
   if (name) frame.name = name;
   frame.referrerPolicy = "no-referrer";
   frame.setAttribute("allow", "");
-  const ready = (event: MessageEvent) => {
-    if (event.source !== frame.contentWindow || event.origin !== "null" || (event.data as { embedFrame?: unknown } | null)?.embedFrame !== "ready") return;
-    stop();
-    // The document's origin is its own, which has no name to address it by. Only this frame's window is sent to.
-    frame.contentWindow!.postMessage({ html: opening() + html, ...(scheme && { scheme }) }, "*", port ? [port] : []);
+  let handed = false;
+  const heard = (event: MessageEvent) => {
+    if (event.source !== frame.contentWindow || event.origin !== "null") return;
+    const said = (event.data as { embedFrame?: unknown } | null)?.embedFrame;
+    if (said === "ready" && !handed) {
+      handed = true;
+      clearTimeout(waited);
+      // The document's origin is its own, which has no name to address it by. Only this frame's window is sent to.
+      frame.contentWindow!.postMessage({ html: opening() + html, ...(scheme && { scheme }) }, "*", port ? [port] : []);
+      waited = setTimeout(() => {
+        stop();
+        drawn?.();
+      }, SHOWN_ANYWAY);
+    } else if (said === "drawn" && handed) {
+      stop();
+      drawn?.();
+    }
   };
-  const waited = setTimeout(() => {
+  let waited = setTimeout(() => {
     stop();
     refused?.();
   }, WAIT);
   const stop = () => {
-    removeEventListener("message", ready);
+    removeEventListener("message", heard);
     clearTimeout(waited);
   };
-  addEventListener("message", ready);
+  addEventListener("message", heard);
   frame.src = grant ? `${EMBED_FRAME_PATH}/g/${encodeURIComponent(grant)}` : EMBED_FRAME_PATH;
   return { frame, stop };
 }

@@ -32,11 +32,14 @@ const errorIn = async (res: Response) => ((await res.json()) as { error: string 
 /** The headers that keep an upload's bytes from acting as a page of the app. */
 const sealOf = (res: Response) => Object.fromEntries(["X-Content-Type-Options", "Cross-Origin-Resource-Policy", "Referrer-Policy", "Cache-Control"].map((name) => [name, res.headers.get(name)]));
 const SEAL = { "X-Content-Type-Options": "nosniff", "Cross-Origin-Resource-Policy": "same-origin", "Referrer-Policy": "no-referrer", "Cache-Control": "private, no-cache" };
+/** The policy every file is served with: a page opened from one is a sandbox with no origin and no script, which may show itself and nothing else. */
+const POLICY = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'";
 const expectSealed = (res: Response, what: string) => {
   expect(sealOf(res), what).toEqual(SEAL);
   const policy = (res.headers.get("Content-Security-Policy") ?? "").split(";").map((part) => part.trim());
   expect(policy, what).toContain("sandbox");
   expect(policy, what).toContain("default-src 'none'");
+  expect(policy.join(" "), what).not.toMatch(/allow-same-origin|allow-scripts|script-src|allow-top-navigation|allow-popups/);
 };
 
 /** Ada, admin of her workspace, with an agent of hers. */
@@ -95,6 +98,52 @@ describe("an upload's bytes over HTTP, with an agent's token", () => {
       expectSealed(res, name);
       expect(await bytesIn(res), name).toEqual([...bytes]);
     }
+  });
+
+  it("answers a PDF as a download at the app's address, sealed as every other file is: the browser's viewer would draw it there as the app", async () => {
+    const { token, workspace } = await connected();
+    const bytes = bytesOf("%PDF-1.7\n<< /OpenAction << /S /JavaScript /JS (app.alert(1)) >> >>");
+
+    const upload = await sent(workspace, token, "paper.pdf", bytes);
+    const res = await get(workspace, token, upload.id);
+    expect([res.status, res.headers.get("Content-Type"), res.headers.get("Content-Disposition")]).toEqual([200, "application/pdf", `attachment; filename="paper.pdf"; filename*=UTF-8''paper.pdf`]);
+    expect(res.headers.get("Content-Security-Policy")).toBe(POLICY);
+    expectSealed(res, "a PDF");
+    expect(await bytesIn(res)).toEqual([...bytes]);
+  });
+
+  it("answers every kind of file with exactly these headers: only pictures, video and sound in place, and all of them sealed", async () => {
+    const { token, workspace } = await connected();
+    const files: [name: string, bytes: Uint8Array, type: string, inline: boolean][] = [
+      ["dot.png", PNG, "image/png", true],
+      ["photo.jpg", Uint8Array.of(0xff, 0xd8, 0xff, 0xe0, 0, 0x10), "image/jpeg", true],
+      ["anim.gif", bytesOf("GIF89a\x01\x00\x01\x00"), "image/gif", true],
+      ["pic.webp", bytesOf("RIFF\x00\x00\x00\x00WEBPVP8 "), "image/webp", true],
+      ["pic.avif", bytesOf("\x00\x00\x00\x1cftypavif"), "image/avif", true],
+      ["x.svg", SVG, "image/svg+xml", false],
+      ["clip.mp4", bytesOf("\x00\x00\x00\x18ftypisom"), "video/mp4", true],
+      ["clip.mov", bytesOf("\x00\x00\x00\x14ftypqt  "), "video/quicktime", true],
+      ["clip.webm", Uint8Array.of(0x1a, 0x45, 0xdf, 0xa3, 0x9f), "video/webm", true],
+      ["song.mp3", bytesOf("ID3\x04\x00"), "audio/mpeg", true],
+      ["song.m4a", bytesOf("\x00\x00\x00\x18ftypM4A "), "audio/mp4", true],
+      ["memo.wav", bytesOf("RIFF\x00\x00\x00\x00WAVEfmt "), "audio/wav", true],
+      ["memo.ogg", bytesOf("OggS\x00\x02"), "audio/ogg", true],
+      ["paper.pdf", bytesOf("%PDF-1.7\n"), "application/pdf", false],
+      ["x.html", HTML, "application/octet-stream", false],
+      ["notes.txt", bytesOf("plain words"), "application/octet-stream", false],
+      ["table.csv", bytesOf("a,b\n1,2\n"), "application/octet-stream", false],
+      ["readme.md", bytesOf("# Title\n"), "application/octet-stream", false],
+      ["data.json", bytesOf('{"a":1}'), "application/octet-stream", false],
+      ["app.js", bytesOf("alert(1)"), "application/octet-stream", false],
+      ["archive.zip", Uint8Array.of(0x50, 0x4b, 0x03, 0x04), "application/octet-stream", false],
+    ];
+
+    const served = [];
+    for (const [name, bytes] of files) {
+      const res = await get(workspace, token, (await sent(workspace, token, name, bytes)).id);
+      served.push([name, res.status, res.headers.get("Content-Type"), res.headers.get("Content-Disposition")?.split(";")[0], res.headers.get("Content-Security-Policy"), ...Object.values(sealOf(res))]);
+    }
+    expect(served).toEqual(files.map(([name, , type, inline]) => [name, 200, type, inline ? "inline" : "attachment", POLICY, ...Object.values(SEAL)]));
   });
 
   it("is not typed by what the request says it is", async () => {
@@ -216,5 +265,85 @@ describe("an upload's bytes over HTTP, with an agent's token", () => {
       const res = await op(body);
       expect([res.status, await errorIn(res)], body.type).toEqual([400, "invalid"]);
     }
+  });
+});
+
+describe("a PDF opened in a tab, from the site kept for files", () => {
+  const FILES = "https://files.ink-files.test";
+  const at = (url: string, init: RequestInit = {}, more: Partial<Env> = { FILE_ORIGIN: FILES }) => worker.fetch(new Request(url, init) as never, { ...env, SESSION_SECRET: SECRET, ...more });
+  const sessionOf = async (personId: string) => `__Host-ink_session=${encodeURIComponent(await sign({ personId }, SECRET, 3600))}`;
+  const PDF = bytesOf("%PDF-1.7\n<< /OpenAction << /S /JavaScript /JS (app.alert(1)) >> >>");
+
+  async function opened(more?: Partial<Env>) {
+    const { ada, token, workspace } = await connected();
+    const pdf = await sent(workspace, token, "paper.pdf", PDF);
+    const png = await sent(workspace, token, "dot.png", PNG);
+    const cookie = await sessionOf(ada.personId);
+    const tab = (id: string, headers: Record<string, string> = { Cookie: cookie }) => at(`https://ink.test/api/workspaces/${workspace}/uploads/${id}?open=tab`, { headers }, more);
+    return { ada, token, workspace, pdf, png, cookie, tab };
+  }
+
+  it("sends a member on to the file site, at an address that names the file and them, where it is shown in place, sealed, and answers nothing else", async () => {
+    const { pdf, tab } = await opened();
+    const sentOn = await tab(pdf.id);
+    expect([sentOn.status, sentOn.headers.get("Cache-Control")]).toEqual([302, "no-store"]);
+    const address = sentOn.headers.get("Location")!;
+    expect(address).toMatch(new RegExp(`^${FILES}/file/[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$`));
+
+    const res = await at(address);
+    expect([res.status, res.headers.get("Content-Type"), res.headers.get("Content-Disposition")]).toEqual([200, "application/pdf", `inline; filename="paper.pdf"; filename*=UTF-8''paper.pdf`]);
+    expect(res.headers.get("Content-Security-Policy")).toBe(POLICY);
+    expectSealed(res, "a PDF on the file site");
+    expect(await bytesIn(res)).toEqual([...PDF]);
+    // A part, as the viewer asks for one.
+    const part = await at(address, { headers: { Range: "bytes=0-3" } });
+    expect([part.status, await bytesIn(part)]).toEqual([206, [...bytesOf("%PDF")]]);
+
+    // The file site is no app: not its pages, its API, its sign-in, or an address it didn't give out.
+    for (const path of ["/", "/api/me", `/api/workspaces/x/uploads/${pdf.id}`, "/auth/dev", "/file/forged.sig", `/file/${address.split("/file/")[1]!.replace(/.$/, "A")}`]) {
+      const other = await at(`${FILES}${path}`);
+      expect([path, other.status], path).toEqual([path, 404]);
+    }
+  });
+
+  it("asks again on every request whether the member may still see the file, so an address outlives no grant", async () => {
+    const { ada, token, workspace } = await connected();
+    const eve = await addMember(ada, "editor", "Eve");
+    const pdf = await sent(workspace, token, "paper.pdf", PDF);
+    const sentOn = await at(`https://ink.test/api/workspaces/${workspace}/uploads/${pdf.id}?open=tab`, { headers: { Cookie: await sessionOf(eve.personId) } });
+    const address = sentOn.headers.get("Location")!;
+    expect((await at(address)).status).toBe(200);
+    await perform(env.DB, ada, { type: "member.remove", memberId: eve.personId });
+    expect((await at(address)).status).toBe(404);
+  });
+
+  it("can't be taken for a session, nor a session for it", async () => {
+    const { pdf, tab, cookie } = await opened();
+    const address = (await tab(pdf.id)).headers.get("Location")!;
+    const signed = address.split("/file/")[1]!;
+    const asSession = await at("https://ink.test/api/me", { headers: { Cookie: `__Host-ink_session=${encodeURIComponent(signed)}` } });
+    expect(asSession.status).toBe(401);
+    const session = decodeURIComponent(cookie.split("=")[1]!);
+    expect((await at(`${FILES}/file/${session}`)).status).toBe(404);
+  });
+
+  it("is only for a member's PDF: a picture is answered at the app's address as ever, an agent gets the PDF as a download, and with no file site nothing is sent on", async () => {
+    const { pdf, png, token, tab } = await opened();
+    const picture = await tab(png.id);
+    expect([picture.status, picture.headers.get("Content-Disposition")?.split(";")[0]]).toEqual([200, "inline"]);
+    const byAgent = await tab(pdf.id, bearer(token));
+    expect([byAgent.status, byAgent.headers.get("Content-Disposition")?.split(";")[0]]).toEqual([200, "attachment"]);
+
+    const nowhere = await opened({});
+    const plain = await nowhere.tab(nowhere.pdf.id);
+    expect([plain.status, plain.headers.get("Content-Disposition")?.split(";")[0]]).toEqual([200, "attachment"]);
+    const me = (await (await at("https://ink.test/api/me", { headers: { Cookie: nowhere.cookie } }, {})).json()) as { setup: unknown };
+    expect(me.setup).toEqual({ embedSite: false, fileSite: false });
+    const meThere = (await (await at("https://ink.test/api/me", { headers: { Cookie: nowhere.cookie } })).json()) as { setup: unknown };
+    expect(meThere.setup).toEqual({ embedSite: false, fileSite: true });
+  });
+
+  it("must be an https address", async () => {
+    await expect(at("https://ink.test/", {}, { FILE_ORIGIN: "http://files.ink-files.test" })).rejects.toThrow("FILE_ORIGIN must be an https address");
   });
 });

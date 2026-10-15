@@ -27,7 +27,7 @@ export interface Problem {
 }
 
 export interface Resolved {
-  /** Every declared setting's value: the member's where it is valid, the default otherwise. */
+  /** Every declared setting's value: the member's where it is valid, the default otherwise (or what the setting says an unreadable value reads as). */
   values: Readonly<Record<string, SettingValue>>;
   problems: readonly Problem[];
   /** The keys whose value is the member's. */
@@ -66,6 +66,11 @@ export function readSetting(setting: Setting, value: unknown): { value: SettingV
       }
       return { value: chords };
     }
+    case "list":
+      if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return { reason: `Expected a list of words in quotes, such as ["one", "two"], not ${shown(value)}` };
+      if (value.length > setting.maxItems) return { reason: `Expected at most ${setting.maxItems} of them` };
+      if (value.some((v: string) => v.length > setting.maxLength)) return { reason: `Expected each to be at most ${setting.maxLength} characters` };
+      return { value: [...new Set(value as string[])] };
   }
 }
 
@@ -80,8 +85,11 @@ export function resolve(declared: readonly Declared[], document: SettingsDocumen
     values[key] = setting.default;
     if (!Object.hasOwn(document, key)) continue;
     const read = readSetting(setting, document[key]);
-    if ("reason" in read) problems.push({ key, kind: "invalid", reason: `${read.reason}. The default is used.` });
-    else {
+    if ("reason" in read) {
+      const unreadable = setting.type === "string" ? setting.unreadable : undefined;
+      if (unreadable !== undefined) values[key] = unreadable;
+      problems.push({ key, kind: "invalid", reason: `${read.reason}. ${unreadable === undefined ? "The default is used" : `${JSON.stringify(unreadable)} is used`}.` });
+    } else {
       values[key] = read.value;
       chosen.add(key);
     }

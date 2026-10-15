@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, asViewerOfNote, join, listedNotes, me, noteCard, openAllNotes, ownPlugin, perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, join, listedNotes, me, noteCard, openAllNotes, ownPlugin, perform, pinPanel, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const lines = (page: Page) => editor(page).locator(".cm-line");
@@ -23,7 +23,7 @@ const openNote = async (page: Page, note: { id: string }) => {
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toBeVisible();
 };
-const openInfo = (page: Page) => inspector(page).getByRole("tab", { name: "Info" }).click();
+const openInfo = (page: Page) => pinPanel(page, "Info");
 /** The app lists everything again when its window takes focus, so a test needn't wait for it to ask what changed. */
 const lookAgain = (page: Page) => page.evaluate(() => void window.dispatchEvent(new Event("focus")));
 const UNSAVED_IN_TRASH = "Your last changes aren't saved: this note is in Trash. Restore it to save them.";
@@ -135,7 +135,8 @@ test("an archived note leaves the note list and Todos, and comes back when archi
   await expect(todosPage(page)).toContainText("water plants");
   await expect(todosPage(page)).not.toContainText("file taxes");
 
-  await todosPage(page).getByRole("checkbox", { name: "Include archived" }).check();
+  // The Todos page lists the todos of archived notes when its query names them.
+  await todosPage(page).getByRole("searchbox", { name: "Filter todos" }).fill("is:archived");
   await expect(todosPage(page)).toContainText("file taxes");
   expect(kept.state).toBe("live");
 });
@@ -157,7 +158,7 @@ test("a link to an archived note opens it, and the backlink from an archived not
   await perform(page, { type: "note.archive", id: old.id, archived: false });
   await perform(page, { type: "note.archive", id: diary.id, archived: true });
   await lookAgain(page);
-  await inspector(page).getByRole("tab", { name: "Backlinks" }).click();
+  await showPanel(page, "Backlinks");
   await expect(ownPlugin(page, "Backlinks").getByRole("navigation", { name: "Backlinks" }).getByRole("link")).toContainText(["Archived"]);
 });
 
@@ -185,7 +186,7 @@ test("a note moved to Trash leaves the list at once, and Undo brings it back", a
   await expect(banner(page)).toHaveCount(0);
   await expect.poll(() => stateOf(page, note.id)).toBe("live");
   await expect(notice(page)).toContainText("Restored from Trash.");
-  await notice(page).getByRole("button", { name: "Dismiss" }).click();
+  await notice(page).locator(".toast-text").click();
   await expect(notice(page)).toHaveCount(0);
   await listShows(page, ["Scrap"]);
 });
@@ -235,7 +236,7 @@ test("the Trash page says who trashed a note and how long it has, and restores i
 
   await trashRows(page).getByRole("button", { name: "Restore" }).click();
 
-  await expect(page.getByRole("region", { name: "Trash" }).getByRole("status")).toHaveText("Roadmap: Restored from Trash.");
+  await expect(notice(page)).toContainText("Roadmap: Restored from Trash.");
   await expect(trashRows(page)).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Trash" })).toContainText("Trash is empty.");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).folderId).toBe(folder.id);
@@ -252,9 +253,93 @@ test("a note restored after its folder was deleted comes back to Unsorted, and t
 
   await trashRows(page).getByRole("button", { name: "Restore" }).click();
 
-  await expect(page.getByRole("region", { name: "Trash" }).getByRole("status")).toHaveText("Orphan: Restored to Unsorted, because its folder was deleted.");
+  await expect(notice(page)).toContainText("Orphan: Restored to Unsorted, because its folder was deleted.");
   await expect.poll(() => stateOf(page, note.id)).toBe("live");
 });
+
+test("what an Undo answers is said in the card's place, and goes by itself once nothing is on it; pressed by the keys, the keyboard stays on it", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await create(page, "# Scrap\n\nnot needed");
+  await openNote(page, note);
+  await openInfo(page);
+  await inspector(page).getByRole("button", { name: "Move to Trash" }).click();
+  await notice(page).getByRole("button", { name: "Undo" }).click();
+  await expect(notice(page)).toHaveText("Restored from Trash.");
+  await page.mouse.move(5, 5);
+  // Five seconds for a card with nothing to press, with the pointer and the keyboard elsewhere.
+  await expect(notice(page)).toHaveCount(0, { timeout: 9000 });
+
+  await inspector(page).getByRole("button", { name: "Move to Trash" }).click();
+  await notice(page).getByRole("button", { name: "Undo" }).press("Enter");
+  await expect(notice(page)).toHaveText("Restored from Trash.");
+  await expect(notice(page)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(notice(page)).toHaveCount(0);
+});
+
+test("three notices with long titles still fit a small window, each cut to its card", async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 560 });
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const long = (n: number) => `${n} ${"averylongwordwithnoroomtobreak".repeat(2)} ${"and many more words after it ".repeat(6)}`.trim();
+  for (const n of [1, 2, 3]) await perform(page, { type: "note.trash", id: (await create(page, `# ${long(n)}`)).id });
+  await page.clock.install();
+  await page.goto("/trash");
+  await expect(trashRows(page)).toHaveCount(3);
+  // Time stands still, so the cards wait for a slow server: each goes after five seconds otherwise.
+  await page.clock.pauseAt(Date.now() + 60_000);
+  for (const n of [1, 2, 3]) {
+    const row = trashRows(page).filter({ hasText: `${n} averylong` });
+    await row.getByRole("button", { name: "Restore" }).press("Enter");
+    await expect(row).toHaveCount(0);
+    await expect(notice(page)).toHaveCount(n);
+  }
+  for (const card of await notice(page).all()) {
+    const box = (await card.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(420);
+    expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  }
+});
+
+for (const width of [1280, 420]) {
+  test(`every notice is one card in the bottom right: they stack, the newest at the foot, three at most, and none covers another, at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await signInAsNewPerson(page, "Ada Lovelace");
+    const titles = ["First", "Second", "Third", "Fourth"];
+    for (const title of titles) await perform(page, { type: "note.trash", id: (await create(page, `# ${title}`)).id });
+    await page.goto("/trash");
+    await expect(trashRows(page)).toHaveCount(4);
+
+    for (const [i, title] of titles.slice(0, 3).entries()) {
+      // By the keyboard: at 420px the cards lie over the foot of the list, where a pointer would press them.
+      await trashRows(page).filter({ hasText: title }).getByRole("button", { name: "Restore" }).press("Enter");
+      await expect(notice(page)).toHaveCount(i + 1);
+    }
+    await expect(notice(page)).toHaveText(["First: Restored from Trash.", "Second: Restored from Trash.", "Third: Restored from Trash."]);
+    // A notice from any plugin is the same card: the todos' "Task completed" is drawn as these are.
+    await expect(notice(page).first()).toHaveClass("toast-card");
+
+    const boxes = async () => Promise.all((await notice(page).all()).map(async (card) => (await card.boundingBox())!));
+    const laidOut = async () => {
+      const shown = await boxes();
+      for (const box of shown) {
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(width - 12);
+        expect(box.x + box.width).toBeGreaterThan(width - 40);
+        expect(box.y + box.height).toBeLessThanOrEqual(800);
+      }
+      // Each below the one before, with a gap: none covers another.
+      for (let i = 1; i < shown.length; i++) expect(shown[i]!.y).toBeGreaterThanOrEqual(shown[i - 1]!.y + shown[i - 1]!.height + 4);
+      return shown;
+    };
+    await laidOut();
+
+    // A fourth sends the oldest away.
+    await trashRows(page).filter({ hasText: "Fourth" }).getByRole("button", { name: "Restore" }).press("Enter");
+    await expect(notice(page)).toHaveText(["Second: Restored from Trash.", "Third: Restored from Trash.", "Fourth: Restored from Trash."]);
+    await laidOut();
+  });
+}
 
 test("an open note that someone else moves to Trash turns read-only, with a banner that moves the text by its own height and no more", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");

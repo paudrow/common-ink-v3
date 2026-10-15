@@ -41,10 +41,21 @@ export const tabs: Plugin = {
      * through here. Back retraces every open and close. Moving between tabs already open is one
      * step however many moves it took, and never takes the place of an open.
      */
+    /** The group whose tab in front is to take the cursor once it is drawn. */
+    let cursorTo: string | null = null;
+    const cursorPut = () => {
+      if (cursorTo === null) return;
+      cursorTo = null;
+      for (const listener of [...listeners]) listener();
+    };
     const dispatch = (action: EditorAction) => {
       const next = editorReducer(layout, action);
-      // A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
-      if ((action.type === "split" || action.type === "send") && next !== layout) host.app().setFocus(false);
+      if ((action.type === "split" || action.type === "send") && next !== layout) {
+        // A tab split off or sent to another group leaves focus, which shows one group: the member sees where it went.
+        host.app().setFocus(false);
+        // It is drawn anew where it went, and what had the cursor in it is gone, so the cursor is put in it there.
+        cursorTo = next.focusedGroupId;
+      }
       if (focused(next)) homeClosed = false;
       else if (action.type === "close" && focused(layout)?.kind === "page" && focused(layout)?.id === homeId()) homeClosed = true;
       if (next !== layout) {
@@ -60,18 +71,19 @@ export const tabs: Plugin = {
       if (tab) dispatch(action({ groupId: layout.focusedGroupId, tab }));
     };
 
-    host.commands.register({ id: "tab.keep", title: "Keep tab open", run: onTab((tab) => ({ type: "pin", ...tab })) });
-    for (const { scope, id, title } of CLOSES) host.commands.register({ id, title, run: onTab((tab) => ({ type: "close", scope, ...tab })) });
-    host.commands.register({ id: "editor.splitRight", title: "Split editor right", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) });
-    host.commands.register({ id: "editor.splitDown", title: "Split editor down", run: onTab((tab) => ({ type: "split", side: "down", ...tab })) });
-    host.commands.register({ id: "tab.moveToNextGroup", title: "Move tab to next group", run: onTab((tab) => ({ type: "send", to: "next", ...tab })) });
-    host.commands.register({ id: "tab.moveToPreviousGroup", title: "Move tab to previous group", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) });
-    host.commands.register({ id: "tab.menu", title: "Show tab menu", run: showTabMenu });
+    host.commands.register({ id: "tab.keep", title: "Keep tab open", group: "Navigation", run: onTab((tab) => ({ type: "pin", ...tab })) });
+    for (const { scope, id, title } of CLOSES) host.commands.register({ id, title, group: "Navigation", run: onTab((tab) => ({ type: "close", scope, ...tab })) });
+    host.commands.register({ id: "editor.splitRight", title: "Split editor right", group: "Navigation", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) });
+    host.commands.register({ id: "editor.splitDown", title: "Split editor down", group: "Navigation", run: onTab((tab) => ({ type: "split", side: "down", ...tab })) });
+    host.commands.register({ id: "tab.moveToNextGroup", title: "Move tab to next group", group: "Navigation", run: onTab((tab) => ({ type: "send", to: "next", ...tab })) });
+    host.commands.register({ id: "tab.moveToPreviousGroup", title: "Move tab to previous group", group: "Navigation", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) });
+    host.commands.register({ id: "tab.menu", title: "Show tab menu", group: "Navigation", run: showTabMenu });
 
     const { items } = lifecycle(host);
 
-    function Editor({ app, renderNote, renderFolder, renderPage, empty, controls }: EditorProps) {
+    function Editor({ app, renderNote, renderFolder, renderPage, empty }: EditorProps) {
       const shown = useSyncExternalStore(subscribe, () => layout);
+      const cursorGroup = useSyncExternalStore(subscribe, () => cursorTo);
       // A tab stays open on a note that was moved to Trash, so those are known by name too.
       const notes = useMemo(() => app.notes && new Map([...app.notes, ...app.trashed].map((n) => [n.id, n])), [app.notes, app.trashed]);
       const home = app.path === "/";
@@ -94,8 +106,9 @@ export const tabs: Plugin = {
         pageNames = { ...pageNames, ...Object.fromEntries(app.pages.map((p) => [p.id, p.label])) };
         host.storage.set("pageNames", pageNames);
       }, [app.pages]);
+      // A page that has gone is called what it was, or by its address; an address no page was ever at has its path for an id and is "Page".
       const titleOf = (tab: Opened) =>
-        tab.kind === "page" ? (pages.get(tab.id)?.label ?? pageNames[tab.id] ?? tab.path) : tab.kind === "folder" ? (app.folders ? (folderTitle(app.folders, tab.id) ?? "Folder") : "") : notes ? notes.get(tab.id)?.title || "Untitled" : "";
+        tab.kind === "page" ? (pages.get(tab.id)?.label ?? pageNames[tab.id] ?? (tab.id.startsWith("/") ? "Page" : tab.path)) : tab.kind === "folder" ? (app.folders ? (folderTitle(app.folders, tab.id) ?? "Folder") : "") : notes ? notes.get(tab.id)?.title || "Untitled" : "";
 
       return (
         <EditorGroups
@@ -105,9 +118,16 @@ export const tabs: Plugin = {
           isPrivate={(tab) => (tab.kind === "note" && notes?.get(tab.id)?.private) ?? false}
           noteItems={(tab) => (tab.kind === "note" ? items(notes?.get(tab.id)) : [])}
           dispatch={dispatch}
-          render={(group, tab) => (tab.kind === "folder" ? renderFolder(tab.id) : tab.kind === "page" ? renderPage(tab.id, tab.path) : renderNote(tab.id, { onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }) }))}
+          render={(group, tab) =>
+            tab.kind === "folder"
+              ? renderFolder(tab.id)
+              : tab.kind === "page"
+                ? renderPage(tab.id, tab.path)
+                : renderNote(tab.id, { onEdit: () => dispatch({ type: "pin", groupId: group.id, tab }), focus: group.id === cursorGroup, onFocused: cursorPut })
+          }
           empty={empty}
-          controls={controls}
+          cursorTo={cursorGroup}
+          onCursorPut={cursorPut}
           focusMode={{
             on: app.focus,
             keys: host.commands.list().find((c) => c.id === "view.toggleFocus")?.shortcut,

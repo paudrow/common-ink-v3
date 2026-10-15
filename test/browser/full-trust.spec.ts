@@ -392,3 +392,31 @@ test("a full-trust plugin's page has no more controls than any third-party plugi
   expect(await controls("Deep Keys")).toBe(sandboxed);
   expect(sandboxed).toBe(9);
 });
+
+test("code that steps outside the function it is wrapped in runs only once it is started, and turning it off still ends it", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  // Ends the function early: what is between runs as soon as its module is loaded.
+  const code = "}\nwindow.brokeOut = (window.brokeOut ?? 0) + 1;\nfunction rest() {";
+  const { id, plugins } = await perform(page, { type: "plugin.install", manifest: JSON.stringify(DEEP), code });
+  const codeHash = plugins.find((p) => p.id === id)!.codeHash!;
+  await perform(page, { type: "plugin.permit", id, capability: "full-trust", allowed: true, codeHash });
+  await perform(page, { type: "plugin.trust", id, on: true, codeHash });
+  const brokeOut = () => page.evaluate(() => (window as unknown as { brokeOut?: number }).brokeOut ?? 0).catch(() => -1);
+
+  // Granted and turned on, but its switch in her settings off: nothing of it is loaded.
+  await page.goto("/plugins");
+  await expect(page.getByRole("list", { name: "Plugins" })).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(await brokeOut()).toBe(0);
+
+  // On, it is loaded and runs.
+  const settings = await perform(page, { type: "settings.read" });
+  await perform(page, { type: "settings.write", text: JSON.stringify({ ...JSON.parse(settings.text || "{}"), [`${id}.enabled`]: true }), baseRevision: settings.revision });
+  await page.reload();
+  await expect.poll(brokeOut).toBe(1);
+
+  // Turned off, the app loads again, and what ran is gone.
+  await perform(page, { type: "plugin.trust", id, on: false });
+  await page.evaluate(() => void window.dispatchEvent(new Event("focus")));
+  await expect.poll(brokeOut, { timeout: 15_000 }).toBe(0);
+});

@@ -22,7 +22,7 @@ const pinned = (page: Page) => card(page, "Pinned");
 const changes = (page: Page) => card(page, "Changes since your last visit");
 const CARDS = ["Today's events", "Due today or earlier", "Today's notes", "Pinned", "Changes since your last visit"];
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
-const what = (within: Locator) => within.locator(".dash-what");
+const what = (within: Locator) => within.locator(".dash-what, .todo-words");
 
 /** The dashboard with every section's answer in. */
 async function settled(page: Page) {
@@ -472,4 +472,270 @@ test("the Dashboard is a plugin: turned off, its page, its link and the pin are 
   await page.getByRole("checkbox", { name: "Dashboard", exact: true }).setChecked(true);
   await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Dashboard" }).click();
   await settled(page);
+});
+
+const DEFAULT = ["events small", "todos small", "today small", "pinned small", "changes wide"];
+/** The panels as the dashboard draws them, in order, each with its size. */
+const placed = (page: Page) => page.locator("[data-panel]").evaluateAll((els) => els.map((el) => `${(el as HTMLElement).dataset.panel} ${(el as HTMLElement).dataset.size}`));
+/** What the member's settings on the server say of the dashboard. */
+const saved = async (page: Page) => (JSON.parse((await perform(page, { type: "settings.read" })).text) as Record<string, unknown>)["dashboard.layout"];
+/** Where each panel is in the grid, which is the same wherever the page is scrolled to. */
+const boxesOf = (page: Page) =>
+  page.locator("[data-panel]").evaluateAll((els) =>
+    els.map((el) => {
+      const grid = el.parentElement!.getBoundingClientRect();
+      const { x, y, width, height } = el.getBoundingClientRect();
+      return { panel: (el as HTMLElement).dataset.panel, x: x - grid.x, y: y - grid.y, width, height };
+    }),
+  );
+
+test("the member picks the dashboard's panels, moves and resizes them with the keys, and it is kept for them on the server and in another browser", async ({ page, browser }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await settled(page);
+  expect(await placed(page)).toEqual(DEFAULT);
+  // Outside Edit there is nothing to arrange with.
+  await expect(dashboard(page).getByRole("button", { name: /^(Move|Remove) / })).toHaveCount(0);
+  await expect(dashboard(page).getByRole("slider")).toHaveCount(0);
+
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  await expect(dashboard(page).getByRole("button", { name: "Done" })).toBeFocused();
+  await expect(dashboard(page).getByRole("button", { name: /^Move / })).toHaveCount(5);
+  // While it is arranged a panel's own controls can't be pressed.
+  expect(await todays(page).locator(".dash-body").evaluate((el) => (el as HTMLElement).inert)).toBe(true);
+
+  // A key that moves nothing, at the top already, leaves the keyboard where the member takes it next.
+  await dashboard(page).getByRole("button", { name: "Move Today's events", exact: true }).focus();
+  await page.keyboard.press("ArrowUp");
+  await dashboard(page).getByRole("button", { name: "Add panel" }).click();
+  await expect(page.getByRole("menuitem")).toHaveText(["Coming up", "Recently edited"]);
+  await expect(page.getByRole("menuitem").first()).toBeFocused();
+  // Escape closes the menu and leaves the dashboard being arranged, with the keys back on Add panel.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menuitem")).toHaveCount(0);
+  await expect(dashboard(page).getByRole("button", { name: "Add panel" })).toBeFocused();
+  await dashboard(page).getByRole("button", { name: "Add panel" }).click();
+  await page.getByRole("menuitem", { name: "Recently edited" }).click();
+  await expect(dashboard(page).getByRole("button", { name: "Move Recently edited", exact: true })).toBeFocused();
+  await dashboard(page).getByRole("button", { name: "Remove Today's events" }).focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => placed(page)).toEqual(["todos small", "today small", "pinned small", "changes wide", "recent small"]);
+  await expect(dashboard(page).getByRole("button", { name: "Move Due today or earlier", exact: true })).toBeFocused();
+
+  await dashboard(page).getByRole("button", { name: "Move Changes since your last visit", exact: true }).focus();
+  await page.keyboard.press("Home");
+  await expect(dashboard(page).getByRole("button", { name: "Move Changes since your last visit", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(() => placed(page)).toEqual(["todos small", "changes wide", "today small", "pinned small", "recent small"]);
+  await expect(page.getByRole("status").filter({ hasText: "moved" })).toHaveText("Changes since your last visit moved to place 2 of 5.");
+
+  const size = dashboard(page).getByRole("slider", { name: "Size of Pinned" });
+  await size.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(size).toHaveAttribute("aria-valuetext", "Tall");
+  await page.keyboard.press("ArrowRight");
+  await expect(size).toHaveAttribute("aria-valuetext", "Large");
+  await expect(size).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => placed(page)).toEqual(["todos small", "changes wide", "today small", "pinned wide", "recent small"]);
+
+  // Escape leaves Edit, as Done does, and gives the keys back to Edit dashboard.
+  await page.keyboard.press("Escape");
+  await expect(dashboard(page).getByRole("button", { name: "Edit dashboard" })).toBeFocused();
+  await expect(dashboard(page).getByRole("button", { name: /^Move / })).toHaveCount(0);
+
+  const arranged = ["todos small", "changes wide", "today small", "pinned wide", "recent small"];
+  await expect.poll(() => saved(page)).toEqual(arranged);
+  await page.reload();
+  await expect(card(page, "Recently edited")).toHaveAttribute("aria-busy", "false");
+  expect(await placed(page)).toEqual(arranged);
+
+  // The same member in another browser.
+  const other = await browser.newPage();
+  await signInAs(other, (await me(page)).person.email, "Ada Lovelace", "/dashboard");
+  await expect(dashboard(other)).toBeVisible();
+  await expect.poll(() => placed(other)).toEqual(arranged);
+  await other.close();
+
+  // Someone else's dashboard is their own.
+  const grace = await anotherPerson(page, "Grace Hopper");
+  await join(grace, page, "editor");
+  await grace.goto("/dashboard");
+  await expect(dashboard(grace)).toBeVisible();
+  await expect.poll(() => placed(grace)).toEqual(DEFAULT);
+  await grace.close();
+
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  await dashboard(page).getByRole("button", { name: "Reset" }).click();
+  await expect.poll(() => placed(page)).toEqual(DEFAULT);
+  // The member's settings keep only what differs from the default, so nothing is kept for it.
+  await expect.poll(() => saved(page)).toBeUndefined();
+  // And Reset can be taken back.
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => placed(page)).toEqual(arranged);
+  await expect.poll(() => saved(page)).toEqual(arranged);
+});
+
+test("a panel is dragged by its grip to where it is let go, is drawn where it would land while dragged, and Escape puts it back", async ({ page }) => {
+  // Tall enough for every panel, so each is dragged from where it is drawn.
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await settled(page);
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  const grip = (name: string) => dashboard(page).getByRole("button", { name: `Move ${name}`, exact: true });
+  const middle = async (name: string) => {
+    const box = (await card(page, name).boundingBox())!;
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+
+  // Pinned, last of the small ones, is taken up and held over Today's events, the first.
+  const from = (await grip("Pinned").boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  const over = await middle("Today's events");
+  await page.mouse.move(over.x, over.y, { steps: 8 });
+  await expect.poll(() => placed(page)).toEqual(["pinned small", "events small", "todos small", "today small", "changes wide"]);
+  await expect(card(page, "Pinned")).toHaveAttribute("data-lifted");
+  // Nothing is saved until it is let go.
+  expect(await saved(page)).toBeUndefined();
+  await page.keyboard.press("Escape");
+  await expect.poll(() => placed(page)).toEqual(DEFAULT);
+  await page.mouse.up();
+  await expect(card(page, "Pinned")).not.toHaveAttribute("data-lifted");
+  expect(await saved(page)).toBeUndefined();
+
+  // Dragged later in the order, which moves the panel it is dragged by in the page, and is still followed and let go there.
+  const eventsGrip = (await grip("Today's events").boundingBox())!;
+  await page.mouse.move(eventsGrip.x + 5, eventsGrip.y + 5);
+  await page.mouse.down();
+  const later = await middle("Due today or earlier");
+  await page.mouse.move(later.x, later.y, { steps: 10 });
+  await expect.poll(() => placed(page)).toEqual(["todos small", "events small", "today small", "pinned small", "changes wide"]);
+  await expect(card(page, "Today's events")).toHaveAttribute("data-lifted");
+  await page.mouse.up();
+  await expect.poll(() => saved(page)).toEqual(["todos small", "events small", "today small", "pinned small", "changes wide"]);
+
+  // Changes, the wide one at the end, is dragged over Due today or earlier and let go there.
+  const changesGrip = (await grip("Changes since your last visit").boundingBox())!;
+  await page.mouse.move(changesGrip.x + 5, changesGrip.y + 5);
+  await page.mouse.down();
+  const to = await middle("Due today or earlier");
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+  const moved = ["changes wide", "todos small", "events small", "today small", "pinned small"];
+  await expect.poll(() => placed(page)).toEqual(moved);
+  await expect.poll(() => saved(page)).toEqual(moved);
+
+  // A press that doesn't move past the threshold moves nothing.
+  const still = (await grip("Pinned").boundingBox())!;
+  await page.mouse.move(still.x + 5, still.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(still.x + 7, still.y + 6);
+  await page.mouse.up();
+  expect(await placed(page)).toEqual(moved);
+});
+
+test("a panel's corner is dragged to the columns and rows it reaches, and no panel before it moves", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await settled(page);
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  const before = await boxesOf(page);
+  const corner = (await dashboard(page).getByRole("slider", { name: "Size of Today's notes" }).boundingBox())!;
+  const pinned = (await card(page, "Pinned").boundingBox())!;
+  expect(corner.y + corner.height).toBeLessThan(page.viewportSize()!.height);
+
+  // Across into the second column and down past half of the next row: large.
+  await page.mouse.move(corner.x + 8, corner.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(pinned.x + pinned.width - 20, pinned.y + pinned.height * 1.7, { steps: 10 });
+  await expect(card(page, "Today's notes")).toHaveAttribute("data-size", "large");
+  await page.mouse.up();
+  await expect.poll(() => saved(page)).toEqual(["events small", "todos small", "today large", "pinned small", "changes wide"]);
+
+  const after = await boxesOf(page);
+  expect(after.slice(0, 2)).toEqual(before.slice(0, 2));
+  const today = after.find((b) => b.panel === "today")!;
+  const first = before.find((b) => b.panel === "events")!;
+  const second = before.find((b) => b.panel === "todos")!;
+  expect(today.x).toBe(first.x);
+  expect(today.width).toBe(second.x + second.width - first.x);
+  expect(today.height).toBeGreaterThan(first.height * 2);
+
+  // Back up and to the left, inside its first cell: small. Its corner is below the window now, so it is scrolled to first.
+  const sizeOfToday = dashboard(page).getByRole("slider", { name: "Size of Today's notes" });
+  await sizeOfToday.scrollIntoViewIfNeeded();
+  const big = (await sizeOfToday.boundingBox())!;
+  const cell = (await card(page, "Today's notes").boundingBox())!;
+  await page.mouse.move(big.x + 8, big.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(cell.x + cell.width * 0.3, cell.y + cell.height * 0.3, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(() => placed(page)).toEqual(DEFAULT);
+  expect(await boxesOf(page)).toEqual(before);
+});
+
+test("entering and leaving Edit moves no panel, and a narrow window has one column in the member's order", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "dashboard.layout": ["changes small", "pinned tall", "events wide"] }), baseRevision: 0 });
+  await page.reload();
+  for (const name of ["Changes since your last visit", "Pinned", "Today's events"]) await expect(card(page, name)).toHaveAttribute("aria-busy", "false");
+  const before = await boxesOf(page);
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  expect(await boxesOf(page)).toEqual(before);
+  await dashboard(page).getByRole("button", { name: "Done" }).click();
+  expect(await boxesOf(page)).toEqual(before);
+  // Escape leaves arranging with the keyboard nowhere, as after a click on the heading.
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  await dashboard(page).getByRole("heading", { level: 1 }).click();
+  await page.keyboard.press("Escape");
+  await expect(dashboard(page).getByRole("button", { name: "Edit dashboard" })).toBeVisible();
+
+  await page.setViewportSize({ width: 640, height: 900 });
+  await page.getByRole("button", { name: "Focus" }).click();
+  await expect.poll(async () => new Set((await boxesOf(page)).map((b) => b.x)).size).toBe(1);
+  const narrow = await boxesOf(page);
+  expect(narrow.map((b) => b.panel)).toEqual(["changes", "pinned", "events"]);
+  expect(narrow[0]!.y).toBeLessThan(narrow[1]!.y);
+  expect(narrow[1]!.y).toBeLessThan(narrow[2]!.y);
+  // Tall is still two rows; wide is as wide as the rest.
+  expect(narrow[1]!.height).toBeGreaterThan(narrow[0]!.height * 1.9);
+  expect(narrow[2]!.width).toBe(narrow[0]!.width);
+
+  // A corner dragged down in one column makes it taller and keeps the width it will have in two.
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  const corner = dashboard(page).getByRole("slider", { name: "Size of Today's events" });
+  await corner.scrollIntoViewIfNeeded();
+  const at = (await corner.boundingBox())!;
+  await page.mouse.move(at.x + 8, at.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 14, at.y + narrow[2]!.height * 0.7, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => saved(page)).toEqual(["changes small", "pinned tall", "events large"]);
+});
+
+test("a saved layout is drawn as far as it is sound: a panel there isn't is left out, one named twice is shown once, and nothing at all says how to add some", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "dashboard.layout": ["clock small", "pinned huge", "events tall", "pinned small"] }), baseRevision: 0 });
+  await page.reload();
+  await expect(dashboard(page)).toBeVisible();
+  await expect.poll(() => placed(page)).toEqual(["pinned small", "events tall"]);
+  await expect(card(page, "Pinned")).toHaveAttribute("aria-busy", "false");
+
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "dashboard.layout": [] }), baseRevision: 1 });
+  await page.reload();
+  await expect(dashboard(page)).toContainText("Nothing is on your dashboard. Press Edit dashboard to add panels.");
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  await dashboard(page).getByRole("button", { name: "Add panel" }).click();
+  await expect(page.getByRole("menuitem")).toHaveCount(7);
+  await page.getByRole("menuitem", { name: "Coming up" }).click();
+  await expect.poll(() => placed(page)).toEqual(["upcoming small"]);
+  await expect(card(page, "Coming up")).toContainText("No calendar is connected.");
+
+  // With a calendar: the week after today, each event with its day.
+  await perform(page, { type: "source.connect", id: "sample-calendar", back: "/" });
+  await page.reload();
+  await expect(card(page, "Coming up")).toHaveAttribute("aria-busy", "false");
+  await expect(card(page, "Coming up").locator(".dash-what").first()).toBeVisible();
+  const said = await card(page, "Coming up").locator(".dash-meta").allInnerTexts();
+  expect(said.length).toBeGreaterThan(3);
+  for (const when of said) expect(when).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) [A-Z][a-z]{2} \d+, (all day|\d)/);
 });

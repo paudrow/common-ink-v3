@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { CalendarEvent, Me, OpInput } from "../../src/core/protocol.ts";
-import { anotherPerson, join, perform, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, join, perform, runCommand, signInAsNewPerson, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -20,6 +20,11 @@ const cell = (page: Page, day: string) => grid(page).locator(`[data-day="${day}"
 const eventIn = (within: Locator, title: string) => within.getByRole("button", { name: new RegExp(`${title}$`) });
 const details = (page: Page) => page.getByRole("dialog", { name: /^Event:/ });
 const form = (page: Page) => details(page).getByRole("form", { name: "Change event" });
+/** An all-day bar in Week's all-day row, by the first and last day it covers on screen. */
+const barOf = (page: Page, title: string, first: string) => grid(page).getByRole("row", { name: "All day" }).locator(`.cal-bar[data-first="${first}"]`).filter({ hasText: title });
+/** The days in view in Week, as the grid has them. */
+const daysInView = (page: Page) => grid(page).getByRole("gridcell").evaluateAll((cells) => cells.map((c) => (c as HTMLElement).dataset.day));
+const openSources = (page: Page) => calendar(page).getByRole("button", { name: "Calendars", exact: true }).click();
 const contact = (page: Page, name: string) => contacts(page).getByRole("list", { name: "Contacts" }).getByRole("listitem", { name });
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const chips = (page: Page) => editor(page).locator(".ref-chip");
@@ -40,11 +45,11 @@ const dayIn = (time: number, timeZone: string) => new Intl.DateTimeFormat("en-CA
 const timeIn = (time: number, timeZone: string) => new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(time).replace(/ /g, " ");
 const shift = (day: string, by: number) => new Date(Date.parse(`${day}T00:00:00Z`) + by * DAY_MS).toISOString().slice(0, 10);
 
-/** The dates of the week it is where the browser is, Sunday first, which is the week the Calendar opens on. */
+/** The dates of the week it is where the browser is, Monday first, which is the week the Calendar opens on unless the member chose another first day. */
 async function weekOn(page: Page) {
   const today = dayIn(Date.now(), await zoneOf(page));
-  const sunday = shift(today, -new Date(`${today}T00:00:00Z`).getUTCDay());
-  return Array.from({ length: 7 }, (_, i) => shift(sunday, i));
+  const monday = shift(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => shift(monday, i));
 }
 
 /** This week's events as the server lists them for the signed-in person. */
@@ -93,6 +98,8 @@ const isMuted = (chip: Locator) =>
 test("a calendar that isn't connected says so, and connecting it shows the week's events", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await page.goto("/calendar");
+  await expect(calendar(page)).toContainText("Connect a calendar to see your events here.");
+  await openSources(page);
 
   await expect(source(page, "Sample calendar")).toContainText("Not connected. Connect it to see your events here.");
   await expect(grid(page)).toHaveCount(0);
@@ -104,22 +111,23 @@ test("a calendar that isn't connected says so, and connecting it shows the week'
   await source(page, "Sample calendar").getByRole("button", { name: "Connect Sample calendar" }).click();
 
   await expect(source(page, "Sample calendar")).toContainText("Connected to Sample data");
+  await page.getByRole("dialog", { name: "Calendars" }).getByRole("button", { name: "Close" }).click();
   const week = await weekOn(page);
   await expect(calendar(page).getByRole("heading", { level: 2 }).first()).toHaveText(/ – /);
   await expect(grid(page).getByRole("gridcell")).toHaveCount(7);
   for (const title of ["Standup", "Planning", "Lunch with Sam", "Offsite", "Call with Tokyo", "Company holiday"]) await expect(eventIn(grid(page), title).first(), title).toBeVisible();
-  await expect(eventIn(cell(page, week[3]!).getByRole("list", { name: "All day" }), "Offsite")).toHaveCount(1);
-  await expect(eventIn(cell(page, week[1]!), "Planning")).toHaveCount(1);
+  await expect(barOf(page, "Offsite", week[2]!)).toHaveAttribute("data-last", week[3]!);
+  await expect(eventIn(cell(page, week[0]!), "Planning")).toHaveCount(1);
 
   await calendar(page).getByRole("button", { name: "Next" }).click();
-  await expect(cell(page, shift(week[0]!, 7))).toBeVisible();
-  await expect(eventIn(cell(page, shift(week[1]!, 7)), "Planning")).toHaveCount(1);
+  await expect.poll(() => daysInView(page)).toEqual(week.map((day) => shift(day, 7)));
+  await expect(eventIn(cell(page, shift(week[0]!, 7)), "Planning")).toHaveCount(1);
   await calendar(page).getByRole("button", { name: "Today" }).click();
-  await expect(cell(page, week[0]!)).toBeVisible();
+  await expect.poll(() => daysInView(page)).toEqual(week);
 
   await calendar(page).getByRole("button", { name: "Month", exact: true }).click();
-  await expect(grid(page).getByRole("columnheader")).toHaveText(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
-  await expect(eventIn(cell(page, week[1]!), "Planning")).toHaveCount(1);
+  await expect(grid(page).getByRole("columnheader")).toHaveText(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+  await expect(eventIn(cell(page, week[0]!), "Planning")).toHaveCount(1);
   await expect.poll(() => grid(page).getByRole("gridcell").count()).toBeGreaterThanOrEqual(28);
 
   await calendar(page).getByRole("button", { name: "Agenda", exact: true }).click();
@@ -142,7 +150,9 @@ test("contacts connect the same way, are searched as typed, and disconnecting ta
   await expect(rows).toHaveText([/^Ada Lovelace/, /^Grace Hopper/, /^Lin Wei/, /^Sam Okafor/, /^Zoë Álvarez/]);
   await expect(contacts(page).getByRole("status").first()).toHaveText("5 contacts");
   await expect(contact(page, "Grace Hopper")).toContainText("Navy");
-  await expect(contact(page, "Grace Hopper").getByRole("link", { name: "hopper@navy.example" })).toHaveAttribute("href", "mailto:hopper@navy.example");
+  // A card is one link, to the person's page: an address is written on it, and followed from that page.
+  await expect(contact(page, "Grace Hopper")).toContainText("hopper@navy.example");
+  await expect(contact(page, "Grace Hopper").getByRole("link")).toHaveAttribute("href", "/person/Grace%20Hopper");
   await expect(contact(page, "Sam Okafor")).toContainText("+1 555 0142");
   await expect(contacts(page).getByRole("button", { name: /Edit|Save/ }), "contacts are read here and not changed").toHaveCount(0);
 
@@ -154,6 +164,7 @@ test("contacts connect the same way, are searched as typed, and disconnecting ta
 
   // One account stands behind both, so the calendar is connected too.
   await openCalendar(page);
+  await openSources(page);
   await source(page, "Sample calendar").getByRole("button", { name: "Disconnect Sample data…" }).click();
   const asking = sources(page).getByRole("group", { name: "Disconnect Sample data" });
   await expect(asking).toContainText("Disconnecting Sample data disconnects Sample calendar and Sample contacts together");
@@ -177,6 +188,7 @@ test("a member's events and contacts are shown to them and to no other member of
 
   await grace.goto("/calendar");
   await grace.getByRole("button", { name: /workspace/ }).first().waitFor();
+  await openSources(grace);
   await expect(source(grace, "Sample calendar")).toContainText("Not connected");
   await expect(grid(grace)).toHaveCount(0);
   for (const title of ["Standup", "Offsite", "Call with Tokyo"]) await expect(grace.locator("body")).not.toContainText(title);
@@ -205,21 +217,29 @@ for (const timezoneId of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
       await expect(calendar(page)).toContainText(`Times are in your time zone, ${timezoneId.replace(/_/g, " ")}.`);
       const week = await weekOn(page);
       // The sample call is at 23:30 UTC on the Thursday, so the day it is on depends on where it is read.
-      const call = Date.parse(`${week[4]}T23:30:00Z`);
+      const call = Date.parse(`${week[3]}T23:30:00Z`);
       const [callDay, callTime] = [dayIn(call, timezoneId), timeIn(call, timezoneId)];
-      expect(callDay, "this zone reads the call on another day than Kiritimati or Los Angeles would").toBe(timezoneId === "Pacific/Kiritimati" ? week[5] : week[4]);
-      const standup = timeIn(Date.parse(`${week[1]}T14:00:00Z`), timezoneId);
+      expect(callDay, "this zone reads the call on another day than Kiritimati or Los Angeles would").toBe(timezoneId === "Pacific/Kiritimati" ? week[4] : week[3]);
+      const standup = timeIn(Date.parse(`${week[0]}T14:00:00Z`), timezoneId);
 
       for (const view of ["Week", "Month"]) {
         await calendar(page).getByRole("button", { name: view, exact: true }).click();
         await expect(calendar(page).getByRole("button", { name: view, exact: true })).toHaveAttribute("aria-pressed", "true");
-        await expect(eventIn(cell(page, callDay), "Call with Tokyo"), `${view}: the call's day`).toHaveText(`${callTime}Call with Tokyo`);
+        if (view === "Week") {
+          // In Week a card says its title, then when it is: the whole span, or where the card is narrow, when it starts.
+          await expect(eventIn(cell(page, callDay), "Call with Tokyo"), `${view}: the call's day`).toHaveAccessibleName(`${new Intl.DateTimeFormat("en-US", { timeZone: timezoneId, hour: "numeric", minute: "2-digit" }).formatRange(call, call + 3_600_000).replace(/[  ]/g, " ")} Call with Tokyo`);
+          await expect(eventIn(cell(page, callDay), "Call with Tokyo").locator(".cal-ev-start")).toHaveText(callTime);
+          await expect(barOf(page, "Offsite", week[2]!), `${view}: Offsite on its two days`).toHaveAttribute("data-last", week[3]!);
+          await expect(barOf(page, "Company holiday", week[4]!), `${view}: the holiday is on Friday`).toHaveAttribute("data-last", week[4]!);
+          await expect(eventIn(cell(page, dayIn(Date.parse(`${week[0]}T14:00:00Z`), timezoneId)), "Standup").first().locator(".cal-ev-start")).toHaveText(standup);
+        } else {
+          await expect(eventIn(cell(page, callDay), "Call with Tokyo"), `${view}: the call's day`).toHaveText(`${callTime}Call with Tokyo`);
+          for (const day of [week[2]!, week[3]!]) await expect(eventIn(cell(page, day).getByRole("list", { name: "All day" }), "Offsite"), `${view}: Offsite on ${day}`).toHaveCount(1);
+          for (const day of [week[1]!, week[4]!]) await expect(eventIn(cell(page, day), "Offsite"), `${view}: no Offsite on ${day}`).toHaveCount(0);
+          await expect(eventIn(cell(page, week[4]!).getByRole("list", { name: "All day" }), "Company holiday"), `${view}: the holiday is on Friday`).toHaveCount(1);
+          await expect(eventIn(cell(page, dayIn(Date.parse(`${week[0]}T14:00:00Z`), timezoneId)), "Standup").first()).toHaveText(`${standup}Standup`);
+        }
         for (const day of week.filter((d) => d !== callDay)) await expect(eventIn(cell(page, day), "Call with Tokyo"), `${view}: ${day}`).toHaveCount(0);
-
-        for (const day of [week[3]!, week[4]!]) await expect(eventIn(cell(page, day).getByRole("list", { name: "All day" }), "Offsite"), `${view}: Offsite on ${day}`).toHaveCount(1);
-        for (const day of [week[2]!, week[5]!]) await expect(eventIn(cell(page, day), "Offsite"), `${view}: no Offsite on ${day}`).toHaveCount(0);
-        await expect(eventIn(cell(page, week[5]!).getByRole("list", { name: "All day" }), "Company holiday"), `${view}: the holiday is on Friday`).toHaveCount(1);
-        await expect(eventIn(cell(page, dayIn(Date.parse(`${week[1]}T14:00:00Z`), timezoneId)), "Standup").first()).toHaveText(`${standup}Standup`);
       }
 
       await eventIn(cell(page, callDay), "Call with Tokyo").click();
@@ -308,8 +328,10 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await openCalendar(page);
 
   await eventIn(grid(page), "Lunch with Sam").click();
-  await details(page).getByRole("button", { name: "Copy reference" }).click();
-  await expect(details(page).getByRole("status")).toContainText("Paste it into a note.");
+  // Copy reference is the palette's, for the event open: the panel's one action is a new note about it.
+  await expect(details(page).getByRole("button", { name: "Copy reference" })).toHaveCount(0);
+  await runCommand(page, "Copy event reference");
+  await expect(page.locator(".toast-card").last()).toContainText(/^Copied the reference to Lunch with Sam, \w{3} \d{1,2}\. Paste it into a note\.$/);
   const written = await page.evaluate(() => navigator.clipboard.readText());
   expect(written).toMatch(/^::event\{[a-z0-9]{12} Lunch with Sam\}$/);
 
@@ -354,8 +376,7 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await expect(chips(page)).toHaveAttribute("title", "Reconnect Sample calendar first to see this event as it is now");
 });
 
-test("a reference to a contact shows its owner the contact, and every other member the name alone", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("a reference to a contact shows its owner the contact, and every other member the name alone", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const grace = await anotherPerson(page, "Grace Hopper");
   const { workspaceId } = await join(grace, page, "editor");
@@ -363,9 +384,10 @@ test("a reference to a contact shows its owner the contact, and every other memb
   const note = await perform(page, { type: "note.create", text: "# Plumbing\n\nCall " });
   await page.goto("/contacts");
 
-  await contact(page, "Sam Okafor").getByRole("button", { name: "Copy reference" }).click();
-  await expect(contact(page, "Sam Okafor").getByRole("status")).toContainText("Paste it into a note.");
-  const written = await page.evaluate(() => navigator.clipboard.readText());
+  // Contacts lists people and copies nothing: a reference to one is written by an agent, or by `record.refer` as here.
+  await expect(contact(page, "Sam Okafor")).toContainText("+1 555 0142");
+  await expect(page.getByRole("button", { name: "Copy reference" })).toHaveCount(0);
+  const { text: written } = await perform(page, { type: "record.refer", sourceId: "sample-contacts", id: "sam" });
   expect(written).toMatch(/^::contact\{[a-z0-9]{12} Sam Okafor\}$/);
 
   await openNote(page, note.id, "Call");

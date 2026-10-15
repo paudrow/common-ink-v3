@@ -71,6 +71,7 @@ if (parent !== window) {
     frame.title = "HTML embed";
     if (port) frame.addEventListener("load", function () { frame.contentWindow.postMessage({ inkPort: true }, "*", [port]); }, { once: true });
     frame.srcdoc = event.data.html;
+    frame.addEventListener("load", function () { parent.postMessage({ embedFrame: "drawn" }, "*"); }, { once: true });
     document.body.append(frame);
   });
   parent.postMessage({ embedFrame: "ready" }, "*");
@@ -92,7 +93,7 @@ const embedFrame = (ancestors: string, network: readonly string[] | null = null)
   });
 
 /** The address of a host given to HTML embeds alone, when `EMBED_ORIGIN` names one. */
-function embedOrigin(env: { EMBED_ORIGIN?: string }): string | null {
+export function embedOrigin(env: { EMBED_ORIGIN?: string }): string | null {
   if (!env.EMBED_ORIGIN) return null;
   const url = new URL(env.EMBED_ORIGIN);
   if (url.protocol !== "https:" && !/(^|\.)localhost$/.test(url.hostname)) throw new Error("EMBED_ORIGIN must be an https address");
@@ -100,7 +101,7 @@ function embedOrigin(env: { EMBED_ORIGIN?: string }): string | null {
 }
 
 /** Where a frame whose network is allowed is opened: the embed's document, under a token from plugin.frame. */
-const GRANTED_PATH = `${EMBED_FRAME_PATH}/g/`;
+export const GRANTED_PATH = `${EMBED_FRAME_PATH}/g/`;
 
 /** The sites a frame's token lets through, the one time it is asked, or null: `redeemFrame`, with the record it reads. */
 type Redeem = (token: string) => Promise<readonly string[] | null>;
@@ -127,15 +128,4 @@ export async function embedResponse(url: URL, env: { EMBED_ORIGIN?: string }, re
   // Every address under the embed's is answered here, so none of them is ever the app's own page.
   if (url.pathname !== EMBED_FRAME_PATH && !url.pathname.startsWith(`${EMBED_FRAME_PATH}/`)) return null;
   return origin ? new Response(null, { status: 302, headers: { Location: origin + url.pathname, "Referrer-Policy": "no-referrer" } }) : served(url.pathname, redeem, "'self'");
-}
-
-/** The app's page with what it may frame: the HTML embed's document, at its own address and under a token, and the sites in `FRAME_ORIGINS`. */
-export function framing(page: Response, url: URL, env: { EMBED_ORIGIN?: string }): Response {
-  if (!page.headers.get("Content-Type")?.startsWith("text/html")) return page;
-  const origin = embedOrigin(env);
-  // A source that ends in / covers every address below it, so the second covers each token's.
-  const framed = [url.origin, ...(origin ? [origin] : [])].flatMap((host) => [host + EMBED_FRAME_PATH, host + GRANTED_PATH]);
-  const res = new Response(page.body, page);
-  res.headers.append("Content-Security-Policy", `frame-src ${[...framed, ...FRAME_ORIGINS].join(" ")}`);
-  return res;
 }

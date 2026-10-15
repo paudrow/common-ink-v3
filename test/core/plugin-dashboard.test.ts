@@ -8,7 +8,7 @@ const NOW = Date.UTC(2026, 9, 11, 11, 30);
 /** 03:30 UTC on October 12: still the evening of the 11th in Los Angeles. */
 const LATE = Date.UTC(2026, 9, 12, 3, 30);
 
-const event = (title: string, when: CalendarEvent["when"]): CalendarEvent => ({ sourceId: "cal", id: title, calendar: "Work", color: null, title, when, timeZone: null, location: null, description: null, recurring: false, editable: true, etag: "0", url: null });
+const event = (title: string, when: CalendarEvent["when"]): CalendarEvent => ({ sourceId: "cal", id: title, calendarId: "work", calendar: "Work", color: null, title, when, timeZone: null, location: null, description: null, recurring: false, editable: true, etag: "0", url: null });
 const note = (id: string, createdAt: number, updatedAt: number, state: NoteSummary["state"] = "live"): NoteSummary => ({
   id,
   title: id,

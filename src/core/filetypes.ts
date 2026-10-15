@@ -8,13 +8,14 @@ export type UploadKind = "image" | "video" | "audio" | "file";
 
 interface Known {
   type: string;
-  kind: Exclude<UploadKind, "file">;
+  kind: UploadKind;
   endings: readonly string[];
   /** Whether a file that starts with `head` is one of these. */
   is: (head: Uint8Array) => boolean;
   /**
    * Whether the bytes may be shown where they are asked for rather than downloaded. An SVG may not:
    * opened as a page it is a document that runs script. It still draws as the source of an image.
+   * HTML is never one of these types at all, so it is always a download.
    */
   inline: boolean;
 }
@@ -39,6 +40,9 @@ const KNOWN: readonly Known[] = [
   { type: "audio/mp4", kind: "audio", endings: ["m4a"], inline: true, is: (h) => brand(h, "M4A ", "isom", "mp42") },
   { type: "audio/wav", kind: "audio", endings: ["wav"], inline: true, is: (h) => ascii(h, 0, "RIFF") && ascii(h, 8, "WAVE") },
   { type: "audio/ogg", kind: "audio", endings: ["ogg", "oga"], inline: true, is: (h) => ascii(h, 0, "OggS") },
+  // Opened in a tab, it is shown by the browser's own viewer, and its script runs inside the viewer and reaches nothing of the app's. See ADR 0008 for what the tab's page is.
+  // A PDF is shown in place only from the site kept for files (`FILE_ORIGIN`), never from the app's own: see src/worker/files.ts.
+  { type: "application/pdf", kind: "file", endings: ["pdf"], inline: false, is: (h) => ascii(h, 0, "%PDF-") },
 ];
 
 /** What every other file is served as. */
@@ -58,6 +62,27 @@ export const kindOf = (type: string): UploadKind => BY_TYPE.get(type)?.kind ?? "
 
 /** Whether bytes of this type are shown in place. Everything else is only ever downloaded. */
 export const showsInline = (type: string): boolean => BY_TYPE.get(type)?.inline ?? false;
+
+/** What a person calls a file, which is how uploads are found and how one is opened: its kind, a PDF, text to read, or anything else. */
+export type FileClass = "image" | "video" | "audio" | "pdf" | "text" | "other";
+export const FILE_CLASSES: readonly FileClass[] = ["image", "video", "audio", "pdf", "text", "other"];
+
+/** The endings of a file that is text to read: plain text, notes, tables, data, logs and the commonest code. Its bytes are served as {@link BYTES} all the same. */
+export const TEXT_ENDINGS = ["txt", "md", "markdown", "csv", "tsv", "json", "log", "yaml", "yml", "toml", "xml", "html", "css", "js", "ts", "py", "sh", "sql"] as const;
+
+const PDF = "application/pdf";
+const classOf = (known: Known): FileClass => (known.type === PDF ? "pdf" : known.kind === "file" ? "other" : known.kind);
+
+/** Every type a file is served as other than {@link BYTES}. */
+export const KNOWN_TYPES: readonly string[] = KNOWN.map((known) => known.type);
+/** The types served as a class of file. A file of no known type is text or other by its name's ending. */
+export const typesOf = (cls: FileClass): string[] => KNOWN.filter((known) => classOf(known) === cls).map((known) => known.type);
+
+export function fileClass(upload: { type: string; name: string }): FileClass {
+  const known = BY_TYPE.get(upload.type);
+  if (known) return classOf(known);
+  return (TEXT_ENDINGS as readonly string[]).includes(endingOf(upload.name)) ? "text" : "other";
+}
 
 /** As much of a file's start as its type and an image's size are read from. */
 export const HEAD_BYTES = 65_536;
@@ -117,5 +142,5 @@ export function cleanName(given: string): string {
 }
 
 /** How the name is written in the header that says what to save a download as. */
-export const disposition = (type: string, name: string) =>
-  `${showsInline(type) ? "inline" : "attachment"}; filename="${name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\%]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
+export const disposition = (type: string, name: string, inline = showsInline(type)) =>
+  `${inline ? "inline" : "attachment"}; filename="${name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\%]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
