@@ -1,6 +1,6 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { perform, type Actor } from "../../core/operations.ts";
-import { NO_SUCH_WORKSPACE, OpError, type OpInput, type OpType } from "../../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } from "../../core/protocol.ts";
 import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
@@ -201,7 +201,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see that query finds: with no query, every open one. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless the query's sort: says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more.\n\n${QUERY("todos")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The todos in the notes you can see that query finds: with no query, every open one. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more.\n\n${QUERY("todos")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
       query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
       ...queryDays,
@@ -214,6 +214,7 @@ export const TOOLS: Tool[] = [
       includeCompleted: { type: "boolean", description: "True to list done todos too. In the query: is:open OR is:done" },
       includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
+      sort: { type: "string", enum: [...TODO_SORTS], description: "The order, when the query has no sort:, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
       limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
       offset: { type: "integer", minimum: 0, description: "The next of the page before" },
     }),

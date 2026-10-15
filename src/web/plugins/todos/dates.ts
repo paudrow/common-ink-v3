@@ -40,6 +40,18 @@ export type DueState = "overdue" | "today" | "later";
 
 export const dueState = (day: string, now: string): DueState => (day < now ? "overdue" : day === now ? "today" : "later");
 
+/** The due dates a list can be narrowed to, as a changed row's line names them, and the days each means today. */
+export const DUE_FILTERS = { any: "Any date", overdue: "Overdue", today: "Today", week: "Next 7 days", none: "No date" } as const;
+export type DueFilter = keyof typeof DUE_FILTERS;
+
+export function dueRange(filter: DueFilter, now: string): { dueFrom?: string; dueTo?: string; noDue?: boolean } {
+  if (filter === "overdue") return { dueTo: addDays(now, -1) };
+  if (filter === "today") return { dueFrom: now, dueTo: now };
+  if (filter === "week") return { dueFrom: now, dueTo: addDays(now, 6) };
+  if (filter === "none") return { noDue: true };
+  return {};
+}
+
 /**
  * The query the Todos page is left at. Before the page took a query it kept a choice from each of
  * its filters, and what a browser still holds of those is read as the query that says the same.

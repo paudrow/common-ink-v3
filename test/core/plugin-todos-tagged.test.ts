@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { narrowedTo, toggledTag } from "../../src/web/plugins/todos/tagged.ts";
+import { narrowedTo, toggledTag, withSort } from "../../src/web/plugins/todos/tagged.ts";
 
 describe("the tags a todos query narrows the list to", () => {
   it("are the tags at its top, written either way", () => {
@@ -55,5 +55,20 @@ describe("pressing a tag's chip", () => {
 
   it("is undone by pressing it again", () => {
     for (const typed of ["", "due:<today", "bill is:open", "importance:>=2 #home"]) expect(toggledTag(toggledTag(typed, "money"), "money")).toBe(typed);
+  });
+});
+
+describe("picking an order in the Todos page's Sort menu", () => {
+  it("writes its sort: at the end of the query, in place of any typed, and takes it off for the order with none", () => {
+    expect(withSort("", "priority-desc")).toBe("sort:priority-desc");
+    expect(withSort("call #money", "text-asc")).toBe("call #money sort:text-asc");
+    expect(withSort("sort:title-asc call #money", "updated-desc")).toBe("call #money sort:updated-desc");
+    expect(withSort("call sort:text-asc due:<today", null)).toBe("call due:<today");
+    expect(withSort("sort:importance-desc", null)).toBe("");
+  });
+
+  it("keeps a query it can't read as typed, and a quoted sort: word in the words is not taken for one", () => {
+    expect(withSort("priority:urgent", "text-asc")).toBe("priority:urgent sort:text-asc");
+    expect(withSort('"sort:this" bank', "priority-desc")).toBe('"sort:this" bank sort:priority-desc');
   });
 });
