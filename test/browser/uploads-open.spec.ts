@@ -198,29 +198,35 @@ test("a file the member can't see and one that isn't there are the same words, w
   expect(answered).toEqual([]);
 });
 
-test("a PDF's chip opens it in a tab of its own, shown by the browser's own viewer, served in place and sealed", async ({ page }) => {
+test("a PDF's chip downloads it, as the Uploads page's Open does, served as a download and sealed, where there is no site kept for files", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
+  const me = await page.evaluate(async () => (await (await fetch("/api/me")).json()) as { setup: { fileSite: boolean } });
+  expect(me.setup.fileSite, "this server has no FILE_ORIGIN").toBe(false);
   const upload = await send(page, "paper.pdf", PDF("(A paper) Tj"));
   const address = `/api/workspaces/${await workspaceOf(page)}/uploads/${upload.id}`;
   await noteWith(page, `# Reading\n\n::file{${upload.id}}\n\nafter\n`);
   const chip = editor(page).getByRole("link", { name: "paper.pdf" });
   await expect(chip).toHaveAttribute("href", address);
-  await expect(chip).toHaveAttribute("target", "_blank");
-  await expect(chip).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(chip).toHaveAttribute("download", "paper.pdf");
+  await expect(chip).not.toHaveAttribute("target", /.+/);
   const served = (await page.request.get(address)).headers();
   expect([served["content-type"], served["content-disposition"], served["content-security-policy"]]).toEqual([
     "application/pdf",
-    `inline; filename="paper.pdf"; filename*=UTF-8''paper.pdf`,
+    `attachment; filename="paper.pdf"; filename*=UTF-8''paper.pdf`,
     "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'",
   ]);
+  // Asked to open in a tab with no file site, it is the same download.
+  expect((await page.request.get(`${address}?open=tab`, { maxRedirects: 0 })).headers()["content-disposition"]).toMatch(/^attachment; /);
 
-  const opened = page.context().waitForEvent("page");
+  const tabs = page.context().pages().length;
+  const saved = page.waitForEvent("download");
   await chip.click();
-  const tab = await opened;
-  await expect(tab).toHaveURL(new RegExp(`${address}$`));
-  await expect.poll(() => tab.frames().some((frame) => frame.url().startsWith("chrome-extension://"))).toBe(true);
-  expect(await tab.evaluate(() => window.opener)).toBeNull();
-  await tab.close();
+  expect((await saved).suggestedFilename()).toBe("paper.pdf");
+  await page.goto(`/uploads/${upload.id}`);
+  const fromPage = page.waitForEvent("download");
+  await page.locator(".upload-detail").getByRole("button", { name: "Open", exact: true }).click();
+  expect((await fromPage).suggestedFilename()).toBe("paper.pdf");
+  expect(page.context().pages(), "no tab was opened").toHaveLength(tabs);
 });
 
 /** A PDF with one page whose words are `shows`, and the script of `action` run when it is opened. */
@@ -271,13 +277,10 @@ test("nothing an upload holds runs script against the app, however it is opened:
   await page.keyboard.press("Escape");
   await expect(chipPreview).toHaveCount(0);
 
-  // The PDF's chip opens it in a tab, in the browser's own viewer, where its script runs inside the viewer and nowhere else.
-  const opened = page.context().waitForEvent("page");
+  // The PDF's chip saves it, and nothing of it is drawn or run.
+  const pdfSaved = page.waitForEvent("download");
   await editor(page).getByRole("link", { name: "evil.pdf" }).click();
-  const tab = await opened;
-  await expect.poll(() => tab.frames().some((frame) => frame.url().startsWith("chrome-extension://"))).toBe(true);
-  await tab.waitForTimeout(1000);
-  await tab.close();
+  expect((await pdfSaved).suggestedFilename()).toBe("evil.pdf");
 
   // The HTML file's chip opens it in the app as its source, which is words and nothing else.
   await editor(page).getByRole("link", { name: "evil.html" }).click();
@@ -286,8 +289,8 @@ test("nothing an upload holds runs script against the app, however it is opened:
   await expect(filePage(page, "evil.html").locator("script, iframe, object, embed")).toHaveCount(0);
   await expect(page.locator("#said")).toHaveCount(0);
 
-  // Each address typed into a tab: HTML and SVG are saved and never shown, and the PDF is shown by the browser's viewer.
-  for (const [upload, name] of [[html, "evil.html"], [svg, "evil.svg"]] as const) {
+  // Each address typed into a tab: HTML, SVG and the PDF are saved and never shown.
+  for (const [upload, name] of [[html, "evil.html"], [svg, "evil.svg"], [pdf, "evil.pdf"]] as const) {
     const tab = await page.context().newPage();
     const download = tab.waitForEvent("download");
     const response = await tab.request.get(address(upload));
@@ -297,13 +300,8 @@ test("nothing an upload holds runs script against the app, however it is opened:
     expect(tab.url(), name).toBe("about:blank");
     await tab.close();
   }
-  const typed = await page.context().newPage();
-  await typed.goto(address(pdf));
-  await expect.poll(() => typed.frames().some((frame) => frame.url().startsWith("chrome-extension://"))).toBe(true);
-  await typed.waitForTimeout(1000);
-  await typed.close();
 
-  // The Uploads page's Open: the HTML file is read as words in the app, the SVG is previewed as a picture, the PDF opens in the viewer.
+  // The Uploads page's Open: the HTML file is read as words in the app, the SVG is previewed as a picture, the PDF is saved.
   const open = page.locator(".upload-detail").getByRole("button", { name: "Open", exact: true });
   await page.goto(`/uploads/${html.id}`);
   await open.click();
@@ -316,12 +314,9 @@ test("nothing an upload holds runs script against the app, however it is opened:
   await expect.poll(() => previewed.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(120);
   await expect(previewed.locator("iframe, object, embed")).toHaveCount(0);
   await page.goto(`/uploads/${pdf.id}`);
-  const fromCard = page.context().waitForEvent("page");
+  const fromCard = page.waitForEvent("download");
   await open.click();
-  const cardTab = await fromCard;
-  await expect.poll(() => cardTab.frames().some((frame) => frame.url().startsWith("chrome-extension://"))).toBe(true);
-  await cardTab.waitForTimeout(1000);
-  await cardTab.close();
+  expect((await fromCard).suggestedFilename()).toBe("evil.pdf");
 
   // Nothing ran as the app: no mark in its storage or its cookies, and the watched address was never asked.
   await page.goto("/");

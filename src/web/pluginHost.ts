@@ -145,6 +145,7 @@ const noUploads = (plugin: Plugin): Provided["uploads"] => ({
   onReferred: () => () => {},
   learn: () => {},
   address: () => "about:blank",
+  tabAddress: () => null,
   bytes: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.bytes: only Common Ink's own plugins are`)),
   send: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.send: only Common Ink's own plugins are`)),
 });

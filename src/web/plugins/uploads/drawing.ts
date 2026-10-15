@@ -55,15 +55,16 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
 
   /**
    * A file as a chip: its name and its size. A press opens it as its kind of file opens: a PDF in a
-   * tab, text in the app and a picture, video or recording in a preview where there is an app to show
+   * tab where there is a site kept for files and otherwise saved, text in the app and a picture, video or recording in a preview where there is an app to show
    * them in, and anything else is saved under its name.
    */
   const chip = (id: string, info: NonNullable<ReferredTo>) => {
     const link = el("a", "file-chip");
     const address = host.uploads.address(id);
-    const how = openingOf(info);
+    const tab = host.uploads.tabAddress(id);
+    const how = openingOf(info, tab !== null);
     if (how === "tab") {
-      link.href = address;
+      link.href = tab!;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       link.title = `Open ${info.name} in a new tab`;

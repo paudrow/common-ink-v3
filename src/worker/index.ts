@@ -6,7 +6,7 @@ import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
-import { handleFiles } from "./files.ts";
+import { fileOrigin, fileSiteResponse, handleFiles } from "./files.ts";
 import { embedOrigin, embedResponse } from "./frames.ts";
 import { secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
@@ -61,7 +61,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === "/api/me" && req.method === "GET") {
     // Opening the app is arriving: an invite made since the person signed in takes effect here.
     await arrive(env.DB, personId);
-    return json({ ...(await whoAmI(env.DB, personId)), setup: { embedSite: embedOrigin(env) !== null } } satisfies MeHere);
+    return json({ ...(await whoAmI(env.DB, personId)), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
   }
 
   // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
@@ -110,6 +110,8 @@ function route(req: Request, env: Env, url: URL): Response | Promise<Response> {
   if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
   const embed = embedResponse(url, env);
   if (embed) return embed;
+  const fileSite = fileSiteResponse(req, env, url);
+  if (fileSite) return fileSite;
   if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
   if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
   if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));

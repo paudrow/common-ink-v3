@@ -1477,6 +1477,8 @@ export const NO_SUCH_WORKSPACE = "No such workspace";
 export interface Setup {
   /** Whether HTML embeds are served from a host of their own (`EMBED_ORIGIN`), apart from the app's site. */
   embedSite: boolean;
+  /** Whether files are opened in a tab from a site of their own (`FILE_ORIGIN`). Without one a PDF is downloaded. */
+  fileSite: boolean;
 }
 
 /** What `/api/me` answers: who is signed in, and how the server is set up. */

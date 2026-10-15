@@ -41,7 +41,8 @@ const KNOWN: readonly Known[] = [
   { type: "audio/wav", kind: "audio", endings: ["wav"], inline: true, is: (h) => ascii(h, 0, "RIFF") && ascii(h, 8, "WAVE") },
   { type: "audio/ogg", kind: "audio", endings: ["ogg", "oga"], inline: true, is: (h) => ascii(h, 0, "OggS") },
   // Opened in a tab, it is shown by the browser's own viewer, and its script runs inside the viewer and reaches nothing of the app's. See ADR 0008 for what the tab's page is.
-  { type: "application/pdf", kind: "file", endings: ["pdf"], inline: true, is: (h) => ascii(h, 0, "%PDF-") },
+  // A PDF is shown in place only from the site kept for files (`FILE_ORIGIN`), never from the app's own: see src/worker/files.ts.
+  { type: "application/pdf", kind: "file", endings: ["pdf"], inline: false, is: (h) => ascii(h, 0, "%PDF-") },
 ];
 
 /** What every other file is served as. */
@@ -141,5 +142,5 @@ export function cleanName(given: string): string {
 }
 
 /** How the name is written in the header that says what to save a download as. */
-export const disposition = (type: string, name: string) =>
-  `${showsInline(type) ? "inline" : "attachment"}; filename="${name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\%]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
+export const disposition = (type: string, name: string, inline = showsInline(type)) =>
+  `${inline ? "inline" : "attachment"}; filename="${name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\%]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;

@@ -28,7 +28,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
       members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
       sharing: { of: async () => ({}) as never, grant: async () => ({}) as never, link: async () => null, revoke: async () => {}, setPrivate: async () => ({ removed: 0 }), all: async () => [] },
-      uploads: { referred: () => undefined, onReferred: () => () => {}, learn: () => {}, address: (id: string) => `/files/${id}`, bytes: async (id: string, upTo: number) => new TextEncoder().encode(`${id}:${upTo}`), send: async () => ({ id: "sent" }) as never },
+      uploads: { referred: () => undefined, onReferred: () => () => {}, learn: () => {}, address: (id: string) => `/files/${id}`, tabAddress: () => null, bytes: async (id: string, upTo: number) => new TextEncoder().encode(`${id}:${upTo}`), send: async () => ({ id: "sent" }) as never },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,

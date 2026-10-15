@@ -8,7 +8,7 @@ const utf8 = (text: string) => new TextEncoder().encode(text);
 
 describe("how a file opens", () => {
   it("is decided by what a person calls it: a picture, a video or a recording in a preview, a PDF in a tab, text in the app, anything else a download", () => {
-    const of = (name: string, type: string) => openingOf({ name, type });
+    const of = (name: string, type: string) => openingOf({ name, type }, true);
     expect([
       of("dot.png", "image/png"),
       of("clip.webm", "video/webm"),
@@ -22,9 +22,14 @@ describe("how a file opens", () => {
   });
 
   it("never opens HTML or SVG as a page: HTML is text read in the app, an SVG is a picture, and a PDF's name with other bytes is a download", () => {
-    expect(openingOf({ name: "page.html", type: "application/octet-stream" })).toBe("app");
-    expect(openingOf({ name: "drawing.svg", type: "image/svg+xml" })).toBe("preview");
-    expect(openingOf({ name: "fake.pdf", type: "application/octet-stream" })).toBe("download");
+    expect(openingOf({ name: "page.html", type: "application/octet-stream" }, true)).toBe("app");
+    expect(openingOf({ name: "drawing.svg", type: "image/svg+xml" }, true)).toBe("preview");
+    expect(openingOf({ name: "fake.pdf", type: "application/octet-stream" }, true)).toBe("download");
+  });
+
+  it("downloads a PDF where there is no site kept for files to open it in a tab from, and changes nothing else", () => {
+    const kinds = [["dot.png", "image/png"], ["paper.pdf", "application/pdf"], ["notes.txt", "application/octet-stream"], ["archive.zip", "application/octet-stream"]] as const;
+    expect(kinds.map(([name, type]) => openingOf({ name, type }, false))).toEqual(["preview", "download", "app", "download"]);
   });
 
   it("in the app is at the file's own address, which names only the upload's id", () => {

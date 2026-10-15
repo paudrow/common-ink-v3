@@ -420,7 +420,7 @@ What a person calls an upload: image, video, audio, PDF, text or other (`fileCla
 _Avoid_: File type (that is what the bytes are served as)
 
 **Opening a file**:
-What pressing an upload's chip, or Open on the Uploads page, does, by its file class (`openUpload`): a picture, a video or a recording is shown in a preview over the app; a PDF opens in a tab of the browser, in its own viewer; text is read in the app at `/file/<id>`, drawn and not changed (markdown as a note is, a CSV or TSV as a table, anything else as code); anything else is downloaded. Text read in the app can be copied into a new note. An uploaded file is not changed in place.
+What pressing an upload's chip, or Open on the Uploads page, does, by its file class (`openUpload`): a picture, a video or a recording is shown in a preview over the app; a PDF is downloaded, and opens in a tab of the browser, in its own viewer, only where the server has a site kept for files (`FILE_ORIGIN`), from that site; text is read in the app at `/file/<id>`, drawn and not changed (markdown as a note is, a CSV or TSV as a table, anything else as code); anything else is downloaded. Text read in the app can be copied into a new note. An uploaded file is not changed in place.
 _Avoid_: Preview (for anything but a picture, a video or a recording), viewer
 
 **Uses**:

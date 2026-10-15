@@ -348,6 +348,12 @@ export interface PluginHost {
     /** Where an upload's bytes are asked for, as the source of a picture, a video or a download. It is good only for whoever is looking: the member's session, or on a link's page the link. */
     address(id: string): string;
     /**
+     * Where an upload is opened in a tab of its own: the app's address for it, which sends a PDF on to
+     * the site kept for files. Null where there is no such site, or on a link's page, where a PDF is
+     * downloaded instead.
+     */
+    tabAddress(id: string): string | null;
+    /**
      * The first `upTo` bytes of an upload, or all of them for a shorter one, asked for where `address`
      * says and answered the same way: for whoever is looking. It rejects with the server's refusal,
      * `not_found` for one that isn't there or that they can't see.

@@ -4,13 +4,15 @@ import { disposition, fileClass, kindOf, showsInline, typeOf, typesOf } from "..
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 describe("what a person calls a file", () => {
-  it("is a PDF only when its name ends in pdf and its bytes start as one, and a PDF is shown in place, by the browser's viewer", () => {
+  it("is a PDF only when its name ends in pdf and its bytes start as one, and a PDF is downloaded, shown in place only from the site kept for files", () => {
     expect(typeOf("paper.pdf", bytes("%PDF-1.7\n"))).toBe("application/pdf");
     expect(typeOf("PAPER.PDF", bytes("%PDF-2.0"))).toBe("application/pdf");
     expect(typeOf("paper.pdf", bytes("<html><script>"))).toBe("application/octet-stream");
     expect(typeOf("paper.txt", bytes("%PDF-1.7"))).toBe("application/octet-stream");
-    expect([kindOf("application/pdf"), showsInline("application/pdf")]).toEqual(["file", true]);
-    expect(disposition("application/pdf", "paper.pdf")).toMatch(/^inline; /);
+    // Shown in place only from the site kept for files, which says so: at the app's address it is a download.
+    expect([kindOf("application/pdf"), showsInline("application/pdf")]).toEqual(["file", false]);
+    expect(disposition("application/pdf", "paper.pdf")).toMatch(/^attachment; /);
+    expect(disposition("application/pdf", "paper.pdf", true)).toMatch(/^inline; /);
   });
 
   it("is its kind, a PDF, text by its name's ending, or other", () => {
