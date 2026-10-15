@@ -40,7 +40,7 @@ export interface Placing {
 }
 
 /** The edit that puts a picked item in the note in place of its trigger and what was typed, and where the cursor goes. */
-export function placed(item: CompletionItem, at: Placing): { from: number; to: number; insert: string; anchor: number; head: number } {
+export function placed(item: CompletionItem & { insert: string }, at: Placing): { from: number; to: number; insert: string; anchor: number; head: number } {
   if (!item.block) {
     const [a, b] = item.select ?? [item.insert.length, item.insert.length];
     return { from: at.from, to: at.to, insert: item.insert, anchor: at.from + a, head: at.from + b };

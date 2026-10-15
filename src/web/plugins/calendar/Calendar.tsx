@@ -3,10 +3,12 @@ import { Icon, today as todayIs, useNow, type Calendar, type CalendarEvent, type
 import { forgetReferences } from "../lib/references.tsx";
 import { useSources, withFresher } from "../lib/Sources.tsx";
 import { CalendarsDialog } from "./CalendarsDialog.tsx";
-import { VIEWS, WEEKDAY_NAMES, cellsOf, dayLabel, daysOf, isGrid, isWeekend, minutesIn, shiftDay, startOfWeek, step, timeLabel, titleOf, titleOfDays, weekdayLabel, type Cell, type Day, type View, type WhenForm } from "./dates.ts";
+import { VIEWS, WEEKDAY_NAMES, cellsOf, dayLabel, daysOf, isDay, isGrid, isWeekend, minutesIn, shiftDay, startOfWeek, step, timeLabel, titleOf, titleOfDays, weekdayLabel, type Cell, type Day, type View, type WhenForm } from "./dates.ts";
 import { EventDetails } from "./EventDetails.tsx";
 import { calendarKey, dayAt, indexOf, keyOf, useListing } from "./listing.ts";
 import { NewEvent } from "./NewEvent.tsx";
+import { forgetEventsToFind } from "./finding.ts";
+import { opened as lastOpened } from "./referring.ts";
 import { SPARE, TimeGrid, type Goal } from "./TimeGrid.tsx";
 
 /** The zone the member's browser is in, which is the one every day and time here is said in. */
@@ -112,9 +114,13 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
   );
   const connected = (sources ?? []).some((s) => s.kind === "calendar" && s.state === "connected");
   const targets = useMemo(() => listing.calendars.filter((c) => c.writable && !hidden.has(calendarKey(c))), [listing.calendars, hidden]);
-  const open = opened === null ? undefined : events.find((e) => keyOf(e) === opened);
+  // One on a calendar the member hid opens all the same when it is asked for by its address.
+  const open = opened === null ? undefined : (events.find((e) => keyOf(e) === opened) ?? listing.events.find((e) => keyOf(e) === opened));
 
-  const reread = useCallback(() => setReading((asked.current += 1)), []);
+  const reread = useCallback(() => {
+    forgetEventsToFind();
+    setReading((asked.current += 1));
+  }, []);
 
   /** Whether today is among the days on show: the grid's, the month's, or the agenda's. */
   const todayShown = isGrid(view) ? today >= anchor && today <= shiftDay(anchor, visible - 1) : view === "month" ? today.slice(0, 7) === anchor.slice(0, 7) : today >= anchor && today <= listedDays!.at(-1)!;
@@ -133,6 +139,23 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
     if (isGrid(view)) return glide(by === 0 ? { to: indexOf(view === "week" && visible === 7 ? weekOf(today) : today) } : { by });
     setFocus(by === 0 ? indexOf(today) : indexOf(step(view, anchor, by)));
   };
+
+  // An address that names an event, as quick open's does, shows its day with the event open, and is then the page's own address again.
+  const linked = useMemo(() => {
+    const asked = new URLSearchParams(app.query);
+    const [sourceId, id, day] = [asked.get("source"), asked.get("event"), asked.get("day")];
+    return sourceId && id && day && isDay(day) ? { key: keyOf({ sourceId, id }), day } : null;
+  }, [app.query]);
+  useEffect(() => {
+    if (!linked) return;
+    if (isGrid(view)) glide({ to: indexOf(view === "week" && visible === 7 ? weekOf(linked.day) : linked.day) });
+    else setFocus(indexOf(linked.day));
+    setOpened(linked.key);
+    app.go(app.path, { replace: true });
+    // Only when the address names another event.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked]);
+  useEffect(() => () => lastOpened(null), []);
 
   // A window too narrow for the whole week opens on today rather than on days before it.
   useEffect(() => {
@@ -196,6 +219,7 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
     try {
       const changed = await host.perform({ type: "event.update", sourceId: event.sourceId, id: event.id, etag: event.etag, when });
       forgetReferences();
+      forgetEventsToFind();
       const at = (asked.current += 1);
       setPlaced((m) => new Map(m).set(key, { when, reading: at }));
       setReading(at);
