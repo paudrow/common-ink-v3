@@ -18,18 +18,27 @@ interface Props {
   empty: string;
   /** A switch under the box that widens what is listed, such as to archived notes. The box keeps the keyboard when it is clicked. */
   toggle?: { label: string; on: boolean; set: (on: boolean) => void };
+  /**
+   * Items found for what is typed some other way than by their label, such as events by their title
+   * and a day: listed after the items whose label holds what is typed, and before those that only
+   * have its letters in order.
+   */
+  found?: (typed: string) => PaletteItem[];
   onPick: (id: string) => void;
   onClose: () => void;
 }
 
 /** A box to type in over a list that narrows to what matches; the command palette and quick open are both one. */
-export function Palette({ label, placeholder, items, most, empty, toggle, onPick, onClose }: Props) {
+export function Palette({ label, placeholder, items, most, empty, toggle, found, onPick, onClose }: Props) {
   const ids = useId();
   const ref = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState("");
   const [at, setAt] = useState(0);
-  const shown = matching(items, typed, (item) => item.label).slice(0, most);
+  const matched = matching(items, typed, (item) => item.label).slice(0, most);
+  const holding = matched.findIndex((item) => !item.label.toLowerCase().includes(typed.trim().toLowerCase()));
+  const cut = holding < 0 ? matched.length : holding;
+  const shown = found ? [...matched.slice(0, cut), ...found(typed), ...matched.slice(cut)] : matched;
   const optionId = (i: number) => `${ids}-option-${i}`;
 
   useDismiss(onClose, ref);

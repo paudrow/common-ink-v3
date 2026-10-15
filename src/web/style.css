@@ -8099,8 +8099,7 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--muted);
 }
 
-.event-links,
-.copy-reference {
+.event-links {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -8111,12 +8110,6 @@ button.todo-tag[aria-pressed="true"] {
 .contact-reach a,
 .ref-details a {
   color: var(--accent);
-}
-
-.copy-reference code {
-  font-family: var(--mono);
-  font-size: 11px;
-  overflow-wrap: anywhere;
 }
 
 .event-form {
@@ -8138,6 +8131,11 @@ button.todo-tag[aria-pressed="true"] {
 .event-notes h3 {
   margin: 0;
   font-size: 13px;
+}
+
+/* The panel's main action, under the notes it adds to. */
+.event-new-note-start {
+  align-self: flex-start;
 }
 
 .event-new-note {

@@ -1,8 +1,8 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useDismiss, type App, type CalendarEvent, type OpInput, type PluginHost, type Source } from "../../plugin-api.ts";
-import { CopyReference } from "../lib/CopyReference.tsx";
 import { formOf, sameWhen, whenLabel, whenOf, type WhenForm } from "./dates.ts";
 import { NewNoteAbout, NotesAbout } from "./EventNotes.tsx";
+import { opened } from "./referring.ts";
 
 interface Props {
   host: PluginHost;
@@ -49,6 +49,8 @@ export function EventDetails({ host, app, event, source, timeZone, close, onChan
   // Kept here and not in the form, which is made again when the event is read again.
   const [said, say] = useState<Said | null>(null);
   useDismiss(close, ref);
+  // The palette's Copy event reference copies the event last opened here.
+  useEffect(() => opened(event), [event]);
   return (
     <div className="event-scrim">
       <div ref={ref} className="event-dialog" role="dialog" aria-label={`Event: ${event.title || "Untitled"}`}>
@@ -83,22 +85,22 @@ export function EventDetails({ host, app, event, source, timeZone, close, onChan
               </>
             )}
           </dl>
-          <div className="event-links">
-            <CopyReference host={host} sourceId={event.sourceId} id={event.id} />
-            <NewNoteAbout key={`${event.sourceId} ${event.id}`} host={host} app={app} event={event} timeZone={timeZone} close={close} />
-            {event.url && /^https?:\/\//.test(event.url) && (
+          {event.url && /^https?:\/\//.test(event.url) && (
+            <div className="event-links">
               <a href={event.url} target="_blank" rel="noopener noreferrer">
                 Open in {source?.provider ?? "its calendar"}
               </a>
-            )}
-          </div>
+            </div>
+          )}
           {event.editable ? (
             // A new form for each reading of the event, so one refused as stale starts again from the event as it is now.
             <EventForm key={event.etag} host={host} event={event} timeZone={timeZone} onChanged={onChanged} said={said} say={say} />
           ) : (
             <p className="event-read-only">{whyReadOnly(event, source)}</p>
           )}
-          <NotesAbout key={`${event.sourceId} ${event.id}`} host={host} app={app} event={event} close={close} />
+          <NotesAbout key={`${event.sourceId} ${event.id}`} host={host} app={app} event={event} close={close}>
+            <NewNoteAbout host={host} app={app} event={event} timeZone={timeZone} close={close} />
+          </NotesAbout>
         </div>
       </div>
     </div>

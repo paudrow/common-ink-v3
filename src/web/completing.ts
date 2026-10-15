@@ -12,11 +12,12 @@ type Items = readonly CompletionItem[];
  * completion whose trigger fits is asked, and their items share the one list, in the order of the
  * completions. One that throws offers nothing, and `onFail` is told.
  */
-export function completing(completions: readonly Completion[], onFail: (completion: Completion, error: unknown) => void): Extension {
-  if (!completions.length) return [];
+export function completing(given: readonly Completion[], onFail: (completion: Completion, error: unknown) => void): Extension {
+  if (!given.length) return [];
+  const completions = [...given].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   /** Where a completion's trigger starts and what it offers for what was typed after it, or null when the cursor isn't after its trigger. */
-  const ask = (completion: Completion, context: CompletionContext): { from: number; items: Items | Promise<Items> } | null => {
+  const ask = (completion: Completion, context: CompletionContext): { completion: Completion; from: number; items: Items | Promise<Items> } | null => {
     const line = context.state.doc.lineAt(context.pos);
     const typed = typedAfter(line.text.slice(0, context.pos - line.from), completion.trigger, completion);
     if (typed === null) return null;
@@ -25,9 +26,9 @@ export function completing(completions: readonly Completion[], onFail: (completi
     const failed = (err: unknown): Items => (onFail(completion, err), []);
     try {
       const items = completion.items(typed);
-      return { from, items: items instanceof Promise ? items.catch(failed) : items };
+      return { completion, from, items: items instanceof Promise ? items.catch(failed) : items };
     } catch (err) {
-      return { from, items: failed(err) };
+      return { completion, from, items: failed(err) };
     }
   };
 
@@ -42,7 +43,7 @@ export function completing(completions: readonly Completion[], onFail: (completi
     const from = Math.min(...asked.map((a) => a.from));
     const offer = (answers: Items[]): CompletionResult | null => {
       // The completion has already chosen and ordered what fits, and unfiltered items keep the order they are given in, one completion after another.
-      const options = answers.flatMap((items, i) => items.map((item) => optionFor(item, asked[i]!.from - from)));
+      const options = answers.flatMap((items, i) => items.map((item) => optionFor(asked[i]!.completion, item, asked[i]!.from - from)));
       return options.length ? { from, to: context.pos, filter: false, update, options } : null;
     };
     const answers = asked.map((a) => a.items);
@@ -57,14 +58,32 @@ export function completing(completions: readonly Completion[], onFail: (completi
   };
 
   /** `after` is how far the item's own trigger is past where the list starts, which is the earliest trigger of those that fit. */
-  const optionFor = (item: CompletionItem, after: number): Option => ({
+  const optionFor = (completion: Completion, item: CompletionItem, after: number): Option => ({
     label: item.label,
     detail: item.detail,
     apply(view, _picked, listFrom, end) {
       const start = listFrom + after;
-      const at = view.state.doc.lineAt(start);
-      const { anchor, head, ...changes } = placed(item, { from: start, to: end, before: at.text.slice(0, start - at.from), after: at.text.slice(end - at.from), last: at.number === view.state.doc.lines });
-      view.dispatch({ changes, selection: { anchor, head }, scrollIntoView: true, userEvent: "input.complete" });
+      const write = (insert: string, from = start, to = end) => {
+        const at = view.state.doc.lineAt(from);
+        const { anchor, head, ...changes } = placed({ ...item, insert }, { from, to, before: at.text.slice(0, from - at.from), after: at.text.slice(to - at.from), last: at.number === view.state.doc.lines });
+        // Typing carried on after it while it was made: the cursor stays where that left it.
+        const still = view.state.selection.main.empty && view.state.selection.main.head === to;
+        view.dispatch({ changes, ...(still && { selection: { anchor, head } }), scrollIntoView: true, userEvent: "input.complete" });
+      };
+      if (typeof item.insert === "string") return write(item.insert);
+      const typed = view.state.doc.sliceString(start, end);
+      item.insert().then(
+        (insert) => {
+          if (insert === null || !view.dom.isConnected) return;
+          // Typing before it while it was made moved it: it is written where the trigger and what was typed now are, the nearest, or not at all.
+          const text = view.state.doc.toString();
+          const found: number[] = [];
+          for (let at = text.indexOf(typed); at >= 0; at = text.indexOf(typed, at + 1)) found.push(at);
+          const at = found.sort((a, b) => Math.abs(a - start) - Math.abs(b - start))[0];
+          if (at !== undefined) write(insert, at, at + typed.length);
+        },
+        (err: unknown) => onFail(completion, err),
+      );
     },
   });
 
