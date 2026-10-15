@@ -32,7 +32,7 @@ A `key:value` in a query that narrows by something other than words: `folder:`, 
 _Avoid_: Qualifier, operator (for a filter)
 
 **Builder**:
-The panel Advanced opens under a search bar: the bar's query as a row for each condition, to be changed by picking. Each change is written into the bar, and what is typed in the bar is read back into the rows. A query rows can't show stays as typed. Its **?** opens the help, every form of the language with an example to try.
+The panel Advanced opens under a search bar: the bar's query as a row for each condition, to be changed by picking. Each change is written into the bar, and what is typed in the bar is read back into the rows. A query rows can't show stays as typed. It opens on a first row to fill in. Its fields are the filters, with `is:` offered as two: State (open, archived, in Trash, and done for a todo) and Visibility (shared or private). Its **?** opens the help over the page, every form of the language under the same headings with an example to try.
 _Avoid_: Filter panel, advanced search form
 
 **Open, Archived, All**:
@@ -170,6 +170,13 @@ _Avoid_: Shortcut, hotkey
 
 **Command palette**:
 The list of commands, narrowed by typing.
+
+**Keyboard shortcuts sheet**:
+Every command that has keys now, under Navigation, Notes, Editor and then a plugin's own heading such as Vim, opened over the page by **?** wherever nothing is being typed, or from the command palette. It shows the member's keys where they changed them.
+_Avoid_: Cheat sheet, help menu (for the sheet)
+
+**Help overlay**:
+Help shown over the page in a dialog with a title and a close button, the one look for help in the app: the query syntax and the keyboard shortcuts sheet are drawn in it.
 
 **Vim mode**:
 A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.

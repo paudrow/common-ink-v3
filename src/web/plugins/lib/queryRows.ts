@@ -1,4 +1,7 @@
-import { filterOf, parseQuery, printQuery, wordsOf, type Cmp, type FilterKey, type Query, type QueryIn, type QueryNode, type QueryScope, type SortKey } from "../../plugin-api.ts";
+import { fieldOf, filterOf, keyOf, parseQuery, printQuery, wordsOf, type Cmp, type FilterKey, type Query, type QueryIn, type QueryNode, type QueryScope, type SortKey } from "../../plugin-api.ts";
+
+/** What a row asks about: a filter's field, such as State or Visibility, which both write `is:`, or `text` for words to find. */
+export type RowField = FilterKey | "visibility" | "text";
 
 /**
  * A query as the builder shows it: a condition a row, all of them to hold or any of them. It is the
@@ -6,8 +9,7 @@ import { filterOf, parseQuery, printQuery, wordsOf, type Cmp, type FilterKey, ty
  * it is or negated, joined by AND alone or by OR alone.
  */
 export interface Row {
-  /** A filter, or `text` for words to find. */
-  key: FilterKey | "text";
+  field: RowField;
   not: boolean;
   cmp: Cmp;
   /** What is typed or picked. For words it is the words, and more than one is a phrase. Empty until the row is filled in. */
@@ -23,15 +25,15 @@ export interface Built {
   sort: SortKey | null;
 }
 
-export const NEW_ROW: Row = { key: "text", not: false, cmp: "=", value: "" };
+export const NEW_ROW: Row = { field: "text", not: false, cmp: "=", value: "" };
 
 function rowOf(node: QueryNode): Row | null {
   if (node.kind === "not") {
     const row = rowOf(node.of);
     return row && { ...row, not: true };
   }
-  if (node.kind === "text") return { key: "text", not: false, cmp: "=", value: node.words.join(" ") };
-  if (node.kind === "filter") return { key: node.key, not: false, cmp: node.cmp, value: node.value, ...(node.to !== undefined && { to: node.to }) };
+  if (node.kind === "text") return { field: "text", not: false, cmp: "=", value: node.words.join(" ") };
+  if (node.kind === "filter") return { field: fieldOf(node.key, node.value) as RowField, not: false, cmp: node.cmp, value: node.value, ...(node.to !== undefined && { to: node.to }) };
   return null;
 }
 
@@ -47,13 +49,13 @@ export function builtOf(query: Query): Built | null {
 /** A row as the term it was typed to be, before the language has read it, or null for one not filled in yet. */
 function typedOf(row: Row): QueryNode | null {
   let node: QueryNode;
-  if (row.key === "text") {
+  if (row.field === "text") {
     const words = wordsOf(row.value);
     if (!words.length) return null;
     node = { kind: "text", words, phrase: words.length > 1 };
   } else {
     if (!row.value.trim() || (row.to !== undefined && !row.to.trim())) return null;
-    node = { kind: "filter", key: row.key, cmp: row.to === undefined ? row.cmp : "=", value: row.value.trim(), ...(row.to !== undefined && { to: row.to.trim() }) };
+    node = { kind: "filter", key: keyOf(row.field) as FilterKey, cmp: row.to === undefined ? row.cmp : "=", value: row.value.trim(), ...(row.to !== undefined && { to: row.to.trim() }) };
   }
   return row.not ? { kind: "not", of: node } : node;
 }
@@ -65,12 +67,12 @@ function typedOf(row: Row): QueryNode | null {
  */
 export function termOf(row: Row, scope: QueryScope): { node: QueryNode } | { why: string } | null {
   const typed = typedOf(row);
-  if (!typed) return row.key === "text" && row.value.trim() ? { why: "There are no letters or digits here to look for" } : null;
+  if (!typed) return row.field === "text" && row.value.trim() ? { why: "There are no letters or digits here to look for" } : null;
   const read = parseQuery(printQuery({ where: typed, in: [], sort: null }), scope);
   if (!read.ok) return { why: read.error.message };
   const node = read.query.where;
   // A value with a space where none is read, such as a day and a word, is two terms and no row.
-  if (!node || rowOf(node)?.key !== row.key) return { why: `This isn't one ${row.key === "text" ? "term" : `${row.key}:`} as the query language reads it` };
+  if (!node || rowOf(node)?.field !== row.field) return { why: `This isn't one ${row.field === "text" ? "term" : `${keyOf(row.field)}:`} as the query language reads it` };
   return { node };
 }
 
@@ -87,10 +89,13 @@ export function queryOf(built: Built, scope: QueryScope): Query {
 }
 
 /** A row set to another field, keeping what of it the field can take. */
-export function withKey(row: Row, key: Row["key"]): Row {
-  const compares = key !== "text" && filterOf(key).compares;
-  return { key, not: row.not, cmp: compares ? row.cmp : "=", value: "" };
+export function withField(row: Row, field: RowField): Row {
+  const compares = field !== "text" && filterOf(keyOf(field)).compares;
+  return { field, not: row.not, cmp: compares ? row.cmp : "=", value: "" };
 }
+
+/** Rows ready to be filled in: there is always one, so a builder opened on nothing has a first condition to fill in. */
+const someRow = (built: Built): Built => (built.rows.length ? built : { ...built, rows: [NEW_ROW] });
 
 export type BuilderEvent =
   /** The bar's text is now this, typed or put there by something other than the builder. */
@@ -115,26 +120,30 @@ export interface Builder {
   unshown: "nested" | "unread" | null;
 }
 
-const BLANK: Built = { rows: [], match: "all", in: [], sort: null };
-
-export function readBuilder(scope: QueryScope, text: string): Builder {
+/** The builder a text is, with no row added to it. */
+function readText(scope: QueryScope, text: string): Builder {
   const parsed = parseQuery(text, scope);
   if (!parsed.ok) return { scope, text, built: null, unshown: "unread" };
   const built = builtOf(parsed.query);
   return { scope, text, built, unshown: built ? null : "nested" };
 }
 
+export function readBuilder(scope: QueryScope, text: string): Builder {
+  const read = readText(scope, text);
+  return read.built ? { ...read, built: someRow(read.built) } : read;
+}
+
 export function builderReducer(state: Builder, event: BuilderEvent): Builder {
   if (event.type === "read") {
     if (event.text === state.text) return state;
-    const read = readBuilder(state.scope, event.text);
+    const read = readText(state.scope, event.text);
     // Rows not yet filled in are no part of the text, so they stay through a change to it.
     const waiting = state.built?.rows.filter((row) => !filled(row, state.scope)) ?? [];
-    return read.built ? { ...read, built: { ...read.built, rows: [...read.built.rows, ...waiting] } } : read;
+    return read.built ? { ...read, built: someRow({ ...read.built, rows: [...read.built.rows, ...waiting] }) } : read;
   }
-  const had = state.built ?? BLANK;
+  const had = state.built;
   // A query rows can't say is never rewritten by them.
-  if (!state.built && state.text.trim()) return state;
+  if (!had) return state;
   const built: Built =
     event.type === "add"
       ? { ...had, rows: [...had.rows, NEW_ROW] }
@@ -147,5 +156,5 @@ export function builderReducer(state: Builder, event: BuilderEvent): Builder {
             : event.type === "in"
               ? { ...had, in: event.in }
               : { ...had, sort: event.sort };
-  return { scope: state.scope, text: printQuery(queryOf(built, state.scope)), built, unshown: null };
+  return { scope: state.scope, text: printQuery(queryOf(built, state.scope)), built: someRow(built), unshown: null };
 }

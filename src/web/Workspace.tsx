@@ -200,16 +200,16 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         editorTextSize: { type: "integer", default: 100, minimum: 75, maximum: 200, title: "Editor text size", description: "The size of a note's text, as a percentage." },
       },
       activate(h) {
-        h.commands.register({ id: "notes.all", title: "Open All notes", run: () => h.app().openFolder(ALL_NOTES) });
+        h.commands.register({ id: "notes.all", title: "Open All notes", group: "Navigation", run: () => h.app().openFolder(ALL_NOTES) });
         if (canEdit) {
-          h.commands.register({ id: "note.new", title: "New note", run: () => void h.app().createNote().catch(() => {}) });
-          h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], leaveToFields: true, run: () => inner.current.step("note.undo") });
-          h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], run: () => inner.current.save() });
-          h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], leaveToFields: true, run: () => inner.current.step("note.redo") });
+          h.commands.register({ id: "note.new", title: "New note", group: "Notes", run: () => void h.app().createNote().catch(() => {}) });
+          h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], group: "Editor", leaveToFields: true, run: () => inner.current.step("note.undo") });
+          h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], group: "Notes", run: () => inner.current.save() });
+          h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], group: "Editor", leaveToFields: true, run: () => inner.current.step("note.redo") });
         }
-        h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], run: () => inner.current.toggleFocus() });
-        h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], run: () => inner.current.toggleSidebar() });
-        h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", run: () => inner.current.toggleInspector() });
+        h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], group: "Navigation", run: () => inner.current.toggleFocus() });
+        h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], group: "Navigation", run: () => inner.current.toggleSidebar() });
+        h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", group: "Navigation", run: () => inner.current.toggleInspector() });
       },
     };
     /** Kept apart from the rest so their links and commands come after the plugins', where the others come before. */

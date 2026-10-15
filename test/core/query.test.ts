@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FILTERS, KEYS, MAX_DEPTH, MAX_SEARCH_LENGTH, MAX_TERMS, conditionOf, dayOf, filterOf, folded, keysFor, keysStarting, parse, print, shift, syntax, syntaxDocs, typingAt, wordsFor, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "../../src/core/query.ts";
+import { FILTERS, KEYS, MAX_DEPTH, MAX_SEARCH_LENGTH, MAX_TERMS, conditionOf, dayOf, fieldName, fieldOf, fieldsOf, filterOf, folded, keysFor, keysStarting, parse, print, shift, syntax, syntaxDocs, typingAt, wordsFor, wordsIn, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "../../src/core/query.ts";
 
 import docs from "../../docs/search.md?raw";
 
@@ -386,6 +386,18 @@ describe("what is said of the language", () => {
       for (const key of keysFor(scope)) expect(syntax(scope).some((row) => row.form.startsWith(`${key}:`)), key).toBe(true);
     }
     expect(KEYS).toEqual(["folder", "tag", "updated", "created", "editor", "author", "is", "has", "due", "importance", "in", "sort"]);
+  });
+
+  it("has Shared and Private under Visibility, apart from the states a note or a todo is in, in the builder and the help alike", () => {
+    expect(fieldsOf("is", "notes")).toEqual(["is", "visibility"]);
+    expect(fieldsOf("has", "notes")).toEqual(["has"]);
+    expect([fieldName("is"), fieldName("visibility"), fieldName("has"), fieldName("updated")]).toEqual(["State", "Visibility", "Has", "Updated"]);
+    expect(wordsIn("is", "notes").map((w) => w.word)).toEqual(["open", "archived", "trashed"]);
+    expect(wordsIn("is", "todos").map((w) => w.word)).toEqual(["open", "done", "archived", "trashed"]);
+    expect(wordsIn("visibility", "todos").map((w) => w.word)).toEqual(["shared", "private"]);
+    expect([fieldOf("is", "private"), fieldOf("is", "archived"), fieldOf("tag", "shared")]).toEqual(["visibility", "is", "tag"]);
+    const headed = (form: string) => syntax("notes").find((row) => row.form === form)?.field;
+    expect(["is:shared", "is:private", "is:archived", "no:WORD", "word", "in:title"].map(headed)).toEqual(["visibility", "visibility", "is", "has", null, "in"]);
   });
 
   it("is what docs/search.md says, between its marks: run `node scripts/query-docs.ts` after changing a filter", () => {

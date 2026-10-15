@@ -273,9 +273,9 @@ describe("plugin host", () => {
     hostWith([notes, palette, { id: "reader", name: "Reader", activate: (h) => void (list = h.commands.list) }]);
 
     expect(list().slice(0, 3)).toEqual([
-      { id: "note.new", title: "New note", shortcut: "⌘N" },
-      { id: "go.todos", title: "Go to Todos", shortcut: undefined },
-      { id: "commands.show", title: "Show all commands", shortcut: "⇧⌘P" },
+      { id: "note.new", title: "New note", shortcut: "⌘N", keys: ["⌘N"], group: undefined },
+      { id: "go.todos", title: "Go to Todos", shortcut: undefined, keys: [], group: undefined },
+      { id: "commands.show", title: "Show all commands", shortcut: "⇧⌘P", keys: ["⇧⌘P", "F1"], group: undefined },
     ]);
   });
 
@@ -723,7 +723,7 @@ describe("keybindings, as settings", () => {
     wrote({ "keybindings.note.new": ["shift+MOD+k", "f2"] });
 
     expect(shortcuts(host)).toEqual({ "mod+shift+k": "note.new", f2: "note.new", "mod+shift+p": "commands.show", f1: "commands.show" });
-    expect(list()[0]).toEqual({ id: "note.new", title: "New note", shortcut: "⇧⌘K" });
+    expect(list()[0]).toEqual({ id: "note.new", title: "New note", shortcut: "⇧⌘K", keys: ["⇧⌘K", "F2"], group: undefined });
     expect(problems()).toEqual([]);
   });
 
@@ -734,7 +734,7 @@ describe("keybindings, as settings", () => {
     wrote({ "keybindings.commands.show": [] });
 
     expect(shortcuts(host)).toEqual({ "mod+n": "note.new" });
-    expect(list()[2]).toEqual({ id: "commands.show", title: "Show all commands", shortcut: undefined });
+    expect(list()[2]).toEqual({ id: "commands.show", title: "Show all commands", shortcut: undefined, keys: [], group: undefined });
   });
 
   it("gives a chord to the command the member bound it to, and flags that another command had it", () => {

@@ -76,6 +76,6 @@ export const daily: Plugin = {
   },
   activate(host) {
     host.views.register("page", { id: "today", path: PATH, label: "Today", icon: "today", nav: "primary", order: 35, transient: true, component: ({ app }) => <Today host={host} app={app} /> });
-    host.commands.register({ id: "daily.today", title: "Open today's daily note", run: () => host.app().go(PATH) });
+    host.commands.register({ id: "daily.today", title: "Open today's daily note", group: "Navigation", run: () => host.app().go(PATH) });
   },
 };

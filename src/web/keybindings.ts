@@ -144,15 +144,22 @@ export function bind(commands: readonly Bindable[]) {
 export const chordFor = (commandId: string, bindings: Readonly<Record<string, string>>) => Object.keys(bindings).find((chord) => bindings[chord] === commandId);
 
 const SYMBOLS: Record<string, string> = { mod: "⌘", ctrl: "⌃", alt: "⌥", shift: "⇧" };
+/** Keys with a name, as a person reads them. Any other key is its own letter, sign or name in capitals. */
+const NAMES: Record<string, string> = { arrowup: "↑", arrowdown: "↓", arrowleft: "←", arrowright: "→", enter: "Enter", tab: "Tab", escape: "Esc", space: "Space", backspace: "Backspace", delete: "Delete" };
 const WORDS: Record<string, string> = { mod: "Ctrl", alt: "Alt", shift: "Shift" };
 
-/** A command's keys as a person reads them: `⇧⌘P` on a Mac, `Ctrl+Shift+P` elsewhere, and `G G` for one chord after another. */
+/**
+ * A command's keys as a person reads them: `⇧⌘P` on a Mac, `Ctrl+Shift+P` elsewhere, and `G G` for
+ * one chord after another. A sign typed with Shift alone reads as the sign, `?` and not `⇧?`.
+ */
 export function chordLabel(keys: string, mac: boolean) {
   return onPlatform(keys, mac)
     .split(" ")
     .map((chord) => {
       const parts = chord.split("+");
-      const key = parts.pop()!.toUpperCase();
+      const named = parts.pop()!;
+      const key = NAMES[named] ?? named.toUpperCase();
+      if (!NAMES[named] && parts.join() === "shift" && /^[^\p{L}\p{N}]$/u.test(key)) return key;
       return mac ? `${parts.reverse().map((k) => SYMBOLS[k]).join("")}${key}` : [...parts.map((k) => WORDS[k]), key].join("+");
     })
     .join(" ");

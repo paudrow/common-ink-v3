@@ -25,8 +25,13 @@ export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE
 export {
   EMPTY as EMPTY_QUERY,
   FILTERS,
+  fieldMeans,
+  fieldName,
+  fieldOf,
+  fieldsOf,
   filterOf,
   keyNamed,
+  keyOf,
   keysFor,
   keysStarting,
   names as queryNames,
@@ -36,9 +41,11 @@ export {
   syntax as querySyntax,
   typingAt,
   wordsFor,
+  wordsIn,
   wordsOf,
   written as writtenValue,
   type Cmp,
+  type Field as QueryField,
   type Filter as QueryFilter,
   type FilterKey,
   type In as QueryIn,
@@ -81,6 +88,8 @@ export { isReading } from "./readOnly.ts";
 export { ResizeHandle } from "./resize.tsx";
 export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
+/** Help shown over the page, such as the query syntax or the keyboard shortcuts: one look for every help there is. */
+export { HelpOverlay } from "./HelpOverlay.tsx";
 export { ago, dayOf, today, useNow } from "./time.ts";
 /** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
 export { useOpenNote, type OpenNote } from "./openNotes.ts";
@@ -300,6 +309,11 @@ export interface Command {
   when?: () => boolean;
   /** A text field has its own answer to this command, so its keys are left to a field that has focus. */
   leaveToFields?: boolean;
+  /**
+   * The heading the keyboard shortcuts list it under: by convention one of `Navigation`, `Notes`,
+   * `Editor`, or a plugin's own, as vim's are under `Vim`. One with none is under Other.
+   */
+  group?: string;
 }
 
 export interface CommandInfo {
@@ -307,6 +321,9 @@ export interface CommandInfo {
   title: string;
   /** The first chord that runs it now, as a person reads it, such as `⇧⌘P`. */
   shortcut: string | undefined;
+  /** Every chord that runs it now, as a person reads them: its own, or the member's in their place. */
+  keys: readonly string[];
+  group: string | undefined;
 }
 
 /** What a view is drawn with. */

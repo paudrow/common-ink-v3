@@ -98,6 +98,12 @@ describe("keybindings", () => {
     expect(chordLabel("ctrl+w h", true)).toBe("⌃W H");
     expect(chordLabel("ctrl+w h", false)).toBe("Ctrl+W H");
     expect(chordLabel("g shift+t", false)).toBe("G Shift+T");
+    // A sign is typed with Shift on most keyboards, and reads as the sign. A letter with Shift still says so.
+    expect(chordLabel("shift+?", true)).toBe("?");
+    expect(chordLabel("shift+?", false)).toBe("?");
+    expect(chordLabel("shift+g", false)).toBe("Shift+G");
+    expect(chordLabel("mod+shift+.", true)).toBe("⇧⌘.");
+    expect([chordLabel("alt+arrowup", true), chordLabel("shift+tab", false), chordLabel("alt+enter", true), chordLabel("escape", false), chordLabel("f1", true)]).toEqual(["⌥↑", "Shift+Tab", "⌥Enter", "Esc", "F1"]);
   });
 
   it("runs a sequence on its last key, and takes the keys that begin one only while a command that can run goes on from them", () => {
