@@ -180,11 +180,7 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
   const words = plainly(todo.words, titleOf) || "Nothing written";
   const { lead, trailing } = splitTags(todo.words);
   const row = keyOf(todo);
-  // Listed under a tag its own line doesn't write: the tag is its note's, which is said after the note's name.
-  const ownTags = new Set(tagsOn(todo.text).map((own) => nameKey(own.name)));
-  const ofNote = narrowedTo.filter((tag) => !ownTags.has(nameKey(tag))).flatMap((tag) => todo.tags.filter((name) => nameKey(name) === nameKey(tag)));
   const narrowed = (name: string) => narrowedTo.some((tag) => nameKey(tag) === nameKey(name));
-  const via = ofNote.map((name) => `#${name}`).join(" ");
 
   /** A chip on the second line, set or not; Add tag's place is taken by the last tag once the todo has one. */
   const chipOf = (chip: RowChip) => chips.current?.querySelector<HTMLElement>(`[data-chip="${chip}"]`) ?? (chip === "tag" ? ([...(chips.current?.querySelectorAll<HTMLElement>(".todo-tag") ?? [])].at(-1) ?? null) : null);
@@ -278,7 +274,8 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
   const level = todo.importance ? IMPORTANCE[todo.importance] : null;
   // A todo that can't be changed shows only what is set on it, and so does one that is done.
   const offers = !readOnly && !todo.done;
-  const title = todo.noteTitle || "Untitled";
+  // The note's name and nothing after it: not the tags its title ends in, nor the one the list may be narrowed to.
+  const title = splitTags(todo.noteTitle).lead || "Untitled";
   const items: MenuItem[] = [
     { label: "Open note", action: () => onOpen(todo) },
     ...(app.openBeside ? [{ label: "Open to the side", action: () => onOpen(todo, true) }] : []),
@@ -411,9 +408,8 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
           </button>
         )}
       </span>
-      <button type="button" className="todo-note" title={ofNote.length ? `Open ${title}, listed for its note's ${ofNote.length > 1 ? "tags" : "tag"} ${via}` : `Open ${title}`} data-row-open onClick={() => onOpen(todo)}>
+      <button type="button" className="todo-note" title={`Open ${title}`} data-row-open onClick={() => onOpen(todo)}>
         <span className="todo-note-title">{title}</span>
-        {ofNote.length > 0 && <span className="todo-via"> {via}</span>}
       </button>
       {menu && <ContextMenu label={`More for ${words}`} x={menu.x} y={menu.y} items={items} onClose={closeMenu} />}
     </li>

@@ -5754,13 +5754,13 @@ button.diff-fold:hover {
   display: grid;
   grid-template-columns: 1.02em minmax(0, 1fr) auto;
   column-gap: 10px;
-  row-gap: 2px;
+  row-gap: 0;
   align-items: baseline;
   margin: 0 -6px;
-  padding: 6px 6px;
+  padding: 4px 6px;
   border-radius: 7px;
   font-size: 14.5px;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 /* The row being changed, by a chip's popover or its menu, is tinted as a row under the pointer is. Colour only: nothing moves. */
@@ -5776,7 +5776,7 @@ button.diff-fold:hover {
   box-sizing: border-box;
   width: 1.02em;
   height: 1.02em;
-  margin: calc((1.45em - 1.02em) / 2) 0 0;
+  margin: calc((1.4em - 1.02em) / 2) 0 0;
   border: 1.5px solid var(--faint);
   border-radius: 5px;
   background: var(--bg-elev) center / 100% no-repeat;
@@ -5845,8 +5845,8 @@ button.diff-fold:hover {
   display: inline-block;
   box-sizing: border-box;
   width: min(420px, 100%);
-  height: 26px;
-  margin: -2.5px 0;
+  height: 24px;
+  margin: -2px 0;
   padding: 0 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 6px;
@@ -5867,7 +5867,7 @@ button.diff-fold:hover {
   align-items: center;
   gap: 4px 6px;
   min-width: 0;
-  min-height: 20px;
+  min-height: 18px;
 }
 
 /* What is set on a todo, as pills, as v1 drew them: each opens a popover under itself, and a tag's narrows the list. */
@@ -5876,7 +5876,7 @@ button.diff-fold:hover {
   box-sizing: border-box;
   align-items: center;
   gap: 4px;
-  height: 20px;
+  height: 18px;
   padding: 0 7px;
   border: 0;
   border-radius: 999px;
@@ -5990,17 +5990,16 @@ button.todo-tag[aria-pressed="true"] {
   display: flex;
   grid-row: 1;
   grid-column: 3;
-  gap: 6px;
   justify-self: end;
   max-width: 38cqi;
   min-width: 0;
-  margin: -3px -4px;
-  padding: 3px 4px;
+  margin: -1px -4px;
+  padding: 1px 4px;
   border: 0;
   border-radius: 5px;
   background: none;
   color: var(--muted);
-  font: 12px var(--prose);
+  font: 12px/15px var(--prose);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -6008,12 +6007,6 @@ button.todo-tag[aria-pressed="true"] {
 .todo-note-title {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* Listed under its note's tag, not its own: the tag, said after the note's name, quieter still. */
-.todo-via {
-  flex: none;
-  color: var(--faint);
 }
 
 .todo-note:hover,
