@@ -120,8 +120,12 @@ The notes about a record are the notes that hold the member's own reference to i
 _Avoid_: Link (that is to a note), mention (that is `@`)
 
 **Dashboard**:
-A view for one member, not a stored object, and what the app opens to when no note is addressed and no tab is open to return to. It shows that member's events still ahead today, including all-day events; open todos they can see that are due today or earlier; their daily note for today and other notes they can see that were created or edited today; their pinned notes; and a summary of changes they can see since their last visit. Today is the member's day: the date where they are, from its midnight to the next. Opening it changes nothing: it makes no daily note. A guest has one too, of what they were granted. See `docs/adr/0009-the-dashboard-is-a-view-and-keeps-two-things.md`.
+A view for one member, not a stored object, and what the app opens to when no note is addressed and no tab is open to return to. It shows that member's events still ahead today, including all-day events; open todos they can see that are due today or earlier; their daily note for today and other notes they can see that were created or edited today; their pinned notes; and a summary of changes they can see since their last visit. Today is the member's day: the date where they are, from its midnight to the next. Opening it changes nothing: it makes no daily note. A guest has one too, of what they were granted. Which panels it shows, in what order and how big, is the member's own, kept with their settings: see Panel. See `docs/adr/0009-the-dashboard-is-a-view-and-keeps-two-things.md`.
 _Avoid_: Home
+
+**Panel**:
+One part of a member's dashboard, such as today's events or pinned notes, picked from the few there are. A member chooses which their dashboard shows, in what order, and at what size: small, wide, tall or large. That arrangement is theirs, the same in every browser, and changed by no agent.
+_Avoid_: Widget (that is in a note), card, section
 
 **Last visit**:
 How far a member has read the changes in a workspace: the moment up to which they marked the dashboard's summary read. It is theirs, kept for them in that workspace, and the same in every browser. It moves only when they press Mark as read, to the moment the summary they were shown was made, so opening the dashboard, reloading it, or having it open twice moves nothing, and a change made since is still there next time. An agent can read it and can't move it. It is not an unseen change, which is about one note in one browser.

@@ -454,6 +454,7 @@ export function TodoGlance({ todo, now, titleOf, onOpen }: { todo: ListedTodo; n
               {repeat}
             </span>
           )}
+          {todo.lastDone && <span className="todo-chip todo-done">{doneLabel(todo.lastDone, now)}</span>}
           {level && (
             <span className="todo-chip todo-importance" data-level={todo.importance}>
               <Icon name="flag" />

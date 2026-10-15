@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
-import { ago, dayOf, useNow, type App, type Author, type CalendarEvent, type HistoryEntry, type HistoryPage, type ListedTodo, type NoteSummary, type PluginHost, type Source, type ViewProps } from "../../plugin-api.ts";
-import { dayLabel, timeLabel } from "../calendar/dates.ts";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { Icon, ago, dismissing, useNow, type App, type Author, type CalendarEvent, type HistoryEntry, type ListedTodo, type NoteSummary, type PluginHost, type Source, type ViewProps } from "../../plugin-api.ts";
+import { dayIn, dayLabel, timeLabel, weekdayLabel } from "../calendar/dates.ts";
+import { followDrag } from "../lib/dragging.ts";
+import { ContextMenu } from "../lib/Menu.tsx";
 import type { ListedAt } from "../lib/openTodo.ts";
 import { TodoGlance } from "../todos/Todos.tsx";
+import { SIZE_NAMES, SIZES, arrange, readLayout, sizeOf, stepSize, writeLayout, type Layout, type Placed, type Size } from "./layout.ts";
 import type { Pins } from "./pins.ts";
 import { FIRST_SUMMARY_MS, aheadToday, editedToday, membersStamp, othersMarks, rose, summarize, todayAt, todoStamp, type Today } from "./today.ts";
 
@@ -81,19 +84,43 @@ export function PinIcon() {
   );
 }
 
+/** Where a panel is drawn: its title, its size, and while the dashboard is being arranged, the controls that arrange it. */
+interface Slot {
+  title: string;
+  size: Size;
+  arranging: Arranging | null;
+}
+
+interface Arranging {
+  /** Whether it is the one being dragged, which is drawn where it would land. */
+  lifted: boolean;
+  /** The handle it is moved by, before its title. */
+  grip: ReactNode;
+  /** Its remove button, in place of what its header has otherwise. */
+  remove: ReactNode;
+  /** The handle in its bottom right corner that it is resized by. */
+  corner: ReactNode;
+}
+
+const SlotContext = createContext<Slot>({ title: "", size: "small", arranging: null });
+
 /**
- * One section of the dashboard. It is the size it will be from the first, with bars where its rows
- * will be, and what it lists scrolls inside it: so nothing on the page moves as each section's
- * answer arrives, however many rows that is.
+ * One panel of the dashboard. It is the size it will be from the first, with bars where its rows
+ * will be, and what it lists scrolls inside it: so nothing on the page moves as each panel's
+ * answer arrives, however many rows that is. While the dashboard is arranged nothing in it can be
+ * pressed but the controls that arrange it.
  */
-function Card({ title, wide, reading, problem, action, children }: { title: string; wide?: boolean; reading: boolean; problem?: string | null; action?: ReactNode; children: ReactNode }) {
+function Card({ reading, problem, action, children }: { reading: boolean; problem?: string | null; action?: ReactNode; children: ReactNode }) {
+  const { title, size, arranging } = useContext(SlotContext);
   return (
-    <section className="dash-card" data-wide={wide || undefined} aria-label={title} aria-busy={reading}>
+    <section className="dash-card" data-size={size} data-lifted={arranging?.lifted || undefined} aria-label={title} aria-busy={reading}>
       <header className="dash-head">
+        {arranging?.grip}
         <h3>{title}</h3>
-        {action}
+        {arranging ? arranging.remove : action}
       </header>
-      <div className="dash-body">
+      {arranging?.corner}
+      <div className="dash-body" inert={!!arranging}>
         {reading ? (
           <ul className="dash-list" aria-hidden="true">
             {[60, 45, 70].map((width) => (
@@ -145,7 +172,7 @@ function Events({ host, app, today, now }: { host: PluginHost; app: App; today: 
     </button>
   );
   return (
-    <Card title="Today's events" reading={listed.status === "reading"} problem={listed.status === "failed" ? listed.message : null}>
+    <Card reading={listed.status === "reading"} problem={listed.status === "failed" ? listed.message : null}>
       {ahead.length > 0 ? (
         <ul className="dash-list" aria-label="Events still ahead today">
           {ahead.map(({ event, started }) => (
@@ -179,7 +206,7 @@ function Todos({ host, app, today, onOpen }: { host: PluginHost; app: App; today
   const listed = useRead(() => host.perform({ type: "todo.list", dueTo: today.day, limit: TODOS_SHOWN }), { key: today.day, stamp, ready: app.notes !== null });
   const todos: readonly ListedTodo[] = listed.status === "read" ? listed.value.todos : [];
   return (
-    <Card title="Due today or earlier" reading={listed.status === "reading"} problem={listed.status === "failed" ? listed.message : null}>
+    <Card reading={listed.status === "reading"} problem={listed.status === "failed" ? listed.message : null}>
       {todos.length > 0 ? (
         <ul className="dash-list dash-todos" aria-label="Todos due today or earlier">
           {todos.map((todo) => (
@@ -239,7 +266,7 @@ function TodaysNotes({ host, app, today, members, now }: { host: PluginHost; app
   };
 
   return (
-    <Card title="Today's notes" reading={found.status === "reading" || app.notes === null} problem={found.status === "failed" ? found.message : null}>
+    <Card reading={found.status === "reading" || app.notes === null} problem={found.status === "failed" ? found.message : null}>
       <ul className="dash-list" aria-label="Today's notes">
         {daily && <NoteRow app={app} note={daily} meta="Your daily note" />}
         {!daily && (role === "admin" || role === "editor") && (
@@ -280,7 +307,7 @@ function Pinned({ app, pins, now }: { app: App; pins: Pins; now: number }) {
     return note?.state === "live" ? [note] : [];
   });
   return (
-    <Card title="Pinned" reading={ids === null || app.notes === null}>
+    <Card reading={ids === null || app.notes === null}>
       {notes.length > 0 ? (
         <ul className="dash-list" aria-label="Pinned notes">
           {notes.map((note) => (
@@ -366,8 +393,6 @@ function Changes({ host, app, now }: { host: PluginHost; app: App; now: number }
 
   return (
     <Card
-      title="Changes since your last visit"
-      wide
       reading={summary.status === "reading"}
       problem={summary.status === "failed" ? summary.message : null}
       action={
@@ -411,30 +436,390 @@ function Changes({ host, app, now }: { host: PluginHost; app: App; now: number }
   );
 }
 
+/** As many notes as Recently edited lists. */
+const RECENT_SHOWN = 30;
+/** How far ahead Coming up looks, after today. */
+const AHEAD_DAYS = 7;
+const DAY_MS = 86_400_000;
+
+function Recent({ app, now }: { app: App; now: number }) {
+  const notes = useMemo(() => (app.notes ?? []).filter((n) => n.state === "live").toSorted((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1)).slice(0, RECENT_SHOWN), [app.notes]);
+  return (
+    <Card reading={app.notes === null}>
+      {notes.length > 0 ? (
+        <ul className="dash-list" aria-label="Recently edited notes">
+          {notes.map((note) => (
+            <NoteRow key={note.id} app={app} note={note} meta={`Edited ${ago(note.updatedAt, now)} by ${note.updatedBy.name}`} />
+          ))}
+        </ul>
+      ) : (
+        <p className="dash-none">No notes yet.</p>
+      )}
+    </Card>
+  );
+}
+
+/** When an event after today is, said briefly: its day, and its time where the member is. */
+function laterOf(event: CalendarEvent, timeZone: string): string {
+  const { when } = event;
+  const day = when.allDay ? when.from : dayIn(when.from, timeZone);
+  const date = `${weekdayLabel(day)} ${dayLabel(day, "short")}`;
+  return when.allDay ? `${date}, all day` : `${date}, ${timeLabel(when.from, timeZone)}`;
+}
+
+function Upcoming({ host, app, today }: { host: PluginHost; app: App; today: Today }) {
+  const listed = useRead(() => host.perform({ type: "event.list", from: today.to, to: today.to + AHEAD_DAYS * DAY_MS, timeZone: today.timeZone }), { key: today.day });
+  // What started today is Today's events'.
+  const later = listed.status === "read" ? listed.value.events.filter(({ when }) => (when.allDay ? when.from > today.day : when.from >= today.to)) : [];
+  const connected = listed.status === "read" && listed.value.sources.some((s) => s.state === "connected");
+  return (
+    <Card reading={listed.status === "reading"} problem={listed.status === "failed" ? listed.message : null}>
+      {later.length > 0 ? (
+        <ul className="dash-list" aria-label="Events in the next seven days">
+          {later.map((event) => (
+            <li key={`${event.sourceId} ${event.id}`}>
+              <button type="button" className="dash-row" title={`${event.title} · ${event.calendar}`} onClick={() => app.go("/calendar")}>
+                <span className="cal-swatch" style={swatch(event.color)} aria-hidden="true" />
+                <span className="dash-what">{event.title || "Untitled"}</span>
+                <span className="dash-meta">{laterOf(event, today.timeZone)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="dash-none">{connected ? "Nothing in the next seven days." : "No calendar is connected."}</p>
+      )}
+    </Card>
+  );
+}
+
+/** What a panel is drawn with. */
+interface Drawn {
+  host: PluginHost;
+  app: App;
+  pins: Pins;
+  onOpenTodo: (todo: ListedAt) => void;
+  today: Today;
+  now: number;
+  members: string;
+}
+
+/** A panel the Dashboard can show: its title, the size it is added at, and how it is drawn. */
+interface PanelKind {
+  id: string;
+  title: string;
+  size: Size;
+  draw: (drawn: Drawn) => ReactNode;
+}
+
+/** Every panel there is, in the order the Add panel menu lists them. */
+export const PANELS: readonly PanelKind[] = [
+  { id: "events", title: "Today's events", size: "small", draw: ({ host, app, today, now }) => <Events host={host} app={app} today={today} now={now} /> },
+  { id: "todos", title: "Due today or earlier", size: "small", draw: ({ host, app, today, onOpenTodo }) => <Todos host={host} app={app} today={today} onOpen={onOpenTodo} /> },
+  { id: "today", title: "Today's notes", size: "small", draw: ({ host, app, today, members, now }) => <TodaysNotes host={host} app={app} today={today} members={members} now={now} /> },
+  { id: "pinned", title: "Pinned", size: "small", draw: ({ app, pins, now }) => <Pinned app={app} pins={pins} now={now} /> },
+  { id: "changes", title: "Changes since your last visit", size: "wide", draw: ({ host, app, now }) => <Changes host={host} app={app} now={now} /> },
+  { id: "upcoming", title: "Coming up", size: "small", draw: ({ host, app, today }) => <Upcoming host={host} app={app} today={today} /> },
+  { id: "recent", title: "Recently edited", size: "small", draw: ({ app, now }) => <Recent app={app} now={now} /> },
+];
+
+/** What a member who has arranged nothing sees. */
+export const DEFAULT_LAYOUT: Layout = PANELS.slice(0, 5).map(({ id, size }) => ({ id, size }));
+
+const KINDS = new Map(PANELS.map((kind) => [kind.id, kind]));
+const OWN_SIZES = new Map(PANELS.map(({ id, size }) => [id, size]));
+
+function GripIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+      {[5, 8, 11].flatMap((y) => [6, 10].map((x) => <circle key={`${x} ${y}`} cx={x} cy={y} r="1.1" />))}
+    </svg>
+  );
+}
+
 interface Props extends ViewProps {
   host: PluginHost;
   pins: Pins;
   onOpenTodo: (todo: ListedAt) => void;
 }
 
-/** The Dashboard: one member's day. Every section is that member's own view, read through the operations any other view uses. */
+const MOVES: Record<string, (at: number, last: number) => number> = { ArrowUp: (at) => at - 1, ArrowLeft: (at) => at - 1, ArrowDown: (at) => at + 1, ArrowRight: (at) => at + 1, Home: () => 0, End: (_, last) => last };
+
+/**
+ * The Dashboard: one member's day, in panels they pick and arrange. Every panel is that member's own
+ * view, read through the operations any other view uses. How it is arranged is the member's
+ * remembered setting, so it is the same in every browser they sign in on.
+ *
+ * Arranging is a state of its own, entered by Edit dashboard and left by Done or Escape. In it each
+ * panel has a grip to drag it, or to move it with the arrow keys, a corner to resize it the same two
+ * ways, and a remove button; the page has Add panel and Reset. Outside it the panels are all there is.
+ */
 export function Dashboard({ host, app, pins, onOpenTodo }: Props) {
   const now = useNow();
   const timeZone = useMemo(zone, []);
   const today = useMemo(() => todayAt(now, timeZone), [now, timeZone]);
-  // One value for the day, so a section reads again at midnight and not each minute.
+  // One value for the day, so a panel reads again at midnight and not each minute.
   const day = useMemo(() => today, [today.day]);
   const members = useMemo(() => membersStamp(app.notes ?? []), [app.notes]);
+
+  const words = useSyncExternalStore(host.settings.subscribe, () => host.settings.get<readonly string[]>("layout"));
+  const layout = useMemo(() => readLayout(words, OWN_SIZES), [words]);
+  const [arranging, setArranging] = useState(false);
+  /** The layout as it would be were what is being dragged let go now. */
+  const [preview, setPreview] = useState<Layout | null>(null);
+  const previewing = useRef<Layout | null>(null);
+  const [dragged, setDragged] = useState<string | null>(null);
+  const [adding, setAdding] = useState<{ x: number; y: number } | null>(null);
+  const [said, setSaid] = useState("");
+  const grid = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLElement>(null);
+  /** The control to give the keyboard back to once the panels are drawn where they went. */
+  const refocus = useRef<string | null>(null);
+  const shown = preview ?? layout;
+
+  /** Saves a changed layout, says what changed, and gives the keyboard to `focus` once it is drawn. False when nothing was saved. */
+  const save = (next: Layout, saying: string, focus?: string) => {
+    if (next === layout) return false;
+    if (!host.settings.set("layout", writeLayout(next))) {
+      app.notify({ message: "Your dashboard couldn't be saved just now. Try again in a moment." });
+      return false;
+    }
+    setSaid(saying);
+    if (focus) refocus.current = focus;
+    return true;
+  };
+  const leave = () => {
+    setArranging(false);
+    setSaid("");
+    refocus.current = "edit";
+  };
+
+  // Escape leaves arranging wherever the keyboard is on the page, as when a click on a title left it nowhere; a menu open over it closes first.
+  useEffect(() => {
+    if (!arranging) return;
+    const escaped = (e: KeyboardEvent) => {
+      const at = document.activeElement;
+      if (e.key !== "Escape" || e.defaultPrevented || dismissing() || !(at === document.body || root.current?.contains(at))) return;
+      e.preventDefault();
+      leave();
+    };
+    document.addEventListener("keydown", escaped);
+    return () => document.removeEventListener("keydown", escaped);
+  }, [arranging]);
+  const show = (next: Layout | null) => {
+    previewing.current = next;
+    setPreview(next);
+  };
+
+  useEffect(() => {
+    const id = refocus.current;
+    refocus.current = null;
+    if (id) root.current?.querySelector<HTMLElement>(`[data-control="${CSS.escape(id)}"]`)?.focus();
+  });
+
+  /** Where in the grid the pointer is over another panel: that panel's place, which the one dragged takes. */
+  const placeAt = (id: string, x: number, y: number) => {
+    for (const el of grid.current?.querySelectorAll<HTMLElement>("[data-panel]") ?? []) {
+      const box = el.getBoundingClientRect();
+      if (el.dataset.panel !== id && x >= box.left && x < box.right && y >= box.top && y < box.bottom) return (previewing.current ?? layout).findIndex((p) => p.id === el.dataset.panel);
+    }
+    return -1;
+  };
+
+  /** The size a panel would be with its bottom right corner at the pointer: as many columns and rows as it reaches past half of. */
+  const sizeAt = (id: string, x: number, y: number) => {
+    const el = grid.current?.querySelector<HTMLElement>(`[data-panel="${CSS.escape(id)}"]`);
+    if (!el || !grid.current) return null;
+    const style = getComputedStyle(grid.current);
+    const columns = style.gridTemplateColumns.split(" ").length;
+    const gap = parseFloat(style.columnGap) || 0;
+    const width = (grid.current.clientWidth - gap * (columns - 1)) / columns;
+    const height = parseFloat(style.gridAutoRows) || el.getBoundingClientRect().height;
+    const box = el.getBoundingClientRect();
+    // In one column a panel's width can't be seen, so a drag there keeps the width it has.
+    const cols = columns > 1 ? (x - box.left > width + gap / 2 ? 2 : 1) : SIZES[layout.find((p) => p.id === id)?.size ?? "small"].cols;
+    return sizeOf(cols, y - box.top > height + gap / 2 ? 2 : 1);
+  };
+
+  /** A drag of a panel's grip or corner: the layout it would make with the pointer where it is is drawn, and saved on release. */
+  const dragging = (kind: PanelKind, at: (x: number, y: number) => Layout | null, saying: (next: Layout) => string) => (e: PointerEvent<HTMLElement>) =>
+    followDrag(e, {
+      start: () => {
+        setDragged(kind.id);
+        show(layout);
+      },
+      move: ({ x, y }) => {
+        const next = at(x, y);
+        if (next) show(next);
+      },
+      drop: () => {
+        const next = previewing.current;
+        setDragged(null);
+        show(null);
+        if (next) save(next, saying(next));
+      },
+      cancel: () => {
+        setDragged(null);
+        show(null);
+      },
+    });
+
+  const controls = (kind: PanelKind, place: Placed, at: number): Arranging => ({
+    lifted: dragged === kind.id,
+    grip: (
+      <button
+        type="button"
+        className="icon-button dash-grip"
+        data-control={`move ${kind.id}`}
+        aria-label={`Move ${kind.title}`}
+        aria-description="Drag it, or press the arrow keys, to move it."
+        title="Drag to move"
+        onPointerDown={dragging(
+          kind,
+          (x, y) => {
+            const to = placeAt(kind.id, x, y);
+            return to === -1 ? null : arrange(previewing.current ?? layout, { type: "move", id: kind.id, to });
+          },
+          (next) => `${kind.title} moved to place ${next.findIndex((p) => p.id === kind.id) + 1} of ${next.length}.`,
+        )}
+        onKeyDown={(e) => {
+          const to = MOVES[e.key]?.(at, layout.length - 1);
+          if (to === undefined) return;
+          e.preventDefault();
+          save(arrange(layout, { type: "move", id: kind.id, to }), `${kind.title} moved to place ${Math.max(0, Math.min(layout.length - 1, to)) + 1} of ${layout.length}.`, `move ${kind.id}`);
+        }}
+      >
+        <GripIcon />
+      </button>
+    ),
+    remove: (
+      <button type="button" className="icon-button dash-remove" aria-label={`Remove ${kind.title}`} title="Remove from dashboard" onClick={() => {
+          const then = layout[at + 1] ?? layout[at - 1];
+          save(arrange(layout, { type: "remove", id: kind.id }), `${kind.title} removed.`, then ? `move ${then.id}` : "add");
+        }}>
+        <Icon name="close" />
+      </button>
+    ),
+    corner: (
+      <span
+        role="slider"
+        tabIndex={0}
+        className="dash-corner"
+        data-control={`size ${kind.id}`}
+        aria-label={`Size of ${kind.title}`}
+        aria-valuemin={0}
+        aria-valuemax={3}
+        aria-valuenow={Object.keys(SIZES).indexOf(place.size)}
+        aria-valuetext={SIZE_NAMES[place.size]}
+        aria-description="Drag it, or press the arrow keys: right and left for its width, down and up for its height."
+        title={`${SIZE_NAMES[place.size]}: drag to resize`}
+        onPointerDown={dragging(
+          kind,
+          (x, y) => {
+            const size = sizeAt(kind.id, x, y);
+            return size && arrange(layout, { type: "resize", id: kind.id, size });
+          },
+          (next) => `${kind.title} is ${SIZE_NAMES[next.find((p) => p.id === kind.id)!.size].toLowerCase()}.`,
+        )}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+          e.preventDefault();
+          const size = stepSize(place.size, e.key);
+          save(arrange(layout, { type: "resize", id: kind.id, size }), `${kind.title} is ${SIZE_NAMES[size].toLowerCase()}.`, `size ${kind.id}`);
+        }}
+      />
+    ),
+  });
+
+  const missing = PANELS.filter((kind) => !layout.some((p) => p.id === kind.id));
+  const drawn: Drawn = { host, app, pins, onOpenTodo, today: day, now, members };
+
   return (
-    <section className="mode-view dashboard" aria-label="Dashboard">
+    <section
+      ref={root}
+      className="mode-view dashboard"
+      aria-label="Dashboard"
+      data-arranging={arranging || undefined}
+    >
       <h1>Dashboard</h1>
-      <p className="dash-date">{dayLabel(day.day, "heading")}</p>
-      <div className="dash-grid">
-        <Events host={host} app={app} today={day} now={now} />
-        <Todos host={host} app={app} today={day} onOpen={onOpenTodo} />
-        <TodaysNotes host={host} app={app} today={day} members={members} now={now} />
-        <Pinned app={app} pins={pins} now={now} />
-        <Changes host={host} app={app} now={now} />
+      <div className="dash-bar">
+        <p className="dash-date">{dayLabel(day.day, "heading")}</p>
+        {arranging ? (
+          <span className="dash-tools" role="group" aria-label="Arrange the dashboard">
+            <button
+              type="button"
+              className="button small"
+              data-control="add"
+              aria-haspopup="menu"
+              aria-expanded={!!adding}
+              disabled={missing.length === 0}
+              title={missing.length === 0 ? "Every panel is on your dashboard" : undefined}
+              onClick={(e) => {
+                const box = e.currentTarget.getBoundingClientRect();
+                setAdding({ x: box.left, y: box.bottom + 4 });
+              }}
+            >
+              Add panel
+            </button>
+            <button
+              type="button"
+              className="button small"
+              onClick={() => {
+                const was = layout;
+                if (save(DEFAULT_LAYOUT, "Your dashboard is back as it was at the start.")) app.notify({ message: "Your dashboard is back as it was at the start.", action: { label: "Undo", run: () => void host.settings.set("layout", writeLayout(was)) } });
+              }}
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              className="button small primary"
+              data-control="done"
+              onClick={leave}
+            >
+              Done
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="button small quiet dash-edit"
+            data-control="edit"
+            onClick={() => {
+              setArranging(true);
+              refocus.current = "done";
+            }}
+          >
+            <Icon name="edit" />
+            Edit dashboard
+          </button>
+        )}
+      </div>
+      {adding && (
+        <ContextMenu
+          label="Add panel"
+          x={adding.x}
+          y={adding.y}
+          items={missing.map((kind) => ({ label: kind.title, action: () => save(arrange(layout, { type: "add", id: kind.id, size: kind.size }), `${kind.title} added at the end.`, `move ${kind.id}`) }))}
+          onClose={() => {
+            setAdding(null);
+            refocus.current ??= "add";
+          }}
+        />
+      )}
+      <p className="dash-said" role="status">
+        {said}
+      </p>
+      {shown.length === 0 && !arranging && <p className="dash-none">Nothing is on your dashboard. Press Edit dashboard to add panels.</p>}
+      <div className="dash-grid" ref={grid}>
+        {shown.map((place, at) => {
+          const kind = KINDS.get(place.id)!;
+          return (
+            <div key={place.id} className="dash-place" data-panel={place.id} data-size={place.size}>
+              <SlotContext.Provider value={{ title: kind.title, size: place.size, arranging: arranging ? controls(kind, place, at) : null }}>{kind.draw(drawn)}</SlotContext.Provider>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
