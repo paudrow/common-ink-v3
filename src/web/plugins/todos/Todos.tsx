@@ -36,10 +36,8 @@ const stored = (value: unknown): Filters => {
   };
 };
 
-/** The orders the list can be in, as the Sort menu names them. Changing it is a refresh, and it is kept in this browser for this member. */
-const SORTS: Record<TodoSort, string> = { due: "Due date", priority: "Priority", changed: "Recently changed", note: "Note", text: "A–Z" };
-
-const storedSort = (value: unknown): TodoSort => (typeof value === "string" && value in SORTS ? (value as TodoSort) : "due");
+/** The orders the list can be in, as the Sort menu names them. Changing it is a refresh, and it is the member's remembered setting `todos.sort`, the same in every browser. */
+export const SORTS: Record<TodoSort, string> = { due: "Due date", priority: "Priority", changed: "Recently changed", note: "Note", text: "A–Z" };
 
 type Query = Omit<Extract<OpInput, { type: "todo.list" }>, "type">;
 
@@ -521,7 +519,7 @@ interface Props {
 
 export function TodosPage({ host, app, onOpen }: Props) {
   const [filters, setFilters] = useState(() => stored(host.storage.get("filters")));
-  const [sort, setSort] = useState(() => storedSort(host.storage.get("sort")));
+  const sort = host.settings.get<TodoSort>("sort");
   /** Whether the list was read yet, and where more of it starts when there is more. */
   const [page, setPage] = useState<Pick<Results["todo.list"], "next"> | null>(null);
   const [list, arrange] = useReducer(listing<ListedTodo>, EMPTY as Listing<ListedTodo>);
@@ -632,9 +630,22 @@ export function TodosPage({ host, app, onOpen }: Props) {
   };
 
   const sortBy = (next: TodoSort) => {
-    setSort(next);
-    host.storage.set("sort", next);
+    if (!host.settings.set("sort", next)) showToast({ text: "The order couldn't be kept: your settings aren't read yet. Try again in a moment.", icon: "list" });
   };
+
+  // A Sort chosen in this browser before it was kept with the account moves there once, as soon as the member's settings are read, unless the account has one already.
+  useEffect(() => {
+    const move = () => {
+      const kept: unknown = host.storage.get("sort");
+      if (kept === undefined || kept === null) return true;
+      if (typeof kept === "string" && kept in SORTS && host.settings.get("sort") === "due" && !host.settings.set("sort", kept)) return false;
+      host.storage.set("sort", null);
+      return true;
+    };
+    if (move()) return;
+    const stop = host.settings.subscribe(() => void (move() && stop()));
+    return stop;
+  }, [host]);
 
   /** What a row that a change took out of the list says under itself, unless the member turned that off. */
   const sayWhy = host.settings.get<boolean>("sayWhyLeaving");
