@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CalendarEvent, Plugin, PluginHost, ViewProps } from "../plugin-api.ts";
-import { dayIn } from "./calendar/dates.ts";
 import { eventsToFind, finding, listedAs } from "./calendar/finding.ts";
+import { eventAddress } from "./calendar/linking.ts";
 import { listable } from "./lib/listable.ts";
 import { Palette } from "./lib/Palette.tsx";
 
@@ -41,10 +41,7 @@ function QuickOpen({ host, app, close }: ViewProps & { host: PluginHost; close: 
         const { label, detail } = listedAs(event, timeZone);
         return { id: idOf(event), label, hint: `Event · ${detail}` };
       });
-  const open = (event: CalendarEvent) => {
-    const day = event.when.allDay ? event.when.from : dayIn(event.when.from, timeZone);
-    app.go(`/calendar?${new URLSearchParams({ source: event.sourceId, event: event.id, day })}`);
-  };
+  const open = (event: CalendarEvent) => app.go(eventAddress(event, timeZone));
   return (
     <Palette
       label="Go to note"

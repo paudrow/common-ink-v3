@@ -128,6 +128,7 @@ class EmbedWidget extends WidgetType {
       const drawn = show({
         config: written.config,
         body: written.body,
+        noteId: view.state.facet(noteOf),
         readOnly: this.readOnly,
         update(next) {
           // The editor can't be changed while it is drawing, which is when `render` runs.
@@ -429,11 +430,14 @@ const arrowsIn = Prec.high(
   ),
 );
 
+/** The note an editor holds, which each embed drawn in it is told. */
+const noteOf = Facet.define<string, string>({ combine: (values) => values[0] ?? "" });
+
 /**
- * Draws each `::name{config}` and each `:::name{config}` block in a note with the embed registered
+ * Draws each `::name{config}` and each `:::name{config}` block in note `noteId` with the embed registered
  * under that name, and keeps what an embed draws below its line. A name nobody registered stays as
  * text. Which embeds there are is said with `embedsAre`.
  */
-export const embedding: Extension = [used, blocks, steppingIn, arrowsIn, Prec.lowest(inline), keptBelow((state) => ({ embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
+export const embedding = (noteId: string): Extension => [noteOf.of(noteId), used, blocks, steppingIn, arrowsIn, Prec.lowest(inline), keptBelow((state) => ({ embeds: state.facet(registered), addresses: state.facet(addressed), blocks: state.field(blocks).all, written: state.field(used) && !isReading(state) }))];
 
 export const embedsAre = (embeds: readonly (Embed | AddressEmbed)[]): Extension => [registered.of(embeds.filter((e): e is Embed => !("claims" in e))), addressed.of(embeds.filter((e): e is AddressEmbed => "claims" in e))];

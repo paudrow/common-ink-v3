@@ -8204,6 +8204,95 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--accent-ink);
 }
 
+/* What an event link in a note opens: the event in brief, then a short list of what to do with it. */
+.event-link {
+  width: 260px;
+  max-width: 100%;
+}
+
+.event-link-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.event-link-head strong {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.event-link .chip-choice[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+}
+
+.event-link .chip-choice svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.event-link-notes {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0;
+  padding: 4px 0;
+  border-block: 1px solid var(--line);
+}
+
+.event-link-notes h3 {
+  margin: 2px 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.event-link-notes .chip-choice {
+  justify-content: space-between;
+}
+
+.event-link-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-link .event-new-note {
+  padding: 4px 8px 8px;
+}
+
+.event-link .event-new-note select {
+  max-width: 100%;
+}
+
+.event-link .event-new-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-link-open {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.event-link-open .event-link-title {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-link-said {
+  margin: 2px 8px 4px;
+}
+
 .event-form label:not(.check) {
   display: flex;
   flex-direction: column;
@@ -8374,3 +8463,7 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 /* Calendar and Contacts: end */
+
+.event-note-start {
+  display: contents;
+}

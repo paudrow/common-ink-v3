@@ -238,7 +238,7 @@ function SharedNoteView({ token, noteId }: { token: string; noteId: string }) {
       parent: el.current,
       state: EditorState.create({
         doc: note.text,
-        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding, embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "Note text" })],
+        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding(noteId), embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "Note text" })],
       }),
     });
     return () => view.destroy();

@@ -617,6 +617,8 @@ export interface AddressEmbed {
 /** What an embed is handed about one place a note writes it. */
 export interface Embedded {
   config: string;
+  /** The note the embed is written in. */
+  noteId: string;
   /** A block embed's body: the note's lines between its opening and closing lines, each with its line break. Empty for an inline embed. */
   body: string;
   /** Whether the member can't change the note. `update` then does nothing, so an embed draws what it shows without the controls that would call it. */
