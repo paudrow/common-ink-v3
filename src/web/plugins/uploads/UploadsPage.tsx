@@ -1,24 +1,28 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent } from "react";
-import { Icon, ago, useDismiss, useNow, type App, type Folders, type PluginHost, type Results, type Upload, type UploadKind, type ViewProps } from "../../plugin-api.ts";
-import { Copyable } from "../lib/Copyable.tsx";
-import { IncludeArchived, opening, reasonOf } from "../lib/FoundNote.tsx";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { Icon, ago, useNow, type App, type Folders, type PluginHost, type Results, type Upload, type ViewProps } from "../../plugin-api.ts";
+import { opening, reasonOf } from "../lib/FoundNote.tsx";
 import { restoredMessage } from "../lib/lifecycle.ts";
+import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
+import { QueryBar } from "../lib/QueryBar.tsx";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "../sharing/Summary.tsx";
 import { toldOf } from "./drawing.ts";
-import { narrowed, selectedIn, uploadPath, UPLOADS_PATH, writtenFor } from "./finding.ts";
-import type { Sender } from "./sending.ts";
+import { onlyMine, reachWords, selectedIn, uploaderWords, uploadPath, UPLOADS_PATH, withMine } from "./finding.ts";
+import { openUpload } from "./opening.ts";
+import { writtenNow, type Sender } from "./sending.ts";
 import { formatBytes, KIND_LABEL } from "./sizing.ts";
+import { Thumb } from "./Thumb.tsx";
 
 type Read = Results["upload.read"];
+type Listed = Results["upload.list"][number];
 
-const KINDS: readonly UploadKind[] = ["image", "video", "audio", "file"];
-const KINDS_LABEL: Record<UploadKind, string> = { image: "Images", video: "Videos", audio: "Audio", file: "Other files" };
+/** How long typing in the query rests before the list is asked for again. */
+const PAUSE_MS = 200;
 
-/** Every folder the member can see, outermost first, each by its path. */
-function foldersIn(folders: Folders | null): { id: string; name: string; canAdd: boolean }[] {
+/** Every folder the member can put a file in, outermost first, each by its path. */
+function foldersIn(folders: Folders | null): { id: string; name: string }[] {
   if (!folders) return [];
-  const under = (parentId: string | null): { id: string; name: string; canAdd: boolean }[] =>
-    folders.childrenOf(parentId).flatMap((f) => [{ id: f.id, name: folders.pathName(f.id), canAdd: f.access === "edit" }, ...under(f.id)]);
+  const under = (parentId: string | null): { id: string; name: string }[] =>
+    folders.childrenOf(parentId).flatMap((f) => [...(f.access === "edit" ? [{ id: f.id, name: folders.pathName(f.id) }] : []), ...under(f.id)]);
   return under(null);
 }
 
@@ -34,49 +38,53 @@ interface Props extends ViewProps {
 }
 
 /**
- * Every upload in the workspace that the member can see. Uploads are listed here and nowhere else:
- * the note list and the folders' counts are of notes. One is picked to see what it is, which notes
+ * Every upload in the workspace that the member can see, found by the query language. Uploads are
+ * listed here and nowhere else: the note list and the folders' counts are of notes. A file sent from
+ * here is the member's alone until it is put in a note. One is picked to see what it is, which notes
  * use it, and what can be done with it.
  */
 export function UploadsPage({ host, app, sender }: Props) {
   const now = useNow();
   const selectedId = selectedIn(app.path);
-  const [folderId, setFolderId] = useState("");
-  const [kind, setKind] = useState<UploadKind | "">("");
-  const [text, setText] = useState("");
-  const [archived, setArchived] = useState(false);
-  /** Where a new file goes, when the member has said. Otherwise the folder the list is narrowed to, or Unsorted. */
-  const [chosenTarget, setTarget] = useState<string | null>(null);
-  const [listed, setListed] = useState<Upload[] | null>(null);
-  const [said, say] = useState<{ text: string; failed?: boolean } | null>(null);
+  const [typed, setTyped] = useState("");
+  const [query, setQuery] = useState("");
+  const [listed, setListed] = useState<Listed[] | null>(null);
+  const [problem, setProblem] = useState<{ query: string; message: string } | null>(null);
   const [asked, setAsked] = useState(0);
   const [over, setOver] = useState(false);
-  const sending = useSyncExternalStore(sender.subscribe, sender.sending);
   const reload = useCallback(() => setAsked((n) => n + 1), []);
+  const run = (text: string) => setQuery(text.trim());
+
+  const wanted = typed.trim();
+  useEffect(() => {
+    if (wanted === query) return;
+    const timer = setTimeout(() => run(wanted), PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [wanted, query]);
 
   useEffect(() => {
     let live = true;
-    host.perform({ type: "upload.list", folderId: folderId || undefined, includeArchived: archived }).then(
-      (uploads) => live && setListed(uploads),
-      (err: unknown) => live && say({ text: reasonOf(err), failed: true }),
+    host.perform({ type: "upload.list", query }).then(
+      (uploads) => live && (setListed(uploads), setProblem(null)),
+      (err: unknown) => live && setProblem({ query, message: reasonOf(err) }),
     );
     return () => {
       live = false;
     };
-  }, [host, folderId, archived, asked]);
+  }, [host, query, asked]);
 
-  const folders = foldersIn(app.folders);
-  const targets = folders.filter((f) => f.canAdd);
-  const target = chosenTarget ?? (targets.some((f) => f.id === folderId) ? folderId : (targets.find((f) => f.id === app.folders?.unsortedId)?.id ?? ""));
-  const shown = narrowed(listed ?? [], { text, kind: kind || null });
-  const narrowing = !!(text.trim() || kind || folderId);
+  const mine = onlyMine(typed);
+  const choose = (wantMine: boolean) => {
+    const next = withMine(typed, wantMine);
+    setTyped(next);
+    run(next);
+  };
 
   const upload = async (files: File[]) => {
     if (!files.length) return;
-    say(null);
-    const taken = await sender.sendAll(files, { folderId: target || undefined });
+    const taken = await sender.sendAll(files);
     if (!taken.length) return;
-    say({ text: taken.length === 1 ? `Uploaded ${taken[0]!.name}.` : `Uploaded ${taken.length} files.` });
+    app.notify({ message: taken.length === 1 ? `Uploaded ${taken[0]!.name}. Only you can see it until you put it in a note.` : `Uploaded ${taken.length} files. Only you can see them until you put them in a note.` });
     reload();
     app.refresh();
     app.go(uploadPath(taken.at(-1)!.id), { replace: true });
@@ -104,97 +112,75 @@ export function UploadsPage({ host, app, sender }: Props) {
         <header className="uploads-head">
           <h1>Uploads</h1>
           {app.canEdit && (
-            <div className="uploads-add">
-              <label>
-                <span>Upload to</span>
-                <select aria-label="Upload to folder" value={target} onChange={(e) => setTarget(e.target.value)}>
-                  {targets.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button type="button" className="button primary" onClick={() => sender.pick((files) => void upload(files))}>
-                Upload files
-              </button>
-            </div>
+            <button type="button" className="button primary" onClick={() => sender.pick((files) => void upload(files))}>
+              Upload files
+            </button>
           )}
         </header>
         <p className="uploads-lede">
-          Files a note can show: a picture, a video, a recording, or anything to download. {app.canEdit ? "Drop files here to upload them, or paste or drop one into a note. " : ""}A file can be up to 50 MB.
+          Files a note can show: a picture, a video, a recording, or anything to download. {app.canEdit ? "Drop files here to upload them, or paste or drop one into a note. " : ""}A file sent from here is yours alone until you put it in a note, and then whoever reads the note sees it. A file can be up to 50 MB.
         </p>
         <div className="uploads-tools">
-          <input type="search" className="filter" aria-label="Filter uploads by name" placeholder="Filter by name" value={text} onChange={(e) => setText(e.target.value)} />
-          <select aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value as UploadKind | "")}>
-            <option value="">All kinds</option>
-            {KINDS.map((k) => (
-              <option key={k} value={k}>
-                {KINDS_LABEL[k]}
-              </option>
-            ))}
-          </select>
-          <select aria-label="Folder" value={folderId} onChange={(e) => setFolderId(e.target.value)}>
-            <option value="">All folders</option>
-            {folders.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
-          <IncludeArchived checked={archived} onChange={setArchived} />
+          <div className="uploads-whose" role="group" aria-label="Whose uploads">
+            <button type="button" aria-pressed={mine} onClick={() => choose(true)}>
+              Mine
+            </button>
+            <button type="button" aria-pressed={!mine} onClick={() => choose(false)}>
+              Everyone's
+            </button>
+          </div>
+          <QueryBar
+            host={host}
+            app={app}
+            scope="uploads"
+            value={typed}
+            label="Find uploads"
+            placeholder="Find uploads: name, type:image, uploader:@me, used:no"
+            problem={problem?.query === query ? problem.message : null}
+            onChange={(text, how) => {
+              setTyped(text);
+              if (how === "set" || !text.trim()) run(text);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && wanted !== query) run(wanted);
+            }}
+          />
         </div>
-        {sending.length > 0 && (
-          <p className="said" role="status">
-            Uploading {sending.map((s) => `${s.name} (${Math.round((100 * s.sent) / s.size)}%)`).join(", ")}
-          </p>
-        )}
-        {said && (
-          <p role={said.failed ? "alert" : "status"} className={said.failed ? "said failed" : "said"}>
-            {said.text}
-          </p>
-        )}
-        {listed && !shown.length && (
-          <p className="uploads-none">{narrowing ? "No uploads match." : archived ? "There are no uploads yet." : "There are no uploads yet. Paste or drop a file into a note, or upload one here."}</p>
-        )}
-        {shown.length > 0 && (
+        {listed && !listed.length && <p className="uploads-none">{query ? "No uploads match." : "There are no uploads yet. Paste or drop a file into a note, or upload one here."}</p>}
+        {listed && listed.length > 0 && (
           <ul className="uploads-list" aria-label="Uploads">
-            {shown.map((u) => {
-              const folder = folderOf(app, u);
-              return (
-                <li key={u.id}>
-                  <a
-                    href={uploadPath(u.id)}
-                    className="upload-row"
-                    aria-current={u.id === selectedId ? "true" : undefined}
-                    onClick={(e) => {
-                      if (!plainClick(e)) return;
-                      e.preventDefault();
-                      app.go(uploadPath(u.id));
-                    }}
-                  >
-                    <span className="upload-thumb">{u.kind === "image" ? <img src={host.uploads.address(u.id)} alt="" loading="lazy" decoding="async" draggable={false} /> : <Icon name="uploads" />}</span>
-                    <span className="upload-what">
-                      <span className="upload-name">{u.name}</span>
-                      <span className="upload-meta">
-                        <span>{KIND_LABEL[u.kind]}</span>
-                        <span>{formatBytes(u.size)}</span>
-                        {folder && <span>{folder}</span>}
-                        <span>
-                          {u.uploadedBy.name}, {ago(u.createdAt, now)}
-                        </span>
-                        {u.private && <span className="found-archived">Private</span>}
-                        {u.state === "archived" && <span className="found-archived">Archived</span>}
+            {listed.map((u) => (
+              <li key={u.id}>
+                <a
+                  href={uploadPath(u.id)}
+                  className="upload-row"
+                  aria-current={u.id === selectedId ? "true" : undefined}
+                  onClick={(e) => {
+                    if (!plainClick(e)) return;
+                    e.preventDefault();
+                    app.go(uploadPath(u.id));
+                  }}
+                >
+                  <Thumb host={host} upload={u} />
+                  <span className="upload-what">
+                    <span className="upload-name">{u.name}</span>
+                    <span className="upload-meta">
+                      <span>{KIND_LABEL[u.kind]}</span>
+                      <span>{formatBytes(u.size)}</span>
+                      <span>
+                        {uploaderWords(u, app.me.id)}, {ago(u.createdAt, now)}
                       </span>
+                      <span>{reachWords(u, app.me.id)}</span>
+                      {u.state === "archived" && <span className="found-archived">Archived</span>}
                     </span>
-                  </a>
-                </li>
-              );
-            })}
+                  </span>
+                </a>
+              </li>
+            ))}
           </ul>
         )}
       </div>
-      {selectedId && <Detail key={selectedId} host={host} app={app} id={selectedId} folders={targets} listed={asked} onChanged={reload} />}
+      {selectedId && <Detail key={selectedId} host={host} app={app} id={selectedId} listed={asked} onChanged={reload} />}
       {over && <div className="uploads-drop">Drop to upload</div>}
     </section>
   );
@@ -204,22 +190,24 @@ interface DetailProps {
   host: PluginHost;
   app: App;
   id: string;
-  /** The folders it can be moved to. */
-  folders: { id: string; name: string }[];
   /** Changes when the list was read again, which is when to read this again. */
   listed: number;
   onChanged: () => void;
 }
 
-/** One upload: what it is, the notes that use it, and what can be done with it. */
-function Detail({ host, app, id, folders, listed, onChanged }: DetailProps) {
+/** A menu open on the card: what can be done with the file, or the folders it can be moved to. */
+type Opened = { menu: "more" | "folders"; x: number; y: number } | null;
+
+/** One upload: what it is, the notes that use it, Open, and everything else behind one "…" menu. */
+function Detail({ host, app, id, listed, onChanged }: DetailProps) {
   const now = useNow();
   const [read, setRead] = useState<Read | null>(null);
   const [missing, setMissing] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
+  const [opened, setOpened] = useState<Opened>(null);
+  const more = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let live = true;
@@ -233,6 +221,15 @@ function Detail({ host, app, id, folders, listed, onChanged }: DetailProps) {
   }, [host, id, listed]);
 
   const close = () => app.go(UPLOADS_PATH);
+  const closeMenu = useCallback(() => {
+    setOpened(null);
+    more.current?.focus();
+  }, []);
+  /** Opens a menu under the "…" button, which is where the keyboard opens it too. */
+  const openMenu = (menu: "more" | "folders") => {
+    const box = more.current?.getBoundingClientRect();
+    if (box) setOpened({ menu, x: box.left, y: box.bottom + 4 });
+  };
 
   /** Does one thing to the upload and tells the app what it is now, so the list and every note that shows it follow. */
   const act = async <T,>(doing: () => Promise<T>, after?: (done: T) => void) => {
@@ -281,12 +278,62 @@ function Detail({ host, app, id, folders, listed, onChanged }: DetailProps) {
           action: { label: "Undo", run: () => void restore() },
         }),
     );
+  const copyEmbed = async () => {
+    const written = await writtenNow(host, read);
+    try {
+      await navigator.clipboard.writeText(written);
+      app.notify({ message: `Copied ${written}. Paste it on a line of a note to show the file there.` });
+    } catch {
+      // A page served over plain http has no clipboard to write to, so the embed is said to be copied by hand.
+      app.notify({ message: `Copy ${written} and paste it on a line of a note to show the file there.`, stays: true });
+    }
+  };
+  const download = () => {
+    const link = document.createElement("a");
+    link.href = address;
+    link.download = read.name;
+    link.click();
+  };
+
+  const items: MenuItem[] = [
+    { label: "Download", action: download },
+    ...(canShare && read.access === "edit" ? [{ label: "Share…", action: () => app.toggleOverlay(SHARE_OVERLAY, { uploadId: read.id, name: read.name }) }] : []),
+    { label: "Copy embed", action: () => void copyEmbed() },
+    ...(read.access === "edit" ? [{ label: "Move to folder…", action: () => openMenu("folders"), disabled: busy, separated: true }] : []),
+    ...(app.workspace.role !== "guest" && read.access === "edit"
+      ? [
+          {
+            label: read.private ? "Share with the folder" : "Make private",
+            disabled: busy,
+            action: () =>
+              void act(
+                () => host.sharing.setPrivate({ uploadId: id }, !read.private),
+                () =>
+                  app.notify({
+                    message: read.private ? `${read.name} is seen by whoever sees ${folder ?? "its folder"}, or a note it is in.` : `${read.name} is private: hidden from every other member, admins too, except the people it is shared with.`,
+                  }),
+              ),
+          },
+        ]
+      : []),
+    { label: read.state === "archived" ? "Unarchive" : "Archive", disabled: locked, action: () => void act(() => host.perform({ type: "upload.archive", id, archived: read.state !== "archived" })) },
+    { label: "Move to Trash", disabled: locked, action: () => (uses > 0 ? setAsking(true) : void trash()) },
+  ];
+  const folders = foldersIn(app.folders).map((f) => ({ label: f.id === read.folderId ? `${f.name} (here)` : f.name, disabled: f.id === read.folderId, action: () => void act(() => host.perform({ type: "upload.move", id, folderId: f.id })) }));
 
   return (
-    <aside className="upload-detail" aria-label={read.name}>
+    <aside
+      className="upload-detail"
+      aria-label={read.name}
+      onKeyDown={(e) => {
+        if (trashed || !(e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey))) return;
+        e.preventDefault();
+        openMenu("more");
+      }}
+    >
       <DetailHead name={read.name} onClose={close} />
       {read.kind === "image" && !trashed && (
-        <button type="button" className="upload-detail-picture" aria-label={`Open ${read.name}`} onClick={() => setPreviewing(true)}>
+        <button type="button" className="upload-detail-picture" aria-label={`Preview ${read.name}`} onClick={() => openUpload(host, read)}>
           <img src={address} alt="" draggable={false} />
         </button>
       )}
@@ -300,8 +347,9 @@ function Detail({ host, app, id, folders, listed, onChanged }: DetailProps) {
         )}
         {folder && <span>{folder}</span>}
         <span>
-          Uploaded by {read.uploadedBy.name} {ago(read.createdAt, now)}
+          Uploaded by {uploaderWords(read, app.me.id).replace(/^You$/, "you")} {ago(read.createdAt, now)}
         </span>
+        <span>{reachWords({ ...read, uses }, app.me.id)}</span>
         {read.state === "archived" && <span className="found-archived">Archived</span>}
       </p>
       {problem && (
@@ -317,68 +365,36 @@ function Detail({ host, app, id, folders, listed, onChanged }: DetailProps) {
           </button>
         </div>
       ) : (
-        <>
-          <div className="upload-actions">
-            {read.kind !== "file" && (
-              <button type="button" className="button small" onClick={() => setPreviewing(true)}>
-                Open
+        <div className="upload-actions">
+          <button type="button" className="button small primary" onClick={() => openUpload(host, read)}>
+            Open
+          </button>
+          <button
+            ref={more}
+            type="button"
+            className="icon-button"
+            aria-label={`More for ${read.name}`}
+            title="Download, share, move, archive or trash it"
+            aria-haspopup="menu"
+            aria-expanded={opened !== null}
+            onClick={() => (opened ? closeMenu() : openMenu("more"))}
+          >
+            <Icon name="more" />
+          </button>
+          {asking && (
+            <div className="confirm" role="group" aria-label={`Move ${read.name} to Trash`}>
+              <span>
+                {uses === 1 ? "1 note still uses this file. It" : `${uses} notes still use this file. They`} will say it is in Trash until it is restored.
+              </span>
+              <button type="button" className="button small danger" autoFocus disabled={busy} onClick={() => void trash()}>
+                Move to Trash
               </button>
-            )}
-            <a className="button small" href={address} download={read.name}>
-              Download
-            </a>
-            {canShare && read.access === "edit" && (
-              <button type="button" className="button small" onClick={() => app.toggleOverlay(SHARE_OVERLAY, { uploadId: read.id, name: read.name })}>
-                Share
+              <button type="button" className="link" onClick={() => setAsking(false)}>
+                Cancel
               </button>
-            )}
-            <button type="button" className="button small" disabled={locked} onClick={() => void act(() => host.perform({ type: "upload.archive", id, archived: read.state !== "archived" }))}>
-              {read.state === "archived" ? "Unarchive" : "Archive"}
-            </button>
-            <button type="button" className="button small" disabled={locked} onClick={() => (uses > 0 ? setAsking(true) : void trash())}>
-              Move to Trash
-            </button>
-            {asking && (
-              <div className="confirm" role="group" aria-label={`Move ${read.name} to Trash`}>
-                <span>
-                  {uses === 1 ? "1 note still uses this file. It" : `${uses} notes still use this file. They`} will say it is in Trash until it is restored.
-                </span>
-                <button type="button" className="button small danger" autoFocus disabled={busy} onClick={() => void trash()}>
-                  Move to Trash
-                </button>
-                <button type="button" className="link" onClick={() => setAsking(false)}>
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
-          <label className="upload-field">
-            <span>Folder</span>
-            <select aria-label="Move to folder" value={read.folderId ?? ""} disabled={locked} onChange={(e) => void act(() => host.perform({ type: "upload.move", id, folderId: e.target.value }))}>
-              {!folders.some((f) => f.id === read.folderId) && <option value={read.folderId ?? ""}>{folder ?? "A folder you can't see"}</option>}
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {app.workspace.role !== "guest" && (
-            <div className="upload-field">
-              <label className="check">
-                <input type="checkbox" checked={read.private} disabled={busy} onChange={(e) => void act(() => host.sharing.setPrivate({ uploadId: id }, e.target.checked))} />
-                <span>Private</span>
-              </label>
-              <p className="said">
-                {read.private
-                  ? "Hidden from every other member, admins too, except the people it is shared with. A note that shows it tells them only that a file isn't available."
-                  : "Whoever uploaded a file can make it private: hidden from every other member, except the people it is shared with."}
-              </p>
             </div>
           )}
-          <Copyable label="Embed" value={writtenFor(read)} />
-          <p className="said">Paste this on a line of a note to show the file there. A link to a note doesn't open its files: only a link on the folder a file is in does.</p>
-        </>
+        </div>
       )}
       <section className="upload-used" aria-label="Used in">
         <h3>Used in</h3>
@@ -391,10 +407,11 @@ function Detail({ host, app, id, folders, listed, onChanged }: DetailProps) {
             ))}
           </ul>
         ) : (
-          <p className="said">No note you can see uses this file.</p>
+          <p className="said">No note you can see uses this file. Type / in a note and Insert an upload to put it there.</p>
         )}
       </section>
-      {previewing && <Preview name={read.name} kind={read.kind} address={address} close={() => setPreviewing(false)} />}
+      {opened?.menu === "more" && <ContextMenu label={`More for ${read.name}`} x={opened.x} y={opened.y} items={items} onClose={closeMenu} />}
+      {opened?.menu === "folders" && <ContextMenu label={`Move ${read.name} to`} x={opened.x} y={opened.y} items={folders} onClose={closeMenu} />}
     </aside>
   );
 }
@@ -410,23 +427,3 @@ function DetailHead({ name, onClose }: { name: string; onClose: () => void }) {
   );
 }
 
-/** A picture, a video or a recording, shown over the app. Nothing plays until the member asks. */
-function Preview({ name, kind, address, close }: { name: string; kind: UploadKind; address: string; close: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useDismiss(close, ref);
-  return (
-    <div className="upload-preview-back">
-      <div ref={ref} className="upload-preview" role="dialog" aria-label={`Preview of ${name}`}>
-        <header className="upload-detail-head">
-          <h2>{name}</h2>
-          <button type="button" className="icon-button" aria-label="Close preview" title="Close" autoFocus onClick={close}>
-            <Icon name="close" />
-          </button>
-        </header>
-        {kind === "image" && <img src={address} alt={name} />}
-        {kind === "video" && <video src={address} controls preload="metadata" />}
-        {kind === "audio" && <audio src={address} controls preload="none" />}
-      </div>
-    </div>
-  );
-}

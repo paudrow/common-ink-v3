@@ -52,6 +52,14 @@ describe("moving between regions of the window", () => {
     expect(toward(row, 0, "right")).toBe(1);
   });
 
+  it("goes from a panel lying over the page to the part of the page under it, on the side the page reaches past it", () => {
+    // A sidebar, the page, and a panel over the page's right end, beside the bar.
+    const over = [box(0, 0, 200, 700), box(200, 0, 1236, 700), box(980, 0, 1236, 700)];
+    expect(toward(over, 2, "left")).toBe(1);
+    expect(toward(over, 2, "right")).toBe(-1);
+    expect(toward(over, 1, "left")).toBe(0);
+  });
+
   it("stays where it is when nothing is on that side", () => {
     expect(toward(row, 0, "left")).toBe(-1);
     expect(toward(row, 3, "right")).toBe(-1);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { advance, bind, chordFor, chordLabel, chordOf, onPlatform, overlap, pressing, typed } from "../../src/web/keybindings.ts";
-import { matching } from "../../src/web/plugins/lib/match.ts";
+import { matching, starting } from "../../src/web/plugins/lib/match.ts";
 
 describe("keybindings", () => {
   const press = (key: string, held: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}, mac = false) =>
@@ -98,6 +98,12 @@ describe("keybindings", () => {
     expect(chordLabel("ctrl+w h", true)).toBe("⌃W H");
     expect(chordLabel("ctrl+w h", false)).toBe("Ctrl+W H");
     expect(chordLabel("g shift+t", false)).toBe("G Shift+T");
+    // A sign is typed with Shift on most keyboards, and reads as the sign. A letter with Shift still says so.
+    expect(chordLabel("shift+?", true)).toBe("?");
+    expect(chordLabel("shift+?", false)).toBe("?");
+    expect(chordLabel("shift+g", false)).toBe("Shift+G");
+    expect(chordLabel("mod+shift+.", true)).toBe("⇧⌘.");
+    expect([chordLabel("alt+arrowup", true), chordLabel("shift+tab", false), chordLabel("alt+enter", true), chordLabel("escape", false), chordLabel("f1", true)]).toEqual(["⌥↑", "Shift+Tab", "⌥Enter", "Esc", "F1"]);
   });
 
   it("runs a sequence on its last key, and takes the keys that begin one only while a command that can run goes on from them", () => {
@@ -138,5 +144,23 @@ describe("matching what was typed", () => {
     expect(match("  PLAN ")).toEqual(["Plan", "Trip planning", "People and plans"]);
     expect(match("")).toEqual(titles);
     expect(match("xyz")).toEqual([]);
+  });
+});
+
+describe("items that start with what was typed", () => {
+  const embeds = ["Timer timer", "Stopwatch stopwatch", "Kanban board kanban", "Standup notes standup"];
+  const start = (typed: string) => starting(embeds, typed, (t) => t);
+
+  it("offers those whose text starts with it, then those with a word that does", () => {
+    expect(start("st")).toEqual(["Stopwatch stopwatch", "Standup notes standup"]);
+    expect(start("B")).toEqual(["Kanban board kanban"]);
+    expect(start("no")).toEqual(["Standup notes standup"]);
+    expect(start("")).toEqual(embeds);
+    expect(starting(["To-do list to-do"], "to-d", (t) => t)).toEqual(["To-do list to-do"]);
+    expect(starting(["To-do list to-do"], "do", (t) => t)).toEqual(["To-do list to-do"]);
+  });
+
+  it("offers nothing for letters that are only inside a word or scattered through it", () => {
+    for (const typed of ["or", "h", "a", "an", "watch", "tmr", "kb"]) expect([typed, start(typed)]).toEqual([typed, []]);
   });
 });

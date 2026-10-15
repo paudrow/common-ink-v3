@@ -1,9 +1,10 @@
 import { SEEN, allows, folderLevel, itemLevel, type GrantLevel, type ItemFacts } from "./access.ts";
 import { HEAD_BYTES, cleanName, imageSize, kindOf, typeOf } from "./filetypes.ts";
 import { newId } from "./ids.ts";
-import { listing, purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
-import { archiving, authorId, authorOf, intoFolder, loadFolder, mend, restoring, seenAmong, toSummary, trashing, type Context } from "./operations.ts";
-import { MAX_UPLOAD_BYTES, OpError, WORKSPACE_UPLOAD_BYTES, type AuthorRef, type Op, type OpenedUpload, type ReferredUpload, type Results, type TrashedUpload, type Upload } from "./protocol.ts";
+import { purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
+import { OLD, archiving, authorId, authorOf, finding, intoFolder, loadFolder, loadNote, mend, restoring, seenAmong, toSummary, trashing, type Context } from "./operations.ts";
+import { MAX_UPLOAD_BYTES, OpError, WORKSPACE_UPLOAD_BYTES, type AuthorRef, type ListedUpload, type Op, type OpenedUpload, type ReferredUpload, type Results, type TrashedUpload, type Upload } from "./protocol.ts";
+import { orderOf } from "./query.ts";
 import { removeUpload } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
 
@@ -182,12 +183,48 @@ export async function createUpload(ctx: Context, op: Extract<Op, { type: "upload
   return toUpload(ctx, row);
 }
 
-export async function listUploads(ctx: Context, op: { folderId?: string; includeArchived: boolean }): Promise<Upload[]> {
-  const { results } = await ctx.db
-    .prepare(`SELECT ${UPLOAD_COLUMNS} WHERE u.workspace_id = ?1 AND (?2 IS NULL OR u.folder_id = ?2) AND ${SEEN("u", "?3", listing(op.includeArchived))} ORDER BY u.created_at DESC, u.id`)
-    .bind(ctx.workspaceId, op.folderId ?? null, ctx.sight.bind)
-    .all<UploadRow>();
-  return results.map((row) => toUpload(ctx, row));
+/**
+ * The uploads a query finds, each with how many notes show it: only notes the asker can see in the
+ * upload's own workspace are counted, archived ones too, as `upload.read`'s `usedIn` lists them.
+ */
+export async function listUploads(ctx: Context, op: Extract<Op, { type: "upload.list" }>): Promise<ListedUpload[]> {
+  // The folder narrows inside what the asker sees and never widens it: one they can't see is no folder.
+  if (op.folderId !== undefined) await loadFolder(ctx, op.folderId, "view");
+  const { query, covering, condition, prepare } = await finding(ctx, "uploads", op, [
+    // The folder's own uploads, not those of the folders inside it, which `folder:` in the query covers.
+    ...(op.folderId === undefined ? [] : [{ kind: "filter", key: "folder", cmp: "=", value: op.folderId, ids: [op.folderId] } as const]),
+    ...OLD.archived(op.includeArchived),
+  ]);
+  // Which notes show an upload is read from their text, so notes written before that was kept are read in first.
+  await mend(ctx);
+  const { results } = await prepare(
+    `SELECT (SELECT COUNT(*) FROM upload_refs r CROSS JOIN notes rn ON rn.id = r.note_id WHERE r.upload_id = u.id AND rn.workspace_id = ?1 AND ${SEEN("rn", "?2", "kept")}) AS uses, ${UPLOAD_COLUMNS}
+     WHERE u.workspace_id = ?1 AND ${SEEN("u", "?2", covering)} AND ${condition}
+     ORDER BY ${orderOf(query.sort ?? "uploaded-desc")}, u.id`,
+  ).all<UploadRow & { uses: number }>();
+  return results.map((row) => ({ ...toUpload(ctx, row), uses: row.uses }));
+}
+
+/**
+ * An upload put in a note. One that is its owner's alone, private to the asker, goes where the note
+ * is and stops being private, so whoever reads the note sees it, as ADR 0008 has it: a reference is
+ * text and grants nothing, so the upload has to be where the note is. In a private note it stays
+ * the asker's. Anything else is left as it is. Asked again, it changes nothing more. An agent is refused
+ * the one change that lets others see a private upload, as it is `upload.setPrivate`.
+ */
+export async function placeUpload(ctx: Context, id: string, noteId: string): Promise<Upload> {
+  const row = await loadUpload(ctx, id, "edit", "refused");
+  const note = await loadNote(ctx, noteId, "edit", "refused");
+  if (row.private_owner === null || row.private_owner !== ctx.sight.memberId || note.private_owner !== null) return toUpload(ctx, row);
+  // As upload.setPrivate is, letting others see a private upload is the member's own act, never an agent's for them.
+  if (ctx.actor.kind !== "member") throw new OpError("forbidden", "Only your member can let others see their private upload, in the app. It stays private");
+  await intoFolder(
+    ctx.db
+      .prepare("UPDATE uploads SET folder_id = ?2, private_owner = NULL WHERE id = ?1 AND private_owner = ?3")
+      .bind(row.id, note.folder_id, row.private_owner)
+      .run(),
+  );
+  return toUpload(ctx, { ...row, folder_id: note.folder_id, private_owner: null });
 }
 
 /** The notes the actor is shown that refer to an upload. An archived note still refers to it; one in Trash is in no listing but Trash. */

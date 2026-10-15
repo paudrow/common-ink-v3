@@ -216,8 +216,8 @@ const withGroup = (layout: EditorLayout, id: string, change: (group: Group) => G
 const placeForNew = (group: Group) => (group.active?.kind === "note" && indexOf(group, group.active) + 1) || group.tabs.length;
 
 /**
- * The window has one preview, and the next thing previewed takes its place, whatever either is of:
- * here when it is in this group, and by `open` in the reducer when it is in another. Nothing else
+ * The window has one preview, and the next thing previewed takes its place, whatever either is of
+ * and whichever group it is in: the reducer's `open` picks that group. Nothing else
  * about a tab changes by being opened from: a note previewed from a previewed list takes the list's
  * place, and the list is a kept tab only once the member keeps it.
  */
@@ -275,10 +275,10 @@ export function editorReducer(layout: EditorLayout, action: EditorAction): Edito
     case "open": {
       const holder = layout.groups.find((g) => has(g, tab!))?.id;
       if (action.background) return holder ? editorReducer(layout, { type: "pin", groupId: holder, tab: tab! }) : withGroup(layout, layout.focusedGroupId, (g) => openBehind(g, tab!));
-      const groupId = holder ?? layout.focusedGroupId;
-      // A new preview is the window's only one: the preview in another group closes, as the one in this group is replaced.
-      const cleared = action.preview && !holder ? { ...layout, groups: layout.groups.map((g) => (g.id === groupId ? g : g.tabs.filter((t) => t.preview).reduce((left, t) => close(left, "tab", t), g))) } : layout;
-      return dropEmpty({ ...withGroup(cleared, groupId, (g) => open(g, tab!, action.preview)), focusedGroupId: groupId });
+      // A new preview is the window's only one, and goes where the preview is, in whichever group: closing that one to open in another would close a group that held nothing else.
+      const previewed = action.preview ? layout.groups.find((g) => g.tabs.some((t) => t.preview))?.id : undefined;
+      const groupId = holder ?? previewed ?? layout.focusedGroupId;
+      return { ...withGroup(layout, groupId, (g) => open(g, tab!, action.preview)), focusedGroupId: groupId };
     }
     case "pin": {
       const group = layout.groups.find((g) => g.id === action.groupId);

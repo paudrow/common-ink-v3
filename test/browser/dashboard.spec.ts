@@ -22,7 +22,7 @@ const pinned = (page: Page) => card(page, "Pinned");
 const changes = (page: Page) => card(page, "Changes since your last visit");
 const CARDS = ["Today's events", "Due today or earlier", "Today's notes", "Pinned", "Changes since your last visit"];
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
-const what = (within: Locator) => within.locator(".dash-what");
+const what = (within: Locator) => within.locator(".dash-what, .todo-words");
 
 /** The dashboard with every section's answer in. */
 async function settled(page: Page) {

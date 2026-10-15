@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { IN_TRASH, type Covering, type NoteState, type Trashed } from "../../src/core/lifecycle.ts";
+import { newId } from "../../src/core/ids.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
-import { Op, OpError, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
 import { UPLOAD_IN_TRASH } from "../../src/core/uploads.ts";
+import { Op, OpError, type CalendarEvent, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
+import type { Sources } from "../../src/core/sources.ts";
 import { NOT_FOR_AGENTS } from "../../src/worker/mcp/tools.ts";
 import { addMember, newMember } from "./members.ts";
 import { PNG, upload } from "./uploading.ts";
@@ -75,11 +77,12 @@ interface World {
 
 const address = () => `${crypto.randomUUID()}@example.com`;
 
-/** Each note has a todo with a project of its own, a tag of its own, and someone of its own it is assigned to, which give the note away as its title does. */
+/** Each note has a todo with words of its own, a tag of its own, and someone of its own it is assigned to, which give the note away as its title does. */
 const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name} @[[who-${name}]]`;
 const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
 
-async function world(): Promise<World> {
+/** `more` is written in every note's text, after its own words. */
+async function world(more = ""): Promise<World> {
   const ada = await newMember("Ada Lovelace");
   const here = (personId: string): Actor => ({ kind: "member", personId, workspaceId: ada.workspaceId });
   const person = async (name: string) => {
@@ -99,7 +102,7 @@ async function world(): Promise<World> {
   const team = await folder("Team");
   const folders = { Open: open, Team: team, Deep: await folder("Deep", team) };
 
-  const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: textOf(name, text) })).id;
+  const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: textOf(name, more ? `${text} ${more}` : text) })).id;
   const notes = { open: await note(ada, "open"), team: await note(ada, "team"), deep: await note(ada, "deep"), lone: await note(ada, "lone"), secret: "", vpriv: await note(vera, "vpriv"), arch: await note(ada, "arch"), bin: await note(ada, "bin") };
   const file = async (by: Actor, name: NoteName, more: { private?: boolean } = {}) => (await upload(by, `File-${name}.png`, PNG, { folderId: folders[FOLDER_OF[name]], ...more })).id;
   const uploads = { open: await file(ada, "open"), team: await file(ada, "team"), deep: await file(ada, "deep"), lone: await file(ada, "lone"), secret: await file(eve, "secret"), vpriv: await file(vera, "vpriv", { private: true }), arch: await file(ada, "arch"), bin: await file(ada, "bin") };
@@ -115,7 +118,7 @@ async function world(): Promise<World> {
   notes.secret = await note(eve, "secret", `[[${notes.open}]]`);
   const zed = await connectAgent(env.DB, eve.personId, "Zed-agent");
   const asZed: Actor = { kind: "agent", agentId: zed.agent.id, personId: eve.personId, workspaceId: ada.workspaceId };
-  await perform(env.DB, asZed, { type: "note.write", id: notes.secret, baseRevision: 1, text: textOf("secret", `[[${notes.open}]] more`) });
+  await perform(env.DB, asZed, { type: "note.write", id: notes.secret, baseRevision: 1, text: textOf("secret", `[[${notes.open}]] more${more && ` ${more}`}`) });
   // What an admin put on the note before it was private: a link, and a guest. Neither outlasts it becoming private.
   const linked = await perform(env.DB, ada, { type: "grant.link", noteId: notes.secret, link: "public" });
   await perform(env.DB, ada, { type: "grant.set", noteId: notes.secret, email: vic!.email, access: "view" });
@@ -289,6 +292,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "upload.read": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "upload.open": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "upload.move": { on: "upload", needs: "E", trashed: "refused", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
+  // The upload beside each note put in that note: none here is its owner's alone in a note that isn't private, so nothing moves.
+  "upload.place": { on: "upload", needs: "E", trashed: "refused", args: (id, w, note) => ({ id, noteId: w.notes[note] }) },
   "upload.archive": { on: "upload", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, archived: STATE_OF[note] === "archived" }) },
   "upload.trash": { on: "upload", needs: "E", trashed: "opens", args: (id) => ({ id }) },
   "upload.restore": { on: "upload", needs: "E", trashed: "opens", args: (id) => ({ id }) },
@@ -302,9 +307,17 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "source.disconnect": { on: "workspace", who: EVERYONE, args: () => ({ id: "google-calendar" }) },
   "event.list": { on: "workspace", who: EVERYONE, args: () => ({ from: 0, to: 1, timeZone: "UTC" }) },
   "event.update": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none", etag: "none", title: "No" }) },
+  "event.create": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } }) },
   "contact.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  // Only the member changes a contact, and only their own: with nothing connected here there is none of anyone's to change. Agents are refused each (NOT_FOR_AGENTS).
+  "contact.update": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", id: "people/c1", etag: "none", name: "No" }) },
+  "contact.photo": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", id: "people/c1", photo: null }) },
+  "contact.create": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", name: "No" }) },
+  // Asked in capitals, so the answer's echo of who it is about is no mark of the note: only a line of it would be.
+  "person.read": { on: "workspace", who: EVERYONE, args: () => ({ who: "WHO-TEAM" }) },
   "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
+  "record.notes": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
   "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
   "upload.purge": { on: "upload", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
@@ -347,9 +360,9 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "record.refer", "pin.set"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer", "pin.set"];
 /** What answers from what is the asker's own and in no folder: their data sources, and how far they have read. */
-const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "contact.list", "record.refer", "record.read", "visit.read"];
+const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "record.refer", "record.read", "record.notes", "visit.read"];
 const AGENTS = [
   "their agent",
   "their read-only agent",
@@ -513,6 +526,17 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             expect(found.next, key).toBeNull();
           }
         }
+        // The todos of each folder, with the folder inside it: a folder that isn't there for the actor is no folder, as one that never was is, and no note is listed that they can't see.
+        for (const folder of FOLDERS) {
+          const seen = folderLevelOf(name, folder) !== "-";
+          await run(`todo.list in ${folder}`, "todo.list", { folderId: w.folders[folder], includeCompleted: true }, seen ? "done" : NO_FOLDER);
+          if (!seen) continue;
+          const inside = NOTES.filter((note) => (FOLDER_OF[note] === folder || (folder === "Team" && FOLDER_OF[note] === "Deep")) && levelOf(name, note) !== "-");
+          for (const [includeArchived, covers] of [[false, "live"], [true, "kept"]] as const) {
+            expect((await perform(env.DB, actor, { type: "todo.list", folderId: w.folders[folder], includeArchived })).todos.map((t) => t.noteId).sort(), `todo.list in ${folder}, ${covers}`).toEqual(inside.filter((note) => COVERED[covers].includes(STATE_OF[note])).map((note) => w.notes[note]).sort());
+          }
+        }
+        await run("todo.list in a folder that never was", "todo.list", { folderId: MISSING }, NO_FOLDER);
         // Several notes at once, each answered for itself: a hidden note is answered word for word as one that was never there, and one the actor may only read is not reverted.
         const asMissing = (answer: object, noteId: string) => ({ ...answer, noteId });
         const left = new Set((await env.DB.prepare("SELECT id FROM notes").all<{ id: string }>()).results.map((n) => n.id));
@@ -672,4 +696,236 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
       expect([...outcomes], who).toEqual(["not_found: No such workspace"]);
     }
   });
+});
+
+/*
+ * Every filter of the query language, asked by every kind of actor. What each filter is true of is
+ * written out below, of the same notes; what an actor is answered is then exactly those of them the
+ * table above lets that actor see, in the states the query covers. A filter with no row fails the
+ * first test.
+ */
+type Truth = readonly NoteName[] | ((who: { name: ActorName; agent: boolean; sees: (note: NoteName) => boolean }) => readonly NoteName[]);
+const LIVE = NOTES.filter((note) => STATE_OF[note] === "live");
+const BY_ADA = NOTES.filter((note) => !MAKER[note]);
+/** A filter that names something: `needs` is what must be there for the actor, and without it the query is refused as one naming nothing is. */
+interface Row {
+  query: string;
+  finds: Truth;
+  needs?: { folder: FolderName } | { note: NoteName } | { anyOf: readonly NoteName[] };
+  /** The same query naming something that was never there. */
+  missing?: string;
+}
+const NOTE_FILTERS: Record<string, Row[]> = {
+  folder: [
+    { query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" },
+    { query: "folder:TEAM-FOLDER is:trashed", finds: ["bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder is:trashed" },
+    { query: "-folder:Open-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Open" }, missing: "-folder:Nope-folder" },
+  ],
+  tag: [{ query: "tag:tag-team", finds: ["team"] }, { query: "#TAG-deep OR #tag-arch OR #tag-bin", finds: ["deep"] }, { query: "-tag:tag-open", finds: NOTES.filter((note) => note !== "open") }],
+  updated: [{ query: "updated:>=2020-01-01", finds: NOTES }, { query: "updated:<2020-01-01", finds: [] }, { query: "updated:today", finds: NOTES }, { query: "-updated:today", finds: [] }],
+  created: [{ query: "created:2020-01-01..*", finds: NOTES }, { query: "created:yesterday", finds: [] }, { query: "created:>=7d", finds: NOTES }],
+  editor: [
+    { query: 'editor:"Zed-agent"', finds: ["secret"], needs: { note: "secret" }, missing: 'editor:"Nobody-agent"' },
+    { query: 'edited-by:"eve editor"', finds: ["secret"], needs: { note: "secret" }, missing: 'edited-by:"nobody editor"' },
+    { query: "editor:@me", finds: ({ name, agent }) => (agent ? [] : name === "Ada, an admin" ? BY_ADA : NOTES.filter((note) => MAKER[note] === name)) },
+  ],
+  author: [
+    { query: 'author:"Vera Viewer"', finds: ["vpriv"], needs: { note: "vpriv" }, missing: 'author:"Nobody Viewer"' },
+    { query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"' },
+    { query: "-author:@me", finds: ({ name, agent }) => (agent ? NOTES : name === "Ada, an admin" ? NOTES.filter((note) => MAKER[note]) : NOTES.filter((note) => MAKER[note] !== name)) },
+  ],
+  is: [
+    { query: "is:open", finds: LIVE },
+    { query: "is:archived", finds: ["arch"] },
+    { query: "is:trashed", finds: ["bin"] },
+    { query: "is:archived OR is:trashed OR is:open", finds: NOTES },
+    { query: "is:private", finds: ["secret", "vpriv"] },
+    // Every note has a grant of its own. Which of them an actor is told are shared is which they may list the grants of.
+    { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
+    { query: "-is:shared", finds: ({ name, agent }) => NOTES.filter((note) => agent || !sharesNote(name, note)) },
+  ],
+  has: [
+    { query: "has:todo", finds: NOTES },
+    { query: "has:task has:open-task", finds: NOTES },
+    { query: "no:open-todo", finds: [] },
+    { query: "has:tag", finds: NOTES },
+    { query: "has:link", finds: ["secret"] },
+    // `open` shows the upload beside `team`, written there before these are asked.
+    { query: "has:attachment", finds: ["open"] },
+    { query: "no:attachment", finds: NOTES.filter((note) => note !== "open") },
+    // `open` is linked to from `secret` alone, so it has a backlink only for someone who can see `secret`.
+    { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) },
+    { query: "no:backlink", finds: ({ sees }) => NOTES.filter((note) => note !== "open" || !sees("secret")) },
+  ],
+  mentions: [
+    { query: "mentions:who-team", finds: ["team"] },
+    { query: "mention:WHO-DEEP OR mentions:who-secret", finds: ["deep", "secret"] },
+    { query: "-mentions:who-open", finds: NOTES.filter((note) => note !== "open") },
+    { query: "mentions:@me", finds: [] },
+  ],
+  in: [{ query: "Title in:title", finds: NOTES }, { query: "body in:title", finds: [] }, { query: "body in:body -Title-team", finds: NOTES.filter((note) => note !== "team") }],
+  sort: [{ query: "body sort:title-desc", finds: NOTES }],
+};
+/** The same of the upload beside each note, which `open` shows the one beside `team` of. */
+const UPLOAD_FILTERS: Record<string, Row[]> = {
+  folder: [
+    { query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" },
+    { query: "-folder:Open-folder is:trashed", finds: ["bin"], needs: { folder: "Open" }, missing: "-folder:Nope-folder is:trashed" },
+  ],
+  name: [{ query: "name:File-team", finds: ["team"] }, { query: "file-DEEP OR name:file-lone", finds: ["deep", "lone"] }, { query: "-name:.png", finds: [] }],
+  type: [{ query: "type:image", finds: NOTES }, { query: "type:pdf OR type:text OR kind:other OR type:video OR type:audio", finds: [] }],
+  uploader: [
+    { query: 'uploader:"Eve Editor"', finds: ["secret"], needs: { note: "secret" }, missing: 'uploader:"Nobody Editor"' },
+    { query: 'uploaded-by:"ada lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'uploaded-by:"Nobody Lovelace"' },
+    { query: "uploader:@me", finds: ({ name, agent }) => (agent ? [] : name === "Ada, an admin" ? BY_ADA : NOTES.filter((note) => MAKER[note] === name)) },
+  ],
+  // `open` shows the upload beside `team`: it is used for whoever sees `open`, and for nobody else.
+  used: [{ query: "used:yes", finds: ({ sees }) => (sees("open") ? ["team"] : []) }, { query: "used:no", finds: ({ sees }) => NOTES.filter((note) => note !== "team" || !sees("open")) }],
+  size: [{ query: "size:>1kb", finds: [] }, { query: `size:${PNG.byteLength}`, finds: NOTES }, { query: "size:1..1mb is:archived", finds: ["arch"] }],
+  uploaded: [{ query: "uploaded:today", finds: NOTES }, { query: "uploaded:<2020-01-01", finds: [] }, { query: "uploaded:>=7d", finds: NOTES }],
+  is: [
+    { query: "is:open", finds: LIVE },
+    { query: "is:archived", finds: ["arch"] },
+    { query: "is:trashed", finds: ["bin"] },
+    { query: "is:private", finds: ["secret", "vpriv"] },
+    // Every upload has a grant of its own. Which of them an actor is told are shared is which they may list the grants of.
+    { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
+  ],
+  sort: [{ query: "sort:size-desc", finds: NOTES }, { query: "file sort:name-asc", finds: NOTES }],
+};
+const TODO_FILTERS: Record<string, Row[]> = {
+  folder: [{ query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" }],
+  tag: [{ query: "tag:tag-team OR #tag-lone", finds: ["team", "lone"] }],
+  updated: [{ query: "updated:>=yesterday", finds: NOTES }],
+  created: [{ query: "created:<2020-01-01", finds: [] }],
+  editor: [{ query: 'editor:"Zed-agent"', finds: ["secret"], needs: { note: "secret" }, missing: 'editor:"Nobody-agent"' }],
+  author: [{ query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"' }],
+  is: [
+    { query: "is:open", finds: NOTES },
+    { query: "is:done", finds: [] },
+    { query: "is:open OR is:done", finds: NOTES },
+    { query: "is:archived", finds: ["arch"] },
+    { query: "is:trashed", finds: ["bin"] },
+    { query: "is:private", finds: ["secret", "vpriv"] },
+    { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
+  ],
+  has: [{ query: "has:due", finds: [] }, { query: "no:due", finds: NOTES }, { query: "has:repeat", finds: [] }, { query: "no:repeat has:tag", finds: NOTES }, { query: "has:link", finds: ["secret"] }, { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) }],
+  assignee: [
+    { query: "assignee:who-team", finds: ["team"] },
+    { query: "assigned:WHO-LONE OR assignee:who-secret", finds: ["lone", "secret"] },
+    { query: "-assignee:who-open", finds: NOTES.filter((note) => note !== "open") },
+    { query: "assignee:@me", finds: [] },
+  ],
+  due: [{ query: "due:<today", finds: [] }, { query: "-due:<today", finds: NOTES }, { query: "due:2020-01-01..2030-01-01", finds: [] }],
+  priority: [{ query: "priority:none", finds: NOTES }, { query: "priority:>=low", finds: [] }, { query: "importance:0..3", finds: NOTES }],
+  in: [{ query: "todo-team", finds: ["team"] }, { query: "Title-team", finds: [] }, { query: "Title-team in:title", finds: ["team"] }, { query: "body-team in:body", finds: [] }],
+  sort: [{ query: "sort:priority-desc", finds: NOTES }],
+};
+
+describe("every filter, by every actor", { timeout: 30_000 }, () => {
+  it("has a row for every filter of each scope, so one added later can't go unasked", async () => {
+    const { keysFor } = await import("../../src/core/query.ts");
+    expect(Object.keys(NOTE_FILTERS).sort()).toEqual([...keysFor("notes")].sort());
+    expect(Object.keys(TODO_FILTERS).sort()).toEqual([...keysFor("todos")].sort());
+    expect(Object.keys(UPLOAD_FILTERS).sort()).toEqual([...keysFor("uploads")].sort());
+  });
+
+  for (const name of Object.keys(ACTORS) as ActorName[]) {
+    for (const as of ["themself", "their agent", "their agent limited to the folder Team", "their agent limited to the folder Open"] as const) {
+      it(`${name}, as ${as}`, async () => {
+        const w = await world();
+        await perform(env.DB, w.actors["Ada, an admin"], { type: "note.write", id: w.notes.open, baseRevision: 1, text: textOf("open", `\n::image{${w.uploads.team} 1x1}\n`) });
+        const person = w.actors[name];
+        const within = as === "themself" ? undefined : LIMITED[as];
+        const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope: within && { folderIds: [w.folders[within[0]!]] } };
+        const sees = (note: NoteName) => !(within && !within.includes(FOLDER_OF[note])) && personLevelOf(name, note) !== "-";
+        const seesFolder = (folder: FolderName) => !(within && !within.includes(folder)) && personFolderLevelOf(name, folder) !== "-";
+        const today = new Date().toISOString().slice(0, 10);
+        const covered = (query: string): Covering => (query.includes("is:trashed") ? "any" : query.includes("is:archived") ? "kept" : "live");
+        const said = async (input: OpInput) => perform(env.DB, actor, input).then((answer) => JSON.stringify(answer), (err: unknown) => (err instanceof OpError ? `${err.code}: ${err.message}` : Promise.reject(err)));
+
+        for (const [type, rows] of [["search", NOTE_FILTERS], ["todo.list", TODO_FILTERS], ["upload.list", UPLOAD_FILTERS]] as const) {
+          for (const row of Object.values(rows).flat()) {
+            const key = `${type} ${row.query}`;
+            const input: OpInput = type === "search" ? { type, query: row.query, today, limit: 50 } : { type, query: row.query, today };
+            const there = !row.needs || ("folder" in row.needs ? seesFolder(row.needs.folder) : "note" in row.needs ? sees(row.needs.note) : row.needs.anyOf.some(sees));
+            if (row.missing) {
+              // Naming what the actor can't see is answered in the words naming what was never there is, with the name alone different.
+              const blank = (text: string) => text.replace(/"[^"]*"/g, '"…"').replace(/of the query: .*\)$/, "");
+              const missing = await said({ ...input, query: row.missing } as OpInput);
+              expect(missing, `${key}: what was never there`).toMatch(/^invalid: (No folder named|Nobody named) "/);
+              if (!there) {
+                expect(blank(await said(input)), `${key}: hidden`).toBe(blank(missing));
+                continue;
+              }
+            }
+            const answer = (await perform(env.DB, actor, input)) as Results["search" | "todo.list" | "upload.list"];
+            const truth = typeof row.finds === "function" ? row.finds({ name, agent: as !== "themself", sees }) : row.finds;
+            const expected = truth.filter((note) => sees(note) && COVERED[covered(row.query)].includes(STATE_OF[note])).map((note) => (type === "upload.list" ? w.uploads : w.notes)[note]).sort();
+            if (Array.isArray(answer)) {
+              expect(answer.map((u) => u.id).sort(), key).toEqual(expected);
+              // How many notes show each is counted among the notes the actor sees, and no others.
+              expect(answer.filter((u) => u.uses > 0).map((u) => [u.id, u.uses]), `${key}: uses`).toEqual(sees("open") && answer.some((u) => u.id === w.uploads.team) ? [[w.uploads.team, 1]] : []);
+            } else {
+              const found = "results" in answer ? answer.results.map((r) => r.note.id) : answer.todos.map((t) => t.noteId);
+              expect([...found].sort(), key).toEqual(expected);
+              // What it is told beside the notes says no more: nothing left to page to, and nothing still to be read in.
+              expect(answer.next, `${key}: next`).toBeNull();
+              if ("results" in answer) expect(answer.indexing, `${key}: indexing`).toBe(false);
+            }
+            const hidden = [...NOTES.filter((note) => !sees(note)), ...FOLDERS.filter((folder) => !seesFolder(folder))];
+            const written = sees("secret") ? [`open: ${w.notes.open}`] : [];
+            expect(hidden.flatMap((item) => w.marks[item].filter((mark) => JSON.stringify(answer).includes(mark)).map((mark) => `${item}: ${mark}`)).filter((mark) => !written.includes(mark)), `${key}: says nothing of what is hidden`).toEqual([]);
+          }
+        }
+      });
+    }
+  }
+});
+
+describe("the notes about an event on a calendar everyone has, by every actor", { timeout: 30_000 }, () => {
+  /** One event every person's calendar holds, as a calendar they all share does: one id for all. */
+  const SYNC: CalendarEvent = { sourceId: "cal", id: "team s1", calendarId: "team", calendar: "Team", color: null, title: "Team sync", when: { allDay: false, from: 0, to: 3_600_000 }, timeZone: null, location: null, description: null, recurring: false, editable: false, etag: "e", url: null };
+  const shared = (has: (personId: string) => boolean): Sources => ({
+    of: async (personId) => [
+      {
+        kind: "calendar",
+        info: { id: "cal", name: "Team calendar", provider: "Test", state: "connected", account: null },
+        list: async () => ({ calendars: [], events: has(personId) ? [SYNC] : [] }),
+        get: async (id) => (has(personId) && id === SYNC.id ? SYNC : null),
+        calendar: async () => null,
+      },
+    ],
+    connect: async () => ({ redirect: null }),
+    disconnect: async () => {},
+  });
+
+  for (const name of Object.keys(ACTORS) as ActorName[]) {
+    for (const as of ["themself", "their agent", "their read-only agent", "their agent limited to the folder Team"] as const) {
+      it(`${name}, as ${as}`, async () => {
+        // Every note holds Ada's reference to the event; the reference is made before the notes, by its id.
+        const ref = newId();
+        const w = await world(`::event{${ref} Team sync}`);
+        const ada = w.actors["Ada, an admin"];
+        await env.DB.prepare("INSERT INTO source_refs (id, person_id, data_source, record_id, created_at) VALUES (?, ?, 'cal', ?, 0)").bind(ref, ada.personId, SYNC.id).run();
+        const person = w.actors[name];
+        const within = LIMITED[as as (typeof AGENTS)[number]];
+        const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope: within ? { folderIds: [w.folders[within[0]!]] } : as === "their read-only agent" ? { readOnly: true } : undefined };
+        const ask = (has: (personId: string) => boolean) => perform(env.DB, actor, { type: "record.notes", sourceId: "cal", id: SYNC.id }, Date.now(), shared(has));
+        if (within) {
+          // What it would list is about its member's calendar, which is in no folder.
+          await expect(ask(() => true)).rejects.toThrow(/record.notes/);
+          return;
+        }
+        const sees = (note: NoteName) => personLevelOf(name, note) !== "-" && STATE_OF[note] !== "trashed";
+        const answer = await ask(() => true);
+        expect(answer.notes.map((n) => n.id).sort(), "with the event in their calendar").toEqual(NOTES.filter(sees).map((note) => w.notes[note]).sort());
+        const hidden = NOTES.filter((note) => personLevelOf(name, note) === "-");
+        expect(hidden.flatMap((note) => w.marks[note].filter((mark) => JSON.stringify(answer).includes(mark))), "says nothing of what is hidden").toEqual([]);
+        // Without the event in their own calendar, Ada's reference is no way to it: only Ada, whose reference it is, is told.
+        const without = await ask((personId) => personId !== person.personId);
+        expect(without.notes.map((n) => n.id).sort(), "without the event").toEqual(person.personId === ada.personId ? answer.notes.map((n) => n.id).sort() : []);
+      });
+    }
+  }
 });

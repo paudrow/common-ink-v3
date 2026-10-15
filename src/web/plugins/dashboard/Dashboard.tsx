@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { ago, dayOf, useNow, type App, type Author, type CalendarEvent, type HistoryEntry, type HistoryPage, type ListedTodo, type NoteSummary, type PluginHost, type Source, type ViewProps } from "../../plugin-api.ts";
 import { dayLabel, timeLabel } from "../calendar/dates.ts";
 import type { ListedAt } from "../lib/openTodo.ts";
-import { dueLabel, dueState } from "../todos/dates.ts";
+import { TodoGlance } from "../todos/Todos.tsx";
 import type { Pins } from "./pins.ts";
 import { FIRST_SUMMARY_MS, aheadToday, editedToday, membersStamp, othersMarks, rose, summarize, todayAt, todoStamp, type Today } from "./today.ts";
 
@@ -169,24 +169,21 @@ function Events({ host, app, today, now }: { host: PluginHost; app: App; today: 
   );
 }
 
+/** What the Todos page lists of the same todos, by its query. */
+const DUE_QUERY = "due:<=today";
+
 function Todos({ host, app, today, onOpen }: { host: PluginHost; app: App; today: Today; onOpen: (todo: ListedAt) => void }) {
   const stamp = useMemo(() => todoStamp(app.notes ?? []), [app.notes]);
+  const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
+  const titleOf = useCallback((noteId: string) => (titles ? (titles.get(noteId) ?? null) : undefined), [titles]);
   const listed = useRead(() => host.perform({ type: "todo.list", dueTo: today.day, limit: TODOS_SHOWN }), { key: today.day, stamp, ready: app.notes !== null });
   const todos: readonly ListedTodo[] = listed.status === "read" ? listed.value.todos : [];
   return (
     <Card title="Due today or earlier" reading={listed.status === "reading"} problem={listed.status === "failed" ? listed.message : null}>
       {todos.length > 0 ? (
-        <ul className="dash-list" aria-label="Todos due today or earlier">
+        <ul className="dash-list dash-todos" aria-label="Todos due today or earlier">
           {todos.map((todo) => (
-            <li key={`${todo.noteId}/${todo.line}`}>
-              <button type="button" className="dash-row" onClick={() => onOpen(todo)}>
-                <span className="dash-what">{todo.words || "Untitled"}</span>
-                <span className="dash-meta">{todo.noteTitle || "Untitled"}</span>
-                <span className="todo-chip todo-due" data-due={dueState(todo.due!, today.day)}>
-                  {dueLabel(todo.due!, today.day)}
-                </span>
-              </button>
-            </li>
+            <TodoGlance key={`${todo.noteId}/${todo.line}`} todo={todo} now={today.day} titleOf={titleOf} onOpen={onOpen} />
           ))}
         </ul>
       ) : (
@@ -194,7 +191,7 @@ function Todos({ host, app, today, onOpen }: { host: PluginHost; app: App; today
       )}
       {listed.status === "read" && listed.value.next !== null && (
         <p className="dash-more">
-          <button type="button" className="link" onClick={() => app.go("/todos")}>
+          <button type="button" className="link" onClick={() => app.go(`/todos?q=${encodeURIComponent(DUE_QUERY)}`)}>
             More on the Todos page
           </button>
         </p>

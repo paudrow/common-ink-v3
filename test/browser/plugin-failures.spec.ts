@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
 import { openPlugins } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });
@@ -23,7 +23,7 @@ test("a plugin whose views and embed throw is left out, the note keeps its typin
         activate(host: { views: { register(slot: string, view: unknown): void }; embeds: { register(embed: unknown): void } }) {
           host.views.register("column", { id: "broken-column", component: broken("The column") });
           host.views.register("section", { id: "broken-section", component: broken("The section") });
-          host.views.register("inspector", { id: "broken-tab", label: "Broken", icon: "info", for: "note", component: broken("The tab") });
+          host.views.register("inspector", { id: "broken-tab", label: "Broken", icon: "info", for: ["note"], component: broken("The tab") });
           host.views.register("editor", { id: "broken-editor", component: broken("The editor area") });
           host.embeds.register({ name: "broken", title: "Broken embed", render: broken("The embed") });
         },
@@ -43,8 +43,8 @@ test("a plugin whose views and embed throw is left out, the note keeps its typin
   await page.keyboard.type("typed beside a broken plugin");
   await expect(page.getByRole("status")).toHaveText("Saved");
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("typed beside a broken plugin");
-  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Broken" }).click();
-  await expect(page.getByRole("tabpanel")).toBeEmpty();
+  await showPanel(page, "Broken");
+  await expect(page.getByRole("complementary", { name: "Inspector" }).locator(".inspector-body")).toBeEmpty();
   await expect(text(page)).toContainText("typed beside a broken plugin");
 
   await openPlugins(page);

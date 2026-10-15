@@ -20,11 +20,23 @@ The notes in one folder, shown in the editor area as cards: each a title, a line
 _Avoid_: List column, feed
 
 **Search bar**:
-What heads every folder's list, and the Search page, which is the same list of every note: a field with the folder it searches shown in it, the choice of Open, Archived or All, and the order. With nothing typed the list is the folder's notes. With something typed it is what the server's search finds among them, each card with the lines that matched.
+What heads every folder's list, and the Search page, which is the same list of every note: a field that takes a query, with the folder it searches shown in it and Advanced beside it. A folder's list also has the choice of Open, Archived or All, Has todos, and the order; on the Search page the query says all three (`is:archived`, `has:todo`, `sort:`), and the bar and Advanced are its only controls. With nothing typed the list is the folder's notes. With a query typed it is what the server's search finds among them, each card with the lines that matched. The Todos page is headed by the same field and Advanced, for todos.
 _Avoid_: Filter box
 
+**Query**:
+What a search or a list of todos is asked for, as text: words, phrases, filters, and `-`, `NOT`, `OR` and parentheses between them, written as GitHub's search writes them. One language, read by one parser, for notes, for todos and for uploads. `docs/search.md` has all of it.
+_Avoid_: Search string, search expression
+
+**Filter**:
+A `key:value` in a query that narrows by something other than words: `folder:`, `tag:`, `updated:`, `editor:`, `is:`, `has:`, `due:`, and of uploads `type:`, `uploader:`, `used:`, `size:`, `uploaded:`, `name:`. `has:attachment` is a note that shows an upload: the word is GitHub's, and the thing is an upload. `no:word` is `-has:word`, and `#name` is `tag:name`. `in:` and `sort:` are written the same way and narrow nothing: they say where words are looked for and in what order the answer comes.
+_Avoid_: Qualifier, operator (for a filter)
+
+**Builder**:
+The panel Advanced opens under a search bar: the bar's query as a row for each condition, to be changed by picking. Each change is written into the bar, and what is typed in the bar is read back into the rows. A query rows can't show stays as typed. It opens on a first row to fill in. Its fields are the filters, with `is:` offered as two: State (open, archived, in Trash, and done for a todo) and Visibility (shared or private). Its **?** opens the help over the page, every form of the language under the same headings with an example to try.
+_Avoid_: Filter panel, advanced search form
+
 **Open, Archived, All**:
-Which notes a list or a search is of, by where each is in its life: the live ones, the archived ones alone, or both. Never one in Trash.
+Which notes a folder's list or its search is of, by where each is in its life: the live ones, the archived ones alone, or both. Never one in Trash. The Search page says it in its query: `is:archived`, `is:open OR is:archived`.
 _Avoid_: Show archived, include archived (for a list of notes)
 
 **All notes**:
@@ -47,32 +59,33 @@ A reference to a person in a note's text, written `@[[id|name]]` for a member of
 _Avoid_: Tag, ping
 
 **Assignee**:
-A person mentioned on a todo's line. A todo can have several. The todos view narrows by assignee and to the todos assigned to the viewing member.
+A person mentioned on a todo's line. A todo can have several. The todos view narrows by assignee with `assignee:` in its query, `assignee:@me` for the viewing member, and an assignee's chip there changes who it is assigned to.
+
+**Person page**:
+What a click on a mention opens, at `/person/<who>`: a member's id or a name, as the mention names them. Each reader is shown only what they may be told: the member card (name, role, and the email where the member list shows it) to whoever can list the members; their own contacts that are this person, matched by name or by the member's email, with everything the contact holds, to that member and their agents alone; the open todos assigned to them and each line that mentions them, newest note first, from the notes the reader can see. Someone who is neither a member nor one of the reader's contacts is the name and nothing more. It searches the notes that mention them with `mentions:` and has one action, "New note about <name>", which makes an ordinary note that mentions them. There is no separate note per person and nothing is typed on the page itself.
+_Avoid_: Contact page (a member's card is one too), profile
 
 **Backlink**:
-A note whose text links to the open note. The inspector's Backlinks tab lists the ones the member can see.
+A note whose text links to the note in front. The inspector's Backlinks panel lists the ones the member can see.
 
 **Todo**:
-A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, recurrence, importance, project, and assignees are written on that line and shown as chips. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a recurring todo leaves the open line with its next due date and files the checked line on the daily note of the member who checked it off, however the box was checked. Taking the completion back takes the filed line back off the daily note. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, with a control to include completed ones.
+A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, repeat, priority, and assignees are written on that line and shown as chips. It has the tags written on its line and the tags of its note. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a repeating todo leaves the open line with its next due date and files the checked line on the daily note of the member who checked it off, however the box was checked. Taking the completion back takes the filed line back off the daily note. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, until its query says otherwise.
 _Avoid_: Task, item
 
-**Importance**:
-How urgent a todo is. Three raised levels, written `!`, `!!`, or `!!!` immediately after the checkbox, or normal when none is set.
+**Priority**:
+How urgent a todo is: High, Medium or Low, written `!!!`, `!!` or `!` immediately after the checkbox, or None when none is written. The app says the words; the note keeps the marks. Operations, tools and the `ink` CLI still call the field `importance`, a number from 0 (None) to 3 (High). A query says `priority:high`; `importance:` reads the same.
+_Avoid_: Importance, normal
 
 **Due date**:
 The day a todo is due, written `due:2026-10-14` on its line. It is a calendar date with no time and no time zone. Overdue is a due date before today, where today is the viewing member's.
 _Avoid_: Deadline
 
-**Recurrence**:
-How a todo comes due again, written `every:` and a rule on its line: every N days, weeks, months or years after the due date (`every:2w`); N after it was last done (`every:3d-after-done`); days of the week (`every:mon,thu`); a day of the month from its start or end (`every:3rd-day`, `every:last-day`); the nth weekday of the month (`every:2nd-tue`, `every:last-fri`). `docs/todos.md` has each rule and its next due date.
-_Avoid_: Repeat, schedule
+**Repeat**:
+How a todo comes due again, written `every:` and a rule on its line: every N days, weeks, months or years after the due date (`every:2w`); N after it was last done (`every:3d-after-done`); days of the week, every week or every Nth (`every:mon,thu`, `every:2w-mon,thu`); days of the month from its start or end (`every:3rd-day`, `every:1st-day,15th-day`, `every:last-day`); the nth weekdays of the month (`every:2nd-tue`, `every:last-fri`); a date or a weekday of a month every year (`every:mar-1`, `every:1st-mon-mar`). A rule may end, on a day or after so many more times (`-until-2026-12-31`, `-times-5`), and its last time checks the todo off for good. A member can **skip** one occurrence: the due date moves to the next with nothing checked off. `docs/todos.md` has each rule and its next due date. A todo with one is a repeating todo. In code the rule is `every` and its module `recurrence.ts`, which a person never reads.
+_Avoid_: Recurrence, recur, schedule
 
 **Completion**:
-One time a recurring todo was checked off, on a day, by a member or an agent. The todo's line carries the latest day and the count, written `done:2026-10-10x12`, and the record has each one.
-
-**Project**:
-A `+Name` on a todo that groups it with todos in other notes. It does not tag the note. A todo can be in several. A name starts with a letter and goes on in letters, digits, `_` and `-`. Matching ignores case.
-_Avoid_: Folder, tag
+One time a repeating todo was checked off, on a day, by a member or an agent. The todo's line carries the latest day and the count, written `done:2026-10-10x12`, and the record has each one.
 
 **Daily note**:
 A note for one calendar date, belonging to one member. Its heading is that date in that member's timezone, written as a due date is: `# 2026-10-11`. Which member and day it belongs to is stored outside the note, so it stays their daily note when moved or retitled. It is made when first needed, private to its member unless their settings say otherwise, in the folder at the top of the workspace that their settings name, and the default is Daily. Changing that setting leaves daily notes already created where they are. An agent files a completion on the connecting member's daily note. A guest has none.
@@ -89,17 +102,21 @@ External structured data a person connects, such as their calendar events or con
 _Avoid_: Integration, connector
 
 **Connect**:
-What a person does to let Common Ink into a data source: agreeing to it at the external system, in their own browser. They can take it back by disconnecting, and agree again at any time. Signing in with Google asks for the calendar and contacts at the same time.
+What a person does to let Common Ink into a data source: agreeing to it at the external system, in their own browser. They can take it back by disconnecting, and agree again at any time. Signing in with Google asks for the calendar and contacts at the same time, the contacts for reading; changing them is agreed to apart, when the member first asks to edit one.
 _Avoid_: Link, sync, authorize
 
 **Record**:
 One thing in a data source: an event or a contact.
 
 **Event**:
-A calendar entry from a member's data source. It may recur, and each occurrence is then an event of its own. It is either between two instants, shown in the viewing member's timezone, or all-day: on calendar dates, with no time and no zone, the same dates wherever it is read. An event can be changed when its data source is read-write and its calendar lets the member change it.
+A calendar entry from a member's data source. It may repeat, and each occurrence is then an event of its own. It is either between two instants, shown in the viewing member's timezone, or all-day: on calendar dates, with no time and no zone, the same dates wherever it is read. An event can be changed when its data source is read-write and its calendar lets the member change it.
+
+**Calendar**:
+One of the calendars in a calendar data source, such as a member's work calendar in their Google account. Every event is in one. A member may add events to a calendar, and change its own, when its data source is read-write and the calendar lets them; a calendar they can only read, such as a holidays calendar, refuses both. Which calendars the Calendar page shows is the member's, kept on the server with their settings in the workspace. The page shows them by Day, 3 days, Week, Month or Agenda, from the first day of the week the member chose.
 
 **Record reference**:
 What a note writes to point at an event or a contact without copying it: an embed, `::event{ref label}` or `::contact{ref label}`. The ref says nothing of the record and leads to it only for the member who made the reference, who is shown the record as it is now. The label is plain text in the note that every reader sees, in gray. Anyone else sees the label and nothing more.
+The notes about a record are the notes that hold the member's own reference to it and that they can see, each said to be Private, Shared or Workspace by who sees it.
 _Avoid_: Link (that is to a note), mention (that is `@`)
 
 **Dashboard**:
@@ -117,15 +134,15 @@ The changes made since a member's last visit by anyone but the member, their own
 A note a member has chosen to show on their own dashboard. It is theirs alone, kept for them in that workspace and the same in every browser, and is not written into the note: pinning is not a change. A pinned note that is archived or in Trash is left off the dashboard and returns with the note. A pin on a note the member can no longer see is left off too, says nothing of the note, and returns if the note does. A member's agent can pin for them.
 
 **Contact**:
-A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. Contacts are read-only.
+A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. The member edits a contact from its person page, every field as a contacts app does, and the change is written back where the contact is kept: Google's contacts through the People API, once the member has agreed to changes as well as reading ("Connect again to edit contacts"). A person who isn't one of the member's contacts can be added to them from their page. Only the member changes or adds a contact: not another member, whatever their role, and not an agent.
 _Avoid_: Member, user
 
 **Tag**:
-An inline `#tag` in a note, with no space after the `#`, outside code. It tags the whole note, including when it appears on a todo line. It has something in it besides digits, so `#12` is not one. It is not a folder or a heading. Matching ignores case.
+An inline `#tag` in a note, with no space after the `#`, outside code. It tags the whole note, including when it appears on a todo line, and every todo in a note counts as tagged with the note's tags. Todos are grouped by tag and by folder, and by nothing else: a `+Name` on a todo is words. It has something in it besides digits, so `#12` is not one. It is not a folder or a heading. Matching ignores case.
 _Avoid_: Label, project
 
 **Search**:
-A search of the text of notes a member can see, including todo lines, tags, and projects. Every word typed must be in the note, each matching the start of a word, ignoring case and accents. Words in double quotes match as a phrase, `#name` narrows to notes with that tag, and `+name` to notes with a todo in that project. Notes whose title matches come first, then the latest changed. Archived notes are excluded unless included, and trashed notes always.
+A search of the text of notes a member can see, including todo lines, and tags. Every word typed must be in the note, each matching the start of a word, ignoring case and accents. Words in double quotes match as a phrase, and `#name` narrows to notes with that tag. Notes whose title matches come first, then the latest changed. Archived notes are excluded unless included, and trashed notes always.
 
 **Quick open**:
 A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included.
@@ -142,23 +159,33 @@ A tab that holds a page. It is one tab wherever under the page's address it is, 
 A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
 
 **Preview tab**:
-The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, in whichever editor group is focused when something is opened: the next thing opened with a single click takes its place, whatever either is of, and a preview in another group closes there. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, a card's pencil, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
+The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, and it is where the next thing opened with a single click goes, whatever either is of and whichever editor group is focused: so no group is closed by opening something in another. With none, it opens in the focused group. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, a card's pencil, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
 
 **Editor group**:
-A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. The inspector shows the tab the member last picked wherever what is in front has it, and otherwise one it does have, with the pick left as it was. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
+A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
 _Avoid_: Pane
 
 **Split**:
 Groups laid along one direction, left to right or top to bottom, each with a share of the room. A tab is split right or down from its menu or a command, and to any side by dragging it to that edge of a group; dragged onto the middle of a group it joins that group's tabs. The edge between two groups is dragged to change their shares.
 
-**Window buttons**:
-The buttons that act on the window and on no one note, whatever is open: the sidebar's and the inspector's, together before the first tab of the top left editor group, where the sidebar meets the editor area.
+**Edge**:
+The line where the sidebar or the inspector meets the editor area, with a short grip half way down it. Dragged, it resizes its side. Dragged in well past the side's least width, the side folds: the sidebar to its bar, and the inspector's pinned panel away, leaving its bar. The folded edge dragged out, or pressed, opens it again, as wide as it was, and it follows the pointer only once the pointer is out that far; the inspector's panel opened this way is pinned. There are no buttons for the sidebar, and the commands Toggle sidebar (⌘\) and Toggle inspector do the same.
 
-**Sidebar bar**, **Inspector bar**:
-What a closed sidebar or a closed inspector leaves: a narrow bar of icons. The sidebar bar has an icon for each thing the open sidebar lists, in the same order; a mode's icon goes to the mode and Folders opens the sidebar. The inspector bar has an icon for each tab the inspector has for what is in front, and an icon opens the inspector on its tab.
+**Sidebar bar**:
+What a closed sidebar leaves: a narrow bar of icons, one for each thing the open sidebar lists, in the same order. A mode's icon goes to the mode and Folders opens the folder picker.
+
+**Inspector bar**:
+The narrow bar of icons at the right of the window, one for each of the inspector's panels. It is always there, the same whatever is in front: no icon comes or goes with what is open, and it never closes by itself. An icon shows its panel, and the same icon again closes it.
+
+**Folder picker**:
+The sidebar's folder tree shown over the page beside the sidebar bar, from the bar's Folders icon, while the sidebar stays closed. Nothing under it moves. It goes when a folder is opened from it, on Escape, and on a press outside it.
 
 **Inspector**:
-The panel at the right that is about whatever is in front: the tab in front of the focused group. Each of its tabs says what kind of thing it is for: a note, a folder's list, or a page. It opens whatever is in front and stays open as the tab in front changes; where no tab is for that kind of thing it shows one quiet line. A note has History, Backlinks and Info; a folder's list has History, the folder's notes that changed as History mode lists them, and Info.
+The inspector bar and the panel it shows, which is about whatever is in front: the tab in front of the focused group. The panels are History, Backlinks and Info. A panel opens over the page and goes when the member presses elsewhere or presses Escape; pinned, by the one control in its header, it is beside the page and stays. Which panel, whether it shows and whether it is pinned are as the member last had them. A panel with nothing for what is in front says "Nothing to show for this view". The History panel is History itself, narrowed to what is in front and with what is selected under the list: a note's changes by time, a folder's or a page's notes by time or by note.
+_Avoid_: Right sidebar, inspector tab
+
+**About**:
+What the inspector's panels are told is in front: a note, a folder's list, or the notes a page says it is showing. A page says so itself, as the History page does with the notes whose changes are ticked; a page that says nothing is nothing to be about.
 
 **Focus**:
 One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
@@ -175,6 +202,13 @@ _Avoid_: Shortcut, hotkey
 **Command palette**:
 The list of commands, narrowed by typing.
 
+**Keyboard shortcuts sheet**:
+Every command that has keys now, under Navigation, Notes, Editor and then a plugin's own heading such as Vim, opened over the page by **?** wherever nothing is being typed, or from the command palette. It shows the member's keys where they changed them.
+_Avoid_: Cheat sheet, help menu (for the sheet)
+
+**Help overlay**:
+Help shown over the page in a dialog with a title and a close button, the one look for help in the app: the query syntax and the keyboard shortcuts sheet are drawn in it.
+
 **Vim mode**:
 A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
 
@@ -185,7 +219,7 @@ The row of a list that vim's keys are on. It has focus, is marked, and is kept i
 A part of the window that `ctrl+w` moves between: the sidebar, each editor group, the inspector.
 
 **Drawn** and **as written**:
-The two ways a note's editor shows markdown. Drawn is what the markdown means: bold words, a table, a formula, a checkbox. As written is its source, with every mark. A line is shown as written while the cursor is on it, and nothing moves when it changes from one to the other. A table is always drawn, and its cells are typed in where they are.
+The two ways a note's editor shows markdown. Drawn is what the markdown means: bold words, a table, a formula, a checkbox. As written is its source, with every mark. A construct is shown as written only while the cursor is on that construct itself, inside it or at its edge: a bold word, a link, inline code, a formula, a task's box, a list mark, each alone, so the rest of its line stays drawn. A heading's mark and a code block's fence go by their line. Nothing else moves when one changes from drawn to written. A table is always drawn, and its cells are typed in where they are; its own lines are shown as written above it while the cursor is in them, reached with the keys.
 _Avoid_: Preview, rendered view, source mode
 
 **Chip**:
@@ -258,7 +292,7 @@ The folders an agent is limited to in the one workspace it reaches: it reaches t
 _Avoid_: Scope, sandbox
 
 **History**:
-The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as a list of changes, by time or by note, beside what the selected ones did. The history of the open note, of a folder, and of the workspace are this same record.
+The ordered record of every change in a workspace. It only goes forward: an undo, a redo, and a revert are each recorded as a new change that names the changes it reverted, so nothing is erased and a change either still stands or was reverted. History is shown as a list of changes under the day each was made, by time or by note, beside what the selected ones did. A day's tick selects the whole day. The history of the open note, of a folder, and of the workspace are this same record.
 _Avoid_: Log, timeline, versions
 
 **Revert**:
@@ -266,7 +300,7 @@ A new change that takes the effect of earlier changes out of a note and keeps ev
 _Avoid_: Restore, rollback, put back, reapply, take back out
 
 **Selection**:
-The changes picked in History, of one note or of many, to read together and to revert together. Reverting a selection makes one revert in each note it has changes of. A selected change that was already reverted is left as it is, and one selected together with the revert that reverted it stays reverted while that revert goes: the note is as if neither had been made.
+The changes picked in History, of one note or of many, to read together and to revert together. Nothing is picked but by the member, and each place History is shown keeps its own selection while the app is open. Where a selection has a **conflict** is marked on its diff before any revert is asked for. Reverting a selection makes one revert in each note it has changes of. A selected change that was already reverted is left as it is, and one selected together with the revert that reverted it stays reverted while that revert goes: the note is as if neither had been made.
 
 **Run**:
 A note's selected changes that follow one another, read as one diff: from the note before the first of them to the note after the last. A change left out between two selected ones ends a run, and the next run says how many were skipped.
@@ -281,7 +315,7 @@ What a revert would do, worked out and not recorded: the changes it would revert
 A later change that still stands and edited a line a revert changes. A preview names each one. A line added or removed whole next to such a line is not an overlap.
 
 **Conflict**:
-A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
+A place in a note where an overlap edited lines a revert changes. The person reverting settles each one: keep the later edit, on a line otherwise returned to how it was, or left whole as it is when the later edit was to the same words or removed the line; go back, so the line is as it was before the reverted change and the later edit to it is dropped; or type the lines by hand. What the same later change did to other lines is no conflict and stays. The revert is one change whichever way its conflicts are settled, and what was chosen is part of it: reverting that revert takes it out too.
 
 **Undo**:
 Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
@@ -308,7 +342,7 @@ The part of the core that turns plugins on and off, hands each one its reach int
 One thing a plugin adds: a command, a view, an embed, a completion, or an editor extension. It is there while its plugin is on.
 
 **View**:
-Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector tab, a page, the bottom bar, or an overlay.
+Something a plugin draws in a slot of the app: a column, a section of the sidebar, the editor area, a folder's list of notes, an inspector panel, a page, the bottom bar, or an overlay.
 _Avoid_: Panel
 
 **Bottom bar**:
@@ -342,13 +376,13 @@ Where an embed keeps what it shows that is more than a word in the line: a video
 Something from another site shown below the line that names it: a YouTube video, or a post on X or Bluesky. It is written as its web address alone on a line, with no syntax of its own. A video is its picture and its title with a play button, and its player loads when play is pressed. A post is shown at once, in the app's theme. An address inside a paragraph is only a link.
 
 **Address line**:
-The line that holds a media embed's address. It is a caption's size and out of sight until the pointer is on it or on the media, or the cursor is on it, and it keeps its room either way.
+The line that holds a media embed's address. While the cursor is elsewhere it takes no room and the media is where it was, a paragraph's gap below the words above. With the cursor on it, the address shows above the media, small, in the code face and the accent's colour, and the media gets an edge of that colour. A step of the arrow keys, or vim's `j` and `k`, from the line next to it stops on it.
 
 **HTML embed**:
-A block embed (`:::html{}`) whose body is HTML, run below the block when the member presses Run, in a frame with an origin of its own. It can't read the app, the member's session, or anything the browser or the server keeps, can't fetch or send anything, and can't send its frame anywhere. The one way out it has is a WebRTC connection, which browsers give no way to refuse.
+A block embed (`:::html{}`) whose body is HTML, run below the block in a frame with an origin of its own, by itself the first time its room is on screen, or when the member presses Run if they have asked to be asked first. While the cursor is in the block, what was run stays; the HTML as written runs once the cursor leaves. HTML that was running when its page stopped answering asks before it runs again. Until it is drawn its room shows a placeholder its size. It can't read the app, the member's session, or anything the browser or the server keeps, can't fetch or send anything, and can't send its frame anywhere. The one way out it has is a WebRTC connection, which browsers give no way to refuse.
 
-**Run**:
-What a member does to start an HTML embed. Its HTML runs nothing because a note was opened, and one that has changed since it was run asks again.
+**Run HTML embeds**:
+A member's setting (`html.run`): `automatically` or `ask first`, which shows a Run button in place of each HTML embed until it is pressed. It defaults to `ask first` until the server serves HTML embeds from a site of their own (`EMBED_ORIGIN`), as the server says in `/api/me`, and to `automatically` where it does; the member's own choice stands either way. A value that is neither reads as `ask first`, and a change reaches notes already open: what ran by itself stops and asks, what was asking runs. Like every setting it is the member's alone: no plugin, agent or embed can read or change it. A page opened from a share link always asks first. An embed whose HTML has changed runs again, or asks again.
 
 **Embed menu**:
 The list of embeds that opens at the cursor when a member types `/` at the start of a line or after a space. Typing filters it, and picking one writes that embed into the note.
@@ -379,5 +413,26 @@ _Avoid_: Option (except for a plugin's own), preference
 Every setting there is for a member in a workspace: the core's, those of each installed plugin whether it is on or off, and a keybinding for each command that is on. Settings are checked against it, and the options are drawn from it.
 
 **Upload**:
-A file in a workspace with one parent folder. The default folder is Unsorted. It is seen as a note is: by its folder, by a grant on it, and private to the member who uploaded it when they make it so. It has no link of its own, and is reached by a link only through the folder it is in. A note refers to an upload by its id, in an embed: `::image{id 640x480}`, `::video{id 640x360}`, `::audio{id}`, or `::file{id}`. The file's name is kept for showing and is in no note and no address. A reader who can't see the upload is shown a placeholder that says nothing of it. An upload is archived and trashed as a note is, and a note that refers to one in Trash says so. Deleting a note leaves the uploads it refers to. A file can be at most 50 MB, and a workspace's uploads 1 GB together. See `docs/adr/0008-uploads-are-items-and-their-bytes-go-through-the-resolver.md`.
+A file in a workspace with one parent folder. The default folder is Unsorted. It is seen as a note is: by its folder, by a grant on it, and private to the member who uploaded it when they make it so. It has no link of its own, and is reached by a link only through the folder it is in. A note refers to an upload by its id, in an embed: `::image{id 640x480}`, `::video{id 640x360}`, `::audio{id}`, or `::file{id}`. The size after the id is the picture's or video's own, written by the app so its room is kept before it loads; a **size word** after it, `small`, `medium` or `large`, draws it a third, a half or three quarters of the note's column wide, and none draws it the column's whole width, never wider than its own size. A member sets it with the size handle on its right edge, not by typing. The file's name is kept for showing and is in no note and no address. A reader who can't see the upload is shown a placeholder that says nothing of it. An upload is archived and trashed as a note is, and a note that refers to one in Trash says so. Deleting a note leaves the uploads it refers to. A file can be at most 50 MB, and a workspace's uploads 1 GB together. See `docs/adr/0008-uploads-are-items-and-their-bytes-go-through-the-resolver.md`.
 _Avoid_: Asset, attachment
+
+**Uploader**:
+The member or agent who uploaded a file, shown with it to whoever can see it. `uploader:` finds uploads by them, among the uploads the asker can see.
+
+**File class**:
+What a person calls an upload: image, video, audio, PDF, text or other (`fileClass`). It is decided from the type the server gave the bytes and, for text, the name's ending. `type:` in a query is it. Its kind (image, video, audio or file) is what says how a note draws it.
+_Avoid_: File type (that is what the bytes are served as)
+
+**Opening a file**:
+What pressing an upload's chip, or Open on the Uploads page, does, by its file class (`openUpload`): a picture, a video or a recording is shown in a preview over the app; a PDF is downloaded, and opens in a tab of the browser, in its own viewer, only where the server has a site kept for files (`FILE_ORIGIN`), from that site; text is read in the app at `/file/<id>`, drawn and not changed (markdown as a note is, a CSV or TSV as a table, anything else as code); anything else is downloaded. Text read in the app can be copied into a new note. An uploaded file is not changed in place.
+_Avoid_: Preview (for anything but a picture, a video or a recording), viewer
+
+**Uses**:
+How many notes the asker can see show an upload. A note they can't see is never counted, so a count says nothing of it. `used:` in a query is whether there are any.
+
+**Placing an upload**:
+What putting an existing upload in a note does to the upload, before its embed is written there (`upload.place`). An upload private to its owner, not yet in any note anyone else sees, goes to the note's folder and stops being private, so whoever reads the note sees it. In a private note it stays its owner's. Only the member does this, in the app: an agent is refused the change that lets others see a private upload, as it is `upload.setPrivate`. Any other upload is left where it is: who sees an upload is decided by its folder, grants and privacy, never by the notes that show it. "Insert an upload" in the `/` menu is how a member places one: a popover at the cursor finds it among the uploads they can see.
+
+**Reach**:
+How far an upload is seen, as the Uploads page says it to the member: "Only you" while it is private to them (as a file uploaded from that page is, until it is placed), "In N notes" by its uses, or "Not in a note". It never counts or names what the member can't see.
+_Avoid_: Visibility (that is a note's `is:` words), audience

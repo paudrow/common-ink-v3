@@ -1,6 +1,8 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { agentActor, perform } from "../../core/operations.ts";
 import { NO_SUCH_WORKSPACE, OpError, type OpInput, type OpType } from "../../core/protocol.ts";
+import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
+import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 import type { Sources } from "../../core/sources.ts";
 
@@ -38,6 +40,9 @@ const SHARING =
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
  * tool below, and test/core/agent-parity.test.ts fails when one has neither.
  */
+const CONTACTS =
+  "A contact is how the member reaches someone: the address their mail goes to, the number their phone calls, in every app that reads their Google contacts. A change to one is not a change in history, so it can't be reverted the way an agent's edits can, and nothing in Common Ink shows it was made. An agent reads notes other people wrote, so one that was talked into it could quietly send the member's mail or calls for a colleague to a stranger. An agent reads the member's contacts, and only the member, signed in, changes or adds one.";
+
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
   "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
@@ -55,6 +60,9 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "note.purge": "Removing a note from Trash for good takes its history with it, and nothing brings it back: not a revert, not Trash. An agent reads notes other people wrote, so one that was talked into it could destroy them past recovery. An agent moves a note to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
   "source.connect": "Connecting a data source is the member agreeing, in their own browser, to let Common Ink into their calendar or contacts. An agent can't agree for them. It reads and changes what the member connected.",
   "source.disconnect": "Disconnecting ends the member's own agreement and cuts off every reference in their notes until they agree again. The member does that themself, in the app.",
+  "contact.update": CONTACTS,
+  "contact.photo": CONTACTS,
+  "contact.create": CONTACTS,
   "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.upload": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the uploads its member can see.",
@@ -85,8 +93,18 @@ const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
 const mentionNames = { type: "string", enum: ["resolve", "keep"], description: 'What to do with mentions you add, @[[Name]] or @[[id]]. "resolve", the default, stores a mention of the one member with that name by their id, as @[[id|Name]], and refuses the write when several members have the name. A name no member has stays a name. "keep" leaves every mention as you wrote it.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
+/** The query language, as much of it as a model needs to write a query unaided. It is read from the filters' table, as docs/search.md is. */
+const QUERY = (scope: Scope) =>
+  `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or ${scope === "uploads" ? "an uploader:" : "an editor:"} naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`;
+const queryDays = {
+  today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
+  zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is the zone your member's settings name, or UTC" },
+};
 const TODOS =
-  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, due:YYYY-MM-DD for the day it is due, +Name for a project, and @[[Name]] for someone it is assigned to. every:RULE makes it recur: 2w (every 2 weeks, in d, w, m or y), mon,thu, 3d-after-done, 3rd-day or last-day of the month, 2nd-tue or last-fri of the month. done:YYYY-MM-DDxN is when a recurring todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note.";
+  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\
+" +
+  RULE_GRAMMAR +
+  "\ndone:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.";
 const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
 const MENTIONS =
   "A mention of a person is @[[id|Name]] for a member of the workspace, with their id from list_members, or @[[Name]] for anyone else, such as one of your member's contacts. You can write @[[Name]] for a member too and it is stored by their id, unless your token is limited to folders: it is then not told who is a member, and every mention is kept and read as written. A mention on a todo's line assigns the todo. A mention gives nobody access and tells nobody. Every reader of the note sees the name, so write only the name of a contact: never their email or anything else list_contacts told you.";
@@ -152,6 +170,13 @@ const reverted = selected(
 );
 const SOURCES = "A data source is your member's own: no other member of the workspace sees its records, whatever their role, and you see no other member's. What you read from one is your member's private data, so put it in a note only where they asked for it there. A token limited to folders is refused every data source tool: the member's calendar and contacts are in no folder.";
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
+const when = {
+  description: "When it is: { allDay: true, from, to } with its first and last day as YYYY-MM-DD, or { allDay: false, from, to } with instants in milliseconds since 1970",
+  oneOf: [
+    { type: "object", properties: { allDay: { const: true }, from: { type: "string" }, to: { type: "string" } }, required: ["allDay", "from", "to"], additionalProperties: false },
+    { type: "object", properties: { allDay: { const: false }, from: { type: "integer", minimum: 0 }, to: { type: "integer", minimum: 0 } }, required: ["allDay", "from", "to"], additionalProperties: false },
+  ],
+};
 
 export const TOOLS: Tool[] = [
   {
@@ -187,7 +212,7 @@ export const TOOLS: Tool[] = [
   {
     name: "write_note",
     description:
-      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a recurring todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         id: noteId,
@@ -196,7 +221,7 @@ export const TOOLS: Tool[] = [
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
         mentionNames,
-        on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "baseRevision", "text"],
     ),
@@ -216,17 +241,23 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the most important. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance, due, projects, assignees, the note's tags, and access. Narrow it by project, by who it is assigned to, by a tag of the note, by a range of due days, both included, or to those with no due date, and by importance. Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
+    description: `The todos in the notes you can see that query finds: with no query, every open one. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless the query's sort: says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, assignees, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more.\
+\
+${QUERY("todos")}\
+\
+The arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
-      project: { type: "string", description: "Only todos in this project, without the +, ignoring case" },
-      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case" },
-      dueFrom: day("Only todos due on or after this day"),
-      dueTo: day("Only todos due on or before this day"),
-      noDue: { type: "boolean", description: "True for only todos with no due date" },
-      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these levels: 0 is normal, 1 to 3 are !, !! and !!!" },
-      assignee: { type: "string", description: "Only todos assigned to this person: a member's id from list_members, or anyone else's name as the todo writes it, ignoring case" },
-      assignedToMe: { type: "boolean", description: "True for only todos assigned to your member" },
-      includeCompleted: { type: "boolean", description: "True to list done todos too" },
+      query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
+      ...queryDays,
+      folderId: { type: "string", description: "Only todos in notes in this folder or in a folder under it, from list_folders. In the query: folder:" },
+      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case: a tag on the todo's own line, or anywhere else in its note. In the query: tag:" },
+      dueFrom: day("Only todos due on or after this day. In the query: due:>="),
+      dueTo: day("Only todos due on or before this day. In the query: due:<="),
+      noDue: { type: "boolean", description: "True for only todos with no due date. In the query: no:due" },
+      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these priorities: 0 is None, 1 Low (!), 2 Medium (!!), 3 High (!!!). In the query: priority:" },
+      assignee: { type: "string", description: "Only todos assigned to this person: a member's id from list_members, or anyone else's name as the todo writes it, ignoring case. In the query: assignee:" },
+      assignedToMe: { type: "boolean", description: "True for only todos assigned to your member. In the query: assignee:@me" },
+      includeCompleted: { type: "boolean", description: "True to list done todos too. In the query: is:open OR is:done" },
       includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
       limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
@@ -236,14 +267,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_filters",
-    description: "What list_todos can be narrowed by: the projects of the todos, who they are assigned to, and the tags of the notes that have todos, in the notes you can see.",
+    description: "What list_todos can be narrowed by: the tags of the notes that have todos and who todos are assigned to, among the notes you can see. The folders it can be narrowed by are list_folders'.",
     inputSchema: object({ includeArchived }),
     op: "todo.filters",
   },
   {
     name: "set_todo",
     description:
-      "Check a todo off, or change its importance, due date, project, who it is assigned to or how it recurs, by rewriting its line in its note. Checking off a todo that recurs leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Check a todo off, skip it, or change its priority, due date, how it repeats, who it is assigned to or its words, by rewriting its line in its note. Checking off a todo that repeats leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. A rule that ends (-times-N, -until-DAY) counts down, and its last time checks the todo off for good. skip moves a repeating todo to its next due date with nothing checked off, and is refused for one that doesn't repeat or is on its last time. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         id: noteId,
@@ -251,14 +282,15 @@ export const TOOLS: Tool[] = [
         line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" },
         text: { type: "string", description: "The todo's line as written, from list_todos" },
         done: { type: "boolean", description: "True checks it off, false opens it again" },
-        importance: { type: "integer", minimum: 0, maximum: 3, description: "0 for normal, 1 to 3 for !, !! and !!!" },
+        importance: { type: "integer", minimum: 0, maximum: 3, description: "Its priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
-        addProject: { type: "string", description: "A project to put it in, without the +. With removeProject, it takes that one's place on the line." },
-        removeProject: { type: "string", description: "A project to take it out of, without the +" },
-        every: { type: ["string", "null"], description: "How it recurs, as written after every:, such as 2w, mon,thu, 3d-after-done or last-fri, or null to stop it recurring" },
+        every: { type: ["string", "null"], description: `How it repeats, as written after every:, or null to stop it repeating. The rules:\
+${RULE_GRAMMAR}` },
+        skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Not together with done" },
         assign: { type: "string", description: "Someone to assign it to, by writing a mention of them on the line: a member's id or name, or anyone else's name. Assigning gives nobody access and tells nobody." },
         unassign: { type: "string", description: "Someone to take it from: a member's id or name, or anyone else's name as the line writes it. Refused when the todo isn't assigned to them." },
-        on: day("The day it is for you, which a recurring todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+        words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, priority, due date, rule and done: mark, tags included, on one line. Its due date and how it repeats are written after them" },
       },
       ["id", "revision", "line", "text"],
     ),
@@ -266,13 +298,13 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "todo_history",
-    description: "Each time a recurring todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. Pass id, revision, line and text as list_todos gave them.",
+    description: "Each time a repeating todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. Pass id, revision, line and text as list_todos gave them.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision of the note, from list_todos" }, line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" }, text: { type: "string", description: "The todo's line as written, from list_todos" } }, ["id", "revision", "line", "text"]),
     op: "todo.history",
   },
   {
     name: "daily_note",
-    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings name. A member has one for each day, and it is where a recurring todo they or you check off is filed. Needs the editor or admin role.",
+    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings name. A member has one for each day, and it is where a repeating todo they or you check off is filed. Needs the editor or admin role.",
     inputSchema: object({ on: day("The day. Left out, it is today in the time zone your member's settings name, or in UTC") }),
     op: "daily.open",
   },
@@ -314,15 +346,15 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "search",
-    description:
-      "Find the notes you can see by their text: every word of query must be in the note, each matching the start of a word, ignoring case and accents. Words in \"double quotes\" match as a phrase. #name narrows to notes with that tag, and +name to notes with a todo in that project. Todos, tags and projects are text like any other, so their words are found too. Notes whose title matches come first, then the latest changed, unless sort asks for another order. folderId narrows to the notes in one folder, not those of the folders inside it, and hasTodos to notes with an open todo. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless includeArchived is true, or \"only\" for them alone, and notes in Trash always. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.",
+    description: `Find the notes you can see with a query: words, each matching the start of a word in the note, ignoring case and accents, and filters. Todos and tags are text like any other, so their words are found too. A query with no word and no filter finds nothing: list_notes lists. Notes whose title matches come first, then the latest changed, unless the query's sort: or else sort asks for another order. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless the query says is:archived, and notes in Trash unless it says is:trashed. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.\n\n${QUERY("notes")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object(
       {
-        query: { type: "string", maxLength: 200, description: 'What to find, such as: budget "second quarter" #money +Home' },
-        folderId: folderId("Only notes in this folder, from list_folders"),
+        query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'What to find, such as: budget "second quarter" #money -is:archived, or: editor:@me updated:>=7d (has:open-todo OR has:backlink)' },
+        ...queryDays,
+        folderId: folderId("Only notes in this folder, not those of the folders inside it, from list_folders. In the query, folder: takes the folders inside too"),
         includeArchived: archivedToo,
-        hasTodos: { type: "boolean", description: "True for only the notes with an open todo" },
-        sort: { enum: ["match", "recent", "created", "title"], description: "match, the default: title matches first, then the latest changed. recent: the latest changed. created: the latest made. title: by title" },
+        hasTodos: { type: "boolean", description: "True for only the notes with an open todo. In the query: has:open-todo" },
+        sort: { enum: ["match", "recent", "created", "title"], description: "match, the default: title matches first, then the latest changed. recent: the latest changed. created: the latest made. title: by title. The query's sort: wins over it" },
         limit: { type: "integer", minimum: 1, maximum: 50, description: "How many notes; default 20" },
         offset: { type: "integer", minimum: 0, description: "The next of the page before" },
       },
@@ -362,8 +394,17 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_uploads",
-    description: `The uploads in a workspace that you can see, latest first: id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, state, and access, which is edit or view. An upload you can't see is never listed, and reads as no such upload everywhere. Narrow it to one folder. Archived uploads are left out unless includeArchived is true, and those in Trash are listed only by list_trashed_uploads. ${UPLOADS}`,
-    inputSchema: object({ folderId: folderId("Only uploads in this folder, from list_folders"), includeArchived: { type: "boolean", description: "True to cover archived uploads too, which are left out otherwise" } }),
+    description: `The uploads you can see that query finds, latest uploaded first unless its sort: says otherwise: with no query, every live one. Each has its id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, private, state, access, which is edit or view, and uses: how many notes you can see show it. An upload you can't see is never listed or counted, and reads as no such upload everywhere. Archived uploads are left out unless the query says is:archived, and those in Trash unless it says is:trashed. ${UPLOADS}\
+\
+${QUERY("uploads")}\
+\
+The arguments beside query are from before it could say them, and narrow it further.`,
+    inputSchema: object({
+      query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: "Which uploads, such as: type:image uploader:@me, or: size:>1mb used:no -type:video" },
+      ...queryDays,
+      folderId: folderId("Only uploads in this folder, not those of the folders inside it, from list_folders. In the query, folder: takes the folders inside too"),
+      includeArchived: { type: "boolean", description: "True to cover archived uploads too, which are left out otherwise. In the query: is:archived" },
+    }),
     op: "upload.list",
   },
   {
@@ -377,6 +418,12 @@ export const TOOLS: Tool[] = [
     description: "Put an upload in another folder. Its id stays the same, so the notes that refer to it still show it. Needs edit on the upload and on the folder.",
     inputSchema: object({ id: uploadId, folderId: folderId("The folder to move it to, from list_folders") }, ["id", "folderId"]),
     op: "upload.move",
+  },
+  {
+    name: "place_upload",
+    description: "Put an upload you can see in a note, before you write its embed in the note's text with write_note: it writes nothing itself. An upload private to your member, seen by nobody else, is refused: only your member can let others see it, in the app. In a private note it stays private and is placed. An upload that isn't private is left where it is. Made twice, it changes nothing more. Needs edit on the upload and on the note. The answer is the upload as it now is.",
+    inputSchema: object({ id: uploadId, noteId: { type: "string", description: "The note it is put in" } }, ["id", "noteId"]),
+    op: "upload.place",
   },
   {
     name: "archive_upload",
@@ -554,7 +601,7 @@ export const TOOLS: Tool[] = [
   {
     name: "list_events",
     description:
-      `Your member's calendar events in a span of time of at most 400 days, soonest first, each occurrence of a recurring event on its own. An event's when is either two instants in milliseconds since 1970 (allDay false) or its first and last day as YYYY-MM-DD (allDay true), which has no time and no zone. An all-day event is in the span when one of its days is a day the span covers in timeZone. sources says whether each calendar answered: one in needs_reconnect has no events here until the member reconnects it. ${SOURCES}`,
+      `Your member's calendar events in a span of time of at most 400 days, soonest first, each occurrence of a recurring event on its own. An event's when is either two instants in milliseconds since 1970 (allDay false) or its first and last day as YYYY-MM-DD (allDay true), which has no time and no zone. An all-day event is in the span when one of its days is a day the span covers in timeZone. Each event's calendarId is the calendar it is in. sources says whether each calendar data source answered: one in needs_reconnect has no events here until the member reconnects it. calendars is every calendar in the connected ones, with or without events in the span, each with its sourceId, id, name, color and writable; create_event adds to one whose writable is true. ${SOURCES}`,
     inputSchema: object({ from: time("The start of the span"), to: time("The end of the span"), timeZone: { type: "string", description: 'The IANA zone whose days all-day events are matched by, such as "America/Chicago"' } }, ["from", "to", "timeZone"]),
     op: "event.list",
   },
@@ -570,23 +617,41 @@ export const TOOLS: Tool[] = [
         title: { type: "string", maxLength: 1000 },
         location: { type: "string", maxLength: 1000 },
         description: { type: "string", maxLength: 8000 },
-        when: {
-          description: "When it is: { allDay: true, from, to } with its first and last day as YYYY-MM-DD, or { allDay: false, from, to } with instants in milliseconds since 1970",
-          oneOf: [
-            { type: "object", properties: { allDay: { const: true }, from: { type: "string" }, to: { type: "string" } }, required: ["allDay", "from", "to"], additionalProperties: false },
-            { type: "object", properties: { allDay: { const: false }, from: { type: "integer", minimum: 0 }, to: { type: "integer", minimum: 0 } }, required: ["allDay", "from", "to"], additionalProperties: false },
-          ],
-        },
+        when,
       },
       ["sourceId", "id", "etag"],
     ),
     op: "event.update",
   },
   {
+    name: "create_event",
+    description:
+      `Add an event to one of your member's calendars where it is kept, such as in Google Calendar, as your member. Pass the calendar's sourceId and id from the calendars list_events answers: one whose writable is false is refused. Answers the event as it was made. This changes the member's real calendar and is not in Common Ink's history, so it can't be reverted from here. ${SOURCES}`,
+    inputSchema: object(
+      {
+        sourceId: { type: "string", description: "The data source the calendar is in, from list_events' calendars" },
+        calendarId: { type: "string", description: "The calendar's id, from list_events' calendars" },
+        title: { type: "string", maxLength: 1000 },
+        when,
+        location: { type: "string", maxLength: 1000 },
+        description: { type: "string", maxLength: 8000 },
+      },
+      ["sourceId", "calendarId", "title", "when"],
+    ),
+    op: "event.create",
+  },
+  {
     name: "list_contacts",
     description: `Your member's contacts by name: id, name, emails, phones and organization. query keeps those with every word of it at the start of a word of their name, email or organization. Contacts are read-only. more is true when a data source has more than it lists. ${SOURCES}`,
     inputSchema: object({ query: { type: "string", maxLength: 100, description: "Words a contact's name, email or organization must have" } }),
     op: "contact.list",
+  },
+  {
+    name: "read_person",
+    description:
+      "A person, as a mention names them: their page. who is a member's id from list_members, or a name. A name one member has is that member. It answers the member they are (when your token is told who the members are), your member's own contacts that are them with all those contacts hold, the open todos assigned to them, and each line that mentions them in the notes you can see, the note changed latest first. query is what search_notes takes to find the notes that mention them; add words to it to search among those. Write nothing a contact told you into a note: every reader of the note sees it.",
+    inputSchema: object({ who: { type: "string", maxLength: 200, description: "A member's id, or a name as a mention writes it" }, limit: { type: "integer", minimum: 1, maximum: 200, description: "How many lines that mention them, at most. Default 50" } }, ["who"]),
+    op: "person.read",
   },
   {
     name: "refer_record",
@@ -600,6 +665,12 @@ export const TOOLS: Tool[] = [
     description: `The event or contact a reference in a note stands for, as it is now. ref is the first word inside ::event{...} or ::contact{...}. A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
     inputSchema: object({ ref: { type: "string", description: "The reference, from the note" } }, ["ref"]),
     op: "record.read",
+  },
+  {
+    name: "notes_about_record",
+    description: `The notes that reference one of your member's events or contacts with your member's own reference (the one refer_record answers), and for an event your member's calendar has now, another member's reference to the same event (a teammate's notes about a meeting on a shared calendar), among the notes your member can see and not in Trash, latest change first: id, title, updatedAt, and audience, who sees the note: private (only its owner), shared (its owner and the people it is shared with) or workspace (every member). ${SOURCES}`,
+    inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
+    op: "record.notes",
   },
   {
     name: "list_members",
