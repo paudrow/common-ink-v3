@@ -422,8 +422,12 @@ What a person calls an upload: image, video, audio, PDF, text or other (`fileCla
 _Avoid_: File type (that is what the bytes are served as)
 
 **Opening a file**:
-What pressing an upload's chip, or Open on the Uploads page, does, by its file class (`openUpload`): a picture, a video or a recording is shown in a preview over the app; a PDF is downloaded, and opens in a tab of the browser, in its own viewer, only where the server has a site kept for files (`FILE_ORIGIN`), from that site; text is read in the app at `/file/<id>`, drawn and not changed (markdown as a note is, a CSV or TSV as a table, anything else as code); anything else is downloaded. Text read in the app can be copied into a new note. An uploaded file is not changed in place.
-_Avoid_: Preview (for anything but a picture, a video or a recording), viewer
+What pressing an upload's chip, or Open on the Uploads page, does, by its file class (`openUpload`): a picture, a video, a recording or a PDF is shown in a file preview over the app, which offers Download, and a PDF in a tab of the browser, in its own viewer, from the site kept for files where the server has one (`FILE_ORIGIN`); text is read in the app at `/file/<id>`, drawn and not changed (markdown as a note is, a CSV or TSV as a table, anything else as code); anything else is downloaded. Text read in the app can be copied into a new note. An uploaded file is not changed in place.
+_Avoid_: viewer
+
+**File preview**:
+As much of an upload as can be seen without opening it, drawn the same wherever it is (`drawPreview`): a picture, a player for a video or a recording, the first pages of a PDF drawn by pdf.js inside the app, the first rows of a CSV or TSV, the first lines of markdown or other text, and a large icon of its type for anything else. A file on a line of its own in a note is a **file card** below that line, its name, size and Download over its preview; among words it is a chip. The Uploads page's panel leads with the selected file's preview. Pressing a preview shows it larger over the app.
+_Avoid_: Thumbnail (that is the small picture in a list), viewer
 
 **Uses**:
 How many notes the asker can see show an upload. A note they can't see is never counted, so a count says nothing of it. `used:` in a query is whether there are any.

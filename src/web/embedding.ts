@@ -1,7 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { Annotation, EditorState, Facet, Prec, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { boxOf, keptBelow } from "./below.ts";
+import { aloneIn, aloneOn, boxOf, keptBelow } from "./below.ts";
 import { closeOptions, refreshOptions, toggleOptions, type Options } from "./embedOptions.ts";
 import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "./embedSyntax.ts";
 import type { AddressEmbed, Drawn, Embed, Embedded } from "./plugin-api.ts";
@@ -289,14 +289,14 @@ function inlineDrawn(view: EditorView): DecorationSet {
       if (!embed || embed.block || /Code/.test(syntaxTree(state).resolveInner(written.from, 1).name)) continue;
       // A block's body is the block's to draw.
       if (drawnBlocks.some((b) => b.from <= written.from && b.to >= written.to)) continue;
-      if (!drawing(embed)) {
-        // All of it is below its line: there is nothing of it in the line but its text, while the cursor is on it.
-        if (!boxOf(embed, written)) continue;
-        ranges.push((cursorOn(state, written) ? asText : unseen).range(written.from, written.to));
-        const line = state.doc.lineAt(written.from);
-        if (line.text.trim() === state.sliceDoc(written.from, written.to)) ranges.push(alone.range(line.from));
+      const lone = aloneIn(state, written);
+      // All of it is below its line: there is nothing of it in the line but its text, while the cursor is on it. A line it is alone on is out of sight with the cursor elsewhere, and shown with the cursor anywhere on it.
+      if ((!drawing(embed) || (lone && embed.below?.alone)) && boxOf(embed, written)) {
+        ranges.push(((lone ? aloneOn(state, written.from, state.field(used)) : cursorOn(state, written)) ? asText : unseen).range(written.from, written.to));
+        if (lone) ranges.push(alone.range(state.doc.lineAt(written.from).from));
         continue;
       }
+      if (!drawing(embed)) continue;
       ranges.push(Decoration.widget({ widget: widgetFor(state, embed, written), side: -1 }).range(written.from));
       if (!cursorOn(state, written)) {
         ranges.push(unseen.range(written.from, written.to));

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { Me, Upload } from "../../src/core/protocol.ts";
 import { anotherPerson, join, perform, signInAsNewPerson } from "./helpers.ts";
+import { pdf as scriptedPdf } from "./pdfs.ts";
 
 // Chromium as it ships, with its own PDF viewer, which the headless shell Playwright starts by default doesn't have.
 test.use({ channel: "chromium" });
@@ -78,7 +79,7 @@ test("a text file's chip opens it in the app to be read, with who uploaded it, i
 test("the chip is reached with the keyboard, and Enter on it opens the file", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const upload = await send(page, "plan.md", Buffer.from("# The plan\n\nGo **now**.\n"));
-  await noteWith(page, `# Plans\n\n::file{${upload.id}}\n\nafter\n`);
+  await noteWith(page, `# Plans\n\nRead ::file{${upload.id}} first.\n\nafter\n`);
   await editor(page).getByRole("link", { name: "plan.md" }).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(`/file/${upload.id}`);
@@ -198,16 +199,16 @@ test("a file the member can't see and one that isn't there are the same words, w
   expect(answered).toEqual([]);
 });
 
-test("a PDF's chip downloads it, as the Uploads page's Open does, served as a download and sealed, where there is no site kept for files", async ({ page }) => {
+test("a PDF's chip previews it over the app as its pages, as the Uploads page's Open does, and its address is still a sealed download, where there is no site kept for files", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const me = await page.evaluate(async () => (await (await fetch("/api/me")).json()) as { setup: { fileSite: boolean } });
   expect(me.setup.fileSite, "this server has no FILE_ORIGIN").toBe(false);
   const upload = await send(page, "paper.pdf", PDF("(A paper) Tj"));
   const address = `/api/workspaces/${await workspaceOf(page)}/uploads/${upload.id}`;
-  await noteWith(page, `# Reading\n\n::file{${upload.id}}\n\nafter\n`);
+  await noteWith(page, `# Reading\n\nRead ::file{${upload.id}} first.\n\nafter\n`);
   const chip = editor(page).getByRole("link", { name: "paper.pdf" });
   await expect(chip).toHaveAttribute("href", address);
-  await expect(chip).toHaveAttribute("download", "paper.pdf");
+  await expect(chip).not.toHaveAttribute("download");
   await expect(chip).not.toHaveAttribute("target", /.+/);
   const served = (await page.request.get(address)).headers();
   expect([served["content-type"], served["content-disposition"], served["content-security-policy"]]).toEqual([
@@ -219,13 +220,14 @@ test("a PDF's chip downloads it, as the Uploads page's Open does, served as a do
   expect((await page.request.get(`${address}?open=tab`, { maxRedirects: 0 })).headers()["content-disposition"]).toMatch(/^attachment; /);
 
   const tabs = page.context().pages().length;
-  const saved = page.waitForEvent("download");
   await chip.click();
-  expect((await saved).suggestedFilename()).toBe("paper.pdf");
+  const previewed = page.getByRole("dialog", { name: "Preview of paper.pdf" });
+  await expect(previewed.locator("canvas")).toHaveCount(1);
+  await expect(previewed.getByRole("link", { name: "Open in a tab" }), "no site to open it in a tab from").toHaveCount(0);
+  await page.keyboard.press("Escape");
   await page.goto(`/uploads/${upload.id}`);
-  const fromPage = page.waitForEvent("download");
   await page.locator(".upload-detail").getByRole("button", { name: "Open", exact: true }).click();
-  expect((await fromPage).suggestedFilename()).toBe("paper.pdf");
+  await expect(page.getByRole("dialog", { name: "Preview of paper.pdf" }).locator("canvas")).toHaveCount(1);
   expect(page.context().pages(), "no tab was opened").toHaveLength(tabs);
 });
 
@@ -256,15 +258,27 @@ test("nothing an upload holds runs script against the app, however it is opened:
     marked.push(route.request().url());
     return route.fulfill({ status: 204 });
   });
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => (dialogs.push(dialog.message()), void dialog.dismiss()));
+  const said: string[] = [];
+  page.on("console", (message) => /pdf-ran|marked/.test(message.text()) && said.push(message.text()));
   const mark = (by: string) => `localStorage.setItem("marked","${by}");document.cookie="marked=${by}; path=/";fetch("/api/marked?${by}")`;
   await signInAsNewPerson(page, "Ada Lovelace");
   const html = await send(page, "evil.html", Buffer.from(`<!doctype html><title>evil</title><script>${mark("html")}</script><p id="said">hello</p>`));
   const svg = await send(page, "evil.svg", Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><script>${mark("svg")}</script><rect width="120" height="80" fill="teal"/></svg>`));
-  const pdf = await send(page, "evil.pdf", PDF("(Evil) Tj", `app.launchURL\\("${baseURL}/api/marked?pdf", true\\); this.submitForm\\("${baseURL}/api/marked?pdf-form"\\);`));
+  // Its script is in every place a PDF reader runs one from: the opening action, named scripts, a page's opening, a link and a button.
+  const pdf = await send(page, "evil.pdf", scriptedPdf({ pages: 2, script: `${mark("pdf")}; app.alert("pdf"); app.launchURL("${baseURL}/api/marked?pdf", true); this.submitForm("${baseURL}/api/marked?pdf-form"); console.println("pdf-ran");`, uri: `${baseURL}/api/marked?pdf-uri` }));
   expect([html.type, svg.type, pdf.type]).toEqual(["application/octet-stream", "image/svg+xml", "application/pdf"]);
   const workspaceId = await workspaceOf(page);
   const address = (upload: Upload) => `/api/workspaces/${workspaceId}/uploads/${upload.id}`;
-  await noteWith(page, `# Files\n\n::file{${html.id}} ::file{${svg.id}} ::file{${pdf.id}}\n\n::image{${svg.id} 120x80}\n\nafter\n`);
+  await noteWith(page, `# Files\n\n::file{${html.id}} ::file{${svg.id}} ::file{${pdf.id}}\n\n::image{${svg.id} 120x80}\n\n::file{${pdf.id}}\n\nafter\n`);
+  const tabs = page.context().pages().length;
+
+  // On a line of its own the PDF is pictures of its pages, drawn by pdf.js, and nothing of it runs.
+  const card = page.locator('.embed-below[data-embed="file"]');
+  await expect(card.locator("canvas")).toHaveCount(2);
+  await expect(card.locator("a")).toHaveCount(2);
+  await expect(card.locator("a").first()).toHaveAttribute("href", `/api/workspaces/${await workspaceOf(page)}/uploads/${pdf.id}`);
 
   // As a picture, the SVG is drawn and runs nothing.
   await expect.poll(() => page.locator(`.embed-below[data-embed="image"] img`).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(120);
@@ -277,10 +291,16 @@ test("nothing an upload holds runs script against the app, however it is opened:
   await page.keyboard.press("Escape");
   await expect(chipPreview).toHaveCount(0);
 
-  // The PDF's chip saves it, and nothing of it is drawn or run.
-  const pdfSaved = page.waitForEvent("download");
+  // The PDF's chip previews it over the app, as pictures of its pages and nothing else; a press where its link and button are does nothing.
   await editor(page).getByRole("link", { name: "evil.pdf" }).click();
-  expect((await pdfSaved).suggestedFilename()).toBe("evil.pdf");
+  const pdfPreview = page.getByRole("dialog", { name: "Preview of evil.pdf" });
+  await expect(pdfPreview.locator("canvas")).toHaveCount(2);
+  await expect(pdfPreview.locator("iframe, object, embed, a[href*='marked'], form, input")).toHaveCount(0);
+  const first = (await pdfPreview.locator("canvas").first().boundingBox())!;
+  for (const [x, y] of [[0.3, 0.21], [0.25, 0.29]]) await page.mouse.click(first.x + x! * first.width, first.y + y! * first.height);
+  await page.evaluate(() => new Promise((done) => setTimeout(done, 300)));
+  await page.keyboard.press("Escape");
+  await expect(pdfPreview).toHaveCount(0);
 
   // The HTML file's chip opens it in the app as its source, which is words and nothing else.
   await editor(page).getByRole("link", { name: "evil.html" }).click();
@@ -314,9 +334,11 @@ test("nothing an upload holds runs script against the app, however it is opened:
   await expect.poll(() => previewed.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(120);
   await expect(previewed.locator("iframe, object, embed")).toHaveCount(0);
   await page.goto(`/uploads/${pdf.id}`);
-  const fromCard = page.waitForEvent("download");
+  // The page's panel previews it too, as its first page.
+  await expect(page.locator(".upload-detail canvas")).toHaveCount(1);
+  await expect(page.locator(".upload-detail").locator("iframe, object, embed, form, input")).toHaveCount(0);
   await open.click();
-  expect((await fromCard).suggestedFilename()).toBe("evil.pdf");
+  await expect(page.getByRole("dialog", { name: "Preview of evil.pdf" }).locator("canvas")).toHaveCount(2);
 
   // Nothing ran as the app: no mark in its storage or its cookies, and the watched address was never asked.
   await page.goto("/");
@@ -324,4 +346,7 @@ test("nothing an upload holds runs script against the app, however it is opened:
   expect(await page.evaluate(() => localStorage.getItem("marked"))).toBeNull();
   expect((await page.context().cookies()).map((c) => c.name)).not.toContain("marked");
   expect(marked).toEqual([]);
+  expect(dialogs, "no dialog").toEqual([]);
+  expect(said, "nothing it said").toEqual([]);
+  expect(page.context().pages(), "no tab or window was opened").toHaveLength(tabs);
 });

@@ -300,7 +300,7 @@ describe("a PDF opened in a tab, from the site kept for files", () => {
     expect([part.status, await bytesIn(part)]).toEqual([206, [...bytesOf("%PDF")]]);
 
     // The file site is no app: not its pages, its API, its sign-in, or an address it didn't give out.
-    for (const path of ["/", "/api/me", `/api/workspaces/x/uploads/${pdf.id}`, "/auth/dev", "/file/forged.sig", `/file/${address.split("/file/")[1]!.replace(/.$/, "A")}`]) {
+    for (const path of ["/", "/api/me", `/api/workspaces/x/uploads/${pdf.id}`, "/auth/dev", "/file/forged.sig", `/file/${address.split("/file/")[1]!.replace(/.$/, (last) => (last === "A" ? "B" : "A"))}`]) {
       const other = await at(`${FILES}${path}`);
       expect([path, other.status], path).toEqual([path, 404]);
     }

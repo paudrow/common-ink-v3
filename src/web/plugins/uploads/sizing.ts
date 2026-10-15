@@ -1,4 +1,5 @@
 import { sizeIn, sizeWordIn, SIZE_WORDS, type BelowBox, type SizeWord, type UploadEmbed, type UploadKind } from "../../plugin-api.ts";
+import { SHOWS, type Preview } from "./previewing.ts";
 
 /** The room kept for a picture or a video whose embed gives no size. */
 export const UNSIZED: BelowBox = { ratio: 16 / 9, maxWidth: 480 };
@@ -71,3 +72,18 @@ export function formatBytes(bytes: number): string {
 }
 
 export const KIND_LABEL: Record<UploadKind, string> = { image: "Image", video: "Video", audio: "Audio", file: "File" };
+
+/** The head of a file's card below its line: its name, what it is, and Download. */
+export const CARD_HEAD = 40;
+
+/**
+ * How tall a file's card is below its line, edge to edge: its head, and under it the preview of what
+ * it is, the first pages of a PDF, a picture, a player, the first lines of text or rows of a table, at
+ * a height known before any of it is read, so nothing moves while it comes. Text that turns out
+ * shorter makes its card shorter once. A file with nothing to preview, one that can't be shown and
+ * one nothing is known of yet (`null`) are the head alone.
+ */
+export function cardHeight(preview: Preview | null): number {
+  const body = !preview ? 0 : preview.shows === "pages" ? SHOWS.note.pageHeight + 24 : preview.shows === "picture" ? 240 : preview.shows === "player" ? (preview.media === "video" ? 240 : AUDIO_HEIGHT) : preview.shows === "rows" ? (SHOWS.note.rows + 1) * 26 + 16 : preview.shows === "lines" ? SHOWS.note.lines * 20 + 20 : 0;
+  return CARD_HEAD + body + 2;
+}

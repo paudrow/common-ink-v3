@@ -580,8 +580,10 @@ export interface Embed {
    * while its plugin starts, not later, so a note never shows it as written first.
    *
    * An embed that is all below its line, as an uploaded picture is, has none: its line shows nothing
-   * of it while the cursor is elsewhere, and its text where it is written while the cursor is on it,
-   * so the line is as tall either way. One whose `below` keeps no room is shown as written.
+   * of it while the cursor is elsewhere, and its text where it is written while the cursor is on it.
+   * A line that is such an embed and nothing else takes no room while the cursor is elsewhere. One
+   * whose `below` keeps no room is shown as written. One whose `below` is `alone` has both: what
+   * `render` draws among words, and what `below` keeps on a line of its own.
    */
   render?(el: HTMLElement, embed: Embedded): void | (() => void) | Drawn;
   /** What it keeps below the line that writes it, such as a video. */
@@ -646,6 +648,12 @@ export interface Drawn {
  * that focuses itself is stopped, and the member is told and can show it again.
  */
 export interface Below {
+  /**
+   * Whether it is kept below only a line the embed is alone on. Among words it is what `render`
+   * draws there and keeps nothing below, as an uploaded file is a chip in a sentence and a preview on
+   * a line of its own.
+   */
+  alone?: boolean;
   /**
    * The room to keep, from what the note says of the embed alone: as wide as the note's column up to
    * a limit and `ratio` times as wide as tall, or `height` pixels tall. With `width`, it is no wider

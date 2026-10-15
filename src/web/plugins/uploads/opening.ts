@@ -1,28 +1,24 @@
 import { fileClass, type FileClass, type PluginHost, type Upload } from "../../plugin-api.ts";
 
 /**
- * How a file opens: a picture, a video or a recording in a preview over the app; a PDF in a tab of
- * the browser, shown by its own viewer, where there is a site kept for files to show it from, and
- * otherwise downloaded; text in the app, read and not changed; anything else is downloaded. Nothing
- * an upload holds is ever a page of the app: a PDF in a tab is on the file site, whose origin isn't
- * the app's, and what opens in the app is read as text.
+ * How a file opens: a picture, a video, a recording and a PDF in a preview over the app, a PDF's
+ * pages drawn by pdf.js; text in the app, read and not changed; anything else is downloaded. Nothing
+ * an upload holds is ever a page of the app: a PDF is only pictures of its pages, and what opens in
+ * the app is read as text. Where there is a site kept for files, the preview of a PDF also offers it
+ * in a tab of the browser, from that site, whose origin isn't the app's.
  */
-export type Opening = "preview" | "tab" | "app" | "download";
+export type Opening = "preview" | "app" | "download";
 
-const OPENS: Record<FileClass, Opening> = { image: "preview", video: "preview", audio: "preview", pdf: "tab", text: "app", other: "download" };
+const OPENS: Record<FileClass, Opening> = { image: "preview", video: "preview", audio: "preview", pdf: "preview", text: "app", other: "download" };
 
-/** `inTab` says whether files can open in a tab here, from a site kept for them (`host.uploads.tabAddress`). */
-export const openingOf = (upload: Pick<Upload, "name" | "type">, inTab: boolean): Opening => {
-  const opening = OPENS[fileClass(upload)];
-  return opening === "tab" && !inTab ? "download" : opening;
-};
+export const openingOf = (upload: Pick<Upload, "name" | "type">): Opening => OPENS[fileClass(upload)];
 
 /** Where a file is read in the app. */
 export const FILE_PATH = "/file";
 export const filePath = (id: string) => `${FILE_PATH}/${id}`;
 export const fileIn = (path: string): string | null => /^\/file\/([a-z0-9]{12})$/.exec(path)?.[1] ?? null;
 
-/** The overlay a picture, a video or a recording is previewed in. It is handed what {@link openUpload} is. */
+/** The overlay a file is previewed in. It is handed what {@link openUpload} is. */
 export const PREVIEW = "upload-preview";
 export type Openable = Pick<Upload, "id" | "name" | "type">;
 
@@ -36,16 +32,15 @@ export function download(address: string, name: string): void {
 
 /** Opens an upload the way its kind of file opens, from anywhere it is offered: a note's chip, the Uploads page. */
 export function openUpload(host: PluginHost, upload: Openable): void {
-  const address = host.uploads.address(upload.id);
-  const tab = host.uploads.tabAddress(upload.id);
-  switch (openingOf(upload, tab !== null)) {
+  switch (openingOf(upload)) {
     case "preview":
-      return host.app().toggleOverlay(PREVIEW, { id: upload.id, name: upload.name, type: upload.type } satisfies Openable);
-    case "tab":
-      return void window.open(tab!, "_blank", "noopener");
+      return previewUpload(host, upload);
     case "app":
       return host.app().go(filePath(upload.id));
     case "download":
-      return download(address, upload.name);
+      return download(host.uploads.address(upload.id), upload.name);
   }
 }
+
+/** Shows any upload larger, over the app, as much of it as can be shown there: what pressing a preview does. */
+export const previewUpload = (host: PluginHost, upload: Openable): void => host.app().toggleOverlay(PREVIEW, { id: upload.id, name: upload.name, type: upload.type } satisfies Openable);
