@@ -91,7 +91,8 @@ describe("an agent limited to folders", () => {
     expect((await connect({ workspaceId: ada.workspaceId, folderIds: [plans, plans, projects] })).agent.folderIds).toEqual([plans, projects]);
   });
 
-  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", async () => {
+  // Some ninety tool calls: a slow runner takes longer than the default 5 s.
+  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", { timeout: 30_000 }, async () => {
     const w = await world();
     const claude = await asAgent(w.limited.token);
 
