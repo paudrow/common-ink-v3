@@ -8246,6 +8246,95 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--accent-ink);
 }
 
+/* What an event link in a note opens: the event in brief, then a short list of what to do with it. */
+.event-link {
+  width: 260px;
+  max-width: 100%;
+}
+
+.event-link-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.event-link-head strong {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.event-link .chip-choice[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+}
+
+.event-link .chip-choice svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.event-link-notes {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0;
+  padding: 4px 0;
+  border-block: 1px solid var(--line);
+}
+
+.event-link-notes h3 {
+  margin: 2px 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.event-link-notes .chip-choice {
+  justify-content: space-between;
+}
+
+.event-link-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-link .event-new-note {
+  padding: 4px 8px 8px;
+}
+
+.event-link .event-new-note select {
+  max-width: 100%;
+}
+
+.event-link .event-new-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-link-open {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.event-link-open .event-link-title {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-link-said {
+  margin: 2px 8px 4px;
+}
+
 .event-form label:not(.check) {
   display: flex;
   flex-direction: column;
@@ -9244,9 +9333,37 @@ a.file-chip:hover .file-chip-name {
 
 .contact-form-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   width: 100%;
+}
+
+/* Where a line is too narrow for its label and value side by side, the value and its remove button go under the label. */
+.contact-form-value {
+  display: flex;
+  flex: 1 1 12rem;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* A line's label: a quiet menu before it, framed only while pointed at or in use. */
+.contact-form .contact-form-type {
+  flex: none;
+  width: 8.5rem;
+  padding-inline: 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.contact-form .contact-form-type:hover,
+.contact-form .contact-form-type:focus,
+.contact-form input.contact-form-type {
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 .contact-form-birthday {
@@ -9364,4 +9481,6 @@ a.file-chip:hover .file-chip-name {
   text-underline-offset: 2px;
 }
 
-
+.event-note-start {
+  display: contents;
+}

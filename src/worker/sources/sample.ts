@@ -1,6 +1,6 @@
 import { shiftDay } from "../../core/events.ts";
 import { newId } from "../../core/ids.ts";
-import type { Calendar, CalendarEvent, Contact, ContactCard, ContactChange, EventWhen } from "../../core/protocol.ts";
+import { CONTACT_LABELS, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactLine, type EventWhen, type LabelledField } from "../../core/protocol.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type Described } from "../../core/sources.ts";
 import { connectPlain, connectionOf } from "./connections.ts";
 import type { Provider } from "./index.ts";
@@ -65,26 +65,35 @@ const PATTERNS: readonly Pattern[] = [
 ];
 
 const NOTHING_MORE = { title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], etag: "0" };
+/** A line with no label. */
+const plain = (value: string): ContactLine => ({ value, type: null });
 const CONTACTS: readonly Omit<ContactCard, "sourceId" | "url">[] = [
-  { ...NOTHING_MORE, id: "ada", name: "Ada Lovelace", emails: ["ada@example.com"], phones: ["+1 555 0100"], organization: "Analytical Engines", title: "Analyst", birthday: "1815-12-10" },
-  { ...NOTHING_MORE, id: "grace", name: "Grace Hopper", emails: ["grace@example.com", "hopper@navy.example"], phones: [], organization: "Navy", title: "Rear Admiral", notes: "Met at the compiler workshop." },
+  { ...NOTHING_MORE, id: "ada", name: "Ada Lovelace", emails: [{ value: "ada@example.com", type: "work" }], phones: [{ value: "+1 555 0100", type: "mobile" }], organization: "Analytical Engines", title: "Analyst", birthday: "1815-12-10" },
+  { ...NOTHING_MORE, id: "grace", name: "Grace Hopper", emails: [{ value: "grace@example.com", type: "work" }, { value: "hopper@navy.example", type: "Navy" }], phones: [], organization: "Navy", title: "Rear Admiral", notes: "Met at the compiler workshop." },
   {
     id: "sam",
     name: "Sam Okafor",
     emails: [],
-    phones: ["+1 555 0142"],
+    phones: [plain("+1 555 0142")],
     organization: "Okafor Plumbing",
     title: "Owner",
-    addresses: ["12 Water Lane, Springfield"],
+    addresses: [plain("12 Water Lane, Springfield")],
     birthday: "--04-21",
     notes: "Fixed the boiler in March. Prefers a text to a call.",
     photo: null,
-    urls: ["https://okafor-plumbing.example"],
+    urls: [plain("https://okafor-plumbing.example")],
     etag: "0",
   },
-  { ...NOTHING_MORE, id: "zoe", name: "Zoë Álvarez", emails: ["zoe@example.com"], phones: [], organization: null },
-  { ...NOTHING_MORE, id: "lin", name: "Lin Wei", emails: ["lin@example.org"], phones: ["+86 10 5550 0199"], organization: "Harbor Books", addresses: ["3 Harbor Road, Ningbo"] },
+  { ...NOTHING_MORE, id: "zoe", name: "Zoë Álvarez", emails: [plain("zoe@example.com")], phones: [], organization: null },
+  { ...NOTHING_MORE, id: "lin", name: "Lin Wei", emails: [plain("lin@example.org")], phones: [plain("+86 10 5550 0199")], organization: "Harbor Books", addresses: [plain("3 Harbor Road, Ningbo")] },
 ];
+
+/** A contact's row as it was kept, read as a contact is now: a line kept before lines had labels was a string, and is a line with none. */
+function keptAs(data: string): Partial<ContactCard> {
+  const card = JSON.parse(data) as Partial<Record<keyof ContactCard, unknown>>;
+  for (const field of Object.keys(CONTACT_LABELS) as LabelledField[]) if (Array.isArray(card[field])) card[field] = (card[field] as (string | ContactLine)[]).map((line) => (typeof line === "string" ? plain(line) : line));
+  return card as Partial<ContactCard>;
+}
 
 const dayOf = (time: number) => new Date(time).toISOString().slice(0, 10);
 
@@ -203,7 +212,7 @@ function contacts(db: D1Database, personId: string, info: Described, writable: b
     const rows = new Map(
       (await db.prepare("SELECT record_id, revision, data FROM sample_records WHERE person_id = ? AND record_id LIKE 'contact:%'").bind(personId).all<Changed & { record_id: string }>()).results.map((row) => [row.record_id.slice(CONTACT.length), row]),
     );
-    const kept = (card: ContactCard, row: Changed | undefined): ContactCard => (row ? { ...card, ...(JSON.parse(row.data) as Partial<ContactCard>), etag: String(row.revision) } : card);
+    const kept = (card: ContactCard, row: Changed | undefined): ContactCard => (row ? { ...card, ...keptAs(row.data), etag: String(row.revision) } : card);
     const added = [...rows].filter(([id]) => id.startsWith(ADDED)).map(([id, row]) => kept({ ...made[0]!, ...NOTHING_MORE, id, name: "", emails: [], phones: [], organization: null }, row));
     return [...made.map((card) => kept(card, rows.get(card.id))), ...added];
   };

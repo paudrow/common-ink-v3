@@ -28,7 +28,7 @@ export function MarkdownReader({ text }: { text: string }) {
       parent: el.current,
       state: EditorState.create({
         doc: text,
-        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding, embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "File text", "aria-readonly": "true" })],
+        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding(""), embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "File text", "aria-readonly": "true" })],
       }),
     });
     return () => view.destroy();

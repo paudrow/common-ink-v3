@@ -49,8 +49,8 @@ interface Kind<K extends SourceRecord["kind"]> {
   hint: string;
   /** What the chip says of the record as it is now, and what hovering it adds. */
   shown(record: Extract<SourceRecord, { kind: K }>): { text: string; title: string };
-  /** What a press on the chip opens. */
-  details(record: Extract<SourceRecord, { kind: K }>): ReactNode;
+  /** What a press on the chip opens, for the reference in note `noteId`. `close` closes it. */
+  details(record: Extract<SourceRecord, { kind: K }>, at: { noteId: string; close: () => void }): ReactNode;
 }
 
 /**
@@ -63,6 +63,7 @@ export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, tit
     name: kind,
     title,
     render(el, first) {
+      const { noteId } = first;
       let drawnFor: string | null = null;
 
       const chip = (state: string, text: string, said: string, record?: Extract<SourceRecord, { kind: K }>) => {
@@ -73,7 +74,7 @@ export function referenceEmbed<K extends SourceRecord["kind"]>({ host, kind, tit
         made.textContent = text;
         made.title = said;
         if (record) {
-          const open = () => openPopover(made, title, () => details(record));
+          const open = () => openPopover(made, title, (close) => details(record, { noteId, close }));
           made.role = "button";
           made.tabIndex = 0;
           made.addEventListener("click", open);

@@ -587,7 +587,7 @@ describe("an agent limited to folders", () => {
     const asked: string[] = [];
     const lunch = { sourceId: "cal", id: "a1", calendarId: "mine", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
     const mine = { sourceId: "cal", id: "mine", name: "Mine-calendar-outside", color: null, writable: true };
-    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null, title: "Plumber-outside", addresses: ["Lane-outside"], birthday: null, notes: "notes-outside", photo: null, urls: [], etag: "e1" };
+    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: [{ value: "sam-outside@example.com", type: null }], phones: [], organization: null, url: null, title: "Plumber-outside", addresses: [{ value: "Lane-outside", type: null }], birthday: null, notes: "notes-outside", photo: null, urls: [], etag: "e1" };
     const changed: unknown[] = [];
     const sources: Sources = {
       async of(personId) {

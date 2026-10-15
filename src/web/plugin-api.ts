@@ -16,7 +16,7 @@ import type { Showing } from "./inspected.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, WORKSPACE_UPLOAD_BYTES } from "../core/protocol.ts";
+export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, WORKSPACE_UPLOAD_BYTES } from "../core/protocol.ts";
 /**
  * The query language notes and todos are found by, as the server reads it: what is typed to a query
  * and back, every filter there is with what it takes and means, and what is being typed at the
@@ -153,7 +153,7 @@ export type Setting = {
   description?: string;
   /**
    * Set for an option the plugin remembers from what the member does in its own views, such as which
-   * calendars the Calendar shows, so it is kept on the server with the member's settings and not in one browser. The
+   * calendars the Calendar shows or the order the Todos page is sorted in, so it is kept on the server with the member's settings and not in one browser. The
    * plugin may change it with `host.settings.set`; it can change no other, and the member can reset it.
    */
   remembered?: true;
@@ -701,6 +701,8 @@ export interface AddressEmbed {
 /** What an embed is handed about one place a note writes it. */
 export interface Embedded {
   config: string;
+  /** The note the embed is written in. */
+  noteId: string;
   /** A block embed's body: the note's lines between its opening and closing lines, each with its line break. Empty for an inline embed. */
   body: string;
   /** Whether the member can't change the note. `update` then does nothing, so an embed draws what it shows without the controls that would call it. */

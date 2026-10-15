@@ -1,4 +1,4 @@
-import type { ContactCard, ContactChange } from "../../plugin-api.ts";
+import { CONTACT_LABELS, labelType, type ContactCard, type ContactChange, type ContactLine, type LabelledField } from "../../plugin-api.ts";
 
 /** One thing a contact's card says, as a page lists it: what it is, and each value it has. */
 export interface Field {
@@ -20,16 +20,51 @@ export function birthdayWords(birthday: string): string {
   return `${Number(day)} ${name}${year && year !== "-" ? ` ${Number(year)}` : ""}`;
 }
 
+/** What a line with no label is called, field by field. */
+const UNLABELLED: Record<LabelledField, string> = { emails: "Email", phones: "Phone", addresses: "Address", urls: "Website" };
+
+/** A line's label in plain words: Google's own label's words, the member's own label as written, or the field's name for none. */
+export function labelWords(field: LabelledField, type: string | null): string {
+  if (type === null) return UNLABELLED[field];
+  const own: Readonly<Record<string, string>> = CONTACT_LABELS[field];
+  return Object.hasOwn(own, type) ? own[type]! : type;
+}
+
+/** A label the member typed, as a line keeps it: none for nothing, Google's own where it names one by its type or its words in any case, and otherwise as typed. */
+export const typeOf = labelType;
+
+/** A line's label where it is one the member wrote, not one of Google's own; null otherwise. */
+export const writtenLabel = (field: LabelledField, type: string | null) => (type !== null && !Object.hasOwn(CONTACT_LABELS[field], type) ? type : null);
+
+/** The labels a line's menu offers, in order: none, Google's own for the field, and the line's own where it is one the member wrote. */
+export function labelChoices(field: LabelledField, type: string | null): { type: string | null; words: string }[] {
+  const google = Object.keys(CONTACT_LABELS[field]).map((known) => ({ type: known, words: labelWords(field, known) }));
+  const written = writtenLabel(field, type);
+  return [{ type: null, words: "No label" }, ...google, ...(written === null ? [] : [{ type: written, words: written }])];
+}
+
+/** A field's lines as a card lists them: lines one after another with the same label under it once. */
+export function labelled(key: LabelledField, lines: ContactLine[], href?: Field["href"]): Field[] {
+  const fields: Field[] = [];
+  for (const line of lines) {
+    const label = labelWords(key, line.type);
+    const last = fields.at(-1);
+    if (last?.label === label) last.values.push(line.value);
+    else fields.push({ key, label, values: [line.value], ...(href && { href }) });
+  }
+  return fields;
+}
+
 /** What a contact's card lists, in the order shown: only what it has. */
 export function fieldsOf(card: ContactCard): Field[] {
   const work = [card.title, card.organization].filter(Boolean).join(", ");
   const all: Field[] = [
-    { key: "emails", label: "Email", values: card.emails, href: (email) => `mailto:${email}` },
-    { key: "phones", label: "Phone", values: card.phones, href: (phone) => `tel:${phone.replace(/[^\d+]/g, "")}` },
+    ...labelled("emails", card.emails, (email) => `mailto:${email}`),
+    ...labelled("phones", card.phones, (phone) => `tel:${phone.replace(/[^\d+]/g, "")}`),
     { key: "organization", label: "Work", values: work ? [work] : [] },
-    { key: "addresses", label: "Address", values: card.addresses },
+    ...labelled("addresses", card.addresses),
     { key: "birthday", label: "Birthday", values: card.birthday ? [birthdayWords(card.birthday)] : [] },
-    { key: "urls", label: "Website", values: card.urls, href: (url) => url },
+    ...labelled("urls", card.urls, (url) => url),
     { key: "notes", label: "Notes", values: card.notes ? [card.notes] : [] },
   ];
   return all.filter((field) => field.values.length > 0);
@@ -44,21 +79,20 @@ export const initialsOf = (name: string) =>
     .map((word) => [...word][0]!.toUpperCase())
     .join("") || "?";
 
-/** A contact as its form holds it while it is edited: each list as lines, the birthday as its three parts. */
+/** A contact as its form holds it while it is edited: each list as lines with their labels, the birthday as its three parts. */
 export interface Draft {
   name: string;
-  emails: string[];
-  phones: string[];
+  emails: ContactLine[];
+  phones: ContactLine[];
   organization: string;
   title: string;
-  addresses: string[];
+  addresses: ContactLine[];
   birthday: { day: string; month: string; year: string };
-  urls: string[];
+  urls: ContactLine[];
   notes: string;
 }
 
-export const LISTS = ["emails", "phones", "addresses", "urls"] as const;
-export type ListKey = (typeof LISTS)[number];
+export const LISTS = Object.keys(CONTACT_LABELS) as LabelledField[];
 
 export const MONTH_NAMES = MONTHS;
 
@@ -77,9 +111,9 @@ export function draftOf(card: ContactCard): Draft {
   };
 }
 
-const lines = (values: string[]) => values.map((v) => v.trim()).filter(Boolean);
+const lines = (drafted: ContactLine[]) => drafted.map((line) => ({ ...line, value: line.value.trim() })).filter((line) => line.value);
 const orNull = (value: string) => value.trim() || null;
-const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+const same = (a: readonly ContactLine[], b: readonly ContactLine[]) => a.length === b.length && a.every((line, i) => line.value === b[i]!.value && line.type === b[i]!.type);
 
 /** The birthday a draft says, as a contact writes it, null for none, or why it can't be one. */
 export function birthdayOf({ day, month, year }: Draft["birthday"]): { birthday: string | null } | { problem: string } {
