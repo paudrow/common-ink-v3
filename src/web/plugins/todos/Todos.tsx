@@ -16,11 +16,21 @@ import { narrowedTo, toggledTag, withSort } from "./tagged.ts";
 /** How long typing rests before the list is asked for, so a word is one ask and not one a letter. */
 const PAUSE_MS = 200;
 
-/** The orders the Sort menu offers. Each is a `sort:` word of the query (`TODO_SORT_WORDS`), so the menu and the query are one choice; Due date is the order with no `sort:`. */
-const SORTS: Record<TodoSort, string> = { due: "Due date", priority: "Priority", changed: "Recently changed", note: "Note", text: "A–Z" };
+/** The orders the Sort menu offers, the member's remembered setting `todos.sort`. Each is a `sort:` word of the query (`TODO_SORT_WORDS`), so the menu, the query and the setting are one choice; Due date is the order with no `sort:`. */
+export const SORTS: Record<TodoSort, string> = { due: "Due date", priority: "Priority", changed: "Recently changed", note: "Note", text: "A–Z" };
 
 /** The Sort menu's choice for a query's `sort:`, or the word itself when the menu has no name for it. */
 const sortChoice = (sort: SortKey | null): string => (sort === null ? "due" : ((Object.keys(SORTS) as TodoSort[]).find((choice) => TODO_SORT_WORDS[choice] === sort) ?? sort));
+
+/** The menu's choice a query says, or null when its `sort:` is a word the menu has no name for or it can't be read. */
+const choiceIn = (text: string): TodoSort | null => {
+  const read = parseQuery(text, "todos");
+  const choice = read.ok ? sortChoice(read.query.sort) : null;
+  return choice !== null && choice in SORTS ? (choice as TodoSort) : null;
+};
+
+/** The query with the account's order as its `sort:`, unless it has a `sort:` the menu has no name for, which it keeps. */
+const sortedAs = (text: string, sort: TodoSort): string => (choiceIn(text) === null && /(^|\s)sort:/iu.test(text) ? text : withSort(text, sort === "due" ? null : TODO_SORT_WORDS[sort]));
 
 /** How many of a todo's tags its row shows before a "+N" that lists the rest. */
 const SHOWN_TAGS = 3;
@@ -481,8 +491,10 @@ interface Props {
 export function TodosPage({ host, app, onOpen }: Props) {
   /** The query the page's address names with `?q=`, as a link to the page does. */
   const linked = useMemo(() => new URLSearchParams(app.query).get("q")?.trim() ?? null, [app.query]);
-  /** What is in the bar, and the query the list is of: the same once typing rests. It is kept in this browser, so the page opens the way it was left. */
-  const [typed, setTyped] = useState(() => (linked ?? savedQuery(host.storage.get("query"), host.storage.get("filters"))).slice(0, MAX_SEARCH_LENGTH));
+  /** The member's order, kept with the account: the bar's `sort:` follows it, and the member's own `sort:` changes it. */
+  const sort = host.settings.get<TodoSort>("sort");
+  /** What is in the bar, and the query the list is of: the same once typing rests. It is kept in this browser, so the page opens the way it was left, in the account's order. */
+  const [typed, setTyped] = useState(() => (linked ?? sortedAs(savedQuery(host.storage.get("query"), host.storage.get("filters")), sort)).slice(0, MAX_SEARCH_LENGTH));
   const [query, setQuery] = useState(typed);
   /** Whether the list was read yet, and where more of it starts when there is more. */
   const [page, setPage] = useState<Pick<Results["todo.list"], "next"> | null>(null);
@@ -545,6 +557,25 @@ export function TodosPage({ host, app, onOpen }: Props) {
     // A link's query stays in the address only while it is the page's: a reload then opens the query the member left.
     if (linked !== null && text !== linked) app.go(app.path, { replace: true });
   };
+  /** Runs a query the member asked for: its `sort:`, or none, is their order from now on, kept with the account. */
+  const askFor = (text: string) => {
+    run(text);
+    const choice = choiceIn(text);
+    if (choice !== null && choice !== host.settings.get<TodoSort>("sort") && !host.settings.set("sort", choice))
+      app.notify({ message: "The order couldn't be kept: your settings aren't read yet. Try again in a moment.", icon: "list" });
+  };
+  // The account's order is the bar's `sort:`: once the member's settings are read, and when it is reset or changed in another tab.
+  const lastSort = useRef(sort);
+  useEffect(() => {
+    if (lastSort.current === sort) return;
+    lastSort.current = sort;
+    // A link that names its order opens in that order.
+    if (typed === linked && /(^|\s)sort:/iu.test(typed)) return;
+    const next = sortedAs(typed, sort);
+    if (next === typed) return;
+    setTyped(next);
+    run(next);
+  }, [sort]);
   // A link's query is the one the page is left at, whether the link opened the page or was followed while it was open.
   const followed = useRef<string | null | undefined>(undefined);
   useEffect(() => {
@@ -557,7 +588,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const wanted = typed.trim();
   useEffect(() => {
     if (wanted === query) return;
-    const timer = setTimeout(() => run(wanted), PAUSE_MS);
+    const timer = setTimeout(() => askFor(wanted), PAUSE_MS);
     return () => clearTimeout(timer);
   }, [wanted, query]);
 
@@ -633,8 +664,22 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const sortBy = (choice: string) => {
     const next = withSort(typed, choice === "due" ? null : choice in SORTS ? TODO_SORT_WORDS[choice as TodoSort] : (choice as SortKey));
     setTyped(next);
-    run(next);
+    askFor(next);
   };
+
+  // A Sort chosen in this browser before it was kept with the account moves there once, as soon as the member's settings are read, unless the account has one already.
+  useEffect(() => {
+    const move = () => {
+      const kept: unknown = host.storage.get("sort");
+      if (kept === undefined || kept === null) return true;
+      if (typeof kept === "string" && kept in SORTS && host.settings.get("sort") === "due" && !host.settings.set("sort", kept)) return false;
+      host.storage.set("sort", null);
+      return true;
+    };
+    if (move()) return;
+    const stop = host.settings.subscribe(() => void (move() && stop()));
+    return stop;
+  }, [host]);
 
   /** What a row that a change took out of the list says under itself, unless the member turned that off. */
   const sayWhy = host.settings.get<boolean>("sayWhyLeaving");
@@ -763,10 +808,10 @@ export function TodosPage({ host, app, onOpen }: Props) {
           problem={unanswered?.query === query ? unanswered.message : null}
           onChange={(text, how) => {
             setTyped(text);
-            if (how === "set" || !text.trim()) run(text.trim());
+            if (how === "set" || !text.trim()) askFor(text.trim());
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && wanted !== query) run(wanted);
+            if (e.key === "Enter" && wanted !== query) askFor(wanted);
           }}
         />
         <label className="todo-sort">

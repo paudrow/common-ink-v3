@@ -146,7 +146,7 @@ export type Setting = {
   description?: string;
   /**
    * Set for an option the plugin remembers from what the member does in its own views, such as which
-   * calendars the Calendar shows, so it is kept on the server with the member's settings and not in one browser. The
+   * calendars the Calendar shows or the order the Todos page is sorted in, so it is kept on the server with the member's settings and not in one browser. The
    * plugin may change it with `host.settings.set`; it can change no other, and the member can reset it.
    */
   remembered?: true;
