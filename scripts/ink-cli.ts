@@ -37,7 +37,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   links-rebuild                       make backlinks and the index of todos again from the notes' text
   todos [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY]
         [--no-due true] [--importance N,N] [--completed true] [--archived true] [--note ID] [--limit N] [--offset N]
-                                      the todos a query finds, such as "due:<today importance:>=2", or every
+                                      the todos a query finds, such as "due:<today priority:>=medium", or every
                                       open one with none; --query QUERY is the same. "ink syntax todos" lists
                                       what a query can say
   syntax [todos]                      the query language of search, or of todos
@@ -94,7 +94,7 @@ the id of the one note with that title, or refuse when none or several have it. 
 leaves such text as it is.
 
 A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
-DAY is a calendar date, YYYY-MM-DD. Importance is 0 for normal and 1 to 3 for !, !! and !!!.
+DAY is a calendar date, YYYY-MM-DD. --importance is the priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!).
 RULE is how a todo repeats, written every:RULE on its line:
   2w (d, w, m or y)   every N after the due date     3d-after-done      N after it was last done
   mon,thu             those days of every week       2w-mon,thu         of every 2nd week

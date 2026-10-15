@@ -76,7 +76,7 @@ const queryDays = {
   zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated: and created:. Left out, it is the zone your member's settings name, or UTC" },
 };
 const TODOS =
-  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for importance, and due:YYYY-MM-DD for the day it is due. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\n" +
+  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), and due:YYYY-MM-DD for the day it is due. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\n" +
   RULE_GRAMMAR +
   "\ndone:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.";
 const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
@@ -201,16 +201,16 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see that query finds: with no query, every open one. ${TODOS} Open ones come first, then the soonest due, then the most important, unless the query's sort: says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance, due, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more.\n\n${QUERY("todos")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
+    description: `The todos in the notes you can see that query finds: with no query, every open one. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless the query's sort: says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more.\n\n${QUERY("todos")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
-      query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today importance:>=2 -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
+      query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
       ...queryDays,
       folderId: { type: "string", description: "Only todos in notes in this folder or in a folder under it, from list_folders. In the query: folder:" },
       tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case: a tag on the todo's own line, or anywhere else in its note. In the query: tag:" },
       dueFrom: day("Only todos due on or after this day. In the query: due:>="),
       dueTo: day("Only todos due on or before this day. In the query: due:<="),
       noDue: { type: "boolean", description: "True for only todos with no due date. In the query: no:due" },
-      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these levels: 0 is normal, 1 to 3 are !, !! and !!!. In the query: importance:" },
+      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these priorities: 0 is None, 1 Low (!), 2 Medium (!!), 3 High (!!!). In the query: priority:" },
       includeCompleted: { type: "boolean", description: "True to list done todos too. In the query: is:open OR is:done" },
       includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
@@ -228,7 +228,7 @@ export const TOOLS: Tool[] = [
   {
     name: "set_todo",
     description:
-      "Check a todo off, skip it, or change its importance, due date, how it repeats or its words, by rewriting its line in its note. Checking off a todo that repeats leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. A rule that ends (-times-N, -until-DAY) counts down, and its last time checks the todo off for good. skip moves a repeating todo to its next due date with nothing checked off, and is refused for one that doesn't repeat or is on its last time. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+      "Check a todo off, skip it, or change its priority, due date, how it repeats or its words, by rewriting its line in its note. Checking off a todo that repeats leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. A rule that ends (-times-N, -until-DAY) counts down, and its last time checks the todo off for good. skip moves a repeating todo to its next due date with nothing checked off, and is refused for one that doesn't repeat or is on its last time. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
     inputSchema: object(
       {
         id: noteId,
@@ -236,12 +236,12 @@ export const TOOLS: Tool[] = [
         line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" },
         text: { type: "string", description: "The todo's line as written, from list_todos" },
         done: { type: "boolean", description: "True checks it off, false opens it again" },
-        importance: { type: "integer", minimum: 0, maximum: 3, description: "0 for normal, 1 to 3 for !, !! and !!!" },
+        importance: { type: "integer", minimum: 0, maximum: 3, description: "Its priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
         due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
         every: { type: ["string", "null"], description: `How it repeats, as written after every:, or null to stop it repeating. The rules:\n${RULE_GRAMMAR}` },
         skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Not together with done" },
         on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
-        words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, importance, due date, rule and done: mark, tags included, on one line. Its due date and how it repeats are written after them" },
+        words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, priority, due date, rule and done: mark, tags included, on one line. Its due date and how it repeats are written after them" },
       },
       ["id", "revision", "line", "text"],
     ),

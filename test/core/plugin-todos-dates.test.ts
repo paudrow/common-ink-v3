@@ -25,7 +25,7 @@ describe("a due date beside today", () => {
     expect(savedQuery(undefined, undefined)).toBe("");
     expect(savedQuery(undefined, { folder: "", tag: "", due: "any", importance: "", completed: false, archived: false })).toBe("");
     const all = savedQuery(undefined, { folder: "abcdefghij12", tag: "Money", due: "week", importance: "2", completed: true, archived: true });
-    expect(all).toBe("folder:abcdefghij12 tag:money due:today..+6d importance:2 (is:open OR is:done) (is:archived OR -is:archived)");
+    expect(all).toBe("folder:abcdefghij12 tag:money due:today..+6d priority:medium (is:open OR is:done) (is:archived OR -is:archived)");
     for (const due of ["overdue", "today", "week", "none"]) expect(parseQuery(savedQuery(undefined, { due }), "todos").ok, due).toBe(true);
     expect(parseQuery(all, "todos").ok).toBe(true);
     // What was never one of its choices is no filter.

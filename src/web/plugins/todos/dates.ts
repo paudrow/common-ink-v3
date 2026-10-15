@@ -3,7 +3,7 @@
  * is: the browser's own time zone. The server is only ever handed days, never asked what today is.
  */
 
-import { dayOf, today } from "../../plugin-api.ts";
+import { PRIORITIES, dayOf, today } from "../../plugin-api.ts";
 
 export { dayOf, today };
 
@@ -52,7 +52,7 @@ export function savedQuery(query: unknown, filters: unknown): string {
     ...(typeof kept.folder === "string" && /^[a-z0-9]{12}$/.test(kept.folder) ? [`folder:${kept.folder}`] : []),
     ...(typeof kept.tag === "string" && /^[\p{L}\p{N}_][\p{L}\p{N}_/-]*$/u.test(kept.tag) && /\D/.test(kept.tag) ? [`tag:${kept.tag.toLowerCase()}`] : []),
     ...(due ? [due] : []),
-    ...(typeof kept.importance === "string" && /^[0-3]$/.test(kept.importance) ? [`importance:${kept.importance}`] : []),
+    ...(typeof kept.importance === "string" && /^[0-3]$/.test(kept.importance) ? [`priority:${PRIORITIES[Number(kept.importance)]}`] : []),
     ...(kept.completed === true ? ["(is:open OR is:done)"] : []),
     ...(kept.archived === true ? ["(is:archived OR -is:archived)"] : []),
   ].join(" ");

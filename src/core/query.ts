@@ -21,7 +21,8 @@ export const MAX_BOUND = 100;
 export type ValueKind =
   | { type: "words"; words: readonly Word[] }
   | { type: "day" }
-  | { type: "number"; min: number; max: number }
+  /** Words in order from the lowest, each standing for its place: a todo's priority is `none` (0) to `high` (3). Its place is taken too. */
+  | { type: "level"; levels: readonly string[] }
   | { type: "folder" }
   | { type: "tag" }
   | { type: "person" };
@@ -80,6 +81,9 @@ interface Spec {
 const BOTH = ["notes", "todos"] as const;
 const NOTES = ["notes"] as const;
 const TODOS = ["todos"] as const;
+
+/** A todo's priorities, from the lowest, as a query writes them. */
+export const PRIORITIES = ["none", "low", "medium", "high"] as const;
 
 const among = (c: Compiling, given: Given) => `(SELECT value FROM json_each(${c.bind(JSON.stringify(given.ids ?? []))}))`;
 
@@ -212,15 +216,15 @@ export const FILTERS = {
     shown: "DAY",
     sql: valueIs("t.due", (day) => day),
   },
-  importance: {
+  priority: {
     scopes: TODOS,
-    aliases: [],
-    value: { type: "number", min: 0, max: 3 },
+    aliases: ["importance"],
+    value: { type: "level", levels: PRIORITIES },
     compares: true,
-    means: "A todo's importance: 0 for normal, 1 to 3 for ! to !!!",
-    example: "importance:>=2",
-    shown: "N",
-    sql: valueIs("t.importance", Number),
+    means: "A todo's priority: high, medium, low or none, written !!!, !!, ! or nothing. 3 to 0 read the same",
+    example: "priority:>=medium",
+    shown: "LEVEL",
+    sql: valueIs("t.importance", (level) => (PRIORITIES as readonly string[]).indexOf(level)),
   },
   in: {
     scopes: BOTH,
@@ -252,7 +256,7 @@ export const FILTERS = {
         { word: "title-desc", scopes: BOTH, means: "By the note's title, Z to A", order: "CASE WHEN n.title = '' THEN 'Untitled' ELSE n.title END COLLATE NOCASE DESC" },
         { word: "due-asc", scopes: TODOS, means: "Soonest due first, and those with no due date last", order: "t.due IS NULL, t.due" },
         { word: "due-desc", scopes: TODOS, means: "Latest due first, and those with no due date last", order: "t.due IS NULL, t.due DESC" },
-        { word: "importance-desc", scopes: TODOS, means: "Most important first", order: "t.importance DESC" },
+        { word: "priority-desc", aliases: ["importance-desc"], scopes: TODOS, means: "Highest priority first", order: "t.importance DESC" },
       ],
     },
     compares: false,
@@ -265,7 +269,7 @@ export const FILTERS = {
 
 export type Key = keyof typeof FILTERS;
 export type In = "title" | "body";
-export type SortKey = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc" | "due-asc" | "due-desc" | "importance-desc";
+export type SortKey = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc" | "due-asc" | "due-desc" | "priority-desc";
 export type FilterKey = Exclude<Key, "in" | "sort">;
 
 export type Filter = { kind: "filter"; key: FilterKey; cmp: Cmp; value: string; to?: string };
@@ -461,9 +465,11 @@ function read(text: string, scope: Scope): Query {
       if (!isDay(low) && !isRelative(low)) throw new Refused(`${key}: takes a day written YYYY-MM-DD, or today, yesterday, tomorrow, 7d for seven days ago or +7d for seven days ahead. "${value}" is none of them`, from, to);
       return low;
     }
-    if (kind.type === "number") {
-      if (!/^\d+$/.test(value) || Number(value) < kind.min || Number(value) > kind.max) throw new Refused(`${key}: takes a number from ${kind.min} to ${kind.max}, and "${value}" isn't one`, from, to);
-      return String(Number(value));
+    if (kind.type === "level") {
+      const low = value.toLowerCase();
+      const level = /^\d+$/.test(low) ? kind.levels[Number(low)] : kind.levels.find((l) => l === low);
+      if (!level) throw new Refused(`${key}: takes ${listOf([...kind.levels].reverse())}, and "${value}" isn't one`, from, to);
+      return level;
     }
     if (kind.type === "words") {
       const word = wordOf(key, scope, value);

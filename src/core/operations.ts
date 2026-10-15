@@ -41,7 +41,7 @@ import {
   type Written,
 } from "./protocol.ts";
 import { removing, forgetRemoved } from "./purge.ts";
-import { FILTERS, MAX_BOUND, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
+import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
@@ -1367,7 +1367,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         ...(op.dueFrom ? [due(">=", op.dueFrom)] : []),
         ...(op.dueTo ? [due("<=", op.dueTo)] : []),
         ...(op.noDue ? [{ kind: "not", of: { kind: "filter", key: "has", cmp: "=", value: "due" } } as const] : []),
-        ...(op.importance ? [any(op.importance.map((level): Filter => ({ kind: "filter", key: "importance", cmp: "=", value: String(level) })))] : []),
+        ...(op.importance ? [any(op.importance.map((level): Filter => ({ kind: "filter", key: "priority", cmp: "=", value: PRIORITIES[level] })))] : []),
         ...(op.noteId ? [{ kind: "note", id: op.noteId } as const] : []),
         ...OLD.completed(op.includeCompleted),
         ...OLD.archived(op.includeArchived),

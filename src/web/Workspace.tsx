@@ -701,6 +701,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     notify: (notice: Notice) => {
       const id = ++toldCount.current;
       tell((shown) => stacked(shown, { id, notice: { ...notice } }));
+      return () => tell((shown) => shown.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
     },
     toggleSidebar,
     togglePanel,

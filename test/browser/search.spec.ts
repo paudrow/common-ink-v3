@@ -696,7 +696,7 @@ test("the ? in Advanced opens the help over the page: every filter and operator 
     expect(forms, form).toContain(form);
   }
   // What is for todos alone is not offered where notes are searched.
-  for (const form of ["due:DAY", "importance:N", "is:done", "has:repeat", "sort:due-asc"]) expect(forms, form).not.toContain(form);
+  for (const form of ["due:DAY", "priority:LEVEL, importance:LEVEL", "is:done", "has:repeat", "sort:due-asc"]) expect(forms, form).not.toContain(form);
   // The headings are the builder's fields: Shared and Private are Visibility, apart from the states.
   await expect(help(page).getByRole("heading", { level: 3 })).toHaveText(["Writing a query", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "State", "Visibility", "Has", "Words in", "Sort"]);
   await expect(help(page).getByRole("table", { name: "State" }).getByRole("rowheader")).toHaveText(["is:open", "is:archived", "is:trashed"]);

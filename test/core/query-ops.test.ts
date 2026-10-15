@@ -276,11 +276,12 @@ describe("todo.list, by each filter", () => {
     expect(await todos(ada, "-has:due is:archived")).toEqual(["Shred it"]);
     expect(await refusal(todos(ada, "due:<today"))).toMatch(/^invalid: "today" is counted from today/);
 
+    expect(await todos(ada, "priority:>=medium")).toEqual(["Call the bank #urgent", "Ship the plan"]);
+    expect(await todos(ada, "priority:high")).toEqual(["Ship the plan"]);
+    expect(await todos(ada, "priority:none")).toEqual(["Tidy the roadmap"]);
+    expect(await todos(ada, "priority:<medium")).toEqual(["Tidy the roadmap"]);
+    expect(await todos(ada, "priority:low..medium (is:archived OR is:open)")).toEqual(["Call the bank #urgent", "Shred it"]);
     expect(await todos(ada, "importance:>=2")).toEqual(["Call the bank #urgent", "Ship the plan"]);
-    expect(await todos(ada, "importance:3")).toEqual(["Ship the plan"]);
-    expect(await todos(ada, "importance:0")).toEqual(["Tidy the roadmap"]);
-    expect(await todos(ada, "importance:<2")).toEqual(["Tidy the roadmap"]);
-    expect(await todos(ada, "importance:1..2 (is:archived OR is:open)")).toEqual(["Call the bank #urgent", "Shred it"]);
     expect(await todos(ada, "has:repeat")).toEqual(["Ship the plan"]);
     expect(await todos(ada, "no:repeat")).toEqual(["Call the bank #urgent", "Tidy the roadmap"]);
   });
@@ -319,7 +320,7 @@ describe("todo.list, by each filter", () => {
 
     expect(await todos(ada, "sort:due-desc")).toEqual(["Ship the plan", "Call the bank #urgent", "Tidy the roadmap"]);
     expect(await todos(ada, "sort:due-asc")).toEqual(["Call the bank #urgent", "Ship the plan", "Tidy the roadmap"]);
-    expect(await todos(ada, "sort:importance-desc")).toEqual(["Ship the plan", "Call the bank #urgent", "Tidy the roadmap"]);
+    expect(await todos(ada, "sort:priority-desc")).toEqual(["Ship the plan", "Call the bank #urgent", "Tidy the roadmap"]);
     expect(await todos(ada, "sort:title-desc")).toEqual(["Ship the plan", "Tidy the roadmap", "Call the bank #urgent"]);
     const first = await perform(env.DB, ada, { type: "todo.list", query: "sort:due-asc", limit: 2 });
     expect([first.todos.map((t) => t.words), first.next]).toEqual([["Call the bank #urgent", "Ship the plan"], 2]);

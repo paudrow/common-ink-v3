@@ -4,6 +4,8 @@ import type { Notice } from "./plugin-api.ts";
 export interface Told {
   id: number;
   notice: Notice;
+  /** Taken down by whoever told it: it fades out and goes. */
+  leaving?: boolean;
 }
 
 /** The most cards shown at once. A newer one sends the oldest away. */

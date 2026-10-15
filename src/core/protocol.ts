@@ -268,14 +268,14 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("links.rebuild") }),
   /**
    * The todos in the notes the asker can see that `query` finds, in the same language as search's:
-   * words are looked for in the todo's own line, and `is:done`, `due:`, `importance:`, `has:due` and
+   * words are looked for in the todo's own line, and `is:done`, `due:`, `priority:`, `has:due` and
    * `has:repeat` are of the todo. With no query it is every open todo. Done ones are listed when
    * the query says `is:done`, and both with `is:open OR is:done`. Open ones come first, then by due
    * date with those that have none last, then the most important, unless the query's `sort:` says otherwise.
    *
    * The fields beside `query` are from before it could say them, and narrow it further. `dueFrom` and
    * `dueTo` are days, both included, and leave out todos with no due date; `noDue` lists only those.
-   * `importance` lists the levels wanted, 0 for normal to 3. `tag` matches ignoring case, and is a tag
+   * `importance` lists the priority levels wanted, 0 for None to 3 for High. `tag` matches ignoring case, and is a tag
    * of the todo's note: one written on the todo's own line, or anywhere else in the note. `folderId`
    * lists the todos of the notes in that folder and in every folder under it; one the asker can't see
    * is no folder. Pass the answer's `next` as `offset` for the page after. A field it doesn't know is

@@ -18,15 +18,15 @@ const LEAVING_MS = 350;
 export function Toasts({ told, onGone }: { told: readonly Told[]; onGone: (id: number) => void }) {
   return (
     <div className="toasts" aria-live="polite">
-      {told.map(({ id, notice }) => (
-        <Toast key={id} notice={notice} onGone={() => onGone(id)} />
+      {told.map(({ id, notice, leaving }) => (
+        <Toast key={id} notice={notice} leaving={leaving} onGone={() => onGone(id)} />
       ))}
     </div>
   );
 }
 
 /** One card. A press on it, or Escape in it, sends it away. Its button's answer, if any, is said in its place. */
-function Toast({ notice, onGone }: { notice: Notice; onGone: () => void }) {
+function Toast({ notice, leaving: takenDown, onGone }: { notice: Notice; leaving?: boolean; onGone: () => void }) {
   const [said, say] = useState<Notice>(notice);
   const [leaving, setLeaving] = useState(false);
   const clock = useRef({ left: 0, since: 0, timer: 0, held: new Set<string>() });
@@ -39,6 +39,7 @@ function Toast({ notice, onGone }: { notice: Notice; onGone: () => void }) {
     setLeaving(true);
   };
   const run = (ms: number) => {
+    if (said.stays) return;
     const at = clock.current;
     clearTimeout(at.timer);
     at.left = ms;
@@ -64,6 +65,9 @@ function Toast({ notice, onGone }: { notice: Notice; onGone: () => void }) {
     run(said.action ? TOAST_MS.action : TOAST_MS.plain);
     return () => clearTimeout(clock.current.timer);
   }, [said]);
+  useEffect(() => {
+    if (takenDown) go();
+  }, [takenDown]);
   useEffect(() => {
     if (!leaving) return;
     const timer = setTimeout(() => gone.current(), LEAVING_MS);
