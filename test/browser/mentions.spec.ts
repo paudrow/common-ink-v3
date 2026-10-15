@@ -266,7 +266,7 @@ test("a person mentioned on a todo is its assignee, drawn as a chip, and the Tod
   await expect.poll(() => text(page, note.id, workspaceId)).toContain("- [ ] Book the venue\n");
   // The list keeps its order: the row no longer matches, and stays where it was, dimmed, until Refresh.
   await expect(rows.first()).toHaveAttribute("data-gone", "true");
-  await page.getByRole("group", { name: "Notice" }).getByRole("button", { name: "Refresh" }).click();
+  await page.locator(".todo-order").getByRole("button", { name: "Refresh" }).click();
   await expect(rows).toHaveCount(0);
   await filter(page, 'assignee:"Sam Okafor"');
   await rows.first().getByRole("button", { name: "Assigned to Sam Okafor" }).click();

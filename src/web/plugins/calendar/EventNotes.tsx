@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { App, CalendarEvent, ListedFolder, NoteAbout, PluginHost } from "../../plugin-api.ts";
 import { dayIn, dayLabel } from "./dates.ts";
 
@@ -65,7 +65,7 @@ export function NewNoteAbout({ host, app, event, timeZone, close }: Props) {
   if (!folders.length) return null;
   if (!choosing)
     return (
-      <button type="button" className="button small" onClick={() => setChoosing(true)}>
+      <button type="button" className="button primary event-new-note-start" onClick={() => setChoosing(true)}>
         New note about this event
       </button>
     );
@@ -104,8 +104,8 @@ export function NewNoteAbout({ host, app, event, timeZone, close }: Props) {
   );
 }
 
-/** The notes that reference the event that the member can see, each saying who sees it. */
-export function NotesAbout({ host, app, event, close }: Omit<Props, "timeZone">) {
+/** The notes that reference the event that the member can see, each saying who sees it, and under them `children`, the way to make another. */
+export function NotesAbout({ host, app, event, close, children }: Omit<Props, "timeZone"> & { children?: ReactNode }) {
   const [listed, setListed] = useState<Listed>({ is: "reading" });
 
   useEffect(() => {
@@ -149,6 +149,7 @@ export function NotesAbout({ host, app, event, close }: Omit<Props, "timeZone">)
         ) : (
           <p className="event-note">No note references this event yet.</p>
         ))}
+      {children}
     </section>
   );
 }

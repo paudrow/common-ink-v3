@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { CalendarEvent, Me, OpInput } from "../../src/core/protocol.ts";
-import { anotherPerson, join, perform, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, join, perform, runCommand, signInAsNewPerson, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -328,8 +328,10 @@ test("a reference to an event shows its owner the event as it is now, and every 
   await openCalendar(page);
 
   await eventIn(grid(page), "Lunch with Sam").click();
-  await details(page).getByRole("button", { name: "Copy reference" }).click();
-  await expect(details(page).getByRole("status")).toContainText("Paste it into a note.");
+  // Copy reference is the palette's, for the event open: the panel's one action is a new note about it.
+  await expect(details(page).getByRole("button", { name: "Copy reference" })).toHaveCount(0);
+  await runCommand(page, "Copy event reference");
+  await expect(page.locator(".toast-card").last()).toContainText(/^Copied the reference to Lunch with Sam, \w{3} \d{1,2}\. Paste it into a note\.$/);
   const written = await page.evaluate(() => navigator.clipboard.readText());
   expect(written).toMatch(/^::event\{[a-z0-9]{12} Lunch with Sam\}$/);
 

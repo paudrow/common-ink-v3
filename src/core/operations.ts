@@ -17,6 +17,8 @@ import {
   MAX_SETTINGS_LENGTH,
   Op,
   OpError,
+  TODO_SORTS,
+  TODO_SORT_WORDS,
   type Author,
   type AuthorRef,
   type ChangeEntry,
@@ -43,6 +45,7 @@ import {
   type Role,
   type SharedNote,
   type TrashedNote,
+  type TodoSort,
   type Written,
 } from "./protocol.ts";
 import { removing, forgetRemoved } from "./purge.ts";
@@ -488,6 +491,15 @@ function inParts(rows: readonly unknown[]): string[] {
   }
   return parts.filter((part) => part.length).map((part) => `[${part.join(",")}]`);
 }
+
+/** Each order of todo.list, before its ties by note and line. A todo's words are its line after its checkbox and priority marks. */
+const TODO_ORDER: Record<TodoSort, string> = {
+  due: "t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE",
+  priority: "t.importance DESC, t.due IS NULL, t.due, n.title COLLATE NOCASE",
+  changed: "n.updated_at DESC",
+  note: "n.title COLLATE NOCASE",
+  text: "ltrim(substr(t.text, instr(t.text, ']') + 1), ' !') COLLATE NOCASE",
+};
 
 const INDEXED = {
   todos:
@@ -1553,7 +1565,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         ...OLD.completed(op.includeCompleted),
         ...OLD.archived(op.includeArchived),
       ]);
-      const order = query.sort ? orderOf(query.sort) : "t.done, t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE";
+      // The query's sort: says the order where it has one, and `sort` where it hasn't. The done ones are last either way, and a
+      // word the Todos page's Sort menu offers breaks its ties as the menu's order does.
+      const sort = query.sort ? TODO_SORTS.find((s) => TODO_SORT_WORDS[s] === query.sort) : op.sort;
+      const order = `t.done, ${sort ? TODO_ORDER[sort] : orderOf(query.sort!)}`;
       const { results } = await prepare(
         `SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
            (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags

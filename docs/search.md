@@ -128,6 +128,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `sort:due-asc` | Soonest due first, and those with no due date last | `sort:due-asc` |
 | `sort:due-desc` | Latest due first, and those with no due date last | `sort:due-desc` |
 | `sort:priority-desc` | Highest priority first | `sort:priority-desc` |
+| `sort:text-asc` | By the todo's words, A to Z | `sort:text-asc` |
 <!-- /syntax -->
 
 Not filters yet: `has:attachment`, which waits for uploads, and `assignee:`, which waits for assignees.

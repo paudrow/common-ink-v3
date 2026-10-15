@@ -5821,19 +5821,141 @@ button.diff-fold:hover {
   font-size: 22px;
 }
 
-/* The list of todos, as v1's: one panel, a todo to a row. */
+/* The query bar and, at the end of its line, the order, which is the query's sort: said as a menu. */
+.todo-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 14px;
+}
+
+.todo-tools > .query-bar {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.todo-sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.todo-sort select {
+  min-width: 0;
+  max-width: 12rem;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+}
+
+/* The list of todos, as v1's: one panel, a todo to a row, and the bar that says the order has changed above the first. */
+.todo-card {
+  padding: 8px clamp(6px, 2.5%, 14px) 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+}
+
 .todo-list {
   container: todos / inline-size;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 1px;
   margin: 0;
-  padding: 8px clamp(6px, 2.5%, 14px) 10px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--bg-elev);
-  box-shadow: var(--shadow-sm);
+  padding: 0;
   list-style: none;
+}
+
+/* Kept at the top of the page while the list is scrolled, so it is seen wherever the change was made. */
+.todo-order-slot {
+  position: sticky;
+  z-index: 2;
+  /* At the very top of the page's scrolling area, above its padding, so no row shows over it. */
+  top: -2rem;
+}
+
+/* It opens to its own height, which the rows move down by as it does, and by nothing more. */
+.todo-order {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 8px;
+  max-height: 3em;
+  margin: 0 -6px 6px;
+  padding: 5px 6px 5px 10px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-elev));
+  color: var(--accent-ink);
+  font: 500 13px/20px var(--prose);
+  animation: todo-order-in 0.18s ease-out;
+}
+
+@keyframes todo-order-in {
+  from {
+    max-height: 0;
+    margin-bottom: 0;
+    padding-block: 0;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-order {
+    animation: none;
+  }
+}
+
+.todo-order svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.todo-order-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-order-refresh {
+  padding: 1px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: 600 12.5px/20px var(--prose);
+  cursor: pointer;
+}
+
+.todo-order-dismiss {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.todo-order-refresh:focus-visible,
+.todo-order-dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.todo-order-dismiss:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 /* A todo's row, in two lines. The first is the todo: its checkbox, its words and, at the right, its note's name. The second, under
@@ -5913,9 +6035,17 @@ button.diff-fold:hover {
   outline-offset: 2px;
 }
 
-/* A row a change took out of the list, which stays where it was until the list is refreshed. */
-.todo-row[data-gone] {
+/* A row a change took out of the list, which stays where it was, greyed, until the list is refreshed. What it says under itself isn't. */
+.todo-row[data-gone] > :not(.todo-why) {
   opacity: 0.5;
+}
+
+.todo-why {
+  grid-row: 3;
+  grid-column: 2 / 4;
+  margin: 1px 0 0;
+  color: var(--muted);
+  font: 12px/1.35 var(--prose);
 }
 
 .todo-row[data-done] .todo-words {
@@ -5955,7 +6085,8 @@ button.diff-fold:hover {
 .todo-chips {
   display: flex;
   grid-row: 2;
-  grid-column: 2 / 4;
+  /* Not under the note's name: the chips wrap before they reach it. */
+  grid-column: 2;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 6px;
@@ -5999,13 +6130,23 @@ button.diff-fold:hover {
   text-align: center;
 }
 
-/* What isn't set yet: its icon and word, quiet and without a pill, which is drawn, dashed, while the row is pointed at or has the keyboard. */
+/* What isn't set yet: its icon alone, named on hover, quiet and without a pill, which is drawn, dashed, while the row is pointed at
+   or has the keyboard. It shows only then, so it needs no word, and the line keeps its room for what is set. */
+.todo-chip-word {
+  display: none;
+}
+
 .todo-chip[data-unset] {
-  padding: 0 6px;
+  justify-content: center;
+  width: 22px;
+  padding: 0;
   border: 1px dashed transparent;
   background: none;
   color: color-mix(in srgb, var(--muted) 65%, var(--faint));
   font-weight: 450;
+  /* Not shown at rest, so a row says only what is set; it keeps its place, so nothing moves when it shows. */
+  opacity: 0;
+  transition: opacity 0.12s;
 }
 
 .todo-row:hover .todo-chip[data-unset],
@@ -6013,6 +6154,14 @@ button.diff-fold:hover {
 .todo-row[data-picking] .todo-chip[data-unset] {
   border-color: var(--faint);
   color: var(--chip-ink);
+  opacity: 1;
+}
+
+/* Where nothing points, as on a touch screen, they are always shown. */
+@media (hover: none) {
+  .todo-chip[data-unset] {
+    opacity: 1;
+  }
 }
 
 button.todo-chip {
@@ -6087,8 +6236,67 @@ button.todo-chip:disabled {
 }
 
 .todo-chip.todo-tag {
+  max-width: 100%;
   background: var(--accent-soft);
   color: var(--accent-ink);
+}
+
+/* A tag's chip and the cross that takes it off, laid over the chip's right end while it is pointed at or has the keyboard. */
+.todo-tag-chip {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  /* A long tag is cut short at about 14 letters' width; its chip's own size, so the line wraps round the chip and not round the tag. */
+  max-width: min(14em, 100%);
+  font-size: 11.5px;
+}
+
+.todo-tag-name {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+/* At the chip's top right corner, half over its edge, so a short tag stays readable under it. */
+.todo-tag-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-ink);
+  color: var(--bg-elev);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+}
+
+.todo-tag-remove svg {
+  width: 9px;
+  height: 9px;
+}
+
+.todo-tag-chip:hover .todo-tag-remove,
+.todo-tag-chip:focus-within .todo-tag-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Where nothing points, there is no hover to show it on. */
+@media (hover: none) {
+  .todo-tag-remove {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.todo-tag-remove:hover {
+  background: var(--danger);
 }
 
 button.todo-tag[aria-pressed="true"] {
@@ -6096,13 +6304,13 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 /* Where a todo is: its note's name, quiet, at the right of its first line, and the way to the note. It gives way to the words, up to
-   38% of the row as v1's label, and ends in an ellipsis. */
+   a quarter of the row, so the chips under the words have room before it, and ends in an ellipsis. */
 .todo-note {
   display: flex;
   grid-row: 1;
   grid-column: 3;
   justify-self: end;
-  max-width: 38cqi;
+  max-width: 24cqi;
   min-width: 0;
   margin: -1px -4px;
   padding: 1px 4px;
@@ -6131,11 +6339,16 @@ button.todo-tag[aria-pressed="true"] {
   outline-offset: 1px;
 }
 
-/* In a narrow list the words have the whole first line, the note's name goes on a line of its own under the chips, where the words
-   start, and what isn't set is its icon alone, named on hover, so the second line still holds a row's chips. */
+/* In a narrow list the words and the chips have the whole width, and the note's name goes on a line of its own under the chips,
+   where the words start. */
 @container todos (max-width: 440px) {
-  .todo-text {
+  .todo-text,
+  .todo-chips {
     grid-column: 2 / 4;
+  }
+
+  .todo-why {
+    grid-row: 4;
   }
 
   .todo-note {
@@ -6143,16 +6356,6 @@ button.todo-tag[aria-pressed="true"] {
     grid-column: 2 / 4;
     justify-self: start;
     max-width: 100%;
-  }
-
-  .todo-chip[data-unset] {
-    justify-content: center;
-    width: 22px;
-    padding: 0;
-  }
-
-  .todo-chip-word {
-    display: none;
   }
 }
 
@@ -6177,6 +6380,55 @@ button.todo-tag[aria-pressed="true"] {
   font-size: 13.5px;
   text-align: left;
   cursor: pointer;
+}
+
+/* A tag in the list "+N" opens: the tag, which narrows the list, and its cross. */
+.tag-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tag-line .chip-choice {
+  flex: 1;
+  min-width: 0;
+}
+
+.tag-line .chip-choice[aria-pressed="true"] {
+  color: var(--accent-ink);
+}
+
+.tag-line-name {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-line-remove {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tag-line-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tag-line-remove:hover,
+.tag-line-remove:focus-visible {
+  outline: none;
+  background: var(--hover);
+  color: var(--danger);
 }
 
 .chip-choice svg {
@@ -7873,8 +8125,7 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--muted);
 }
 
-.event-links,
-.copy-reference {
+.event-links {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -7885,12 +8136,6 @@ button.todo-tag[aria-pressed="true"] {
 .contact-reach a,
 .ref-details a {
   color: var(--accent);
-}
-
-.copy-reference code {
-  font-family: var(--mono);
-  font-size: 11px;
-  overflow-wrap: anywhere;
 }
 
 .event-form {
@@ -7912,6 +8157,11 @@ button.todo-tag[aria-pressed="true"] {
 .event-notes h3 {
   margin: 0;
   font-size: 13px;
+}
+
+/* The panel's main action, under the notes it adds to. */
+.event-new-note-start {
+  align-self: flex-start;
 }
 
 .event-new-note {

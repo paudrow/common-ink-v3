@@ -3,7 +3,7 @@ import type { NoteState } from "./lifecycle.ts";
 import { readableName } from "./mentions.ts";
 import { parseRule } from "./recurrence.ts";
 import { dayIn } from "./history.ts";
-import { MAX_SEARCH_LENGTH } from "./query.ts";
+import { MAX_SEARCH_LENGTH, type SortKey } from "./query.ts";
 import { isDay, type LastDone } from "./todos.ts";
 
 export { MAX_SEARCH_LENGTH };
@@ -125,6 +125,12 @@ const Zone = z
 const Days = { today: Day.optional(), zone: Zone.optional() };
 /** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done`, `last-fri`, `mar-1` or `1m-times-5`. docs/todos.md has every rule. */
 const Recurrence = z.string().max(1000).refine((rule) => parseRule(rule) !== null, "not a way to repeat, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 or 1m-times-5");
+/** The orders todo.list can list todos in. */
+export const TODO_SORTS = ["due", "priority", "changed", "note", "text"] as const;
+export type TodoSort = (typeof TODO_SORTS)[number];
+/** The `sort:` word of a query that says each order: the query's `sort:` and `sort` are one choice. */
+export const TODO_SORT_WORDS: Record<TodoSort, SortKey> = { due: "due-asc", priority: "priority-desc", changed: "updated-desc", note: "title-asc", text: "text-asc" };
+
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 /**
  * Whether a listing also covers archived notes, which it leaves out unless asked. Nothing but
@@ -344,6 +350,10 @@ export const Op = z.discriminatedUnion("type", [
    * lists the todos of the notes in that folder and in every folder under it; one the asker can't see
    * is no folder. Pass the answer's `next` as `offset` for the page after. A field it doesn't know is
    * refused, so a filter it no longer has, such as a project, is never read as no filter.
+   * `sort` orders the open ones, and the done ones after them, another way: `priority` the highest
+   * first, then by due date; `changed` those whose note changed last first; `note` by their note's
+   * title; `text` by their words, A to Z. Ties go by note and line. A `sort:` in the query wins over it
+   * (`TODO_SORT_WORDS` names the word for each).
    */
   z.object({
     type: z.literal("todo.list"),
@@ -360,6 +370,7 @@ export const Op = z.discriminatedUnion("type", [
     includeCompleted: z.boolean().default(false),
     includeArchived: IncludeArchived,
     noteId: Id.optional(),
+    sort: z.enum(TODO_SORTS).default("due"),
     limit: z.number().int().min(1).max(200).default(100),
     offset: z.number().int().min(0).default(0),
   }).strict(),

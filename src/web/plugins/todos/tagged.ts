@@ -1,7 +1,7 @@
-import { nameKey, parseQuery, printQuery, type Query, type QueryNode } from "../../plugin-api.ts";
+import { nameKey, parseQuery, printQuery, type Query, type QueryNode, type SortKey } from "../../plugin-api.ts";
 
 /** The terms every todo a query lists answers: its AND's at the top, or the query alone. */
-const conjuncts = (where: QueryNode | null): QueryNode[] => (where === null ? [] : where.kind === "and" ? where.of : [where]);
+export const conjuncts = (where: QueryNode | null): QueryNode[] => (where === null ? [] : where.kind === "and" ? where.of : [where]);
 
 const isTag = (node: QueryNode, name: string) => node.kind === "filter" && node.key === "tag" && node.cmp === "=" && nameKey(node.value) === nameKey(name);
 
@@ -44,4 +44,20 @@ export function toggledTag(text: string, name: string): string {
   const wanted: Query = { ...query, where: query.where ? { kind: "and", of: [...terms, tag] } : tag };
   const added = `${typed} #${name}`.trim();
   return same(added, wanted) ? added : printQuery(wanted);
+}
+
+/**
+ * The query with its order changed to `sort:` the word, or to no `sort:` for null: any `sort:` typed is
+ * taken off and the word written at its end. What was typed is kept as typed where that reads as the
+ * same query, and is otherwise written the one way the query is printed.
+ */
+export function withSort(text: string, sort: SortKey | null): string {
+  const typed = text.trim();
+  const cut = typed.replace(/(^|\s)sort:\S*/giu, " ").replace(/\s+/g, " ").trim();
+  const added = sort ? `${cut} sort:${sort}`.trim() : cut;
+  const read = parseQuery(typed, "todos");
+  if (!read.ok) return added;
+  const again = parseQuery(added, "todos");
+  const wanted: Query = { ...read.query, sort };
+  return again.ok && printQuery(again.query) === printQuery(wanted) ? added : printQuery(wanted);
 }

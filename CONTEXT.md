@@ -117,6 +117,7 @@ One of the calendars in a calendar data source, such as a member's work calendar
 **Record reference**:
 What a note writes to point at an event or a contact without copying it: an embed, `::event{ref label}` or `::contact{ref label}`. The ref says nothing of the record and leads to it only for the member who made the reference, who is shown the record as it is now. The label is plain text in the note that every reader sees, in gray. Anyone else sees the label and nothing more.
 The notes about a record are the notes that hold the member's own reference to it and that they can see, each said to be Private, Shared or Workspace by who sees it.
+A member writes a reference to an event as they link a note: `[[` offers their events, nearest first, and picking one writes its reference.
 _Avoid_: Link (that is to a note), mention (that is `@`)
 
 **Dashboard**:
