@@ -8660,9 +8660,37 @@ button.todo-tag[aria-pressed="true"] {
 
 .contact-form-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   width: 100%;
+}
+
+/* Where a line is too narrow for its label and value side by side, the value and its remove button go under the label. */
+.contact-form-value {
+  display: flex;
+  flex: 1 1 12rem;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* A line's label: a quiet menu before it, framed only while pointed at or in use. */
+.contact-form .contact-form-type {
+  flex: none;
+  width: 8.5rem;
+  padding-inline: 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.contact-form .contact-form-type:hover,
+.contact-form .contact-form-type:focus,
+.contact-form input.contact-form-type {
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 .contact-form-birthday {

@@ -543,14 +543,14 @@ ${RULE_GRAMMAR}` },
   },
   {
     name: "list_contacts",
-    description: `Your member's contacts by name: id, name, emails, phones and organization. query keeps those with every word of it at the start of a word of their name, email or organization. Contacts are read-only. more is true when a data source has more than it lists. ${SOURCES}`,
+    description: `Your member's contacts by name: id, name, emails, phones and organization. Each email, phone, address and website is { value, type }: type is the label, Google's own (an email's home, work or other; a phone's mobile, home, work, main, homeFax, workFax, pager or other; an address's home, work or other; a website's homePage, work, blog, profile or other), one your member wrote, as written, or null for none. query keeps those with every word of it at the start of a word of their name, email or organization. Contacts are read-only. more is true when a data source has more than it lists. ${SOURCES}`,
     inputSchema: object({ query: { type: "string", maxLength: 100, description: "Words a contact's name, email or organization must have" } }),
     op: "contact.list",
   },
   {
     name: "read_person",
     description:
-      "A person, as a mention names them: their page. who is a member's id from list_members, or a name. A name one member has is that member. It answers the member they are (when your token is told who the members are), your member's own contacts that are them with all those contacts hold, the open todos assigned to them, and each line that mentions them in the notes you can see, the note changed latest first. query is what search_notes takes to find the notes that mention them; add words to it to search among those. Write nothing a contact told you into a note: every reader of the note sees it.",
+      "A person, as a mention names them: their page. who is a member's id from list_members, or a name. A name one member has is that member. It answers the member they are (when your token is told who the members are), your member's own contacts that are them with all those contacts hold (each email, phone, address and website as { value, type }, as list_contacts says), the open todos assigned to them, and each line that mentions them in the notes you can see, the note changed latest first. query is what search_notes takes to find the notes that mention them; add words to it to search among those. Write nothing a contact told you into a note: every reader of the note sees it.",
     inputSchema: object({ who: { type: "string", maxLength: 200, description: "A member's id, or a name as a mention writes it" }, limit: { type: "integer", minimum: 1, maximum: 200, description: "How many lines that mention them, at most. Default 50" } }, ["who"]),
     op: "person.read",
   },

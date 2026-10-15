@@ -1467,7 +1467,7 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
   const theirs = ctx.personId !== null && ctx.actor.kind !== "visitor" && !ctx.sight.within;
   // Matched by the member's email only for an asker the member list tells it to: for anyone else a match would confirm a guess.
   const emails = new Set(toldEmail ? [toldEmail.toLowerCase()] : []);
-  const contacts = theirs ? await contactCards(asker(ctx), (c) => folded(c.name) === folded(name) || c.emails.some((e) => emails.has(e.toLowerCase()))) : [];
+  const contacts = theirs ? await contactCards(asker(ctx), (c) => folded(c.name) === folded(name) || c.emails.some((e) => emails.has(e.value.toLowerCase()))) : [];
 
   const query = `mentions:${writtenValue(searchedAs)}`;
   const todoQuery = `assignee:${writtenValue(searchedAs)}`;

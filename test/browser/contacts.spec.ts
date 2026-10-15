@@ -49,7 +49,7 @@ test("a contact is read-only until contacts are connected again to edit them; th
   await expect(edit).toHaveCount(0);
   const shown = ["Emailsam@okafor.example", "Phone+1 555 0142+1 555 0199", "WorkOkafor Plumbing", "Address14 River Road, Springfield", "Birthday21 April 1988", "NotesText first."];
   await expect(fields(page, "Sam Okafor")).toHaveText(shown);
-  expect((await perform(page, { type: "person.read", who: "Sam Okafor" })).contacts[0]).toMatchObject({ emails: ["sam@okafor.example"], phones: ["+1 555 0142", "+1 555 0199"], title: null, addresses: ["14 River Road, Springfield"], birthday: "1988-04-21", urls: [], notes: "Text first." });
+  expect((await perform(page, { type: "person.read", who: "Sam Okafor" })).contacts[0]).toMatchObject({ emails: [{ value: "sam@okafor.example", type: null }], phones: [{ value: "+1 555 0142", type: null }, { value: "+1 555 0199", type: null }], title: null, addresses: [{ value: "14 River Road, Springfield", type: null }], birthday: "1988-04-21", urls: [], notes: "Text first." });
   await page.reload();
   await expect(fields(page, "Sam Okafor")).toHaveText(shown);
 
@@ -90,6 +90,66 @@ test("a contact is read-only until contacts are connected again to edit them; th
   await page.keyboard.press("ControlOrMeta+Enter");
   await expect(page).toHaveURL(/\/person\/Samuel%20Okafor$/);
   await expect(fields(page, "Samuel Okafor").first()).toHaveText("Emailsam@okafor.example");
+});
+
+test("each email, phone, address and website says its label in plain words, and the form changes it from a quiet menu beside the line, Google's own labels or one written in, kept with the contact", async ({ page }) => {
+  await reading(page);
+  await perform(page, { type: "source.connect", id: "sample-contacts", back: "/", edit: true });
+  await page.goto("/person/Grace%20Hopper");
+  await expect(fields(page, "Grace Hopper")).toHaveText(["Work emailgrace@example.com", "Navyhopper@navy.example", "WorkRear Admiral, Navy", "NotesMet at the compiler workshop."]);
+  await page.goto("/person/Ada%20Lovelace");
+  await expect(fields(page, "Ada Lovelace")).toHaveText(["Work emailada@example.com", "Mobile+1 555 0100", "WorkAnalyst, Analytical Engines", "Birthday10 December 1815"]);
+
+  await yourContact(page, "Ada Lovelace").getByRole("button", { name: "Edit", exact: true }).click();
+  const edit = form(page, "Ada Lovelace");
+  await expect(edit.getByRole("textbox", { name: "Name" })).toBeFocused();
+  // The keys reach a line's label first, then its value.
+  await page.keyboard.press("Tab");
+  const emailLabel = edit.getByRole("combobox", { name: "Email label 1" });
+  await expect(emailLabel).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(edit.getByRole("textbox", { name: "Email 1" })).toBeFocused();
+  await expect(emailLabel.locator("option")).toHaveText(["No label", "Home email", "Work email", "Other email", "Custom…"]);
+  await expect(edit.getByRole("combobox", { name: "Phone label 1" }).locator("option")).toHaveText(["No label", "Mobile", "Home phone", "Work phone", "Main", "Home fax", "Work fax", "Pager", "Other phone", "Custom…"]);
+  await expect(emailLabel.locator("option:checked")).toHaveText("Work email");
+  await emailLabel.selectOption({ label: "Home email" });
+
+  // Custom… writes a label in place of the menu: Escape goes back to the one it had and leaves the form open, Enter keeps what was written and sends nothing.
+  const phoneLabel = edit.getByRole("combobox", { name: "Phone label 1" });
+  await phoneLabel.selectOption({ label: "Custom…" });
+  const writing = edit.getByRole("textbox", { name: "Phone label 1" });
+  await expect(writing).toBeFocused();
+  await writing.fill("Not kept");
+  await page.keyboard.press("Escape");
+  await expect(edit).toBeVisible();
+  await expect(phoneLabel.locator("option:checked")).toHaveText("Mobile");
+  await phoneLabel.selectOption({ label: "Custom…" });
+  await writing.fill("Lab");
+  await page.keyboard.press("Enter");
+  await expect(edit).toBeVisible();
+  await expect(phoneLabel.locator("option:checked")).toHaveText("Lab");
+  await expect(phoneLabel).toBeFocused();
+
+  await edit.getByRole("button", { name: "Add website" }).click();
+  await edit.getByRole("combobox", { name: "Website label 1" }).selectOption({ label: "Blog" });
+  await edit.getByRole("textbox", { name: "Website 1" }).fill("https://ada.example");
+  await edit.getByRole("button", { name: "Save" }).click();
+
+  await expect(edit).toHaveCount(0);
+  const shown = ["Home emailada@example.com", "Lab+1 555 0100", "WorkAnalyst, Analytical Engines", "Birthday10 December 1815", "Bloghttps://ada.example"];
+  await expect(fields(page, "Ada Lovelace")).toHaveText(shown);
+  expect((await perform(page, { type: "person.read", who: "Ada Lovelace" })).contacts[0]).toMatchObject({
+    emails: [{ value: "ada@example.com", type: "home" }],
+    phones: [{ value: "+1 555 0100", type: "Lab" }],
+    urls: [{ value: "https://ada.example", type: "blog" }],
+  });
+  await page.reload();
+  await expect(fields(page, "Ada Lovelace")).toHaveText(shown);
+  // A written label is offered again on its own line, and Custom… starts from it.
+  await yourContact(page, "Ada Lovelace").getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(phoneLabel.locator("option")).toHaveText(["No label", "Mobile", "Home phone", "Work phone", "Main", "Home fax", "Work fax", "Pager", "Other phone", "Lab", "Custom…"]);
+  await phoneLabel.selectOption({ label: "Custom…" });
+  await expect(writing).toHaveValue("Lab");
 });
 
 test("a member who isn't in my contacts is added to them from their page; their own page is not theirs to edit there, and another member's contacts are their own", async ({ page }) => {

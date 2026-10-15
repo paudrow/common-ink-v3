@@ -146,8 +146,10 @@ export type SearchSort = (typeof SEARCH_SORTS)[number];
 const SourceId = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, "not a data source's id");
 /** A record's id as its data source gave it. It is passed back to that data source and read as nothing else. */
 const RecordId = z.string().min(1).max(1024);
-/** One line of a contact's: an email, a phone number, an address, a page. */
-const ContactLine = (max: number) => z.string().trim().min(1).max(max);
+/** What one line of a contact's says: an email, a phone number, an address, a page. */
+const LineValue = (max: number) => z.string().trim().min(1).max(max);
+/** A line of a contact's with its label: Google's own type, one the member wrote, or none. */
+const Labelled = <V extends z.ZodString>(value: V) => z.object({ value, type: z.string().trim().min(1).max(100).nullable().default(null) });
 /** A birthday as YYYY-MM-DD, or --MM-DD when the year isn't known, on a day the month has. */
 const Birthday = z
   .string()
@@ -160,13 +162,13 @@ const Birthday = z
 /** What a contact's page can change of them. Each is the whole of that field: a list given is the list it becomes, and null takes it away. */
 const ContactFields = {
   name: z.string().trim().min(1).max(500),
-  emails: z.array(ContactLine(320).regex(/^[^\s@]+@[^\s@]+$/, "not an email address")).max(20),
-  phones: z.array(ContactLine(100).regex(/^[\d\s()+.\-/*#,;ext]+$/i, "not a phone number")).max(20),
-  organization: ContactLine(500).nullable(),
-  title: ContactLine(500).nullable(),
-  addresses: z.array(ContactLine(1000)).max(10),
+  emails: z.array(Labelled(LineValue(320).regex(/^[^\s@]+@[^\s@]+$/, "not an email address"))).max(20),
+  phones: z.array(Labelled(LineValue(100).regex(/^[\d\s()+.\-/*#,;ext]+$/i, "not a phone number"))).max(20),
+  organization: LineValue(500).nullable(),
+  title: LineValue(500).nullable(),
+  addresses: z.array(Labelled(LineValue(1000))).max(10),
   birthday: Birthday.nullable(),
-  urls: z.array(ContactLine(2000).regex(/^https?:\/\/[^\s]+$/, "a website starts https:// or http://")).max(20),
+  urls: z.array(Labelled(LineValue(2000).regex(/^https?:\/\/[^\s]+$/, "a website starts https:// or http://"))).max(20),
   notes: z.string().max(8000).nullable(),
 };
 /** A picture as its bytes in base64: a JPEG or a PNG, up to half a megabyte. */
@@ -1212,12 +1214,39 @@ export interface CalendarEvent {
   url: string | null;
 }
 
+/**
+ * The labels Google's contacts have of their own for each kind of line, as People's `type` names
+ * them, each with the plain words it is shown in. Any other label is one the member wrote.
+ */
+export const CONTACT_LABELS = {
+  emails: { home: "Home email", work: "Work email", other: "Other email" },
+  phones: { mobile: "Mobile", home: "Home phone", work: "Work phone", main: "Main", homeFax: "Home fax", workFax: "Work fax", pager: "Pager", other: "Other phone" },
+  addresses: { home: "Home address", work: "Work address", other: "Other address" },
+  urls: { homePage: "Home page", work: "Work website", blog: "Blog", profile: "Profile", other: "Other website" },
+} as const satisfies Record<string, Record<string, string>>;
+/** A contact's fields that are lines, each with a label. */
+export type LabelledField = keyof typeof CONTACT_LABELS;
+
+/** The label a member typed, as it is kept: one of Google's own when it names one, in any case and either as its key or its words; else the words as typed, spaces made one; null when empty. */
+export function labelType(field: LabelledField, typed: string): string | null {
+  const said = typed.trim().replace(/\s+/g, " ");
+  if (!said) return null;
+  const folded = said.toLowerCase();
+  return Object.entries(CONTACT_LABELS[field]).find(([type, words]) => type.toLowerCase() === folded || words.toLowerCase() === folded)?.[0] ?? said;
+}
+
+/** One line of a contact's and its label: a key of `CONTACT_LABELS` for its field, a label the member wrote, or null for none. */
+export interface ContactLine {
+  value: string;
+  type: string | null;
+}
+
 export interface Contact {
   sourceId: string;
   id: string;
   name: string;
-  emails: string[];
-  phones: string[];
+  emails: ContactLine[];
+  phones: ContactLine[];
   organization: string | null;
   url: string | null;
 }
@@ -1226,19 +1255,19 @@ export interface Contact {
 export interface ContactCard extends Contact {
   /** Their job title, where the organization is. */
   title: string | null;
-  addresses: string[];
+  addresses: ContactLine[];
   /** YYYY-MM-DD, or --MM-DD when the year isn't known. */
   birthday: string | null;
   notes: string | null;
   /** An https address of their picture, or a data: address for one kept here. */
   photo: string | null;
-  urls: string[];
+  urls: ContactLine[];
   /** Sent back with a change, which is refused when the contact has changed since. */
   etag: string;
 }
 
 /** A change to a contact: each field given is the whole of it, and null takes it away. */
-export type ContactChange = Partial<{ name: string; emails: string[]; phones: string[]; organization: string | null; title: string | null; addresses: string[]; birthday: string | null; urls: string[]; notes: string | null }>;
+export type ContactChange = Partial<{ name: string; emails: ContactLine[]; phones: ContactLine[]; organization: string | null; title: string | null; addresses: ContactLine[]; birthday: string | null; urls: ContactLine[]; notes: string | null }>;
 
 /** One line of a note that mentions a person, as the asker is shown it: each mention on it written as the name it shows. */
 export interface MentionLine {
