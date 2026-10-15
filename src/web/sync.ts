@@ -4,17 +4,20 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { Filed, Note, OpInput, Results, RevertedNotes, Written } from "../core/protocol.ts";
 import { IN_TRASH } from "../core/lifecycle.ts";
 import { changesBetween } from "../core/text.ts";
-import { ApiError, perform } from "./api.ts";
+import { ApiError, perform, session } from "./api.ts";
 import { today } from "./time.ts";
 
 export const PAUSE_MS = 1000;
 const RETRY_MS = 3000;
 
 /** `rejected`: the server won't take what was typed. `inTrash`: it won't because the note is in Trash, and will once the note is restored. */
-export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "rejected" | "inTrash";
+export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "signedOut" | "rejected" | "inTrash";
 
-/** Sending the same write again can succeed only after a network failure, a server fault, or signing back in. */
-const worthRetrying = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || err.status === 401 || err.status === 429;
+/** Asking the same again by itself can succeed only after a network failure, a server fault, or a write that lost to too many others at once. */
+export const worthRetrying = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || err.status === 429 || err.status === 409;
+
+/** The session ended. The same write succeeds once the member has signed in again, and not before. */
+const signedOut = (err: unknown) => err instanceof ApiError && err.status === 401;
 
 /** The server says a refusal is for Trash only in its message, which is the same wherever a trashed note is refused. */
 const refusedForTrash = (err: unknown) => err instanceof ApiError && err.code === "conflict" && err.message === IN_TRASH;
@@ -26,6 +29,10 @@ addEventListener("pagehide", () => {
 });
 addEventListener("beforeunload", (e) => {
   if (unsaved.size) e.preventDefault();
+});
+
+session.subscribe(() => {
+  if (!session.signedOut()) for (const sync of unsaved) void sync.commit();
 });
 
 /** Settles once typing in this note from editors that have closed has been sent, so a read after it includes that typing. */
@@ -247,8 +254,12 @@ export class NoteSync {
         else unsaved.delete(this);
         this.onState(this.dirty ? "unsaved" : "saved");
       } catch (err) {
-        this.failing = worthRetrying(err);
-        if (this.failing) {
+        // A conflict is asked again, but not one for Trash: the server takes nothing more until the note is restored.
+        this.failing = !refusedForTrash(err) && (worthRetrying(err) || signedOut(err));
+        if (signedOut(err)) {
+          // Kept to be sent as it is once the member is signed in again, which the session says.
+          this.onState("signedOut");
+        } else if (this.failing) {
           this.onState("failed");
           this.schedule(RETRY_MS);
         } else {

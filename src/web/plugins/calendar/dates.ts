@@ -3,8 +3,20 @@ import type { CalendarEvent, EventWhen } from "../../plugin-api.ts";
 /** A calendar date, written YYYY-MM-DD. Days are counted as dates and never as 24 hours: a day a clock changes on is 23 or 25 hours long. */
 export type Day = string;
 
-export const VIEWS = { month: "Month", week: "Week", day: "Day", agenda: "Agenda" } as const;
+/** The views, in the order the toolbar offers them, each with the key that shows it and, for a grid of hours, how many days it shows at most. */
+export const VIEWS = {
+  day: { label: "Day", key: "d", days: 1 },
+  three: { label: "3 days", key: "x", days: 3 },
+  week: { label: "Week", key: "w", days: 7 },
+  month: { label: "Month", key: "m" },
+  agenda: { label: "Agenda", key: "a" },
+} as const satisfies Record<string, { label: string; key: string; days?: 1 | 3 | 7 }>;
 export type View = keyof typeof VIEWS;
+export type GridView = { [V in View]: (typeof VIEWS)[V] extends { days: number } ? V : never }[View];
+export const isGrid = (view: View): view is GridView => "days" in VIEWS[view];
+
+/** The days of the week by name, Sunday first as `weekdayOf` counts them, which is how the setting for the first day of the week says one. */
+export const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
 /** How many days the agenda lists from the day it starts on. */
 export const AGENDA_DAYS = 14;
@@ -35,22 +47,21 @@ export const weekdayOf = (day: Day) => new Date(counted(day)).getUTCDay();
 
 export const daysBetween = (from: Day, to: Day) => Math.round((counted(to) - counted(from)) / DAY_MS);
 const daysFrom = (day: Day, count: number): Day[] => Array.from({ length: Math.max(0, count) }, (_, i) => shiftDay(day, i));
-const startOfWeek = (day: Day) => shiftDay(day, -weekdayOf(day));
+/** The day the week `day` is in starts on, for a week that starts on `first` (Sunday 0). */
+export const startOfWeek = (day: Day, first = 0) => shiftDay(day, -((weekdayOf(day) - first + 7) % 7));
+export const isWeekend = (day: Day) => weekdayOf(day) === 0 || weekdayOf(day) === 6;
 
-/** The days a view shows around `anchor`: its week from Sunday, the day itself, the whole weeks its month touches, or the days from it on. */
-export function daysOf(view: View, anchor: Day): Day[] {
-  if (view === "week") return daysFrom(startOfWeek(anchor), 7);
-  if (view === "day") return [anchor];
+/** The days a non-grid view shows around `anchor`: the whole weeks its month touches, from the week's first day, or the agenda's days from it on. */
+export function daysOf(view: "month" | "agenda", anchor: Day, firstDay = 0): Day[] {
   if (view === "agenda") return daysFrom(anchor, AGENDA_DAYS);
-  const first = startOfWeek(shiftMonth(anchor, 0));
+  const first = startOfWeek(shiftMonth(anchor, 0), firstDay);
   const last = shiftDay(shiftMonth(anchor, 1), -1);
   return daysFrom(first, Math.ceil((daysBetween(first, last) + 1) / 7) * 7);
 }
 
-/** The anchor of the view before or after. */
-export function step(view: View, anchor: Day, by: 1 | -1): Day {
-  if (view === "month") return shiftMonth(anchor, by);
-  return shiftDay(anchor, { week: 7, day: 1, agenda: AGENDA_DAYS }[view] * by);
+/** The anchor of the month or agenda before or after. */
+export function step(view: "month" | "agenda", anchor: Day, by: 1 | -1): Day {
+  return view === "month" ? shiftMonth(anchor, by) : shiftDay(anchor, AGENDA_DAYS * by);
 }
 
 const clocks = new Map<string, Intl.DateTimeFormat>();
@@ -159,7 +170,7 @@ export function whenLabel(when: EventWhen, timeZone: string, locale?: string): s
 }
 
 /** What the days on show are called: "October 2026" for a month, and otherwise the first and last of them. */
-export function titleOf(view: View, anchor: Day, locale?: string): string {
+export function titleOf(view: "month" | "agenda", anchor: Day, locale?: string): string {
   if (view === "month") return new Intl.DateTimeFormat(locale, { timeZone: "UTC", month: "long", year: "numeric" }).format(counted(anchor));
   return titleOfDays(daysOf(view, anchor), locale);
 }

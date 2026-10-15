@@ -1,8 +1,8 @@
-import { acceptCompletion, autocompletion, type Completion as Option, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, currentCompletions, selectedCompletionIndex, setSelectedCompletion, type Completion as Option, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
-import { Prec, type Extension } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
-import { placed, typedAfter } from "./completionSyntax.ts";
+import { Prec, type EditorState, type Extension } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { placed, startsLine, typedAfter } from "./completionSyntax.ts";
 import type { Completion, CompletionItem } from "./plugin-api.ts";
 
 type Items = readonly CompletionItem[];
@@ -69,10 +69,28 @@ export function completing(completions: readonly Completion[], onFail: (completi
     },
   });
 
+  const entersAt = (state: EditorState) => {
+    const head = state.selection.main.head;
+    const line = state.doc.lineAt(head);
+    const before = line.text.slice(0, head - line.from);
+    return completions.every((completion) => {
+      const typed = completion.prose ? typedAfter(before, completion.trigger, completion) : null;
+      return typed === null || startsLine(before, typed, completion.trigger);
+    });
+  };
+  // Tab picks what is highlighted, or the first item when nothing is.
+  const pick = (view: EditorView) => {
+    if (currentCompletions(view.state).length && selectedCompletionIndex(view.state) === null) view.dispatch({ effects: setSelectedCompletion(0) });
+    return acceptCompletion(view);
+  };
   // No delays: a member who types `/timer` and Enter without a pause means the timer.
   return [
-    autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0, optionClass: (option) => (option.type ? `cm-completion-${option.type}` : "") }),
-    // Tab picks what is highlighted, as Enter does. With no list open it is whatever Tab is elsewhere.
-    Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
+    // A list opens with nothing highlighted, and its first item is highlighted in the same turn unless a prose trigger follows other words on its line, where Enter stays a new line.
+    autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0, selectOnOpen: false, optionClass: (option) => (option.type ? `cm-completion-${option.type}` : "") }),
+    EditorView.updateListener.of(({ view, state }) => {
+      if (currentCompletions(state).length && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
+    }),
+    // With no list open Tab is whatever it is elsewhere in a note.
+    Prec.highest(keymap.of([{ key: "Tab", run: pick }])),
   ];
 }

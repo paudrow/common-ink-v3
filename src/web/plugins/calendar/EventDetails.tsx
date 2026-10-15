@@ -1,10 +1,12 @@
 import { useRef, useState, type FormEvent } from "react";
-import { useDismiss, type CalendarEvent, type OpInput, type PluginHost, type Source } from "../../plugin-api.ts";
+import { useDismiss, type App, type CalendarEvent, type OpInput, type PluginHost, type Source } from "../../plugin-api.ts";
 import { CopyReference } from "../lib/CopyReference.tsx";
 import { formOf, sameWhen, whenLabel, whenOf, type WhenForm } from "./dates.ts";
+import { NewNoteAbout, NotesAbout } from "./EventNotes.tsx";
 
 interface Props {
   host: PluginHost;
+  app: App;
   event: CalendarEvent;
   /** The data source the event is in, when it is known. */
   source: Source | undefined;
@@ -42,7 +44,7 @@ function changeOf(event: CalendarEvent, fields: Fields, timeZone: string): Chang
 const whyReadOnly = (event: CalendarEvent, source: Source | undefined) => (source && !source.writable ? `${source.name} is read-only.` : `You can only read the calendar ${event.calendar}.`);
 
 /** One event: what it is and when, and for one the member may change, the form that changes it where it is kept. */
-export function EventDetails({ host, event, source, timeZone, close, onChanged }: Props) {
+export function EventDetails({ host, app, event, source, timeZone, close, onChanged }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   // Kept here and not in the form, which is made again when the event is read again.
   const [said, say] = useState<Said | null>(null);
@@ -81,20 +83,22 @@ export function EventDetails({ host, event, source, timeZone, close, onChanged }
               </>
             )}
           </dl>
-          <p className="event-links">
+          <div className="event-links">
             <CopyReference host={host} sourceId={event.sourceId} id={event.id} />
+            <NewNoteAbout key={`${event.sourceId} ${event.id}`} host={host} app={app} event={event} timeZone={timeZone} close={close} />
             {event.url && /^https?:\/\//.test(event.url) && (
               <a href={event.url} target="_blank" rel="noopener noreferrer">
                 Open in {source?.provider ?? "its calendar"}
               </a>
             )}
-          </p>
+          </div>
           {event.editable ? (
             // A new form for each reading of the event, so one refused as stale starts again from the event as it is now.
             <EventForm key={event.etag} host={host} event={event} timeZone={timeZone} onChanged={onChanged} said={said} say={say} />
           ) : (
             <p className="event-read-only">{whyReadOnly(event, source)}</p>
           )}
+          <NotesAbout key={`${event.sourceId} ${event.id}`} host={host} app={app} event={event} close={close} />
         </div>
       </div>
     </div>

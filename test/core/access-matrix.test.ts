@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { IN_TRASH, type Covering, type NoteState, type Trashed } from "../../src/core/lifecycle.ts";
+import { newId } from "../../src/core/ids.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
-import { Op, OpError, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
+import { Op, OpError, type CalendarEvent, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
+import type { Sources } from "../../src/core/sources.ts";
 import { NOT_FOR_AGENTS } from "../../src/worker/mcp/tools.ts";
 import { addMember, newMember } from "./members.ts";
 
@@ -69,7 +71,8 @@ const address = () => `${crypto.randomUUID()}@example.com`;
 const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name} @[[who-${name}]]`;
 const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
 
-async function world(): Promise<World> {
+/** `more` is written in every note's text, after its own words. */
+async function world(more = ""): Promise<World> {
   const ada = await newMember("Ada Lovelace");
   const here = (personId: string): Actor => ({ kind: "member", personId, workspaceId: ada.workspaceId });
   const person = async (name: string) => {
@@ -89,7 +92,7 @@ async function world(): Promise<World> {
   const team = await folder("Team");
   const folders = { Open: open, Team: team, Deep: await folder("Deep", team) };
 
-  const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: textOf(name, text) })).id;
+  const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: textOf(name, more ? `${text} ${more}` : text) })).id;
   const notes = { open: await note(ada, "open"), team: await note(ada, "team"), deep: await note(ada, "deep"), lone: await note(ada, "lone"), secret: "", vpriv: await note(vera, "vpriv"), arch: await note(ada, "arch"), bin: await note(ada, "bin") };
   await perform(env.DB, ada, { type: "note.archive", id: notes.arch, archived: true });
   await perform(env.DB, ada, { type: "note.trash", id: notes.bin });
@@ -98,7 +101,7 @@ async function world(): Promise<World> {
   notes.secret = await note(eve, "secret", `[[${notes.open}]]`);
   const zed = await connectAgent(env.DB, eve.personId, "Zed-agent");
   const asZed: Actor = { kind: "agent", agentId: zed.agent.id, personId: eve.personId, workspaceId: ada.workspaceId };
-  await perform(env.DB, asZed, { type: "note.write", id: notes.secret, baseRevision: 1, text: textOf("secret", `[[${notes.open}]] more`) });
+  await perform(env.DB, asZed, { type: "note.write", id: notes.secret, baseRevision: 1, text: textOf("secret", `[[${notes.open}]] more${more && ` ${more}`}`) });
   // What an admin put on the note before it was private: a link, and a guest. Neither outlasts it becoming private.
   const linked = await perform(env.DB, ada, { type: "grant.link", noteId: notes.secret, link: "public" });
   await perform(env.DB, ada, { type: "grant.set", noteId: notes.secret, email: vic!.email, access: "view" });
@@ -261,6 +264,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "person.read": { on: "workspace", who: EVERYONE, args: () => ({ who: "WHO-TEAM" }) },
   "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
+  "record.notes": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
   "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
 };
@@ -294,7 +298,7 @@ const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].share
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
 const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "record.refer"];
 /** What answers from the asker's own data sources, which are in no folder. */
-const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "record.refer", "record.read"];
+const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "record.refer", "record.read", "record.notes"];
 const AGENTS = [
   "their agent",
   "their read-only agent",
@@ -691,7 +695,7 @@ const TODO_FILTERS: Record<string, Row[]> = {
     { query: "is:private", finds: ["secret", "vpriv"] },
     { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
   ],
-  has: [{ query: "has:due", finds: [] }, { query: "no:due", finds: NOTES }, { query: "has:recurrence", finds: [] }, { query: "no:recurrence has:tag", finds: NOTES }, { query: "has:link", finds: ["secret"] }, { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) }],
+  has: [{ query: "has:due", finds: [] }, { query: "no:due", finds: NOTES }, { query: "has:repeat", finds: [] }, { query: "no:repeat has:tag", finds: NOTES }, { query: "has:link", finds: ["secret"] }, { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) }],
   assignee: [
     { query: "assignee:who-team", finds: ["team"] },
     { query: "assigned:WHO-LONE OR assignee:who-secret", finds: ["lone", "secret"] },
@@ -699,9 +703,9 @@ const TODO_FILTERS: Record<string, Row[]> = {
     { query: "assignee:@me", finds: [] },
   ],
   due: [{ query: "due:<today", finds: [] }, { query: "-due:<today", finds: NOTES }, { query: "due:2020-01-01..2030-01-01", finds: [] }],
-  importance: [{ query: "importance:0", finds: NOTES }, { query: "importance:>=1", finds: [] }, { query: "importance:0..3", finds: NOTES }],
+  priority: [{ query: "priority:none", finds: NOTES }, { query: "priority:>=low", finds: [] }, { query: "importance:0..3", finds: NOTES }],
   in: [{ query: "todo-team", finds: ["team"] }, { query: "Title-team", finds: [] }, { query: "Title-team in:title", finds: ["team"] }, { query: "body-team in:body", finds: [] }],
-  sort: [{ query: "sort:importance-desc", finds: NOTES }],
+  sort: [{ query: "sort:priority-desc", finds: NOTES }],
 };
 
 describe("every filter, by every actor", { timeout: 30_000 }, () => {
@@ -752,6 +756,53 @@ describe("every filter, by every actor", { timeout: 30_000 }, () => {
             expect(hidden.flatMap((item) => w.marks[item].filter((mark) => JSON.stringify(answer).includes(mark)).map((mark) => `${item}: ${mark}`)).filter((mark) => !written.includes(mark)), `${key}: says nothing of what is hidden`).toEqual([]);
           }
         }
+      });
+    }
+  }
+});
+
+describe("the notes about an event on a calendar everyone has, by every actor", { timeout: 30_000 }, () => {
+  /** One event every person's calendar holds, as a calendar they all share does: one id for all. */
+  const SYNC: CalendarEvent = { sourceId: "cal", id: "team s1", calendarId: "team", calendar: "Team", color: null, title: "Team sync", when: { allDay: false, from: 0, to: 3_600_000 }, timeZone: null, location: null, description: null, recurring: false, editable: false, etag: "e", url: null };
+  const shared = (has: (personId: string) => boolean): Sources => ({
+    of: async (personId) => [
+      {
+        kind: "calendar",
+        info: { id: "cal", name: "Team calendar", provider: "Test", state: "connected", account: null },
+        list: async () => ({ calendars: [], events: has(personId) ? [SYNC] : [] }),
+        get: async (id) => (has(personId) && id === SYNC.id ? SYNC : null),
+        calendar: async () => null,
+      },
+    ],
+    connect: async () => ({ redirect: null }),
+    disconnect: async () => {},
+  });
+
+  for (const name of Object.keys(ACTORS) as ActorName[]) {
+    for (const as of ["themself", "their agent", "their read-only agent", "their agent limited to the folder Team"] as const) {
+      it(`${name}, as ${as}`, async () => {
+        // Every note holds Ada's reference to the event; the reference is made before the notes, by its id.
+        const ref = newId();
+        const w = await world(`::event{${ref} Team sync}`);
+        const ada = w.actors["Ada, an admin"];
+        await env.DB.prepare("INSERT INTO source_refs (id, person_id, data_source, record_id, created_at) VALUES (?, ?, 'cal', ?, 0)").bind(ref, ada.personId, SYNC.id).run();
+        const person = w.actors[name];
+        const within = LIMITED[as as (typeof AGENTS)[number]];
+        const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope: within ? { folderIds: [w.folders[within[0]!]] } : as === "their read-only agent" ? { readOnly: true } : undefined };
+        const ask = (has: (personId: string) => boolean) => perform(env.DB, actor, { type: "record.notes", sourceId: "cal", id: SYNC.id }, Date.now(), shared(has));
+        if (within) {
+          // What it would list is about its member's calendar, which is in no folder.
+          await expect(ask(() => true)).rejects.toThrow(/record.notes/);
+          return;
+        }
+        const sees = (note: NoteName) => personLevelOf(name, note) !== "-" && STATE_OF[note] !== "trashed";
+        const answer = await ask(() => true);
+        expect(answer.notes.map((n) => n.id).sort(), "with the event in their calendar").toEqual(NOTES.filter(sees).map((note) => w.notes[note]).sort());
+        const hidden = NOTES.filter((note) => personLevelOf(name, note) === "-");
+        expect(hidden.flatMap((note) => w.marks[note].filter((mark) => JSON.stringify(answer).includes(mark))), "says nothing of what is hidden").toEqual([]);
+        // Without the event in their own calendar, Ada's reference is no way to it: only Ada, whose reference it is, is told.
+        const without = await ask((personId) => personId !== person.personId);
+        expect(without.notes.map((n) => n.id).sort(), "without the event").toEqual(person.personId === ada.personId ? answer.notes.map((n) => n.id).sort() : []);
       });
     }
   }

@@ -111,10 +111,11 @@ export const mentions: Plugin = {
         stays: true,
         action: {
           label: `Share with ${names}`,
+          // What came of it is said in the card's place.
           run: () =>
-            void Promise.all(out.map((m) => host.sharing.grant({ noteId }, { memberId: m.personId }, "view"))).then(
-              () => host.app().notify({ message: `${names} can now read this note.` }),
-              (err: unknown) => host.app().notify({ message: err instanceof Error ? err.message : "The note couldn't be shared." }),
+            Promise.all(out.map((m) => host.sharing.grant({ noteId }, { memberId: m.personId }, "view"))).then(
+              () => ({ message: `${names} can now read this note.`, icon: "check" as const }),
+              (err: unknown) => ({ message: err instanceof Error ? err.message : "The note couldn't be shared." }),
             ),
         },
       });

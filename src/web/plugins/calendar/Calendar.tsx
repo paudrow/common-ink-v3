@@ -3,7 +3,7 @@ import { Icon, today as todayIs, useNow, type Calendar, type CalendarEvent, type
 import { forgetReferences } from "../lib/references.tsx";
 import { useSources, withFresher } from "../lib/Sources.tsx";
 import { CalendarsDialog } from "./CalendarsDialog.tsx";
-import { VIEWS, cellsOf, dayLabel, daysOf, minutesIn, shiftDay, shiftMonth, step, timeLabel, titleOf, titleOfDays, weekdayLabel, type Cell, type Day, type View, type WhenForm } from "./dates.ts";
+import { VIEWS, WEEKDAY_NAMES, cellsOf, dayLabel, daysOf, isGrid, isWeekend, minutesIn, shiftDay, startOfWeek, step, timeLabel, titleOf, titleOfDays, weekdayLabel, type Cell, type Day, type View, type WhenForm } from "./dates.ts";
 import { EventDetails } from "./EventDetails.tsx";
 import { calendarKey, dayAt, indexOf, keyOf, useListing } from "./listing.ts";
 import { NewEvent } from "./NewEvent.tsx";
@@ -14,10 +14,7 @@ const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** Days read beyond those drawn, either side, so a fast slide still finds them read. */
 const AHEAD = 7;
-const KEYS: Record<string, View> = { m: "month", w: "week", d: "day", a: "agenda" };
-
-const isGrid = (view: View): view is "week" | "day" => view === "week" || view === "day";
-const startOfWeek = (day: Day) => shiftDay(day, -new Date(`${day}T00:00:00Z`).getUTCDay());
+const KEYS = Object.fromEntries(Object.entries(VIEWS).map(([view, { key }]) => [key, view as View]));
 const timeOf = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 
 /** The form's start and end for a span of minutes on a day; an end at midnight is the next day's 00:00. */
@@ -66,12 +63,15 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
   const timeZone = useMemo(zone, []);
   const now = useNow();
   const today = todayIs();
+  const firstDay = Math.max(0, WEEKDAY_NAMES.indexOf(host.settings.get<string>("weekStarts") as (typeof WEEKDAY_NAMES)[number]));
+  const weekends = host.settings.get<boolean>("weekends");
+  const weekOf = (day: Day) => startOfWeek(day, firstDay);
   const [view, setView] = useState<View>(() => {
     const kept = host.storage.get("view");
-    return typeof kept === "string" && kept in VIEWS ? (kept as View) : "week";
+    return typeof kept === "string" && Object.hasOwn(VIEWS, kept) ? (kept as View) : "week";
   });
-  /** The first day in view in Week and Day; any day of the month, or the agenda's first day, otherwise. Counted from EPOCH. */
-  const [focus, setFocus] = useState(() => indexOf(view === "week" ? startOfWeek(today) : today));
+  /** The first day in view in a grid of hours; any day of the month, or the agenda's first day, otherwise. Counted from EPOCH. */
+  const [focus, setFocus] = useState(() => indexOf(view === "week" ? weekOf(today) : today));
   const [goal, setGoal] = useState<Goal | null>(null);
   const [drawnFrom, setDrawnFrom] = useState(focus - SPARE[7]);
   const [reading, setReading] = useState(0);
@@ -79,20 +79,18 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
   const asked = useRef(0);
   const page = useRef<HTMLElement>(null);
   const [placed, setPlaced] = useState<ReadonlyMap<string, Placed>>(new Map());
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => {
-    const kept = host.storage.get("hidden");
-    return new Set(Array.isArray(kept) ? kept.filter((k): k is string => typeof k === "string") : []);
-  });
+  const hiddenList = host.settings.get<readonly string[]>("hidden");
+  const hidden = useMemo<ReadonlySet<string>>(() => new Set(hiddenList), [hiddenList]);
   const [opened, setOpened] = useState<string | null>(null);
   const [adding, setAdding] = useState<WhenForm | null>(null);
   const [choosing, setChoosing] = useState(false);
   const { sources, setSources, problem } = useSources(host);
 
   const [fit, setFit] = useState(7);
-  const visible = view === "day" ? 1 : fit;
+  const visible = isGrid(view) ? Math.min(VIEWS[view].days, fit) : fit;
   const anchor = dayAt(focus);
-  const listedDays = useMemo(() => (isGrid(view) ? null : daysOf(view, anchor)), [view, anchor]);
-  const [from, to] = listedDays ? [indexOf(listedDays[0]!), indexOf(listedDays.at(-1)!) + 1] : [drawnFrom - AHEAD, drawnFrom + visible + 2 * SPARE[view === "day" ? 1 : 7] + AHEAD];
+  const listedDays = useMemo(() => (isGrid(view) ? null : daysOf(view, anchor, firstDay)), [view, anchor, firstDay]);
+  const [from, to] = !isGrid(view) ? [indexOf(listedDays![0]!), indexOf(listedDays!.at(-1)!) + 1] : [drawnFrom - AHEAD, drawnFrom + visible + 2 * SPARE[VIEWS[view].days] + AHEAD];
   const listing = useListing(host, timeZone, from, to, reading);
 
   useEffect(() => {
@@ -118,19 +116,22 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
 
   const reread = useCallback(() => setReading((asked.current += 1)), []);
 
+  /** Whether today is among the days on show: the grid's, the month's, or the agenda's. */
+  const todayShown = isGrid(view) ? today >= anchor && today <= shiftDay(anchor, visible - 1) : view === "month" ? today.slice(0, 7) === anchor.slice(0, 7) : today >= anchor && today <= listedDays!.at(-1)!;
+
   const show = (next: View) => {
     if (next === view) return;
     host.storage.set("view", next);
-    const inView = isGrid(view) && today >= anchor && today <= shiftDay(anchor, visible - 1);
+    const inView = todayShown;
     setGoal(null);
-    setFocus(indexOf(next === "week" ? startOfWeek(inView ? today : anchor) : next === "day" && inView ? today : anchor));
+    setFocus(indexOf(next === "week" ? weekOf(inView ? today : anchor) : isGrid(next) && inView ? today : anchor));
     setView(next);
   };
 
   const glide = (where: { to: number } | { by: number }) => setGoal((was) => ({ ...where, seq: (was?.seq ?? 0) + 1 }));
   const go = (by: 1 | -1 | 0) => {
-    if (isGrid(view)) return glide(by === 0 ? { to: indexOf(view === "week" && visible === 7 ? startOfWeek(today) : today) } : { by });
-    setFocus(by === 0 ? indexOf(today) : indexOf(view === "month" ? shiftMonth(anchor, by) : step(view, anchor, by)));
+    if (isGrid(view)) return glide(by === 0 ? { to: indexOf(view === "week" && visible === 7 ? weekOf(today) : today) } : { by });
+    setFocus(by === 0 ? indexOf(today) : indexOf(step(view, anchor, by)));
   };
 
   // A window too narrow for the whole week opens on today rather than on days before it.
@@ -143,20 +144,44 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
 
   const onFirst = useCallback((first: number) => setFocus(first), []);
 
+  // A week shown from the first day it had starts on the new one when the member changes it.
+  const weekStarted = useRef(firstDay);
+  useEffect(() => {
+    if (weekStarted.current === firstDay) return;
+    weekStarted.current = firstDay;
+    // The week that holds today when it was on show, and otherwise the one that holds the middle of what was.
+    if (view === "week" && visible === 7) glide({ to: indexOf(weekOf(todayShown ? today : shiftDay(anchor, 3))) });
+    // Only when the first day changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstDay]);
+
+  // Calendars hidden in this browser before they were kept on the server join those hidden there, once: as soon as the member's settings are read.
+  useEffect(() => {
+    const move = () => {
+      const kept = host.storage.get("hidden");
+      if (!Array.isArray(kept)) return true;
+      const was = kept.filter((k): k is string => typeof k === "string");
+      if (!host.settings.set("hidden", [...new Set([...host.settings.get<readonly string[]>("hidden"), ...was])])) return false;
+      host.storage.set("hidden", null);
+      return true;
+    };
+    if (move()) return;
+    const stop = host.settings.subscribe(() => void (move() && stop()));
+    return stop;
+  }, [host]);
+
   const setShown = (calendar: Calendar, shown: boolean) => {
     const next = new Set(hidden);
     if (shown) next.delete(calendarKey(calendar));
     else next.add(calendarKey(calendar));
-    host.storage.set("hidden", [...next]);
-    setHidden(next);
+    if (!host.settings.set("hidden", [...next])) app.notify({ message: "Which calendars are shown couldn't be kept: your settings aren't read yet, or too many calendars are hidden. Try again in a moment." });
   };
 
   /** Opens the form for a span the grid asked for, or for the next half hour today, or 9:00 on the first day in view when today isn't. */
   const startAdding = (form?: WhenForm) => {
     if (!targets.length) return;
     if (form) return setAdding(form);
-    const todayShown = !isGrid(view) || (today >= anchor && today <= shiftDay(anchor, visible - 1));
-    const day = todayShown ? today : anchor;
+    const day = !isGrid(view) || todayShown ? today : anchor;
     const start = day === today ? Math.min(23 * 60, Math.floor(minutesIn(Date.now(), timeZone) / 30) * 30 + 30) : 9 * 60;
     setAdding(formFor(day, start, start + 30));
   };
@@ -187,7 +212,7 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
   const move = async (event: CalendarEvent, when: { from: number; to: number }, verb: "Moved" | "Resized") => {
     const was = event.when;
     const changed = await place(event, { allDay: false, ...when });
-    if (changed) app.notify({ message: `${verb} ${event.title || "Untitled"}`, action: { label: "Undo", run: () => void place(changed, was) } });
+    if (changed) app.notify({ message: `${verb} ${event.title || "Untitled"}`, icon: "calendar", action: { label: "Undo", run: () => void place(changed, was) } });
   };
 
   // The calendar's own keys, as v1 had them, while nothing else has the keyboard.
@@ -216,14 +241,22 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
   const busy = !(listedDays ?? Array.from({ length: visible }, (_, i) => dayAt(focus + i))).every((day) => listing.listed(indexOf(day)));
 
   return (
-    <section ref={page} className="calendar-page" aria-label="Calendar" data-view={view}>
+    <section ref={page} className="calendar-page" aria-label="Calendar" data-view={view} data-weekends={weekends || undefined}>
       <header className="cal-head">
         <h1>Calendar</h1>
         <span className="cal-zone">Times are in your time zone, {timeZone.replace(/_/g, " ")}.</span>
-        <button type="button" className="button cal-choose" aria-haspopup="dialog" onClick={() => setChoosing(true)}>
-          <Icon name="calendar" />
-          Calendars
-        </button>
+        <span className="cal-actions">
+          <button type="button" className="button cal-choose" aria-haspopup="dialog" onClick={() => setChoosing(true)}>
+            <Icon name="calendar" />
+            Calendars
+          </button>
+          {targets.length > 0 && (
+            <button type="button" className="button primary cal-add" onClick={() => startAdding()} title="New event (C)">
+              <Icon name="plus" />
+              New event
+            </button>
+          )}
+        </span>
       </header>
       <div className="cal-toolbar">
         <button type="button" className="button small" onClick={() => go(0)} title="Today (T)">
@@ -240,8 +273,8 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
         <h2 aria-live="polite">{title}</h2>
         <div className="cal-views" role="group" aria-label="View">
           {(Object.keys(VIEWS) as View[]).map((each) => (
-            <button key={each} type="button" className="button small" aria-pressed={view === each} onClick={() => show(each)} title={`${VIEWS[each]} (${each[0]!.toUpperCase()})`}>
-              {VIEWS[each]}
+            <button key={each} type="button" className="button small" aria-pressed={view === each} onClick={() => show(each)} title={`${VIEWS[each].label} (${VIEWS[each].key.toUpperCase()})`}>
+              {VIEWS[each].label}
             </button>
           ))}
         </div>
@@ -267,7 +300,7 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
       {isGrid(view) && (connected || !sources) && (
         <TimeGrid
           key={view}
-          most={view === "day" ? 1 : 7}
+          most={VIEWS[view].days}
           onFit={setFit}
           opensAt={focus}
           goal={goal}
@@ -298,7 +331,7 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
           {Array.from({ length: cells.length / 7 }, (_, week) => (
             <div key={cells[week * 7]!.day} className="cal-row" role="row">
               {cells.slice(week * 7, week * 7 + 7).map((cell) => (
-                <div key={cell.day} className="cal-day" role="gridcell" aria-label={dayLabel(cell.day, "heading")} data-day={cell.day} data-today={cell.day === today || undefined} data-outside={cell.day.slice(0, 7) !== anchor.slice(0, 7) || undefined}>
+                <div key={cell.day} className="cal-day" role="gridcell" aria-label={dayLabel(cell.day, "heading")} data-day={cell.day} data-today={cell.day === today || undefined} data-weekend={isWeekend(cell.day) || undefined} data-outside={cell.day.slice(0, 7) !== anchor.slice(0, 7) || undefined}>
                   <span className="cal-date">
                     <span className="cal-number">{Number(cell.day.slice(8))}</span>
                   </span>
@@ -325,6 +358,7 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
       {open && (
         <EventDetails
           host={host}
+          app={app}
           event={open}
           source={(sources ?? []).find((s) => s.id === open.sourceId)}
           timeZone={timeZone}
@@ -345,7 +379,7 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
           onAdded={(event) => {
             setAdding(null);
             reread();
-            app.notify({ message: `Added ${event.title || "Untitled"}` });
+            app.notify({ message: `Added ${event.title || "Untitled"}`, icon: "calendar" });
           }}
         />
       )}

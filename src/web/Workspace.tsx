@@ -1,35 +1,47 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import type { Me, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { EditorView } from "@codemirror/view";
+import type { MeHere, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
 import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, signOut } from "./api.ts";
 import { Drawn } from "./Drawn.tsx";
 import { usable } from "./editorExtensions.ts";
 import { folderTree } from "./folders.ts";
 import { Icon } from "./icons.tsx";
-import { Inspector, viewsFor, type Subject } from "./Inspector.tsx";
+import { InspectorBar, InspectorPanel, type Subject } from "./Inspector.tsx";
+import type { Showing } from "./inspected.ts";
+import { layoutOf, reduce, restored, showing, type Side, type SideAction } from "./inspectorState.ts";
 import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, typed } from "./keybindings.ts";
 import { lastChange, relisted, withChanged } from "./knownNotes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { NoteReader } from "./NoteReader.tsx";
+import { stacked, type Told } from "./notices.ts";
 import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
 import { ResizeHandle } from "./resize.tsx";
-import { folderPath, type Navigate, type Place } from "./router.ts";
+import { folderPath, keepsATab, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
 import { Settings } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
-import { isBoolean, readStored, useStored, writeStored } from "./stored.ts";
+import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
+import { Toasts } from "./Toasts.tsx";
 
 const FOCUS_KEY = "ink.focus";
 const SIDEBAR_KEY = "ink.sidebar";
-const INSPECTOR_KEY = "ink.inspector";
-/** How wide the sidebar and the inspector start, and how far a member can drag each. */
+/**
+ * The panel the inspector's command opens for a member who has used none. It is not History, which
+ * counts a note's changes as seen by being shown.
+ */
+const FIRST_PANEL = "info";
+/** How wide the sidebar starts, and how far a member can drag it. */
 const SIDEBAR = { start: 216, min: 150, max: 480 };
-const INSPECTOR = { start: 300, min: 180, max: 600 };
+/** The inspector's panel. Its bar is beside it, so pinned at its start the two take the 300px the inspector always took. */
+const INSPECTOR = { start: 256, min: 180, max: 600 };
+/** How wide the bar of icons is that the sidebar folds to. The inspector's bar is beside its panel, which folds to nothing. */
+const BAR = 44;
 /** How far an arrow key moves the edge of one. */
 const WIDTH_STEP = 16;
 type Widths = { sidebar?: number; inspector?: number };
@@ -60,7 +72,6 @@ const SEQUENCE_MS = 1500;
 /** A list that takes focus itself and moves its own cursor with its own keys, as History's list of changes does. */
 const OWN_KEYS = '[role="listbox"][tabindex], [role="tree"][tabindex], [data-list][tabindex]';
 const hasOwnKeys = (el: EventTarget | null) => el instanceof Element && (el.closest<HTMLElement>(OWN_KEYS)?.tabIndex ?? -1) >= 0;
-const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 
 
 const summaryOf = ({ text: _, ...summary }: Note): NoteSummary => summary;
@@ -70,47 +81,11 @@ const pathTo = (byId: ReadonlyMap<string, NoteSummary>, id: string) => {
   return note ? notePath(note) : `/note/${id}`;
 };
 
-/** How long a notice stays when the member does nothing about it. Long enough to read it and reach its button. */
-const NOTICE_MS = 10_000;
-
 /** Functions that stay the same from one render to the next, each calling the latest one it was handed. */
 function useLatest<T extends Record<string, (...args: never[]) => unknown>>(fns: T): T {
   const latest = useRef(fns);
   latest.current = fns;
   return useState(() => Object.fromEntries(Object.keys(fns).map((name) => [name, (...args: never[]) => latest.current[name]!(...args)])) as T)[0];
-}
-
-/** A notice at the foot of the app. It waits while the pointer or the keyboard is on it, so its button can be reached. */
-function Toast({ notice, onClose }: { notice: Notice; onClose: () => void }) {
-  const [held, hold] = useState(false);
-  const close = useRef(onClose);
-  close.current = onClose;
-  useEffect(() => {
-    if (held || notice.stays) return;
-    const timer = setTimeout(() => close.current(), NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice, held]);
-  const { action } = notice;
-  return (
-    <div className="told" role="group" aria-label="Notice" onPointerEnter={() => hold(true)} onPointerLeave={() => hold(false)} onFocus={() => hold(true)} onBlur={() => hold(false)}>
-      <span>{notice.message}</span>
-      {action && (
-        <button
-          type="button"
-          className="link"
-          onClick={() => {
-            onClose();
-            action.run();
-          }}
-        >
-          {action.label}
-        </button>
-      )}
-      <button type="button" className="icon-button" aria-label="Dismiss" title="Dismiss" onClick={onClose}>
-        <Icon name="close" />
-      </button>
-    </div>
-  );
 }
 
 /** A folder's notes by title, for when no plugin lists them. */
@@ -144,7 +119,7 @@ function FolderNotes({ folderId, folders, notes, pathOf, onOpen }: { folderId: s
 }
 
 interface Props {
-  me: Me;
+  me: MeHere;
   workspace: WorkspaceSummary;
   /** The member's settings in this workspace. */
   settings: SettingsStore;
@@ -167,14 +142,26 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   /** Every note in the workspace the member can see, in every state: live, archived, and in Trash. */
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
   /** What the app is telling the member, such as that a note was moved to Trash. Each has its own identity, so a timer set for one never takes the next away. */
-  const [told, tell] = useState<Notice | null>(null);
+  const [told, tell] = useState<readonly Told[]>([]);
+  const toldCount = useRef(0);
   const [listVersion, setListVersion] = useState(0);
   /** In focus the tab in front of the focused group fills the window, over everything else, which stays as it is underneath. Which group that is, the layout already says. */
   const [focusMode, setFocusMode] = useStored(FOCUS_KEY, isBoolean, false);
   const [sidebarOpen, setSidebarOpen] = useStored(SIDEBAR_KEY, isBoolean, true);
-  const [inspectorOpen, setInspectorOpen] = useStored(INSPECTOR_KEY, isBoolean, true);
-  /** The inspector's tab the member last picked, kept in this browser as the widths are. Only a pick changes it: what is in front shows it when it has it. */
-  const [picked, setPicked] = useStored<string | null>(`ink.inspectorTab.${me.person.id}`, isStringOrNull, null);
+  /**
+   * The inspector as the member last had it, kept in this browser as the widths are: which panel,
+   * whether it shows, and whether it is pinned. It begins closed and unpinned. A member from before
+   * panels could be pinned never chose to pin one, so they begin the same, with the tab they had
+   * picked as the panel last used. The key is not `ink.inspector.<id>`, which earlier builds wrote
+   * pinned on a first visit without the member choosing it.
+   */
+  const sideKey = `ink.inspectorPanel.${me.person.id}`;
+  const [side, setSide] = useState<Side>(() =>
+    restored(readStored(sideKey, isAnything), { panel: readStored(`ink.inspectorTab.${me.person.id}`, isString) ?? FIRST_PANEL, open: false, pinned: false }),
+  );
+  useEffect(() => writeStored(sideKey, side), [sideKey, side]);
+  /** What each page that is drawn says it is showing, by the page's id. */
+  const [said, setSaid] = useState<ReadonlyMap<string, Showing>>(new Map());
   /** How wide the member dragged the sidebar and the inspector. Kept in this browser, as the layout is: a width suits the screen it was set on. */
   const [widths, setWidths] = useStored<Widths>(`ink.widths.${me.person.id}`, isWidths, {});
   const sidebarWidth = within(SIDEBAR, widths.sidebar ?? SIDEBAR.start);
@@ -198,6 +185,9 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const appNow = useRef<App>(null!);
   /** What the app's own commands do, as of the latest render. */
   const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
+  const panel = useRef<HTMLElement>(null);
+  const inspectorBar = useRef<HTMLElement>(null);
+  const panelId = useId();
   const [host] = useState(() => {
     let created: Host;
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
@@ -210,16 +200,16 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         editorTextSize: { type: "integer", default: 100, minimum: 75, maximum: 200, title: "Editor text size", description: "The size of a note's text, as a percentage." },
       },
       activate(h) {
-        h.commands.register({ id: "notes.all", title: "Open All notes", run: () => h.app().openFolder(ALL_NOTES) });
+        h.commands.register({ id: "notes.all", title: "Open All notes", group: "Navigation", run: () => h.app().openFolder(ALL_NOTES) });
         if (canEdit) {
-          h.commands.register({ id: "note.new", title: "New note", run: () => void h.app().createNote().catch(() => {}) });
-          h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], leaveToFields: true, run: () => inner.current.step("note.undo") });
-          h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], run: () => inner.current.save() });
-          h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], leaveToFields: true, run: () => inner.current.step("note.redo") });
+          h.commands.register({ id: "note.new", title: "New note", group: "Notes", run: () => void h.app().createNote().catch(() => {}) });
+          h.commands.register({ id: "history.undo", title: "Undo", keys: ["mod+z"], group: "Editor", leaveToFields: true, run: () => inner.current.step("note.undo") });
+          h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], group: "Notes", run: () => inner.current.save() });
+          h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], group: "Editor", leaveToFields: true, run: () => inner.current.step("note.redo") });
         }
-        h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], run: () => inner.current.toggleFocus() });
-        h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], run: () => inner.current.toggleSidebar() });
-        h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", run: () => inner.current.toggleInspector() });
+        h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], group: "Navigation", run: () => inner.current.toggleFocus() });
+        h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], group: "Navigation", run: () => inner.current.toggleSidebar() });
+        h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", group: "Navigation", run: () => inner.current.toggleInspector() });
       },
     };
     /** Kept apart from the rest so their links and commands come after the plugins', where the others come before. */
@@ -240,8 +230,9 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       trusted: [core, ...BUILT_INS, pages],
       settings: documentOf(settings.text()) ?? {},
       // The member's own controls come through here: the Settings and Plugins pages, and the commands that turn a plugin on or off.
-      write: (key, value) => void settings.set(key, value),
+      write: (key, value) => settings.set(key, value),
       mac: MAC,
+      embedSite: me.setup.embedSite,
       provide: (plugin) => ({
         workspace,
         app: () => appNow.current,
@@ -276,9 +267,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   useEffect(() => {
     let last: string | null = null;
     const read = () => {
-      if (settings.text() === last) return;
-      last = settings.text();
-      host.settingsChanged(documentOf(last) ?? {});
+      // Once the member's settings are read the plugins are told so even when nothing differs from what they had, as a plugin waiting to change one is.
+      const now = `${settings.status().kind === "loading" ? "loading" : "read"} ${settings.text()}`;
+      if (now === last) return;
+      last = now;
+      host.settingsChanged(documentOf(settings.text()) ?? {});
     };
     read();
     return settings.subscribe(read);
@@ -290,9 +283,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const passing = routePage?.transient ? routePage : undefined;
   const routePageId = passing ? undefined : routePage?.id;
   const address = place.path + place.query;
+  /** An address no page is at is opened like one, under its own path as the id no page has, so it says so in a tab beside the ones that are open and never in their place. */
+  const nowhere = route.kind === "page" && !routePage && keepsATab(place.path);
   const opened = useMemo<Opened | null>(
-    () => (routeNoteId ? { kind: "note", id: routeNoteId } : routeFolderId ? { kind: "folder", id: routeFolderId } : routePageId ? { kind: "page", id: routePageId, path: address } : null),
-    [routeNoteId, routeFolderId, routePageId, address],
+    () => (routeNoteId ? { kind: "note", id: routeNoteId } : routeFolderId ? { kind: "folder", id: routeFolderId } : routePageId || nowhere ? { kind: "page", id: routePageId ?? place.path, path: address } : null),
+    [routeNoteId, routeFolderId, routePageId, nowhere, address],
   );
   useEffect(() => () => host.dispose(), [host]);
   /** Each embed as registered, but telling the host when it throws while being drawn. One is made per embed, so a drawn embed isn't redrawn when something else changes. */
@@ -333,7 +328,15 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     return chord && chordLabel(chord, MAC);
   };
 
-  const loadFolders = useCallback(() => perform(workspaceId, { type: "folder.list" }).then((r) => setTree(folderTree(r))), [workspaceId]);
+  // A listing that fails, as a request can under load, is asked for again at the next refresh, and leaves what was listed as it was.
+  const loadFolders = useCallback(
+    () =>
+      perform(workspaceId, { type: "folder.list" }).then(
+        (r) => setTree(folderTree(r)),
+        () => {},
+      ),
+    [workspaceId],
+  );
   useEffect(() => void loadFolders(), [loadFolders]);
 
   const listedNotes = useRef(notes);
@@ -343,16 +346,19 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   useEffect(() => {
     let live = true;
     const since = (learned.current = new Map());
-    Promise.all([perform(workspaceId, { type: "note.list", includeArchived: true }), perform(workspaceId, { type: "trash.list" })]).then(([kept, trash]) => {
-      if (!live) return;
-      const { notes: listed, gone: lost } = relisted(kept, trash, listedNotes.current, since);
-      const there = new Set(listed.map((n) => n.id));
-      setGone((was) => {
-        const now = [...was, ...lost].filter((id) => !there.has(id));
-        return now.length === was.size && !lost.length ? was : new Set(now);
-      });
-      setNotes(listed);
-    });
+    Promise.all([perform(workspaceId, { type: "note.list", includeArchived: true }), perform(workspaceId, { type: "trash.list" })]).then(
+      ([kept, trash]) => {
+        if (!live) return;
+        const { notes: listed, gone: lost } = relisted(kept, trash, listedNotes.current, since);
+        const there = new Set(listed.map((n) => n.id));
+        setGone((was) => {
+          const now = [...was, ...lost].filter((id) => !there.has(id));
+          return now.length === was.size && !lost.length ? was : new Set(now);
+        });
+        setNotes(listed);
+      },
+      () => {},
+    );
     return () => {
       live = false;
     };
@@ -466,7 +472,17 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
 
   const toggleFocus = useCallback(() => setFocusMode((on) => !on), [setFocusMode]);
   const toggleSidebar = useCallback(() => setSidebarOpen((open) => !open), [setSidebarOpen]);
-  const toggleInspector = useCallback(() => setInspectorOpen((open) => !open), [setInspectorOpen]);
+  /** Whether the next panel to show takes the cursor, and the next to close gives it back: so for the keys and the icons, and not for a press elsewhere or the edge. */
+  const byHand = useRef(false);
+  const act = useCallback(
+    (action: SideAction, hand = false) => {
+      byHand.current = hand;
+      setSide((was) => reduce(was, action, host.contributions().views.inspector.map((v) => v.id)));
+    },
+    [host],
+  );
+  const toggleInspector = useCallback(() => act({ type: "toggle" }, true), [act]);
+  const togglePanel = useCallback((viewId: string) => act({ type: "pick", panel: viewId }, true), [act]);
   const closeOverlay = useCallback(() => setOverlay(null), []);
 
   /**
@@ -480,8 +496,14 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const canCreateNote = !!newNoteFolderId && tree?.byId.get(newNoteFolderId)?.access === "edit";
 
   const go = navigate;
-  /** The note whose editor is to take the cursor once it is there. */
+  /** The note whose editor is to take the cursor once it is there, unless the member has put it somewhere else by then. */
   const [toFocus, setToFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (toFocus === null) return;
+    const elsewhere = () => setToFocus(null);
+    addEventListener("focusin", elsewhere, true);
+    return () => removeEventListener("focusin", elsewhere, true);
+  }, [toFocus]);
   const openNote = (noteId: string, options: { preview?: boolean; focus?: boolean; background?: boolean } = {}) => {
     const area = host.contributions().views.editor.at(-1);
     if (options.background && area?.open) return area.open({ kind: "note", id: noteId }, { preview: false, background: true });
@@ -523,6 +545,87 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       (err: Error) => setStuck({ noteId: routeNoteId, message: err instanceof ApiError ? err.message : `Couldn't ${type === "note.undo" ? "undo" : "redo"}. Common Ink can't be reached.` }),
     );
   };
+  const panels = useMemo(() => contributed.views.inspector.map((v) => v.id), [contributed.views.inspector]);
+  const shownPanel = showing(side, panels);
+  const layout = layoutOf(side, panels);
+
+  /** What last had focus outside the inspector, which is where the cursor goes back to. */
+  const outside = useRef<HTMLElement | null>(null);
+  /** Whether the cursor was last in a dialog over the window, such as the command palette. */
+  const inDialog = useRef(false);
+  useEffect(() => {
+    const within = (el: EventTarget | null) => el instanceof Node && (!!panel.current?.contains(el) || !!inspectorBar.current?.contains(el));
+    /** A dialog over the window, such as the command palette, is a step on the way back and not elsewhere: a panel's command run from it can close the panel. */
+    const over = (el: EventTarget | null) => el instanceof Element && !!el.closest('[role="dialog"]');
+    const temporary = layout === "temporary";
+    // A panel over the page goes when the member goes elsewhere: a press or the cursor outside it and its bar, or Escape that nothing in it had a use for.
+    const onFocus = (e: FocusEvent) => {
+      const fromDialog = inDialog.current;
+      inDialog.current = over(e.target);
+      if (within(e.target) || inDialog.current) return;
+      if (e.target instanceof HTMLElement) outside.current = e.target;
+      // The cursor given back by a palette as it closes is not the member going elsewhere.
+      if (temporary && !fromDialog) act({ type: "dismiss" });
+    };
+    const onPress = (e: PointerEvent) => {
+      if (!within(e.target) && !over(e.target)) act({ type: "dismiss" });
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || !(within(e.target) || e.target === document.body)) return;
+      e.preventDefault();
+      act({ type: "dismiss" }, true);
+    };
+    addEventListener("focusin", onFocus, true);
+    if (temporary) {
+      addEventListener("pointerdown", onPress, true);
+      addEventListener("keydown", onKey);
+    }
+    return () => {
+      removeEventListener("focusin", onFocus, true);
+      removeEventListener("pointerdown", onPress, true);
+      removeEventListener("keydown", onKey);
+    };
+  }, [layout, act]);
+  const wasShown = useRef(shownPanel);
+  useLayoutEffect(() => {
+    if (wasShown.current === shownPanel) return;
+    wasShown.current = shownPanel;
+    if (!byHand.current) return;
+    byHand.current = false;
+    // After the frame, so a palette the command was run from has put the cursor back where it was first.
+    if (shownPanel !== null)
+      return void requestAnimationFrame(() => document.activeElement?.closest('[role="dialog"]') || panel.current?.focus({ preventScroll: true }));
+    const at = document.activeElement;
+    // Closed from the palette, the cursor is given back now, as the palette would give it back to the panel, which is gone.
+    const to = outside.current;
+    if (!((!at || at === document.body || inspectorBar.current?.contains(at) || at.closest('[role="dialog"]')) && to?.isConnected)) return;
+    // A note's editor is given the cursor by its view, which puts it back where it was in the text: focus alone can put it at the start.
+    const editor = EditorView.findFromDOM(to);
+    if (editor) editor.focus();
+    else to.focus({ preventScroll: true });
+  }, [shownPanel]);
+  // Focus shows neither the bar nor a panel, so one that lay over the page is not there on leaving it.
+  useEffect(() => {
+    if (focusMode) act({ type: "dismiss" });
+  }, [focusMode, act]);
+
+  /** One per page, the same each time, so a page that says what it shows says it once. */
+  const [tellers] = useState(() => new Map<string, (showing: Showing | null) => void>());
+  const inspectFor = (pageId: string) => {
+    const made =
+      tellers.get(pageId) ??
+      ((showing: Showing | null) =>
+        setSaid((was) => {
+          if (JSON.stringify(was.get(pageId) ?? null) === JSON.stringify(showing)) return was;
+          const next = new Map(was);
+          if (showing) next.set(pageId, showing);
+          else next.delete(pageId);
+          return next;
+        }));
+    tellers.set(pageId, made);
+    return made;
+  };
+
   inner.current = { step, save: () => routeNoteId && void saveNow(routeNoteId), toggleFocus, toggleSidebar, toggleInspector };
 
   useEffect(() => {
@@ -597,8 +700,14 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     saveNote: async (noteId: string) => saveNow(noteId),
     markSeen,
     toggleOverlay: (id: string, state?: unknown) => setOverlay((open) => (open?.id === id ? null : { id, state })),
-    notify: (notice: Notice) => tell({ ...notice }),
+    notify: (notice: Notice) => {
+      const id = ++toldCount.current;
+      tell((shown) => stacked(shown, { id, notice: { ...notice } }));
+      return () => tell((shown) => shown.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    },
     toggleSidebar,
+    togglePanel,
+    inspect: (_: Showing | null) => {},
     setFocus: setFocusMode,
     switchWorkspace: onSwitch,
     reloadWorkspaces: () => void reloadWorkspaces(),
@@ -626,6 +735,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     pages: contributed.views.page.toSorted((a, b) => (a.order ?? UNPLACED) - (b.order ?? UNPLACED)),
     sections: null,
     sectionNames: contributed.views.section.flatMap(({ id, label, icon }) => (label && icon ? [{ id, label, icon }] : [])),
+    sectionsOpening: () => null,
     readNote: () => null,
     overlay: overlay?.id ?? null,
     ...actions,
@@ -638,21 +748,35 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const bar = useMemo(() => [...contributed.views.bar].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.bar]);
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay?.id);
 
-  app.sections = contributed.views.section.length === 0 ? null : contributed.views.section.map((section) => <Drawn key={section.id} host={host} view={section} />);
+  /** The sections, each told when it opens something if the place they are drawn in wants to know. */
+  const sections = (opened?: () => void, only?: string) =>
+    contributed.views.section.flatMap((section) => {
+      if (only !== undefined && section.id !== only) return [];
+      const telling = <A extends unknown[]>(open: (...args: A) => void) => (...args: A) => (open(...args), opened?.());
+      const as = (its: App): App => ({ ...its, openNote: telling(its.openNote), openFolder: telling(its.openFolder), openBeside: its.openBeside && telling(its.openBeside), go: telling(its.go) });
+      return <Drawn key={section.id} host={host} view={section} as={opened && as} />;
+    });
+  app.sections = contributed.views.section.length === 0 ? null : sections();
+  app.sectionsOpening = sections;
   const inspectorViews = contributed.views.inspector;
+  const shownView = inspectorViews.find((v) => v.id === shownPanel);
   /** What is in front, for the inspector to be about. Null while it loads. */
   const subject = ((): Subject | null => {
-    if (routeNoteId) return current && tree ? { kind: "note", props: { note: current } } : null;
+    if (routeNoteId) return current && tree ? { kind: "note", note: current } : null;
     if (routeFolderId) {
       if (!tree || !notes) return null;
       const name = folderTitle(tree, routeFolderId);
-      if (name !== null) return { kind: "folder", props: { folderId: routeFolderId, name, notes: notes.filter((n) => n.state === "live" && (routeFolderId === ALL_NOTES || n.folderId === routeFolderId)) } };
+      return name === null ? { kind: "nothing" } : { kind: "folder", folderId: routeFolderId, name, notes: notes.filter((n) => n.state === "live" && (routeFolderId === ALL_NOTES || n.folderId === routeFolderId)) };
     }
-    const inFront = contributed.views.page.find((p) => p.id === routePageId);
-    return inFront ? { kind: "page", props: { page: inFront } } : { kind: "nothing" };
+    const shows = routePageId ? said.get(routePageId) : undefined;
+    if (!shows) return { kind: "nothing" };
+    if (!notes) return null;
+    if (shows.kind === "notes") return { kind: "notes", label: shows.label, notes: shows.noteIds.flatMap((id) => byId.get(id) ?? []) };
+    const note = byId.get(shows.noteId);
+    return note ? { kind: "note", note } : { kind: "nothing" };
   })();
 
-  const renderNote = (noteId: string, { onEdit }: { onEdit?: () => void } = {}) => {
+  const renderNote = (noteId: string, { onEdit, focus, onFocused }: { onEdit?: () => void; focus?: boolean; onFocused?: () => void } = {}) => {
     const note = byId.get(noteId);
     return (
       <NoteEditor
@@ -667,8 +791,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           onEdit?.();
         }}
         notice={stuck?.noteId === noteId ? stuck.message : null}
-        focus={toFocus === noteId}
-        onFocused={() => setToFocus(null)}
+        focus={toFocus === noteId || !!focus}
+        onFocused={() => {
+          setToFocus(null);
+          onFocused?.();
+        }}
         access={note?.access}
         state={note?.state}
         gone={gone.has(noteId)}
@@ -679,23 +806,23 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         extensions={extensions}
         onExtensionRefused={host.fail}
         meta={
-          note && (
-            <>
-              <span className="crumbs">{tree?.pathName(note.folderId)}</span>
-              {note.private && (
-                <span className="private-mark">
-                  <Icon name="lock" /> Private
-                </span>
-              )}
-              {note.access === "view" && canEdit && <span className="private-mark">View only</span>}
-              {contributed.views.mark.map((mark) => (
+          // Both are there from the start, empty until they are known, so the bar is as tall while they load as after.
+          <>
+            <span className="crumbs" title={(note && tree?.pathName(note.folderId)) || undefined}>
+              {note && tree?.pathName(note.folderId)}
+            </span>
+            {note?.private && (
+              <span className="private-mark">
+                <Icon name="lock" /> Private
+              </span>
+            )}
+            {note?.access === "view" && canEdit && <span className="private-mark">View only</span>}
+            {note &&
+              contributed.views.mark.map((mark) => (
                 <Drawn key={mark.id} host={host} view={mark} note={note} />
               ))}
-              <span>
-                edited {ago(note.updatedAt, now)} by {note.updatedBy.name}
-              </span>
-            </>
-          )
+            <span>{note && `edited ${ago(note.updatedAt, now)} by ${note.updatedBy.name}`}</span>
+          </>
         }
         above={
           note &&
@@ -730,27 +857,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     const at = { path: cut < 0 ? path : path.slice(0, cut), query: cut < 0 ? "" : path.slice(cut), pageState: here ? place.state : null };
     return (
       <div className="page-pane" key={page.id}>
-        <Drawn host={host} view={page} as={(app) => ({ ...app, ...at, opened: { kind: "page", id: pageId, path }, noteId: null, note: null, unseen: false, folderId: null })} />
+        <Drawn host={host} view={page} as={(app) => ({ ...app, ...at, opened: { kind: "page", id: pageId, path }, noteId: null, note: null, unseen: false, folderId: null, inspect: inspectFor(pageId) })} />
       </div>
     );
   };
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
-  /** The buttons that act on the window and on no one note, together where the sidebar meets the editor area: before the first tab of the top left group. Each is there while there is something for it to open. */
-  const controls = (
-    <div className="window-controls" role="group" aria-label="Window">
-      {contributed.views.column.length > 0 && (
-        <button type="button" className="icon-button" aria-label="Sidebar" title={`Sidebar (${shortcut("view.toggleSidebar")})`} aria-pressed={sidebarOpen} onClick={toggleSidebar}>
-          <Icon name="sidebar" />
-        </button>
-      )}
-      {inspectorViews.length > 0 && (
-        <button type="button" className="icon-button" aria-label="Inspector" title="Inspector" aria-pressed={inspectorOpen} onClick={toggleInspector}>
-          <Icon name="inspector" />
-        </button>
-      )}
-    </div>
-  );
-
   /**
    * What the address names alone, for when no plugin fills the editor area or the one that does
    * throws. At `/` it is every note, so there is a way to a note whatever is turned off.
@@ -759,7 +870,6 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     <div className="groups" data-focus-mode={focusMode || undefined}>
       <section className="group" data-front="">
         <div className="tab-row">
-          {controls}
           <button type="button" className="icon-button focus-button" aria-label="Focus" title={`${focusMode ? "Leave focus" : "Focus"} (${shortcut("view.toggleFocus")})`} aria-pressed={focusMode} onClick={toggleFocus}>
             <Icon name="focus" />
           </button>
@@ -772,15 +882,14 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   );
 
   /** Focus is of a group, and the way out of it is in that group. With none drawn the window stays whole, so nothing is hidden with no way back. */
-  const nothingThere = route.kind === "page" && !routePageId && !passing;
-  const focusable = !nothingThere && (!!editorArea || !passing);
+  const focusable = !!editorArea || !passing;
 
   return (
     <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100, "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
       {contributed.views.column.map((column) => (
         <Drawn key={column.id} host={host} view={column} />
       ))}
-      {sidebarOpen && contributed.views.column.length > 0 && (
+      {contributed.views.column.length > 0 && (
         <ResizeHandle
           label="Resize sidebar"
           orientation="vertical"
@@ -789,6 +898,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           step={WIDTH_STEP}
           onChange={(sidebar) => setWidths((w) => ({ ...w, sidebar }))}
           onReset={() => setWidths(({ sidebar: _, ...w }) => w)}
+          fold={{ folded: !sidebarOpen, size: BAR, onFold: (folded) => setSidebarOpen(!folded) }}
         />
       )}
 
@@ -799,56 +909,32 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           </div>
         )}
         {/* The editor area stays as it is under a page that only leads somewhere else, out of sight, so no open editor or embed is made again. */}
-        {nothingThere ? (
-          <p className="notice">There's nothing at this address.</p>
-        ) : editorArea ? (
+        {editorArea ? (
           <div className="editor-area" data-under={passing ? "" : undefined}>
-            <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} controls={controls} fallback={loneEditor} />
+            <Drawn key={editorArea.id} host={host} view={editorArea} renderNote={renderNote} renderFolder={renderFolder} renderPage={renderPage} empty={empty} fallback={loneEditor} />
           </div>
         ) : (
           !passing && loneEditor
         )}
       </main>
 
-      {inspectorViews.length > 0 &&
-        (inspectorOpen ? (
-          <>
-            <ResizeHandle
-              label="Resize inspector"
-              orientation="vertical"
-              value={inspectorWidth}
-              {...INSPECTOR}
-              step={WIDTH_STEP}
-              perPixel={() => -1}
-              onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
-              onReset={() => setWidths(({ inspector: _, ...w }) => w)}
-            />
-            <Inspector host={host} views={inspectorViews} app={app} subject={subject} picked={picked} onPick={setPicked} />
-          </>
-        ) : (
-          <nav className="rail" aria-label="Inspector bar">
-            {viewsFor(inspectorViews, subject).map((v) => {
-              const badge = v.badge?.(app) ?? null;
-              return (
-                <button
-                  key={v.id}
-                  type="button"
-                  className="icon-button"
-                  aria-label={v.label}
-                  title={v.label}
-                  aria-description={badge ?? undefined}
-                  onClick={() => {
-                    setPicked(v.id);
-                    setInspectorOpen(true);
-                  }}
-                >
-                  <Icon name={v.icon} />
-                  {badge && <span className="unseen-dot" />}
-                </button>
-              );
-            })}
-          </nav>
-        ))}
+      {inspectorViews.length > 0 && (
+        <>
+          <ResizeHandle
+            label="Resize inspector"
+            orientation="vertical"
+            value={inspectorWidth}
+            {...INSPECTOR}
+            step={WIDTH_STEP}
+            perPixel={() => -1}
+            onChange={(inspector) => setWidths((w) => ({ ...w, inspector }))}
+            onReset={() => setWidths(({ inspector: _, ...w }) => w)}
+            fold={{ folded: layout !== "pinned", size: 0, onFold: (folded) => act({ type: "fold", folded }) }}
+          />
+          {shownView && <InspectorPanel ref={panel} id={panelId} host={host} view={shownView} subject={subject} pinned={side.pinned} onPin={() => act({ type: "pin" })} />}
+          <InspectorBar ref={inspectorBar} views={inspectorViews} app={app} shown={shownPanel} panelId={panelId} onPick={togglePanel} />
+        </>
+      )}
       {bar.length > 0 && (
         <div className="bar" role="group" aria-label="Bottom bar">
           {(["left", "right"] as const).map((side) => (
@@ -865,10 +951,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         </div>
       )}
       {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} state={overlay?.state} />}
-      {/* Always there, so a screen reader is told when a notice arrives in it. */}
-      <div className="toasts" aria-live="polite">
-        {told && <Toast notice={told} onClose={() => tell((now) => (now === told ? null : now))} />}
-      </div>
+      <Toasts told={told} onGone={(id) => tell((shown) => shown.filter((t) => t.id !== id))} />
     </div>
   );
 }

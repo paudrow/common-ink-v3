@@ -18,6 +18,7 @@ export const tables: Plugin = {
     host.commands.register({
       id: "tables.edit",
       title: "Edit the next table",
+      group: "Editor",
       keys: ["mod+alt+t"],
       when: () => !!hasTable(document.activeElement),
       run() {
@@ -25,6 +26,6 @@ export const tables: Plugin = {
         if (view) editTable(view);
       },
     });
-    for (const { id, label } of CELL_ACTIONS) host.commands.register({ id: `tables.${id}`, title: `Table: ${label.toLowerCase()}`, run: () => void actOnLastCell(id) });
+    for (const { id, label } of CELL_ACTIONS) host.commands.register({ id: `tables.${id}`, title: `Table: ${label.toLowerCase()}`, group: "Editor", run: () => void actOnLastCell(id) });
   },
 };

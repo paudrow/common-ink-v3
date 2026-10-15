@@ -15,6 +15,25 @@ export const calendar: Plugin = {
   name: "Calendar",
   description: "Shows the events of the calendars you connect, which nobody else in the workspace sees, and lets a note reference one.",
   icon: "calendar",
+  settings: {
+    weekStarts: {
+      type: "string",
+      enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      default: "Monday",
+      title: "First day of the week",
+      description: "The day a week starts on in the Calendar: the first day Week shows, and the first column of Month.",
+    },
+    weekends: { type: "boolean", default: true, title: "Highlight weekends", description: "Shades Saturday and Sunday in the Calendar's days and months." },
+    hidden: {
+      type: "list",
+      default: [],
+      maxItems: 100,
+      maxLength: 200,
+      remembered: true,
+      title: "Hidden calendars",
+      description: "The calendars unticked in the Calendar's Calendars dialog, whose events the Calendar doesn't show. They are kept on the server with your settings for this workspace, so the Calendar shows the same calendars in every browser you sign in on.",
+    },
+  },
   activate(host) {
     host.views.register("page", { id: "calendar", path: "/calendar", label: "Calendar", icon: "calendar", nav: "primary", order: 40, component: (props) => <CalendarPage host={host} {...props} /> });
     host.embeds.register(

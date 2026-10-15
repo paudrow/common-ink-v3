@@ -267,6 +267,42 @@ export async function refer(asker: Asker, sourceId: string, id: string): Promise
   return { ref: row!.id, kind: RECORD[source.kind], text: writtenReference(RECORD[source.kind], row!.id, label) };
 }
 
+/** The most references to one record that the notes about it are looked for by: the asker's own, and one for each other member. */
+const MAX_REFERENCES = 50;
+
+/**
+ * Whether the asker can read the event now, from their own calendar. Any failure is a no: asked only
+ * when a teammate referenced the event, a failure said aloud would tell the asker that someone had.
+ */
+async function readsEvent(asker: Asker, sourceId: string, id: string): Promise<boolean> {
+  const source = (await asker.sources.of(asker.personId)).find((s) => s.info.id === sourceId);
+  if (source?.kind !== "calendar" || source.info.state !== "connected") return false;
+  return source.get(id).then(
+    (event) => event !== null,
+    () => false,
+  );
+}
+
+/**
+ * The references the notes about one of the asker's records hold: the asker's own, and for an event
+ * the asker can read now, every other member's of the workspace to the same event. An event's id
+ * names it for everyone whose calendar holds it (Google's is its calendar's id and its own), so the
+ * members of a shared calendar refer to one event by one id. A contact is one person's own, and
+ * only their own reference is theirs. Following a reference is still its maker's alone (`readRecord`).
+ */
+export async function referencesTo(asker: Asker, workspaceId: string, sourceId: string, id: string): Promise<string[]> {
+  const { results } = await asker.db
+    .prepare(
+      `SELECT id, person_id FROM source_refs WHERE data_source = ?1 AND record_id = ?2 AND (person_id = ?3 OR person_id IN (SELECT person_id FROM members WHERE workspace_id = ?4))
+       ORDER BY person_id = ?3 DESC, created_at, id LIMIT ?5`,
+    )
+    .bind(sourceId, id, asker.personId, workspaceId, MAX_REFERENCES)
+    .all<{ id: string; person_id: string }>();
+  const own = results.filter((r) => r.person_id === asker.personId).map((r) => r.id);
+  if (own.length === results.length || !(await readsEvent(asker, sourceId, id))) return own;
+  return results.map((r) => r.id);
+}
+
 /** The record a reference stands for, read where it is kept. Someone else's reference is no reference. */
 export async function readRecord(asker: Asker, ref: string): Promise<SourceRecord> {
   const row = await asker.db.prepare("SELECT data_source, record_id FROM source_refs WHERE id = ? AND person_id = ?").bind(ref, asker.personId).first<{ data_source: string; record_id: string }>();

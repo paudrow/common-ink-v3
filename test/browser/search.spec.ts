@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, noteIdIn, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -33,6 +33,47 @@ const GARDEN = "# Garden plan\n\nPlant the tomatoes by the fence.\n";
 const ERRANDS = "# Errands\n\n- [ ] Call the bank about the mortgage +Home\n";
 const READING = "# Reading\n\nNotes on gardening books #botany\n";
 const SCRAPS = "# Scraps\n\nfence the by, tomatoes later\n";
+
+test("the inspector is about the notes the search lists: Info counts them and History is theirs, and both follow the query", async ({ page }) => {
+  await searching(page, [GARDEN, ERRANDS, READING, SCRAPS]);
+  await pinPanel(page, "Info");
+  const panel = page.getByRole("complementary", { name: "Inspector" });
+  await expect(panel.getByRole("term")).toHaveText(["Showing", "Notes", "Last changed"]);
+  await expect(panel.getByRole("definition").first()).toHaveText("Search");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("4 notes");
+  await field(page).fill("fence");
+  await expect(titles(page)).toHaveCount(2);
+  await expect(panel.getByRole("definition").first()).toHaveText("Search: fence");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("2 notes");
+  await page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button", { name: "History" }).click();
+  const changed = panel.getByRole("tree", { name: "Notes that changed" }).locator('[aria-level="1"]');
+  await expect(changed).toHaveCount(2);
+  await expect(changed.filter({ hasText: "Garden plan" })).toHaveCount(1);
+  await expect(changed.filter({ hasText: "Scraps" })).toHaveCount(1);
+  await field(page).fill("tomatoes in:title");
+  await expect(nothing(page)).toBeVisible();
+  await expect(changed).toHaveCount(0);
+});
+
+test("while a search is on its way the inspector says what it said of the last answer, never the new query with the old notes", async ({ page }) => {
+  await searching(page, [GARDEN, ERRANDS, READING, SCRAPS]);
+  await pinPanel(page, "Info");
+  const panel = page.getByRole("complementary", { name: "Inspector" });
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("4 notes");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"type":"search"')) await held;
+    await route.fallback();
+  });
+  await field(page).fill("fence");
+  await expect(status(page)).toContainText("Searching");
+  await expect(panel.getByRole("definition").first()).toHaveText("Search");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("4 notes");
+  release();
+  await expect(panel.getByRole("definition").first()).toHaveText("Search: fence");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("2 notes");
+});
 
 test("search finds a note by a word of its text, a todo's words, a tag, and a phrase in quotes", async ({ page }) => {
   await searching(page, [GARDEN, ERRANDS, READING, SCRAPS]);
@@ -516,15 +557,21 @@ test("Advanced builds the query a row at a time, writes each change in the field
   await expect(builder(page)).toHaveCount(0);
   await advanced(page).click();
   await expect(advanced(page)).toHaveAttribute("aria-expanded", "true");
-  await expect(condition(page, 1)).toHaveCount(0);
+  // A first condition is there to fill in, and says nothing until it is filled in.
+  await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(1);
+  await expect(condition(page, 1).getByRole("combobox", { name: "Field" })).toHaveValue("text");
+  await expect(condition(page, 1).getByRole("textbox", { name: "Value" })).toHaveValue("");
+  await expect(field(page)).toHaveValue("");
+  await builder(page).getByRole("radio", { name: "Match any" }).check();
+  await expect(field(page)).toHaveValue("");
+  await builder(page).getByRole("radio", { name: "Match all" }).check();
 
   // From the builder to the field.
-  await builder(page).getByRole("button", { name: "Add a condition" }).click();
   await condition(page, 1).getByRole("textbox", { name: "Value" }).fill("budget");
   await expect(field(page)).toHaveValue("budget");
   await expect.poll(async () => (await titles(page).allTextContents()).sort()).toEqual(["Budget", "Roadmap"]);
   await builder(page).getByRole("button", { name: "Add a condition" }).click();
-  await expect(condition(page, 2).getByRole("combobox", { name: "Field" }).getByRole("option")).toHaveText(["Words", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "Mentions", "State", "Has"]);
+  await expect(condition(page, 2).getByRole("combobox", { name: "Field" }).getByRole("option")).toHaveText(["Words", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "Mentions", "State", "Visibility", "Has"]);
   await condition(page, 2).getByRole("combobox", { name: "Field" }).selectOption({ label: "Folder" });
   // A row with nothing chosen is no part of the query yet.
   await expect(field(page)).toHaveValue("budget");
@@ -584,7 +631,6 @@ test("a row's value is read as it would be typed: a tag picked in capitals narro
   await create(page, "# Trips\n\nBook the train #Travel\n");
   await page.goto("/search");
   await advanced(page).click();
-  await builder(page).getByRole("button", { name: "Add a condition" }).click();
   await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption("tag");
   const value = condition(page, 1).getByRole("combobox", { name: "Value" });
   // The list offers a tag as it is written in the notes, and picking one puts exactly that in the field.
@@ -631,39 +677,72 @@ test("a query the builder can't show as rows stays as typed, with one line sayin
   await expect(condition(page, 2).getByRole("combobox", { name: "Is or is not" })).toHaveValue("not");
 });
 
-test("the ? in Advanced lists every filter and operator with what it means, and an example is a button that puts its query in the field and runs it", async ({ page }) => {
+const help = (page: Page) => page.getByRole("dialog", { name: "Query syntax" });
+const helpButton = (page: Page) => builder(page).getByRole("button", { name: "Query syntax" });
+
+test("the ? in Advanced opens the help over the page: every filter and operator under the builder's headings, an example tried when pressed, and Escape or Close giving the keyboard back to the ?", async ({ page }) => {
   await library(page);
   await advanced(page).click();
-  const help = builder(page).getByRole("region", { name: "Query syntax" });
-  await expect(help).toHaveCount(0);
-  await builder(page).getByRole("button", { name: "Query syntax" }).click();
-  await expect(builder(page).getByRole("button", { name: "Query syntax" })).toHaveAttribute("aria-expanded", "true");
-  const forms = await help.getByRole("rowheader").allTextContents();
+  await expect(help(page)).toHaveCount(0);
+  await expect(helpButton(page)).toHaveAttribute("aria-haspopup", "dialog");
+  await helpButton(page).click();
+  await expect(help(page)).toBeVisible();
+  await expect(helpButton(page)).toHaveAttribute("aria-expanded", "true");
+  // Over the page and holding the keyboard, not a section of the panel that scrolls.
+  expect(await help(page).evaluate((el) => el.matches(":modal"))).toBe(true);
+  await expect(help(page).getByRole("button", { name: "Close" })).toBeFocused();
+  const forms = await help(page).getByRole("rowheader").allTextContents();
   for (const form of ["word", '"a phrase"', "a OR b", "-a, NOT a", "( )", "key:A..B", "#NAME", "folder:NAME", "tag:NAME", "updated:DAY", "created:DAY", "editor:NAME, edited-by:NAME", "author:NAME", "is:open", "is:archived", "is:trashed", "is:shared", "is:private", "has:todo", "has:open-todo", "has:link", "has:backlink", "has:tag", "no:WORD", "in:title", "in:body", "sort:updated-desc", "sort:title-asc"]) {
     expect(forms, form).toContain(form);
   }
   // What is for todos alone is not offered where notes are searched.
-  for (const form of ["due:DAY", "importance:N", "is:done", "has:recurrence", "sort:due-asc"]) expect(forms, form).not.toContain(form);
-  await expect(help.getByRole("row").filter({ hasText: "is:archived" }).first()).toContainText("Archived. A query that doesn't say so leaves archived notes out");
+  for (const form of ["due:DAY", "priority:LEVEL, importance:LEVEL", "is:done", "has:repeat", "sort:due-asc"]) expect(forms, form).not.toContain(form);
+  // The headings are the builder's fields: Shared and Private are Visibility, apart from the states.
+  await expect(help(page).getByRole("heading", { level: 3 })).toHaveText(["Writing a query", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "Mentions", "State", "Visibility", "Has", "Words in", "Sort"]);
+  await expect(help(page).getByRole("table", { name: "State" }).getByRole("rowheader")).toHaveText(["is:open", "is:archived", "is:trashed"]);
+  await expect(help(page).getByRole("table", { name: "Visibility" }).getByRole("rowheader")).toHaveText(["is:shared", "is:private"]);
+  await expect(help(page).getByRole("row").filter({ hasText: "is:archived" }).first()).toContainText("Archived. A query that doesn't say so leaves archived notes out");
 
-  await help.getByRole("button", { name: "is:archived", exact: true }).click();
-  await expect(field(page)).toHaveValue("is:archived");
+  // Escape closes the help alone: the builder stays open, and the ? has the keyboard again.
+  await page.keyboard.press("Escape");
+  await expect(help(page)).toHaveCount(0);
+  await expect(builder(page)).toBeVisible();
+  await expect(helpButton(page)).toBeFocused();
+  await expect(helpButton(page)).toHaveAttribute("aria-expanded", "false");
+  await helpButton(page).click();
+  await help(page).getByRole("button", { name: "Close" }).click();
+  await expect(help(page)).toHaveCount(0);
+  await expect(helpButton(page)).toBeFocused();
+  await helpButton(page).click();
+  await page.mouse.click(4, 4);
+  await expect(help(page)).toHaveCount(0);
+  await expect(builder(page)).toBeVisible();
+  await expect(helpButton(page)).toBeFocused();
+
+  // An example is tried when pressed: its query is put in the field and run, and the help closes on it.
+  const tryExample = async (example: string) => {
+    await helpButton(page).click();
+    await help(page).getByRole("button", { name: example, exact: true }).click();
+    await expect(help(page)).toHaveCount(0);
+    await expect(field(page)).toHaveValue(example);
+  };
+  await tryExample("is:archived");
   await expect(titles(page)).toHaveText(["Old budget"]);
-  await help.getByRole("button", { name: "has:link", exact: true }).click();
-  await expect(field(page)).toHaveValue("has:link");
+  await expect(helpButton(page)).toBeFocused();
+  await tryExample("has:link");
   await expect(titles(page)).toHaveText(["Roadmap"]);
-  await help.getByRole("button", { name: "(budget OR plan) -draft", exact: true }).click();
-  await expect(field(page)).toHaveValue("(budget OR plan) -draft");
+  await tryExample("(budget OR plan) -draft");
   // Roadmap has a todo to draft it, which the example's -draft leaves out.
   await expect(titles(page)).toHaveText(["Budget"]);
   // Every example reads: none leaves the field saying it can't be read.
-  for (const example of await help.getByRole("button").all()) {
-    await example.click();
-    await expect(field(page)).toHaveValue((await example.textContent())!);
+  await helpButton(page).click();
+  const examples = await help(page).locator(".query-example").allTextContents();
+  await page.keyboard.press("Escape");
+  expect(examples.length).toBeGreaterThan(30);
+  for (const example of examples) {
+    await tryExample(example);
     await expect(field(page)).not.toHaveAttribute("aria-invalid", "true");
   }
-  await builder(page).getByRole("button", { name: "Query syntax" }).click();
-  await expect(help).toHaveCount(0);
 });
 
 test("the bar, the builder and the help fit a window 380 wide, and nothing in them runs off its side", async ({ page }) => {
@@ -674,8 +753,14 @@ test("the bar, the builder and the help fit a window 380 wide, and nothing in th
   await field(page).fill('budget folder:"Common Ink" updated:2020-01-01..today');
   await advanced(page).click();
   await builder(page).getByRole("button", { name: "Query syntax" }).click();
+  await expect(help(page)).toBeVisible();
   await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(3);
   const over = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".query-bar, .query-bar *")].filter((el) => el.getClientRects().length && (el.getBoundingClientRect().right > innerWidth + 0.5 || el.getBoundingClientRect().left < -0.5)).map((el) => `${el.tagName}.${el.className}`));
   expect(over).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  // The help is in the window, and its own words scroll inside it.
+  const box = (await help(page).boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(800);
 });

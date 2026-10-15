@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, me, noteCard, noteIdIn, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, listedNotes, me, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const history = (page: Page, id: string) => perform(page, { type: "note.history", id });
 
@@ -133,7 +133,7 @@ test("leaving a note while its save is on the way keeps the other writer's chang
   await expect(page).toHaveURL(/\/note\/untitled-[a-z0-9]{12}$/);
   await expect(page).not.toHaveURL(new RegExp(id));
   opened();
-  await page.getByRole("complementary", { name: "Inspector" }).getByRole("tab", { name: "Info" }).click();
+  await showPanel(page, "Info");
   await expect(page.getByRole("complementary", { name: "Inspector" }).getByRole("textbox", { name: "Note URL" })).toHaveValue(new RegExp(`${noteIdIn(page)}$`));
 
   await openAllNotes(page);

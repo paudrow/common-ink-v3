@@ -10,16 +10,16 @@ import { TodosPage } from "./Todos.tsx";
 const MINUTE_MS = 60_000;
 
 /**
- * Todos. A checkbox line anywhere in a note is one, and its importance, due date and recurrence are
+ * Todos. A checkbox line anywhere in a note is one, and its priority, due date and recurrence are
  * tokens on the line, drawn as chips that rewrite their token when changed. The Todos page lists
  * them across the notes the member can see, and changes one by rewriting its line in its note.
  */
 export const todos: Plugin = {
   id: "todos",
   name: "Todos",
-  description: "Checkbox lines with due dates, importance and recurrence, and a page of every todo.",
+  description: "Checkbox lines with due dates, priorities and repeats, and a page of every todo.",
   icon: "todos",
-  screenshots: [{ src: "/plugin-shots/todos-light.png", dark: "/plugin-shots/todos-dark.png", alt: "The Todos page: every open todo with its importance, its due date and the note it is in." }],
+  screenshots: [{ src: "/plugin-shots/todos-light.png", dark: "/plugin-shots/todos-dark.png", alt: "The Todos page: every open todo with its priority, its due date and the note it is in." }],
   activate(host) {
     const editors = new Map<string, EditorView>();
     /** The editors there are now, a reading of a note among them. */
@@ -42,9 +42,12 @@ export const todos: Plugin = {
       view.dispatch({ selection: { anchor: to }, effects: EditorView.scrollIntoView(from, { y: "center" }) });
     };
 
-    const open = (todo: ListedTodo) => {
+    /** Opens a todo's note with the cursor on its line: in front, or in a split beside it, whose editor arrives there once it is made. */
+    const open = (todo: ListedTodo, beside?: boolean) => {
       going = { noteId: todo.noteId, line: todo.line, text: todo.text };
-      host.app().openNote(todo.noteId, { focus: true });
+      const app = host.app();
+      if (beside && app.openBeside) return app.openBeside({ kind: "note", id: todo.noteId }, "right");
+      app.openNote(todo.noteId, { focus: true });
       const view = editors.get(todo.noteId);
       if (view) arrive(view);
     };
@@ -73,7 +76,7 @@ export const todos: Plugin = {
     host.editorExtensions.register({
       id: "todos",
       extension: (editor) => [
-        todoChips({ host, noteId: editor.noteId, onCompleted: (view, words) => completed(words, () => reopen(editor.noteId, view)), onRecurred: (words, revision) => completed(words, () => takeBack(host, editor.noteId, revision)) }),
+        todoChips({ host, noteId: editor.noteId, onCompleted: (view) => completed(host, () => reopen(editor.noteId, view)), onRecurred: (revision) => completed(host, () => takeBack(host, editor.noteId, revision)) }),
         ViewPlugin.define((view) => {
           const key = editorKey(editor);
           editors.set(key, view);

@@ -11,7 +11,7 @@ import { onTodo, todoLines } from "../lib/todoLines.ts";
 import { ChipMenu } from "./ChipMenu.tsx";
 import { Completions } from "./Completions.tsx";
 import { dueLabel, dueState, today } from "./dates.ts";
-import { CHIP_NAMES, IMPORTANCE, pickerLabel, type ChipKind } from "./picking.ts";
+import { CHIP_NAMES, PRIORITY, pickerLabel, type ChipKind } from "./picking.ts";
 import { doneLabel, doneName, everyLabel, everyName } from "./recurrence.ts";
 
 interface Checkbox extends Token {
@@ -33,9 +33,9 @@ export interface TodoChipsContext {
   host: PluginHost;
   noteId: string;
   /** Told of a todo checked off in the note and left done, to be undone with `untick`. */
-  onCompleted: (view: EditorView, words: string) => void;
+  onCompleted: (view: EditorView) => void;
   /** Told of a recurring todo checked off in the note, once the server has completed it: the change that did. */
-  onRecurred: (words: string, revision: number) => void;
+  onRecurred: (revision: number) => void;
 }
 
 /**
@@ -116,12 +116,12 @@ const checkbox = ({ host, noteId, onCompleted, onRecurred }: TodoChipsContext): 
         // The server completes it, and says so of the write that checked it: that change is what Undo takes back.
         void Promise.all([saved, before]).then((writes) => {
           const completing = writes.find((note) => note?.filed);
-          if (completing) onRecurred(todo.words, completing.revision);
+          if (completing) onRecurred(completing.revision);
         });
         return;
       }
       view.dispatch({ effects: tick.of({ from: line.from, text: line.text }) });
-      onCompleted(view, todo.words);
+      onCompleted(view);
     });
     // The keyboard stays in the note: a box ticked with the pointer is not somewhere the next key goes.
     el.addEventListener("mousedown", (event) => {
@@ -161,14 +161,15 @@ function panel(el: HTMLElement, says: string, name: string, label: string, disab
  * A chip that opens the popover the Todos page opens from the same chip. A pick there rewrites the line as
  * the member's edit, as `todo.set` would: skipping by `skipTodo`, the rest by `rewriteTodo`.
  */
-function opener(el: HTMLElement, says: string, chip: ChipKind, source: Source) {
-  panel(el, says, `${CHIP_NAMES[chip]}: ${says}`, pickerLabel(chip), source.readOnly, (close) => {
+function opener(el: HTMLElement, says: string, chip: ChipKind, source: Source, named = says) {
+  panel(el, says, `${CHIP_NAMES[chip]}: ${named}`, pickerLabel(chip), source.readOnly, (close) => {
     const line = source.line();
     const read = line && parseTodo(line.text);
     return createElement(ChipMenu, {
       chip,
       todo: { due: read?.due?.date ?? null, importance: read?.importance ?? 0, every: read?.every?.written ?? null },
       now: today(),
+      onClose: close,
       onPick(change) {
         close();
         source.rewriteLine((text) => {
@@ -197,7 +198,9 @@ const importance: Chip<ImportanceMarks> = {
   },
   draw(el, token, source) {
     el.dataset.level = String(token.level);
-    opener(el, IMPORTANCE[token.level], "importance", source);
+    // The note shows its marks as written, as wide as they are; they are named in words.
+    el.title = `Priority: ${PRIORITY[token.level]}`;
+    opener(el, "!".repeat(token.level), "importance", source, PRIORITY[token.level]);
   },
 };
 
@@ -304,8 +307,9 @@ const asWritten = drawnInView((view) => {
 });
 
 const look = EditorView.baseTheme({
-  // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark.
-  // The box starts where its `[` does, so it is in one place ticked or not, though `[x]` is wider than `[ ]`.
+  // Drawn here and not by the browser, so it is one size and one look on every system, in light and in dark. It is as wide
+  // as the box, and so is the `[ ]`, `[x]` or `[X]` it stands for when that is shown as written, so neither moves the words.
+  ".md-chip.md-chip-task": { width: `${BOX_EM}em` },
   ".md-chip.md-chip-task > :last-child": { inset: "0 -0.35em", paddingLeft: "0.35em", justifyContent: "flex-start", cursor: "pointer" },
   ".md-chip-task input": {
     appearance: "none",

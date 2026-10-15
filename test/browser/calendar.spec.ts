@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { CalendarEvent } from "../../src/core/protocol.ts";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, me, newEmail, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
 
 const ZONE = "America/New_York";
 test.use({ timezoneId: ZONE });
@@ -16,11 +16,11 @@ const DAY_MS = 86_400_000;
 const shift = (day: string, by: number) => new Date(Date.parse(`${day}T00:00:00Z`) + by * DAY_MS).toISOString().slice(0, 10);
 const dayIn = (time: number) => new Intl.DateTimeFormat("en-CA", { timeZone: ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(time);
 
-/** This week's dates where the browser is, Sunday first: the week the Calendar opens on. */
+/** This week's dates where the browser is, Monday first: the week the Calendar opens on, as a week starts unless the member chose another day. */
 function thisWeek() {
   const today = dayIn(Date.now());
-  const sunday = shift(today, -new Date(`${today}T00:00:00Z`).getUTCDay());
-  return Array.from({ length: 7 }, (_, i) => shift(sunday, i));
+  const monday = shift(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => shift(monday, i));
 }
 
 const calendar = (page: Page) => page.getByRole("region", { name: "Calendar", exact: true });
@@ -34,7 +34,7 @@ async function openWithSample(page: Page, wholeWeek = true) {
   await perform(page, { type: "source.connect", id: "sample-calendar", back: "/calendar" });
   await page.goto("/calendar");
   await expect(grid(page)).toHaveAttribute("aria-busy", "false");
-  if (wholeWeek) await expect(card(page, thisWeek()[1]!, "Planning")).toBeVisible();
+  if (wholeWeek) await expect(card(page, thisWeek()[0]!, "Planning")).toBeVisible();
 }
 
 /** The events of the days given, as the server lists them for the signed-in person in the browser's zone. */
@@ -93,6 +93,8 @@ test("a sideways scroll slides the days continuously and settles on a day's edge
   await openWithSample(page);
   const week = thisWeek();
   expect(await daysInView(page)).toEqual(week);
+  // The hours open near now, which late in the day is the foot of the grid: from the morning there is room to scroll down whenever this runs.
+  await grid(page).locator(".cal-tg-scroll").evaluate((el) => (el.scrollTop = 7 * 48));
   const top = await grid(page).locator(".cal-tg-scroll").evaluate((el) => el.scrollTop);
   const header = await grid(page).locator(".cal-tg-head").boundingBox();
   const gutter = await grid(page).locator(".cal-hours").boundingBox();
@@ -179,7 +181,7 @@ test("Today, the arrows and the keys glide the days to the same places a scroll 
   await page.keyboard.press("j");
   await expect.poll(() => daysInView(page)).toEqual(week.map((d) => shift(d, 14)));
 
-  // From a week that starts on any day, Today goes back to this week from Sunday.
+  // From a week that starts on any day, Today goes back to this week from its first day.
   await page.mouse.move(700, 450);
   await page.keyboard.down("Shift");
   await page.mouse.wheel(0, 80);
@@ -187,7 +189,8 @@ test("Today, the arrows and the keys glide the days to the same places a scroll 
   await expect.poll(async () => (await daysInView(page))[0]).toBe(shift(week[0]!, 15));
   await page.keyboard.press("t");
   await expect.poll(() => daysInView(page)).toEqual(week);
-  expect(await firstEdge(page)).toBeCloseTo(0, 0);
+  // The days in view are said once the glide is within half a day of them; its last frames land it on the edge.
+  await expect.poll(() => firstEdge(page)).toBeCloseTo(0, 0);
   expect((await seen(page)).unread).toBe(0);
 
   await page.keyboard.press("d");
@@ -207,7 +210,7 @@ test("Today, the arrows and the keys glide the days to the same places a scroll 
 
 test("a drag on empty grid draws a draft on the quarter hour with its times, and its release opens the form, which adds nothing until Save", async ({ page }) => {
   await openWithSample(page);
-  const tuesday = thisWeek()[2]!;
+  const tuesday = thisWeek()[1]!;
   await showHours(page, 7 * 60);
 
   const hover = await spot(page, tuesday, 9 * 60 + 47);
@@ -264,7 +267,7 @@ test("a drag on empty grid draws a draft on the quarter hour with its times, and
 
 test("Escape drops a drag, and letting go after it opens nothing", async ({ page }) => {
   await openWithSample(page);
-  const tuesday = thisWeek()[2]!;
+  const tuesday = thisWeek()[1]!;
   await showHours(page, 7 * 60);
   const from = await spot(page, tuesday, 8 * 60);
   await page.mouse.move(from.x, from.y);
@@ -280,7 +283,7 @@ test("Escape drops a drag, and letting go after it opens nothing", async ({ page
 test("an event dragged to another day and time moves there at once and is saved, Undo puts it back, and its bottom edge changes its end", async ({ page }) => {
   await openWithSample(page);
   const week = thisWeek();
-  const [monday, tuesday, wednesday] = [week[1]!, week[2]!, week[3]!];
+  const [monday, tuesday, wednesday] = [week[0]!, week[1]!, week[2]!];
   await showHours(page, 8 * 60);
   const lunch = card(page, tuesday, "Lunch with Sam");
   await expect(lunch).toHaveAccessibleName("1:00 – 2:00 PM Lunch with Sam");
@@ -323,8 +326,10 @@ test("an event dragged to another day and time moves there at once and is saved,
   await page.mouse.move(60, lunchAgain.y + 8, { steps: 6 });
   await page.mouse.up();
   await expect(card(page, week[0]!, "Lunch with Sam"), "on the first day in view, the nearest to where it was let go").toHaveCount(1);
-  await expect(page.getByText("Moved Lunch with Sam"), "the notice is this move's, not the resize's before it").toBeVisible();
-  await page.getByRole("button", { name: "Undo" }).click();
+  // The resize's notice stays above with its own Undo; this move's is the newest, at the foot.
+  const notices = page.getByRole("group", { name: "Notice" });
+  await expect(notices.last(), "the newest notice is this move's").toContainText("Moved Lunch with Sam");
+  await notices.last().getByRole("button", { name: "Undo" }).click();
   await expect(card(page, tuesday, "Lunch with Sam")).toHaveCount(1);
 
   // A press without a drag still opens the event.
@@ -344,24 +349,24 @@ test("the Calendars button holds the data sources and a checkbox per calendar, w
   await expect(shown.getByRole("listitem")).toHaveText(["Work", "Personal", "HolidaysRead-only"]);
 
   await shown.getByRole("checkbox", { name: "Work" }).uncheck();
-  await expect(card(page, week[1]!, "Standup")).toHaveCount(0);
-  await expect(card(page, week[1]!, "Planning")).toHaveCount(0);
-  await expect(card(page, week[2]!, "Lunch with Sam")).toHaveCount(1);
+  await expect(card(page, week[0]!, "Standup")).toHaveCount(0);
+  await expect(card(page, week[0]!, "Planning")).toHaveCount(0);
+  await expect(card(page, week[1]!, "Lunch with Sam")).toHaveCount(1);
   await dialog.getByRole("button", { name: "Close" }).click();
 
   await page.reload();
   await expect(grid(page)).toHaveAttribute("aria-busy", "false");
-  await expect(card(page, week[2]!, "Lunch with Sam")).toBeVisible();
-  await expect(card(page, week[1]!, "Standup"), "still hidden after a reload").toHaveCount(0);
+  await expect(card(page, week[1]!, "Lunch with Sam")).toBeVisible();
+  await expect(card(page, week[0]!, "Standup"), "still hidden after a reload").toHaveCount(0);
   await calendar(page).getByRole("button", { name: "Calendars", exact: true }).click();
   await expect(shown.getByRole("checkbox", { name: "Work" })).not.toBeChecked();
   await shown.getByRole("checkbox", { name: "Work" }).check();
-  await expect(card(page, week[1]!, "Standup")).toHaveCount(1);
+  await expect(card(page, week[0]!, "Standup")).toHaveCount(1);
 });
 
 test("overlapping events are laid out as v1 laid them out: side by side when they start under half an hour apart, stacked and indented otherwise", async ({ page }) => {
   await openWithSample(page);
-  const thursday = thisWeek()[4]!;
+  const thursday = thisWeek()[3]!;
   // What layoutDay answers for the sample Thursday, pinned in test/core/plugin-calendar-layout.test.ts: [title, start, lane, lanes, span, indent].
   const expected = [
     ["Standup", 10 * 60, 0, 1, 1, 0],
@@ -394,7 +399,7 @@ test("every event in the week shows when it is, however narrow its card", async 
     await openWithSample(page, width > 1000);
     await expect.poll(() => firstEdge(page)).toBeCloseTo(0, 0);
     // A narrow window shows fewer days: slide to this week's Thursday, the day with the most side by side, whatever today is.
-    const thursday = thisWeek()[4]!;
+    const thursday = thisWeek()[3]!;
     const first = (await daysInView(page))[0]!;
     const by = (Date.parse(thursday) - Date.parse(first)) / DAY_MS;
     if (by) {
@@ -416,4 +421,237 @@ test("every event in the week shows when it is, however narrow its card", async 
     expect(times.length, `${width}: cards in view`).toBeGreaterThan(width > 1000 ? 8 : 1);
     for (const t of times) expect({ ...t, text: t.text.length > 0 }, `${width}: ${t.name}`).toEqual({ name: t.name, text: true, inside: true, whole: true });
   }
+});
+
+const viewButton = (page: Page, name: string) => calendar(page).getByRole("group", { name: "View" }).getByRole("button", { name, exact: true });
+const scrollTop = (page: Page) => grid(page).locator(".cal-tg-scroll").evaluate((el) => el.scrollTop);
+
+/** A sideways two-finger stroke over the grid, `by` pixels in all, leaning a little up and down as fingers do. */
+async function swipe(page: Page, by: number) {
+  const box = (await grid(page).locator(".cal-tg-scroll").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let i = 0; i < 6; i++) {
+    await page.mouse.wheel(by / 6, i % 2 ? 4 : -3);
+    await page.waitForTimeout(16);
+  }
+}
+
+test("the views are offered Day, 3 days, Week, Month, and Agenda after them", async ({ page }) => {
+  await openWithSample(page);
+  await expect(calendar(page).getByRole("group", { name: "View" }).getByRole("button")).toHaveText(["Day", "3 days", "Week", "Month", "Agenda"]);
+});
+
+test("Day and 3 days slide sideways by whole days under a modest swipe, as Week does, and the hours never drift", async ({ page }) => {
+  await openWithSample(page);
+  const today = dayIn(Date.now());
+  await page.keyboard.press("d");
+  await expect(viewButton(page, "Day")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => daysInView(page)).toEqual([today]);
+  await grid(page).locator(".cal-tg-scroll").evaluate((el) => (el.scrollTop = 7 * 48));
+  const top = await scrollTop(page);
+  await watch(page);
+
+  // A fifth of a day's width, which on a day this wide used to settle back where it was.
+  const width = (await column(page, today).boundingBox())!.width;
+  expect(width, "Day is one wide day").toBeGreaterThan(600);
+  await swipe(page, 180);
+  await expect.poll(() => daysInView(page)).toEqual([shift(today, 1)]);
+  await expect.poll(() => firstEdge(page), { message: "settled on the day's edge" }).toBeCloseTo(0, 0);
+  // Two swipes, each settled before the next: one stroke is one day however far it goes.
+  await swipe(page, -180);
+  await expect.poll(() => daysInView(page)).toEqual([today]);
+  await expect.poll(() => firstEdge(page)).toBeCloseTo(0, 0);
+  await page.waitForTimeout(300);
+  await swipe(page, -180);
+  await expect.poll(() => daysInView(page)).toEqual([shift(today, -1)]);
+  await expect.poll(() => firstEdge(page)).toBeCloseTo(0, 0);
+  // A nudge settles back.
+  await page.waitForTimeout(300);
+  await swipe(page, 30);
+  await page.waitForTimeout(600);
+  expect(await daysInView(page)).toEqual([shift(today, -1)]);
+  const frames = await seen(page);
+  expect(new Set(frames.tops), "the hours never moved").toEqual(new Set([top]));
+  expect(frames.misaligned, "the header's day moved with the body's").toBe(0);
+  expect(frames.unread).toBe(0);
+
+  await page.keyboard.press("x");
+  await expect(viewButton(page, "3 days")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => daysInView(page), "3 days opens on the day Day showed").toEqual([shift(today, -1), today, shift(today, 1)]);
+  await swipe(page, 150);
+  await expect.poll(() => daysInView(page)).toEqual([today, shift(today, 1), shift(today, 2)]);
+  await expect.poll(() => firstEdge(page)).toBeCloseTo(0, 0);
+  await page.keyboard.press("j");
+  await expect.poll(() => daysInView(page), "the next three days").toEqual([shift(today, 3), shift(today, 4), shift(today, 5)]);
+  await page.keyboard.press("t");
+  await expect.poll(() => daysInView(page)).toEqual([today, shift(today, 1), shift(today, 2)]);
+  await page.reload();
+  await expect(viewButton(page, "3 days"), "the view is remembered").toHaveAttribute("aria-pressed", "true");
+});
+
+test("the first day of the week is the member's setting, Monday unless they choose: Week and Month start on it", async ({ page }) => {
+  await openWithSample(page);
+  const week = thisWeek();
+  expect(new Date(`${week[0]}T00:00:00Z`).getUTCDay(), "a week starts on Monday").toBe(1);
+  expect(await daysInView(page)).toEqual(week);
+  await page.keyboard.press("m");
+  await expect(calendar(page).locator(".cal-weekdays [role=columnheader]")).toHaveText(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+
+  await page.goto("/settings/plugins/calendar");
+  await page.getByLabel("First day of the week").selectOption("Sunday");
+  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)["calendar.weekStarts"]).toBe("Sunday");
+  await page.goto("/calendar");
+  await expect(calendar(page).locator(".cal-weekdays [role=columnheader]")).toHaveText(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
+  await page.keyboard.press("w");
+  const today = dayIn(Date.now());
+  const sunday = shift(today, -new Date(`${today}T00:00:00Z`).getUTCDay());
+  await expect.poll(() => daysInView(page), "this week, from Sunday, today in it").toEqual(Array.from({ length: 7 }, (_, i) => shift(sunday, i)));
+});
+
+test("weekends are shaded unless the member turns Highlight weekends off", async ({ page }) => {
+  await openWithSample(page);
+  const week = thisWeek();
+  const shade = (day: string) => column(page, day).evaluate((el) => getComputedStyle(el).backgroundColor);
+  const clear = await shade(week.slice(0, 5).find((day) => day !== dayIn(Date.now()))!);
+  expect(await shade(week[5]!), "Saturday").not.toBe(clear);
+  expect(await shade(week[6]!), "Sunday").not.toBe(clear);
+  await page.goto("/settings/plugins/calendar");
+  await page.getByLabel("Highlight weekends").uncheck();
+  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)["calendar.weekends"]).toBe(false);
+  await page.goto("/calendar");
+  await expect(grid(page)).toHaveAttribute("aria-busy", "false");
+  expect(await shade(week[5]!)).toBe(clear);
+  expect(await shade(week[6]!)).toBe(clear);
+});
+
+test("New event in the header opens the form for the next half hour, and adds nothing until Save", async ({ page }) => {
+  await openWithSample(page);
+  const before = (await listed(page, thisWeek()[0]!, thisWeek()[6]!)).length;
+  await calendar(page).getByRole("button", { name: "New event" }).click();
+  const form = page.getByRole("dialog", { name: "New event" });
+  await expect(form.getByRole("textbox", { name: "Title" })).toBeFocused();
+  await form.getByRole("textbox", { name: "Title" }).fill("From the header");
+  await page.keyboard.press("Escape");
+  await expect(form).toHaveCount(0);
+  expect((await listed(page, thisWeek()[0]!, thisWeek()[6]!)).length).toBe(before);
+});
+
+test("hidden calendars are kept with the account: another browser signed in as the same member hides them too, and one hidden in this browser before moves to the account once", async ({ page, browser, baseURL }) => {
+  await openWithSample(page);
+  const week = thisWeek();
+  await calendar(page).getByRole("button", { name: "Calendars", exact: true }).click();
+  await page.getByRole("dialog", { name: "Calendars" }).getByRole("checkbox", { name: "Work" }).uncheck();
+  await expect(card(page, week[0]!, "Standup")).toHaveCount(0);
+  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)["calendar.hidden"]).toEqual(["sample-calendar work"]);
+  const { person, workspaces } = await me(page);
+
+  const elsewhere = await (await browser.newContext({ baseURL, timezoneId: ZONE })).newPage();
+  await signInAs(elsewhere, person.email, person.name);
+  // In that browser Personal was hidden before calendars were kept with the account.
+  await elsewhere.evaluate(({ key }) => localStorage.setItem(key, JSON.stringify(["sample-calendar personal"])), { key: `ink.plugin.calendar.${workspaces[0]!.id}.${person.id}.hidden` });
+  await elsewhere.goto("/calendar");
+  await expect(grid(elsewhere)).toHaveAttribute("aria-busy", "false");
+  await expect(card(elsewhere, week[1]!, "Lunch with Sam"), "Personal, hidden in this browser before").toHaveCount(0);
+  await expect(card(elsewhere, week[0]!, "Standup"), "Work, hidden in the other").toHaveCount(0);
+  await expect(grid(elsewhere).locator(`.cal-bar[data-first="${week[4]}"]`, { hasText: "Company holiday" }), "Holidays, hidden in neither").toBeVisible();
+  await expect.poll(async () => JSON.parse((await perform(elsewhere, { type: "settings.read" })).text)["calendar.hidden"]).toEqual(["sample-calendar work", "sample-calendar personal"]);
+  expect(await elsewhere.evaluate(({ key }) => localStorage.getItem(key), { key: `ink.plugin.calendar.${workspaces[0]!.id}.${person.id}.hidden` }), "moved once, and not again").toBe("null");
+
+  await page.reload();
+  await expect(grid(page)).toHaveAttribute("aria-busy", "false");
+  await expect(card(page, week[1]!, "Lunch with Sam"), "and the first browser follows the account").toHaveCount(0);
+  await elsewhere.context().close();
+});
+
+test("calendars hidden in this browser before move to the server even when the member's settings, with nothing in them yet, are slow to come", async ({ page }) => {
+  await openWithSample(page);
+  const week = thisWeek();
+  const { person, workspaces } = await me(page);
+  await page.evaluate(({ key }) => localStorage.setItem(key, JSON.stringify(["sample-calendar work"])), { key: `ink.plugin.calendar.${workspaces[0]!.id}.${person.id}.hidden` });
+  // The app draws with the defaults before the settings are read, and reading them changes nothing it has.
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"settings.read"')) await new Promise((done) => setTimeout(done, 2500));
+    await route.fallback();
+  });
+  await page.reload();
+  await expect(grid(page)).toHaveAttribute("aria-busy", "false");
+  await expect(card(page, week[0]!, "Standup")).toHaveCount(0);
+  await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)["calendar.hidden"]).toEqual(["sample-calendar work"]);
+  expect(await page.evaluate(({ key }) => localStorage.getItem(key), { key: `ink.plugin.calendar.${workspaces[0]!.id}.${person.id}.hidden` })).toBe("null");
+});
+
+test("New note about this event makes a note in the folder picked, last used first, that references it, and the event lists the notes about it each with who sees them", async ({ page }) => {
+  await openWithSample(page);
+  const week = thisWeek();
+  const meetings = await perform(page, { type: "folder.create", name: "Meetings" });
+  await page.reload();
+  await expect(grid(page)).toHaveAttribute("aria-busy", "false");
+  await showHours(page, 9 * 60);
+  await card(page, week[1]!, "Lunch with Sam").click();
+  const event = page.getByRole("dialog", { name: "Event: Lunch with Sam" });
+  await expect(event.getByRole("region", { name: "Notes about this event" })).toContainText("No note references this event yet.");
+  await event.getByRole("button", { name: "New note about this event" }).click();
+  await event.getByRole("combobox").selectOption({ label: "Meetings" });
+  await event.getByRole("button", { name: "Make the note" }).click();
+  await expect(page).toHaveURL(/\/note\//);
+  const lunch = (await listed(page, week[1]!, week[1]!)).find((e) => e.title === "Lunch with Sam")!;
+  const { ref } = await perform(page, { type: "record.refer", sourceId: lunch.sourceId, id: lunch.id });
+  const made = await perform(page, { type: "note.read", id: /([a-z0-9]{12})$/.exec(new URL(page.url()).pathname)![1]! });
+  expect(made.folderId).toBe(meetings.id);
+  expect(made.text).toBe(`# Lunch with Sam, ${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(Date.parse(`${week[1]}T00:00:00Z`))}\n\n::event{${ref} Lunch with Sam}\n\n`);
+  await expect(page.locator(".cm-content")).toContainText("Lunch with Sam");
+
+  // A private note of Ada's that references it too.
+  const own = await perform(page, { type: "note.create", text: `# Ada-private-thoughts\n\n::event{${ref} Lunch with Sam}\n` });
+  await perform(page, { type: "note.setPrivate", id: own.id, private: true });
+
+  // Eve, another member, copies Ada's reference into a private note of her own.
+  const eve = await anotherPerson(page, "Eve Example");
+  const { workspaceId } = await join(eve, page, "editor");
+  const hers = await perform(eve, { type: "note.create", text: `# Eve-secret-plans\n\n::event{${ref} Lunch with Sam}\n` }, workspaceId);
+  await perform(eve, { type: "note.setPrivate", id: hers.id, private: true }, workspaceId);
+
+  const notesOf = async () => {
+    await page.goto("/calendar");
+    await expect(grid(page)).toHaveAttribute("aria-busy", "false");
+    await showHours(page, 9 * 60);
+    await card(page, week[1]!, "Lunch with Sam").click();
+    const region = page.getByRole("dialog", { name: "Event: Lunch with Sam" }).getByRole("region", { name: "Notes about this event" });
+    await expect(region).toHaveAttribute("aria-busy", "false");
+    return region;
+  };
+  let region = await notesOf();
+  await expect(region.getByRole("listitem")).toHaveText([/^Ada-private-thoughtsPrivate$/, /^Lunch with Sam, .*Workspace$/]);
+  await expect(page.getByText("Eve-secret-plans"), "a note Ada can't see is not listed, nor its title").toHaveCount(0);
+
+  // Once Eve shares it with Ada, it is listed, as shared.
+  await perform(eve, { type: "grant.set", noteId: hers.id, email: (await me(page)).person.email, access: "view" }, workspaceId);
+  region = await notesOf();
+  await expect(region.getByRole("listitem")).toHaveCount(3);
+  await expect(region.getByRole("listitem").filter({ hasText: "Eve-secret-plans" })).toHaveText("Eve-secret-plansShared");
+
+  // Eve's calendar doesn't have the event yet: Ada's reference is no way to it for her.
+  expect(await perform(eve, { type: "record.notes", sourceId: lunch.sourceId, id: lunch.id }, workspaceId)).toEqual({ notes: [] });
+  // With the sample calendar, which both have as members of a team share a calendar, Lunch with Sam is one event for both:
+  // Eve is told of the notes about it that she can see, Ada's among them, and not Ada's private one, title and all.
+  await perform(eve, { type: "source.connect", id: "sample-calendar", back: "/calendar" }, workspaceId);
+  const evesView = await perform(eve, { type: "record.notes", sourceId: lunch.sourceId, id: lunch.id }, workspaceId);
+  expect(evesView.notes.map((n) => [n.title, n.audience]).toSorted()).toEqual([
+    ["Eve-secret-plans", "shared"],
+    [made.title, "workspace"],
+  ]);
+  expect(JSON.stringify(evesView)).not.toContain("Ada-private");
+  // Following Ada's reference is still Ada's alone.
+  await expect(perform(eve, { type: "record.read", ref }, workspaceId)).rejects.toThrow(/No such record/);
+
+  // Opening one goes to it, and the next note about an event is offered the folder used last.
+  await region.getByRole("button", { name: "Ada-private-thoughts" }).click();
+  await expect(page).toHaveURL(new RegExp(own.id));
+  await page.goto("/calendar");
+  await expect(grid(page)).toHaveAttribute("aria-busy", "false");
+  await showHours(page, 9 * 60);
+  await card(page, week[0]!, "Planning").click();
+  await page.getByRole("dialog", { name: "Event: Planning" }).getByRole("button", { name: "New note about this event" }).click();
+  await expect(page.getByRole("dialog", { name: "Event: Planning" }).getByRole("combobox")).toHaveValue(meetings.id);
+  await eve.context().close();
 });

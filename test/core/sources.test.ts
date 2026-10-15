@@ -430,6 +430,171 @@ describe("a reference to a record", () => {
   });
 });
 
+describe("the notes that reference a record", () => {
+  it("are the notes holding the asker's own reference as one, not in code or Trash, each saying who sees it", async () => {
+    const w = world();
+    const ada = await newMember("Ada");
+    const eve = await addMember(ada, "editor", "Eve");
+    w.events.set(ada.personId, [event("a1", "Lunch with Sam"), event("a2", "Planning")]);
+    const lunch = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
+    const planning = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a2" });
+    expect(await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a1" }), "none yet").toEqual({ notes: [] });
+    const at = (text: string) => w.ask(ada, { type: "note.create", text });
+    const team = await at(`# Team notes\n\n${lunch.text}\n`);
+    const mine = await at(`# Just mine\n\nAbout ${lunch.text}, and ${planning.text}\n`);
+    await w.ask(ada, { type: "note.setPrivate", id: mine.id, private: true });
+    const withEve = await at(`# With Eve\n\n- [ ] ask ${lunch.text}\n`);
+    await w.ask(ada, { type: "note.setPrivate", id: withEve.id, private: true });
+    await w.ask(ada, { type: "grant.set", noteId: withEve.id, email: (await whoAmI(env.DB, eve.personId)).person.email, access: "view" });
+    const old = await at(`# Archived\n\n${lunch.text}\n`);
+    await w.ask(ada, { type: "note.archive", id: old.id, archived: true });
+    const binned = await at(`# Binned\n\n${lunch.text}\n`);
+    await w.ask(ada, { type: "note.trash", id: binned.id });
+    await at(`# Code\n\n\`${lunch.text}\`\n\n\`\`\`\n${lunch.text}\n\`\`\`\n`);
+    await at(`# Words\n\nthe ref ${lunch.ref} said in words\n`);
+    await at(`# Other\n\n${planning.text}\n`);
+
+    const listed = await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a1" });
+    const byTitle = <T extends { title: string }>(notes: readonly T[]) => notes.toSorted((a, b) => a.title.localeCompare(b.title));
+    expect(byTitle(listed.notes).map((n) => [n.title, n.audience, n.id])).toEqual([
+      ["Archived", "workspace", old.id],
+      ["Just mine", "private", mine.id],
+      ["Team notes", "workspace", team.id],
+      ["With Eve", "shared", withEve.id],
+    ]);
+    // Her agent is told the same, read-only or not.
+    for (const agent of [await agentOf(ada), await agentOf(ada, { readOnly: true })]) expect(await w.ask(agent, { type: "record.notes", sourceId: "cal", id: "a1" })).toEqual(listed);
+    expect(byTitle((await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a2" })).notes).map((n) => n.title)).toEqual(["Just mine", "Other"]);
+  });
+
+  it("leaves out a note the asker can't see, title and all, until they can, and lists none of anyone else's references", async () => {
+    const w = world();
+    const ada = await newMember("Ada");
+    const eve = await addMember(ada, "editor", "Eve");
+    w.events.set(ada.personId, [event("a1", "Lunch with Sam")]);
+    w.events.set(eve.personId, [event("e1", "Eve's own lunch")]);
+    const lunch = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "a1" });
+    await w.ask(ada, { type: "note.create", text: `# Ada's lunch\n\n${lunch.text}\n` });
+    // Eve copies Ada's reference into a note of her own and makes it private.
+    const hers = await w.ask(eve, { type: "note.create", text: `# Eve-secret-plans\n\n${lunch.text}\n` });
+    await w.ask(eve, { type: "note.setPrivate", id: hers.id, private: true });
+    const asked = await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a1" });
+    expect(asked.notes.map((n) => n.title)).toEqual(["Ada's lunch"]);
+    expect(JSON.stringify(asked)).not.toMatch(/Eve-secret|${hers.id}/);
+    // Eve's own event is not Ada's, and Ada's, which Eve's calendar doesn't have, lists nothing for her.
+    expect(await w.ask(eve, { type: "record.notes", sourceId: "cal", id: "e1" })).toEqual({ notes: [] });
+    expect(await w.ask(eve, { type: "record.notes", sourceId: "cal", id: "a1" })).toEqual({ notes: [] });
+    await w.ask(eve, { type: "grant.set", noteId: hers.id, email: (await whoAmI(env.DB, ada.personId)).person.email, access: "view" });
+    expect((await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "a1" })).notes.map((n) => [n.title, n.audience]).toSorted()).toEqual([
+      ["Ada's lunch", "workspace"],
+      ["Eve-secret-plans", "shared"],
+    ]);
+    // Of a record nobody referenced, or one that isn't there, there are none.
+    expect(await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "nothing" })).toEqual({ notes: [] });
+    expect(await w.ask(ada, { type: "record.notes", sourceId: "nowhere", id: "a1" })).toEqual({ notes: [] });
+  });
+});
+
+describe("the notes about an event on a calendar members share", () => {
+  /** The same event in each member's calendar, as a calendar they all have holds it: one id for all of them. */
+  const SYNC = event("team s1", "Team sync", { calendarId: "team", calendar: "Team" });
+
+  it("lists a teammate's notes about it while the asker's own calendar has it, only those the asker can see, each saying who sees it", async () => {
+    const w = world();
+    const ada = await newMember("Ada");
+    const eve = await addMember(ada, "editor", "Eve");
+    const vic = await addMember(ada, "viewer", "Vic");
+    for (const member of [ada, eve]) w.events.set(member.personId, [SYNC]);
+    const adas = await w.ask(ada, { type: "record.refer", sourceId: "cal", id: "team s1" });
+    const at = async (by: Actor, text: string, as: "workspace" | "private" | { with: Actor } = "workspace") => {
+      const note = await w.ask(by, { type: "note.create", text });
+      if (as !== "workspace") await w.ask(by, { type: "note.setPrivate", id: note.id, private: true });
+      if (typeof as === "object") await w.ask(by, { type: "grant.set", noteId: note.id, email: (await whoAmI(env.DB, as.with.personId)).person.email, access: "view" });
+      return note;
+    };
+    await at(ada, `# Sync agenda\n\n${adas.text}\n`);
+    await at(ada, `# Ada-private-sync\n\n${adas.text}\n`, "private");
+    await at(ada, `# For Eve\n\n${adas.text}\n`, { with: eve });
+    const titles = async (actor: Actor) => (await w.ask(actor, { type: "record.notes", sourceId: "cal", id: "team s1" })).notes.map((n) => [n.title, n.audience]).toSorted();
+
+    // Eve never referenced it: Ada's notes she can see are listed for her all the same, and Ada's private one is not, title and all.
+    expect(await titles(eve)).toEqual([
+      ["For Eve", "shared"],
+      ["Sync agenda", "workspace"],
+    ]);
+    expect(JSON.stringify(await w.ask(eve, { type: "record.notes", sourceId: "cal", id: "team s1" }))).not.toMatch(/Ada-private/);
+    // Her agents are told the same, read-only or not.
+    for (const agent of [await agentOf(eve), await agentOf(eve, { readOnly: true })]) expect((await w.ask(agent, { type: "record.notes", sourceId: "cal", id: "team s1" })).notes.map((n) => [n.title, n.audience]).toSorted()).toEqual(await titles(eve));
+    // Her own reference adds her own notes, and Ada is told of them in turn.
+    const eves = await w.ask(eve, { type: "record.refer", sourceId: "cal", id: "team s1" });
+    expect(eves.ref).not.toBe(adas.ref);
+    await at(eve, `# Eve's take\n\n${eves.text}\n`);
+    await at(eve, `# Eve-private-take\n\n${eves.text}\n`, "private");
+    expect(await titles(ada)).toEqual([
+      ["Ada-private-sync", "private"],
+      ["Eve's take", "workspace"],
+      ["For Eve", "shared"],
+      ["Sync agenda", "workspace"],
+    ]);
+    // Following Eve's reference is still Eve's alone.
+    expect(await refusal(w.ask(ada, { type: "record.read", ref: eves.ref }))).toBe("not_found: No such record");
+
+    // Vic sees every workspace note, and his calendar doesn't have the event: none is listed for him, by its id or anyone's reference.
+    expect(await w.ask(vic, { type: "record.notes", sourceId: "cal", id: "team s1" })).toEqual({ notes: [] });
+    w.events.set(vic.personId, [event("team s2", "Another meeting", { calendarId: "team", calendar: "Team" })]);
+    expect(await w.ask(vic, { type: "record.notes", sourceId: "cal", id: "team s1" })).toEqual({ notes: [] });
+    // Once his calendar has it too, it is his to be told of, by the same rule.
+    w.events.set(vic.personId, [SYNC]);
+    expect(await titles(vic)).toEqual([
+      ["Eve's take", "workspace"],
+      ["Sync agenda", "workspace"],
+    ]);
+    // Taken off Eve's calendar, or her calendar needing reconnecting, she is told only of the notes with her own reference.
+    w.events.set(eve.personId, []);
+    expect(await titles(eve)).toEqual([
+      ["Eve's take", "workspace"],
+      ["Eve-private-take", "private"],
+    ]);
+    // A calendar that fails, however it fails, is told no more than one that answers without the event, which says nothing of whether a teammate referenced it.
+    const failing = w.sources.of;
+    w.sources.of = async (personId) => (await failing(personId)).map((source) => (source.kind === "calendar" && personId === eve.personId ? ({ ...source, get: async () => Promise.reject(new Error("boom")) } as DataSource) : source));
+    expect(await titles(eve)).toEqual([
+      ["Eve's take", "workspace"],
+      ["Eve-private-take", "private"],
+    ]);
+    expect(await w.ask(eve, { type: "record.notes", sourceId: "cal", id: "team nobody" })).toEqual({ notes: [] });
+    w.sources.of = failing;
+    w.events.set(eve.personId, [SYNC]);
+    w.state.set(eve.personId, "needs_reconnect");
+    expect(await titles(eve)).toEqual([
+      ["Eve's take", "workspace"],
+      ["Eve-private-take", "private"],
+    ]);
+  });
+
+  it("is told only of members of the workspace, and never of another's reference to a contact", async () => {
+    const w = world();
+    const ada = await newMember("Ada");
+    const eve = await addMember(ada, "editor", "Eve");
+    const elsewhere = await newMember("Olga");
+    for (const person of [ada, eve, elsewhere]) w.events.set(person.personId, [SYNC]);
+    for (const person of [ada, eve]) w.contacts.set(person.personId, [contact("people/c1", "Sam Okafor")]);
+    const sam = await w.ask(eve, { type: "record.refer", sourceId: "people", id: "people/c1" });
+    await w.ask(eve, { type: "note.create", text: `# About Sam\n\n${sam.text}\n` });
+    expect(await w.ask(ada, { type: "record.notes", sourceId: "people", id: "people/c1" })).toEqual({ notes: [] });
+    // A reference made by someone in no part of the workspace, copied into a note here, is not a teammate's.
+    const olgas = await w.ask(elsewhere, { type: "record.refer", sourceId: "cal", id: "team s1" });
+    await w.ask(eve, { type: "note.create", text: `# Copied\n\n${olgas.text}\n` });
+    expect(await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "team s1" })).toEqual({ notes: [] });
+    // Nor is a member who has left.
+    const eves = await w.ask(eve, { type: "record.refer", sourceId: "cal", id: "team s1" });
+    await w.ask(eve, { type: "note.create", text: `# Eve's take\n\n${eves.text}\n` });
+    expect((await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "team s1" })).notes.map((n) => n.title)).toEqual(["Eve's take"]);
+    await w.ask(ada, { type: "member.remove", memberId: eve.personId });
+    expect(await w.ask(ada, { type: "record.notes", sourceId: "cal", id: "team s1" })).toEqual({ notes: [] });
+  });
+});
+
 describe("a reference in a note, asked about by everyone it doesn't belong to", () => {
   const PRIVATE = /Cafe-Lula-private|contract-private|sam-private@example\.com|555-0100|Okafor-Works-private|"a1"|people\/c1/;
   const NEVER_MADE = "aaaaaaaaaaaa";

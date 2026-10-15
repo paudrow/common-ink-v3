@@ -75,7 +75,7 @@ function useDrawing(open: (noteId: string) => void) {
       plugins: DRAWING,
       // Whoever holds a link isn't a member and has no settings: HTML in a note it opens runs only when they press Run.
       settings: { "html.run": "ask first" },
-      write: () => {},
+      write: () => false,
       mac: MAC,
       provide: (plugin) => ({
         workspace: { id: "", name: "", role: "guest" },

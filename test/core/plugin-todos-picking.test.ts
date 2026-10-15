@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choicesFor, picking, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
+import { choicesFor, picking, repeatOf, repeats, sameRule, tagged, typedTag, type Opened, type Picking, type PickingEvent } from "../../src/web/plugins/todos/picking.ts";
 
 const run = (events: PickingEvent[], from: Picking = null) => events.reduce(picking, from);
 const open = (row: string, chip: Opened): PickingEvent => ({ type: "open", row, chip });
@@ -43,42 +43,71 @@ describe("what a chip's popover offers", () => {
     expect(choicesFor("due", { due: null, importance: 0, every: null }, now).map((c) => c.label)).toEqual(["Today", "Tomorrow", "Next week"]);
   });
 
-  it("for importance: every level, most first, the one it has marked", () => {
+  it("for a todo that repeats: Skip to the date it moves to, before Clear, and with the year when it is another", () => {
+    expect(choicesFor("due", { due: "2026-10-14", importance: 0, every: "1w" }, now).slice(3)).toEqual([
+      { label: "Skip to Oct 21", change: { skip: true }, current: false },
+      { label: "Clear", change: { due: null }, current: false },
+    ]);
+    expect(choicesFor("due", { due: "2026-12-20", importance: 0, every: "1m" }, now)[3]!.label).toBe("Skip to Jan 20, 2027");
+    // The last time of a rule that ends has no later one to skip to.
+    expect(choicesFor("due", { due: "2026-10-14", importance: 0, every: "1d-times-1" }, now).map((c) => c.label)).toEqual(["Today", "Tomorrow", "Next week", "Clear"]);
+  });
+
+  it("for priority: High, Medium and Low in words, then None, the one it has marked", () => {
     expect(choicesFor("importance", { due: null, importance: 2, every: null }, now)).toEqual([
-      { label: "!!!", change: { importance: 3 }, current: false },
-      { label: "!!", change: { importance: 2 }, current: true },
-      { label: "!", change: { importance: 1 }, current: false },
-      { label: "Normal", change: { importance: 0 }, current: false },
+      { label: "High", change: { importance: 3 }, current: false },
+      { label: "Medium", change: { importance: 2 }, current: true },
+      { label: "Low", change: { importance: 1 }, current: false },
+      { label: "None", change: { importance: 0 }, current: false },
+    ]);
+  });
+});
+
+describe("what the Repeat popover lists", () => {
+  it("is Doesn't repeat, the common rules with the days a due date gives them, and Custom", () => {
+    // 14 October 2026 is a Wednesday.
+    expect(repeats("2026-10-14")).toEqual([
+      { label: "Doesn't repeat", every: null },
+      { label: "Daily", every: "1d" },
+      { label: "Weekdays", every: "mon,tue,wed,thu,fri" },
+      { label: "Weekly on Wednesday", every: "1w" },
+      { label: "Monthly on the 14th", every: "1m" },
+      { label: "Yearly", every: "1y" },
+      { label: "Custom", every: null, custom: true },
+    ]);
+    expect(repeats(null).map((r) => r.label)).toEqual(["Doesn't repeat", "Daily", "Weekdays", "Weekly", "Monthly", "Yearly", "Custom"]);
+  });
+
+  it("checks the one a rule is, however it is written, Doesn't repeat for none, and Custom for any other", () => {
+    const listed = repeats("2026-10-14");
+    expect([null, "1d", "1w", "mon,tue,wed,thu,fri", "1m", "1y", "2w", "1w-times-3", "3d-after-done", "sometimes"].map((every) => repeatOf(every, listed).label)).toEqual([
+      "Doesn't repeat",
+      "Daily",
+      "Weekly on Wednesday",
+      "Weekdays",
+      "Monthly on the 14th",
+      "Yearly",
+      "Custom",
+      "Custom",
+      "Custom",
+      "Custom",
     ]);
   });
 
-  const picks = (current?: string) =>
-    [
-      ["Daily", "1d"],
-      ["Every weekday", "mon,tue,wed,thu,fri"],
-      ["Weekly", "1w"],
-      ["Every 2 weeks", "2w"],
-      ["Monthly", "1m"],
-      ["Yearly", "1y"],
-    ].map(([label, every]) => ({ label, change: { every }, current: every === current }));
+  it("knows a rule written another way, and none, as the same", () => {
+    expect([sameRule(null, null), sameRule("1w", "1w"), sameRule("fri,mon", "mon,fri"), sameRule("1w", null), sameRule(null, "1w"), sameRule("1w", "2w"), sameRule("sometimes", "never")]).toEqual([true, true, true, false, false, false, false]);
+  });
+});
 
-  it("for a recurrence: the six common rules, the one in force marked, then Skip this one with the day it moves to, and Stop recurring", () => {
-    expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: "1w" }, now)).toEqual([
-      ...picks("1w"),
-      { label: "Skip this one", detail: "due Oct 21", change: { skip: true }, current: false },
-      { label: "Stop recurring", change: { every: null }, current: false },
-    ]);
+describe("adding a tag from a row", () => {
+  it("takes a typed tag with or without its #, and nothing that can't be one tag", () => {
+    expect(["home", "#home", "  #Home/garden-2 ", "a_b"].map(typedTag)).toEqual(["home", "home", "Home/garden-2", "a_b"]);
+    expect(["", "#", "12", "two words", "#a#b", "a.b", "-a"].map(typedTag)).toEqual([null, null, null, null, null, null, null]);
   });
 
-  it("for a todo that doesn't recur yet: only the six rules", () => {
-    expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: null }, now)).toEqual(picks());
-  });
-
-  it("for a rule on its last time: no Skip, since there is no later one to move to, and Stop", () => {
-    expect(choicesFor("every", { due: "2026-10-14", importance: 0, every: "1d-times-1" }, now)).toEqual([...picks(), { label: "Stop recurring", change: { every: null }, current: false }]);
-  });
-
-  it("for a rule that lands in another year: the skip says the year", () => {
-    expect(choicesFor("every", { due: "2026-12-20", importance: 0, every: "1m" }, now).find((c) => c.label === "Skip this one")?.detail).toBe("due Jan 20, 2027");
+  it("writes the tag after the words, once, whatever case it is in there already", () => {
+    expect(tagged("Call the bank", "money")).toBe("Call the bank #money");
+    expect(tagged("Call the bank #Money", "money")).toBe("Call the bank #Money");
+    expect(tagged("", "money")).toBe("#money");
   });
 });

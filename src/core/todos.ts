@@ -145,6 +145,11 @@ export interface TodoChange {
   lastDone?: LastDone | null;
   /** True moves a recurring todo's due date to its next one, with nothing checked off. */
   skip?: boolean;
+  /**
+   * What the todo says, as `words` reads it: the line but its list mark, checkbox, importance and due date,
+   * with its tags. Its importance stays where it is and its due date goes after the words. One line.
+   */
+  words?: string;
   /** Assigns it to a person, unless it is theirs already: a member by their id and name, anyone else by name. */
   assign?: { id?: string | null; name: string };
   /** Takes it from a person, named by their id or by a name ignoring case, or from each of several such. */
@@ -162,7 +167,7 @@ export interface Edit extends Span {
  * importance right after the checkbox. Nothing else on the line is touched. None when the line
  * isn't a todo or already says all of it.
  */
-export function todoEdits(line: string, change: TodoChange): Edit[] {
+export function todoEdits(line: string, change: Omit<TodoChange, "words">): Edit[] {
   const todo = parseTodo(line);
   if (!todo) return [];
   const edits: Edit[] = [];
@@ -185,7 +190,7 @@ export function todoEdits(line: string, change: TodoChange): Edit[] {
   }
 
   if (change.every !== undefined && change.every !== (todo.every?.written ?? null)) {
-    if (change.every !== null && !parseRule(change.every)) throw new RangeError(`${change.every} isn't a way to recur. docs/todos.md has the rules, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 and 1m-times-5`);
+    if (change.every !== null && !parseRule(change.every)) throw new RangeError(`${change.every} isn't a way to repeat. docs/todos.md has the rules, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 and 1m-times-5`);
     if (!todo.every) tail += ` every:${change.every}`;
     else if (change.every) edits.push({ from: todo.every.from, to: todo.every.to, insert: `every:${change.every}` });
     else edits.push({ from: todo.every.from - 1, to: todo.every.to, insert: "" });
@@ -213,8 +218,25 @@ export function todoEdits(line: string, change: TodoChange): Edit[] {
   return edits.sort((a, b) => a.from - b.from);
 }
 
-/** The todo's line with `change` made, and every other character as it was. */
-export function rewriteTodo(line: string, change: TodoChange): string {
+/**
+ * The todo's line saying `words`, with the importance it has before them and the due date, the rule and
+ * the last-done mark it has after them, unless the words write their own: then theirs is the one, and
+ * the line has one of each.
+ */
+function reworded(line: string, words: string): string {
+  if (/[\r\n]/.test(words)) throw new RangeError("A todo's words are one line");
+  const todo = parseTodo(line);
+  const said = words.trim();
+  if (!todo || said.replace(/\s+/g, " ") === todo.words) return line;
+  const own = parseTodo(`- [ ] ${said}`)!;
+  const kept = (span: Span | null, theirs: Span | null) => (span && !theirs ? line.slice(span.from, span.to) : "");
+  const after = [kept(todo.due, own.due), kept(todo.every, own.every), kept(todo.lastDone, own.lastDone)];
+  return [line.slice(0, todo.box.to), kept(todo.importanceAt, own.importanceAt), said, ...after].filter(Boolean).join(" ");
+}
+
+/** The todo's line with `change` made. Every character it doesn't change is as it was, unless its words are rewritten. */
+export function rewriteTodo(line: string, { words, ...change }: TodoChange): string {
+  if (words !== undefined) line = reworded(line, words);
   let out = "";
   let at = 0;
   for (const edit of todoEdits(line, change)) {
@@ -259,9 +281,9 @@ export function completeTodo(line: string, on: string): Completed {
  */
 export function skipTodo(line: string, on: string): string {
   const todo = parseTodo(line);
-  if (!todo?.every || todo.done) throw new RangeError("Only an open todo that recurs can be skipped");
+  if (!todo?.every || todo.done) throw new RangeError("Only an open todo that repeats can be skipped");
   const next = skippedTo(todo.every.rule, { due: todo.due?.date ?? null, on });
-  if (!next) throw new RangeError("This is the last time this todo recurs, so there is no later one to skip to. Check it off, or stop it recurring");
+  if (!next) throw new RangeError("This is the last time this todo repeats, so there is no later one to skip to. Check it off, or stop it repeating");
   return rewriteTodo(line, { due: next, every: writeRule(counted(todo.every.rule)) });
 }
 

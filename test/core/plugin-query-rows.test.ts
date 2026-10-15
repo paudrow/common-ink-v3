@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseQuery } from "../../src/web/plugin-api.ts";
 import { builderReducer, builtOf, filled, readBuilder, termOf, type BuilderEvent, type Row } from "../../src/web/plugins/lib/queryRows.ts";
 
-const row = (key: Row["key"], value: string, more: Partial<Row> = {}): Row => ({ key, not: false, cmp: "=", value, ...more });
+const row = (field: Row["field"], value: string, more: Partial<Row> = {}): Row => ({ field, not: false, cmp: "=", value, ...more });
 const read = (text: string, scope: "notes" | "todos" = "notes") => {
   const parsed = parseQuery(text, scope);
   if (!parsed.ok) throw new Error(parsed.error.message);
@@ -21,7 +21,7 @@ describe("the builder's rows", () => {
       sort: "title-asc",
     });
     expect(read("is:archived OR #money OR budget")).toEqual({ rows: [row("is", "archived"), row("tag", "money"), row("text", "budget")], match: "any", in: [], sort: null });
-    expect(read("due:<today importance:>=2", "todos")?.rows).toEqual([row("due", "today", { cmp: "<" }), row("importance", "2", { cmp: ">=" })]);
+    expect(read("due:<today importance:>=2", "todos")?.rows).toEqual([row("due", "today", { cmp: "<" }), row("priority", "medium", { cmp: ">=" })]);
   });
 
   it("can't say a group inside a group, AND with OR, or a NOT of more than one thing", () => {
@@ -47,15 +47,15 @@ describe("the builder's rows", () => {
     expect(builder.text).toBe('budget OR -folder:"Common Ink" in:title sort:updated-asc');
     builder = builderReducer(builder, { type: "remove", at: 0 });
     expect(builder.text).toBe('-folder:"Common Ink" in:title sort:updated-asc');
-    expect(after("", [{ type: "add" }, { type: "set", at: 0, row: row("has", "todo", { not: true }) }]).text).toBe("no:todo");
-    expect(after("", [{ type: "add" }, { type: "set", at: 0, row: row("text", "second quarter") }]).text).toBe('"second quarter"');
+    expect(after("", [{ type: "set", at: 0, row: row("has", "todo", { not: true }) }]).text).toBe("no:todo");
+    expect(after("", [{ type: "set", at: 0, row: row("text", "second quarter") }]).text).toBe('"second quarter"');
   });
 
   it("hold a value the language can't read as a row still being filled in, and never write it", () => {
     expect(filled(row("updated", "2026-10"), "notes")).toBe(false);
     expect(filled(row("updated", "2026-10-01"), "notes")).toBe(true);
     expect(filled(row("updated", "2026-10-01", { to: "" }), "notes")).toBe(false);
-    expect(filled(row("importance", "9"), "todos")).toBe(false);
+    expect(filled(row("priority", "urgent"), "todos")).toBe(false);
     expect(filled(row("due", "today"), "notes")).toBe(false);
     expect(filled(row("tag", "not a tag"), "notes")).toBe(false);
     expect(filled(row("text", "+++"), "notes")).toBe(false);
@@ -65,13 +65,14 @@ describe("the builder's rows", () => {
   });
 
   it("read a row's value as the language reads it typed: a tag or a day in capitals, a tag with its #, a word that is an operator's", () => {
-    const set = (to: Row, scope: "notes" | "todos" = "notes") => after("", [{ type: "add" }, { type: "set", at: 0, row: to }], scope);
+    const set = (to: Row, scope: "notes" | "todos" = "notes") => after("", [{ type: "set", at: 0, row: to }], scope);
     expect(set(row("tag", "Money")).text).toBe("tag:money");
     expect(set(row("tag", "#Money")).text).toBe("tag:money");
     expect(set(row("tag", "#money", { not: true })).text).toBe("-tag:money");
     expect(set(row("due", "Today", { cmp: "<" }), "todos").text).toBe("due:<today");
     expect(set(row("updated", "YESTERDAY", { to: "Today" })).text).toBe("updated:yesterday..today");
-    expect(set(row("importance", "02"), "todos").text).toBe("importance:2");
+    expect(set(row("priority", "02"), "todos").text).toBe("priority:medium");
+    expect(set(row("priority", "High"), "todos").text).toBe("priority:high");
     expect(set(row("text", "AND")).text).toBe('"AND"');
     expect(set(row("text", "NOT", { not: true })).text).toBe('-"NOT"');
     expect(set(row("text", "or")).text).toBe("or");
@@ -90,7 +91,7 @@ describe("the builder's rows", () => {
     expect(termOf(row("updated", "2026-10"), "notes")).toEqual({ why: 'updated: takes a day written YYYY-MM-DD, or today, yesterday, tomorrow, 7d for seven days ago or +7d for seven days ahead. "2026-10" is none of them' });
     expect(termOf(row("due", "next week"), "todos")).toEqual({ why: 'due: takes a day written YYYY-MM-DD, or today, yesterday, tomorrow, 7d for seven days ago or +7d for seven days ahead. "next" is none of them' });
     expect(termOf(row("due", "today tomorrow"), "todos")).toEqual({ why: "This isn't one due: as the query language reads it" });
-    expect(termOf(row("importance", "9"), "todos")).toEqual({ why: 'importance: takes a number from 0 to 3, and "9" isn\'t one' });
+    expect(termOf(row("priority", "9"), "todos")).toEqual({ why: 'priority: takes high, medium, low or none, and "9" isn\'t one' });
     expect(termOf(row("due", "today"), "notes")).toEqual({ why: "due: is for todos, and this is a search of notes" });
     expect(termOf(row("text", "+++"), "notes")).toEqual({ why: "There are no letters or digits here to look for" });
   });
@@ -104,6 +105,30 @@ describe("the builder's rows", () => {
     builder = builderReducer(builder, { type: "read", text: "titel:x" });
     expect(builder).toMatchObject({ built: null, unshown: "unread", text: "titel:x" });
     expect(builderReducer(builder, { type: "add" })).toBe(builder);
-    expect(builderReducer(builder, { type: "read", text: "" })).toMatchObject({ built: { rows: [] }, unshown: null });
+    expect(builderReducer(builder, { type: "read", text: "" })).toMatchObject({ built: { rows: [row("text", "")] }, unshown: null });
+  });
+
+  it("open on a first row ready to fill in when the query has none, which adds nothing to the query, and keep one when the last is removed", () => {
+    expect(readBuilder("notes", "").built!.rows).toEqual([row("text", "")]);
+    expect(readBuilder("notes", "sort:title-asc")).toMatchObject({ text: "sort:title-asc", built: { rows: [row("text", "")], sort: "title-asc" } });
+    expect(readBuilder("notes", "budget").built!.rows).toEqual([row("text", "budget")]);
+    let builder = after("", [{ type: "match", match: "any" }]);
+    expect(builder.text).toBe("");
+    expect(builder.built!.rows).toEqual([row("text", "")]);
+    builder = after("budget", [{ type: "remove", at: 0 }]);
+    expect(builder.text).toBe("");
+    expect(builder.built!.rows).toEqual([row("text", "")]);
+    // A row being filled in when the text is cleared is the one row: no second empty one joins it.
+    builder = after("budget", [{ type: "add" }, { type: "set", at: 1, row: row("tag", "") }, { type: "read", text: "" }]);
+    expect(builder.built!.rows).toEqual([row("tag", "")]);
+  });
+
+  it("put Shared and Private under Visibility, apart from the states, and write both as is:", () => {
+    expect(read("is:shared -is:private is:archived")?.rows).toEqual([row("visibility", "shared"), row("visibility", "private", { not: true }), row("is", "archived")]);
+    expect(after("", [{ type: "set", at: 0, row: row("visibility", "private") }]).text).toBe("is:private");
+    expect(after("", [{ type: "set", at: 0, row: row("visibility", "shared", { not: true }) }], "todos").text).toBe("-is:shared");
+    // A word of the other field is no Visibility: it is said why, and kept out of the query.
+    expect(termOf(row("visibility", "archived"), "notes")).toEqual({ why: "This isn't one is: as the query language reads it" });
+    expect(termOf(row("is", "shared"), "notes")).toEqual({ why: "This isn't one is: as the query language reads it" });
   });
 });

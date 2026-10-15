@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from "react";
-import { Icon, carry, useDismiss, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { Icon, carry, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
@@ -16,6 +16,11 @@ function Sidebar({ app }: ViewProps) {
     if (on !== null) setMore(true);
   }
   const open = app.sidebarOpen;
+  /** The section shown over the page from the closed bar, if any. */
+  const [picking, setPicking] = useState<App["sectionNames"][number] | null>(null);
+  const pickerButton = useRef<HTMLButtonElement>(null);
+  const closePicker = useCallback(() => setPicking(null), []);
+  if ((open || app.focus) && picking) setPicking(null);
   const links = (nav: PageInfo["nav"]) => under(nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled={open} />);
   const pages = (
     <>
@@ -35,10 +40,21 @@ function Sidebar({ app }: ViewProps) {
         <NewNote app={app} />
         {pages}
         {app.sectionNames.map((section) => (
-          <button key={section.id} type="button" className="icon-button" aria-label={section.label} title={section.label} onClick={app.toggleSidebar}>
+          <button
+            key={section.id}
+            ref={picking?.id === section.id ? pickerButton : undefined}
+            type="button"
+            className="icon-button"
+            aria-label={section.label}
+            title={section.label}
+            aria-haspopup="dialog"
+            aria-expanded={picking?.id === section.id}
+            onClick={() => setPicking(picking?.id === section.id ? null : section)}
+          >
             <Icon name={section.icon} />
           </button>
         ))}
+        {picking && <Picker app={app} section={picking} anchor={pickerButton} onClose={closePicker} />}
       </nav>
     );
   return (
@@ -50,6 +66,67 @@ function Sidebar({ app }: ViewProps) {
       </nav>
       {app.sections}
     </aside>
+  );
+}
+
+/** How long the picker stays once something is opened from it, so the second click of a double click still lands on its row. */
+const LINGER_MS = 300;
+const EDGE = 8;
+
+/**
+ * One of the sidebar's sections over the page beside its bar, for picking a folder or a tag while
+ * the sidebar is closed. It takes no room: nothing under it moves. It goes once something is opened from it, on
+ * Escape, and on a press outside it, and the cursor goes back to the button that opened it.
+ */
+function Picker({ app, section, anchor, onClose }: ViewProps & { section: App["sectionNames"][number]; anchor: RefObject<HTMLButtonElement | null>; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [leaving, setLeaving] = useState(false);
+  /** A row being dragged out of it to the editor area, which it then lets the pointer through to. */
+  const [dragging, setDragging] = useState(false);
+  useDismiss(onClose, ref, anchor);
+  const opened = useCallback(() => setLeaving(true), []);
+  useLayoutEffect(() => {
+    if (!leaving) return;
+    const timer = setTimeout(onClose, LINGER_MS);
+    return () => clearTimeout(timer);
+  }, [leaving, onClose]);
+
+  useLayoutEffect(() => {
+    const el = ref.current!;
+    const button = anchor.current;
+    const place = () => {
+      const top = button?.getBoundingClientRect().top ?? EDGE;
+      el.style.top = `${Math.max(EDGE, Math.min(top, innerHeight - EDGE - el.offsetHeight))}px`;
+    };
+    place();
+    (el.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]') ?? el.querySelector<HTMLElement>("[tabindex], button, a[href]"))?.focus();
+    // It is taller once a folder in it is opened out, and may then need to start higher to fit.
+    const sized = new ResizeObserver(place);
+    sized.observe(el);
+    addEventListener("resize", place);
+    return () => {
+      sized.disconnect();
+      removeEventListener("resize", place);
+      if (button?.isConnected && (el.contains(document.activeElement) || document.activeElement === document.body)) button.focus();
+    };
+  }, [anchor]);
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label={section.label}
+      className="sidebar-picker"
+      data-leaving={leaving || undefined}
+      data-dragging={dragging || undefined}
+      // Not as the drag starts: what is dragged is drawn from the row as it is then.
+      onDragStart={() => setTimeout(() => setDragging(true))}
+      onDragEnd={onClose}
+      // The cursor taken out of it, as by Tab, leaves nothing floating over the page behind it.
+      onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && e.relatedTarget !== anchor.current && onClose()}
+    >
+      {app.sectionsOpening(opened, section.id)}
+    </div>
   );
 }
 

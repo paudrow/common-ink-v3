@@ -12,13 +12,15 @@ export const IDLE_MS = 90;
 /** How far the speed of the last moments carries the settling, in ms of travel, and at most half a day either way. */
 const CARRY_MS = 80;
 const MOST_CARRY = 0.5;
+/** A slide that has gone this far past the edge it left, in pixels, or half a day if that is less, goes on to the next edge: on a day as wide as the Day view's, half a day is a long way to swipe. */
+const COMMIT_PX = 72;
 /** A glide that would pass more days than this starts this many days short of where it lands. */
 const FARTHEST_GLIDE = 7;
 
 export type Motion =
   | { kind: "still" }
-  /** Moving under a wheel. `velocity` is in days a millisecond, smoothed over the last few events. */
-  | { kind: "wheeling"; at: number; velocity: number }
+  /** Moving under a wheel. `velocity` is in days a millisecond, smoothed over the last few events; `heading` is which way the last event moved them, and `column` a day's width in pixels. */
+  | { kind: "wheeling"; at: number; velocity: number; heading: -1 | 0 | 1; column: number }
   /** Settling eases out from where a wheel left the days; a glide asked for by a button or key eases in and out. */
   | { kind: "gliding"; from: number; to: number; start: number; duration: number; settling: boolean };
 
@@ -47,9 +49,11 @@ function glide(from: number, to: number, start: number, duration: number, settli
   return from === to ? { kind: "still" } : { kind: "gliding", from, to, start, duration, settling };
 }
 
-/** The day the days settle on: the nearest edge, nudged the way they were moving. */
-export function settleOn(x: number, velocity: number): number {
+/** The day the days settle on: the nearest edge, nudged the way they were moving, or the next edge the way they were heading once they went far enough past the one they left. */
+export function settleOn(x: number, velocity: number, heading: -1 | 0 | 1 = 0, column = 0): number {
   const carry = Math.max(-MOST_CARRY, Math.min(MOST_CARRY, velocity * CARRY_MS));
+  const left = heading > 0 ? Math.floor(x) : Math.ceil(x);
+  if (heading !== 0 && Math.abs(x - left) * column >= Math.min(COMMIT_PX, column / 2)) return left + heading;
   return Math.round(x + carry);
 }
 
@@ -65,7 +69,8 @@ export function sideways(state: Sideways, push: Push): Sideways {
     // The first event of a run says nothing of speed; one notch of a mouse wheel then settles on the nearest day.
     const was = state.motion.kind === "wheeling" && push.at - state.motion.at < IDLE_MS ? state.motion : null;
     const velocity = was ? was.velocity * 0.6 + (days / Math.max(8, push.at - was.at)) * 0.4 : 0;
-    return { x, motion: { kind: "wheeling", at: push.at, velocity }, axis, axisAt: push.at };
+    const heading = days > 0 ? 1 : days < 0 ? -1 : was ? was.heading : 0;
+    return { x, motion: { kind: "wheeling", at: push.at, velocity, heading, column: push.column }, axis, axisAt: push.at };
   }
   if (push.type === "go") {
     const from = position(state, push.at);
@@ -75,7 +80,7 @@ export function sideways(state: Sideways, push: Push): Sideways {
   }
   const { motion } = state;
   if (motion.kind === "wheeling" && push.at - motion.at >= IDLE_MS) {
-    const to = settleOn(state.x, motion.velocity);
+    const to = settleOn(state.x, motion.velocity, motion.heading, motion.column);
     return { ...state, motion: glide(state.x, to, push.at, Math.min(420, 160 + 260 * Math.abs(to - state.x)), true) };
   }
   if (motion.kind === "gliding") {

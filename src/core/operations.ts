@@ -24,6 +24,7 @@ import {
   type Folder,
   type HistoryEntry,
   type LinkedNote,
+  type NoteAbout,
   type ListedTodo,
   type Mentioned,
   type Note,
@@ -45,11 +46,12 @@ import {
   type Written,
 } from "./protocol.ts";
 import { removing, forgetRemoved } from "./purge.ts";
-import { FILTERS, MAX_BOUND, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
+import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, contactCards, createEvent, listContacts, listEvents, listSources, readRecord, refer, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, contactCards, createEvent, listContacts, listEvents, listSources, readRecord, referencesTo, refer, updateEvent, type Sources } from "./sources.ts";
+import { referencesIn } from "./references.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
@@ -609,7 +611,9 @@ async function replay(ctx: Context, id: string, revision: number, current: numbe
   return { text, since };
 }
 
-const MAX_WRITE_ATTEMPTS = 5;
+const MAX_WRITE_ATTEMPTS = 12;
+/** The longest wait before a write's second attempt. Each later attempt may wait as much again. */
+const WRITE_RETRY_MS = 15;
 /** Reverting an author reads each note's whole record and costs a few queries a note, and a request is allowed only so many. */
 const REVERT_AUTHOR_NOTES = 10;
 /** A handful of statements a note, in one batch. */
@@ -1000,13 +1004,19 @@ async function recordTakenBack(ctx: Context, row: NoteRow, history: readonly Rec
   return { next, ...(refiled.unfiled && { unfiled: refiled.unfiled }) };
 }
 
-/** Runs a write again from the note as it now stands, each time another write took its revision. */
+/**
+ * Runs a write again from the note as it now stands, each time another write took its revision.
+ * Writers that lost to the same one wait for different lengths of time, so they don't all meet
+ * again. One that still can't get in is told so as a conflict: nothing of it was written, and the
+ * same request sent again is merged as any other.
+ */
 async function settle<T>(write: () => Promise<T | null>): Promise<T> {
   for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
     const done = await write();
     if (done !== null) return done;
+    if (attempt < MAX_WRITE_ATTEMPTS) await new Promise((resume) => setTimeout(resume, Math.random() * WRITE_RETRY_MS * attempt));
   }
-  throw new Error("The note changed under every attempt to write it");
+  throw new OpError("conflict", "The note was being changed by others too fast for this change to be written. Nothing of it was: send it again");
 }
 
 interface ChangeRow {
@@ -1534,7 +1544,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         ...(op.dueFrom ? [due(">=", op.dueFrom)] : []),
         ...(op.dueTo ? [due("<=", op.dueTo)] : []),
         ...(op.noDue ? [{ kind: "not", of: { kind: "filter", key: "has", cmp: "=", value: "due" } } as const] : []),
-        ...(op.importance ? [any(op.importance.map((level): Filter => ({ kind: "filter", key: "importance", cmp: "=", value: String(level) })))] : []),
+        ...(op.importance ? [any(op.importance.map((level): Filter => ({ kind: "filter", key: "priority", cmp: "=", value: PRIORITIES[level] })))] : []),
         ...(op.noteId ? [{ kind: "note", id: op.noteId } as const] : []),
         ...(op.assignee === undefined ? [] : [{ kind: "filter", key: "assignee", cmp: "=", value: op.assignee } as const]),
         ...(op.assignedToMe ? [{ kind: "filter", key: "assignee", cmp: "=", value: "@me" } as const] : []),
@@ -2446,4 +2456,24 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "person.read": { needs: "view", run: readPerson },
   "record.refer": { needs: "view", own: true, changes: true, run: (ctx, op) => refer(asker(ctx), op.sourceId, op.id) },
   "record.read": { needs: "view", own: true, run: (ctx, op) => readRecord(asker(ctx), op.ref) },
+  "record.notes": {
+    needs: "view",
+    own: true,
+    async run(ctx, op) {
+      const refs = await referencesTo(asker(ctx), ctx.workspaceId, op.sourceId, op.id);
+      if (!refs.length) return { notes: [] };
+      await mend(ctx);
+      // Search finds the notes with a ref among their words; the note's text says which hold it as a reference, and not in code.
+      const { results } = await ctx.db
+        .prepare(
+          `SELECT n.id, n.title, n.text, n.updated_at, CASE WHEN n.private_owner IS NULL THEN 'workspace' WHEN EXISTS (SELECT 1 FROM grants g WHERE g.note_id = n.id) THEN 'shared' ELSE 'private' END AS audience
+           FROM notes n WHERE n.workspace_id = ?1 AND n.id IN (SELECT r.note_id FROM note_search s JOIN note_search_rows r ON r.id = s.rowid WHERE s.note_search MATCH ?2) AND ${SEEN("n", "?3", "kept")}
+           ORDER BY n.updated_at DESC, n.id`,
+        )
+        .bind(ctx.workspaceId, `workspace : "${ctx.workspaceId.replace(/[^a-z0-9]/g, "")}" AND text : (${refs.map((ref) => `"${ref}"`).join(" OR ")})`, ctx.sight.bind)
+        .all<{ id: string; title: string; text: string; updated_at: number; audience: NoteAbout["audience"] }>();
+      const notes = results.filter((n) => referencesIn(n.text).some((found) => refs.includes(found.ref)));
+      return { notes: notes.map((n): NoteAbout => ({ id: n.id, title: n.title, updatedAt: n.updated_at, audience: n.audience })) };
+    },
+  },
 };

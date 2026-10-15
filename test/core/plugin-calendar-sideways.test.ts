@@ -29,6 +29,19 @@ describe("the days slid sideways", () => {
     expect([settleOn(3.4, 0), settleOn(3.4, 0.002), settleOn(3.6, -0.002), settleOn(3.2, 1)]).toEqual([3, 4, 3, 4]);
   });
 
+  it("on a day as wide as the Day view's, go on to the next day once a swipe is well past the edge it left, and settle back from a nudge", () => {
+    const wide = (at: number, dx: number, dy = 0, shift = false): Push => ({ type: "wheel", dx, dy, shift, at, column: 1000 });
+    const swipe = frames(run(still(100), [wide(0, 45), wide(16, 45), wide(32, 45), wide(48, 45)]), 48 + IDLE_MS);
+    expect(swipe.x, "a 180px swipe of a 1000px day is the next day").toBe(101);
+    const back = frames(run(still(100), [wide(0, -45), wide(16, -45), wide(32, -45)]), 32 + IDLE_MS);
+    expect(back.x, "and the day before, the other way").toBe(99);
+    const nudge = frames(run(still(100), [wide(0, 20), wide(40, 20)]), 40 + IDLE_MS);
+    expect(nudge.x, "a 40px nudge settles back").toBe(100);
+    const notch = frames(run(still(100), [wide(0, 0, 100, true)]), IDLE_MS);
+    expect(notch.x, "one notch of shift and the wheel is the next day").toBe(101);
+    expect([settleOn(3.2, 0, 1, 1000), settleOn(3.8, 0, -1, 1000), settleOn(3.05, 0, 1, 1000), settleOn(3.3, 0, 1, 100)]).toEqual([4, 3, 3, 3]);
+  });
+
   it("move only while the wheel runs: a frame before it has been idle long enough leaves them where they are", () => {
     const moving = run(still(100), [wheel(0, 50)]);
     expect(sideways(moving, { type: "frame", at: IDLE_MS - 1 })).toBe(moving);

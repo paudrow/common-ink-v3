@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 import { category, group, json, openJson, openOptions, setPlugin, typeJson } from "./settings-helpers.ts";
 
 let errors: string[];
@@ -103,7 +103,7 @@ test("editing the JSON changes the options and the app, and editing the options 
 
 test("a plugin's options are listed under it with their schema and apply without a reload, and its switch is on the Plugins page and not among them", async ({ page }) => {
   await openSettings(page);
-  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list", "HTML embeds", "Daily notes", "Mentions", "Vim mode"]);
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list", "HTML embeds", "Calendar", "Daily notes", "Mentions", "Vim mode"]);
   const noteList = await category(page, "Note list");
 
   await expect(noteList.getByRole("checkbox")).toHaveCount(1);
@@ -300,6 +300,7 @@ for (const width of [1700, 1280, 900, 560]) {
     await page.setViewportSize({ width, height: 480 });
     await openSettings(page);
     await page.goto("/settings/keyboard");
+    await pinPanel(page, "Info");
     await expect(page.getByRole("status")).toHaveText("Saved");
     const row = page.getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Toggle inspector/ });
     await row.scrollIntoViewIfNeeded();
@@ -565,7 +566,7 @@ test("a plugin that asks to change settings is refused and nothing is written, w
   await page.addInitScript(() => {
     interface Handed {
       perform(op: unknown): Promise<unknown>;
-      settings: { get(name: string): unknown };
+      settings: { get(name: string): unknown; set(name: string, value: unknown): boolean };
       commands: { register(command: unknown): void };
       views: { register(slot: string, view: unknown): void };
     }
@@ -584,7 +585,8 @@ test("a plugin that asks to change settings is refused and nothing is written, w
               const wrote = await outcome(host.perform({ type: "settings.write", text: '{"core.theme":"dark","greedy.shout":true}' }));
               const read = await outcome(host.perform({ type: "settings.read" }));
               const listed = await outcome(host.perform({ type: "note.list" }));
-              (window as unknown as { __GREEDY__: unknown }).__GREEDY__ = { wrote, read, listed, setter: Object.keys(host.settings) };
+              const set = await outcome(Promise.resolve().then(() => host.settings.set("shout", true)));
+              (window as unknown as { __GREEDY__: unknown }).__GREEDY__ = { wrote, read, listed, set };
             },
           });
         },
@@ -603,7 +605,7 @@ test("a plugin that asks to change settings is refused and nothing is written, w
     wrote: "Greedy can't settings.write: a plugin can't read or change the member's settings",
     read: "Greedy can't settings.read: a plugin can't read or change the member's settings",
     listed: "done",
-    setter: ["get", "subscribe"],
+    set: "Greedy can't change shout: a plugin changes only a setting it declares remembered",
   });
   await expect.poll(() => stored(page)).toEqual({});
   await expect.poll(() => theme(page)).toBeNull();
@@ -721,6 +723,40 @@ test("Enter and Space given to commands leave buttons, links and checkboxes thei
   const recorder = page.getByRole("dialog", { name: "Record a key for Toggle inspector" });
   await expect(recorder.getByRole("group", { name: "Press the keys" })).toBeFocused();
   await page.keyboard.press("Space");
-  await expect(recorder).toContainText("SPACE begins with a key that types, and that presses a button or checkbox in focus. So it runs only where nothing is being typed and focus is on no such control.");
+  await expect(recorder).toContainText("Space begins with a key that types, and that presses a button or checkbox in focus. So it runs only where nothing is being typed and focus is on no such control.");
   await page.keyboard.press("Escape");
+});
+
+test("the key recorder keeps Tab inside it and closes on Escape from any of its buttons", async ({ page }) => {
+  await openSettings(page);
+  const keys = await category(page, "Keyboard shortcuts");
+  await page.getByRole("searchbox", { name: "Search settings" }).fill("toggle focus");
+  const open = keys.getByRole("row", { name: /Toggle focus/ }).getByRole("button", { name: "Record a key for Toggle focus" });
+  await open.click();
+  const recorder = page.getByRole("dialog", { name: "Record a key for Toggle focus" });
+  const box = recorder.getByRole("group", { name: "Press the keys" });
+  await expect(box).toBeFocused();
+  const inside = () => page.evaluate(() => document.activeElement?.closest("[role=dialog]") !== null && document.activeElement !== document.body);
+
+  // Tab went on out of the dialog, to the page behind it, where Escape closed nothing.
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    expect(await inside()).toBe(true);
+  }
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Shift+Tab");
+    expect(await inside()).toBe(true);
+  }
+  await box.focus();
+  await page.keyboard.press("Tab");
+  await expect(box).not.toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(recorder).toHaveCount(0);
+
+  // A press on the dialog's own words leaves the keyboard in it, so Escape still closes it.
+  await open.click();
+  await recorder.getByText("Press Enter to save and Escape to cancel.").click();
+  await page.keyboard.press("Escape");
+  await expect(recorder).toHaveCount(0);
+  expect(await stored(page)).toEqual({});
 });

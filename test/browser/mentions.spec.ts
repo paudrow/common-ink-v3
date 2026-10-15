@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, join, me, perform, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, connectAgent, join, me, perform, pinPanel, signInAsNewPerson, visitor } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -161,12 +161,15 @@ test("mentioning a member in a private note of mine offers to share it, and shar
   await expect(mentions(grace)).toHaveText(["@Sam Okafor", "@Ada Lovelace", "@Grace Hopper"]);
   await expect(editor(grace)).toHaveAttribute("contenteditable", "false");
 
+  // #66's inspector: Info, pinned so it stays, has Share.
+  await pinPanel(page, "Info");
   await page.getByRole("complementary", { name: "Inspector" }).getByRole("button", { name: "Share" }).click();
   await expect(shareDialog(page).getByRole("listitem", { name: "Grace Hopper" })).toContainText("let in to this private note");
 
   // Mentioned again, she can already see it, so nothing is asked.
   await shareDialog(page).getByRole("button", { name: "Close" }).click();
-  await notice(page).getByRole("button", { name: "Dismiss" }).click();
+  // A press on the card sends it away.
+  await notice(page).locator(".toast-text").click();
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("Enter");
@@ -260,18 +263,22 @@ test("a person mentioned on a todo is its assignee, drawn as a chip, and the Tod
   const who = page.getByRole("dialog", { name: "Assignees of Book the venue" });
   await expect(who.getByRole("button")).toHaveText([/@Grace Hopper/, "@Ada Lovelace", "@Sam Okafor"]);
   await who.getByRole("button", { name: "Unassign Grace Hopper" }).click();
-  await expect(rows).toHaveCount(0);
   await expect.poll(() => text(page, note.id, workspaceId)).toContain("- [ ] Book the venue\n");
+  // The list keeps its order: the row no longer matches, and stays where it was, dimmed, until Refresh.
+  await expect(rows.first()).toHaveAttribute("data-gone", "true");
+  await page.getByRole("group", { name: "Notice" }).getByRole("button", { name: "Refresh" }).click();
+  await expect(rows).toHaveCount(0);
   await filter(page, 'assignee:"Sam Okafor"');
   await rows.first().getByRole("button", { name: "Assigned to Sam Okafor" }).click();
   await page.getByRole("dialog", { name: "Assignees of Call the bank" }).getByRole("button", { name: "Assign to Ada Lovelace" }).click();
   await expect(rows.first().locator(".todo-assignee")).toHaveText(["@Sam Okafor", "@Ada Lovelace"]);
   await expect.poll(() => text(page, note.id)).toMatch(/- \[ \] Call the bank @\[\[Sam Okafor\]\] @\[\[[a-z0-9]{12}\|Ada Lovelace\]\]/);
 
-  // A todo with nobody is assigned from its "…".
+  // A todo with nobody has a quiet Assign chip in its place on the second line, after Priority and before the tags.
   await filter(page, "venue");
-  await rows.first().getByRole("button", { name: "More for Book the venue" }).click();
-  await page.getByRole("menuitem", { name: "Assign…" }).click();
+  await expect(rows.first().locator(".todo-chips .todo-chip")).toHaveClass([/todo-due/, /todo-every/, /todo-importance/, /todo-assign\b/, /todo-add-tag/]);
+  await expect(rows.first().getByRole("button", { name: "Assign: nobody" })).toHaveAttribute("data-unset", "true");
+  await rows.first().getByRole("button", { name: "Assign: nobody" }).click();
   await page.getByRole("dialog", { name: "Assignees of Book the venue" }).getByRole("button", { name: "Assign to Grace Hopper" }).click();
   await expect.poll(() => text(page, note.id)).toContain(`- [ ] Book the venue @[[${graceId}|Grace Hopper]]`);
 });

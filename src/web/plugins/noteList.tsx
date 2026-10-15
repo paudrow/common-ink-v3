@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, ago, dayOf, folderTitle, parseQuery, queryNames, useNow, type App, type FolderProps, type NoteSummary, type Plugin, type PluginHost, type SearchMatch } from "../plugin-api.ts";
+import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, ago, dayOf, folderTitle, parseQuery, queryNames, useInspected, useNow, type App, type Showing, type FolderProps, type NoteSummary, type Plugin, type PluginHost, type SearchMatch } from "../plugin-api.ts";
 import { reasonOf } from "./lib/FoundNote.tsx";
 import { lifecycle } from "./lib/lifecycle.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
@@ -35,6 +35,8 @@ export interface FinderProps extends FolderProps {
   queryOnly?: boolean;
   /** Whether the search field takes the keyboard when the list is drawn. */
   autoFocus?: boolean;
+  /** Whether the inspector is about the notes listed, called by the heading and the query, as on the Search page. */
+  inspected?: boolean;
   /** Takes the search out of this folder to every note, for a list that is of one folder. */
   onWiden?: () => void;
 }
@@ -93,7 +95,7 @@ function folderForNew(app: App, folderId: string) {
  * nothing typed it is the notes the app already holds, and nothing is asked of the server. With
  * something typed it is what the server's search finds in the folder, each card with the lines that matched.
  */
-export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, queryOnly, autoFocus, onWiden }: FinderProps) {
+export function NoteFinder({ app, host, folderId, readNote, snippets, view, act, kept, heading, queryOnly, autoFocus, inspected, onWiden }: FinderProps) {
   const ids = useId();
   const now = useNow();
   const { setArchived, items: menuFor } = useMemo(() => lifecycle(host), [host]);
@@ -209,6 +211,13 @@ export function NoteFinder({ app, host, folderId, readNote, snippets, view, act,
     });
   }, [inFolder, search, view.show, view.hasTodos, view.sort, order, namesArchived, namesTrashed, app.notes, app.trashed, folderId]);
   const notes = items.map((item) => item.note);
+  // History is then the history of the notes found, and Info counts them, each following the query.
+  // Told only once the list answers its query: while a search is on its way it says what it said before.
+  const told = useRef<Showing | null>(null);
+  if (inFolder && (!asked || (search.status === "listed" && search.ask.query === asked))) {
+    told.current = { kind: "notes", label: [heading ?? "Notes", view.query.trim()].filter(Boolean).join(": "), noteIds: notes.map((n) => n.id).sort() };
+  }
+  useInspected(app, inspected ? told.current : null);
 
   /**
    * Where the list was scrolled to when it was last drawn. It goes back there as its expanded

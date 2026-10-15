@@ -66,6 +66,11 @@ export function readSetting(setting: Setting, value: unknown): { value: SettingV
       }
       return { value: chords };
     }
+    case "list":
+      if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return { reason: `Expected a list of words in quotes, such as ["one", "two"], not ${shown(value)}` };
+      if (value.length > setting.maxItems) return { reason: `Expected at most ${setting.maxItems} of them` };
+      if (value.some((v: string) => v.length > setting.maxLength)) return { reason: `Expected each to be at most ${setting.maxLength} characters` };
+      return { value: [...new Set(value as string[])] };
   }
 }
 

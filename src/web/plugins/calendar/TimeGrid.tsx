@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { CalendarEvent } from "../../plugin-api.ts";
-import { dayIn, dayLabel, instantAt, minutesIn, timeLabel, weekdayLabel, type Day } from "./dates.ts";
+import { dayIn, dayLabel, instantAt, isWeekend, minutesIn, timeLabel, weekdayLabel, type Day } from "./dates.ts";
 import { IDLE, dragSpan, drafting, released, type Draft, type Held, type Outcome } from "./drafting.ts";
 import { HOUR_PX, bars, inAllDayRow, layoutDay, openingMinutes, piecesOf, type Placed } from "./layout.ts";
 import { dayAt, keyOf } from "./listing.ts";
 import { position, sideways, still, windowStart, type Sideways } from "./sideways.ts";
 
 /** Days drawn beyond those in view on each side, so a slide never shows a day being drawn. */
-export const SPARE = { 7: 14, 1: 7 } as const;
+export const SPARE = { 7: 14, 3: 7, 1: 7 } as const;
 /** The all-day row's height for each row of bars. */
 const BAR_PX = 22;
 /** The narrowest a day is drawn: a window too narrow for a week at this width shows as many days as fit, and slides to the rest. */
@@ -23,10 +23,11 @@ function rangeLabel(from: number, to: number, timeZone: string): string {
   return plain(from === to ? format.format(from) : format.formatRange(from, to));
 }
 
-/** "11:00", a time of day without its AM or PM, for a card too narrow for more. */
+/** "11" or "1:45", a time of day without its AM or PM, and on the hour without its minutes, for a card too narrow for more. */
 function compactLabel(time: number, timeZone: string): string {
   const parts = new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit" }).formatToParts(time);
-  return plain(parts.filter((part) => part.type === "hour" || part.type === "minute" || (part.type === "literal" && part.value.trim())).map((part) => part.value).join(""));
+  const onTheHour = parts.some((part) => part.type === "minute" && part.value === "00");
+  return plain(parts.filter((part) => part.type === "hour" || (!onTheHour && (part.type === "minute" || (part.type === "literal" && part.value.trim())))).map((part) => part.value).join(""));
 }
 
 /** What a piece of an event says of its time: its span, its start, and its start in short, or, where it goes on from an earlier day, when it ends. */
@@ -46,8 +47,8 @@ const hourLabel = (hour: number) => plain(new Intl.DateTimeFormat(undefined, { h
 export type Goal = ({ to: number } | { by: number }) & { seq: number };
 
 interface Props {
-  /** How many days are in view when they fit: 7 for Week, 1 for Day. */
-  most: 7 | 1;
+  /** How many days are in view when they fit: 7 for Week, 3 for 3 days, 1 for Day. */
+  most: 7 | 3 | 1;
   /** Told how many days are in view, once the grid knows how wide it is. */
   onFit: (days: number) => void;
   /** The first day in view when the grid opens, counted from EPOCH. */
@@ -72,7 +73,7 @@ interface Props {
 }
 
 /**
- * The Week and Day grids: hours down the side, the days across, and the days sliding sideways under
+ * The Day, 3 days and Week grids: hours down the side, the days across, and the days sliding sideways under
  * a sideways scroll while the hours, the day names and the all-day row stay where they are. The days
  * drawn are a window around those in view, `SPARE` either side; where the days are is applied to the
  * page each frame and never goes through React, which draws again only when the window moves.
@@ -295,7 +296,7 @@ export function TimeGrid({ most, onFit, opensAt, goal, onFirst, onWindow, events
               {window.map((index, j) => {
                 const day = dayAt(index);
                 return (
-                  <span key={index} className="cal-tg-day" role="columnheader" data-today={day === today || undefined} aria-hidden={index < first || index >= first + days || undefined} style={{ left: j * column }}>
+                  <span key={index} className="cal-tg-day" role="columnheader" data-today={day === today || undefined} data-weekend={isWeekend(day) || undefined} aria-hidden={index < first || index >= first + days || undefined} style={{ left: j * column }}>
                     <span className="cal-tg-weekday">{weekdayLabel(day)}</span>
                     <span className="cal-tg-date">{Number(day.slice(8))}</span>
                   </span>
@@ -358,7 +359,7 @@ export function TimeGrid({ most, onFit, opensAt, goal, onFirst, onWindow, events
                 const day = windowDays[j]!;
                 const hidden = index < first || index >= first + days;
                 return (
-                  <div key={index} className="cal-col" role="gridcell" aria-label={dayLabel(day, "heading")} aria-hidden={hidden || undefined} inert={hidden} data-day={day} data-today={day === today || undefined} data-listed={listed(index) || undefined} style={{ left: j * column }}>
+                  <div key={index} className="cal-col" role="gridcell" aria-label={dayLabel(day, "heading")} aria-hidden={hidden || undefined} inert={hidden} data-day={day} data-today={day === today || undefined} data-weekend={isWeekend(day) || undefined} data-listed={listed(index) || undefined} style={{ left: j * column }}>
                     {(placedByDay.get(day) ?? []).map((piece) => {
                       const key = keyOf(piece.item);
                       if (moving?.key === key) return null;

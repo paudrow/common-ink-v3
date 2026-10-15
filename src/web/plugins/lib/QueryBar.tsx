@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
-import { Icon, MAX_SEARCH_LENGTH, filterOf, keyNamed, keysFor, keysStarting, parseQuery, querySyntax, typingAt, wordsFor, writtenValue, type App, type Cmp, type FilterKey, type PluginHost, type QueryIn, type QueryKey, type QueryScope, type SortKey } from "../../plugin-api.ts";
-import { builderReducer, readBuilder, termOf, withKey, type BuilderEvent, type Row } from "./queryRows.ts";
+import { HelpOverlay, Icon, MAX_SEARCH_LENGTH, fieldMeans, fieldName, fieldsOf, filterOf, keyNamed, keyOf, keysFor, keysStarting, parseQuery, querySyntax, typingAt, wordsFor, wordsIn, writtenValue, type App, type Cmp, type PluginHost, type QueryField, type QueryIn, type QueryScope, type SortKey, type SyntaxRow } from "../../plugin-api.ts";
+import { builderReducer, readBuilder, termOf, withField, type BuilderEvent, type Row, type RowField } from "./queryRows.ts";
 
 /** How long the field rests before a query that can't be read says so: a filter half typed is no mistake yet. */
 const REST_MS = 700;
@@ -50,11 +50,12 @@ function useNames(host: PluginHost, app: App, scope: QueryScope, wanted: boolean
   return { folders, tags: read.tags, people: ["@me", ...read.people], mentioned: ["@me", ...read.mentioned] };
 }
 
-/** The values a filter can be given, as what is shown and what is written. */
-function valuesOf(key: QueryKey, scope: QueryScope, names: Names): { label: string; value: string; detail?: string }[] {
-  const { value } = filterOf(key);
-  if (value.type === "words") return wordsFor(key, scope).map((w) => ({ label: w.word, value: w.word, detail: w.means }));
-  if (value.type === "number") return Array.from({ length: value.max - value.min + 1 }, (_, i) => ({ label: String(value.min + i), value: String(value.min + i) }));
+/** The values a field can be given, as what is shown and what is written. */
+function valuesOf(field: QueryField, scope: QueryScope, names: Names): { label: string; value: string; detail?: string }[] {
+  const { value } = filterOf(keyOf(field));
+  if (value.type === "words") return wordsIn(field, scope).map((w) => ({ label: w.word, value: w.word, detail: w.means }));
+  // Highest first, as the Todos page's chips offer a priority, each said as the app says it.
+  if (value.type === "level") return [...value.levels].reverse().map((level) => ({ label: level[0]!.toUpperCase() + level.slice(1), value: level }));
   if (value.type === "day") return RELATIVE_DAYS.map((day) => ({ label: day, value: day }));
   if (value.type === "folder") return names.folders;
   return (value.type === "tag" ? names.tags : value.type === "mentioned" ? names.mentioned : names.people).map((name) => ({ label: name, value: name }));
@@ -69,7 +70,9 @@ function offersAt(text: string, cursor: number, scope: QueryScope, names: Names)
     return offers.length ? { from, to, offers } : null;
   }
   const wanted = typed.toLowerCase();
-  const offers = valuesOf(key, scope, names)
+  // Every word the filter takes is offered as it is typed, whichever field of the builder has it.
+  const offers = fieldsOf(key, scope)
+    .flatMap((field) => valuesOf(field, scope, names))
     // What is typed starts the value, or a word of what it is shown as, such as a folder along a path.
     .filter((v) => v.value.toLowerCase().startsWith(wanted) || v.label.toLowerCase().split(/[\s/]+/).some((word) => word.startsWith(wanted)))
     .filter((v) => v.value.toLowerCase() !== wanted)
@@ -78,15 +81,14 @@ function offersAt(text: string, cursor: number, scope: QueryScope, names: Names)
   return offers.length ? { from, to, offers } : null;
 }
 
-const FIELD_NAMES: Partial<Record<FilterKey | "text", string>> = { text: "Words", is: "State", has: "Has" };
-const fieldName = (key: FilterKey | "text") => FIELD_NAMES[key] ?? key[0]!.toUpperCase() + key.slice(1);
-const COMPARISONS: { id: Cmp | "between"; label: string }[] = [
-  { id: "=", label: "on" },
-  { id: ">", label: "after" },
-  { id: ">=", label: "on or after" },
-  { id: "<", label: "before" },
-  { id: "<=", label: "on or before" },
-  { id: "between", label: "between" },
+/** How each comparison reads: of a day, and of a level such as a priority. */
+const COMPARISONS: { id: Cmp | "between"; label: string; ofLevel: string }[] = [
+  { id: "=", label: "on", ofLevel: "exactly" },
+  { id: ">", label: "after", ofLevel: "above" },
+  { id: ">=", label: "on or after", ofLevel: "at least" },
+  { id: "<", label: "before", ofLevel: "below" },
+  { id: "<=", label: "on or before", ofLevel: "at most" },
+  { id: "between", label: "between", ofLevel: "between" },
 ];
 
 interface ValueProps {
@@ -103,10 +105,10 @@ interface ValueProps {
 
 function ValueField({ row, scope, names, label, value, onChange, listId, whyId }: ValueProps) {
   const wrong = { "aria-invalid": whyId ? true : undefined, "aria-describedby": whyId };
-  if (row.key === "text") return <input type="text" aria-label={label} placeholder="words to find" value={value} onChange={(e) => onChange(e.target.value)} {...wrong} />;
-  const kind = filterOf(row.key).value.type;
-  const values = valuesOf(row.key, scope, names);
-  if (kind === "words" || kind === "number" || kind === "folder") {
+  if (row.field === "text") return <input type="text" aria-label={label} placeholder="words to find" value={value} onChange={(e) => onChange(e.target.value)} {...wrong} />;
+  const kind = filterOf(keyOf(row.field)).value.type;
+  const values = valuesOf(row.field, scope, names);
+  if (kind === "words" || kind === "level" || kind === "folder") {
     const offered = value && !values.some((v) => v.value === value) ? [...values, { label: value, value }] : values;
     return (
       <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} {...wrong}>
@@ -134,18 +136,21 @@ function ValueField({ row, scope, names, label, value, onChange, listId, whyId }
 function Condition({ row, at, scope, names, act }: { row: Row; at: number; scope: QueryScope; names: Names; act: (event: BuilderEvent) => void }) {
   const ids = useId();
   const set = (change: Partial<Row>) => act({ type: "set", at, row: { ...row, ...change } });
-  const compares = row.key !== "text" && filterOf(row.key).compares;
-  const keys = keysFor(scope).filter((key) => !filterOf(key).top) as FilterKey[];
+  const compares = row.field !== "text" && filterOf(keyOf(row.field)).compares;
+  const leveled = row.field !== "text" && filterOf(keyOf(row.field)).value.type === "level";
+  const fields = keysFor(scope)
+    .filter((key) => !filterOf(key).top)
+    .flatMap((key) => fieldsOf(key, scope)) as Exclude<RowField, "text">[];
   const between = row.to !== undefined;
   const term = termOf(row, scope);
   const why = term && "why" in term ? term.why : null;
   return (
     <li className="query-row" role="group" aria-label={`Condition ${at + 1}`}>
-      <select aria-label="Field" value={row.key} onChange={(e) => act({ type: "set", at, row: withKey(row, e.target.value as Row["key"]) })}>
+      <select aria-label="Field" value={row.field} onChange={(e) => act({ type: "set", at, row: withField(row, e.target.value as RowField) })}>
         <option value="text">Words</option>
-        {keys.map((key) => (
-          <option key={key} value={key} title={filterOf(key).means}>
-            {fieldName(key)}
+        {fields.map((field) => (
+          <option key={field} value={field} title={fieldMeans(field)}>
+            {fieldName(field)}
           </option>
         ))}
       </select>
@@ -158,13 +163,13 @@ function Condition({ row, at, scope, names, act }: { row: Row; at: number; scope
           aria-label="Comparison"
           value={between ? "between" : row.cmp}
           onChange={(e) => {
-            const rest: Row = { key: row.key, not: row.not, cmp: row.cmp, value: row.value };
+            const rest: Row = { field: row.field, not: row.not, cmp: row.cmp, value: row.value };
             act({ type: "set", at, row: e.target.value === "between" ? { ...rest, cmp: "=", to: row.to ?? "" } : { ...rest, cmp: e.target.value as Cmp } });
           }}
         >
           {COMPARISONS.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.label}
+              {leveled ? c.ofLevel : c.label}
             </option>
           ))}
         </select>
@@ -188,6 +193,47 @@ const UNSHOWN = {
   unread: "The query in the bar can't be read yet. Put it right there to build on it here.",
 };
 
+/** The headings of the help, each with the forms listed under it, in the order the language lists them. */
+function helpGroups(rows: readonly SyntaxRow[]): { name: string; rows: SyntaxRow[] }[] {
+  const groups = new Map<string, SyntaxRow[]>();
+  for (const row of rows) {
+    const name = row.field === null ? "Writing a query" : fieldName(row.field);
+    groups.set(name, [...(groups.get(name) ?? []), row]);
+  }
+  return [...groups].map(([name, listed]) => ({ name, rows: listed }));
+}
+
+/** Everything the bar reads, under the builder's own headings, each with an example that is tried when pressed. */
+function QueryHelp({ scope, run }: { scope: QueryScope; run: (example: string) => void }) {
+  return (
+    <div className="query-help">
+      <p className="help-lead">Everything the bar reads. Press an example to try it.</p>
+      {helpGroups(querySyntax(scope)).map(({ name, rows }) => (
+        <section key={name}>
+          <h3>{name}</h3>
+          <table aria-label={name}>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.form}>
+                  <th scope="row">
+                    <code>{row.form}</code>
+                  </th>
+                  <td>{row.means}</td>
+                  <td>
+                    <button type="button" className="query-example" title="Try this query" onClick={() => run(row.example)}>
+                      {row.example}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 interface PanelProps {
   id: string;
   scope: QueryScope;
@@ -210,7 +256,7 @@ function Advanced({ id, scope, text, names, run, close }: PanelProps) {
     setBuilder(next);
     if (next.text !== text) run(next.text);
   };
-  const built = builder.built ?? (text.trim() ? null : { rows: [], match: "all" as const, in: [], sort: null });
+  const { built } = builder;
   const looked = built?.in.length === 1 ? built.in[0]! : "";
   return (
     <div
@@ -227,31 +273,20 @@ function Advanced({ id, scope, text, names, run, close }: PanelProps) {
       <header>
         <strong>Build a query</strong>
         <span>Each change is written in the bar.</span>
-        <button type="button" className="icon-button query-help-toggle" aria-label="Query syntax" title="Query syntax" aria-expanded={helping} aria-controls={`${ids}-help`} onClick={() => setHelping(!helping)}>
+        <button type="button" className="icon-button query-help-toggle" aria-label="Query syntax" title="Query syntax" aria-haspopup="dialog" aria-expanded={helping} onClick={() => setHelping(true)}>
           ?
         </button>
       </header>
       {helping && (
-        <div id={`${ids}-help`} className="query-help" role="region" aria-label="Query syntax">
-          <p>Everything the bar reads. Press an example to try it.</p>
-          <table>
-            <tbody>
-              {querySyntax(scope).map((row) => (
-                <tr key={row.form}>
-                  <th scope="row">
-                    <code>{row.form}</code>
-                  </th>
-                  <td>{row.means}</td>
-                  <td>
-                    <button type="button" className="query-example" title="Try this query" onClick={() => run(row.example)}>
-                      {row.example}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <HelpOverlay title="Query syntax" onClose={() => setHelping(false)}>
+          <QueryHelp
+            scope={scope}
+            run={(example) => {
+              setHelping(false);
+              run(example);
+            }}
+          />
+        </HelpOverlay>
       )}
       {built ? (
         <>
@@ -261,7 +296,7 @@ function Advanced({ id, scope, text, names, run, close }: PanelProps) {
             ))}
           </ul>
           <div className="query-foot">
-            <button type="button" className="button small" data-autofocus onClick={() => act({ type: "add" })}>
+            <button type="button" className="button small" onClick={() => act({ type: "add" })}>
               <Icon name="plus" />
               Add a condition
             </button>
