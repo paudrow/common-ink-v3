@@ -326,8 +326,10 @@ test("an event dragged to another day and time moves there at once and is saved,
   await page.mouse.move(60, lunchAgain.y + 8, { steps: 6 });
   await page.mouse.up();
   await expect(card(page, week[0]!, "Lunch with Sam"), "on the first day in view, the nearest to where it was let go").toHaveCount(1);
-  await expect(page.getByText("Moved Lunch with Sam"), "the notice is this move's, not the resize's before it").toBeVisible();
-  await page.getByRole("button", { name: "Undo" }).click();
+  // The resize's notice stays above with its own Undo; this move's is the newest, at the foot.
+  const notices = page.getByRole("group", { name: "Notice" });
+  await expect(notices.last(), "the newest notice is this move's").toContainText("Moved Lunch with Sam");
+  await notices.last().getByRole("button", { name: "Undo" }).click();
   await expect(card(page, tuesday, "Lunch with Sam")).toHaveCount(1);
 
   // A press without a drag still opens the event.

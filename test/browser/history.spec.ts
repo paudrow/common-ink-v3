@@ -41,7 +41,7 @@ const cards = (scope: Page | Locator) => () => pane(scope).locator(".hist-file-n
 const added = (scope: Locator) => scope.locator("ins.diff-line .diff-text");
 const removed = (scope: Locator) => scope.locator("del.diff-line .diff-text");
 const revertDialog = (page: Page) => page.getByRole("dialog", { name: /^Revert/ });
-const toast = (page: Page) => page.locator(".toast");
+const toast = (page: Page) => page.locator(".toast-card");
 /** Opens the revert of everything picked and confirms it. */
 async function revertPicked(page: Page, scope: Page | Locator) {
   await bar(scope).getByRole("button", { name: "Revert…" }).click();
@@ -429,7 +429,7 @@ test("Select all and one Revert undo a big chunk: one new change in each note, a
   await expect.poll(async () => (await listed(mode)()).slice(0, 3).sort()).toEqual(["You undid a revert of Plan", "You undid a revert of Recipes", "You undid a revert of Trip"]);
   expect((await listed(mode)()).slice(3, 6).sort()).toEqual(["You reverted 1 change to Recipes · reverted", "You reverted 2 changes to Trip · reverted", "You reverted 4 changes to Plan · reverted"]);
   await expect(mode.locator(".hist-reverted")).toHaveCount(3);
-  await toast(page).getByRole("button", { name: "Dismiss" }).click();
+  await toast(page).locator(".toast-text").click();
   await expect(toast(page)).toHaveCount(0);
 
   // Select all again clears when everything is picked.
@@ -476,7 +476,8 @@ test("a note that changes under the preview is left as it is and named, the othe
 
   await dialog.getByRole("button", { name: "Revert", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(toast(page)).toContainText("Reverted 1 change to Trip");
+  // Said under the first revert's notice, which is still there with its own Undo.
+  await expect(toast(page)).toHaveText([/Reverted 1 change to Plan/, /Reverted 1 change to Trip/]);
   await expect.poll(() => text(page, trip)).toBe("# Trip\n\nBook trains.");
   expect(await reverts(page, trip)).toEqual([null, null, null, [2]]);
 });

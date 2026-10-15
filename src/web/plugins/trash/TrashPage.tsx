@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ago, useNow, type PluginHost, type TrashedNote, type ViewProps } from "../../plugin-api.ts";
-import { lifecycle, mayPurge, restoredMessage } from "../lib/lifecycle.ts";
+import { lifecycle, mayPurge } from "../lib/lifecycle.ts";
 import { daysLeft, leftLabel } from "./days.ts";
 import { Purge } from "./Purge.tsx";
 
@@ -10,7 +10,8 @@ const titleOf = (note: { title: string }) => note.title || "Untitled";
 export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   const now = useNow();
   const [listed, setListed] = useState<TrashedNote[] | null>(null);
-  const [said, say] = useState<{ text: string; failed?: boolean } | null>(null);
+  /** Why Trash couldn't be read, until it is. */
+  const [unread, setUnread] = useState<string | null>(null);
   const [asked, setAsked] = useState(0);
   const { restoring, purge } = lifecycle(host);
   // Read again whenever the app learns that Trash changed, here or anywhere else.
@@ -19,8 +20,12 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
   useEffect(() => {
     let live = true;
     host.perform({ type: "trash.list" }).then(
-      (notes) => live && setListed(notes),
-      (err: Error) => live && say({ text: err.message, failed: true }),
+      (notes) => {
+        if (!live) return;
+        setListed(notes);
+        setUnread(null);
+      },
+      (err: Error) => live && setUnread(err.message),
     );
     return () => {
       live = false;
@@ -29,17 +34,17 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
 
   const restore = (note: TrashedNote) =>
     restoring(note.id).then(
-      ({ folderGone }) => say({ text: `${titleOf(note)}: ${restoredMessage(folderGone)}` }),
-      (err: Error) => say({ text: err.message, failed: true }),
+      (said) => host.app().notify({ ...said, message: `${titleOf(note)}: ${said.message}` }),
+      (err: Error) => host.app().notify({ message: err.message }),
     );
 
   return (
     <section className="mode-view trash-page" aria-label="Trash">
       <h1>Trash</h1>
       <p className="trash-lede">A note moved to Trash waits here for 30 days and is then removed for good, with its history. Until then it can be read and restored.</p>
-      {said && (
-        <p role={said.failed ? "alert" : "status"} className={said.failed ? "said failed" : "said"}>
-          {said.text}
+      {unread && (
+        <p role="alert" className="said failed">
+          {unread}
         </p>
       )}
       {listed && !listed.length && <p className="trash-none">Trash is empty.</p>}
@@ -78,7 +83,7 @@ export function TrashPage({ host, app }: ViewProps & { host: PluginHost }) {
                       title={note.title}
                       onPurge={async () => {
                         await purge(note.id);
-                        say({ text: `${titleOf(note)} was deleted forever.` });
+                        host.app().notify({ message: `${titleOf(note)} was deleted forever.`, icon: "trash" });
                         setAsked((n) => n + 1);
                       }}
                     />

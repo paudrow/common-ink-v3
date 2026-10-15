@@ -212,7 +212,7 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
   const move = async (event: CalendarEvent, when: { from: number; to: number }, verb: "Moved" | "Resized") => {
     const was = event.when;
     const changed = await place(event, { allDay: false, ...when });
-    if (changed) app.notify({ message: `${verb} ${event.title || "Untitled"}`, action: { label: "Undo", run: () => void place(changed, was) } });
+    if (changed) app.notify({ message: `${verb} ${event.title || "Untitled"}`, icon: "calendar", action: { label: "Undo", run: () => void place(changed, was) } });
   };
 
   // The calendar's own keys, as v1 had them, while nothing else has the keyboard.
@@ -379,7 +379,7 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
           onAdded={(event) => {
             setAdding(null);
             reread();
-            app.notify({ message: `Added ${event.title || "Untitled"}` });
+            app.notify({ message: `Added ${event.title || "Untitled"}`, icon: "calendar" });
           }}
         />
       )}

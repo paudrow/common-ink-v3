@@ -14,6 +14,7 @@ import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, typed } f
 import { lastChange, relisted, withChanged } from "./knownNotes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { NoteReader } from "./NoteReader.tsx";
+import { stacked, type Told } from "./notices.ts";
 import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
@@ -26,6 +27,7 @@ import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
+import { Toasts } from "./Toasts.tsx";
 
 const FOCUS_KEY = "ink.focus";
 const SIDEBAR_KEY = "ink.sidebar";
@@ -79,47 +81,11 @@ const pathTo = (byId: ReadonlyMap<string, NoteSummary>, id: string) => {
   return note ? notePath(note) : `/note/${id}`;
 };
 
-/** How long a notice stays when the member does nothing about it. Long enough to read it and reach its button. */
-const NOTICE_MS = 10_000;
-
 /** Functions that stay the same from one render to the next, each calling the latest one it was handed. */
 function useLatest<T extends Record<string, (...args: never[]) => unknown>>(fns: T): T {
   const latest = useRef(fns);
   latest.current = fns;
   return useState(() => Object.fromEntries(Object.keys(fns).map((name) => [name, (...args: never[]) => latest.current[name]!(...args)])) as T)[0];
-}
-
-/** A notice at the foot of the app. It waits while the pointer or the keyboard is on it, so its button can be reached. */
-function Toast({ notice, onClose }: { notice: Notice; onClose: () => void }) {
-  const [held, hold] = useState(false);
-  const close = useRef(onClose);
-  close.current = onClose;
-  useEffect(() => {
-    if (held) return;
-    const timer = setTimeout(() => close.current(), NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice, held]);
-  const { action } = notice;
-  return (
-    <div className="told" role="group" aria-label="Notice" onPointerEnter={() => hold(true)} onPointerLeave={() => hold(false)} onFocus={() => hold(true)} onBlur={() => hold(false)}>
-      <span>{notice.message}</span>
-      {action && (
-        <button
-          type="button"
-          className="link"
-          onClick={() => {
-            onClose();
-            action.run();
-          }}
-        >
-          {action.label}
-        </button>
-      )}
-      <button type="button" className="icon-button" aria-label="Dismiss" title="Dismiss" onClick={onClose}>
-        <Icon name="close" />
-      </button>
-    </div>
-  );
 }
 
 /** A folder's notes by title, for when no plugin lists them. */
@@ -176,7 +142,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   /** Every note in the workspace the member can see, in every state: live, archived, and in Trash. */
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
   /** What the app is telling the member, such as that a note was moved to Trash. Each has its own identity, so a timer set for one never takes the next away. */
-  const [told, tell] = useState<Notice | null>(null);
+  const [told, tell] = useState<readonly Told[]>([]);
+  const toldCount = useRef(0);
   const [listVersion, setListVersion] = useState(0);
   /** In focus the tab in front of the focused group fills the window, over everything else, which stays as it is underneath. Which group that is, the layout already says. */
   const [focusMode, setFocusMode] = useStored(FOCUS_KEY, isBoolean, false);
@@ -733,7 +700,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     saveNote: async (noteId: string) => saveNow(noteId),
     markSeen,
     toggleOverlay: (id: string, state?: unknown) => setOverlay((open) => (open?.id === id ? null : { id, state })),
-    notify: (notice: Notice) => tell({ ...notice }),
+    notify: (notice: Notice) => {
+      const id = ++toldCount.current;
+      tell((shown) => stacked(shown, { id, notice: { ...notice } }));
+    },
     toggleSidebar,
     togglePanel,
     inspect: (_: Showing | null) => {},
@@ -980,10 +950,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         </div>
       )}
       {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} state={overlay?.state} />}
-      {/* Always there, so a screen reader is told when a notice arrives in it. */}
-      <div className="notices" aria-live="polite">
-        {told && <Toast notice={told} onClose={() => tell((now) => (now === told ? null : now))} />}
-      </div>
+      <Toasts told={told} onGone={(id) => tell((shown) => shown.filter((t) => t.id !== id))} />
     </div>
   );
 }

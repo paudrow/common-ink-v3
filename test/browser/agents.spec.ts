@@ -17,7 +17,7 @@ const pane = (scope: Page | Locator) => scope.getByRole("region", { name: "What 
 /** What is ticked and what to do with it, at the foot of the list while something is ticked. */
 const bar = (scope: Page | Locator) => scope.getByRole("group", { name: "Selection" });
 const revertDialog = (page: Page) => page.getByRole("dialog", { name: /^Revert/ });
-const toast = (page: Page) => page.locator(".toast");
+const toast = (page: Page) => page.locator(".toast-card");
 /** One note of a revert, in its dialog. */
 const inNote = (page: Page, title: string) => revertDialog(page).getByRole("region", { name: title, exact: true });
 /** The lines a diff adds or removes. A rewritten line is on both sides, as its words on that side. */
@@ -408,7 +408,7 @@ test("reverting an agent is undone from what says it was done, and every note is
   await expect(toast(page).getByRole("button", { name: "Undo" })).toHaveCount(0);
   await expect.poll(() => text(page, plan)).toBe("# Plan\n\nClaude's step\n\nAda's last word");
   await expect.poll(() => text(page, trip)).toBe("# Trip\n\nPack light.\n\nLeave early.");
-  await toast(page).getByRole("button", { name: "Dismiss" }).click();
+  await toast(page).locator(".toast-text").click();
   await expect(toast(page)).toHaveCount(0);
   // What Claude wrote stands again, so it can be reverted again.
   await revertClaude(page).click();
