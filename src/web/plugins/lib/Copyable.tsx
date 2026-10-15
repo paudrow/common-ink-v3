@@ -1,7 +1,10 @@
 import { useRef, useState } from "react";
 
-/** Something to copy out of the app, such as a token or a link, shown in full with a button that copies it. */
-export function Copyable({ label, value }: { label: string; value: string }) {
+/**
+ * Something to copy out of the app, such as a token or a link, shown in full with a button that copies it.
+ * `prose` is text to read, such as a prompt: it wraps, scrolls past a few lines, and its button is the one to press.
+ */
+export function Copyable({ label, value, prose = false }: { label: string; value: string; prose?: boolean }) {
   const field = useRef<HTMLTextAreaElement>(null);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -15,11 +18,11 @@ export function Copyable({ label, value }: { label: string; value: string }) {
     setCopied(true);
   };
   return (
-    <label className="copyable">
+    <label className={prose ? "copyable prose" : "copyable"}>
       <span>{label}</span>
       <span className="copyable-row">
-        <textarea ref={field} readOnly value={value} rows={value.split("\n").length} wrap="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()} />
-        <button type="button" className="button small" aria-label={`Copy ${label}`} onClick={copy}>
+        <textarea ref={field} readOnly value={value} rows={prose ? 12 : value.split("\n").length} wrap={prose ? "soft" : "off"} spellCheck={false} onFocus={(e) => e.currentTarget.select()} />
+        <button type="button" className={prose ? "button primary" : "button small"} aria-label={`Copy ${label}`} onClick={copy}>
           {copied ? "Copied" : "Copy"}
         </button>
       </span>

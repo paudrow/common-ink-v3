@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Note } from "../../src/core/protocol.ts";
-import { agentWith, perform, signInAsNewPerson } from "./helpers.ts";
+import { agentWith, perform, shownToken, signInAsNewPerson } from "./helpers.ts";
 
 const connected = (page: Page) => page.getByRole("list", { name: "Connected agents" }).getByRole("listitem");
 const connectForm = (page: Page) => page.getByRole("form", { name: "Connect an agent" });
@@ -34,7 +34,7 @@ async function connectLimited(page: Page, name: string, choose: (form: Locator) 
   await form.getByRole("button", { name: "Connect" }).click();
   const shown = page.getByRole("region", { name: "New token" });
   await expect(shown).toContainText(`${name} is connected.`);
-  const token = await shown.getByRole("textbox", { name: "Token" }).inputValue();
+  const token = await shownToken(shown);
   await shown.getByRole("button", { name: "Done" }).click();
   return agentWith(page, token);
 }
@@ -64,7 +64,8 @@ test("an agent is connected to chosen folders: its row names them, and it reache
   await form.getByRole("button", { name: "Connect" }).click();
   const shown = page.getByRole("region", { name: "New token" });
   await expect(shown).toContainText("Claude is connected.");
-  const claude = agentWith(page, await shown.getByRole("textbox", { name: "Token" }).inputValue());
+  await expect(shown.getByRole("textbox", { name: "Prompt" })).toHaveValue(/It reaches only the folder "Projects" of my workspace "Ada's workspace" and the folders inside it\. The rest of it is hidden from you\./);
+  const claude = agentWith(page, await shownToken(shown));
 
   const row = connected(page);
   await expect(row).toContainText("reaches only Projects in Ada's workspace");

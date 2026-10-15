@@ -4819,6 +4819,49 @@ button.diff-fold:hover {
   align-self: flex-start;
 }
 
+.copyable.prose .copyable-row {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.copyable.prose textarea {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.by-hand summary {
+  width: max-content;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.by-hand > .copyable {
+  margin-top: 10px;
+}
+
+.new-token .by-hand .hint {
+  margin-top: 4px;
+}
+
+.agent .set-up-again {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.agent:hover .set-up-again,
+.agent:focus-within .set-up-again {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .agent .set-up-again {
+    opacity: 1;
+  }
+}
+
 .copyable-row {
   display: flex;
   gap: 6px;
