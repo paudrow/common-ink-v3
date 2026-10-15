@@ -8,6 +8,10 @@ export interface Toast {
   icon?: IconName;
   /** What Undo does. It answers with what to say when it couldn't be done, and with nothing when it was. */
   undo?: () => Promise<string | undefined> | string | undefined;
+  /** What it offers instead of Undo, such as Refresh: pressed, it is done and the toast goes. */
+  action?: { label: string; run: () => void };
+  /** Whether it stays until it is answered or sent away, as one that says something still so does. */
+  stays?: boolean;
 }
 
 /** How long a toast is shown before it goes away by itself, counted only while neither the pointer nor the keyboard is on it. */
@@ -18,20 +22,54 @@ const AGAIN_MS = 2000;
 const LEAVING_MS = 350;
 
 let root: Root | null = null;
-let shown = 0;
+let count = 0;
+type Placed = { id: number; toast: Toast };
+/** The toast shown now, until it has gone. */
+let up: Placed | null = null;
+/** A toast that stays, kept back while one with an Undo is up, so that it never takes an Undo's place; it is shown when that one goes. */
+let behind: Placed | null = null;
+
+const draw = ({ id, toast }: Placed, gone = false) => {
+  up = { id, toast };
+  root!.render(
+    <Shown
+      key={id}
+      toast={toast}
+      gone={gone}
+      onGone={() => {
+        if (up?.id !== id) return;
+        up = null;
+        const next = behind;
+        behind = null;
+        if (next) draw(next);
+      }}
+    />,
+  );
+};
 
 /**
  * Says something in the window's bottom right corner for a few seconds, with an Undo when there is
  * one, as v1's toasts did. It is laid over the app from an element of its own at the end of the page,
  * so nothing moves when it comes and goes, and anything can show one: a page, or a chip in a note.
- * One is shown at a time, and a newer one takes its place. A press on it, or Escape in it, sends it away.
+ * One is shown at a time, and a newer one takes its place, except that one that stays waits behind an
+ * Undo, and comes back after one that took its place. A press on it, or Escape in it, sends it away.
+ * It answers with what takes it away, which does nothing once another has taken its place.
  */
-export function showToast(toast: Toast): void {
+export function showToast(toast: Toast): () => void {
   root ??= createRoot(Object.assign(document.body.appendChild(document.createElement("div")), { className: "toasts" }));
-  root.render(<Shown key={++shown} toast={toast} />);
+  const placed = { id: ++count, toast };
+  if (toast.stays && up?.toast.undo) behind = placed;
+  else {
+    if (toast.undo && up?.toast.stays) behind = up;
+    draw(placed);
+  }
+  return () => {
+    if (behind?.id === placed.id) behind = null;
+    else if (up?.id === placed.id) draw(placed, true);
+  };
 }
 
-function Shown({ toast }: { toast: Toast }) {
+function Shown({ toast, gone, onGone }: { toast: Toast; gone: boolean; onGone: () => void }) {
   const [said, say] = useState<Toast | null>(toast);
   const [leaving, setLeaving] = useState(false);
   const clock = useRef({ left: 0, since: 0, timer: 0, held: new Set<string>() });
@@ -41,6 +79,7 @@ function Shown({ toast }: { toast: Toast }) {
     setLeaving(true);
   };
   const run = (ms: number) => {
+    if (toast.stays) return;
     const at = clock.current;
     clearTimeout(at.timer);
     at.left = ms;
@@ -68,13 +107,19 @@ function Shown({ toast }: { toast: Toast }) {
     return () => clearTimeout(clock.current.timer);
   }, [said]);
   useEffect(() => {
+    if (gone) go();
+  }, [gone]);
+  useEffect(() => {
     if (!leaving) return;
-    const timer = setTimeout(() => say(null), LEAVING_MS);
+    const timer = setTimeout(() => {
+      say(null);
+      onGone();
+    }, LEAVING_MS);
     return () => clearTimeout(timer);
   }, [leaving]);
 
   if (!said) return null;
-  const { text, icon = "check", undo } = said;
+  const { text, icon = "check", undo, action } = said;
   return (
     <div
       className="toast-card"
@@ -107,6 +152,18 @@ function Shown({ toast }: { toast: Toast }) {
           }}
         >
           Undo
+        </button>
+      )}
+      {action && (
+        <button
+          type="button"
+          className="toast-action"
+          onClick={() => {
+            go();
+            action.run();
+          }}
+        >
+          {action.label}
         </button>
       )}
     </div>

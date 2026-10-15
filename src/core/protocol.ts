@@ -181,7 +181,7 @@ export const Op = z.discriminatedUnion("type", [
    * The todos in the notes the asker can see: open ones, or done ones too with `includeCompleted`.
    * Open ones come first, then by due date with those that have none last, then the most important.
    * `dueFrom` and `dueTo` are days, both included, and leave out todos with no due date; `noDue`
-   * lists only those. `importance` lists the levels wanted, 0 for normal to 3. `tag` matches ignoring
+   * lists only those. `importance` lists the priority levels wanted, 0 for None to 3 for High. `tag` matches ignoring
    * case, and is a tag of the todo's note: one written on the todo's own line, or anywhere else in the
    * note. `folderId` lists the todos of the notes in that folder and in every folder under it; one the
    * asker can't see is no folder. Pass the answer's `next` as `offset` for the page after. A field it

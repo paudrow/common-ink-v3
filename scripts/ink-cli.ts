@@ -75,7 +75,7 @@ the id of the one note with that title, or refuse when none or several have it. 
 leaves such text as it is.
 
 A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
-DAY is a calendar date, YYYY-MM-DD. Importance is 0 for normal and 1 to 3 for !, !! and !!!.
+DAY is a calendar date, YYYY-MM-DD. --importance is the priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!).
 RULE is how a todo repeats, written every:RULE on its line:
   2w (d, w, m or y)   every N after the due date     3d-after-done      N after it was last done
   mon,thu             those days of every week       2w-mon,thu         of every 2nd week
