@@ -35,7 +35,7 @@ Until #15 a member of a workspace could see every note in it, and a dozen querie
 | Does a signed-in share link need the person to be allowed to sign in? | Yes. `ALLOWED_EMAILS` says who can sign in to this Common Ink at all, and the link asks only that they have. Opening one makes them nothing in the workspace. | The list is the deployment's gate, not a workspace's. |
 | Can an agent share, make a link, or make a note private? | No. All of it is the member's, signed in. | As for members (#14): it isn't in history, so it can't be reverted, and an agent that was talked into it could publish a note. |
 | Can an admin delete a folder that holds only notes they can't see? | Yes, and those notes go to Unsorted. | Refusing would tell them the folder isn't empty. |
-| Does `links.rebuild` cover notes the admin can't see? | No. | Its count and its cursor would name them. Every write keeps the record anyway. |
+| Does `links.rebuild` cover notes the admin can't see? | Yes, since #18 (ADR 3). It answers only whether it is done. | It first skipped them, since its count and cursor would name them. That left their records wrong for good, so the count and the cursor went instead. |
 
 **Where this narrows issue 1.** Three of the choices above read issue 1 more narrowly than its words. Each is a choice, not a finding, and behaviour follows the choice.
 

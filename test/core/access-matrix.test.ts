@@ -57,6 +57,10 @@ interface World {
 
 const address = () => `${crypto.randomUUID()}@example.com`;
 
+/** Each note has a todo with words of its own, and a tag of its own, which give the note away as its title does. */
+const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name}`;
+const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
+
 async function world(): Promise<World> {
   const ada = await newMember("Ada Lovelace");
   const here = (personId: string): Actor => ({ kind: "member", personId, workspaceId: ada.workspaceId });
@@ -77,14 +81,14 @@ async function world(): Promise<World> {
   const team = await folder("Team");
   const folders = { Open: open, Team: team, Deep: await folder("Deep", team) };
 
-  const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: `# Title-${name}\n\nbody-${name} ${text}` })).id;
+  const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: textOf(name, text) })).id;
   const notes = { open: await note(ada, "open"), team: await note(ada, "team"), deep: await note(ada, "deep"), lone: await note(ada, "lone"), secret: "", vpriv: await note(vera, "vpriv") };
   await perform(env.DB, vera, { type: "note.setPrivate", id: notes.vpriv, private: true });
   await perform(env.DB, ada, { type: "member.setRole", memberId: vera.personId, as: "viewer" });
   notes.secret = await note(eve, "secret", `[[${notes.open}]]`);
   const zed = await connectAgent(env.DB, eve.personId, "Zed-agent");
   const asZed: Actor = { kind: "agent", agentId: zed.agent.id, personId: eve.personId, workspaceId: ada.workspaceId };
-  await perform(env.DB, asZed, { type: "note.write", id: notes.secret, baseRevision: 1, text: `# Title-secret\n\nbody-secret [[${notes.open}]] more` });
+  await perform(env.DB, asZed, { type: "note.write", id: notes.secret, baseRevision: 1, text: textOf("secret", `[[${notes.open}]] more`) });
   // What an admin put on the note before it was private: a link, and a guest. Neither outlasts it becoming private.
   const linked = await perform(env.DB, ada, { type: "grant.link", noteId: notes.secret, link: "public" });
   await perform(env.DB, ada, { type: "grant.set", noteId: notes.secret, email: vic!.email, access: "view" });
@@ -101,7 +105,7 @@ async function world(): Promise<World> {
   for (const name of NOTES) spare[name] = (await perform(env.DB, name === "secret" ? eve : name === "vpriv" ? vera : ada, { type: "grant.set", noteId: notes[name], email: `spare-${name}-${address()}`, access: "view" })).id;
 
   const marks = {} as World["marks"];
-  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`];
+  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`];
   for (const name of FOLDERS) marks[name] = [folders[name], `${name}-folder`];
   marks.secret.push(zed.agent.id, "Zed-agent");
 
@@ -156,7 +160,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.list": { on: "everything", args: () => ({}) },
   "note.create": { on: "folder", needs: "E", args: (folderId) => ({ folderId, text: "# Made" }) },
   "note.read": { on: "note", needs: "V", args: (id) => ({ id }) },
-  "note.write": { on: "note", needs: "E", args: (id, w, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, text: note === "secret" ? `# Title-secret\n\nbody-secret [[${w.notes.open}]] more` : `# Title-${note}\n\nbody-${note} ` }) },
+  "note.write": { on: "note", needs: "E", args: (id, w, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, text: note === "secret" ? textOf("secret", `[[${w.notes.open}]] more`) : textOf(note) }) },
   "note.backlinks": { on: "note", needs: "V", args: (id) => ({ id }) },
   "note.history": { on: "note", needs: "V", args: (id) => ({ id }) },
   "note.diff": { on: "note", needs: "V", args: (id) => ({ id, revision: 1 }) },
@@ -176,6 +180,12 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "history.previewRevert": { on: "everything", args: (w) => everyNote(w, 1) },
   "history.revert": { on: "workspace", who: ["admin", "editor", "guest"], args: (w) => everyNote(w, 99) },
   "links.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
+  "todo.list": { on: "everything", args: () => ({ includeCompleted: true }) },
+  "todo.filters": { on: "everything", args: () => ({}) },
+  "todo.set": { on: "note", needs: "E", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note), importance: 0 }) },
+  "todo.history": { on: "note", needs: "V", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note) }) },
+  "todos.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
+  "daily.open": { on: "workspace", who: ["admin", "editor"], args: () => ({ on: "2026-10-11" }) },
   "folder.list": { on: "everything", args: () => ({}) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
@@ -221,7 +231,7 @@ const enough = (level: Level, needs: "V" | "E") => level === "E" || (level === "
 const sharesNote = (name: ActorName, note: NoteName) => OWNER[note] === name || (ACTORS[name].shares && personLevelOf(name, note) === "E");
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "folder.delete"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open"];
 const AGENTS = [
   "their agent",
   "their read-only agent",
@@ -328,7 +338,8 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             // The one admin can't leave, and nobody here asks to: leaving is checked in members.test.ts.
             if (type === "member.leave") continue;
             // Who is in the workspace is told to whoever sees all of it.
-            if (type === "member.list" && within) allowed = false;
+            // A daily note is in a folder at the top of the workspace, or makes one there: a member's, and their agent's when it sees all of it.
+            if ((type === "member.list" || type === "daily.open") && within) allowed = false;
             await run(type, type, plan.args(w), allowed ? "done" : "forbidden", true);
           } else {
             await run(type, type, plan.args(w), "forbidden");
@@ -345,6 +356,15 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         expect((await perform(env.DB, actor, { type: "history.summary", authors: [{ kind: "agent", id: w.secretAgent.id }] })).notes.map((n) => [n.noteId, n.changes])).toEqual(levelOf(name, "secret") === "-" ? [] : [[w.notes.secret, 1]]);
         await run("history.revertAuthor narrowed", "history.revertAuthor", { author: { kind: "agent", id: "aaaaaaaaaaaa" }, noteIds: every }, role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")) ? "forbidden" : "done");
         await run("note.list in a hidden folder", "note.list", { folderId: w.folders.Open }, "done");
+        // The todos of each folder, with the folder inside it: a folder that isn't there for the actor is no folder, as one that never was is, and no note is listed that they can't see.
+        for (const folder of FOLDERS) {
+          const seen = folderLevelOf(name, folder) !== "-";
+          await run(`todo.list in ${folder}`, "todo.list", { folderId: w.folders[folder], includeCompleted: true }, seen ? "done" : NO_FOLDER);
+          if (!seen) continue;
+          const inside = NOTES.filter((note) => (FOLDER_OF[note] === folder || (folder === "Team" && FOLDER_OF[note] === "Deep")) && levelOf(name, note) !== "-");
+          expect((await perform(env.DB, actor, { type: "todo.list", folderId: w.folders[folder] })).todos.map((t) => t.noteId).sort(), `todo.list in ${folder}`).toEqual(inside.map((note) => w.notes[note]).sort());
+        }
+        await run("todo.list in a folder that never was", "todo.list", { folderId: MISSING }, NO_FOLDER);
         // Several notes at once, each answered for itself: a hidden note is answered word for word as one that was never there, and one the actor may only read is not reverted.
         const asMissing = (answer: object, noteId: string) => ({ ...answer, noteId });
         const previews = await perform(env.DB, actor, { type: "history.previewRevert", ...everyNote(w, 1) });

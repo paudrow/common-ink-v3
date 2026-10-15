@@ -163,6 +163,16 @@ interface Listed {
 
 const LISTS: Listed[] = [
   {
+    name: "the Todos page",
+    path: "/todos",
+    list: (page) => page.getByRole("list", { name: "Todos" }),
+    opened: async (page) => {
+      await expect(page).toHaveURL(/\/note\//);
+      await expect(editor(page)).toBeFocused();
+      await expect(statusLine(page)).toHaveText("--NORMAL--");
+    },
+  },
+  {
     name: "the Plugins list",
     path: "/plugins",
     list: (page) => page.getByRole("list", { name: "Plugins", exact: true }),

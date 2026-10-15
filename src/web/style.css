@@ -19,7 +19,13 @@
   --added: #15803d;
   --added-soft: rgb(21 128 61 / 0.12);
   --removed-soft: rgb(194 65 12 / 0.12);
+  --warn: #c7811b;
+  --warn-ink: #895913;
+  --chip-ink: color-mix(in srgb, var(--muted) 70%, var(--ink));
   --shadow: 0 18px 48px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
+  --shadow-lg: 0 24px 60px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(30 24 12 / 0.05), 0 4px 14px -6px rgb(30 24 12 / 0.1);
+  --accent-ink: #4545b8;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-family: var(--prose);
@@ -53,7 +59,11 @@
     --added: #6dc98a;
     --added-soft: rgb(109 201 138 / 0.14);
     --removed-soft: rgb(240 138 93 / 0.14);
+    --warn-ink: #c7811b;
     --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+    --shadow-lg: 0 24px 60px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -6px rgb(0 0 0 / 0.4);
+    --accent-ink: #a9a9ff;
   }
 }
 
@@ -78,7 +88,11 @@
   --added: #6dc98a;
   --added-soft: rgb(109 201 138 / 0.14);
   --removed-soft: rgb(240 138 93 / 0.14);
+  --warn-ink: #c7811b;
   --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-lg: 0 24px 60px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -6px rgb(0 0 0 / 0.4);
+  --accent-ink: #a9a9ff;
 }
 
 html,
@@ -336,6 +350,8 @@ button.link:hover {
   position: fixed;
   z-index: 40;
   min-width: 180px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 4px;
   border-radius: 8px;
   background: var(--bg-elev);
@@ -2146,24 +2162,6 @@ button.link:hover {
 .kanban-colour:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-/* A panel opened from a chip, laid over the app. It is placed by its opener, under its chip. */
-.chip-popover {
-  position: fixed;
-  z-index: 40;
-  top: 0;
-  left: 0;
-  width: max-content;
-  max-width: min(22rem, calc(100vw - 16px));
-  max-height: calc(100vh - 16px);
-  padding: 8px;
-  overflow-y: auto;
-  border-radius: 8px;
-  background: var(--bg-elev);
-  box-shadow: var(--shadow);
-  color: var(--ink);
-  font-size: 13px;
 }
 
 .kanban-palette {
@@ -4272,6 +4270,84 @@ kbd {
   color: inherit;
 }
 
+/* What just happened, in the window's bottom right corner, as v1's toasts. */
+.toasts {
+  position: fixed;
+  right: 18px;
+  bottom: 44px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast-card {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 10px;
+  min-width: 240px;
+  max-width: 340px;
+  padding: 10px 14px 10px 10px;
+  border-radius: 12px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-size: 13px;
+  animation: toast-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  transition:
+    opacity 0.35s,
+    transform 0.35s;
+}
+
+.toast-card[data-leaving] {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.toast-card:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+.toast-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-action {
+  margin-left: 4px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--accent-ink);
+  font: 650 12.5px var(--prose);
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: var(--accent-soft);
+}
+
 .change-stat {
   font-family: var(--mono);
   font-size: 11px;
@@ -5187,6 +5263,1044 @@ button.diff-fold:hover {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+}
+
+.todos-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  /* A list as wide as v1's, about 660px: a todo is not far wider than what it says. */
+  max-width: calc(660px + 4rem);
+  height: 100%;
+  margin: 0 auto;
+  /* Less room at the sides in a narrow column, which is the todos' room. */
+  padding: 2rem clamp(12px, 5%, 2rem) 3rem;
+  overflow-y: auto;
+}
+
+.todos-page h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.todo-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.todo-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+/* The order is not a filter: it sits at the end of their line. */
+.todo-sort {
+  margin-left: auto;
+}
+
+.todo-filters select {
+  min-width: 0;
+  max-width: 12rem;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+}
+
+/* The list of todos, as v1's: one panel, a todo to a row, and the bar that says the order has changed above the first. */
+.todo-card {
+  padding: 8px clamp(6px, 2.5%, 14px) 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+}
+
+.todo-list {
+  container: todos / inline-size;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Kept at the top of the page while the list is scrolled, so it is seen wherever the change was made. */
+.todo-order-slot {
+  position: sticky;
+  z-index: 2;
+  /* At the very top of the page's scrolling area, above its padding, so no row shows over it. */
+  top: -2rem;
+}
+
+/* It opens to its own height, which the rows move down by as it does, and by nothing more. */
+.todo-order {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 8px;
+  max-height: 3em;
+  margin: 0 -6px 6px;
+  padding: 5px 6px 5px 10px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-elev));
+  color: var(--accent-ink);
+  font: 500 13px/20px var(--prose);
+  animation: todo-order-in 0.18s ease-out;
+}
+
+@keyframes todo-order-in {
+  from {
+    max-height: 0;
+    margin-bottom: 0;
+    padding-block: 0;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-order {
+    animation: none;
+  }
+}
+
+.todo-order svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.todo-order-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-order-refresh {
+  padding: 1px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: 600 12.5px/20px var(--prose);
+  cursor: pointer;
+}
+
+.todo-order-dismiss {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.todo-order-refresh:focus-visible,
+.todo-order-dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.todo-order-dismiss:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* A todo's row, in two lines. The first is the todo: its checkbox, its words and, at the right, its note's name. The second, under
+   the words, is what is set on it and then what can be. Every row has both, so the list has one rhythm. */
+.todo-row {
+  display: grid;
+  grid-template-columns: 1.02em minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 0;
+  align-items: baseline;
+  margin: 0 -6px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  font-size: 14.5px;
+  line-height: 1.4;
+}
+
+/* The row being changed, by a chip's popover or its menu, is tinted as a row under the pointer is. Colour only: nothing moves. */
+.todo-row:hover,
+.todo-row[data-picking] {
+  background: var(--hover);
+}
+
+.todo-box {
+  grid-row: 1;
+  grid-column: 1;
+  align-self: start;
+  box-sizing: border-box;
+  width: 1.02em;
+  height: 1.02em;
+  margin: calc((1.4em - 1.02em) / 2) 0 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 5px;
+  background: var(--bg-elev) center / 100% no-repeat;
+  appearance: none;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
+}
+
+.todo-box:enabled:hover {
+  border-color: var(--accent);
+}
+
+.todo-box:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4l2.6 2.6L12 5.5' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.todo-box:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.todo-box:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.todo-text {
+  grid-row: 1;
+  grid-column: 2;
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.todo-words[role="button"] {
+  cursor: text;
+}
+
+.todo-words:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A row a change took out of the list, which stays where it was, greyed, until the list is refreshed. What it says under itself isn't. */
+.todo-row[data-gone] > :not(.todo-why) {
+  opacity: 0.5;
+}
+
+.todo-why {
+  grid-row: 3;
+  grid-column: 2 / 4;
+  margin: 1px 0 0;
+  color: var(--muted);
+  font: 12px/1.35 var(--prose);
+}
+
+.todo-row[data-done] .todo-words {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+}
+
+.todo-words .todo-tag {
+  color: var(--muted);
+}
+
+.todo-words .todo-link {
+  color: var(--accent-ink);
+}
+
+/* The words being edited, in place: a one-line field as wide as v1's where there is room, as tall as the line, laid over the row's
+   padding so nothing moves. */
+.todo-edit {
+  display: inline-block;
+  box-sizing: border-box;
+  width: min(420px, 100%);
+  height: 24px;
+  margin: -2px 0;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg-elev);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  color: var(--ink);
+  font: inherit;
+  vertical-align: top;
+}
+
+/* The second line: what is set, then what isn't, starting under the words. */
+.todo-chips {
+  display: flex;
+  grid-row: 2;
+  /* Not under the note's name: the chips wrap before they reach it. */
+  grid-column: 2;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  min-height: 18px;
+}
+
+/* What is set on a todo, as pills, as v1 drew them: each opens a popover under itself, and a tag's narrows the list. */
+.todo-chip {
+  display: inline-flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--chip-ink);
+  font: 500 11.5px/1 var(--prose);
+  white-space: nowrap;
+}
+
+.todo-chip svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  opacity: 0.75;
+}
+
+.todo-chip .chip-hash {
+  width: auto;
+  color: inherit;
+}
+
+/* What isn't set yet: its icon alone, named on hover, quiet and without a pill, which is drawn, dashed, while the row is pointed at
+   or has the keyboard. It shows only then, so it needs no word, and the line keeps its room for what is set. */
+.todo-chip-word {
+  display: none;
+}
+
+.todo-chip[data-unset] {
+  justify-content: center;
+  width: 22px;
+  padding: 0;
+  border: 1px dashed transparent;
+  background: none;
+  color: color-mix(in srgb, var(--muted) 65%, var(--faint));
+  font-weight: 450;
+  /* Not shown at rest, so a row says only what is set; it keeps its place, so nothing moves when it shows. */
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.todo-row:hover .todo-chip[data-unset],
+.todo-row:focus-within .todo-chip[data-unset],
+.todo-row[data-picking] .todo-chip[data-unset] {
+  border-color: var(--faint);
+  color: var(--chip-ink);
+  opacity: 1;
+}
+
+/* Where nothing points, as on a touch screen, they are always shown. */
+@media (hover: none) {
+  .todo-chip[data-unset] {
+    opacity: 1;
+  }
+}
+
+button.todo-chip {
+  cursor: pointer;
+}
+
+button.todo-chip:enabled:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+button.todo-chip[data-unset]:enabled:hover {
+  box-shadow: none;
+  color: var(--ink);
+}
+
+button.todo-chip[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+button.todo-chip[data-unset][aria-expanded="true"] {
+  border-color: var(--accent);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+button.todo-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button.todo-chip:disabled {
+  cursor: default;
+}
+
+.todo-row[data-done] .todo-chip {
+  opacity: 0.75;
+}
+
+.todo-importance[data-level="3"] {
+  color: var(--danger);
+}
+
+.todo-importance[data-level="2"] {
+  color: var(--warn-ink);
+}
+
+/* When it was last done: quieter than what is set on the todo, as v1's done chip was. */
+.todo-chip.todo-done {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+}
+
+.todo-due[data-due="today"] {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn-ink);
+}
+
+.todo-due[data-due="overdue"] {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.todo-chip.todo-tag {
+  max-width: 100%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* A tag's chip and the cross that takes it off, laid over the chip's right end while it is pointed at or has the keyboard. */
+.todo-tag-chip {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  /* A long tag is cut short at about 14 letters' width; its chip's own size, so the line wraps round the chip and not round the tag. */
+  max-width: min(14em, 100%);
+  font-size: 11.5px;
+}
+
+.todo-tag-name {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+/* At the chip's top right corner, half over its edge, so a short tag stays readable under it. */
+.todo-tag-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-ink);
+  color: var(--bg-elev);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+}
+
+.todo-tag-remove svg {
+  width: 9px;
+  height: 9px;
+}
+
+.todo-tag-chip:hover .todo-tag-remove,
+.todo-tag-chip:focus-within .todo-tag-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Where nothing points, there is no hover to show it on. */
+@media (hover: none) {
+  .todo-tag-remove {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.todo-tag-remove:hover {
+  background: var(--danger);
+}
+
+button.todo-tag[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Where a todo is: its note's name, quiet, at the right of its first line, and the way to the note. It gives way to the words, up to
+   a quarter of the row, so the chips under the words have room before it, and ends in an ellipsis. */
+.todo-note {
+  display: flex;
+  grid-row: 1;
+  grid-column: 3;
+  justify-self: end;
+  max-width: 24cqi;
+  min-width: 0;
+  margin: -1px -4px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: 12px/15px var(--prose);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.todo-note-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.todo-note:hover,
+.todo-note:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.todo-note:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* In a narrow list the words and the chips have the whole width, and the note's name goes on a line of its own under the chips,
+   where the words start. */
+@container todos (max-width: 440px) {
+  .todo-text,
+  .todo-chips {
+    grid-column: 2 / 4;
+  }
+
+  .todo-why {
+    grid-row: 4;
+  }
+
+  .todo-note {
+    grid-row: 3;
+    grid-column: 2 / 4;
+    justify-self: start;
+    max-width: 100%;
+  }
+}
+
+/* What a todo's chip opens: its choices, as v1's. */
+.chip-menu {
+  display: flex;
+  flex-direction: column;
+  width: 246px;
+}
+
+.chip-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* A tag in the list "+N" opens: the tag, which narrows the list, and its cross. */
+.tag-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tag-line .chip-choice {
+  flex: 1;
+  min-width: 0;
+}
+
+.tag-line .chip-choice[aria-pressed="true"] {
+  color: var(--accent-ink);
+}
+
+.tag-line-name {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-line-remove {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tag-line-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tag-line-remove:hover,
+.tag-line-remove:focus-visible {
+  outline: none;
+  background: var(--hover);
+  color: var(--danger);
+}
+
+.chip-choice svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+/* A tag's mark, as v1's picker drew it, beside the tag's name: drawn, so the name is all the choice says. */
+.chip-hash {
+  flex: none;
+  width: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.chip-hash::before {
+  content: "#";
+}
+
+.chip-choice:hover,
+.chip-choice:focus-visible {
+  outline: none;
+  background: var(--hover);
+}
+
+.chip-choice[aria-current] {
+  color: var(--muted);
+}
+
+.chip-detail {
+  color: var(--muted);
+}
+
+/* What a field is set to, or Add, at the right of its line in a row's fields, as v1's. */
+.chip-value {
+  overflow: hidden;
+  max-width: 55%;
+  margin-left: auto;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-value[data-unset] {
+  color: var(--muted);
+}
+
+.chip-now {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chip-day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -6px -6px 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.chip-day input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.todo-none {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.todo-next {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* A panel opened from a chip, laid over the app, in the look of v1's pickers. It is placed by its opener, under its chip. */
+.chip-popover {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 90;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+/* The Repeat popover, one column: the rule in words and its next dates, the rules to pick from, Custom's form, then Cancel and Done. */
+.chip-menu.repeat-menu {
+  width: 300px;
+  max-width: 100%;
+}
+
+.repeat-says {
+  margin-bottom: 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.repeat-says p {
+  margin: 0;
+}
+
+.repeat-rule {
+  font-weight: 600;
+}
+
+.repeat-rule[data-wrong] {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.repeat-next {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.repeat-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.repeat-check {
+  display: inline-grid;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+}
+
+.chip-choice .repeat-check svg {
+  color: var(--accent);
+}
+
+.repeat-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 8px 2px;
+  border-top: 1px solid var(--line);
+}
+
+.repeat-as-text {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.repeat-as-text:hover,
+.repeat-as-text:focus-visible {
+  color: var(--ink);
+}
+
+/* It stays in sight while the popover scrolls, as it does with Custom's form open in a short window. */
+.repeat-foot {
+  display: flex;
+  position: sticky;
+  bottom: -6px;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 6px -6px -6px;
+  padding: 8px 8px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+
+.repeat-foot button {
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background-color: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.repeat-foot button:hover:enabled {
+  background-color: var(--hover);
+}
+
+.repeat-foot button:focus-visible,
+.repeat-as-text:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.repeat-foot button.primary:enabled {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.repeat-foot button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+/* The form that builds any rule as a sentence. */
+.rule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rule-editor p {
+  margin: 0;
+}
+
+.rule-editor button,
+.rule-editor input,
+.rule-editor select {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background-color: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+}
+
+.rule-editor button {
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.rule-editor button:hover:enabled,
+.rule-editor button:focus-visible {
+  background-color: var(--hover);
+  outline: none;
+}
+
+.rule-editor button:focus-visible,
+.rule-editor input:focus-visible,
+.rule-editor select:focus-visible,
+.completions button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.rule-editor button:disabled,
+.rule-editor select:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rule-in {
+  margin-left: 16px;
+}
+
+.rule-row input[type="number"] {
+  width: 4em;
+  padding: 2px 4px;
+}
+
+.rule-row input[type="date"],
+.rule-row input[type="text"] {
+  padding: 2px 6px;
+}
+
+.rule-row .rule-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.rule-row select {
+  max-width: 100%;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.rule-days {
+  display: flex;
+  gap: 3px;
+}
+
+.rule-editor .rule-days button {
+  flex: 1;
+  padding: 3px 0;
+}
+
+.rule-editor button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rule-editor .rule-out {
+  padding: 0 6px;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.rule-editor .rule-add {
+  align-self: flex-start;
+  padding-left: 0;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.rule-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rule-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12px;
+}
+
+.completions {
+  min-width: 13rem;
+}
+
+.completions h2 {
+  margin: 2px 6px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  outline: none;
+}
+
+.completions ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.completions li > * {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+.completions li > button {
+  cursor: pointer;
+}
+
+.completions li > button:hover,
+.completions li > button:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.completion-by {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+
+.completions-note {
+  max-width: 18rem;
+  margin: 6px 6px 2px;
+  color: var(--muted);
+  font-size: 12px;
+  outline: none;
+}
+
+.daily-opening {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2.5rem 2rem;
+}
+
+.daily-opening h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.daily-opening p {
+  color: var(--muted);
 }
 
 /* The row vim's keys are on, in any list. A card's row has the card's corners, so its mark does too. */

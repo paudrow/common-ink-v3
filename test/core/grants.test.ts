@@ -344,7 +344,7 @@ describe("a private note", () => {
       expect((await perform(env.DB, other, { type: "note.list", folderId: team.id }))).toEqual([]);
       expect(await perform(env.DB, other, { type: "history.revertAuthor", author: { kind: "agent", id: zed.agent.id } })).toEqual({ reverted: [], emptied: [], failed: [], next: null });
     }
-    expect(await perform(env.DB, ada, { type: "links.rebuild" })).toEqual({ notes: 2, next: null });
+    expect(await perform(env.DB, ada, { type: "links.rebuild" })).toEqual({ done: true });
     expect((await perform(env.DB, ada, { type: "grant.list" })).grants).toEqual([]);
 
     expect(await titles(eve)).toEqual(["Diary", "Linking", "Open"]);
@@ -465,7 +465,7 @@ describe("a private note", () => {
   it("keeps its owner from leaving, so it isn't left with nobody", async () => {
     const { ada, eve, secret } = await withSecret();
 
-    await expect(perform(env.DB, eve, { type: "member.leave" })).rejects.toMatchObject({ code: "invalid", message: "You have private notes here, which nobody else can reach. Stop them being private first, so they aren't left with nobody." });
+    await expect(perform(env.DB, eve, { type: "member.leave" })).rejects.toMatchObject({ code: "invalid", message: "You have a private note here besides your daily notes, which nobody else can reach. Stop it being private first, so it isn't left with nobody." });
     expect(await titles(eve)).toEqual(["Diary", "Open"]);
 
     await perform(env.DB, eve, { type: "note.setPrivate", id: secret.id, private: false });

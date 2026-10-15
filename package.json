@@ -9,7 +9,7 @@
     "build": "vite build",
     "typecheck": "wrangler types --check && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "types": "wrangler types",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/zones/recurrence-zones.test.ts",
     "test:browser": "playwright test",
     "check": "npm run typecheck && npm test && npm run build",
     "preview": "node scripts/preview.ts",

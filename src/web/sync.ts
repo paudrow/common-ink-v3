@@ -1,9 +1,10 @@
 import { redo, undo } from "@codemirror/commands";
 import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
-import type { Note, OpInput, Results, RevertedNotes } from "../core/protocol.ts";
+import type { Filed, Note, OpInput, Results, RevertedNotes, Written } from "../core/protocol.ts";
 import { changesBetween } from "../core/text.ts";
 import { ApiError, perform, session } from "./api.ts";
+import { today } from "./time.ts";
 
 export const PAUSE_MS = 1000;
 const RETRY_MS = 3000;
@@ -38,14 +39,44 @@ const open = new Map<string, NoteSync>();
 /** Sends what's typed in a note now, without waiting for a pause. */
 export const saveNow = (noteId: string) => open.get(noteId)?.commit();
 
-type HistoryOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.undo" | "note.redo" }>;
+const filing = new Set<() => void>();
 
-/** Moves a note through its history. What's typed is saved first, and the note's editor takes the result if it's open. */
+/**
+ * Calls `listener` when a change to one note changed daily notes too: checking off a recurring todo
+ * files a line on one, which may be new, and taking a completion back takes its line off again.
+ */
+export function onFiled(listener: () => void): () => void {
+  filing.add(listener);
+  return () => void filing.delete(listener);
+}
+
+/** What an answer may say of the daily notes its change reached. */
+interface Reached {
+  id?: string;
+  filed?: Filed;
+  unfiled?: { dailyNoteIds?: readonly string[] };
+}
+
+/** After a change that may have reached daily notes: the app is told, and each one's open editor takes what was filed on it or taken off it. */
+async function settle(answer: Reached): Promise<void> {
+  if (!answer.filed && !answer.unfiled) return;
+  for (const listener of [...filing]) listener();
+  const dailies = [answer.filed?.dailyNoteId, ...(answer.unfiled?.dailyNoteIds ?? [])].filter((id) => id && id !== answer.id);
+  // The change itself landed. A daily note that can't be read now is read again when the app next looks.
+  await Promise.all([...new Set(dailies)].map((id) => open.get(id!)?.pull().catch(() => {})));
+}
+
+/** An operation that changes one note's text from outside its editor, and answers with the note. */
+type HistoryOp = Extract<OpInput, { type: "note.revert" | "note.revertChanges" | "note.undo" | "note.redo" | "todo.set" }>;
+
+/** Moves a note through its history, or rewrites a todo in it. What's typed is saved first, and the note's editor takes the result if it's open. */
 export async function moveThroughHistory(workspaceId: string, op: HistoryOp): Promise<Note> {
   const sync = open.get(op.id);
   await sync?.commit();
-  const note = await perform(workspaceId, op);
+  // A todo is completed on the member's own day, which the server can't know.
+  const note: Written = await perform(workspaceId, op.type === "todo.set" && op.on === undefined ? { ...op, on: today() } : op);
   await sync?.take(note);
+  await settle(note);
   return note;
 }
 
@@ -59,17 +90,21 @@ export async function revertMany(workspaceId: string, changes: RevertMany["chang
   await commitTyping(changes.map((c) => c.noteId));
   const done = await perform(workspaceId, { type: "history.revert", changes });
   await Promise.all(done.reverted.map((r) => open.get(r.noteId)?.pull(r.revision)));
+  for (const r of done.reverted) await settle({ id: r.noteId, unfiled: r.unfiled });
   return done;
 }
 
-const MOVES: ReadonlySet<string> = new Set<HistoryOp["type"]>(["note.revert", "note.revertChanges", "note.undo", "note.redo"]);
+const MOVES: ReadonlySet<string> = new Set<HistoryOp["type"]>(["note.revert", "note.revertChanges", "note.undo", "note.redo", "todo.set"]);
 
 /**
  * Performs an operation and keeps the open editors true to it. Before one that moves notes through
- * history, or previews that, what's typed is saved, and each open editor takes its note's result.
+ * history or rewrites a todo, or previews a revert, what's typed is saved, and each open editor takes
+ * its note's result.
  */
 export async function performInSync<T extends OpInput>(workspaceId: string, op: T): Promise<Results[T["type"]]> {
   if (MOVES.has(op.type)) return moveThroughHistory(workspaceId, op as HistoryOp) as Promise<Results[T["type"]]>;
+  // A todo's history is asked for by its line, which the server has only once what is typed is saved.
+  if (op.type === "todo.history") await open.get(op.id)?.commit();
   if (op.type === "history.revert") return revertMany(workspaceId, op.changes) as Promise<Results[T["type"]]>;
   if (op.type === "history.previewRevert") {
     // What is typed and not yet saved would change the note under the preview.
@@ -79,7 +114,10 @@ export async function performInSync<T extends OpInput>(workspaceId: string, op: 
   if (op.type !== "history.revertAuthor") return perform(workspaceId, op);
   await Promise.all([...open.values()].map((sync) => sync.commit()));
   const result = await perform(workspaceId, op);
-  for (const { note } of (result as Results["history.revertAuthor"]).reverted) await open.get(note.id)?.pull(note.revision);
+  for (const { note } of (result as Results["history.revertAuthor"]).reverted) {
+    await open.get(note.id)?.pull(note.revision);
+    await settle(note);
+  }
   return result;
 }
 
@@ -101,6 +139,8 @@ interface Write {
   text: string;
   baseRevision: number;
   writeId: string;
+  /** The member's day when it was typed, which a recurring todo checked off in it is completed on. */
+  on: string;
 }
 
 /**
@@ -170,8 +210,8 @@ export class NoteSync {
     this.timer = setTimeout(() => void this.commit(), ms);
   }
 
-  /** Send what's typed now, after any save already on its way. */
-  async commit(): Promise<void> {
+  /** Send what's typed now, after any save already on its way. It answers with the note as that write left it, or with nothing when there was nothing to send or the write didn't land. */
+  async commit(): Promise<Written | undefined> {
     clearTimeout(this.timer);
     while (this.inFlight) await this.inFlight;
     const doc = this.doc();
@@ -183,10 +223,11 @@ export class NoteSync {
         this.onState("saved");
         return;
       }
-      this.unacknowledged = { text, baseRevision: this.revision, writeId: crypto.randomUUID() };
+      this.unacknowledged = { text, baseRevision: this.revision, writeId: crypto.randomUUID(), on: today() };
       this.typedSinceWrite = ChangeSet.empty(text.length);
     }
     const write = this.unacknowledged;
+    let landed: Written | undefined;
     this.onState("saving");
     this.inFlight = (async () => {
       try {
@@ -199,6 +240,8 @@ export class NoteSync {
         this.revision = saved.revision;
         this.savedText = saved.text;
         this.onSaved(saved);
+        landed = saved;
+        void settle(saved);
         if (this.dirty) this.schedule(PAUSE_MS);
         else unsaved.delete(this);
         this.onState(this.dirty ? "unsaved" : "saved");
@@ -220,6 +263,7 @@ export class NoteSync {
       }
     })();
     await this.inFlight;
+    return landed;
   }
 
   private apply(changes: ChangeSet) {
@@ -260,17 +304,17 @@ export class NoteSync {
     if (this.dirty) this.schedule(PAUSE_MS);
   }
 
-  /** Reads the note again when the server has a later revision than this editor does. */
-  async pull(revision: number): Promise<void> {
+  /** Reads the note again when the server has a later revision than this editor does, or may have when none is named. */
+  async pull(revision?: number): Promise<void> {
     while (this.inFlight) await this.inFlight;
-    if (revision <= this.revision) return;
+    if (revision !== undefined && revision <= this.revision) return;
     await this.take(await perform(this.workspaceId, { type: "note.read", id: this.noteId }));
   }
 
   /** Stop following the view, which can be destroyed right after, and commit what was typed. */
-  close(): Promise<void> {
+  async close(): Promise<void> {
     if (open.get(this.noteId) === this) open.delete(this.noteId);
     this.closedDoc = this.view?.state.doc ?? null;
-    return this.commit();
+    await this.commit();
   }
 }

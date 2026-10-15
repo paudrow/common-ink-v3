@@ -205,11 +205,11 @@ test("turning History off takes its page, its link, and its inspector panel away
   await run(page, "Disable plugin: History");
   await expect.poll(panelIcons(page)).toEqual(["Backlinks", "Info"]);
   await page.getByRole("button", { name: "More" }).click();
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "Plugins"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "Plugins"]);
 
   await run(page, "Enable plugin: History");
   await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
 });
 
 test("a stopwatch written in a note is drawn in it and runs, and is plain text again with its plugin off", async ({ page }) => {
@@ -475,9 +475,9 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
   await expect(section(page, "Pictures")).toHaveCount(0);
 
   await page.setViewportSize({ width: 520, height: 800 });
-  await page.goto("/plugins/tables");
+  await page.goto("/plugins/todos");
   await expect(section(page, "Pictures").locator("img:visible")).toHaveCount(1);
-  await expect(section(page, "What it adds").getByRole("group", { name: "Commands" })).toContainText("Edit the next table");
+  await expect(section(page, "What it adds").getByRole("group", { name: "Views" })).toContainText("A page: Todos");
   expect(await fits(page)).toBe(true);
 
   await page.goto("/plugins/no-such-plugin");

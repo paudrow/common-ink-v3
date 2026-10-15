@@ -140,7 +140,7 @@ test("a folder is renamed in place", async ({ page }) => {
 test("More expands and collapses Contacts, Uploads, and History, and a mode not built yet names what builds it", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const modes = page.getByRole("navigation", { name: "Modes" });
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
 
   const more = modes.getByRole("button", { name: "More" });
   await expect(more).toHaveAttribute("aria-expanded", "false");
@@ -148,7 +148,7 @@ test("More expands and collapses Contacts, Uploads, and History, and a mode not 
   const less = modes.getByRole("button", { name: "Less" });
   await expect(less).toHaveAttribute("aria-expanded", "true");
   await expect(more).toHaveCount(0);
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");
@@ -156,9 +156,9 @@ test("More expands and collapses Contacts, Uploads, and History, and a mode not 
 
   await less.click();
   await expect(more).toHaveAttribute("aria-expanded", "false");
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Calendar"]);
-  await modes.getByRole("link", { name: "Todos" }).click();
-  await expect(editorPane(page).locator(".mode-view")).toHaveText("TodosTodos arrives with #18.");
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
+  await modes.getByRole("link", { name: "Calendar" }).click();
+  await expect(editorPane(page).locator(".mode-view")).toHaveText("CalendarCalendar arrives with #17.");
 });
 
 test("More opens by itself when a mode under it is reached another way, and stays closed once closed by hand until the next time", async ({ page }) => {

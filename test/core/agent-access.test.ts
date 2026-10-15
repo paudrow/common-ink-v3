@@ -48,6 +48,12 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "note.write": { id: noteId, baseRevision: 2, text: "# Plan\n\nStep\n\nMore" },
   "note.backlinks": { id: noteId },
   "links.rebuild": {},
+  "todo.list": {},
+  "todo.filters": {},
+  "todo.set": { id: noteId, revision: 2, line: 0, text: "- [ ] not there", done: true },
+  "todo.history": { id: noteId, revision: 2, line: 0, text: "- [ ] not there" },
+  "todos.rebuild": {},
+  "daily.open": {},
   "note.history": { id: noteId },
   "note.move": { id: noteId, folderId },
   "note.label": { id: noteId, revision: 1, name: "Start" },
@@ -83,11 +89,14 @@ const refusedTo = async (run: () => Promise<unknown>) => {
 describe("an agent's access is its member's", () => {
   const REFUSED: Record<Role, ToolOp[]> = {
     admin: [],
-    editor: ["links.rebuild", "folder.delete"],
+    editor: ["links.rebuild", "todos.rebuild", "folder.delete"],
     viewer: [
       "note.create",
       "note.write",
       "links.rebuild",
+      "todo.set",
+      "todos.rebuild",
+      "daily.open",
       "note.move",
       "note.label",
       "note.revert",

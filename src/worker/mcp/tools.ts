@@ -1,6 +1,7 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { perform, type Actor } from "../../core/operations.ts";
-import { NO_SUCH_WORKSPACE, OpError, type OpInput, type OpType } from "../../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } from "../../core/protocol.ts";
+import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 
 /** What a tool call comes back with: text for the agent, and whether it failed. */
@@ -64,6 +65,11 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
 
 const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
+const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
+const TODOS =
+  "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), and due:YYYY-MM-DD for the day it is due. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\n" +
+  RULE_GRAMMAR +
+  "\ndone:YYYY-MM-DDxN is when a repeating todo was last checked off and how many times, which checking it off writes. A #tag anywhere in a note tags the note, and a todo counts as tagged with its note's tags.";
 const LINKS = "A link to another note is [[id]] or [[id|display text]] with the note's id, so it survives the note being renamed. You can write [[Title]] or [[Title|display text]] instead and it is stored by id; text in code is left alone.";
 const folderId = (description: string) => ({ type: "string", description });
 const folderName = { type: "string", maxLength: 100, description: "The folder's name, without a /" };
@@ -143,14 +149,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "create_note",
-    description: `Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} Needs the editor or admin role.`,
+    description: `Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} ${TODOS} Needs the editor or admin role.`,
     inputSchema: object({ text: { type: "string", description: "The note's markdown" }, folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"), linkTitles }),
     op: "note.create",
   },
   {
     name: "write_note",
     description:
-      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         id: noteId,
@@ -158,6 +164,7 @@ export const TOOLS: Tool[] = [
         text: { type: "string", description: "The note's full new markdown" },
         writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry safe" },
         linkTitles,
+        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
       },
       ["id", "baseRevision", "text"],
     ),
@@ -171,9 +178,73 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "rebuild_links",
-    description: "Make the record behind backlinks again from the text of the notes you can see. Every write keeps that record, so this is only for a record that was changed some other way. It covers 40 notes a call: while the answer's next isn't null, call again with it as after. Needs the admin role.",
-    inputSchema: object({ after: { type: "string", description: "The next of the call before" } }),
+    description: "Make what is derived from the notes' text again, for every note in the workspace: the record behind backlinks, and the index behind list_todos. Every write keeps them, so this is only for a record that was changed some other way. It covers so many notes a call: while the answer's done is false, call again. Needs the admin role.",
+    inputSchema: object({}),
     op: "links.rebuild",
+  },
+  {
+    name: "list_todos",
+    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless sort orders them another way. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 to 3), due, the note's tags, and access. Narrow it by folder, by a tag of the note, by a range of due days, both included, or to those with no due date, and by priority (importance). Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
+    inputSchema: object({
+      folderId: { type: "string", description: "Only todos in notes in this folder or in a folder under it, from list_folders" },
+      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case: a tag on the todo's own line, or anywhere else in its note" },
+      dueFrom: day("Only todos due on or after this day"),
+      dueTo: day("Only todos due on or before this day"),
+      noDue: { type: "boolean", description: "True for only todos with no due date" },
+      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these priorities: 0 is None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
+      includeCompleted: { type: "boolean", description: "True to list done todos too" },
+      noteId: { type: "string", description: "Only the todos in this note" },
+      sort: { type: "string", enum: [...TODO_SORTS], description: "The order, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
+      limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
+      offset: { type: "integer", minimum: 0, description: "The next of the page before" },
+    }),
+    op: "todo.list",
+  },
+  {
+    name: "todo_filters",
+    description: "The tags list_todos can be narrowed by: those of the notes that have todos, among the notes you can see. The folders it can be narrowed by are list_folders'.",
+    inputSchema: object({}),
+    op: "todo.filters",
+  },
+  {
+    name: "set_todo",
+    description:
+      "Check a todo off, skip it, or change its priority, due date, how it repeats or its words, by rewriting its line in its note. Checking off a todo that repeats leaves it open with its next due date and a done: mark, and files the checked line on your member's daily note for the day: the answer's filed says which day and note. A rule that ends (-times-N, -until-DAY) counts down, and its last time checks the todo off for good. skip moves a repeating todo to its next due date with nothing checked off, and is refused for one that doesn't repeat or is on its last time. Undoing or reverting that change takes the filed line off the daily note again. Pass id, revision, line and text as list_todos gave them. The line is followed through every change made to the note since that revision, so it is found where it has moved to and no other todo is taken for it, even one that reads the same. The call is refused as a conflict when that line was itself changed or deleted, so list again. Made twice, it changes nothing more. Whatever you leave out stays as written. Needs edit on the note. The change is recorded under your agent's name.",
+    inputSchema: object(
+      {
+        id: noteId,
+        revision: { type: "integer", minimum: 0, description: "The revision of the note the todo was listed at, from list_todos" },
+        line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" },
+        text: { type: "string", description: "The todo's line as written, from list_todos" },
+        done: { type: "boolean", description: "True checks it off, false opens it again" },
+        importance: { type: "integer", minimum: 0, maximum: 3, description: "Its priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
+        due: { type: ["string", "null"], description: "The day it is due as YYYY-MM-DD, or null for no due date" },
+        every: { type: ["string", "null"], description: `How it repeats, as written after every:, or null to stop it repeating. The rules:\n${RULE_GRAMMAR}` },
+        skip: { type: "boolean", description: "True moves a repeating todo's due date to its next one with nothing checked off or filed. It counts as one of a rule's -times-N. Not together with done" },
+        on: day("The day it is for you, which a repeating todo checked off is completed on and filed under. Left out, it is today in the time zone your member's settings name, or in UTC"),
+        words: { type: "string", description: "What the todo says instead, as list_todos gives its words: everything but its checkbox, priority, due date, rule and done: mark, tags included, on one line. Its due date and how it repeats are written after them" },
+      },
+      ["id", "revision", "line", "text"],
+    ),
+    op: "todo.set",
+  },
+  {
+    name: "todo_history",
+    description: "Each time a repeating todo was checked off, latest first: the day, who did it, and the daily note it was filed on when you can see that note. Pass id, revision, line and text as list_todos gave them.",
+    inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "The revision of the note, from list_todos" }, line: { type: "integer", minimum: 0, description: "The todo's line, from list_todos" }, text: { type: "string", description: "The todo's line as written, from list_todos" } }, ["id", "revision", "line", "text"]),
+    op: "todo.history",
+  },
+  {
+    name: "daily_note",
+    description: "Your member's daily note for a day: found, or made with the date as its heading in the folder their settings name. A member has one for each day, and it is where a repeating todo they or you check off is filed. Needs the editor or admin role.",
+    inputSchema: object({ on: day("The day. Left out, it is today in the time zone your member's settings name, or in UTC") }),
+    op: "daily.open",
+  },
+  {
+    name: "rebuild_todos",
+    description: "The same as rebuild_links: makes the index behind list_todos and the record behind backlinks again from the notes' text, for every note in the workspace. Notes written before there was an index are indexed without it, the first time todos are listed. While the answer's done is false, call again. Needs the admin role.",
+    inputSchema: object({}),
+    op: "todos.rebuild",
   },
   {
     name: "move_note",

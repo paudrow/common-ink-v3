@@ -23,7 +23,7 @@ import { documentOf } from "./settings.ts";
 import { Settings } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
-import { performInSync, saveNow, undoOrRedo } from "./sync.ts";
+import { onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 
 const FOCUS_KEY = "ink.focus";
@@ -45,6 +45,8 @@ type Widths = { sidebar?: number; inspector?: number };
 const isWidths = (v: unknown): v is Widths => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number" && n > 0);
 const within = ({ min, max }: { min: number; max: number }, width: number) => Math.min(max, Math.max(min, width));
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+/** Where a page that gives no order is placed: after every page that gives one. */
+const UNPLACED = Number.MAX_SAFE_INTEGER;
 /** How often the notes changed since the last look are listed, so an agent's or another member's change shows up. */
 const REFRESH_MS = 5000;
 /**
@@ -233,7 +235,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       trusted: [core, ...BUILT_INS, pages],
       settings: documentOf(settings.text()) ?? {},
       // The member's own controls come through here: the Settings and Plugins pages, and the commands that turn a plugin on or off.
-      write: (key, value) => void settings.set(key, value),
+      write: (key, value) => settings.set(key, value),
       mac: MAC,
       embedSite: me.setup.embedSite,
       provide: (plugin) => ({
@@ -270,9 +272,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   useEffect(() => {
     let last: string | null = null;
     const read = () => {
-      if (settings.text() === last) return;
-      last = settings.text();
-      host.settingsChanged(documentOf(last) ?? {});
+      // Once the member's settings are read the plugins are told so even when nothing differs from what they had, as a plugin waiting to change one is.
+      const now = `${settings.status().kind === "loading" ? "loading" : "read"} ${settings.text()}`;
+      if (now === last) return;
+      last = now;
+      host.settingsChanged(documentOf(settings.text()) ?? {});
     };
     read();
     return settings.subscribe(read);
@@ -329,7 +333,15 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     return chord && chordLabel(chord, MAC);
   };
 
-  const loadFolders = useCallback(() => perform(workspaceId, { type: "folder.list" }).then((r) => setTree(folderTree(r))), [workspaceId]);
+  // A listing that fails, as a request can under load, is asked for again at the next refresh, and leaves what was listed as it was.
+  const loadFolders = useCallback(
+    () =>
+      perform(workspaceId, { type: "folder.list" }).then(
+        (r) => setTree(folderTree(r)),
+        () => {},
+      ),
+    [workspaceId],
+  );
   useEffect(() => void loadFolders(), [loadFolders]);
 
   const listedNotes = useRef(notes);
@@ -339,18 +351,21 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   useEffect(() => {
     let live = true;
     const since = (learned.current = new Map());
-    perform(workspaceId, { type: "note.list" }).then((all) => {
-      if (!live) return;
-      const known = listedNotes.current;
-      const listed = newest(all, known, since);
-      const there = new Set(listed.map((n) => n.id));
-      const lost = (known ?? []).filter((n) => !there.has(n.id)).map((n) => n.id);
-      setGone((was) => {
-        const now = [...was, ...lost].filter((id) => !there.has(id));
-        return now.length === was.size && !lost.length ? was : new Set(now);
-      });
-      setNotes(listed);
-    });
+    perform(workspaceId, { type: "note.list" }).then(
+      (all) => {
+        if (!live) return;
+        const known = listedNotes.current;
+        const listed = newest(all, known, since);
+        const there = new Set(listed.map((n) => n.id));
+        const lost = (known ?? []).filter((n) => !there.has(n.id)).map((n) => n.id);
+        setGone((was) => {
+          const now = [...was, ...lost].filter((id) => !there.has(id));
+          return now.length === was.size && !lost.length ? was : new Set(now);
+        });
+        setNotes(listed);
+      },
+      () => {},
+    );
     return () => {
       live = false;
     };
@@ -360,6 +375,9 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     void loadFolders();
     setListVersion((v) => v + 1);
   }, [loadFolders]);
+
+  // A recurring todo checked off anywhere in the app is filed on a daily note, which may be new, in a folder that may be new.
+  useEffect(() => onFiled(refresh), [refresh]);
 
   useEffect(() => {
     const again = () => document.visibilityState === "visible" && refresh();
@@ -670,6 +688,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     moveNote,
     noteChanged: remember,
     refresh,
+    saveNote: async (noteId: string) => saveNow(noteId),
     markSeen,
     toggleOverlay: (id: string, state?: unknown) => setOverlay((open) => (open?.id === id ? null : { id, state })),
     toggleSidebar,
@@ -697,7 +716,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     folderId: frontFolderId,
     focus: focusMode,
     sidebarOpen,
-    pages: contributed.views.page,
+    pages: contributed.views.page.toSorted((a, b) => (a.order ?? UNPLACED) - (b.order ?? UNPLACED)),
     sections: null,
     sectionsOpening: () => null,
     readNote: () => null,

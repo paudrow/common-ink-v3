@@ -322,7 +322,7 @@ test("the tab row has its tabs and Focus and no button for either side, whose co
   await expect(sidebar(page)).toHaveCount(0);
   expect(await widthOf(bar)).toBe(44);
   expect(await widthOf(main)).toBe(1280 - 44 - 300);
-  await expect.poll(() => controls(bar)).toEqual(["New note", "Dashboard", "Search", "Todos", "Calendar", "More", "Folders"]);
+  await expect.poll(() => controls(bar)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders"]);
   expect(await controls(page.locator(".tab-row"))).toEqual(["Focus"]);
   await page.reload();
   await expect(bar).toBeVisible();
@@ -578,13 +578,13 @@ async function listedIn(part: Locator, things: string) {
 test("a closed sidebar leaves a bar with an icon for each thing the sidebar lists, in the sidebar's own order, and each goes where it says", async ({ page }) => {
   await withNote(page);
   const open = await listedIn(sidebar(page), ".new-note, nav[aria-label=Modes] > *, .section-head > span");
-  expect(open.map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Calendar", "More", "Folders"]);
+  expect(open.map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders"]);
 
   await toggleSidebar(page);
   const bar = page.getByRole("navigation", { name: "Sidebar bar" });
   await expect(bar).toBeVisible();
   expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(open.map((o) => o.name));
-  for (const name of ["New note", "Dashboard", "Search", "Todos", "Calendar", "More", "Folders"]) {
+  for (const name of ["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders"]) {
     const icon = bar.getByRole(["New note", "More", "Folders"].includes(name) ? "button" : "link", { name, exact: true });
     await expect(icon).toHaveAttribute("title", name === "New note" ? "New note in Unsorted" : name);
     expect(await widthOf(icon)).toBe(28);
@@ -598,7 +598,7 @@ test("a closed sidebar leaves a bar with an icon for each thing the sidebar list
 
   // More lists the rest in the bar as it does in the sidebar, between Calendar and Folders.
   await bar.getByRole("button", { name: "More" }).click();
-  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Calendar", "Less", "Contacts", "Uploads", "History", "Plugins", "Folders"]);
+  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "Less", "Contacts", "Uploads", "History", "Plugins", "Folders"]);
   await bar.getByRole("button", { name: "Less" }).click();
 
   // Folders shows the folder tree over the page, and the sidebar stays closed.

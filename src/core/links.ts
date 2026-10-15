@@ -1,4 +1,4 @@
-import { linesOutsideCode } from "./markdown.ts";
+import { linesOutsideCode } from "./lines.ts";
 
 /**
  * A link as a note writes it: `[[target]]` or `[[target|display text]]`. A note stores the target

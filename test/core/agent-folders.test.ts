@@ -91,7 +91,8 @@ describe("an agent limited to folders", () => {
     expect((await connect({ workspaceId: ada.workspaceId, folderIds: [plans, plans, projects] })).agent.folderIds).toEqual([plans, projects]);
   });
 
-  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", async () => {
+  // Some ninety tool calls: a slow runner takes longer than the default 5 s.
+  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", { timeout: 30_000 }, async () => {
     const w = await world();
     const claude = await asAgent(w.limited.token);
 
@@ -213,7 +214,7 @@ describe("an agent limited to folders", () => {
       expect(many.skipped).toEqual([w.outside.id, w.loose.id, MISSING].map((noteId) => ({ noteId, noteTitle: "", why: "refused", message: "No such note" })));
     }
     // Rebuilding the record of links covers the notes it can see, and counts no other.
-    expect(await claude.json("rebuild_links")).toEqual({ notes: 2, next: null });
+    expect(await claude.json("rebuild_links")).toEqual({ done: true });
 
     const after = await perform(env.DB, w.ada, { type: "note.list" });
     const untouched = (notes: typeof after) => notes.filter((n) => n.id !== w.deep.id).map((n) => [n.id, n.folderId, n.revision]);
@@ -269,6 +270,87 @@ describe("an agent limited to folders", () => {
     expect((await narrow.json<{ notes: unknown[] }>("history_summary")).notes).toEqual([]);
     // The agent still says what it was limited to, so its member can see why it reaches nothing.
     expect((await listAgents(env.DB, w.ada.personId)).find((a) => a.id === agent.id)!.folderIds).toEqual([w.plans]);
+  });
+
+  it("lists the todos and tags of its own notes only, learns nothing of a folder outside by asking for its todos, and sets no todo outside", async () => {
+    const w = await world();
+    const todo = "- [ ] buy-outside +proj-outside";
+    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Chores-outside\n\n${todo}\n\n#tag-outside` });
+    const chores = (await perform(env.DB, w.ada, { type: "note.list", folderId: w.journal })).find((n) => n.title === "Chores-outside")!;
+    await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: "# Sprint\n\n- [ ] ship-inside +proj-inside\n\n#tag-inside" });
+    const claude = await asAgent(w.limited.token);
+
+    const listed = await claude.json<{ todos: { text: string }[] }>("list_todos", { includeCompleted: true });
+    expect(listed.todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
+    // Narrowed to a folder: one inside its limit with the folders under it, and a folder outside is no folder, as one that never was.
+    expect((await claude.json<{ todos: { text: string }[] }>("list_todos", { folderId: w.projects })).todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
+    expect((await claude.json<{ todos: { text: string }[] }>("list_todos", { folderId: w.plans })).todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
+    expect(await claude.call("list_todos", { folderId: w.journal })).toEqual(NO_FOLDER);
+    expect(await claude.call("list_todos", { folderId: w.journal, includeCompleted: true, tag: "tag-outside" })).toEqual(await claude.call("list_todos", { folderId: MISSING, includeCompleted: true, tag: "tag-outside" }));
+    expect((await claude.json<{ todos: unknown[] }>("list_todos", { tag: "tag-outside" })).todos).toEqual([]);
+    expect(await claude.json("todo_filters")).toEqual({ tags: ["tag-inside"] });
+    const set = (id: string) => claude.call("set_todo", { id, revision: 1, line: 3, text: todo, done: true });
+    expect(await set(chores.id)).toEqual(NO_NOTE);
+    expect(await set(MISSING)).toEqual(NO_NOTE);
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: chores.id })).text).toContain(todo);
+    expect(claude.said.join("\n")).not.toMatch(/buy-outside|proj-outside|tag-outside|Chores-outside|Journal/);
+  });
+
+  it("skips a recurring todo inside its folders and completes the last time of one that ends, with nothing filed outside them, and neither outside", async () => {
+    const w = await world();
+    const todo = "- [ ] Water-inside every:1w-times-2 due:2026-10-10";
+    const chores = await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: todo });
+    const elsewhere = await perform(env.DB, w.ada, { type: "note.create", text: "- [ ] Water-outside every:1w due:2026-10-10" });
+    const daily = await perform(env.DB, w.ada, { type: "daily.open", on: "2026-10-11" });
+    const claude = await asAgent(w.limited.token);
+
+    const skipped = await claude.json<{ text: string; revision: number; filed?: unknown }>("set_todo", { id: chores.id, revision: 1, line: 0, text: todo, skip: true, on: "2026-10-11" });
+    expect(skipped.text).toBe("- [ ] Water-inside every:1w-times-1 due:2026-10-17");
+    expect(skipped.filed).toBeUndefined();
+
+    const last = await claude.json<{ text: string; filed: { dailyNoteId: string | null; todos: number } }>("set_todo", { id: chores.id, revision: skipped.revision, line: 0, text: skipped.text, done: true, on: "2026-10-11" });
+    expect(last.text).toBe("- [x] Water-inside every:1w-times-1 due:2026-10-17");
+    expect(last.filed).toEqual({ on: "2026-10-11", dailyNoteId: null, todos: 1 });
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: daily.id })).revision).toBe(1);
+
+    expect(await claude.call("set_todo", { id: elsewhere.id, revision: 1, line: 0, text: "- [ ] Water-outside every:1w due:2026-10-10", skip: true, on: "2026-10-11" })).toEqual(NO_NOTE);
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: elsewhere.id })).revision).toBe(1);
+    expect(await claude.call("set_todo", { id: chores.id, revision: 3, line: 0, text: last.text, skip: true })).toMatchObject({ isError: true, text: expect.stringContaining("invalid") });
+  });
+
+  it("completes a recurring todo inside its folders and files nothing on a daily note outside them, makes no daily folder, and is told of no daily note", async () => {
+    const w = await world();
+    const todo = "- [ ] Water-inside every:1w due:2026-10-10";
+    const chores = await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: `# Chores\n\n${todo}\n- [ ] Bins-inside every:1w due:2026-10-10` });
+    const claude = await asAgent(w.limited.token);
+    const folders = async () => (await perform(env.DB, w.ada, { type: "folder.list" })).folders.map((f) => f.name).sort();
+    const before = await folders();
+
+    // With no daily folder yet: the todo is completed, and no folder or note is made at the top of the workspace for it.
+    const first = await claude.json<{ text: string; revision: number; filed: { dailyNoteId: string | null; todos: number } }>("set_todo", { id: chores.id, revision: 1, line: 2, text: todo, done: true, on: "2026-10-11" });
+    expect(first.text).toContain("- [ ] Water-inside every:1w due:2026-10-17 done:2026-10-11x1");
+    expect(first.filed).toEqual({ on: "2026-10-11", dailyNoteId: null, todos: 1 });
+    expect(await folders()).toEqual(before);
+    expect(await claude.call("daily_note", { on: "2026-10-11" })).toEqual({ isError: true, text: "forbidden: An agent limited to folders can't daily.open" });
+    expect(await folders()).toEqual(before);
+
+    // With Ada's daily note there, outside the limit: it is not written on, and the agent is not told its id.
+    const daily = await perform(env.DB, w.ada, { type: "daily.open", on: "2026-10-11" });
+    const written = await claude.json<{ text: string; revision: number; filed: { dailyNoteId: string | null } }>("write_note", { id: chores.id, baseRevision: first.revision, text: first.text.replace("- [ ] Bins-inside", "- [x] Bins-inside"), on: "2026-10-11" });
+    expect(written.text).toContain("- [ ] Bins-inside every:1w due:2026-10-17 done:2026-10-11x1");
+    expect(written.filed.dailyNoteId).toBeNull();
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: daily.id })).revision).toBe(1);
+
+    // What Ada files herself is on her daily note, which the agent's history of the todo doesn't name.
+    const adas = await perform(env.DB, w.ada, { type: "todo.set", id: chores.id, revision: written.revision, line: 2, text: "- [ ] Water-inside every:1w due:2026-10-17 done:2026-10-11x1", done: true, on: "2026-10-11" });
+    expect(adas.filed!.dailyNoteId).toBe(daily.id);
+    const told = await claude.json<{ completions: { dailyNoteId: string | null }[] }>("todo_history", { id: chores.id, revision: adas.revision, line: 2, text: "- [ ] Water-inside every:1w due:2026-10-24 done:2026-10-11x2" });
+    expect(told.completions.map((c) => c.dailyNoteId)).toEqual([null, null]);
+    expect(await claude.call("read_note", { id: daily.id })).toEqual(NO_NOTE);
+    expect(await claude.call("todo_history", { id: w.outside.id, revision: 3, line: 0, text: "- [ ] x" })).toEqual(NO_NOTE);
+    expect(await claude.call("todo_history", { id: MISSING, revision: 3, line: 0, text: "- [ ] x" })).toEqual(NO_NOTE);
+    expect(claude.said.join("\n")).not.toContain(daily.id);
+    expect(claude.said.join("\n")).not.toMatch(/# 2026-10-11/);
   });
 
   it("isn't told who is in the workspace, some of whom have only written outside its folders", async () => {

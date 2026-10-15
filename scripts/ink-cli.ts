@@ -16,10 +16,22 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
   create [--text TEXT] [--folder ID] [--link-titles keep]
                                       a new note (text from stdin if --text is left out)
-  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles keep]
+  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles keep] [--on DAY]
                                       replace a note's text (from stdin if --text is left out)
   backlinks ID                        the notes that link to a note
-  links-rebuild [--after ID]          make the record behind backlinks again from the notes' text
+  links-rebuild                       make backlinks and the index of todos again from the notes' text
+  todos [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY] [--no-due true] [--importance N,N]
+        [--completed true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
+                                      the todos in the notes you can see, open ones unless --completed
+  todo-filters                        the tags that todos can be narrowed by
+  todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
+        [--every RULE|none] [--skip true] [--on DAY]
+                                      check a todo off, change it, or skip a repeating todo to its next
+                                      due date; ID, both Ns and LINE are from todos
+  todo-history ID --revision N --line N --text LINE
+                                      each time a repeating todo was checked off, and by whom
+  daily [--on DAY]                    your daily note for a day, made if it isn't there
+  todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
   folders                             the folders in a workspace
   folder-create NAME [--parent ID]    a new folder
@@ -61,6 +73,18 @@ from authors, such as agent:abc123def456. NEXT is the next of the page before, a
 A link to a note is [[ID]] or [[ID|display text]]. Write [[Title]] and create and write store it by
 the id of the one note with that title, or refuse when none or several have it. --link-titles keep
 leaves such text as it is.
+
+A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
+DAY is a calendar date, YYYY-MM-DD. --importance is the priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!).
+RULE is how a todo repeats, written every:RULE on its line:
+  2w (d, w, m or y)   every N after the due date     3d-after-done      N after it was last done
+  mon,thu             those days of every week       2w-mon,thu         of every 2nd week
+  3rd-day last-day    that day of every month        2nd-tue last-fri   that weekday of every month
+  1st-day,15th-day    several of either, in order    3m-last-fri        of every 3rd month
+  mar-1               that date every year           1st-mon-mar        that weekday of that month
+  then -until-DAY (none after that day) or -times-N (N more times, counting the one due now)
+Checking off a todo that repeats leaves it open with its next due date and files the checked line on
+your daily note for --on, or for today when left out. Its last time checks it off for good.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
 
@@ -161,11 +185,11 @@ function json(name: string, value: string): unknown {
   }
 }
 
-const nextOf = (answer: string): string | null => {
+const read = (answer: string): { next?: string | null; done?: boolean } => {
   try {
-    return (JSON.parse(answer) as { next?: string | null }).next ?? null;
+    return JSON.parse(answer) as { next?: string | null; done?: boolean };
   } catch {
-    return null;
+    return {};
   }
 };
 
@@ -188,6 +212,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       Object.fromEntries(Object.entries(as).flatMap(([arg, [flag, read]]) => (flags.has(flag) ? [[arg, read ? read(`--${flag}`, flags.get(flag)!) : flags.get(flag)!]] : [])));
     const ids = (_: string, value: string) => value.split(",");
     const author = (_: string, value: string) => authorRef(value);
+    const truth = (_: string, value: string) => value !== "false";
 
     let tool: string;
     let args: Record<string, unknown> = {};
@@ -215,7 +240,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "write":
         if (!flags.has("base")) throw new UsageError("write needs --base, the revision you read");
         tool = "write_note";
-        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"] }) };
+        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], on: ["on"] }) };
         break;
       case "backlinks":
         tool = "backlinks";
@@ -223,7 +248,48 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "links-rebuild":
         tool = "rebuild_links";
-        args = given({ after: ["after"] });
+        break;
+      case "todos":
+        tool = "list_todos";
+        args = given({
+          folderId: ["folder"],
+          tag: ["tag"],
+          dueFrom: ["due-from"],
+          dueTo: ["due-to"],
+          noDue: ["no-due", truth],
+          importance: ["importance", integers],
+          includeCompleted: ["completed", truth],
+          noteId: ["note"],
+          sort: ["sort"],
+          limit: ["limit", integer],
+          offset: ["offset", integer],
+        });
+        break;
+      case "todo-filters":
+        tool = "todo_filters";
+        break;
+      case "todo":
+        if (!flags.has("revision") || !flags.has("line") || !flags.has("text")) throw new UsageError("todo needs --revision, --line and --text, as todos gave them");
+        tool = "set_todo";
+        args = {
+          id: needId(),
+          revision: integer("--revision", flags.get("revision")!),
+          line: integer("--line", flags.get("line")!),
+          text: flags.get("text")!,
+          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], every: ["every", (_, value) => (value === "none" ? null : value)], skip: ["skip", truth], on: ["on"], words: ["words"] }),
+        };
+        break;
+      case "todo-history":
+        if (!flags.has("revision") || !flags.has("line") || !flags.has("text")) throw new UsageError("todo-history needs --revision, --line and --text, as todos gave them");
+        tool = "todo_history";
+        args = { id: needId(), revision: integer("--revision", flags.get("revision")!), line: integer("--line", flags.get("line")!), text: flags.get("text")! };
+        break;
+      case "daily":
+        tool = "daily_note";
+        args = given({ on: ["on"] });
+        break;
+      case "todos-rebuild":
+        tool = "rebuild_todos";
         break;
       case "move":
         tool = "move_note";
@@ -381,7 +447,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
       io.out(answer);
       if (failed) return 1;
       // These cover a few notes a call, so the command carries on until every note is covered.
-      const next = tool === "revert_author" || tool === "rebuild_links" ? nextOf(answer) : null;
+      if (tool === "rebuild_links" || tool === "rebuild_todos") {
+        if (read(answer).done !== false) return 0;
+        continue;
+      }
+      const next = tool === "revert_author" ? (read(answer).next ?? null) : null;
       if (!next) return 0;
       args = { ...args, after: next };
     }

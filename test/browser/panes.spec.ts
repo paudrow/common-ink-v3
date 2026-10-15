@@ -608,7 +608,7 @@ for (const [name, splits, panes] of [
     const others = await Promise.all(Array.from({ length: panes }, (_, i) => tabs(page, i).allInnerTexts()));
 
     const pages = await modes(page).getByRole("link").allInnerTexts();
-    expect(pages).toEqual(["Dashboard", "Search", "Todos", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
+    expect(pages).toEqual(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
     const opensThere = async (label: string) => {
       for (let i = 0; i < panes; i++) await expect(tabs(page, i)).toHaveText(i === there ? [label] : others[i]!);
       await expect(group(page, there + 1)).toHaveAttribute("data-focused", "true");
@@ -616,7 +616,8 @@ for (const [name, splits, panes] of [
       await expect.poll(() => previews(page)).toEqual([label]);
       await expect.poll(() => placed(page)).toEqual(before);
     };
-    for (const label of pages) {
+    // Today opens the member's daily note, a note and not a page.
+    for (const label of pages.filter((label) => label !== "Today")) {
       await modes(page).getByRole("link", { name: label, exact: true }).click();
       await opensThere(label);
       await front();

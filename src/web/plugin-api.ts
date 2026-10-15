@@ -7,10 +7,10 @@
  * `test/core/plugin-boundary.test.ts` checks.
  *
  * A plugin declares its options as `settings` and reads them through its host. It cannot change
- * them, or read anyone else's: settings are the member's.
+ * them, other than one it declares `remembered`, or read anyone else's: settings are the member's.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary } from "../core/protocol.ts";
+import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, Results, Role, Sharing, WorkspaceSummary, Written } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 import type { Showing } from "./inspected.ts";
 
@@ -23,6 +23,18 @@ export { lineHunks } from "../core/text.ts";
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
+/** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
+export { changeTodo, completeTodo, skipTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+
+/** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
+export { DAY_NAMES, MONTHS, MONTH_NAMES, WEEKDAYS, counted, describeRule, endLabel, isInterval, nextDue, occurrences, ordinal, parseRule, pastThe28th, ruleLabel, skippedTo, writeRule, type End, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
+
+/** The settings a daily note is made by, which the daily plugin declares under exactly these keys and the server reads. */
+export { DAILY_SETTINGS } from "../core/daily.ts";
+
+/** One time a recurring todo was checked off, as `todo.history` answers it. The protocol calls it `Completion`, which here is a list offered at the cursor. */
+export type TodoCompletion = Results["todo.history"]["completions"][number];
+
 export { dismissing, useDismiss } from "./dismiss.ts";
 export { sandboxed } from "./htmlFrame.ts";
 export { askSite } from "./otherSites.ts";
@@ -33,7 +45,7 @@ export { isReading } from "./readOnly.ts";
 export { ResizeHandle } from "./resize.tsx";
 export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
-export { ago, useNow } from "./time.ts";
+export { ago, dayOf, today, useNow } from "./time.ts";
 /** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
 export { useOpenNote, type OpenNote } from "./openNotes.ts";
 
@@ -83,7 +95,16 @@ export interface Screenshot {
  * One setting: what it holds, what it is when the member hasn't changed it, and what a person is
  * told about it. The words are JSON Schema's, and it is plain data: no functions and no classes.
  */
-export type Setting = { title: string; description?: string } & (
+export type Setting = {
+  title: string;
+  description?: string;
+  /**
+   * Set for an option the plugin remembers from what the member does in its own views, such as the
+   * order the Todos page is sorted in, so it is kept on the server with the member's settings and not in one browser. The
+   * plugin may change it with `host.settings.set`; it can change no other, and the member can reset it.
+   */
+  remembered?: true;
+} & (
   | { type: "boolean"; default: boolean }
   /**
    * `unreadable` is what it reads as when the member's value isn't one it can take, if that is not the default: the safe choice, for a
@@ -185,10 +206,16 @@ export interface PluginHost {
    * and one that reads or changes who a note or folder is shared with.
    */
   perform<T extends PluginOp>(op: T): Promise<Results[T["type"]]>;
-  /** This plugin's own options, as the member set them or as they default. There is no way to change one. */
+  /** This plugin's own options, as the member set them or as they default. Only one declared `remembered` can be changed. */
   readonly settings: {
     /** The option declared under `name` in the plugin's `settings`. A value the member got wrong reads as the default. */
     get<T extends SettingValue = SettingValue>(name: string): T;
+    /**
+     * Changes an option the plugin declared `remembered`, for the member, wherever they sign in. Any
+     * other throws. False when it wasn't changed: the member's settings aren't read yet, or the value
+     * isn't one the option takes.
+     */
+    set(name: string, value: SettingValue): boolean;
     /** Calls `listener` when the member's settings change. A view is drawn again without asking. */
     subscribe(listener: () => void): Dispose;
   };
@@ -318,13 +345,14 @@ export interface Slots {
    * `pageState` are its own, so two pages open side by side each read their own address, and
    * `app.go` to an address under its path moves that page and no other. `nav` says where its link goes:
    * with the main links of the sidebar, under More, or in the workspace menu. Each page gets a
-   * `go.<id>` command. A page is also shown at every address under its
+   * `go.<id>` command. `order` places its link among the others: lower first, and those with none
+   * after them, in the order of their plugins. A page is also shown at every address under its
    * path, such as `/plugins/tabs` for the page at `/plugins`, unless another page is at exactly that address:
-   * it reads the rest from `app.path`. One that is `transient` only leads somewhere else
-   * with `app.show`: it is never a tab, and is drawn in place of the editor area for the moment it
-   * takes to find where to go, with the editor area kept as it is underneath.
+   * it reads the rest from `app.path`. One that is `transient` only leads somewhere else, as Today
+   * leads to the day's note with `app.show`: it is never a tab, and is drawn in place of the editor
+   * area for the moment it takes to find where to go, with the editor area kept as it is underneath.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; transient?: boolean; component: View };
+  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; component: View };
   /**
    * An item in the bottom bar: one thin line along the foot of the window for small things to
    * glance at, such as a count of the open note's words. `side` is the end it sits at, the left
@@ -711,6 +739,13 @@ export interface App {
   noteChanged(note: Note): void;
   /** Reads the folders and notes again, after a change the app wasn't told about. */
   refresh(): void;
+  /**
+   * Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a
+   * change that must reach the server as it is, before anything else is typed. It answers with the
+   * note as that write left it, `filed` saying whether it checked off a recurring todo, and with
+   * nothing when there was nothing to send, no editor of the note, or the write didn't land.
+   */
+  saveNote(noteId: string): Promise<Written | undefined>;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */

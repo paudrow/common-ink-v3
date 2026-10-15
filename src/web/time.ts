@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** The calendar day it is at `time` where the member is: the browser's own time zone, written YYYY-MM-DD. */
+export const dayOf = (time: Date) => `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}`;
+
+/** Today where the member is. The server is handed this day and never works it out for someone in the app. */
+export const today = () => dayOf(new Date());
+
 /** How long ago `then` was, as a note list shows it: "just now", "5m ago", "yesterday", or a date. */
 export function ago(then: number, now: number): string {
   const minutes = Math.round((now - then) / 60_000);

@@ -814,13 +814,14 @@ test("each kind of rendering is its own plugin: turning one off shows that markd
   const text = "# All\n\nSome **bold** here.\n\n- [ ] task\n  - under\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nMath $x^2$ here.\n\n```js\nconst a = 1;\n```\n";
   const note = await open(page, text);
   const drawn = {
-    gfm: () => editor(page).getByRole("checkbox"),
+    gfm: () => editor(page).locator(".md-hang"),
+    todos: () => editor(page).getByRole("checkbox"),
     tables: () => editor(page).getByRole("table"),
     math: () => editor(page).locator(".katex"),
     "code-blocks": () => editor(page).getByRole("button", { name: "Copy" }),
     bullets: () => editor(page).locator(".bullet-dot"),
   };
-  const names = { gfm: "GitHub-flavored markdown", tables: "Tables", math: "LaTeX", "code-blocks": "Code blocks", bullets: "Outline bullets" };
+  const names = { gfm: "GitHub-flavored markdown", todos: "Todos", tables: "Tables", math: "LaTeX", "code-blocks": "Code blocks", bullets: "Outline bullets" };
 
   for (const each of Object.values(drawn)) await expect(each()).toHaveCount(1);
   await expect(line(page, "const a").locator(".tok-keyword")).toHaveCount(1);
