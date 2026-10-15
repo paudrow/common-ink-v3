@@ -150,7 +150,9 @@ test("contacts connect the same way, are searched as typed, and disconnecting ta
   await expect(rows).toHaveText([/^Ada Lovelace/, /^Grace Hopper/, /^Lin Wei/, /^Sam Okafor/, /^Zoë Álvarez/]);
   await expect(contacts(page).getByRole("status").first()).toHaveText("5 contacts");
   await expect(contact(page, "Grace Hopper")).toContainText("Navy");
-  await expect(contact(page, "Grace Hopper").getByRole("link", { name: "hopper@navy.example" })).toHaveAttribute("href", "mailto:hopper@navy.example");
+  // A card is one link, to the person's page: an address is written on it, and followed from that page.
+  await expect(contact(page, "Grace Hopper")).toContainText("hopper@navy.example");
+  await expect(contact(page, "Grace Hopper").getByRole("link")).toHaveAttribute("href", "/person/Grace%20Hopper");
   await expect(contact(page, "Sam Okafor")).toContainText("+1 555 0142");
   await expect(contacts(page).getByRole("button", { name: /Edit|Save/ }), "contacts are read here and not changed").toHaveCount(0);
 

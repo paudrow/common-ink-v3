@@ -421,7 +421,7 @@ test("a click on a mention opens that person's page: my contact's details for me
   await expect(sam.getByRole("heading", { name: "Sam Okafor" })).toBeVisible();
   await expect(sam.getByRole("region", { name: "Your contact Sam Okafor" })).toContainText("From your contacts. Only you see this.");
   await expect(sam.locator(".person-field")).toHaveText(["Phone+1 555 0142", "WorkOwner, Okafor Plumbing", "Address12 Water Lane, Springfield", "Birthday21 April", "Websitehttps://okafor-plumbing.example", "NotesFixed the boiler in March. Prefers a text to a call."]);
-  await expect(sam.getByRole("region", { name: "Open todos" }).getByRole("listitem")).toHaveText(["Fix the boilerBoiler"]);
+  await expect(sam.getByRole("list", { name: "Open todos assigned to Sam Okafor" }).locator(".todo-words")).toHaveText(["Fix the boiler"]);
   const lines = sam.getByRole("list", { name: "Lines" }).getByRole("listitem");
   await expect(lines).toHaveText([/^secret-line about @Sam OkaforSecret · today$/, /^Called @Sam Okafor about the leak under the sink\.Plumbing log · today$/, /^Fix the boiler @Sam OkaforBoiler · today$/]);
   // The page has one action and the search: nothing else to press.

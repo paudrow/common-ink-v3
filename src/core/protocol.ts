@@ -140,6 +140,35 @@ export type SearchSort = (typeof SEARCH_SORTS)[number];
 const SourceId = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, "not a data source's id");
 /** A record's id as its data source gave it. It is passed back to that data source and read as nothing else. */
 const RecordId = z.string().min(1).max(1024);
+/** One line of a contact's: an email, a phone number, an address, a page. */
+const ContactLine = (max: number) => z.string().trim().min(1).max(max);
+/** A birthday as YYYY-MM-DD, or --MM-DD when the year isn't known, on a day the month has. */
+const Birthday = z
+  .string()
+  .regex(/^(\d{4}|-)-(\d{2})-(\d{2})$/, "a birthday is YYYY-MM-DD, or --MM-DD without the year")
+  .refine((day) => {
+    const [, year, month, date] = /^(\d{4}|-)-(\d{2})-(\d{2})$/.exec(day)!;
+    const last = new Date(Date.UTC(year === "-" ? 2024 : Number(year), Number(month), 0)).getUTCDate();
+    return Number(month) >= 1 && Number(month) <= 12 && Number(date) >= 1 && Number(date) <= last;
+  }, "not a day of the year");
+/** What a contact's page can change of them. Each is the whole of that field: a list given is the list it becomes, and null takes it away. */
+const ContactFields = {
+  name: z.string().trim().min(1).max(500),
+  emails: z.array(ContactLine(320).regex(/^[^\s@]+@[^\s@]+$/, "not an email address")).max(20),
+  phones: z.array(ContactLine(100).regex(/^[\d\s()+.\-/*#,;ext]+$/i, "not a phone number")).max(20),
+  organization: ContactLine(500).nullable(),
+  title: ContactLine(500).nullable(),
+  addresses: z.array(ContactLine(1000)).max(10),
+  birthday: Birthday.nullable(),
+  urls: z.array(ContactLine(2000).regex(/^https?:\/\/[^\s]+$/, "a website starts https:// or http://")).max(20),
+  notes: z.string().max(8000).nullable(),
+};
+/** A picture as its bytes in base64: a JPEG or a PNG, up to half a megabyte. */
+const Photo = z
+  .string()
+  .max(700_000)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/, "not base64")
+  .refine((b64) => b64.startsWith("/9j/") || b64.startsWith("iVBORw0KGgo"), "a picture is a JPEG or a PNG");
 /**
  * When an event is. An all-day event is on calendar dates, `from` its first day and `to` its last,
  * with no time and no zone. Any other is between two instants.
@@ -484,9 +513,10 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("source.list") }),
   /**
    * Connects a data source. `redirect`, when there is one, is where the member's browser goes to
-   * agree to it, and `back` is the path in Common Ink it returns to.
+   * agree to it, and `back` is the path in Common Ink it returns to. `edit` asks to change it as well
+   * as read it, where that is agreed to apart, as Google's contacts are.
    */
-  z.object({ type: z.literal("source.connect"), id: SourceId, back: z.string().max(1000).default("/") }),
+  z.object({ type: z.literal("source.connect"), id: SourceId, back: z.string().max(1000).default("/"), edit: z.boolean().default(false) }),
   /** Disconnects a data source, and every other one that came through the same account: they were agreed to as one. */
   z.object({ type: z.literal("source.disconnect"), id: SourceId }),
   /**
@@ -526,6 +556,16 @@ export const Op = z.discriminatedUnion("type", [
   }),
   /** The asker's contacts by name. `query` keeps those with every word of it at the start of a word of their name, email or organization. */
   z.object({ type: z.literal("contact.list"), query: z.string().max(100).optional() }),
+  /**
+   * Changes one of the asker's contacts where it is kept, as the member whose it is: only the fields
+   * given, each as a whole. `etag` is the contact's as it was read: the change is refused when the
+   * contact has changed there since. A data source that is read-only refuses.
+   */
+  z.object({ type: z.literal("contact.update"), sourceId: SourceId, id: RecordId, etag: z.string().min(1).max(200), ...z.object(ContactFields).partial().shape }),
+  /** Puts a picture on one of the asker's contacts where it is kept, in place of the one it had, or with null takes its own off. */
+  z.object({ type: z.literal("contact.photo"), sourceId: SourceId, id: RecordId, photo: Photo.nullable() }),
+  /** Adds a contact to the asker's own contacts where they are kept: a name, and whatever else is known of them. */
+  z.object({ type: z.literal("contact.create"), sourceId: SourceId, ...z.object(ContactFields).partial().shape, name: ContactFields.name }),
   /**
    * A person, as a mention names them, as the asker may be told of them: what their page shows. `who`
    * is a member's id, or a name. A name one member has is that member, for an asker told who the
@@ -1096,6 +1136,9 @@ export interface Results {
   "event.create": CalendarEvent;
   /** `more` when a data source has more contacts than it lists. */
   "contact.list": { contacts: Contact[]; sources: Source[]; more: boolean };
+  "contact.update": ContactCard;
+  "contact.photo": ContactCard;
+  "contact.create": ContactCard;
   "person.read": PersonPage;
   "record.refer": Reference;
   "record.read": SourceRecord;
@@ -1116,6 +1159,8 @@ export interface Source {
   state: SourceState;
   /** False for a read-only data source, which refuses every change. */
   writable: boolean;
+  /** Set on one that is read-only only because the member agreed to no more: connecting it again with `edit` asks to change it too. */
+  reconnectToWrite?: true;
   /** The account it is connected to, or null when it isn't. */
   account: string | null;
 }
@@ -1174,10 +1219,15 @@ export interface ContactCard extends Contact {
   /** YYYY-MM-DD, or --MM-DD when the year isn't known. */
   birthday: string | null;
   notes: string | null;
-  /** An https address of their picture. */
+  /** An https address of their picture, or a data: address for one kept here. */
   photo: string | null;
   urls: string[];
+  /** Sent back with a change, which is refused when the contact has changed since. */
+  etag: string;
 }
+
+/** A change to a contact: each field given is the whole of it, and null takes it away. */
+export type ContactChange = Partial<{ name: string; emails: string[]; phones: string[]; organization: string | null; title: string | null; addresses: string[]; birthday: string | null; urls: string[]; notes: string | null }>;
 
 /** One line of a note that mentions a person, as the asker is shown it: each mention on it written as the name it shows. */
 export interface MentionLine {
@@ -1201,6 +1251,8 @@ export interface PersonPage {
   more: boolean;
   /** The query that finds the notes that mention them, which a search from their page is narrowed by. */
   query: string;
+  /** The query that lists the todos assigned to them, as the Todos page reads it. */
+  todoQuery: string;
 }
 
 export type SourceRecord = { kind: "event"; ref: string; event: CalendarEvent } | { kind: "contact"; ref: string; contact: Contact };

@@ -8084,20 +8084,35 @@ button.todo-tag[aria-pressed="true"] {
   text-underline-offset: 2px;
 }
 
-.contact-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* Contacts as cards, as notes and todos are listed: the whole card opens the person's page. */
+.contact-cards > li {
+  display: block;
 }
 
-.contact-list > li {
+.contact-card {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  padding: 10px 0;
-  border-top: 1px solid var(--line);
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.contact-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The initials are drawn and not written, so a card's words start with the name. */
+.contact-avatar::before {
+  content: attr(data-initials);
 }
 
 .contact-what {
@@ -8105,23 +8120,29 @@ button.todo-tag[aria-pressed="true"] {
   flex: 1;
   flex-direction: column;
   gap: 2px;
-  min-width: 12rem;
+  min-width: 0;
 }
 
 .contact-name {
-  font-weight: 600;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .contact-organization,
 .contact-reach {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .contact-reach {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 12px;
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -8247,13 +8268,123 @@ button.todo-tag[aria-pressed="true"] {
   white-space: pre-wrap;
 }
 
+.person-contact-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.person-not-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.person-not-contact .person-whose {
+  margin: 0;
+}
+
+/* A contact edited as a contacts app does: a label beside each field, its lines one under another. */
+.contact-form {
+  display: grid;
+  gap: 10px;
+}
+
+.contact-form-photo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.contact-form-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.contact-form-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.contact-form-lines {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.contact-form-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.contact-form-birthday {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.contact-form input,
+.contact-form textarea,
+.contact-form select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.contact-form-birthday input {
+  width: 5rem;
+}
+
+.contact-form-birthday select {
+  width: auto;
+}
+
+.contact-form textarea {
+  resize: vertical;
+}
+
+.contact-form-add {
+  gap: 4px;
+}
+
+.contact-form-add svg {
+  width: 12px;
+  height: 12px;
+}
+
+.contact-form-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .contact-form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .person-source {
   display: inline-block;
   margin-top: 8px;
   font-size: 12px;
 }
 
-.person-todos ul,
 .person-mentions ul {
   margin: 8px 0 0;
   padding: 0;

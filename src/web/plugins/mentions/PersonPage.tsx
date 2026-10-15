@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MAX_SEARCH_LENGTH, useInspected, writtenMention, type App, type ContactCard, type PersonPage as Person, type PluginHost, type Results, type Showing } from "../../plugin-api.ts";
+import { MAX_SEARCH_LENGTH, useInspected, writtenMention, type App, type PersonPage as Person, type PluginHost, type Results, type Showing, type Source } from "../../plugin-api.ts";
+import { personPath } from "../lib/person.ts";
 import { QueryBar } from "../lib/QueryBar.tsx";
-import { fieldsOf, initialsOf } from "./fields.ts";
+import { TodoList } from "../todos/Todos.tsx";
+import { ContactSection } from "./ContactEditor.tsx";
+import { initialsOf } from "./fields.ts";
 
 /** How long typing rests before the search is asked for. */
 const PAUSE_MS = 200;
@@ -15,32 +18,6 @@ const ago = (at: number, now: number) => {
   if (days < 30) return `${days} days ago`;
   return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 };
-
-/** One of the asker's contacts that is this person: all it holds, which the asker alone is shown. */
-function ContactDetails({ card, provider }: { card: ContactCard; provider: string | undefined }) {
-  return (
-    <section className="person-contact" aria-label={`Your contact ${card.name}`}>
-      <p className="person-whose">From your contacts. Only you see this.</p>
-      <dl className="person-fields">
-        {fieldsOf(card).map((field) => (
-          <div key={field.key} className="person-field" data-field={field.key}>
-            <dt>{field.label}</dt>
-            <dd>
-              {field.values.map((value) => (
-                <div key={value}>{field.href ? <a href={field.href(value)} {...(field.key === "urls" && { target: "_blank", rel: "noopener noreferrer" })}>{value}</a> : value}</div>
-              ))}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {card.url && /^https:\/\//.test(card.url) && (
-        <a className="person-source" href={card.url} target="_blank" rel="noopener noreferrer">
-          Open in {provider ?? "its contacts"}
-        </a>
-      )}
-    </section>
-  );
-}
 
 interface Props {
   host: PluginHost;
@@ -62,25 +39,27 @@ export function PersonPage({ host, app, who, openAt }: Props) {
   const [found, setFound] = useState<{ query: string; answer: Results["search"] | null; problem: string | null } | null>(null);
   const [sources, setSources] = useState<Results["source.list"]["sources"]>([]);
   const version = useMemo(() => (app.notes ?? []).map((n) => `${n.id}:${n.revision}:${n.state}`).join(","), [app.notes]);
+  /** Bumped when the member changed their contacts from here, which the page is read again for at once. */
+  const [changed, setChanged] = useState(0);
 
   // Read on opening, and again a while after notes stop changing: each read lists the member's contacts again from where they are kept.
-  const read = useRef<string | null>(null);
+  const read = useRef<{ who: string; changed: number } | null>(null);
   useEffect(() => {
     // An answer is kept unless the page is of someone else by then: a read made before notes changed again is still the latest there is.
     const ask = () =>
       host.perform({ type: "person.read", who }).then(
-        (answer) => read.current === who && (setPerson(answer), setProblem(null)),
-        (err: unknown) => read.current === who && setProblem(err instanceof Error ? err.message : "This person couldn't be read."),
+        (answer) => read.current?.who === who && (setPerson(answer), setProblem(null)),
+        (err: unknown) => read.current?.who === who && setProblem(err instanceof Error ? err.message : "This person couldn't be read."),
       );
-    const again = read.current === who;
-    read.current = who;
+    const again = read.current?.who === who && read.current.changed === changed;
+    read.current = { who, changed };
     const timer = again ? setTimeout(() => void ask(), REREAD_MS) : (void ask(), undefined);
     return () => clearTimeout(timer);
-  }, [host, who, version]);
+  }, [host, who, version, changed]);
+  // The member's data sources say whether their contacts can be changed from here, or added to.
   useEffect(() => {
-    if (!person?.contacts.length) return;
     host.perform({ type: "source.list" }).then((r) => setSources(r.sources), () => {});
-  }, [host, person?.contacts.length]);
+  }, [host, changed]);
 
   const wanted = typed.trim();
   useEffect(() => {
@@ -122,6 +101,26 @@ export function PersonPage({ host, app, who, openAt }: Props) {
     }
   };
 
+  /** Connects a contacts data source again, asking to change it too: off to agree to it where that is somewhere else. */
+  const connectToEdit = async (source: Source) => {
+    try {
+      const answer = await host.perform({ type: "source.connect", id: source.id, back: app.path, edit: true });
+      if (answer.redirect) return void (location.href = answer.redirect);
+      setChanged((n) => n + 1);
+    } catch (err) {
+      setProblem(err instanceof Error ? err.message : "It couldn't be connected.");
+    }
+  };
+  const addToContacts = async (sourceId: string) => {
+    if (!person) return;
+    try {
+      await host.perform({ type: "contact.create", sourceId, name: person.name, ...(person.member?.email && { emails: [person.member.email] }) });
+      setChanged((n) => n + 1);
+    } catch (err) {
+      setProblem(err instanceof Error ? err.message : "The contact couldn't be added.");
+    }
+  };
+
   if (!person) {
     return (
       <section className="person-page" aria-label="Person">
@@ -140,6 +139,10 @@ export function PersonPage({ host, app, who, openAt }: Props) {
   const now = Date.now();
   // A guest and a viewer can't make a note, so the page has nothing for them to press.
   const canWrite = host.workspace.role === "admin" || host.workspace.role === "editor";
+  // Where to add them to the member's own contacts, when they aren't there: the first contacts data source that takes changes, or one that would once connected again.
+  const contactSources = sources.filter((s) => s.kind === "contacts" && s.state === "connected");
+  const addTo = contactSources.find((s) => s.writable);
+  const couldAddTo = contactSources.find((s) => s.reconnectToWrite);
 
   return (
     <section className="person-page" aria-label={person.name}>
@@ -169,22 +172,47 @@ export function PersonPage({ host, app, who, openAt }: Props) {
         </p>
       )}
       {person.contacts.map((card) => (
-        <ContactDetails key={`${card.sourceId} ${card.id}`} card={card} provider={sources.find((s) => s.id === card.sourceId)?.provider} />
+        <ContactSection
+          key={`${card.sourceId} ${card.id}`}
+          host={host}
+          card={card}
+          source={sources.find((s) => s.id === card.sourceId)}
+          onConnect={(source) => void connectToEdit(source)}
+          onSaved={(saved, change) => {
+            // A contact renamed is found by its new name: the page goes there, as a mention of that name would.
+            if (change.name !== undefined && !person.member) return app.go(personPath(saved.name), { replace: true });
+            setChanged((n) => n + 1);
+          }}
+        />
       ))}
+      {!person.contacts.length && (addTo ?? couldAddTo) && (
+        <section className="person-contact person-not-contact" aria-label="Not in your contacts">
+          <p className="person-whose">{person.name} isn't in your contacts.</p>
+          {addTo ? (
+            <button type="button" className="button small" onClick={() => void addToContacts(addTo.id)}>
+              Add to my contacts
+            </button>
+          ) : (
+            <button type="button" className="button small" onClick={() => void connectToEdit(couldAddTo!)}>
+              Connect again to edit contacts
+            </button>
+          )}
+        </section>
+      )}
 
       {person.todos.length > 0 && (
         <section className="person-todos" aria-label="Open todos">
           <h2>Open todos</h2>
-          <ul>
-            {person.todos.map((todo) => (
-              <li key={`${todo.noteId}/${todo.line}`}>
-                <button type="button" className="person-line" onClick={() => openAt(todo.noteId, todo.line)}>
-                  <span className="person-text">{todo.words || "Nothing written"}</span>
-                  <span className="person-note">{todo.noteTitle || "Untitled"}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <TodoList
+            host={host}
+            app={app}
+            query={person.todoQuery}
+            label={`Open todos assigned to ${person.name}`}
+            none={null}
+            onOpen={(todo, beside) => (beside && app.openBeside ? app.openBeside({ kind: "note", id: todo.noteId }, "right") : openAt(todo.noteId, todo.line))}
+            // A tag's chip opens the Todos page, narrowed to their todos with that tag.
+            onTag={(name) => app.go(`/todos?${new URLSearchParams({ q: `${person.todoQuery} #${name}` })}`)}
+          />
         </section>
       )}
 

@@ -428,12 +428,30 @@ interface Props {
   onOpen: (todo: ListedTodo, beside?: boolean) => void;
 }
 
-export function TodosPage({ host, app, onOpen }: Props) {
-  /** The query the page's address names with `?q=`, as a link to the page does. */
-  const linked = useMemo(() => new URLSearchParams(app.query).get("q")?.trim() ?? null, [app.query]);
-  /** What is in the bar, and the query the list is of: the same once typing rests. It is kept in this browser, so the page opens the way it was left. */
-  const [typed, setTyped] = useState(() => (linked ?? savedQuery(host.storage.get("query"), host.storage.get("filters"))).slice(0, MAX_SEARCH_LENGTH));
-  const [query, setQuery] = useState(typed);
+/** Stands in for the inspector where a list of todos is part of a page that tells the inspector itself. */
+const NO_INSPECTOR = { inspect: () => {} };
+
+interface ListProps extends Props {
+  /** The query the list is of, as the Todos page's bar takes it. */
+  query: string;
+  /** What the list is called, to the inspector and to a screen reader. With `inspected`, the inspector is about the notes its todos are in. */
+  label: string;
+  inspected?: boolean;
+  /** The tags the list is narrowed to, whose chips read as pressed. */
+  narrowedTo?: readonly string[];
+  onTag: (name: string) => void;
+  /** Told what the server said of a query that reads and can't be answered, and null once one is answered. */
+  onUnanswered?: (message: string | null, query: string) => void;
+  /** What the list says when it has no todo, or null to say nothing. */
+  none: string | null;
+}
+
+/**
+ * Todos as rows, read for a query and read again whenever a note changes: each row changed in place,
+ * one change after another, a checked one lingering struck through, and a row a change took out of the
+ * query staying, dimmed, until Refresh. The Todos page is its bar over one of these, and a person's page has one of their open todos.
+ */
+export function TodoList({ host, app, onOpen, query, label, inspected = false, narrowedTo: narrowedTags = [], onTag, onUnanswered, none }: ListProps) {
   /** Whether the list was read yet, and where more of it starts when there is more. */
   const [page, setPage] = useState<Pick<Results["todo.list"], "next"> | null>(null);
   const [list, arrange] = useReducer(listing<ListedTodo>, EMPTY as Listing<ListedTodo>);
@@ -441,8 +459,8 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const [problem, setProblem] = useState<string | null>(null);
   /** Why the list couldn't be read, until it is. */
   const [unread, setUnread] = useState<string | null>(null);
-  /** What the server said of a query that reads and can't be answered, and the query it said it of. */
-  const [unanswered, setUnanswered] = useState<{ query: string; message: string } | null>(null);
+  const unanswered = useRef(onUnanswered);
+  unanswered.current = onUnanswered;
   const [asked, setAsked] = useState(0);
   const [picked, onPicking] = useReducer(picking, null);
   /** The recurring todos whose completion is on its way. Checked again before it lands, one would be completed twice. */
@@ -453,15 +471,14 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const shown = useRef<readonly ListedTodo[]>([]);
   shown.current = listed;
   // The inspector is about the notes the listed todos are in: History is their history, and Info counts them.
-  useInspected(app, page && { kind: "notes", label: "Todos", noteIds: [...new Set(list.fresh.map((t) => t.noteId))].sort() });
+  useInspected(inspected ? app : NO_INSPECTOR, page && { kind: "notes", label, noteIds: [...new Set(list.fresh.map((t) => t.noteId))].sort() });
   /** The changes on their way to the server, one at a time, how many there are, and the revision each note they changed is at now. */
   const sending = useRef({ last: Promise.resolve(), count: 0, revisions: new Map<string, number>() });
   // Today is the member's own: the day it is in this browser, looked at again each minute.
   const now = dayOf(new Date(useNow()));
   const read = useMemo(() => parseQuery(query, "todos"), [query]);
   const ask = useMemo(() => ({ query, today: now, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }), [query, now]);
-  /** The tags the list is narrowed to: their chips read as pressed. */
-  const narrowedTags = useMemo(() => narrowedTo(query), [query]);
+  useEffect(() => setProblem(null), [query]);
   // The list is read again whenever a note the member can see changes, by anyone, or is archived, trashed, or brought back.
   const version = useMemo(() => (app.notes ?? []).map((n) => `${n.id}:${n.revision}:${n.state}`).join(","), [app.notes]);
   const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
@@ -494,29 +511,6 @@ export function TodosPage({ host, app, onOpen }: Props) {
   }, [out]);
   useEffect(() => () => notice.current?.(), []);
 
-  const run = (text: string) => {
-    setQuery(text);
-    setProblem(null);
-    host.storage.set("query", text);
-    // A link's query stays in the address only while it is the page's: a reload then opens the query the member left.
-    if (linked !== null && text !== linked) app.go(app.path, { replace: true });
-  };
-  // A link's query is the one the page is left at, whether the link opened the page or was followed while it was open.
-  const followed = useRef<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (linked === followed.current) return;
-    followed.current = linked;
-    if (linked === null) return;
-    setTyped(linked.slice(0, MAX_SEARCH_LENGTH));
-    run(linked.slice(0, MAX_SEARCH_LENGTH));
-  }, [linked]);
-  const wanted = typed.trim();
-  useEffect(() => {
-    if (wanted === query) return;
-    const timer = setTimeout(() => run(wanted), PAUSE_MS);
-    return () => clearTimeout(timer);
-  }, [wanted, query]);
-
   useEffect(() => {
     // A query that can't be read is said so under the bar, and the list stays as it was.
     if (!read.ok) return;
@@ -531,7 +525,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
         if (stale || sending.current.count) return;
         sending.current.revisions.clear();
         setUnread(null);
-        setUnanswered(null);
+        unanswered.current?.(null, ask.query);
         take({ type: "read", rows: listed.todos, refresh: had.current.readFor !== readFor });
         had.current.readFor = readFor;
         setPage({ next: listed.next });
@@ -551,7 +545,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
         setPage(null);
         arrange({ type: "read", rows: [], refresh: true });
         had.current.readFor = "";
-        setUnanswered({ query: ask.query, message });
+        unanswered.current?.(message, ask.query);
       },
     );
     return () => {
@@ -672,35 +666,18 @@ export function TodosPage({ host, app, onOpen }: Props) {
   };
 
   return (
-    <section className="todos-page" aria-label="Todos">
-      <h1>Todos</h1>
-      <QueryBar
-        host={host}
-        app={app}
-        scope="todos"
-        value={typed}
-        label="Filter todos"
-        placeholder="Filter todos: words, #tag, due:<today, assignee:@me"
-        problem={unanswered?.query === query ? unanswered.message : null}
-        onChange={(text, how) => {
-          setTyped(text);
-          if (how === "set" || !text.trim()) run(text.trim());
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && wanted !== query) run(wanted);
-        }}
-      />
+    <>
       {(problem ?? unread) && (
         <p className="notice" role="alert">
           {problem ?? unread}
         </p>
       )}
-      {page && listed.length === 0 && <p className="todo-none">{query ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}</p>}
+      {page && listed.length === 0 && none && <p className="todo-none">{none}</p>}
       {listed.length > 0 && (
         <ul
           ref={ul}
           className="todo-list"
-          aria-label="Todos"
+          aria-label={label}
           onFocus={(e) => {
             const row = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
             focused.current = row?.dataset.row ?? null;
@@ -728,14 +705,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
               onOpen={onOpen}
               completions={completions}
               onPicking={onPicking}
-              onTag={(name) => {
-                // The chip does what it shows: a tag already typed and not yet run is not taken off by a chip that reads unpressed.
-                const typedHas = narrowedTo(typed).some((tag) => nameKey(tag) === nameKey(name));
-                const shownHas = narrowedTags.some((tag) => nameKey(tag) === nameKey(name));
-                const next = typedHas === shownHas ? toggledTag(typed, name) : typed.trim();
-                setTyped(next);
-                run(next);
-              }}
+              onTag={onTag}
             />
           ))}
         </ul>
@@ -745,6 +715,81 @@ export function TodosPage({ host, app, onOpen }: Props) {
           Show more
         </button>
       )}
+    </>
+  );
+}
+
+export function TodosPage({ host, app, onOpen }: Props) {
+  /** The query the page's address names with `?q=`, as a link to the page does. */
+  const linked = useMemo(() => new URLSearchParams(app.query).get("q")?.trim() ?? null, [app.query]);
+  /** What is in the bar, and the query the list is of: the same once typing rests. It is kept in this browser, so the page opens the way it was left. */
+  const [typed, setTyped] = useState(() => (linked ?? savedQuery(host.storage.get("query"), host.storage.get("filters"))).slice(0, MAX_SEARCH_LENGTH));
+  const [query, setQuery] = useState(typed);
+  /** What the server said of a query that reads and can't be answered, and the query it said it of. */
+  const [unanswered, setUnanswered] = useState<{ query: string; message: string } | null>(null);
+  /** The tags the list is narrowed to: their chips read as pressed. */
+  const narrowedTags = useMemo(() => narrowedTo(query), [query]);
+
+  const run = (text: string) => {
+    setQuery(text);
+    host.storage.set("query", text);
+    // A link's query stays in the address only while it is the page's: a reload then opens the query the member left.
+    if (linked !== null && text !== linked) app.go(app.path, { replace: true });
+  };
+  // A link's query is the one the page is left at, whether the link opened the page or was followed while it was open.
+  const followed = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (linked === followed.current) return;
+    followed.current = linked;
+    if (linked === null) return;
+    setTyped(linked.slice(0, MAX_SEARCH_LENGTH));
+    run(linked.slice(0, MAX_SEARCH_LENGTH));
+  }, [linked]);
+  const wanted = typed.trim();
+  useEffect(() => {
+    if (wanted === query) return;
+    const timer = setTimeout(() => run(wanted), PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [wanted, query]);
+
+  return (
+    <section className="todos-page" aria-label="Todos">
+      <h1>Todos</h1>
+      <QueryBar
+        host={host}
+        app={app}
+        scope="todos"
+        value={typed}
+        label="Filter todos"
+        placeholder="Filter todos: words, #tag, due:<today, assignee:@me"
+        problem={unanswered?.query === query ? unanswered.message : null}
+        onChange={(text, how) => {
+          setTyped(text);
+          if (how === "set" || !text.trim()) run(text.trim());
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && wanted !== query) run(wanted);
+        }}
+      />
+      <TodoList
+        host={host}
+        app={app}
+        onOpen={onOpen}
+        query={query}
+        label="Todos"
+        inspected
+        narrowedTo={narrowedTags}
+        onUnanswered={(message, of) => setUnanswered(message === null ? null : { query: of, message })}
+        none={query ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}
+        onTag={(name) => {
+          // The chip does what it shows: a tag already typed and not yet run is not taken off by a chip that reads unpressed.
+          const typedHas = narrowedTo(typed).some((tag) => nameKey(tag) === nameKey(name));
+          const shownHas = narrowedTags.some((tag) => nameKey(tag) === nameKey(name));
+          const next = typedHas === shownHas ? toggledTag(typed, name) : typed.trim();
+          setTyped(next);
+          run(next);
+        }}
+      />
     </section>
   );
 }

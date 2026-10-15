@@ -50,7 +50,7 @@ import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative,
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, contactCards, createEvent, listContacts, listEvents, listSources, readRecord, referencesTo, refer, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, contactCards, createContact, createEvent, listContacts, listEvents, listSources, photoContact, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
 import { referencesIn } from "./references.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
@@ -1458,7 +1458,8 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
   const contacts = theirs ? await contactCards(asker(ctx), (c) => folded(c.name) === folded(name) || c.emails.some((e) => emails.has(e.toLowerCase()))) : [];
 
   const query = `mentions:${writtenValue(searchedAs)}`;
-  const todoList = Op.parse({ type: "todo.list", query: `assignee:${writtenValue(searchedAs)}` }) as Extract<Op, { type: "todo.list" }>;
+  const todoQuery = `assignee:${writtenValue(searchedAs)}`;
+  const todoList = Op.parse({ type: "todo.list", query: todoQuery }) as Extract<Op, { type: "todo.list" }>;
   const { todos } = await HANDLERS["todo.list"].run(ctx, todoList);
   return {
     who,
@@ -1469,6 +1470,7 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
     mentionedIn: listed.map((r) => ({ noteId: r.note_id, noteTitle: r.title, line: r.line, text: lineAsShown(r.said, shown, keys), updatedAt: r.updated_at })),
     more: results.length > op.limit,
     query,
+    todoQuery,
   };
 }
 
@@ -2436,7 +2438,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     by: "member",
     async run(ctx, op) {
       if (!(await listSources(asker(ctx))).some((s) => s.id === op.id)) throw new OpError("not_found", "No such data source");
-      const { redirect } = await ctx.sources.connect(ctx.personId!, op.id, op.back);
+      const { redirect } = await ctx.sources.connect(ctx.personId!, op.id, op.back, op.edit);
       return { redirect, sources: await listSources(asker(ctx)) };
     },
   },
@@ -2453,6 +2455,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "event.update": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateEvent(asker(ctx), sourceId, id, etag, change) },
   "event.create": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, calendarId, type: _, ...fields }) => createEvent(asker(ctx), sourceId, calendarId, fields) },
   "contact.list": { needs: "view", own: true, run: (ctx, op) => listContacts(asker(ctx), op.query) },
+  // A contact is how the member reaches someone, outside Common Ink and its history: only the member changes one. See NOT_FOR_AGENTS.
+  "contact.update": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateContact(asker(ctx), sourceId, id, etag, change) },
+  "contact.photo": { needs: "view", by: "member", own: true, changes: true, run: (ctx, op) => photoContact(asker(ctx), op.sourceId, op.id, op.photo) },
+  "contact.create": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, type: _, ...fields }) => createContact(asker(ctx), sourceId, fields) },
   "person.read": { needs: "view", run: readPerson },
   "record.refer": { needs: "view", own: true, changes: true, run: (ctx, op) => refer(asker(ctx), op.sourceId, op.id) },
   "record.read": { needs: "view", own: true, run: (ctx, op) => readRecord(asker(ctx), op.ref) },

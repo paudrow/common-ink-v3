@@ -260,6 +260,10 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "event.update": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none", etag: "none", title: "No" }) },
   "event.create": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } }) },
   "contact.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  // Only the member changes a contact, and only their own: with nothing connected here there is none of anyone's to change. Agents are refused each (NOT_FOR_AGENTS).
+  "contact.update": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", id: "people/c1", etag: "none", name: "No" }) },
+  "contact.photo": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", id: "people/c1", photo: null }) },
+  "contact.create": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", name: "No" }) },
   // Asked in capitals, so the answer's echo of who it is about is no mark of the note: only a line of it would be.
   "person.read": { on: "workspace", who: EVERYONE, args: () => ({ who: "WHO-TEAM" }) },
   "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
@@ -296,9 +300,9 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "record.refer"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer"];
 /** What answers from the asker's own data sources, which are in no folder. */
-const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "record.refer", "record.read", "record.notes"];
+const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "record.refer", "record.read", "record.notes"];
 const AGENTS = [
   "their agent",
   "their read-only agent",

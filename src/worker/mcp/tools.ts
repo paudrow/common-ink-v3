@@ -40,6 +40,9 @@ const SHARING =
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
  * tool below, and test/core/agent-parity.test.ts fails when one has neither.
  */
+const CONTACTS =
+  "A contact is how the member reaches someone: the address their mail goes to, the number their phone calls, in every app that reads their Google contacts. A change to one is not a change in history, so it can't be reverted the way an agent's edits can, and nothing in Common Ink shows it was made. An agent reads notes other people wrote, so one that was talked into it could quietly send the member's mail or calls for a colleague to a stranger. An agent reads the member's contacts, and only the member, signed in, changes or adds one.";
+
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
   "settings.write": "Only the member changes their settings. What the keys mean is assembled in the app from its plugins, so the server couldn't check what an agent wrote, and an agent could turn off or rebind what the member relies on.",
@@ -57,6 +60,9 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "note.purge": "Removing a note from Trash for good takes its history with it, and nothing brings it back: not a revert, not Trash. An agent reads notes other people wrote, so one that was talked into it could destroy them past recovery. An agent moves a note to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
   "source.connect": "Connecting a data source is the member agreeing, in their own browser, to let Common Ink into their calendar or contacts. An agent can't agree for them. It reads and changes what the member connected.",
   "source.disconnect": "Disconnecting ends the member's own agreement and cuts off every reference in their notes until they agree again. The member does that themself, in the app.",
+  "contact.update": CONTACTS,
+  "contact.photo": CONTACTS,
+  "contact.create": CONTACTS,
   "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
 };

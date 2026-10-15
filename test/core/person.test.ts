@@ -7,7 +7,7 @@ import type { ContactCard, OpInput, PersonPage } from "../../src/core/protocol.t
 import type { ContactsSource, Sources } from "../../src/core/sources.ts";
 import { addMember, newMember } from "./members.ts";
 
-const card = (id: string, name: string, more: Partial<ContactCard> = {}): ContactCard => ({ sourceId: "people", id, name, emails: [], phones: [], organization: null, url: null, title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], ...more });
+const card = (id: string, name: string, more: Partial<ContactCard> = {}): ContactCard => ({ sourceId: "people", id, name, emails: [], phones: [], organization: null, url: null, title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], etag: "1", ...more });
 
 /** Each person's contacts, held in memory, and whose were read. */
 function contactsOf(byPerson: Map<string, ContactCard[]>) {
@@ -156,6 +156,6 @@ describe("a person's page", () => {
 
   it("is only the name for someone who is neither a member nor one of the asker's contacts", async () => {
     const w = await world();
-    expect(await w.page(w.bob, "The landlord")).toEqual({ who: "The landlord", name: "The landlord", member: null, contacts: [], todos: [], mentionedIn: [], more: false, query: 'mentions:"The landlord"' });
+    expect(await w.page(w.bob, "The landlord")).toEqual({ who: "The landlord", name: "The landlord", member: null, contacts: [], todos: [], mentionedIn: [], more: false, query: 'mentions:"The landlord"', todoQuery: 'assignee:"The landlord"' });
   });
 });

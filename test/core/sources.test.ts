@@ -36,7 +36,7 @@ const event = (id: string, title: string, more: Partial<CalendarEvent> = {}): Ca
 const calendar = (id: string, name: string, more: Partial<Calendar> = {}): Calendar => ({ sourceId: "cal", id, name, color: null, writable: true, ...more });
 const MINE = calendar("mine", "Mine");
 
-const contact = (id: string, name: string, more: Partial<ContactCard> = {}): ContactCard => ({ sourceId: "people", id, name, emails: [], phones: [], organization: null, url: null, title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], ...more });
+const contact = (id: string, name: string, more: Partial<ContactCard> = {}): ContactCard => ({ sourceId: "people", id, name, emails: [], phones: [], organization: null, url: null, title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], etag: "1", ...more });
 
 /** Data sources held in memory, each person's their own, with a record of everything asked of them. */
 function world(options: { readOnly?: boolean; fails?: SourceError } = {}) {
@@ -744,6 +744,59 @@ describe("the sample data", () => {
     expect((await ask(ada, { type: "source.disconnect", id: "sample-calendar" })).sources.map((s) => s.state)).toEqual(["not_connected", "not_connected"]);
     await ask(ada, { type: "source.connect", id: "sample-calendar" });
     expect((await ask(ada, { type: "event.list", ...WEEK })).events.map((e) => e.title)).not.toContain("Lunch with Sam and Lin");
+  });
+
+  it("has contacts read-only until connected again to edit them; then a change, a picture and a new contact are the person's alone, an agent changes none, and disconnecting forgets them", async () => {
+    const sources = offered({ DEV_SIGN_IN: "1" }, "localhost");
+    const ada = await newMember("Ada");
+    const eve = await addMember(ada, "editor", "Eve");
+    const agent = await agentOf(ada);
+    const ask = <T extends OpInput>(actor: Actor, op: T) => perform(env.DB, actor, op, T0, sources);
+    const contactsOf = async (actor: Actor) => (await ask(actor, { type: "source.list" })).sources.find((s) => s.id === "sample-contacts")!;
+    await ask(ada, { type: "source.connect", id: "sample-contacts" });
+    await ask(eve, { type: "source.connect", id: "sample-contacts" });
+    expect(await contactsOf(ada)).toMatchObject({ state: "connected", writable: false, reconnectToWrite: true });
+    const sam = (await ask(ada, { type: "person.read", who: "Sam Okafor" })).contacts[0]!;
+    expect(sam).toMatchObject({ id: "sam", etag: "0" });
+    expect(await refusal(ask(ada, { type: "contact.update", sourceId: "sample-contacts", id: "sam", etag: "0", phones: [] }))).toBe("forbidden: Connect Sample contacts again to edit contacts");
+
+    await ask(ada, { type: "source.connect", id: "sample-contacts", edit: true });
+    expect(await contactsOf(ada)).toEqual({ id: "sample-contacts", kind: "contacts", name: "Sample contacts", provider: "Sample data", state: "connected", writable: true, account: "Sample data" });
+    const changed = await ask(ada, { type: "contact.update", sourceId: "sample-contacts", id: "sam", etag: "0", emails: ["sam@okafor.example"], phones: ["+1 555 0142", "+1 555 0199"], title: null, birthday: "1988-04-21" });
+    expect(changed).toMatchObject({ name: "Sam Okafor", emails: ["sam@okafor.example"], phones: ["+1 555 0142", "+1 555 0199"], organization: "Okafor Plumbing", title: null, birthday: "1988-04-21", etag: "1" });
+    expect(await refusal(ask(ada, { type: "contact.update", sourceId: "sample-contacts", id: "sam", etag: "0", notes: "Clobbered" }))).toBe("conflict: It was changed since you opened it. Open it again, then make your change.");
+    expect(await refusal(ask(ada, { type: "contact.update", sourceId: "sample-contacts", id: "sam", etag: "1", birthday: "1988-02-30" }))).toContain("not a day of the year");
+    expect(await refusal(ask(ada, { type: "contact.update", sourceId: "sample-contacts", id: "nobody", etag: "1", notes: "x" }))).toBe("not_found: No such contact");
+    // A change of nothing still says when the contact has changed since it was read.
+    expect(await refusal(ask(ada, { type: "contact.update", sourceId: "sample-contacts", id: "sam", etag: "0" }))).toBe("conflict: It was changed since you opened it. Open it again, then make your change.");
+    expect(await ask(ada, { type: "contact.update", sourceId: "sample-contacts", id: "sam", etag: "1" })).toEqual(changed);
+    const pictured = await ask(ada, { type: "contact.photo", sourceId: "sample-contacts", id: "sam", photo: "/9j/4AAQSkZJRg==" });
+    expect(pictured).toMatchObject({ photo: "data:image/jpeg;base64,/9j/4AAQSkZJRg==", emails: ["sam@okafor.example"], etag: "2" });
+    expect(await refusal(ask(ada, { type: "contact.photo", sourceId: "sample-contacts", id: "sam", photo: "PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+" }))).toContain("a picture is a JPEG or a PNG");
+    const grace = await ask(ada, { type: "contact.create", sourceId: "sample-contacts", name: "Grace Hopper", emails: ["grace@example.com"] });
+    expect((await ask(ada, { type: "contact.list", query: "grace" })).contacts.map((c) => [c.name, c.emails])).toEqual([
+      ["Grace Hopper", ["grace@example.com", "hopper@navy.example"]],
+      ["Grace Hopper", ["grace@example.com"]],
+    ]);
+    expect((await ask(ada, { type: "person.read", who: "Sam Okafor" })).contacts[0]).toEqual(pictured);
+
+    // Eve's sample contacts are as they came, and she can't reach Ada's: an id is looked for in her own.
+    expect((await ask(eve, { type: "person.read", who: "Sam Okafor" })).contacts[0]).toMatchObject({ emails: [], photo: null, etag: "0" });
+    expect(await refusal(ask(eve, { type: "contact.update", sourceId: "sample-contacts", id: grace.id, etag: "1", name: "Mine now" }))).toBe("forbidden: Connect Sample contacts again to edit contacts");
+    await ask(eve, { type: "source.connect", id: "sample-contacts", edit: true });
+    expect(await refusal(ask(eve, { type: "contact.update", sourceId: "sample-contacts", id: grace.id, etag: "1", name: "Mine now" }))).toBe("not_found: No such contact");
+    // An agent changes no contact, its member's or anyone's.
+    for (const op of [
+      { type: "contact.update", sourceId: "sample-contacts", id: "sam", etag: "2", notes: "From an agent" },
+      { type: "contact.photo", sourceId: "sample-contacts", id: "sam", photo: null },
+      { type: "contact.create", sourceId: "sample-contacts", name: "Stranger" },
+    ] as const)
+      expect(await refusal(ask(agent, op))).toBe(`forbidden: An agent can't ${op.type}`);
+
+    await ask(ada, { type: "source.disconnect", id: "sample-contacts" });
+    await ask(ada, { type: "source.connect", id: "sample-contacts" });
+    expect((await ask(ada, { type: "person.read", who: "Sam Okafor" })).contacts[0]).toMatchObject({ emails: [], photo: null, etag: "0" });
+    expect(await contactsOf(ada)).toMatchObject({ writable: false, reconnectToWrite: true });
   });
 
   it("has three calendars, takes a new event in the two that can be written, keeps it beside the person, and forgets it on disconnect", async () => {

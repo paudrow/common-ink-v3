@@ -1,7 +1,8 @@
 /*
  * Google, as far as Common Ink asks anything of it: a stand-in at the one place the Worker reaches
  * out. It answers in the shapes Google's API reference gives for the token and revoke endpoints,
- * Calendar's calendarList, events and events.insert, and People's connections, and refuses the way they refuse.
+ * Calendar's calendarList, events and events.insert, and People's connections, get, updateContact,
+ * updateContactPhoto, deleteContactPhoto and createContact, and refuses the way they refuse.
  * It throws for a request to any other host, so no test passes by reaching somewhere else.
  */
 
@@ -52,6 +53,8 @@ export class FakeGoogle {
   revoked: string[] = [];
   calendars: FakeCalendar[] = [];
   people: unknown[] = [];
+  /** Access tokens agreed to change contacts, not only to read them. */
+  contactWriters = new Set<string>();
   /** How many of each list a page holds. */
   pageSize = 250;
   /** Answers in place of the real one, by a request's method and path, each used once. */
@@ -105,7 +108,7 @@ export class FakeGoogle {
     if (url.origin === "https://oauth2.googleapis.com") return this.oauth(url, new URLSearchParams(sent.body));
     const token = /^Bearer (.+)$/.exec(sent.headers.get("Authorization") ?? "")?.[1];
     if (!token || !this.valid.has(token)) return json({ error: { code: 401, message: "Invalid Credentials", errors: [{ domain: "global", reason: "authError", location: "Authorization", locationType: "header" }], status: "UNAUTHENTICATED" } }, 401);
-    return url.origin === "https://www.googleapis.com" ? this.calendar(sent) : this.contacts(url);
+    return url.origin === "https://www.googleapis.com" ? this.calendar(sent) : this.contacts(sent, token);
   }) as typeof fetch;
 
   asked(method: string, path: RegExp): Sent[] {
@@ -169,13 +172,48 @@ export class FakeGoogle {
     return json(event);
   }
 
-  private contacts(url: URL): Response {
+  private contacts({ method, url, body }: Sent, token: string): Response {
     if (url.pathname === "/v1/people/me/connections") {
       const { items, nextPageToken } = this.page(this.people, url);
       return json({ connections: items, ...(nextPageToken ? { nextPageToken } : {}), totalPeople: this.people.length, totalItems: this.people.length });
     }
-    const found = this.people.find((p) => `/v1/${(p as { resourceName: string }).resourceName}` === url.pathname);
-    return found ? json(found) : json({ error: { code: 404, message: "Requested entity was not found.", status: "NOT_FOUND" } }, 404);
+    const missing = () => json({ error: { code: 404, message: "Requested entity was not found.", status: "NOT_FOUND" } }, 404);
+    if (method !== "GET" && !this.contactWriters.has(token)) return INSUFFICIENT.people();
+    type Person = Record<string, unknown> & { resourceName: string; etag: string };
+    // People works out a name's displayName from what is written.
+    const named = (given: Record<string, unknown>) => (Array.isArray(given.names) ? { ...given, names: (given.names as { unstructuredName?: string }[]).map((n) => ({ displayName: n.unstructuredName, ...n })) } : given);
+    const etag = () => `%E${this.sent.length}`;
+    if (url.pathname === "/v1/people:createContact") {
+      if (method !== "POST") return refusal(405, "methodNotAllowed");
+      const made = { ...named(JSON.parse(body) as Record<string, unknown>), resourceName: `people/c${100 + this.people.length}`, etag: etag() };
+      this.people.push(made);
+      return json(made);
+    }
+    const [, resourceName, action] = /^\/v1\/(people\/[^/:]+)(?::(\w+))?$/.exec(url.pathname) ?? [];
+    const found = this.people.find((p) => (p as Person).resourceName === resourceName) as Person | undefined;
+    if (!found) return missing();
+    if (action === undefined && method === "GET") return json(found);
+    if (action === "updateContact" && method === "PATCH") {
+      const given = named(JSON.parse(body) as Record<string, unknown>);
+      const fields = url.searchParams.get("updatePersonFields");
+      if (!fields) return json({ error: { code: 400, message: "updatePersonFields mask is required.", status: "INVALID_ARGUMENT" } }, 400);
+      if (given.etag !== found.etag) return json({ error: { code: 400, message: "Request person.etag is different than the current person.etag. Clear local cache and get the latest person.", status: "FAILED_PRECONDITION" } }, 400);
+      // Each field named is replaced by what was sent, and one named and not sent is taken away.
+      for (const field of fields.split(",")) found[field] = given[field] ?? [];
+      found.etag = etag();
+      return json(found);
+    }
+    if (action === "updateContactPhoto" && method === "PATCH") {
+      found.photos = [{ url: `https://lh3.googleusercontent.com/contacts/${found.resourceName.slice(7)}-${this.sent.length}`, metadata: { source: { type: "CONTACT" } } }];
+      found.etag = etag();
+      return json({ person: found });
+    }
+    if (action === "deleteContactPhoto" && method === "DELETE") {
+      found.photos = [];
+      found.etag = etag();
+      return json({ person: found });
+    }
+    return refusal(405, "methodNotAllowed");
   }
 }
 

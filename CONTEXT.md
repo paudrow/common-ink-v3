@@ -102,7 +102,7 @@ External structured data a person connects, such as their calendar events or con
 _Avoid_: Integration, connector
 
 **Connect**:
-What a person does to let Common Ink into a data source: agreeing to it at the external system, in their own browser. They can take it back by disconnecting, and agree again at any time. Signing in with Google asks for the calendar and contacts at the same time.
+What a person does to let Common Ink into a data source: agreeing to it at the external system, in their own browser. They can take it back by disconnecting, and agree again at any time. Signing in with Google asks for the calendar and contacts at the same time, the contacts for reading; changing them is agreed to apart, when the member first asks to edit one.
 _Avoid_: Link, sync, authorize
 
 **Record**:
@@ -130,7 +130,7 @@ The previous time a member opened a workspace.
 A note a member has chosen to show on their own dashboard. It is not written into the note.
 
 **Contact**:
-A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. Contacts are read-only.
+A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. The member edits a contact from its person page, every field as a contacts app does, and the change is written back where the contact is kept: Google's contacts through the People API, once the member has agreed to changes as well as reading ("Connect again to edit contacts"). A person who isn't one of the member's contacts can be added to them from their page. Only the member changes or adds a contact: not another member, whatever their role, and not an agent.
 _Avoid_: Member, user
 
 **Tag**:

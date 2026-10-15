@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type OpInput } from "../../src/core/protocol.ts";
-import { SOURCE_SCOPES } from "../../src/worker/google.ts";
+import { SOURCE_SCOPES, WRITE_SCOPES } from "../../src/worker/google.ts";
 import worker from "../../src/worker/index.ts";
 import { sign } from "../../src/worker/session.ts";
 import { connectionOf, keepTokens } from "../../src/worker/sources/connections.ts";
-import { patchOf, toCard } from "../../src/worker/sources/google.ts";
+import { patchOf, personOf, toCard } from "../../src/worker/sources/google.ts";
 import { sourcesFor } from "../../src/worker/sources/index.ts";
 import { vault } from "../../src/worker/vault.ts";
 import { FakeGoogle, INSUFFICIENT, RATE_LIMITED, idToken, type FakeCalendar } from "./google.ts";
@@ -19,6 +19,7 @@ const KEY = "a-token-key-for-tests-0123456789abcdef";
 const SECRET = "test-session-secret";
 const CALENDAR_SCOPES = [...SOURCE_SCOPES["google-calendar"]];
 const ALL_SCOPES = [...CALENDAR_SCOPES, ...SOURCE_SCOPES["google-contacts"]];
+const CONTACTS_WRITE = WRITE_SCOPES["google-contacts"]!;
 const SETTINGS = { GOOGLE_CLIENT_ID: "client-id", GOOGLE_CLIENT_SECRET: "client-secret", TOKEN_KEY: KEY, SESSION_SECRET: SECRET, DEV_SIGN_IN: undefined, ALLOWED_EMAILS: undefined };
 const configured = (more: Partial<Env> = {}) => ({ ...env, ...SETTINGS, ...more }) as Env;
 
@@ -41,7 +42,13 @@ const holidays = (): FakeCalendar => ({ id: "en.usa#holiday@group.v.calendar.goo
 const hidden = (): FakeCalendar => ({ id: "old@group.calendar.google.com", summary: "Unticked", accessRole: "owner", selected: false, events: [{ id: "x", etag: '"1"', summary: "Not shown", start: { date: "2026-10-12" }, end: { date: "2026-10-13" } }] });
 
 const PEOPLE = [
-  { resourceName: "people/c1", etag: "%Eg", names: [{ displayName: "Sam Okafor", metadata: { primary: true } }], phoneNumbers: [{ value: "+1 555 0142" }], organizations: [{ name: "Okafor Plumbing", title: "Owner" }] },
+  {
+    resourceName: "people/c1",
+    etag: "%Eg",
+    names: [{ displayName: "Sam Okafor", metadata: { primary: true } }],
+    phoneNumbers: [{ value: "+1 555 0142", type: "mobile", formattedType: "Mobile", canonicalForm: "+15550142", metadata: { primary: true } }],
+    organizations: [{ name: "Okafor Plumbing", title: "Owner", department: "Boilers" }],
+  },
   { resourceName: "people/c2", etag: "%Eg", names: [{ displayName: "Zoë Álvarez" }], emailAddresses: [{ value: "zoe@example.com" }, { value: "z@example.org" }] },
   { resourceName: "people/c3", etag: "%Eg", emailAddresses: [{ value: "nameless@example.com" }] },
   { resourceName: "people/c4", etag: "%Eg" },
@@ -58,10 +65,11 @@ interface Held {
 async function connected(held: Held = {}, more: Partial<Env> = {}) {
   const google = new FakeGoogle();
   google.calendars = [mine(), holidays(), hidden()];
-  google.people = PEOPLE;
+  google.people = structuredClone(PEOPLE);
   const ada = await newMember("Ada");
   const { access = "at-1", refresh = "rt-1", expiresAt = T0 + 3_600_000, scopes = ALL_SCOPES } = held;
   google.valid.add(access);
+  if (scopes.includes(CONTACTS_WRITE)) google.contactWriters.add(access);
   if (refresh) google.refreshes.set(refresh, "at-2");
   await keepTokens(env.DB, vault(KEY)!, ada.personId, "google", "ada@example.com", { accessToken: access, refreshToken: refresh, expiresAt, scopes }, T0);
   const sources = sourcesFor(configured(more), new URL("https://commonink.app/"), google.fetch, () => T0);
@@ -464,7 +472,7 @@ describe("Google Contacts", () => {
     const { google, ask } = await connected();
     google.pageSize = 3;
     const { contacts, sources, more } = await ask({ type: "contact.list" });
-    expect(sources).toEqual([{ id: "google-contacts", kind: "contacts", name: "Google Contacts", provider: "Google", state: "connected", writable: false, account: "ada@example.com" }]);
+    expect(sources).toEqual([{ id: "google-contacts", kind: "contacts", name: "Google Contacts", provider: "Google", state: "connected", writable: false, reconnectToWrite: true, account: "ada@example.com" }]);
     expect(more).toBe(false);
     expect(contacts).toEqual([
       { sourceId: "google-contacts", id: "people/c3", name: "nameless@example.com", emails: ["nameless@example.com"], phones: [], organization: null, url: "https://contacts.google.com/person/c3" },
@@ -478,6 +486,84 @@ describe("Google Contacts", () => {
     const { ref } = await ask({ type: "record.refer", sourceId: "google-contacts", id: "people/c1" });
     expect(await ask({ type: "record.read", ref })).toMatchObject({ kind: "contact", contact: { name: "Sam Okafor" } });
     expect(google.asked("GET", /\/v1\/people\/c1$/)).toHaveLength(2);
+  });
+});
+
+describe("editing a Google contact", () => {
+  const editing = () => connected({ scopes: [...ALL_SCOPES, CONTACTS_WRITE] });
+  const sentBody = (google: FakeGoogle, method: string, path: RegExp) => google.asked(method, path).map((s) => JSON.parse(s.body) as unknown);
+
+  it("is refused while the member agreed only to read contacts, before anything is sent, and connecting again with edit asks for the scope that changes them", async () => {
+    const { google, ask } = await connected();
+    expect((await ask({ type: "source.list" })).sources.find((s) => s.id === "google-contacts")).toMatchObject({ state: "connected", writable: false, reconnectToWrite: true });
+    expect(await refusal(ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c1", etag: "%Eg", phones: [] }))).toBe("forbidden: Connect Google Contacts again to edit contacts");
+    expect(await refusal(ask({ type: "contact.photo", sourceId: "google-contacts", id: "people/c1", photo: null }))).toBe("forbidden: Connect Google Contacts again to edit contacts");
+    expect(await refusal(ask({ type: "contact.create", sourceId: "google-contacts", name: "Grace" }))).toBe("forbidden: Connect Google Contacts again to edit contacts");
+    expect(google.sent).toEqual([]);
+    const { redirect } = await ask({ type: "source.connect", id: "google-contacts", back: "/person/Sam%20Okafor", edit: true });
+    expect(redirect).toBe("/auth/google/connect?source=google-contacts&edit=1&next=%2Fperson%2FSam%2520Okafor");
+  });
+
+  it("is a contacts data source that takes changes once the member agreed to the scope that changes contacts, which reads them too", async () => {
+    const { ask } = await connected({ scopes: [...CALENDAR_SCOPES, CONTACTS_WRITE] });
+    expect((await ask({ type: "source.list" })).sources.find((s) => s.id === "google-contacts")).toEqual({ id: "google-contacts", kind: "contacts", name: "Google Contacts", provider: "Google", state: "connected", writable: true, account: "ada@example.com" });
+    expect((await ask({ type: "contact.list" })).contacts).toHaveLength(3);
+  });
+
+  it("changes only the fields named, as People's updateContact takes them, keeping each label and the organization's department, and answers the card Google holds", async () => {
+    const { google, ask } = await editing();
+    const card = await ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c1", etag: "%Eg", name: "Samuel Okafor", phones: ["+1 555 0142", "+1 555 0199"], emails: ["sam@okafor.example"], title: null, birthday: "--04-21", notes: "Text first" });
+    const [patch] = google.asked("PATCH", /^\/v1\/people\/c1:updateContact$/);
+    expect(patch!.url.searchParams.get("updatePersonFields")).toBe("names,emailAddresses,phoneNumbers,organizations,birthdays,biographies");
+    expect(JSON.parse(patch!.body)).toEqual({
+      etag: "%Eg",
+      names: [{ unstructuredName: "Samuel Okafor" }],
+      phoneNumbers: [{ value: "+1 555 0142", type: "mobile" }, { value: "+1 555 0199" }],
+      emailAddresses: [{ value: "sam@okafor.example" }],
+      organizations: [{ name: "Okafor Plumbing", department: "Boilers" }],
+      birthdays: [{ date: { month: 4, day: 21 } }],
+      biographies: [{ value: "Text first", contentType: "TEXT_PLAIN" }],
+    });
+    expect(card).toMatchObject({ id: "people/c1", name: "Samuel Okafor", phones: ["+1 555 0142", "+1 555 0199"], emails: ["sam@okafor.example"], organization: "Okafor Plumbing", title: null, birthday: "--04-21", notes: "Text first" });
+    expect(card.etag).not.toBe("%Eg");
+    // Read back, it is as Google now holds it.
+    const { ref } = await ask({ type: "record.refer", sourceId: "google-contacts", id: "people/c1" });
+    expect(await ask({ type: "record.read", ref })).toMatchObject({ contact: { name: "Samuel Okafor", etag: card.etag } });
+  });
+
+  it("refuses a change made from a stale reading, says so, and Google keeps what it had", async () => {
+    const { google, ask } = await editing();
+    await ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c1", etag: "%Eg", notes: "First" });
+    expect(await refusal(ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c1", etag: "%Eg", notes: "Second" }))).toBe("conflict: It was changed in Google since you opened it. Open it again, then make your change.");
+    expect((google.people[0] as { biographies: unknown }).biographies).toEqual([{ value: "First", contentType: "TEXT_PLAIN" }]);
+    // A contact that isn't there is said so before anything is sent to change it.
+    const before = google.sent.length;
+    expect(await refusal(ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c99", etag: "%Eg", notes: "x" }))).toBe("not_found: No such contact");
+    expect(google.sent.slice(before).map((s) => s.method)).toEqual(["GET"]);
+  });
+
+  it("puts a picture on a contact with updateContactPhoto and takes it off with deleteContactPhoto, and a picture is drawn only from where Google keeps them", async () => {
+    const { google, ask } = await editing();
+    const pictured = await ask({ type: "contact.photo", sourceId: "google-contacts", id: "people/c1", photo: "/9j/4AAQSkZJRg==" });
+    expect(sentBody(google, "PATCH", /^\/v1\/people\/c1:updateContactPhoto$/)).toEqual([{ photoBytes: "/9j/4AAQSkZJRg==", personFields: "names,emailAddresses,phoneNumbers,organizations,addresses,birthdays,biographies,photos,urls" }]);
+    expect(pictured.photo).toMatch(/^https:\/\/lh3\.googleusercontent\.com\/contacts\/c1-/);
+    const taken = await ask({ type: "contact.photo", sourceId: "google-contacts", id: "people/c1", photo: null });
+    expect(google.asked("DELETE", /^\/v1\/people\/c1:deleteContactPhoto$/)).toHaveLength(1);
+    expect(taken.photo).toBeNull();
+  });
+
+  it("adds a contact with createContact, and lists it after", async () => {
+    const { google, ask } = await editing();
+    const made = await ask({ type: "contact.create", sourceId: "google-contacts", name: "Grace Hopper", emails: ["grace@example.com"] });
+    expect(sentBody(google, "POST", /^\/v1\/people:createContact$/)).toEqual([{ names: [{ unstructuredName: "Grace Hopper" }], emailAddresses: [{ value: "grace@example.com" }] }]);
+    expect(made).toMatchObject({ name: "Grace Hopper", emails: ["grace@example.com"], phones: [] });
+    expect((await ask({ type: "contact.list", query: "grace" })).contacts.map((c) => c.id)).toEqual([made.id]);
+  });
+
+  it("writes a change as a whole for each field, an organization and title both cleared as none, and no field it wasn't given", () => {
+    expect(personOf({ organization: null, title: null }, { organizations: [{ name: "A", title: "B" }, { name: "Second" }] })).toEqual({ person: { organizations: [{ name: "Second" }] }, fields: ["organizations"] });
+    expect(personOf({ birthday: "1990-01-02", addresses: [] })).toEqual({ person: { birthdays: [{ date: { year: 1990, month: 1, day: 2 } }], addresses: [] }, fields: ["birthdays", "addresses"] });
+    expect(personOf({ birthday: null, notes: null, urls: ["https://a.example"] })).toEqual({ person: { birthdays: [], biographies: [], urls: [{ value: "https://a.example" }] }, fields: ["birthdays", "biographies", "urls"] });
   });
 });
 
@@ -625,6 +711,20 @@ describe("signing in and connecting with Google", () => {
     expect(await vault(KEY)!.open(kept.refreshToken, `google:${ada.personId}:refresh`)).toBe("rt-connect");
   });
 
+  it("connects contacts again to edit them, asking for the scope that changes them beside the one that reads them, and keeps what Google answers as contacts that take changes", async () => {
+    const ada = await newMember("Ada");
+    const { email } = (await whoAmI(env.DB, ada.personId)).person;
+    // With include_granted_scopes Google answers everything agreed to, the old scopes with the new.
+    tokenEndpoint({ email, scope: [...ALL_SCOPES, CONTACTS_WRITE].join(" "), refresh_token: "rt-edit" });
+    const { asked, home } = await roundTrip("/auth/google/connect?source=google-contacts&edit=1&next=/person/Sam", await sessionOf(ada.personId));
+    expect(asked.searchParams.get("scope")!.split(" ")).toEqual(["openid", "email", "profile", ...SOURCE_SCOPES["google-contacts"], CONTACTS_WRITE]);
+    expect(home.headers.get("Location")).toBe("/person/Sam");
+    expect((await connectionOf(env.DB, ada.personId, "google"))!.scopes).toContain(CONTACTS_WRITE);
+    // Without edit nothing more than reading is asked.
+    const plain = new URL((await visit("/auth/google/connect?source=google-contacts", await sessionOf(ada.personId))).headers.get("Location")!);
+    expect(plain.searchParams.get("scope")!.split(" ")).toEqual(["openid", "email", "profile", ...SOURCE_SCOPES["google-contacts"]]);
+  });
+
   it("keeps nothing when Google answers for another account, or the member said no, or isn't who started", async () => {
     const ada = await newMember("Ada");
     const eve = await newMember("Eve");
@@ -675,7 +775,8 @@ describe("a Google contact's card", () => {
       addresses: [{ formattedValue: "12 Water Lane" }, {}],
       birthdays: [{ date: { month: 4, day: 21 } }],
       biographies: [{ value: "Prefers a text" }],
-      photos: [{ url: "https://lh3.example/default", default: true }, { url: "https://lh3.example/sam" }],
+      photos: [{ url: "https://lh3.googleusercontent.com/default", default: true }, { url: "https://lh3.googleusercontent.com/sam" }],
+      etag: "%EgM",
       urls: [{ value: "https://okafor.example" }, { value: "javascript:alert(1)" }],
     };
     expect(toCard(person)).toEqual({
@@ -690,10 +791,13 @@ describe("a Google contact's card", () => {
       addresses: ["12 Water Lane"],
       birthday: "--04-21",
       notes: "Prefers a text",
-      photo: "https://lh3.example/sam",
+      photo: "https://lh3.googleusercontent.com/sam",
       urls: ["https://okafor.example"],
+      etag: "%EgM",
     });
-    expect(toCard({ ...person, birthdays: [{ date: { year: 1990, month: 4, day: 21 } }], photos: [{ url: "http://lh3.example/sam" }] })).toMatchObject({ birthday: "1990-04-21", photo: null });
+    expect(toCard({ ...person, birthdays: [{ date: { year: 1990, month: 4, day: 21 } }], photos: [{ url: "http://lh3.googleusercontent.com/sam" }] })).toMatchObject({ birthday: "1990-04-21", photo: null });
+    // A picture from anywhere else isn't drawn: the page policy lets in only Google's.
+    expect(toCard({ ...person, photos: [{ url: "https://lh3.example/sam" }] })).toMatchObject({ photo: null });
     expect(toCard({ resourceName: "people/c1" })).toBeNull();
   });
 });
