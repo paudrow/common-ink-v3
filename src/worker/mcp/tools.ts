@@ -370,6 +370,13 @@ ${RULE_GRAMMAR}` },
     op: "folder.rename",
   },
   {
+    name: "move_folder",
+    description:
+      "Put a folder inside another, or at the top level with a null parentId. The notes and folders in it go with it and keep their ids. A folder can't go inside itself or a folder in it, and Unsorted stays where it is. Needs the editor or admin role, and edit on both folders.",
+    inputSchema: object({ id: folderId("The folder to move"), parentId: { type: ["string", "null"], description: "The folder to put it inside, from list_folders, or null for the top level" } }, ["id", "parentId"]),
+    op: "folder.move",
+  },
+  {
     name: "delete_folder",
     description: "Delete a folder that has no notes and no folders in it. Archived notes count, and notes in Trash don't: those are restored to Unsorted afterwards. Needs the admin role.",
     inputSchema: object({ id: folderId("The folder id") }, ["id"]),

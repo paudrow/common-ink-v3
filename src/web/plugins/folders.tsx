@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useId, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carry, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carriesTab, carry, type App, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
+import { canMove, movable, placesFor, type Place } from "./lib/folderMoves.ts";
 import { useKept } from "./lib/kept.ts";
 import { listable } from "./lib/listable.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
+import { Palette } from "./lib/Palette.tsx";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "./sharing/Summary.tsx";
 
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((id) => typeof id === "string");
@@ -29,11 +32,15 @@ interface Props {
   onSplit: ((id: string, side: "right" | "down") => void) | null;
   onChanged: () => void;
   onMoveNote: (noteId: string, folderId: string) => Promise<void>;
+  /** True once it is moved. */
+  onMoveFolder: (id: string, place: Place) => Promise<boolean>;
+  /** Opens the picker of where a folder goes. */
+  onPickPlace: (id: string) => void;
   /** Opens the Share dialog for a folder. Left out when there is none to open. */
   onShare?: (folderId: string) => void;
 }
 
-function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSplit, onChanged, onMoveNote, onShare }: Props) {
+function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSplit, onChanged, onMoveNote, onMoveFolder, onPickPlace, onShare }: Props) {
   const ids = useId();
   const [expandedList, setExpanded] = useKept(host.storage, "expanded", isStrings, []);
   const expanded = new Set(expandedList);
@@ -42,6 +49,11 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
   const closeMenu = useCallback(() => setMenu(null), []);
   const [error, setError] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [dropTop, setDropTop] = useState(false);
+  /** The folder being dragged from this tree. A drag only says what it carries once it is dropped, and a folder can't be dropped where it can't go. */
+  const dragging = useRef<string | null>(null);
+  /** The folder dragged from this tree, while the drag in hand is that one. A drag from anywhere else carries something else. */
+  const draggedFolder = (e: DragEvent) => (dragging.current && carriesTab(e.dataTransfer) && !e.dataTransfer.types.includes(NOTE_DRAG) ? dragging.current : null);
   const canEdit = role !== "viewer";
   /** A guest has no place at the top of the workspace to put a folder. */
   const member = role !== "guest";
@@ -170,7 +182,16 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
             aria-labelledby={`${ids}-${folder.id}`}
             aria-describedby={`${ids}-${folder.id}-count`}
             tabIndex={folder.id === selectedId ? 0 : -1}
-            {...dragged(folder.id)}
+            draggable
+            onDragStart={(e) => {
+              carry(e.dataTransfer, { kind: "folder", id: folder.id });
+              dragging.current = folder.id;
+            }}
+            onDragEnd={() => {
+              dragging.current = null;
+              setDropTarget(null);
+              setDropTop(false);
+            }}
             onClick={choose}
             onDoubleClick={() => onOpen(folder.id, true)}
             onKeyDown={(e) => {
@@ -183,7 +204,8 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
               setMenu({ id: folder.id, name: folder.name, folder, x: e.clientX, y: e.clientY });
             }}
             onDragOver={(e) => {
-              if (!e.dataTransfer.types.includes(NOTE_DRAG)) return;
+              const moving = draggedFolder(e);
+              if (!e.dataTransfer.types.includes(NOTE_DRAG) && !(moving && canMove(tree, moving, folder.id, member))) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
               setDropTarget(folder.id);
@@ -194,6 +216,11 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
               setDropTarget(null);
               const noteId = e.dataTransfer.getData(NOTE_DRAG);
               if (noteId) void attempt(() => onMoveNote(noteId, folder.id));
+              else {
+                const moving = draggedFolder(e);
+                dragging.current = null;
+                if (moving && canMove(tree, moving, folder.id, member)) void onMoveFolder(moving, folder.id).then((moved) => moved && expand(folder.id));
+              }
             }}
           >
             {hasChildren ? (
@@ -263,8 +290,34 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
     e.preventDefault();
   };
 
+  /** Off every row, a folder dragged in the tree goes to the top of the workspace. */
+  const toTop = (e: DragEvent) => {
+    const moving = draggedFolder(e);
+    return moving && !(e.target as Element).closest(".folder-row") && canMove(tree, moving, null, member) ? moving : null;
+  };
+
   return (
-    <div className="folders">
+    <div
+      className="folders"
+      data-drop-top={dropTop || undefined}
+      onDragOver={(e) => {
+        if (!toTop(e)) return setDropTop(false);
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDropTop(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTop(false);
+      }}
+      onDrop={(e) => {
+        const moving = toTop(e);
+        if (!moving) return;
+        e.preventDefault();
+        setDropTop(false);
+        dragging.current = null;
+        void onMoveFolder(moving, null);
+      }}
+    >
       <div className="section-head">
         <span id={`${ids}-label`}>Folders</span>
         {canEdit && member && (
@@ -296,6 +349,7 @@ function FolderTree({ host, tree, role, loose, total, selectedId, onOpen, onSpli
                 ]
               : []),
             ...(menu.folder?.access === "edit" ? [{ label: "New folder inside", action: () => startCreate(menu.id) }] : []),
+            ...(menu.folder && placesFor(tree, menu.id, member).length ? [{ label: "Move to…", action: () => onPickPlace(menu.id) }] : []),
             ...(onShare && menu.folder && shareable === menu.id ? [{ label: "Share", action: () => onShare(menu.id) }] : []),
             ...(menu.folder?.access !== "edit" || menu.id === tree.unsortedId
               ? []
@@ -345,12 +399,119 @@ function NameInput({ initial, onCommit, onCancel }: { initial: string; onCommit:
   );
 }
 
+const MOVE_OVERLAY = "move-folder";
+const TOP = "top";
+
+/** What the last move of a folder said, and the move that takes it back. */
+type Said = { text: string; back?: { id: string; place: Place } };
+
+/** Moves folders and says so, with an Undo, wherever the move was made from. */
+function mover(host: PluginHost) {
+  let said: Said | null = null;
+  const listeners = new Set<() => void>();
+  // In the bottom bar only while there is something to say: an item there keeps the bar, which is gone when nothing else is in it.
+  let shown: (() => void) | null = null;
+  const say = (next: Said | null) => {
+    said = next;
+    if (said && !shown) shown = host.views.register("bar", { id: "folder-moved", component: () => <Moved moves={moves} /> });
+    if (!said && shown) {
+      shown();
+      shown = null;
+    }
+    for (const listener of listeners) listener();
+  };
+  const where = (tree: Tree, place: Place) => (place === null ? "to the top" : `into "${tree.byId.get(place)?.name ?? "a folder"}"`);
+  async function move(id: string, place: Place, undoing = false): Promise<boolean> {
+    const app = host.app();
+    const tree = app.folders;
+    const folder = tree?.byId.get(id);
+    if (!tree || !folder) return false;
+    let moved = false;
+    try {
+      await host.perform({ type: "folder.move", id, parentId: place });
+      say({ text: `Moved "${folder.name}" ${undoing ? "back " : ""}${where(tree, place)}`, back: undoing ? undefined : { id, place: folder.parentId } });
+      moved = true;
+    } catch (err) {
+      say({ text: `Couldn't move "${folder.name}": ${err instanceof Error ? err.message : String(err)}` });
+    }
+    app.refresh();
+    return moved;
+  }
+  const moves = {
+    move,
+    say,
+    said: () => said,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  return moves;
+}
+type Mover = ReturnType<typeof mover>;
+
+/** Drawn from the bottom bar so it is there whatever is open, and shown over the window. */
+function Moved({ moves }: { moves: Mover }) {
+  const said = useSyncExternalStore(moves.subscribe, moves.said);
+  if (!said) return null;
+  return createPortal(
+    <div className="toast" role="status">
+      <span>{said.text}</span>
+      {said.back && (
+        <button type="button" className="link" onClick={() => void moves.move(said.back!.id, said.back!.place, true)}>
+          Undo
+        </button>
+      )}
+      <button type="button" className="icon-button" aria-label="Dismiss" onClick={() => moves.say(null)}>
+        <Icon name="close" />
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
+/** Where a folder goes, picked by typing: first which folder, unless one was handed over, then where. */
+function MovePicker({ app, state, close, moves }: { app: App; state: unknown; close: () => void; moves: Mover }) {
+  const tree = app.folders;
+  if (!tree) return null;
+  const top = app.workspace.role !== "guest";
+  const handed = (state as { folderId?: unknown } | undefined)?.folderId;
+  const moving = typeof handed === "string" && placesFor(tree, handed, top).length ? handed : null;
+  if (!moving)
+    return (
+      <Palette
+        key="which"
+        label="Move which folder"
+        placeholder="Find the folder to move"
+        empty="There's no folder you can move."
+        items={movable(tree, top).map((id) => ({ id, label: tree.byId.get(id)!.name, hint: tree.pathName(tree.byId.get(id)!.parentId) || undefined }))}
+        onPick={(id) => app.toggleOverlay(MOVE_OVERLAY, { folderId: id })}
+        onClose={close}
+      />
+    );
+  return (
+    <Palette
+      key={moving}
+      label={`Move "${tree.byId.get(moving)!.name}" to`}
+      placeholder={`Where "${tree.byId.get(moving)!.name}" goes`}
+      empty="No folder matches."
+      items={placesFor(tree, moving, top).map((place) => ({ id: place ?? TOP, label: place === null ? "Top of the workspace" : tree.pathName(place) }))}
+      onPick={(id) => void moves.move(moving, id === TOP ? null : id)}
+      onClose={close}
+    />
+  );
+}
+
 export const folders: Plugin = {
   id: "folders",
   name: "Folders",
   description: "The folder tree in the sidebar, where notes are filed, moved and found.",
   icon: "folders",
   activate(host) {
+    const moves = mover(host);
+    const pickPlace = (folderId: string | null) => host.app().toggleOverlay(MOVE_OVERLAY, { folderId });
+    host.commands.register({ id: "folders.move", title: "Move folder to…", run: () => pickPlace(host.app().folderId) });
+    host.views.register("overlay", { id: MOVE_OVERLAY, component: ({ app, state, close }) => <MovePicker app={app} state={state} close={close} moves={moves} /> });
     host.views.register("section", {
       id: "folders",
       label: "Folders",
@@ -370,6 +531,8 @@ export const folders: Plugin = {
             onSplit={app.openBeside && ((id, side) => app.openBeside?.({ kind: "folder", id }, side))}
             onChanged={app.refresh}
             onMoveNote={app.moveNote}
+            onMoveFolder={moves.move}
+            onPickPlace={pickPlace}
             onShare={host.commands.list().some((c) => c.id === SHARE_COMMAND) ? (folderId) => app.toggleOverlay(SHARE_OVERLAY, { folderId }) : undefined}
           />
           )

@@ -9,7 +9,7 @@ The only container a person signs into. It holds notes, folders, and uploads. A 
 _Avoid_: Space, vault, project
 
 **Folder**:
-A named location in a workspace. A note or upload has exactly one parent folder. An editor can create and rename a folder they can edit. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty.
+A named location in a workspace. A note or upload has exactly one parent folder. An editor can create, rename and move a folder they can edit, into one they can edit or to the top of the workspace, and never into itself or a folder inside it; what is in it goes with it. A guest, or an agent limited to folders, moves only the folders inside one they were given, and into one they were given. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty.
 _Avoid_: Directory, space
 
 **Unsorted**:

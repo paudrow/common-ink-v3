@@ -37,6 +37,7 @@ const COMMANDS: Record<string, string[][]> = {
   list_folders: [["folders"]],
   create_folder: [["folder-create", "Plans", "--parent", ID]],
   rename_folder: [["folder-rename", ID, "--name", "Plans"]],
+  move_folder: [["folder-move", ID, "--parent", ID]],
   delete_folder: [["folder-delete", ID]],
   note_history: [["history", ID]],
   change_diff: [["diff", ID, "--change", "2"]],
