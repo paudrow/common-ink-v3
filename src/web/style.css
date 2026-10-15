@@ -2806,6 +2806,19 @@ button.link:hover {
   color: var(--danger);
 }
 
+/* What a bar of Who wrote this says of its line. */
+.cm-editor .cm-tooltip.who-tip {
+  border: 0;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  padding: 3px 8px;
+  font-family: var(--prose);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 /* The list a completion offers at the cursor, such as the embed menu. */
 .cm-editor .cm-tooltip.cm-tooltip-autocomplete {
   border: 0;
@@ -4142,6 +4155,103 @@ kbd {
 
 .hist-open-page {
   text-decoration: underline;
+}
+
+/* Who wrote this: the switch in a note's History panel, a dot that fills when it is on. */
+.who-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.who-switch::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.who-switch[aria-checked="true"] {
+  color: var(--ink);
+}
+
+.who-switch[aria-checked="true"]::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/*
+ * Who wrote this: a bar beside each line, in the room left of the text. Members are cool colours and
+ * agents warm ones, drawn dashed; the member's own lines are grey. One value of each holds in both
+ * themes. The bar is wider to the pointer than it looks.
+ */
+.who-wrote {
+  pointer-events: none;
+}
+
+.who-bar {
+  width: 9px;
+  cursor: pointer;
+  pointer-events: auto;
+  --who: var(--faint);
+}
+
+.who-bar::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--who);
+}
+
+.who-bar:hover::before {
+  left: 2px;
+  width: 5px;
+}
+
+.who-bar[data-tone^="agent"]::before {
+  background: repeating-linear-gradient(to bottom, var(--who) 0 5px, transparent 5px 8px);
+}
+
+.who-bar[data-tone="member-0"] {
+  --who: #3e8ee6;
+}
+
+.who-bar[data-tone="member-1"] {
+  --who: #12a594;
+}
+
+.who-bar[data-tone="member-2"] {
+  --who: #8e4ec6;
+}
+
+.who-bar[data-tone="member-3"] {
+  --who: #46a758;
+}
+
+.who-bar[data-tone="member-4"] {
+  --who: #05a2c2;
+}
+
+.who-bar[data-tone="agent-0"] {
+  --who: #f76b15;
+}
+
+.who-bar[data-tone="agent-1"] {
+  --who: #e5484d;
+}
+
+.who-bar[data-tone="agent-2"] {
+  --who: #d6409f;
+}
+
+.who-bar[data-tone="agent-3"] {
+  --who: #e2b100;
 }
 
 .hist-all {

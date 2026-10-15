@@ -221,6 +221,8 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note.history"), id: Id }),
   /** What one change did to its note, as a line diff. */
   z.object({ type: z.literal("note.diff"), id: Id, revision: Revision.min(1) }),
+  /** Who wrote each line of the note as it is now: the change that last wrote or edited it. */
+  z.object({ type: z.literal("note.blame"), id: Id }),
   z.object({ type: z.literal("note.move"), id: Id, folderId: Id }),
   /**
    * Archives a note, or with `archived` false brings it back. An archived note keeps its folder, id
@@ -883,6 +885,22 @@ export interface ChangeEntry {
   restores: number;
 }
 
+/** Who wrote each line of a note: the change that last wrote or edited it. */
+export interface Blame {
+  /** The revision the note is at, whose text this is. */
+  revision: number;
+  text: string;
+  /** Runs of lines one change last wrote, top to bottom, one for every line of `text` and none for no text. Lines count from 1. */
+  lines: { from: number; to: number; revision: number }[];
+  /** The changes `lines` names, oldest first, each once. */
+  changes: ChangeEntry[];
+  /**
+   * The name of each member whose agent wrote a line, by their person id, for someone who may know
+   * who the members are: a member who sees the whole workspace. Nobody's for anyone else.
+   */
+  owners: Record<string, string>;
+}
+
 export interface DiffLine {
   kind: "same" | "add" | "del";
   text: string;
@@ -1108,6 +1126,7 @@ export interface Results {
   "note.undo": Written;
   "note.redo": Written;
   "note.diff": Diff;
+  "note.blame": Blame;
   "history.summary": HistorySummary;
   "history.list": HistoryPage;
   "history.authors": Author[];
