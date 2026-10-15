@@ -503,9 +503,10 @@ export const Op = z.discriminatedUnion("type", [
   /** The event or contact a reference stands for, as it is now. A reference someone else made reads as none at all. */
   z.object({ type: z.literal("record.read"), ref: Id }),
   /**
-   * The notes that reference one of the asker's records with the asker's own reference, among the
-   * notes they can see and not in Trash, latest change first. A note they can't see is left out, title
-   * and all. Each says who sees it: only its owner, the people it is shared with, or the workspace.
+   * The notes that reference one of the asker's records with the asker's own reference, and for an
+   * event their calendar has now, another member's reference to the same event, among the notes they
+   * can see and not in Trash, latest change first. A note they can't see is left out, title and all.
+   * Each says who sees it: only its owner, the people it is shared with, or the workspace.
    */
   z.object({ type: z.literal("record.notes"), sourceId: SourceId, id: RecordId }),
 ]);

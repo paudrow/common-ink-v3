@@ -630,9 +630,19 @@ test("New note about this event makes a note in the folder picked, last used fir
   await expect(region.getByRole("listitem")).toHaveCount(3);
   await expect(region.getByRole("listitem").filter({ hasText: "Eve-secret-plans" })).toHaveText("Eve-secret-plansShared");
 
-  // A reference is its member's: Eve's own Lunch with Sam lists none of the notes that hold Ada's.
-  await perform(eve, { type: "source.connect", id: "sample-calendar", back: "/calendar" }, workspaceId);
+  // Eve's calendar doesn't have the event yet: Ada's reference is no way to it for her.
   expect(await perform(eve, { type: "record.notes", sourceId: lunch.sourceId, id: lunch.id }, workspaceId)).toEqual({ notes: [] });
+  // With the sample calendar, which both have as members of a team share a calendar, Lunch with Sam is one event for both:
+  // Eve is told of the notes about it that she can see, Ada's among them, and not Ada's private one, title and all.
+  await perform(eve, { type: "source.connect", id: "sample-calendar", back: "/calendar" }, workspaceId);
+  const evesView = await perform(eve, { type: "record.notes", sourceId: lunch.sourceId, id: lunch.id }, workspaceId);
+  expect(evesView.notes.map((n) => [n.title, n.audience]).toSorted()).toEqual([
+    ["Eve-secret-plans", "shared"],
+    [made.title, "workspace"],
+  ]);
+  expect(JSON.stringify(evesView)).not.toContain("Ada-private");
+  // Following Ada's reference is still Ada's alone.
+  await expect(perform(eve, { type: "record.read", ref }, workspaceId)).rejects.toThrow(/No such record/);
 
   // Opening one goes to it, and the next note about an event is offered the folder used last.
   await region.getByRole("button", { name: "Ada-private-thoughts" }).click();

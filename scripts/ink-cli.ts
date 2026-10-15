@@ -95,7 +95,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   contacts [QUERY]                    your member's contacts, or those matching every word
   refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
   record REF                          the event or contact a reference stands for, as it is now
-  notes-about SOURCE RECORD           the notes that reference a record with your member's reference, and who sees each
+  notes-about SOURCE RECORD           the notes that reference a record, by your member's reference or a teammate's to the same event, and who sees each
 
 A flag a command doesn't take is refused, and nothing is sent.
 

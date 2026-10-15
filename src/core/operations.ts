@@ -46,7 +46,7 @@ import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative,
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, createEvent, listContacts, listEvents, listSources, ownReference, readRecord, refer, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, createEvent, listContacts, listEvents, listSources, readRecord, referencesTo, refer, updateEvent, type Sources } from "./sources.ts";
 import { referencesIn } from "./references.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
@@ -2270,19 +2270,19 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     own: true,
     async run(ctx, op) {
-      const ref = await ownReference(asker(ctx), op.sourceId, op.id);
-      if (!ref) return { notes: [] };
+      const refs = await referencesTo(asker(ctx), ctx.workspaceId, op.sourceId, op.id);
+      if (!refs.length) return { notes: [] };
       await mend(ctx);
-      // Search finds the notes with the ref among their words; the note's text says which hold it as a reference, and not in code.
+      // Search finds the notes with a ref among their words; the note's text says which hold it as a reference, and not in code.
       const { results } = await ctx.db
         .prepare(
           `SELECT n.id, n.title, n.text, n.updated_at, CASE WHEN n.private_owner IS NULL THEN 'workspace' WHEN EXISTS (SELECT 1 FROM grants g WHERE g.note_id = n.id) THEN 'shared' ELSE 'private' END AS audience
            FROM notes n WHERE n.workspace_id = ?1 AND n.id IN (SELECT r.note_id FROM note_search s JOIN note_search_rows r ON r.id = s.rowid WHERE s.note_search MATCH ?2) AND ${SEEN("n", "?3", "kept")}
            ORDER BY n.updated_at DESC, n.id`,
         )
-        .bind(ctx.workspaceId, `workspace : "${ctx.workspaceId.replace(/[^a-z0-9]/g, "")}" AND text : "${ref}"`, ctx.sight.bind)
+        .bind(ctx.workspaceId, `workspace : "${ctx.workspaceId.replace(/[^a-z0-9]/g, "")}" AND text : (${refs.map((ref) => `"${ref}"`).join(" OR ")})`, ctx.sight.bind)
         .all<{ id: string; title: string; text: string; updated_at: number; audience: NoteAbout["audience"] }>();
-      const notes = results.filter((n) => referencesIn(n.text).some((found) => found.ref === ref));
+      const notes = results.filter((n) => referencesIn(n.text).some((found) => refs.includes(found.ref)));
       return { notes: notes.map((n): NoteAbout => ({ id: n.id, title: n.title, updatedAt: n.updated_at, audience: n.audience })) };
     },
   },

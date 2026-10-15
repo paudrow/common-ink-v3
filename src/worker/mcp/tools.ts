@@ -541,7 +541,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "notes_about_record",
-    description: `The notes that reference one of your member's events or contacts with your member's own reference (the one refer_record answers), among the notes your member can see and not in Trash, latest change first: id, title, updatedAt, and audience, who sees the note: private (only its owner), shared (its owner and the people it is shared with) or workspace (every member). ${SOURCES}`,
+    description: `The notes that reference one of your member's events or contacts with your member's own reference (the one refer_record answers), and for an event your member's calendar has now, another member's reference to the same event (a teammate's notes about a meeting on a shared calendar), among the notes your member can see and not in Trash, latest change first: id, title, updatedAt, and audience, who sees the note: private (only its owner), shared (its owner and the people it is shared with) or workspace (every member). ${SOURCES}`,
     inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
     op: "record.notes",
   },
