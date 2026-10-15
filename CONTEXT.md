@@ -24,11 +24,11 @@ What heads every folder's list, and the Search page, which is the same list of e
 _Avoid_: Filter box
 
 **Query**:
-What a search or a list of todos is asked for, as text: words, phrases, filters, and `-`, `NOT`, `OR` and parentheses between them, written as GitHub's search writes them. One language, read by one parser, for notes and for todos. `docs/search.md` has all of it.
+What a search or a list of todos is asked for, as text: words, phrases, filters, and `-`, `NOT`, `OR` and parentheses between them, written as GitHub's search writes them. One language, read by one parser, for notes, for todos and for uploads. `docs/search.md` has all of it.
 _Avoid_: Search string, search expression
 
 **Filter**:
-A `key:value` in a query that narrows by something other than words: `folder:`, `tag:`, `updated:`, `editor:`, `is:`, `has:`, `due:`. `no:word` is `-has:word`, and `#name` is `tag:name`. `in:` and `sort:` are written the same way and narrow nothing: they say where words are looked for and in what order the answer comes.
+A `key:value` in a query that narrows by something other than words: `folder:`, `tag:`, `updated:`, `editor:`, `is:`, `has:`, `due:`, and of uploads `type:`, `uploader:`, `used:`, `size:`, `uploaded:`, `name:`. `has:attachment` is a note that shows an upload: the word is GitHub's, and the thing is an upload. `no:word` is `-has:word`, and `#name` is `tag:name`. `in:` and `sort:` are written the same way and narrow nothing: they say where words are looked for and in what order the answer comes.
 _Avoid_: Qualifier, operator (for a filter)
 
 **Builder**:
@@ -409,5 +409,26 @@ _Avoid_: Option (except for a plugin's own), preference
 Every setting there is for a member in a workspace: the core's, those of each installed plugin whether it is on or off, and a keybinding for each command that is on. Settings are checked against it, and the options are drawn from it.
 
 **Upload**:
-A file in a workspace with one parent folder. The default folder is Unsorted. It is seen as a note is: by its folder, by a grant on it, and private to the member who uploaded it when they make it so. It has no link of its own, and is reached by a link only through the folder it is in. A note refers to an upload by its id, in an embed: `::image{id 640x480}`, `::video{id 640x360}`, `::audio{id}`, or `::file{id}`. The file's name is kept for showing and is in no note and no address. A reader who can't see the upload is shown a placeholder that says nothing of it. An upload is archived and trashed as a note is, and a note that refers to one in Trash says so. Deleting a note leaves the uploads it refers to. A file can be at most 50 MB, and a workspace's uploads 1 GB together. See `docs/adr/0008-uploads-are-items-and-their-bytes-go-through-the-resolver.md`.
+A file in a workspace with one parent folder. The default folder is Unsorted. It is seen as a note is: by its folder, by a grant on it, and private to the member who uploaded it when they make it so. It has no link of its own, and is reached by a link only through the folder it is in. A note refers to an upload by its id, in an embed: `::image{id 640x480}`, `::video{id 640x360}`, `::audio{id}`, or `::file{id}`. The size after the id is the picture's or video's own, written by the app so its room is kept before it loads; a **size word** after it, `small`, `medium` or `large`, draws it a third, a half or three quarters of the note's column wide, and none draws it the column's whole width, never wider than its own size. A member sets it with the size handle on its right edge, not by typing. The file's name is kept for showing and is in no note and no address. A reader who can't see the upload is shown a placeholder that says nothing of it. An upload is archived and trashed as a note is, and a note that refers to one in Trash says so. Deleting a note leaves the uploads it refers to. A file can be at most 50 MB, and a workspace's uploads 1 GB together. See `docs/adr/0008-uploads-are-items-and-their-bytes-go-through-the-resolver.md`.
 _Avoid_: Asset, attachment
+
+**Uploader**:
+The member or agent who uploaded a file, shown with it to whoever can see it. `uploader:` finds uploads by them, among the uploads the asker can see.
+
+**File class**:
+What a person calls an upload: image, video, audio, PDF, text or other (`fileClass`). It is decided from the type the server gave the bytes and, for text, the name's ending. `type:` in a query is it. Its kind (image, video, audio or file) is what says how a note draws it.
+_Avoid_: File type (that is what the bytes are served as)
+
+**Opening a file**:
+What pressing an upload's chip, or Open on the Uploads page, does, by its file class (`openUpload`): a picture, a video or a recording is shown in a preview over the app; a PDF opens in a tab of the browser, in its own viewer; text is read in the app at `/file/<id>`, drawn and not changed (markdown as a note is, a CSV or TSV as a table, anything else as code); anything else is downloaded. Text read in the app can be copied into a new note. An uploaded file is not changed in place.
+_Avoid_: Preview (for anything but a picture, a video or a recording), viewer
+
+**Uses**:
+How many notes the asker can see show an upload. A note they can't see is never counted, so a count says nothing of it. `used:` in a query is whether there are any.
+
+**Placing an upload**:
+What putting an existing upload in a note does to the upload, before its embed is written there (`upload.place`). An upload private to its owner, not yet in any note anyone else sees, goes to the note's folder and stops being private, so whoever reads the note sees it. In a private note it stays its owner's. Only the member does this, in the app: an agent is refused the change that lets others see a private upload, as it is `upload.setPrivate`. Any other upload is left where it is: who sees an upload is decided by its folder, grants and privacy, never by the notes that show it. "Insert an upload" in the `/` menu is how a member places one: a popover at the cursor finds it among the uploads they can see.
+
+**Reach**:
+How far an upload is seen, as the Uploads page says it to the member: "Only you" while it is private to them (as a file uploaded from that page is, until it is placed), "In N notes" by its uses, or "Not in a note". It never counts or names what the member can't see.
+_Avoid_: Visibility (that is a note's `is:` words), audience

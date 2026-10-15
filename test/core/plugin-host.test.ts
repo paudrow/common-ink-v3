@@ -28,7 +28,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
       members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
       sharing: { of: async () => ({}) as never, grant: async () => ({}) as never, link: async () => null, revoke: async () => {}, setPrivate: async () => ({ removed: 0 }), all: async () => [] },
-      uploads: { referred: () => undefined, onReferred: () => () => {}, learn: () => {}, address: (id: string) => `/files/${id}`, send: async () => ({ id: "sent" }) as never },
+      uploads: { referred: () => undefined, onReferred: () => () => {}, learn: () => {}, address: (id: string) => `/files/${id}`, bytes: async (id: string, upTo: number) => new TextEncoder().encode(`${id}:${upTo}`), send: async () => ({ id: "sent" }) as never },
       storage: { get: () => undefined, set: () => {} },
     }),
     ...options,
@@ -527,11 +527,13 @@ describe("plugin host", () => {
     expect(greedy!.uploads.referred("aaaaaaaaaaaa")).toBeNull();
     expect(greedy!.uploads.address("aaaaaaaaaaaa")).toBe("about:blank");
     await expect(greedy!.uploads.send(new Blob(["x"]), { name: "x.txt" })).rejects.toThrow("Greedy isn't given host.uploads.send: only Common Ink's own plugins are");
+    await expect(greedy!.uploads.bytes("aaaaaaaaaaaa", 100)).rejects.toThrow("Greedy isn't given host.uploads.bytes: only Common Ink's own plugins are");
 
     await own!.perform({ type: "upload.list", includeArchived: true });
     expect(performed).toEqual([["uploads", "upload.list"]]);
     expect(own!.uploads.address("aaaaaaaaaaaa")).toBe("/files/aaaaaaaaaaaa");
     expect(await own!.uploads.send(new Blob(["x"]), { name: "x.txt" })).toEqual({ id: "sent" });
+    expect(new TextDecoder().decode(await own!.uploads.bytes("aaaaaaaaaaaa", 100))).toBe("aaaaaaaaaaaa:100");
   });
 
   it("refuses every plugin an upload's bytes and its privacy as operations, which go through host.uploads and host.sharing", async () => {

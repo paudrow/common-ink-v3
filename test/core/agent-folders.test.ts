@@ -877,7 +877,8 @@ describe("changing what an agent is limited to", () => {
 
     const claude = await asAgent(w.limited.token);
     expect(idsOf(await claude.json<{ id: string }[]>("list_uploads", { includeArchived: true }))).toEqual([inside.id]);
-    expect(await claude.json("list_uploads", { folderId: w.journal })).toEqual(await claude.json("list_uploads", { folderId: MISSING }));
+    expect(await claude.call("list_uploads", { folderId: w.journal })).toEqual(await claude.call("list_uploads", { folderId: MISSING }));
+    expect(await claude.call("list_uploads", { folderId: MISSING })).toEqual(NO_FOLDER);
     expect(await claude.json("list_trashed_uploads")).toEqual([]);
     expect((await claude.json<{ folders: { id: string; uploadCount: number }[] }>("list_folders")).folders.map((f) => [f.id, f.uploadCount])).toEqual([
       [w.plans, 0],
@@ -901,6 +902,30 @@ describe("changing what an agent is limited to", () => {
       { id: binned.id, upload: null },
     ]);
     expect(await claude.call("search", { query: "Photo-outside" })).toEqual(await claude.call("search", { query: "nosuchwordanywhere" }));
+
+    // No filter of list_uploads finds what is outside, counts a note outside, or names someone who uploaded only there.
+    const grace = await addMember(w.ada, "editor", "Grace-outside");
+    await upload(grace, "Grace-photo-outside.png", PNG, { folderId: w.journal });
+    marks.push("Grace-outside", grace.personId);
+    const finds = async (query: string) => idsOf(await claude.json<{ id: string }[]>("list_uploads", { query, today: "2026-10-15" }));
+    for (const query of ["", "type:image", "type:pdf OR type:other", "-type:image", "used:yes", "used:no", "outside", "name:outside", "size:>0", "size:<1kb", "uploaded:>=2020-01-01", "is:open OR is:archived OR is:trashed", "is:private OR -is:private", "uploader:@me OR -uploader:@me", "sort:size-desc"]) {
+      expect((await finds(query)).filter((id) => id !== inside.id), query).toEqual([]);
+    }
+    expect(await finds("type:image")).toEqual([inside.id]);
+    // The picture inside is shown by a note inside and one outside: it is told of the one it sees.
+    expect((await claude.json<{ id: string; uses: number }[]>("list_uploads", { query: "used:yes" })).map((u) => [u.id, u.uses])).toEqual([[inside.id, 1]]);
+    expect(await finds('uploader:"Ada Lovelace"')).toEqual([inside.id]);
+    // A name it asks by is said back to it, so these are asked apart from what is checked for marks below.
+    const echo = await asAgent(w.limited.token);
+    const nobody = await echo.call("list_uploads", { query: 'uploader:"Nobody-at-all"' });
+    expect(nobody.text).toBe('invalid: Nobody named "Nobody-at-all" has uploaded a file you can see');
+    expect((await echo.call("list_uploads", { query: 'uploader:"Grace-outside"' })).text).toBe(nobody.text.replace("Nobody-at-all", "Grace-outside"));
+    expect((await echo.call("list_uploads", { query: "uploader:Ghost-outside" })).text).toBe(nobody.text.replace("Nobody-at-all", "Ghost-outside"));
+    expect((await echo.call("list_uploads", { query: "folder:Journal" })).text).toBe((await echo.call("list_uploads", { query: "folder:Nowhere" })).text.replace("Nowhere", "Journal"));
+    // Nor is anything put in a note outside, or anything outside put in a note inside.
+    expect(await claude.call("place_upload", { id: outside.id, noteId: showing.id })).toEqual(NO_UPLOAD);
+    expect(await claude.call("place_upload", { id: inside.id, noteId: w.outside.id })).toEqual(NO_NOTE);
+    expect(await claude.call("place_upload", { id: inside.id, noteId: showing.id })).toMatchObject({ isError: false });
 
     const send = (path: string, init: RequestInit = {}) => worker.fetch(new Request(`https://ink.test${path}`, init) as never, { ...env, SESSION_SECRET: "test-secret" });
     const token = { Authorization: `Bearer ${w.limited.token}` };

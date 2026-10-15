@@ -47,7 +47,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       the todos a query finds, such as "due:<today priority:>=medium", or every
                                       open one with none; --query QUERY is the same. "ink syntax todos" lists
                                       what a query can say
-  syntax [todos]                      the query language of search, or of todos
+  syntax [todos|uploads]              the query language of search, of todos, or of uploads
   todo-filters [--archived true]      the tags and assignees that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
         [--every RULE|none] [--skip true] [--assign WHO]
@@ -59,14 +59,18 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   daily [--on DAY]                    your daily note for a day, made if it isn't there
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
-  uploads [--folder ID] [--archived true]
-                                      the uploads in a workspace, or in one folder
+  uploads [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--archived true]
+                                      the uploads a query finds, such as "type:image uploader:@me", each
+                                      with how many notes show it, or every live one with none; --query
+                                      QUERY is the same. "ink syntax uploads" lists what a query can say
   upload FILE [--folder ID] [--name NAME]
                                       put a file in a folder, or in Unsorted, and say how a note shows it
   download ID [--out PATH] [--force true]
                                       save an upload's bytes under its name here, or at PATH
   upload-info ID                      one upload, and the notes that refer to it
   upload-move ID --folder ID          put an upload in another folder
+  upload-place ID --note ID           put an upload in a note before writing its line there: one private
+                                      to you goes to the note's folder, unless the note is private too
   upload-archive ID                   archive an upload: kept, and left out of listings
   upload-unarchive ID                 bring an archived upload back
   upload-trash ID                     move an upload to Trash, where it waits 30 days
@@ -283,8 +287,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const id = positional[0];
     // What a query can say is the same for everyone, so it is said with no token.
     if (command === "syntax") {
-      if (id !== undefined && id !== "todos") throw new UsageError("syntax takes nothing, or todos");
-      io.out(syntaxText(id === "todos" ? "todos" : "notes"));
+      if (id !== undefined && id !== "todos" && id !== "uploads") throw new UsageError("syntax takes nothing, todos or uploads");
+      io.out(syntaxText(id ?? "notes"));
       return 0;
     }
     if (!token) throw new UsageError("Set INK_TOKEN to an agent token from Common Ink");
@@ -506,7 +510,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "uploads":
         tool = "list_uploads";
-        args = given({ folderId: ["folder"], includeArchived: ["archived", truth] });
+        if (id !== undefined && flags.has("query")) throw new UsageError("uploads takes its query once: after the command, or as --query");
+        args = { ...(id !== undefined && { query: id }), ...days(), ...given({ query: ["query"], folderId: ["folder"], includeArchived: ["archived", truth] }) };
+        break;
+      case "upload-place":
+        tool = "place_upload";
+        args = { id: need("an upload id"), noteId: needFlag("note") };
         break;
       case "upload-info":
         tool = "read_upload";

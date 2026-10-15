@@ -4,7 +4,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import { keep } from "./belowIdentity.ts";
 import { inlineIn, rewriteOf, type Written } from "./embedSyntax.ts";
 import { guardFrames } from "./frameGuard.ts";
-import type { AddressEmbed, Below, BelowBox, Embed } from "./plugin-api.ts";
+import type { AddressEmbed, Below, BelowBox, BelowDrawn, BelowEmbedded, Embed } from "./plugin-api.ts";
 
 /** One embed with something kept below its line. */
 interface Shown {
@@ -31,7 +31,7 @@ let ids = 0;
 const GAP = 6;
 const UNDER_CARD = 12;
 
-const sameBox = (a: BelowBox, b: BelowBox) => a.maxWidth === b.maxWidth && ("ratio" in a ? "ratio" in b && a.ratio === b.ratio : "height" in b && a.height === b.height);
+const sameBox = (a: BelowBox, b: BelowBox) => a.maxWidth === b.maxWidth && a.share === b.share && ("ratio" in a ? "ratio" in b && a.ratio === b.ratio : "height" in b && a.height === b.height);
 
 /** How tall each box was when last measured, for the ones sized by their width. */
 const heights = new Map<number, number>();
@@ -88,6 +88,7 @@ class BoxWidget extends WidgetType {
     box.style.aspectRatio = "ratio" in this.box ? String(this.box.ratio) : "";
     box.style.height = "height" in this.box ? `${this.box.height}px` : "";
     box.style.maxWidth = this.box.maxWidth ? `${this.box.maxWidth}px` : "";
+    box.style.width = this.box.share ? `${this.box.share * 100}%` : "";
   }
 
   override ignoreEvent() {
@@ -103,13 +104,17 @@ interface Reading {
   written: boolean;
 }
 
-function boxOf(embed: Kept, written: Written): BelowBox | null {
+/** The room an embed asks for below what the note writes of it, or null for none or for one that makes no sense. A share that makes none is the whole column. */
+export function boxOf(embed: { below?: Below }, written: Pick<Written, "config" | "body">): BelowBox | null {
   try {
-    const box = embed.below.box({ config: written.config, body: written.body });
+    const box = embed.below?.box({ config: written.config, body: written.body });
     if (!box) return null;
     const size = "ratio" in box ? box.ratio : box.height;
     const width = box.maxWidth ?? 1;
-    return Number.isFinite(size) && size > 0 && Number.isFinite(width) && width > 0 ? box : null;
+    if (!(Number.isFinite(size) && size > 0 && Number.isFinite(width) && width > 0)) return null;
+    if (box.share === undefined || (box.share > 0 && box.share <= 1)) return box;
+    const { share: _, ...whole } = box;
+    return whole;
   } catch {
     return null;
   }
@@ -128,7 +133,7 @@ function claims(embed: AddressEmbed, address: string): boolean {
 
 function read(state: EditorState, { embeds, addresses, blocks }: Reading, before: readonly Shown[], moved: (pos: number) => number, sized: ReadonlyMap<number, number>): Shown[] {
   const has = (embed: Embed | undefined): embed is Embed & { below: Below } => !!embed?.below;
-  const drawnBlocks = blocks.filter((b) => embeds.get(b.name)?.block);
+  const drawnBlocks = blocks.filter((b) => embeds.get(b.name)?.block && embeds.get(b.name)?.render);
   const found: Written[] = drawnBlocks.filter((b) => has(embeds.get(b.name)));
   if ([...embeds.values()].some((e) => !e.block && has(e))) {
     for (const written of inlineIn(state.doc.toString())) {
@@ -271,7 +276,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     drawn: HTMLElement;
     /** What the note said of the embed when this was drawn. */
     source: string;
-    stop: (() => void) | void;
+    made: BelowDrawn;
     unguard: () => void;
     place?: Place;
   }
@@ -347,7 +352,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
             const drawn = el.appendChild(document.createElement("div"));
             drawn.className = "embed-below-drawn";
             const { id } = shown;
-            const made: Live = (live = { el, drawn, source: shown.source, stop: undefined, unguard: guardFrames(el, () => this.taken(made, id, view)).stop });
+            const made: Live = (live = { el, drawn, source: shown.source, made: {}, unguard: guardFrames(el, () => this.taken(made, id, view)).stop });
             this.live.set(id, made);
             this.draw(made, shown, view);
           }
@@ -355,8 +360,10 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           // The note says something else of it now: it is drawn again, in the element and the place it has. A block
           // being written is drawn again once the cursor has left it, and not at each key, half-written.
           if (live.source !== shown.source && !(shown.written.block && within(view.state, shown.written))) {
-            this.stop(live);
-            live.drawn.replaceChildren();
+            if (!live.made.update) {
+              this.stop(live);
+              live.drawn.replaceChildren();
+            }
             this.draw(live, shown, view);
           }
           // With no room, as inside something else that is drawn, it is kept and not shown.
@@ -370,6 +377,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
         }
       }
 
+      /** Draws an embed in its element, or has it change what it drew to fit what the note says of it now, where it knows how. */
       draw(live: Live, { id, embed, written, source }: Shown, view: EditorView) {
         live.source = source;
         let drawing = true;
@@ -380,21 +388,33 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           const changes = rewriteOf(now.written, next);
           if (changes.length) view.dispatch({ changes, userEvent: "input.embed" });
         };
+        const handed: BelowEmbedded = {
+          config: written.config,
+          body: written.body,
+          readOnly: view.state.readOnly,
+          // The editor can't be changed while it is being measured, which is when this is drawn.
+          update: (next) => (drawing ? queueMicrotask(() => rewrite(next)) : rewrite(next)),
+          resize: (height) => {
+            if (!Number.isFinite(height) || height <= 0 || this.live.get(id) !== live || !view.state.field(field, false)) return;
+            const effects = resized.of({ id, height: Math.round(height) });
+            if (drawing) queueMicrotask(() => view.dispatch({ effects }));
+            else view.dispatch({ effects });
+          },
+          column: () => {
+            const room = view.contentDOM.querySelector(`[data-below="${id}"]`)?.parentElement;
+            if (!room) return 0;
+            const style = getComputedStyle(room);
+            return room.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+          },
+        };
         try {
-          live.stop = embed.below.render(live.drawn, {
-            config: written.config,
-            body: written.body,
-            readOnly: view.state.readOnly,
-            // The editor can't be changed while it is being measured, which is when this is drawn.
-            update: (next) => (drawing ? queueMicrotask(() => rewrite(next)) : rewrite(next)),
-            resize: (height) => {
-              if (!Number.isFinite(height) || height <= 0 || this.live.get(id) !== live || !view.state.field(field, false)) return;
-              const effects = resized.of({ id, height: Math.round(height) });
-              if (drawing) queueMicrotask(() => view.dispatch({ effects }));
-              else view.dispatch({ effects });
-            },
-          });
+          if (live.made.update) live.made.update(handed);
+          else {
+            const made = embed.below.render(live.drawn, handed);
+            live.made = typeof made === "function" ? { stop: made } : (made ?? {});
+          }
         } catch (err) {
+          this.stop(live);
           live.drawn.replaceChildren(`${embed.title} couldn't be shown: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
           drawing = false;
@@ -423,8 +443,8 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
       }
 
       stop(live: Live) {
-        const stop = live.stop;
-        live.stop = undefined;
+        const { stop } = live.made;
+        live.made = {};
         try {
           stop?.();
         } catch {

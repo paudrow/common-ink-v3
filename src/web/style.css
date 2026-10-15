@@ -2119,6 +2119,22 @@ button.link:hover {
   visibility: hidden;
 }
 
+/* An embed that is all below its line, as written, where it is written: its line is as tall with it as with nothing. A line with nothing else on it is as tall as that text. */
+.embed-written {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.cm-line.embed-alone {
+  font-size: 12.5px;
+}
+
+.embed-written * {
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
 .embed-options-panel {
   display: flex;
   flex-direction: column;
@@ -8174,9 +8190,16 @@ button.todo-tag[aria-pressed="true"] {
 
 /* Uploads */
 
-/* A picture, a video or a recording below its line. It fills the room the note keeps for it, and the room never follows it. */
-.embed-below:has(> .upload-image, > .upload-video, > .upload-audio, > .upload-missing) {
-  display: flex;
+/*
+ * A picture, a video or a recording below its line: the thing itself, with no frame of the host's
+ * around it. It fills the room the note keeps for it, and the room never follows it. Its size handle
+ * and the width a drag will snap to are drawn past its edges.
+ */
+.embed-below:has(> .embed-below-drawn > :is(.upload-image, .upload-video, .upload-audio)) {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: none;
 }
 
 .upload-image,
@@ -8184,6 +8207,7 @@ button.todo-tag[aria-pressed="true"] {
   display: block;
   width: 100%;
   height: 100%;
+  border-radius: 6px;
   object-fit: contain;
 }
 
@@ -8193,10 +8217,63 @@ button.todo-tag[aria-pressed="true"] {
 
 .upload-audio {
   display: block;
-  box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: 8px;
+}
+
+/* The size handle: a bar on the right edge, seen on hover or focus, which drags the width to small, medium, large or full. */
+.upload-size {
+  display: grid;
+  position: absolute;
+  top: 50%;
+  right: -10px;
+  place-items: center;
+  width: 20px;
+  height: 56px;
+  translate: 0 -50%;
+  opacity: 0;
+  cursor: ew-resize;
+  touch-action: none;
+  transition: opacity 0.12s;
+}
+
+/* Dark with a light edge, so it is seen on any picture, light or dark. */
+.upload-size::before {
+  content: "";
+  box-sizing: border-box;
+  width: 8px;
+  height: 44px;
+  border: 1.5px solid rgb(255 255 255 / 0.9);
+  border-radius: 4px;
+  background: rgb(30 30 36 / 0.7);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+
+.embed-below:hover .upload-size,
+.upload-size:focus-visible,
+.upload-size.dragging {
+  opacity: 1;
+}
+
+.upload-size:focus-visible {
+  outline: none;
+}
+
+.upload-size:focus-visible::before,
+.upload-size.dragging::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.upload-size-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  border: 2px dashed var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  pointer-events: none;
 }
 
 /* In place of a file that can't be shown, in the same room. */
@@ -8296,36 +8373,50 @@ a.file-chip:hover .file-chip-name {
   font-size: 22px;
 }
 
-.uploads-add,
-.uploads-add label,
 .uploads-tools {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
 }
 
-.uploads-add label,
-.uploads-tools {
-  color: var(--muted);
-  font-size: 13px;
+.uploads-tools .query-bar {
+  flex: 1 1 20rem;
+  min-width: 0;
 }
 
-.uploads-page select {
-  max-width: 14rem;
-  padding: 4px 6px;
-  border: 1px solid var(--line-strong);
+/* Mine or Everyone's: two quiet halves of one switch, as tall as the query's field beside it. */
+.uploads-whose {
+  display: flex;
+  flex: none;
+  box-sizing: border-box;
+  height: 38px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-side);
+}
+
+.uploads-whose button {
+  padding: 0 12px;
+  border: 0;
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
+  background: none;
+  color: var(--muted);
   font: inherit;
   font-size: 13px;
+  cursor: pointer;
 }
 
-.uploads-tools .filter {
-  flex: 1;
-  width: auto;
-  min-width: 10rem;
+.uploads-whose button[aria-pressed="true"] {
+  background: var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+
+.uploads-whose button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .uploads-lede,
@@ -8472,27 +8563,6 @@ a.file-chip:hover .file-chip-name {
   margin: 0;
 }
 
-.upload-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.upload-field .check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.upload-field select {
-  max-width: none;
-}
-
 .upload-used h3 {
   margin: 0 0 4px;
   color: var(--muted);
@@ -8567,6 +8637,194 @@ a.file-chip:hover .file-chip-name {
 
 .upload-preview audio {
   width: min(28rem, 80vw);
+}
+
+/* "Insert an upload": the popover at the cursor in a note, laid over it as the "/" menu is. */
+.cm-editor .cm-tooltip.upload-insert {
+  box-sizing: border-box;
+  width: min(22rem, calc(100vw - 16px));
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-family: var(--prose);
+  font-size: 13px;
+}
+
+.upload-insert input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.upload-insert input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.upload-insert ul {
+  max-height: 16rem;
+  margin: 6px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.upload-insert li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.upload-insert li[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.upload-insert .upload-thumb {
+  width: 28px;
+  height: 28px;
+}
+
+.upload-insert .upload-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.upload-insert small {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.upload-insert-none {
+  margin: 8px 4px 2px;
+  color: var(--muted);
+}
+
+.file-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 68rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.file-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.file-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.file-title h1 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.file-said,
+.file-none {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.file-code .cm-editor {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--code-bg);
+  font-size: 13px;
+}
+
+.file-code .cm-scroller {
+  font-family: var(--mono);
+}
+
+.file-code .cm-gutters {
+  border-right: 1px solid var(--line);
+  border-radius: 8px 0 0 8px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.file-code .cm-editor.cm-focused {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.file-table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.file-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.file-table th,
+.file-table td {
+  max-width: 28rem;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.file-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-side);
+  font-weight: 600;
+}
+
+.file-table td + td,
+.file-table th + th {
+  border-left: 1px solid var(--line);
+}
+
+.file-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 60rem) {
+  .file-page {
+    padding: 1.25rem 1rem 2rem;
+  }
 }
 
 .trash-part {

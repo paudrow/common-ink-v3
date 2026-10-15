@@ -32,11 +32,14 @@ const errorIn = async (res: Response) => ((await res.json()) as { error: string 
 /** The headers that keep an upload's bytes from acting as a page of the app. */
 const sealOf = (res: Response) => Object.fromEntries(["X-Content-Type-Options", "Cross-Origin-Resource-Policy", "Referrer-Policy", "Cache-Control"].map((name) => [name, res.headers.get(name)]));
 const SEAL = { "X-Content-Type-Options": "nosniff", "Cross-Origin-Resource-Policy": "same-origin", "Referrer-Policy": "no-referrer", "Cache-Control": "private, no-cache" };
+/** The policy every file is served with: a page opened from one is a sandbox with no origin and no script, which may show itself and nothing else. */
+const POLICY = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'";
 const expectSealed = (res: Response, what: string) => {
   expect(sealOf(res), what).toEqual(SEAL);
   const policy = (res.headers.get("Content-Security-Policy") ?? "").split(";").map((part) => part.trim());
   expect(policy, what).toContain("sandbox");
   expect(policy, what).toContain("default-src 'none'");
+  expect(policy.join(" "), what).not.toMatch(/allow-same-origin|allow-scripts|script-src|allow-top-navigation|allow-popups/);
 };
 
 /** Ada, admin of her workspace, with an agent of hers. */
@@ -95,6 +98,52 @@ describe("an upload's bytes over HTTP, with an agent's token", () => {
       expectSealed(res, name);
       expect(await bytesIn(res), name).toEqual([...bytes]);
     }
+  });
+
+  it("answers a PDF in place, to be shown by the browser's viewer, sealed as every other file is: a page with no origin and no script", async () => {
+    const { token, workspace } = await connected();
+    const bytes = bytesOf("%PDF-1.7\n<< /OpenAction << /S /JavaScript /JS (app.alert(1)) >> >>");
+
+    const upload = await sent(workspace, token, "paper.pdf", bytes);
+    const res = await get(workspace, token, upload.id);
+    expect([res.status, res.headers.get("Content-Type"), res.headers.get("Content-Disposition")]).toEqual([200, "application/pdf", `inline; filename="paper.pdf"; filename*=UTF-8''paper.pdf`]);
+    expect(res.headers.get("Content-Security-Policy")).toBe(POLICY);
+    expectSealed(res, "a PDF");
+    expect(await bytesIn(res)).toEqual([...bytes]);
+  });
+
+  it("answers every kind of file with exactly these headers: only pictures, video, sound and PDF in place, and all of them sealed", async () => {
+    const { token, workspace } = await connected();
+    const files: [name: string, bytes: Uint8Array, type: string, inline: boolean][] = [
+      ["dot.png", PNG, "image/png", true],
+      ["photo.jpg", Uint8Array.of(0xff, 0xd8, 0xff, 0xe0, 0, 0x10), "image/jpeg", true],
+      ["anim.gif", bytesOf("GIF89a\x01\x00\x01\x00"), "image/gif", true],
+      ["pic.webp", bytesOf("RIFF\x00\x00\x00\x00WEBPVP8 "), "image/webp", true],
+      ["pic.avif", bytesOf("\x00\x00\x00\x1cftypavif"), "image/avif", true],
+      ["x.svg", SVG, "image/svg+xml", false],
+      ["clip.mp4", bytesOf("\x00\x00\x00\x18ftypisom"), "video/mp4", true],
+      ["clip.mov", bytesOf("\x00\x00\x00\x14ftypqt  "), "video/quicktime", true],
+      ["clip.webm", Uint8Array.of(0x1a, 0x45, 0xdf, 0xa3, 0x9f), "video/webm", true],
+      ["song.mp3", bytesOf("ID3\x04\x00"), "audio/mpeg", true],
+      ["song.m4a", bytesOf("\x00\x00\x00\x18ftypM4A "), "audio/mp4", true],
+      ["memo.wav", bytesOf("RIFF\x00\x00\x00\x00WAVEfmt "), "audio/wav", true],
+      ["memo.ogg", bytesOf("OggS\x00\x02"), "audio/ogg", true],
+      ["paper.pdf", bytesOf("%PDF-1.7\n"), "application/pdf", true],
+      ["x.html", HTML, "application/octet-stream", false],
+      ["notes.txt", bytesOf("plain words"), "application/octet-stream", false],
+      ["table.csv", bytesOf("a,b\n1,2\n"), "application/octet-stream", false],
+      ["readme.md", bytesOf("# Title\n"), "application/octet-stream", false],
+      ["data.json", bytesOf('{"a":1}'), "application/octet-stream", false],
+      ["app.js", bytesOf("alert(1)"), "application/octet-stream", false],
+      ["archive.zip", Uint8Array.of(0x50, 0x4b, 0x03, 0x04), "application/octet-stream", false],
+    ];
+
+    const served = [];
+    for (const [name, bytes] of files) {
+      const res = await get(workspace, token, (await sent(workspace, token, name, bytes)).id);
+      served.push([name, res.status, res.headers.get("Content-Type"), res.headers.get("Content-Disposition")?.split(";")[0], res.headers.get("Content-Security-Policy"), ...Object.values(sealOf(res))]);
+    }
+    expect(served).toEqual(files.map(([name, , type, inline]) => [name, 200, type, inline ? "inline" : "attachment", POLICY, ...Object.values(SEAL)]));
   });
 
   it("is not typed by what the request says it is", async () => {

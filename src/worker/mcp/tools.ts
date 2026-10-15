@@ -94,10 +94,10 @@ const mentionNames = { type: "string", enum: ["resolve", "keep"], description: '
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
 /** The query language, as much of it as a model needs to write a query unaided. It is read from the filters' table, as docs/search.md is. */
 const QUERY = (scope: Scope) =>
-  `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or an editor: naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`;
+  `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or ${scope === "uploads" ? "an uploader:" : "an editor:"} naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`;
 const queryDays = {
   today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
-  zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated: and created:. Left out, it is the zone your member's settings name, or UTC" },
+  zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is the zone your member's settings name, or UTC" },
 };
 const TODOS =
   "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\
@@ -369,8 +369,17 @@ ${RULE_GRAMMAR}` },
   },
   {
     name: "list_uploads",
-    description: `The uploads in a workspace that you can see, latest first: id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, state, and access, which is edit or view. An upload you can't see is never listed, and reads as no such upload everywhere. Narrow it to one folder. Archived uploads are left out unless includeArchived is true, and those in Trash are listed only by list_trashed_uploads. ${UPLOADS}`,
-    inputSchema: object({ folderId: folderId("Only uploads in this folder, from list_folders"), includeArchived: { type: "boolean", description: "True to cover archived uploads too, which are left out otherwise" } }),
+    description: `The uploads you can see that query finds, latest uploaded first unless its sort: says otherwise: with no query, every live one. Each has its id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, private, state, access, which is edit or view, and uses: how many notes you can see show it. An upload you can't see is never listed or counted, and reads as no such upload everywhere. Archived uploads are left out unless the query says is:archived, and those in Trash unless it says is:trashed. ${UPLOADS}\
+\
+${QUERY("uploads")}\
+\
+The arguments beside query are from before it could say them, and narrow it further.`,
+    inputSchema: object({
+      query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: "Which uploads, such as: type:image uploader:@me, or: size:>1mb used:no -type:video" },
+      ...queryDays,
+      folderId: folderId("Only uploads in this folder, not those of the folders inside it, from list_folders. In the query, folder: takes the folders inside too"),
+      includeArchived: { type: "boolean", description: "True to cover archived uploads too, which are left out otherwise. In the query: is:archived" },
+    }),
     op: "upload.list",
   },
   {
@@ -384,6 +393,12 @@ ${RULE_GRAMMAR}` },
     description: "Put an upload in another folder. Its id stays the same, so the notes that refer to it still show it. Needs edit on the upload and on the folder.",
     inputSchema: object({ id: uploadId, folderId: folderId("The folder to move it to, from list_folders") }, ["id", "folderId"]),
     op: "upload.move",
+  },
+  {
+    name: "place_upload",
+    description: "Put an upload you can see in a note, before you write its embed in the note's text with write_note: it writes nothing itself. An upload private to your member, seen by nobody else, is refused: only your member can let others see it, in the app. In a private note it stays private and is placed. An upload that isn't private is left where it is. Made twice, it changes nothing more. Needs edit on the upload and on the note. The answer is the upload as it now is.",
+    inputSchema: object({ id: uploadId, noteId: { type: "string", description: "The note it is put in" } }, ["id", "noteId"]),
+    op: "upload.place",
   },
   {
     name: "archive_upload",

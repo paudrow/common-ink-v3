@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { parseQuery } from "../../src/web/plugin-api.ts";
-import { builderReducer, builtOf, filled, readBuilder, termOf, type BuilderEvent, type Row } from "../../src/web/plugins/lib/queryRows.ts";
+import { fieldName, fieldsOf, keysFor, parseQuery, querySyntax, wordsIn, type QueryScope } from "../../src/web/plugin-api.ts";
+import { builderReducer, builtOf, filled, readBuilder, termOf, withField, type BuilderEvent, type Row } from "../../src/web/plugins/lib/queryRows.ts";
 
 const row = (field: Row["field"], value: string, more: Partial<Row> = {}): Row => ({ field, not: false, cmp: "=", value, ...more });
-const read = (text: string, scope: "notes" | "todos" = "notes") => {
+const read = (text: string, scope: QueryScope = "notes") => {
   const parsed = parseQuery(text, scope);
   if (!parsed.ok) throw new Error(parsed.error.message);
   return builtOf(parsed.query);
 };
-const after = (text: string, events: BuilderEvent[], scope: "notes" | "todos" = "notes") => events.reduce(builderReducer, readBuilder(scope, text));
+const after = (text: string, events: BuilderEvent[], scope: QueryScope = "notes") => events.reduce(builderReducer, readBuilder(scope, text));
 
 describe("the builder's rows", () => {
   it("are a flat query laid out: words and filters, as they are or negated, all of them or any", () => {
@@ -130,5 +130,64 @@ describe("the builder's rows", () => {
     // A word of the other field is no Visibility: it is said why, and kept out of the query.
     expect(termOf(row("visibility", "archived"), "notes")).toEqual({ why: "This isn't one is: as the query language reads it" });
     expect(termOf(row("is", "shared"), "notes")).toEqual({ why: "This isn't one is: as the query language reads it" });
+  });
+});
+
+describe("the builder's rows for uploads", () => {
+  it("lay out every filter uploads are found by, with Visibility apart from State, and none that is a note's", () => {
+    expect(read('report type:image -used:yes uploader:@me size:>1mb uploaded:2026-10-01..2026-10-14 name:"Q2 plan" folder:Pictures is:private sort:size-desc', "uploads")).toEqual({
+      rows: [
+        row("text", "report"),
+        row("type", "image"),
+        row("used", "yes", { not: true }),
+        row("uploader", "@me"),
+        row("size", "1mb", { cmp: ">" }),
+        row("uploaded", "2026-10-01", { to: "2026-10-14" }),
+        row("name", "Q2 plan"),
+        row("folder", "Pictures"),
+        row("visibility", "private"),
+      ],
+      match: "all",
+      in: [],
+      sort: "size-desc",
+    });
+    expect(read("type:pdf OR type:text OR kind:other", "uploads")?.match).toBe("any");
+    expect(keysFor("uploads").flatMap((key) => fieldsOf(key, "uploads"))).toEqual(["folder", "name", "type", "uploader", "used", "size", "uploaded", "is", "visibility", "sort"]);
+    expect(wordsIn("is", "uploads").map((w) => w.word)).toEqual(["open", "archived", "trashed"]);
+    expect(wordsIn("type", "uploads").map((w) => w.word)).toEqual(["image", "video", "audio", "pdf", "text", "other"]);
+  });
+
+  it("write each row as the bar reads it, and keep one the language can't read for uploads out of the query", () => {
+    const set = (to: Row) => after("", [{ type: "set", at: 0, row: to }], "uploads").text;
+    expect(set(row("size", "1MB", { cmp: ">=" }))).toBe("size:>=1mb");
+    expect(set(row("size", "100kb", { to: "1.5mb" }))).toBe("size:100kb..1.5mb");
+    expect(set(row("name", "Q2 report"))).toBe('name:"Q2 report"');
+    expect(set(row("type", "pdf", { not: true }))).toBe("-type:pdf");
+    expect(set(row("used", "no"))).toBe("used:no");
+    expect(set(row("uploader", "Ada Lovelace"))).toBe('uploader:"Ada Lovelace"');
+    expect(set(row("uploaded", "7d", { cmp: ">=" }))).toBe("uploaded:>=7d");
+    expect(set(row("visibility", "shared"))).toBe("is:shared");
+    expect(set(row("text", "q2 report"))).toBe('"q2 report"');
+    expect(filled(row("size", "big"), "uploads")).toBe(false);
+    expect(filled(row("size", "1.5gb"), "uploads")).toBe(true);
+    expect(termOf(row("size", "lots"), "uploads")).toEqual({ why: 'size: takes a number of bytes, or one with kb, mb or gb after it, such as 1mb. "lots" is none of them' });
+    expect(termOf(row("type", "spreadsheet"), "uploads")).toEqual({ why: 'type: doesn\'t take "spreadsheet". It takes image, video, audio, pdf, text or other' });
+    expect(termOf(row("tag", "money"), "uploads")).toEqual({ why: "tag: is for notes and todos, and this is a search of uploads" });
+    // A size is compared as a day is: a field that compares keeps its comparison, one that doesn't is set to is.
+    expect(withField(row("uploaded", "", { cmp: ">" }), "size")).toEqual(row("size", "", { cmp: ">" }));
+    expect(withField(row("size", "1mb", { cmp: ">" }), "type")).toEqual(row("type", ""));
+    let builder = after("type:image", [{ type: "add" }, { type: "set", at: 1, row: row("size", "1m") }], "uploads");
+    expect(builder.text).toBe("type:image");
+    builder = builderReducer(builder, { type: "set", at: 1, row: row("size", "1mb", { cmp: "<" }) });
+    expect(builder.text).toBe("type:image size:<1mb");
+    builder = builderReducer(builder, { type: "sort", sort: "name-asc" });
+    expect(builder.text).toBe("type:image size:<1mb sort:name-asc");
+  });
+
+  it("are helped by the language's own table for uploads: every heading is a field of the builder, or how a query is written", () => {
+    const headings = [...new Set(querySyntax("uploads").map((r) => (r.field === null ? "Writing a query" : fieldName(r.field))))];
+    expect(headings).toEqual(["Writing a query", "Folder", "Name", "Type", "Uploader", "Used", "Size", "Uploaded", "State", "Visibility", "Sort"]);
+    expect(querySyntax("uploads").find((r) => r.form === "type:text")?.means).toBe("Text to read, by its name's ending: txt, md, markdown, csv, tsv, json, log, yaml, yml, toml, xml, html, css, js, ts, py, sh, sql");
+    expect(querySyntax("uploads").some((r) => r.form.startsWith("#") || r.form.startsWith("tag:") || r.form.startsWith("in:"))).toBe(false);
   });
 });

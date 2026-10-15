@@ -523,13 +523,23 @@ export const Op = z.discriminatedUnion("type", [
    * first bytes. `private` makes it private to the member who uploads it, as a private note is.
    */
   z.object({ type: z.literal("upload.create"), name: FileName, size: z.number().int().min(1), folderId: Id.optional(), private: z.boolean().default(false) }),
-  /** The uploads the asker can see, latest first, in one folder or in all. */
-  z.object({ type: z.literal("upload.list"), folderId: Id.optional(), includeArchived: IncludeArchived }),
+  /**
+   * The uploads the asker can see that `query` finds, in the query language (docs/search.md), latest
+   * first: with no query, every live one. `folderId` narrows to one folder's own uploads and
+   * `includeArchived` covers archived ones too, as `is:archived` does.
+   */
+  z.object({ type: z.literal("upload.list"), query: z.string().max(MAX_SEARCH_LENGTH).default(""), ...Days, folderId: Id.optional(), includeArchived: IncludeArchived }),
   /** One upload, and the notes the asker can see that refer to it. */
   z.object({ type: z.literal("upload.read"), id: Id }),
   /** The bytes of one upload. Over HTTP it is `GET /api/workspaces/<id>/uploads/<upload id>`. */
   z.object({ type: z.literal("upload.open"), id: Id }),
   z.object({ type: z.literal("upload.move"), id: Id, folderId: Id }),
+  /**
+   * What putting an upload in a note asks of it, before its embed is written there. An upload that is
+   * private to the asker, theirs alone, goes to the note's folder and stops being private, so whoever
+   * reads the note sees it. In a private note it stays theirs. Any other upload is left as it is.
+   */
+  z.object({ type: z.literal("upload.place"), id: Id, noteId: Id }),
   /** Archives an upload, or brings it back, as note.archive does a note. Notes that refer to it still show it. */
   z.object({ type: z.literal("upload.archive"), id: Id, archived: z.boolean() }),
   /**
@@ -833,6 +843,11 @@ export interface Upload {
   state: NoteState;
   purgesAt: number | null;
   stateAt: number | null;
+}
+
+/** An upload as a listing gives it: with how many notes the asker can see show it. */
+export interface ListedUpload extends Upload {
+  uses: number;
 }
 
 export interface TrashedUpload extends Upload {
@@ -1214,10 +1229,11 @@ export interface Results {
   "shared.read": SharedNote & { text: string; revision: number; links: LinkedNote[]; uploads: ReferredUpload[] };
   "shared.upload": OpenedUpload;
   "upload.create": Upload;
-  "upload.list": Upload[];
+  "upload.list": ListedUpload[];
   "upload.read": Upload & { usedIn: NoteSummary[] };
   "upload.open": OpenedUpload;
   "upload.move": Upload;
+  "upload.place": Upload;
   "upload.archive": Upload;
   /** `usedIn` is how many notes the asker can see still refer to it. */
   "upload.trash": Upload & { usedIn: number };

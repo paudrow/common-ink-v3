@@ -1,14 +1,16 @@
+import { FILE_CLASSES, KNOWN_TYPES, TEXT_ENDINGS, typesOf, type FileClass } from "./filetypes.ts";
 import { isDay, nameKey } from "./todos.ts";
 
 /**
- * The query language notes and todos are found by: words, "phrases", `key:value` filters, `-` and
- * `NOT`, `OR`, and parentheses, as GitHub's search writes them. This module is the whole of it and
+ * The query language notes, todos and uploads are found by: words, "phrases", `key:value` filters,
+ * `-` and `NOT`, `OR`, and parentheses, as GitHub's search writes them. This module is the whole of it and
  * touches nothing: text to a tree and back, and a tree to a condition in SQL. {@link FILTERS} is the
  * one place a filter is said. The parser, the printer, the builder, the help, the tools'
  * descriptions and `docs/search.md` are all read from it.
  */
 
-export type Scope = "notes" | "todos";
+export type Scope = "notes" | "todos" | "uploads";
+export const SCOPES: readonly Scope[] = ["notes", "todos", "uploads"];
 export type Cmp = "=" | ">" | ">=" | "<" | "<=";
 
 export const MAX_SEARCH_LENGTH = 200;
@@ -26,7 +28,11 @@ export type ValueKind =
   | { type: "folder" }
   | { type: "tag" }
   | { type: "person" }
-  | { type: "mentioned" };
+  | { type: "mentioned" }
+  /** Some of a name, to be found anywhere in it. */
+  | { type: "contains" }
+  /** A number of bytes, or of kb, mb or gb. */
+  | { type: "size" };
 
 /** One of the words a filter such as `is:` takes. The same word can mean one thing of a note and another of a todo. */
 export interface Word {
@@ -82,9 +88,15 @@ interface Spec {
 const BOTH = ["notes", "todos"] as const;
 const NOTES = ["notes"] as const;
 const TODOS = ["todos"] as const;
+const UPLOADS = ["uploads"] as const;
+const ALL = SCOPES;
+const KEPT = ["notes", "uploads"] as const;
 
 /** A todo's priorities, from the lowest, as a query writes them. */
 export const PRIORITIES = ["none", "low", "medium", "high"] as const;
+
+/** The row a condition is of: the upload `u`, or the note `n`, which a todo is in. */
+const item = (c: Compiling) => (c.scope === "uploads" ? "u" : "n");
 
 const among = (c: Compiling, given: Given) => `(SELECT value FROM json_each(${c.bind(JSON.stringify(given.ids ?? []))}))`;
 
@@ -102,20 +114,53 @@ const timeIs = (column: string) => (c: Compiling, { cmp, value, to }: Given) => 
 const valueIs = (column: string, read: (value: string) => string | number) => (c: Compiling, { cmp, value, to }: Given) =>
   to === undefined ? `${column} ${cmp} ${c.bind(read(value))}` : `(${column} >= ${c.bind(read(value))} AND ${column} <= ${c.bind(read(to))})`;
 
+/** Bytes as a query writes them: a number, and kb, mb or gb after it for so many of those. */
+const SIZE = /^(\d{1,15}(?:\.\d{1,3})?)(b|kb|mb|gb)?$/;
+const UNITS = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 } as const;
+export const bytesOf = (written: string): number => {
+  const [, number, unit] = SIZE.exec(written)!;
+  return Math.round(Number(number) * UNITS[(unit ?? "b") as keyof typeof UNITS]);
+};
+
+/** A note of the upload's own workspace that the asker can see and that shows the upload. */
+const USED = (c: Compiling) => `SELECT 1 FROM upload_refs r CROSS JOIN notes rn ON rn.id = r.note_id WHERE r.upload_id = u.id AND rn.workspace_id = u.workspace_id AND ${c.seen("rn")}`;
+
+/** A name's part as LIKE finds it anywhere in the name, with what LIKE reads as more than a character read as itself. */
+const containing = (c: Compiling, part: string) => `u.name LIKE ${c.bind(`%${part.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`)} ESCAPE '\\'`;
+
+const quoted = (values: readonly string[]) => values.map((value) => `'${value}'`).join(", ");
+const TEXT = `(${TEXT_ENDINGS.map((ending) => `u.name LIKE '%.${ending}'`).join(" OR ")})`;
+/** An upload of a class of file, by its type, and for text by its name's ending, as `fileClass` says. Every value is the table's own, never typed. */
+function classIs(cls: FileClass): string {
+  const typed = typesOf(cls);
+  const untyped = `u.type NOT IN (${quoted(KNOWN_TYPES)})`;
+  if (cls === "text") return `(${untyped} AND ${TEXT})`;
+  if (cls === "other") return `(${typed.length ? `u.type IN (${quoted(typed)}) OR ` : ""}(${untyped} AND NOT ${TEXT}))`;
+  return `u.type IN (${quoted(typed)})`;
+}
+const CLASS_MEANS: Record<FileClass, string> = {
+  image: "A picture",
+  video: "A video",
+  audio: "Sound",
+  pdf: "A PDF",
+  text: `Text to read, by its name's ending: ${TEXT_ENDINGS.join(", ")}`,
+  other: "Any other file",
+};
+
 /** Each of `ids` names an author as `kind:id`. */
 const changedBy = (first: boolean) => (c: Compiling, given: Given) =>
   `EXISTS (SELECT 1 FROM json_each(${c.bind(JSON.stringify(given.ids ?? []))}) j JOIN changes c ON c.note_id = n.id AND c.author_kind = substr(j.value, 1, instr(j.value, ':') - 1) AND c.author_id = substr(j.value, instr(j.value, ':') + 1)${first ? " WHERE c.revision = 1" : ""})`;
 
 export const FILTERS = {
   folder: {
-    scopes: BOTH,
+    scopes: ALL,
     aliases: [],
     value: { type: "folder" },
     compares: false,
     means: "In a folder, named or by its id, or in a folder inside it",
     example: "folder:Unsorted",
     shown: "NAME",
-    sql: (c, given) => `n.folder_id IN ${among(c, given)}`,
+    sql: (c, given) => `${item(c)}.folder_id IN ${among(c, given)}`,
   },
   tag: {
     scopes: BOTH,
@@ -187,19 +232,84 @@ export const FILTERS = {
     shown: "NAME",
     sql: (c, given) => `EXISTS (SELECT 1 FROM mentions a WHERE a.note_id = t.note_id AND a.line = t.line AND a.who IN ${among(c, given)})`,
   },
-  is: {
-    scopes: BOTH,
+  name: {
+    scopes: UPLOADS,
+    aliases: [],
+    value: { type: "contains" },
+    compares: false,
+    means: "The file's name has this in it, ignoring case",
+    example: "name:report",
+    shown: "TEXT",
+    sql: (c, given) => containing(c, given.value),
+  },
+  type: {
+    scopes: UPLOADS,
+    aliases: ["kind"],
+    value: { type: "words", words: FILE_CLASSES.map((cls): Word => ({ word: cls, scopes: UPLOADS, means: CLASS_MEANS[cls], sql: () => classIs(cls) })) },
+    compares: false,
+    means: "What kind of file it is",
+    example: "type:image",
+    shown: "WORD",
+  },
+  uploader: {
+    scopes: UPLOADS,
+    aliases: ["uploaded-by"],
+    value: { type: "person" },
+    compares: false,
+    means: "Uploaded by a member or an agent, by name. @me is you",
+    example: "uploader:@me",
+    shown: "NAME",
+    sql: (c, given) => `u.uploaded_by_kind || ':' || u.uploaded_by IN ${among(c, given)}`,
+  },
+  used: {
+    scopes: UPLOADS,
     aliases: [],
     value: {
       type: "words",
       words: [
-        { word: "open", scopes: NOTES, means: "Not archived and not in Trash", sql: () => "n.state = 'live'" },
+        { word: "yes", scopes: UPLOADS, means: "A note you can see shows it", sql: (c) => `EXISTS (${USED(c)})` },
+        { word: "no", scopes: UPLOADS, means: "No note you can see shows it", sql: (c) => `NOT EXISTS (${USED(c)})` },
+      ],
+    },
+    compares: false,
+    means: "Whether a note shows it",
+    example: "used:no",
+    shown: "WORD",
+  },
+  size: {
+    scopes: UPLOADS,
+    aliases: [],
+    value: { type: "size" },
+    compares: true,
+    means: "How big the file is: bytes, or kb, mb or gb",
+    example: "size:>1mb",
+    shown: "SIZE",
+    sql: valueIs("u.size", bytesOf),
+  },
+  uploaded: {
+    scopes: UPLOADS,
+    aliases: [],
+    value: { type: "day" },
+    compares: true,
+    means: "The day the file was uploaded",
+    example: "uploaded:>=2026-10-01",
+    shown: "DAY",
+    sql: timeIs("u.created_at"),
+  },
+  is: {
+    scopes: ALL,
+    aliases: [],
+    value: {
+      type: "words",
+      words: [
+        { word: "open", scopes: KEPT, means: "Not archived and not in Trash", sql: (c) => `${item(c)}.state = 'live'` },
         { word: "open", scopes: TODOS, means: "Not done. A query that says neither is:open nor is:done lists only open todos", sql: () => "t.done = 0" },
         { word: "done", scopes: TODOS, means: "Done. With is:open OR is:done, both", sql: () => "t.done = 1" },
         { word: "archived", scopes: BOTH, means: "Archived. A query that doesn't say so leaves archived notes out", sql: () => "n.state = 'archived'" },
-        { word: "trashed", scopes: BOTH, means: "In Trash. A query that doesn't say so leaves Trash out", sql: () => "n.state = 'trashed'" },
-        { word: "shared", scopes: BOTH, field: "visibility", means: "Shared by itself with a person or by a link, where you may see how it is shared", sql: (c, given) => `n.id IN ${among(c, given)}` },
-        { word: "private", scopes: BOTH, field: "visibility", means: "Private to one member", sql: () => "n.private_owner IS NOT NULL" },
+        { word: "archived", scopes: UPLOADS, means: "Archived. A query that doesn't say so leaves archived uploads out", sql: () => "u.state = 'archived'" },
+        { word: "trashed", scopes: ALL, means: "In Trash. A query that doesn't say so leaves Trash out", sql: (c) => `${item(c)}.state = 'trashed'` },
+        { word: "shared", scopes: ALL, field: "visibility", means: "Shared by itself with a person or by a link, where you may see how it is shared", sql: (c, given) => `${item(c)}.id IN ${among(c, given)}` },
+        { word: "private", scopes: ALL, field: "visibility", means: "Private to one member", sql: (c) => `${item(c)}.private_owner IS NOT NULL` },
       ],
     },
     compares: false,
@@ -218,6 +328,7 @@ export const FILTERS = {
         { word: "link", scopes: BOTH, means: "Links to another note", sql: () => "EXISTS (SELECT 1 FROM links l WHERE l.source_id = n.id)" },
         { word: "backlink", scopes: BOTH, means: "Linked to from a note you can see", sql: (c) => `EXISTS (SELECT 1 FROM links l JOIN notes b ON b.id = l.source_id WHERE l.target_id = n.id AND ${c.seen("b")})` },
         { word: "tag", scopes: BOTH, means: "Has any tag", sql: () => "EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id)" },
+        { word: "attachment", scopes: NOTES, means: "Shows an upload: a picture, a video, sound or a file", sql: () => "EXISTS (SELECT 1 FROM upload_refs r WHERE r.note_id = n.id)" },
         { word: "due", scopes: TODOS, means: "Has a due date", sql: () => "t.due IS NOT NULL" },
         { word: "repeat", aliases: ["recurrence"], scopes: TODOS, means: "Repeats", sql: () => "t.recurs = 1" },
       ],
@@ -264,7 +375,7 @@ export const FILTERS = {
     shown: "WORD",
   },
   sort: {
-    scopes: BOTH,
+    scopes: ALL,
     aliases: [],
     value: {
       type: "words",
@@ -278,6 +389,10 @@ export const FILTERS = {
         { word: "due-asc", scopes: TODOS, means: "Soonest due first, and those with no due date last", order: "t.due IS NULL, t.due" },
         { word: "due-desc", scopes: TODOS, means: "Latest due first, and those with no due date last", order: "t.due IS NULL, t.due DESC" },
         { word: "priority-desc", aliases: ["importance-desc"], scopes: TODOS, means: "Highest priority first", order: "t.importance DESC" },
+        { word: "uploaded-desc", scopes: UPLOADS, means: "Latest uploaded first", order: "u.created_at DESC" },
+        { word: "uploaded-asc", scopes: UPLOADS, means: "Earliest uploaded first", order: "u.created_at" },
+        { word: "name-asc", scopes: UPLOADS, means: "By the file's name, A to Z", order: "u.name COLLATE NOCASE" },
+        { word: "size-desc", scopes: UPLOADS, means: "Largest first", order: "u.size DESC" },
       ],
     },
     compares: false,
@@ -290,7 +405,7 @@ export const FILTERS = {
 
 export type Key = keyof typeof FILTERS;
 export type In = "title" | "body";
-export type SortKey = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc" | "due-asc" | "due-desc" | "priority-desc";
+export type SortKey = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc" | "due-asc" | "due-desc" | "priority-desc" | "uploaded-desc" | "uploaded-asc" | "name-asc" | "size-desc";
 export type FilterKey = Exclude<Key, "in" | "sort">;
 
 export type Filter = { kind: "filter"; key: FilterKey; cmp: Cmp; value: string; to?: string };
@@ -495,10 +610,15 @@ function read(text: string, scope: Scope): Query {
     if (kind.type === "words") {
       const word = wordOf(key, scope, value);
       if (word) return word.word;
-      const other = wordOf(key, scope === "notes" ? "todos" : "notes", value);
-      if (other) throw new Refused(`${key}:${other.word} is for ${scope === "notes" ? "todos" : "notes"}, and this is a search of ${scope}`, from, to);
+      const elsewhere = SCOPES.find((other) => other !== scope && wordOf(key, other, value));
+      if (elsewhere) throw new Refused(`${key}:${wordOf(key, elsewhere, value)!.word} is for ${elsewhere}, and this is a search of ${scope}`, from, to);
       const near = nearest(value, wordsFor(key, scope).map((w) => w.word));
       throw new Refused(`${key}: doesn't take "${value}". ${near.length ? `Did you mean ${listOf(near)}?` : `It takes ${listOf(wordsFor(key, scope).map((w) => w.word))}`}`, from, to);
+    }
+    if (kind.type === "size") {
+      const low = value.toLowerCase();
+      if (!SIZE.test(low)) throw new Refused(`${key}: takes a number of bytes, or one with kb, mb or gb after it, such as 1mb. "${value}" is none of them`, from, to);
+      return low;
     }
     if (kind.type === "tag") {
       const name = value.replace(/^#/, "");
@@ -590,7 +710,7 @@ function read(text: string, scope: Scope): Query {
       const near = nearest(keyed[1]!, [...keysFor(scope), LACKS]);
       throw new Refused(`There is no filter "${keyed[1]}:". ${near.length ? `Did you mean ${listOf(near.map((n) => `${n}:`))}? ` : ""}To search for the words, put them in quotes`, from, from + keyed[1]!.length + 1);
     }
-    if (written.startsWith("#") && isTag(written.slice(1))) {
+    if (written.startsWith("#") && isTag(written.slice(1)) && spec("tag").scopes.includes(scope)) {
       term(from, at);
       return { kind: "filter", key: "tag", cmp: "=", value: nameKey(written.slice(1)) };
     }
@@ -756,6 +876,9 @@ function joined(conditions: readonly string[], by: "AND" | "OR"): string {
  * as the index folds them, say which of a note's todos it is.
  */
 function textIs(c: Compiling, terms: readonly Text[]): string {
+  // An upload is found by its name: each term in it, its words in their order.
+  // Words are letters and digits alone, which LIKE reads as themselves.
+  if (c.scope === "uploads") return `(${joined(terms.map(({ words }) => `u.name LIKE ${c.bind(`%${words.join("%")}%`)}`), "AND")})`;
   if (c.scope === "notes") return FOUND(c, terms, c.in);
   const title = c.in.includes("title");
   if (title && !c.in.includes("body")) return FOUND(c, terms, ["title"]);
@@ -819,16 +942,25 @@ export interface SyntaxRow {
 /** What is written between and around terms, which no filter is. */
 const FORMS: readonly (Omit<SyntaxRow, "field"> & { scopes: readonly Scope[] })[] = [
   { form: "word", means: "Has the word, or one that starts with it, ignoring case and accents", example: "budget", scopes: BOTH },
+  { form: "word", means: "Its name has the word in it, ignoring case", example: "report", scopes: UPLOADS },
   { form: '"a phrase"', means: "Has the words together, in that order", example: '"second quarter"', scopes: BOTH },
+  { form: '"a phrase"', means: "Its name has the words in that order", example: '"q2 report"', scopes: UPLOADS },
   { form: "a b", means: "Both: a space is AND, which can also be written", example: "budget plan", scopes: BOTH },
+  { form: "a b", means: "Both: a space is AND, which can also be written", example: "report type:pdf", scopes: UPLOADS },
   { form: "a OR b", means: "Either. OR, AND and NOT are operators only in capitals", example: "budget OR plan", scopes: BOTH },
+  { form: "a OR b", means: "Either. OR, AND and NOT are operators only in capitals", example: "type:image OR type:video", scopes: UPLOADS },
   { form: "-a, NOT a", means: "Not: before a word, a phrase, a filter or a group", example: "budget -plan", scopes: BOTH },
+  { form: "-a, NOT a", means: "Not: before a word, a phrase, a filter or a group", example: "-type:image", scopes: UPLOADS },
   { form: "( )", means: `Groups, up to ${MAX_DEPTH} deep. NOT binds first, then AND, then OR`, example: "(budget OR plan) -draft", scopes: BOTH },
+  { form: "( )", means: `Groups, up to ${MAX_DEPTH} deep. NOT binds first, then AND, then OR`, example: "(type:pdf OR type:text) used:no", scopes: UPLOADS },
   { form: "key:>DAY, >=, <, <=", means: "After, on or after, before, on or before a day or a number", example: "updated:>2026-10-01", scopes: BOTH },
+  { form: "key:>VALUE, >=, <, <=", means: "After, on or after, before, on or before a day; larger, at least, smaller, at most a size", example: "size:>=500kb", scopes: UPLOADS },
   { form: "key:A..B", means: "From A to B, both included. * leaves one side open", example: "created:2026-10-01..*", scopes: BOTH },
+  { form: "key:A..B", means: "From A to B, both included. * leaves one side open", example: "size:1mb..5mb", scopes: UPLOADS },
   { form: "today, yesterday, tomorrow, 7d, +7d", means: "A day counted from today: 7d is seven days ago, +7d seven days ahead", example: "updated:>=7d", scopes: BOTH },
+  { form: "today, yesterday, tomorrow, 7d, +7d", means: "A day counted from today: 7d is seven days ago, +7d seven days ahead", example: "uploaded:>=7d", scopes: UPLOADS },
   { form: "#NAME", means: "Short for tag:NAME", example: "#money", scopes: BOTH },
-  { form: 'key:"a value"', means: "A value with a space in it is written in quotes", example: 'folder:"Common Ink"', scopes: BOTH },
+  { form: 'key:"a value"', means: "A value with a space in it is written in quotes", example: 'folder:"Common Ink"', scopes: ALL },
 ];
 
 /** Every form of the language for a scope, each with what it means and an example that reads: the help, the tools' descriptions and the docs are this. */
@@ -853,8 +985,8 @@ export const syntaxText = (scope: Scope) =>
 
 const table = (scope: Scope) => ["| Write | It finds | Example |", "| --- | --- | --- |", ...syntax(scope).map((row) => `| \`${row.form.replace(/\|/g, "\\|")}\` | ${row.means} | \`${row.example}\` |`)].join("\n");
 
-/** The two tables of `docs/search.md`, between its marks. */
-export const syntaxDocs = () => `### Notes\n\n${table("notes")}\n\n### Todos\n\n${table("todos")}`;
+/** The tables of `docs/search.md`, between its marks. */
+export const syntaxDocs = () => SCOPES.map((scope) => `### ${scope[0]!.toUpperCase()}${scope.slice(1)}\n\n${table(scope)}`).join("\n\n");
 
 /** What is being typed at `cursor`, for completing it: a filter's name, or the value of one. */
 export interface Typing {
@@ -876,7 +1008,7 @@ export function typingAt(text: string, cursor: number, scope: Scope): Typing | n
     from++;
     token = token.slice(1);
   }
-  if (token.startsWith("#")) return isTag(token.slice(1)) || token === "#" ? { from, to: cursor, key: "tag", typed: token.slice(1), lead: "#" } : null;
+  if (token.startsWith("#")) return spec("tag").scopes.includes(scope) && (isTag(token.slice(1)) || token === "#") ? { from, to: cursor, key: "tag", typed: token.slice(1), lead: "#" } : null;
   const keyed = /^([A-Za-z][A-Za-z-]*):(.*)$/s.exec(token);
   if (!keyed) return /^[a-z][a-z-]*$/.test(token) ? { from, to: cursor, key: null, typed: token, lead: "" } : null;
   const key = keyed[1] === LACKS ? "has" : NAMED.get(keyed[1]!);
@@ -887,7 +1019,7 @@ export function typingAt(text: string, cursor: number, scope: Scope): Typing | n
 }
 
 /** The names a filter's name being typed could be, for a scope. */
-export const keysStarting = (typed: string, scope: Scope): string[] => [...keysFor(scope).flatMap((key) => [key, ...spec(key).aliases]), LACKS].filter((name) => name.startsWith(typed)).sort();
+export const keysStarting = (typed: string, scope: Scope): string[] => [...keysFor(scope).flatMap((key) => [key, ...spec(key).aliases]), ...(spec("has").scopes.includes(scope) ? [LACKS] : [])].filter((name) => name.startsWith(typed)).sort();
 
 /** A filter as the table says it, for whoever draws a picker or a help from it. */
 export const filterOf = (key: Key): Pick<Spec, "means" | "example" | "compares" | "value" | "shown" | "top"> => spec(key);

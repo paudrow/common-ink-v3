@@ -48,7 +48,7 @@ import {
 } from "./protocol.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
-import { NO_FILES, archiveUpload, createUpload, listUploads, moveUpload, openUpload, purgeUpload, readUpload, referred, restoreUpload, trashUpload, trashedUploads, type Files } from "./uploads.ts";
+import { NO_FILES, archiveUpload, createUpload, listUploads, moveUpload, openUpload, placeUpload, purgeUpload, readUpload, referred, restoreUpload, trashUpload, trashedUploads, type Files } from "./uploads.ts";
 import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
@@ -1341,13 +1341,13 @@ const either = (word: string): Node => ({ kind: "or", of: [is(word), { kind: "no
 const any = (of: Node[]): Node => (of.length > 1 ? { kind: "or", of } : of[0]!);
 
 /** What the fields a listing had before there was a query language say, as the query says it. */
-const OLD = {
+export const OLD = {
   archived: (includeArchived: boolean | "only"): Node[] => (includeArchived === "only" ? [is("archived")] : includeArchived ? [either("archived")] : []),
   completed: (includeCompleted: boolean): Node[] => (includeCompleted ? [either("done")] : []),
 };
 
-/** What a query asks of the database: a condition over the notes row `n` and, for todos, the todos row `t`, with what it binds after the workspace and the asker's sight. */
-interface Finding {
+/** What a query asks of the database: a condition over the notes row `n` and, for todos, the todos row `t`, or for uploads the uploads row `u`, with what it binds after the workspace and the asker's sight. */
+export interface Finding {
   query: Query;
   covering: Covering;
   condition: string;
@@ -1372,13 +1372,13 @@ export function binder(values: (string | number)[]): (value: string | number) =>
 }
 
 /**
- * Reads a query and makes it a condition, for `search` and for `todo.list` alike: the one place a
- * query meets the database. Every value is bound. A name is looked up among what the asker can
- * already see, so a folder they can't see, or someone who has changed no note they can see, is
- * refused in the very words a name nobody has is. `also` is ANDed with it: the old fields of the
+ * Reads a query and makes it a condition, for `search`, `todo.list` and `upload.list` alike: the
+ * one place a query meets the database. Every value is bound. A name is looked up among what the
+ * asker can already see, so a folder they can't see, or someone who has changed no note or uploaded
+ * no file they can see, is refused in the very words a name nobody has is. `also` is ANDed with it: the old fields of the
  * operation, said as a query says them. Which states of a note it covers is read from its `is:`.
  */
-async function finding(ctx: Context, scope: Scope, op: { query: string; today?: string; zone?: string }, also: readonly Bound[]): Promise<Finding> {
+export async function finding(ctx: Context, scope: Scope, op: { query: string; today?: string; zone?: string }, also: readonly Bound[]): Promise<Finding> {
   const parsed = parse(op.query, scope);
   if (!parsed.ok) {
     const { message, from, to } = parsed.error;
@@ -1417,6 +1417,20 @@ async function finding(ctx: Context, scope: Scope, op: { query: string; today?: 
     if (!results.length) throw new OpError("invalid", `Nobody named "${named}" has changed a note you can see`);
     return results.map((r) => r.author);
   };
+  /** Who uploaded, as `authors` is who changed: found only among the uploads the asker can see. */
+  const uploaders = async (named: string): Promise<string[]> => {
+    if (named.toLowerCase() === "@me") return [`${ctx.author.kind}:${authorId(ctx)}`];
+    const uploaded = (kind: string, id: string) => `EXISTS (SELECT 1 FROM uploads u WHERE u.uploaded_by = ${id} AND u.uploaded_by_kind = '${kind}' AND u.workspace_id = ?1 AND ${SEEN("u", "?2", "any")})`;
+    const { results } = await ctx.db
+      .prepare(
+        `SELECT 'member:' || p.id AS author FROM people p WHERE p.name = ?3 COLLATE NOCASE AND ${uploaded("member", "p.id")}
+         UNION ALL SELECT 'agent:' || a.id FROM agents a WHERE a.name = ?3 COLLATE NOCASE AND ${uploaded("agent", "a.id")}`,
+      )
+      .bind(ctx.workspaceId, ctx.sight.bind, named)
+      .all<{ author: string }>();
+    if (!results.length) throw new OpError("invalid", `Nobody named "${named}" has uploaded a file you can see`);
+    return results.map((r) => r.author);
+  };
   /**
    * Who a mention of `named` is matched by: the name itself, which is how a mention by name alone is
    * kept, and the id of each member so named for an asker who is told who the members are. `@me` is
@@ -1429,12 +1443,13 @@ async function finding(ctx: Context, scope: Scope, op: { query: string; today?: 
     return [...new Set([personKey(named), ...(meant.byId.has(named) ? [named] : []), ...(meant.byName.get(named.toLowerCase()) ?? []).map((m) => m.id)])];
   };
   let shared: Promise<string[]> | undefined;
-  /** The notes with a grant of their own that the asker may list the grants of: what sharing a note shows them, and no more. */
+  /** The notes, or the uploads, with a grant of their own that the asker may list the grants of: what sharing one shows them, and no more. */
   const sharedIds = () =>
     (shared ??= (async () => {
       if (ctx.actor.kind !== "member") return [];
+      const [table, column] = scope === "uploads" ? ["uploads", "upload_id"] : ["notes", "note_id"];
       const { results } = await ctx.db
-        .prepare(`SELECT DISTINCT n.id, n.folder_id, n.private_owner FROM grants g JOIN notes n ON n.id = g.note_id WHERE g.workspace_id = ?1 AND ${SEEN("n", "?2", "any")}`)
+        .prepare(`SELECT DISTINCT n.id, n.folder_id, n.private_owner FROM grants g JOIN ${table} n ON n.id = g.${column} WHERE g.workspace_id = ?1 AND ${SEEN("n", "?2", "any")}`)
         .bind(ctx.workspaceId, ctx.sight.bind)
         .all<{ id: string; folder_id: string; private_owner: string | null }>();
       return results.filter((note) => canShare(itemAsked(ctx.sight, note))).map((note) => note.id);
@@ -1450,7 +1465,7 @@ async function finding(ctx: Context, scope: Scope, op: { query: string; today?: 
     if (node.kind !== "filter" || "ids" in node) return node;
     const { type } = FILTERS[node.key].value;
     if (type === "folder") return { ...node, ids: await folderIds(node.value) };
-    if (type === "person") return { ...node, ids: await authors(node.value) };
+    if (type === "person") return { ...node, ids: await (node.key === "uploader" ? uploaders : authors)(node.value) };
     if (type === "mentioned") return { ...node, ids: await mentionedAs(node.value) };
     if (type === "day") return { ...node, value: day(node.value), ...(node.to !== undefined && { to: day(node.to) }) };
     if (node.key === "is" && node.value === "shared") return { ...node, ids: await sharedIds() };
@@ -1461,7 +1476,7 @@ async function finding(ctx: Context, scope: Scope, op: { query: string; today?: 
 
   let zone: (day: string) => number;
   let settingsZone: string | null | undefined;
-  const timed = [...walk(where as Node | null)].some(({ node }) => node.kind === "filter" && (node.key === "updated" || node.key === "created"));
+  const timed = [...walk(where as Node | null)].some(({ node }) => node.kind === "filter" && (node.key === "updated" || node.key === "created" || node.key === "uploaded"));
   if (timed && !op.zone) {
     const row = await ctx.db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(ctx.workspaceId, ctx.personId).first<{ text: string }>();
     settingsZone = dailySettings(row?.text).timeZone;
@@ -2515,6 +2530,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "upload.read": { needs: "view", run: (ctx, op) => readUpload(ctx, op.id) },
   "upload.open": { needs: "view", run: (ctx, op) => openUpload(ctx, op.id, "opens") },
   "upload.move": { needs: "edit", run: (ctx, op) => moveUpload(ctx, op.id, op.folderId) },
+  "upload.place": { needs: "edit", run: (ctx, op) => placeUpload(ctx, op.id, op.noteId) },
   "upload.archive": { needs: "edit", run: (ctx, op) => archiveUpload(ctx, op.id, op.archived) },
   "upload.trash": { needs: "edit", run: (ctx, op) => trashUpload(ctx, op.id) },
   "upload.restore": { needs: "edit", run: (ctx, op) => restoreUpload(ctx, op.id) },

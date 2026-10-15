@@ -197,3 +197,28 @@ test("each kind of address gets its own policy, and all of them nosniff and a re
     expect([path, h["content-security-policy"], h["x-content-type-options"]]).toEqual([path, "default-src 'none'; frame-ancestors 'none'", "nosniff"]);
   }
 });
+
+test("an upload's bytes keep their own sealed policy under the page's, in place or as a download, and a refusal is no page either", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const sealed = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'";
+  const sent = (name: string, text: string) =>
+    page.evaluate(
+      async ({ name, text }) => {
+        const id = (await (await fetch("/api/me")).json()).workspaces[0].id;
+        const res = await fetch(`/api/workspaces/${id}/uploads`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name })) }, body: text });
+        return { workspaceId: id as string, id: ((await res.json()) as { id: string }).id };
+      },
+      { name, text },
+    );
+  const pdf = await sent("paper.pdf", "%PDF-1.4\n%%EOF\n");
+  const html = await sent("page.html", "<script>alert(1)</script>");
+  const headers = async (path: string) => {
+    const res = await page.request.get(path);
+    const h = res.headers();
+    return [res.status(), h["content-security-policy"], h["content-disposition"]?.split(";")[0], h["x-content-type-options"], h["cross-origin-resource-policy"]];
+  };
+  expect(await headers(`/api/workspaces/${pdf.workspaceId}/uploads/${pdf.id}`)).toEqual([200, sealed, "inline", "nosniff", "same-origin"]);
+  expect(await headers(`/api/workspaces/${html.workspaceId}/uploads/${html.id}`)).toEqual([200, sealed, "attachment", "nosniff", "same-origin"]);
+  const missing = await headers(`/api/workspaces/${pdf.workspaceId}/uploads/zzzzzzzzzzzz`);
+  expect(missing.slice(0, 2)).toEqual([404, "default-src 'none'; frame-ancestors 'none'"]);
+});

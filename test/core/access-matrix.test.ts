@@ -282,6 +282,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "upload.read": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "upload.open": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "upload.move": { on: "upload", needs: "E", trashed: "refused", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
+  // The upload beside each note put in that note: none here is its owner's alone in a note that isn't private, so nothing moves.
+  "upload.place": { on: "upload", needs: "E", trashed: "refused", args: (id, w, note) => ({ id, noteId: w.notes[note] }) },
   "upload.archive": { on: "upload", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, archived: STATE_OF[note] === "archived" }) },
   "upload.trash": { on: "upload", needs: "E", trashed: "opens", args: (id) => ({ id }) },
   "upload.restore": { on: "upload", needs: "E", trashed: "opens", args: (id) => ({ id }) },
@@ -738,6 +740,9 @@ const NOTE_FILTERS: Record<string, Row[]> = {
     { query: "no:open-todo", finds: [] },
     { query: "has:tag", finds: NOTES },
     { query: "has:link", finds: ["secret"] },
+    // `open` shows the upload beside `team`, written there before these are asked.
+    { query: "has:attachment", finds: ["open"] },
+    { query: "no:attachment", finds: NOTES.filter((note) => note !== "open") },
     // `open` is linked to from `secret` alone, so it has a backlink only for someone who can see `secret`.
     { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) },
     { query: "no:backlink", finds: ({ sees }) => NOTES.filter((note) => note !== "open" || !sees("secret")) },
@@ -750,6 +755,33 @@ const NOTE_FILTERS: Record<string, Row[]> = {
   ],
   in: [{ query: "Title in:title", finds: NOTES }, { query: "body in:title", finds: [] }, { query: "body in:body -Title-team", finds: NOTES.filter((note) => note !== "team") }],
   sort: [{ query: "body sort:title-desc", finds: NOTES }],
+};
+/** The same of the upload beside each note, which `open` shows the one beside `team` of. */
+const UPLOAD_FILTERS: Record<string, Row[]> = {
+  folder: [
+    { query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" },
+    { query: "-folder:Open-folder is:trashed", finds: ["bin"], needs: { folder: "Open" }, missing: "-folder:Nope-folder is:trashed" },
+  ],
+  name: [{ query: "name:File-team", finds: ["team"] }, { query: "file-DEEP OR name:file-lone", finds: ["deep", "lone"] }, { query: "-name:.png", finds: [] }],
+  type: [{ query: "type:image", finds: NOTES }, { query: "type:pdf OR type:text OR kind:other OR type:video OR type:audio", finds: [] }],
+  uploader: [
+    { query: 'uploader:"Eve Editor"', finds: ["secret"], needs: { note: "secret" }, missing: 'uploader:"Nobody Editor"' },
+    { query: 'uploaded-by:"ada lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'uploaded-by:"Nobody Lovelace"' },
+    { query: "uploader:@me", finds: ({ name, agent }) => (agent ? [] : name === "Ada, an admin" ? BY_ADA : NOTES.filter((note) => MAKER[note] === name)) },
+  ],
+  // `open` shows the upload beside `team`: it is used for whoever sees `open`, and for nobody else.
+  used: [{ query: "used:yes", finds: ({ sees }) => (sees("open") ? ["team"] : []) }, { query: "used:no", finds: ({ sees }) => NOTES.filter((note) => note !== "team" || !sees("open")) }],
+  size: [{ query: "size:>1kb", finds: [] }, { query: `size:${PNG.byteLength}`, finds: NOTES }, { query: "size:1..1mb is:archived", finds: ["arch"] }],
+  uploaded: [{ query: "uploaded:today", finds: NOTES }, { query: "uploaded:<2020-01-01", finds: [] }, { query: "uploaded:>=7d", finds: NOTES }],
+  is: [
+    { query: "is:open", finds: LIVE },
+    { query: "is:archived", finds: ["arch"] },
+    { query: "is:trashed", finds: ["bin"] },
+    { query: "is:private", finds: ["secret", "vpriv"] },
+    // Every upload has a grant of its own. Which of them an actor is told are shared is which they may list the grants of.
+    { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
+  ],
+  sort: [{ query: "sort:size-desc", finds: NOTES }, { query: "file sort:name-asc", finds: NOTES }],
 };
 const TODO_FILTERS: Record<string, Row[]> = {
   folder: [{ query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" }],
@@ -785,12 +817,14 @@ describe("every filter, by every actor", { timeout: 30_000 }, () => {
     const { keysFor } = await import("../../src/core/query.ts");
     expect(Object.keys(NOTE_FILTERS).sort()).toEqual([...keysFor("notes")].sort());
     expect(Object.keys(TODO_FILTERS).sort()).toEqual([...keysFor("todos")].sort());
+    expect(Object.keys(UPLOAD_FILTERS).sort()).toEqual([...keysFor("uploads")].sort());
   });
 
   for (const name of Object.keys(ACTORS) as ActorName[]) {
     for (const as of ["themself", "their agent", "their agent limited to the folder Team", "their agent limited to the folder Open"] as const) {
       it(`${name}, as ${as}`, async () => {
         const w = await world();
+        await perform(env.DB, w.actors["Ada, an admin"], { type: "note.write", id: w.notes.open, baseRevision: 1, text: textOf("open", `\n::image{${w.uploads.team} 1x1}\n`) });
         const person = w.actors[name];
         const within = as === "themself" ? undefined : LIMITED[as];
         const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope: within && { folderIds: [w.folders[within[0]!]] } };
@@ -800,7 +834,7 @@ describe("every filter, by every actor", { timeout: 30_000 }, () => {
         const covered = (query: string): Covering => (query.includes("is:trashed") ? "any" : query.includes("is:archived") ? "kept" : "live");
         const said = async (input: OpInput) => perform(env.DB, actor, input).then((answer) => JSON.stringify(answer), (err: unknown) => (err instanceof OpError ? `${err.code}: ${err.message}` : Promise.reject(err)));
 
-        for (const [type, rows] of [["search", NOTE_FILTERS], ["todo.list", TODO_FILTERS]] as const) {
+        for (const [type, rows] of [["search", NOTE_FILTERS], ["todo.list", TODO_FILTERS], ["upload.list", UPLOAD_FILTERS]] as const) {
           for (const row of Object.values(rows).flat()) {
             const key = `${type} ${row.query}`;
             const input: OpInput = type === "search" ? { type, query: row.query, today, limit: 50 } : { type, query: row.query, today };
@@ -815,14 +849,20 @@ describe("every filter, by every actor", { timeout: 30_000 }, () => {
                 continue;
               }
             }
-            const answer = await perform(env.DB, actor, input);
+            const answer = (await perform(env.DB, actor, input)) as Results["search" | "todo.list" | "upload.list"];
             const truth = typeof row.finds === "function" ? row.finds({ name, agent: as !== "themself", sees }) : row.finds;
-            const expected = truth.filter((note) => sees(note) && COVERED[covered(row.query)].includes(STATE_OF[note])).map((note) => w.notes[note]).sort();
-            const found = "results" in answer ? answer.results.map((r) => r.note.id) : answer.todos.map((t) => t.noteId);
-            expect([...found].sort(), key).toEqual(expected);
-            // What it is told beside the notes says no more: nothing left to page to, and nothing still to be read in.
-            expect(answer.next, `${key}: next`).toBeNull();
-            if ("results" in answer) expect(answer.indexing, `${key}: indexing`).toBe(false);
+            const expected = truth.filter((note) => sees(note) && COVERED[covered(row.query)].includes(STATE_OF[note])).map((note) => (type === "upload.list" ? w.uploads : w.notes)[note]).sort();
+            if (Array.isArray(answer)) {
+              expect(answer.map((u) => u.id).sort(), key).toEqual(expected);
+              // How many notes show each is counted among the notes the actor sees, and no others.
+              expect(answer.filter((u) => u.uses > 0).map((u) => [u.id, u.uses]), `${key}: uses`).toEqual(sees("open") && answer.some((u) => u.id === w.uploads.team) ? [[w.uploads.team, 1]] : []);
+            } else {
+              const found = "results" in answer ? answer.results.map((r) => r.note.id) : answer.todos.map((t) => t.noteId);
+              expect([...found].sort(), key).toEqual(expected);
+              // What it is told beside the notes says no more: nothing left to page to, and nothing still to be read in.
+              expect(answer.next, `${key}: next`).toBeNull();
+              if ("results" in answer) expect(answer.indexing, `${key}: indexing`).toBe(false);
+            }
             const hidden = [...NOTES.filter((note) => !sees(note)), ...FOLDERS.filter((folder) => !seesFolder(folder))];
             const written = sees("secret") ? [`open: ${w.notes.open}`] : [];
             expect(hidden.flatMap((item) => w.marks[item].filter((mark) => JSON.stringify(answer).includes(mark)).map((mark) => `${item}: ${mark}`)).filter((mark) => !written.includes(mark)), `${key}: says nothing of what is hidden`).toEqual([]);

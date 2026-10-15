@@ -26,8 +26,9 @@ const refused = (err: unknown, headers: Record<string, string> = {}) => {
  *   that type or not at all, whatever they look like.
  * - `sandbox` makes a file opened as a page a document with no origin and no script, so even a type
  *   that got through by mistake can't reach the member's session. It may show itself, and nothing else.
- * - Anything not on the list of pictures, video and sound is a download (`Content-Disposition`), an
- *   SVG too, which still draws as the source of an image.
+ * - Anything not on the list of pictures, video, sound and PDF is a download (`Content-Disposition`), an
+ *   SVG too, which still draws as the source of an image. A PDF opened in a tab is drawn by the
+ *   browser's own viewer, in a page of the browser's making that the sandbox doesn't reach (ADR 0008).
  * - `same-origin` keeps another site, and an HTML embed's frame, from loading the bytes with the member's session.
  * - `private, no-cache` lets only the member's own browser keep a copy, and has it ask before each
  *   use, which is answered through the same check. No shared cache keeps one.

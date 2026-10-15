@@ -15,9 +15,9 @@
 // made for the dev user as the Calendar page makes one. The sample calendar and contacts are connected
 // for that first. Only the sample data is read: no calendar or contacts that anyone connected is.
 //
-// An upload is written by a sample file's name, ::image{sample.png}, ::audio{sample.wav} or
-// ::file{sample.pdf}, and is stored by the id of that file, sent to the address the app itself
-// uploads to. A file of that name already there is used again. The files are made by
+// An upload is written by a sample file's name, ::image{sample.png}, ::audio{sample.wav},
+// ::video{sample.webm}, or ::file{sample.pdf} (and sample.csv, sample.txt, sample.md), and is
+// stored by the id of that file, sent to the address the app itself uploads to. A file of that name already there is used again. The files are made by
 // scripts/sample-files.ts: none is read from this computer.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -26,7 +26,8 @@ import { isNoteId, linksIn, retargeted } from "../src/core/links.ts";
 import type { CalendarEvent, Contact, Reference, Source, Upload } from "../src/core/protocol.ts";
 import { namedReferences } from "../src/core/references.ts";
 import { writtenUpload } from "../src/core/uploadRefs.ts";
-import { namedUploads, sampleFile } from "./sample-files.ts";
+import { HEAD_BYTES, typeOf } from "../src/core/filetypes.ts";
+import { namedUploads, sampleFile, sampleSize } from "./sample-files.ts";
 
 const TITLE = "# Try in this PR";
 
@@ -109,14 +110,16 @@ async function showing(written: string): Promise<string> {
       if (!res.ok) throw new Error(`upload ${name}: ${await res.text()}`);
       return (await res.json()) as Upload;
     };
-    sent.set(name, there.find((u) => u.name === name && u.size === bytes.byteLength) ?? (await send()));
+    // One sent before is used again only if it is served as it would be now: a PDF sent before PDFs were known is a download.
+    sent.set(name, there.find((u) => u.name === name && u.size === bytes.byteLength && u.type === typeOf(name, bytes.subarray(0, HEAD_BYTES))) ?? (await send()));
   }
   let out = "";
   let at = 0;
-  for (const { embed, name, from, to } of namedUploads(written)) {
+  for (const { embed, name, word, from, to } of namedUploads(written)) {
     const upload = sent.get(name);
     if (!upload) continue;
-    out += written.slice(at, from) + writtenUpload(embed, upload.id, upload.width && upload.height ? { width: upload.width, height: upload.height } : null);
+    const plain = writtenUpload(embed, upload.id, upload.width && upload.height ? { width: upload.width, height: upload.height } : sampleSize(name));
+    out += written.slice(at, from) + (word ? `${plain.slice(0, -1)} ${word}}` : plain);
     at = to;
   }
   return out + written.slice(at);

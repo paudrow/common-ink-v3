@@ -16,7 +16,7 @@ import type { Showing } from "./inspected.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, WORKSPACE_UPLOAD_BYTES } from "../core/protocol.ts";
+export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, WORKSPACE_UPLOAD_BYTES } from "../core/protocol.ts";
 /**
  * The query language notes and todos are found by, as the server reads it: what is typed to a query
  * and back, every filter there is with what it takes and means, and what is being typed at the
@@ -68,8 +68,8 @@ export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../co
 export { isPersonId, mentionKey, mentionName, mentionsIn, mentionsOn, writtenMention, type WrittenMention } from "../core/mentions.ts";
 
 /** How a note refers to an upload, which is the same for a plugin as for an agent, and what kind of file an upload is. */
-export { UPLOAD_EMBEDS, sizeIn, uploadIn, writtenUpload, type UploadEmbed } from "../core/uploadRefs.ts";
-export type { UploadKind } from "../core/filetypes.ts";
+export { SIZE_WORDS, UPLOAD_EMBEDS, sizeIn, sizeWordIn, uploadIn, withSizeWord, writtenUpload, type SizeWord, type UploadEmbed } from "../core/uploadRefs.ts";
+export { FILE_CLASSES, TEXT_ENDINGS, fileClass, type FileClass, type UploadKind } from "../core/filetypes.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
 export { changeTodo, completeTodo, skipTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
@@ -347,6 +347,12 @@ export interface PluginHost {
     learn(uploads: readonly ReferredUpload[]): void;
     /** Where an upload's bytes are asked for, as the source of a picture, a video or a download. It is good only for whoever is looking: the member's session, or on a link's page the link. */
     address(id: string): string;
+    /**
+     * The first `upTo` bytes of an upload, or all of them for a shorter one, asked for where `address`
+     * says and answered the same way: for whoever is looking. It rejects with the server's refusal,
+     * `not_found` for one that isn't there or that they can't see.
+     */
+    bytes(id: string, upTo: number): Promise<Uint8Array>;
     /** Sends a file to the workspace as the member. `folderId` left out puts it in Unsorted. `onProgress` is told how many bytes have gone. The server's refusal, such as that the workspace is full, is what it throws. */
     send(file: Blob, as: { name: string; folderId?: string; private?: boolean }, onProgress?: (sent: number) => void): Promise<Upload>;
   };
@@ -555,18 +561,23 @@ export interface Embed {
   starts?: { config?: string; body?: string };
   /**
    * For an embed a menu can't write, because what it holds is made by doing something: an upload's
-   * is made by sending a file. A menu offers it under this title, after the embeds it writes, and
-   * picking it calls `run` and writes nothing. The editor it was picked in still has the keyboard.
+   * is made by sending a file, or by choosing one already sent. A menu offers each under its title,
+   * after the embeds it writes, in the order given, and picking one calls its `run` and writes
+   * nothing. The editor it was picked in still has the keyboard.
    */
-  pick?: { title: string; detail?: string; run: () => void };
+  pick?: EmbedPick | readonly EmbedPick[];
   /** False for an embed no menu lists by itself, because another embed's `pick` is how a note comes to have it: a picture, a video and a sound are all written by "Upload a file". `host.embeds.list()` leaves it out. */
   menu?: boolean;
   /**
    * Draws into `el`, once, all of it before returning, so the embed is never seen half drawn. May
    * return a function that stops whatever it started, or a {@link Drawn}. An embed is registered
    * while its plugin starts, not later, so a note never shows it as written first.
+   *
+   * An embed that is all below its line, as an uploaded picture is, has none: its line shows nothing
+   * of it while the cursor is elsewhere, and its text where it is written while the cursor is on it,
+   * so the line is as tall either way. One whose `below` keeps no room is shown as written.
    */
-  render(el: HTMLElement, embed: Embedded): void | (() => void) | Drawn;
+  render?(el: HTMLElement, embed: Embedded): void | (() => void) | Drawn;
   /** What it keeps below the line that writes it, such as a video. */
   below?: Below;
   /**
@@ -638,17 +649,31 @@ export interface Below {
   box(written: { config: string; body: string }): BelowBox | null;
   /**
    * Draws into `el`, which is as large as the room. May return a function that stops whatever it
-   * started. `update` rewrites the embed in the note as {@link Embedded.update} does, which is how
+   * started, or a {@link BelowDrawn}. `update` rewrites the embed in the note as {@link Embedded.update} does, which is how
    * what is only known once it has loaded, such as a picture's size, gets into the note for `box` to
    * read. `resize` is for what the note can't hold, such as how tall a post turned out to be once it
    * had loaded: it gives the room that height in pixels, which moves what is under it once, and does
-   * nothing for a room sized by a ratio.
+   * nothing for a room sized by a ratio. `column` is how wide the note's column is now in pixels, the
+   * widest a room can be, for something that offers to be drawn at a share of it.
    */
-  render(el: HTMLElement, embed: Pick<Embedded, "config" | "body" | "readOnly" | "update"> & { resize(height: number): void }): void | (() => void);
+  render(el: HTMLElement, embed: BelowEmbedded): void | (() => void) | BelowDrawn;
 }
 
-/** The room kept below a line. `maxWidth` is a limit in pixels narrower than the host's own, for what is drawn no wider, such as a post. */
-export type BelowBox = ({ ratio: number } | { height: number }) & { maxWidth?: number };
+export type BelowEmbedded = Pick<Embedded, "config" | "body" | "readOnly" | "update"> & { resize(height: number): void; column(): number };
+
+/** What `Below.render` can give back. */
+export interface BelowDrawn {
+  /** Changes what was drawn to fit what the note says of the embed now, in the elements already there, as a playing video keeps playing at another size. Without it the element is emptied and drawn again. */
+  update?(embed: BelowEmbedded): void;
+  stop?(): void;
+}
+
+/**
+ * The room kept below a line. `maxWidth` is a limit in pixels narrower than the host's own, for what
+ * is drawn no wider, such as a post. `share` is how much of the column's width it takes, more than 0
+ * and up to 1, which is what it takes without one.
+ */
+export type BelowBox = ({ ratio: number } | { height: number }) & { maxWidth?: number; share?: number };
 
 /**
  * Something shown below a line that is one https address and nothing else: a video, a post. It has
@@ -693,6 +718,13 @@ export interface Embedded {
 }
 
 export type EmbedInfo = Pick<Embed, "name" | "title" | "block" | "starts" | "pick">;
+
+/** One entry of an embed in a menu that does something in place of writing it, as "Upload a file" does. */
+export interface EmbedPick {
+  title: string;
+  detail?: string;
+  run: () => void;
+}
 
 /**
  * A list offered at the cursor while the member types after a trigger, such as the embed menu on
@@ -852,6 +884,12 @@ export interface App {
   sectionsOpening: (opened: () => void, id: string) => ReactNode;
   /** Draws a note's text to be read and not changed, as {@link FolderProps.readNote} does, for a page that lists notes. */
   readNote: (noteId: string) => ReactNode;
+  /**
+   * Draws markdown that is not a note, such as an uploaded file's, to be read and not changed, as a
+   * link's page draws a note: the same embeds, with nothing of the workspace behind them, and HTML
+   * in it run only when the reader presses Run.
+   */
+  readMarkdown: (text: string) => ReactNode;
   /** The overlay that is open. */
   overlay: string | null;
 

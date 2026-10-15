@@ -143,6 +143,7 @@ describe("MCP protocol", () => {
       "list_uploads",
       "read_upload",
       "move_upload",
+      "place_upload",
       "archive_upload",
       "trash_upload",
       "restore_upload",

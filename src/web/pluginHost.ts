@@ -139,12 +139,13 @@ function withheld(plugin: Plugin, given: Provided): Pick<Provided, (typeof OWN_O
   return Object.fromEntries(OWN_ONLY.map((capability) => [capability, refusing(capability)])) as never;
 }
 
-/** `host.uploads` for a plugin that isn't Common Ink's own: no upload is known, none has an address, and nothing is sent. */
+/** `host.uploads` for a plugin that isn't Common Ink's own: no upload is known, none has an address, nothing is read, and nothing is sent. */
 const noUploads = (plugin: Plugin): Provided["uploads"] => ({
   referred: () => null,
   onReferred: () => () => {},
   learn: () => {},
   address: () => "about:blank",
+  bytes: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.bytes: only Common Ink's own plugins are`)),
   send: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.send: only Common Ink's own plugins are`)),
 });
 

@@ -111,6 +111,16 @@ export function sendUpload(workspaceId: string, file: Blob, as: { name: string; 
   });
 }
 
+/** The first `upTo` bytes of an upload, from the address its bytes are asked for, which answers as it answers a picture: by the session, through the same check. */
+export async function readUpload(address: string, upTo: number): Promise<Uint8Array> {
+  const res = await fetch(address, { headers: { Range: `bytes=0-${upTo - 1}` }, credentials: "same-origin", cache: "no-store" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? "The file couldn't be read.");
+  }
+  return new Uint8Array(await res.arrayBuffer()).subarray(0, upTo);
+}
+
 /** What a link opens, asked as whoever holds it. Neither asks who that is unless the link is for people signed in. */
 export const openShared = (token: string) => request<Shared>(`/api/shared/${token}`);
 export const readShared = (token: string, noteId: string) => request<Results["shared.read"]>(`/api/shared/${token}/notes/${noteId}`);
