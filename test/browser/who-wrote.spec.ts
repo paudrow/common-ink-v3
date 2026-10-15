@@ -119,6 +119,20 @@ test("the bars follow typing at once, and take another member's change when it a
   await expect.poll(() => tones(page), { timeout: 15_000 }).toEqual(["member", "self", "self", "member", "member", "agent", "self", "self"]);
 });
 
+test("lines a revert brings back keep the bar of whoever wrote them, not of who reverted", async ({ page }) => {
+  const { id, ed, workspaceId } = await plan(page);
+  await runCommand(page, "Who wrote this");
+  await expect.poll(() => tones(page)).toEqual(["self", "self", "self", "member", "member", "agent", "agent"]);
+
+  await perform(ed, { type: "note.write", id, baseRevision: 3, text: "# Plan\n\nAda's step\n\nEd's step" }, workspaceId);
+  await expect(page.locator(".cm-content")).not.toContainText("Claude's step", { timeout: 15_000 });
+  await perform(ed, { type: "note.revertChanges", id, revisions: [4] }, workspaceId);
+  await expect(page.locator(".cm-content")).toContainText("Claude's step", { timeout: 15_000 });
+  await expect.poll(() => tones(page), { timeout: 15_000 }).toEqual(["self", "self", "self", "member", "member", "agent", "agent"]);
+  await bar(page, 7).hover();
+  await expect(page.getByRole("tooltip")).toHaveText("Claude (your agent), just now");
+});
+
 test("the switch in a note's History panel turns the bars on and off, and the note keeps them on for the member after a reload", async ({ page }) => {
   const { id } = await plan(page);
   await panelIcon(page, "History").click();

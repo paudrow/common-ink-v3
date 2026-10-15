@@ -70,13 +70,19 @@ describe("who wrote this", () => {
     expect(blamed.owners).toEqual({ [ada.personId]: "Ada Lovelace" });
   });
 
-  it("names a line a revert gave back by the revert, which says what it took out", async () => {
-    const { ada, id } = await plan();
+  it("names a line a revert brought back by whoever wrote it, member or agent, and not by who reverted", async () => {
+    const { ada, ed, id } = await plan();
     await perform(env.DB, ada, { type: "note.revertChanges", id, revisions: [4] });
+    await write(ed, id, "# Plan\n\nAda's step\n\nEd's step", T0 + 5 * MINUTE);
+    await perform(env.DB, ed, { type: "note.revertChanges", id, revisions: [6] });
     const blamed = await perform(env.DB, ada, { type: "note.blame", id });
-    expect(blamed.lines.find((run) => run.from === 3)).toEqual({ from: 3, to: 3, revision: 5 });
-    expect(blamed.changes.find((c) => c.revision === 5)).toMatchObject({ reverts: { how: "revert", revisions: [4] } });
-    expect(blamed.changes.map((c) => c.revision)).not.toContain(4);
+    expect(byLine(blamed)).toEqual(["Ada Lovelace: # Plan", "Ada Lovelace: ", "Ada Lovelace: Ada's step", "Ed Editor: ", "Ed Editor: Ed's step", "Scribe: ", "Scribe: Scribe's step"]);
+    expect(blamed.lines).toEqual([
+      { from: 1, to: 3, revision: 1 },
+      { from: 4, to: 5, revision: 2 },
+      { from: 6, to: 7, revision: 3 },
+    ]);
+    expect(blamed.changes.map((c) => c.revision)).toEqual([1, 2, 3]);
   });
 
   it("has no lines for a note with no text", async () => {

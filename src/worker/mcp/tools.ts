@@ -392,7 +392,7 @@ ${RULE_GRAMMAR}` },
   {
     name: "note_blame",
     description:
-      "Who wrote each line of a note as it is now: the change that last wrote or edited the line. Answers the note's text and revision, lines as runs { from, to, revision } counted from 1, the changes those name (each with its author, a member or an agent by name, and when), and for a member who sees the whole workspace the name of each member whose agent wrote a line (owners, by person id). Lines put in or taken out around a line don't change it; a word taken out of it does.",
+      "Who wrote each line of a note as it is now: the change that last wrote or edited the line. Answers the note's text and revision, lines as runs { from, to, revision } counted from 1, the changes those name (each with its author, a member or an agent by name, and when), and for a member who sees the whole workspace the name of each member whose agent wrote a line (owners, by person id). Lines put in or taken out around a line don't change it; a word taken out of it does. A line a revert brought back is named by the change that wrote it, not the revert.",
     inputSchema: object({ id: noteId }, ["id"]),
     op: "note.blame",
   },
