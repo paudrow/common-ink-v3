@@ -21,7 +21,7 @@ describe("the builder's rows", () => {
       sort: "title-asc",
     });
     expect(read("is:archived OR #money OR budget")).toEqual({ rows: [row("is", "archived"), row("tag", "money"), row("text", "budget")], match: "any", in: [], sort: null });
-    expect(read("due:<today importance:>=2", "todos")?.rows).toEqual([row("due", "today", { cmp: "<" }), row("importance", "2", { cmp: ">=" })]);
+    expect(read("due:<today importance:>=2", "todos")?.rows).toEqual([row("due", "today", { cmp: "<" }), row("priority", "medium", { cmp: ">=" })]);
   });
 
   it("can't say a group inside a group, AND with OR, or a NOT of more than one thing", () => {
@@ -55,7 +55,7 @@ describe("the builder's rows", () => {
     expect(filled(row("updated", "2026-10"), "notes")).toBe(false);
     expect(filled(row("updated", "2026-10-01"), "notes")).toBe(true);
     expect(filled(row("updated", "2026-10-01", { to: "" }), "notes")).toBe(false);
-    expect(filled(row("importance", "9"), "todos")).toBe(false);
+    expect(filled(row("priority", "urgent"), "todos")).toBe(false);
     expect(filled(row("due", "today"), "notes")).toBe(false);
     expect(filled(row("tag", "not a tag"), "notes")).toBe(false);
     expect(filled(row("text", "+++"), "notes")).toBe(false);
@@ -71,7 +71,8 @@ describe("the builder's rows", () => {
     expect(set(row("tag", "#money", { not: true })).text).toBe("-tag:money");
     expect(set(row("due", "Today", { cmp: "<" }), "todos").text).toBe("due:<today");
     expect(set(row("updated", "YESTERDAY", { to: "Today" })).text).toBe("updated:yesterday..today");
-    expect(set(row("importance", "02"), "todos").text).toBe("importance:2");
+    expect(set(row("priority", "02"), "todos").text).toBe("priority:medium");
+    expect(set(row("priority", "High"), "todos").text).toBe("priority:high");
     expect(set(row("text", "AND")).text).toBe('"AND"');
     expect(set(row("text", "NOT", { not: true })).text).toBe('-"NOT"');
     expect(set(row("text", "or")).text).toBe("or");
@@ -90,7 +91,7 @@ describe("the builder's rows", () => {
     expect(termOf(row("updated", "2026-10"), "notes")).toEqual({ why: 'updated: takes a day written YYYY-MM-DD, or today, yesterday, tomorrow, 7d for seven days ago or +7d for seven days ahead. "2026-10" is none of them' });
     expect(termOf(row("due", "next week"), "todos")).toEqual({ why: 'due: takes a day written YYYY-MM-DD, or today, yesterday, tomorrow, 7d for seven days ago or +7d for seven days ahead. "next" is none of them' });
     expect(termOf(row("due", "today tomorrow"), "todos")).toEqual({ why: "This isn't one due: as the query language reads it" });
-    expect(termOf(row("importance", "9"), "todos")).toEqual({ why: 'importance: takes a number from 0 to 3, and "9" isn\'t one' });
+    expect(termOf(row("priority", "9"), "todos")).toEqual({ why: 'priority: takes high, medium, low or none, and "9" isn\'t one' });
     expect(termOf(row("due", "today"), "notes")).toEqual({ why: "due: is for todos, and this is a search of notes" });
     expect(termOf(row("text", "+++"), "notes")).toEqual({ why: "There are no letters or digits here to look for" });
   });

@@ -10,16 +10,16 @@ import { TodosPage } from "./Todos.tsx";
 const MINUTE_MS = 60_000;
 
 /**
- * Todos. A checkbox line anywhere in a note is one, and its importance, due date and recurrence are
+ * Todos. A checkbox line anywhere in a note is one, and its priority, due date and recurrence are
  * tokens on the line, drawn as chips that rewrite their token when changed. The Todos page lists
  * them across the notes the member can see, and changes one by rewriting its line in its note.
  */
 export const todos: Plugin = {
   id: "todos",
   name: "Todos",
-  description: "Checkbox lines with due dates, importance and repeats, and a page of every todo.",
+  description: "Checkbox lines with due dates, priorities and repeats, and a page of every todo.",
   icon: "todos",
-  screenshots: [{ src: "/plugin-shots/todos-light.png", dark: "/plugin-shots/todos-dark.png", alt: "The Todos page: every open todo with its importance, its due date and the note it is in." }],
+  screenshots: [{ src: "/plugin-shots/todos-light.png", dark: "/plugin-shots/todos-dark.png", alt: "The Todos page: every open todo with its priority, its due date and the note it is in." }],
   activate(host) {
     const editors = new Map<string, EditorView>();
     /** The editors there are now, a reading of a note among them. */

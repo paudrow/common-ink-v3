@@ -58,11 +58,12 @@ _Avoid_: Wikilink, reference
 A note whose text links to the note in front. The inspector's Backlinks panel lists the ones the member can see.
 
 **Todo**:
-A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, repeat, importance, and assignees are written on that line and shown as chips. It has the tags written on its line and the tags of its note. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a repeating todo leaves the open line with its next due date and files the checked line on the daily note of the member who checked it off, however the box was checked. Taking the completion back takes the filed line back off the daily note. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, until its query says otherwise.
+A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, repeat, priority, and assignees are written on that line and shown as chips. It has the tags written on its line and the tags of its note. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a repeating todo leaves the open line with its next due date and files the checked line on the daily note of the member who checked it off, however the box was checked. Taking the completion back takes the filed line back off the daily note. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, until its query says otherwise.
 _Avoid_: Task, item
 
-**Importance**:
-How urgent a todo is. Three raised levels, written `!`, `!!`, or `!!!` immediately after the checkbox, or normal when none is set.
+**Priority**:
+How urgent a todo is: High, Medium or Low, written `!!!`, `!!` or `!` immediately after the checkbox, or None when none is written. The app says the words; the note keeps the marks. Operations, tools and the `ink` CLI still call the field `importance`, a number from 0 (None) to 3 (High). A query says `priority:high`; `importance:` reads the same.
+_Avoid_: Importance, normal
 
 **Due date**:
 The day a todo is due, written `due:2026-10-14` on its line. It is a calendar date with no time and no time zone. Overdue is a due date before today, where today is the viewing member's.

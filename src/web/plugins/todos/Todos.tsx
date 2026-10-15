@@ -3,11 +3,12 @@ import { Icon, MAX_SEARCH_LENGTH, changeTodo, isNoteId, linksOn, nameKey, parseQ
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
 import { QueryBar } from "../lib/QueryBar.tsx";
+import { EMPTY, keyOf, left, listing, pending, type Hold, type Listing, type ListingEvent } from "./arranged.ts";
 import { ChipMenu, TagMenu } from "./ChipMenu.tsx";
 import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
 import { dayOf, dueLabel, dueState, savedQuery } from "./dates.ts";
-import { CHIP_NAMES, IMPORTANCE, pickerLabel, picking, tagged, type Opened, type PickingEvent, type RowChip } from "./picking.ts";
+import { CHIP_NAMES, PRIORITY, pickerLabel, picking, tagged, type Opened, type PickingEvent, type RowChip } from "./picking.ts";
 import { doneLabel, doneName, everyName } from "./recurrence.ts";
 import { narrowedTo, toggledTag } from "./tagged.ts";
 
@@ -17,6 +18,10 @@ const PAUSE_MS = 200;
 /** How long a todo checked off stays in a list of open ones, struck through, as v1's did. */
 const LINGER_MS = 1500;
 
+/** How many todos a read lists, and the most one can, after Show more. */
+const PAGE = 100;
+const MOST = 200;
+
 /** How long after a read of the list fails, as a request can under load, it is read again. */
 const AGAIN_MS = 3000;
 
@@ -25,8 +30,6 @@ const fault = (err: unknown) => {
   const status = (err as { status?: unknown } | null)?.status;
   return typeof status !== "number" || status >= 500 || status === 408 || status === 429;
 };
-
-const keyOf = (todo: Pick<ListedTodo, "noteId" | "line">) => `${todo.noteId}/${todo.line}`;
 
 /** The todo as it reads once `change` is made on the day `on`, by the function the server makes it with: a recurring todo checked off stays open, due next. */
 function changed(todo: ListedTodo, change: TodoChange, on: string): ListedTodo {
@@ -127,6 +130,8 @@ interface RowProps {
   picked: Opened | null;
   /** Whether its completion is on its way to the server. */
   completing: boolean;
+  /** Whether a change the member made took it out of the list, which it stays in, dimmed, until the list is refreshed. */
+  gone: boolean;
   onChange: (todo: ListedTodo, change: TodoChange) => void;
   onOpen: (todo: ListedTodo, beside?: boolean) => void;
   /** Reads each time it was checked off. */
@@ -139,13 +144,13 @@ interface RowProps {
 /**
  * A todo's row, in two lines. The first is the todo: its checkbox, its words, which are edited right
  * there when pressed, and at the right its note's name, which opens the note at the todo's line. The
- * second, under the words, is what is set on it, a chip each, and after those a quiet chip for each
- * thing not set yet; each opens a small popover under itself, and a tag's chip narrows the list
- * through its query. The
- * rest, opening the note beside the list and each field again, is the row's menu: a right-click,
- * Shift+F10 or the menu key.
+ * second, under the words, has a chip for each thing a todo has, each in its one place whether it is set
+ * or not: the due date, the repeat, the last time it was done, the priority, the tags, and Add tag. Set,
+ * a chip says what it is; not set, it is a quiet word. Each opens a small popover under itself, and a
+ * tag's chip narrows the list through its query. The row's menu, a right-click, Shift+F10 or the menu key, opens the note,
+ * in front or beside the list.
  */
-function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, onChange, onOpen, completions, onPicking, onTag }: RowProps) {
+function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, gone, onChange, onOpen, completions, onPicking, onTag }: RowProps) {
   /** While the words are edited, how tall they were, which their line keeps so that nothing under it moves. */
   const [editing, setEditing] = useState<number | null>(null);
   /** Where the row's menu is open, if it is. */
@@ -153,7 +158,6 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
   // Leaving the field after Enter or Escape has closed it saves nothing more.
   const ending = useRef(false);
   const said = useRef<HTMLSpanElement>(null);
-  const chips = useRef<HTMLSpanElement>(null);
   /** What had the keyboard when the menu was opened, which has it again when the menu closes. */
   const before = useRef<Element | null>(null);
   // A popover stays open while the list is read again: what is picked in it is made to the todo as the list has it then.
@@ -167,23 +171,12 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
   }, [picked, todo.text]);
   // So is the field its words are edited in, and nothing typed there is saved to the one that came.
   const editedOn = useRef<string | null>(null);
-  // A pick turns a chip from set to not set, or back, which draws it anew in its place on the line: the keyboard stays with it.
-  const kept = useRef<RowChip | null>(null);
-  useLayoutEffect(() => {
-    const chip = kept.current;
-    kept.current = null;
-    if (!chip || (document.activeElement && document.activeElement !== document.body)) return;
-    chipOf(chip)?.focus();
-  }, [todo.text]);
   // A note in Trash takes no change until it is restored, so its todos are shown as one the member can only view.
   const readOnly = todo.access !== "edit" || app.trashed.some((n) => n.id === todo.noteId);
   const words = plainly(todo.words, titleOf) || "Nothing written";
   const { lead, trailing } = splitTags(todo.words);
   const row = keyOf(todo);
   const narrowed = (name: string) => narrowedTo.some((tag) => nameKey(tag) === nameKey(name));
-
-  /** A chip on the second line, set or not; Add tag's place is taken by the last tag once the todo has one. */
-  const chipOf = (chip: RowChip) => chips.current?.querySelector<HTMLElement>(`[data-chip="${chip}"]`) ?? (chip === "tag" ? ([...(chips.current?.querySelectorAll<HTMLElement>(".todo-tag") ?? [])].at(-1) ?? null) : null);
 
   /** Opens a popover under one of the row's chips, with the row marked while it is open. */
   const show = (chip: Opened, anchor: HTMLElement, label: string, content: (close: () => void) => ReactNode) => {
@@ -196,14 +189,12 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
     show(chip, anchor, pickerLabel(chip, words), (close) => {
       const made = (to: TodoChange) => {
         close();
-        if (latest.current.text !== todo.text) return;
-        if (document.activeElement === anchor && changed(latest.current, to, now).text !== latest.current.text) kept.current = chip;
-        onChange(latest.current, to);
+        if (latest.current.text === todo.text) onChange(latest.current, to);
       };
       return chip === "tag" ? (
         <TagMenu tags={tags} has={trailing} onPick={(name) => made({ words: tagged(latest.current.words, name) })} />
       ) : (
-        <ChipMenu chip={chip} todo={todo} now={now} onPick={made} />
+        <ChipMenu chip={chip} todo={todo} now={now} onPick={made} onClose={close} />
       );
     });
   // Listing them changes nothing, so someone who can only read may look.
@@ -264,36 +255,21 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
     const had = before.current;
     if (had instanceof HTMLElement && had !== document.body && had.isConnected) had.focus();
   }, []);
-  /** Opens a chip's popover from the menu, at the chip. */
-  const pickFromMenu = (chip: RowChip) => {
-    const anchor = chipOf(chip);
-    if (anchor) pick(chip, anchor);
-  };
   const due = todo.due && dueLabel(todo.due, now);
   const repeat = todo.every && (todo.recurs ?? todo.every);
-  const level = todo.importance ? IMPORTANCE[todo.importance] : null;
+  const level = todo.importance ? PRIORITY[todo.importance] : null;
   // A todo that can't be changed shows only what is set on it, and so does one that is done.
   const offers = !readOnly && !todo.done;
   // The note's name and nothing after it: not the tags its title ends in, nor the one the list may be narrowed to.
   const title = splitTags(todo.noteTitle).lead || "Untitled";
-  const items: MenuItem[] = [
-    { label: "Open note", action: () => onOpen(todo) },
-    ...(app.openBeside ? [{ label: "Open to the side", action: () => onOpen(todo, true) }] : []),
-    ...(offers
-      ? [
-          { label: "Due date…", action: () => pickFromMenu("due"), separated: true },
-          { label: "Repeat…", action: () => pickFromMenu("every") },
-          { label: "Importance…", action: () => pickFromMenu("importance") },
-          { label: "Add tag…", action: () => pickFromMenu("tag") },
-        ]
-      : []),
-  ];
+  const items: MenuItem[] = [{ label: "Open note", action: () => onOpen(todo) }, ...(app.openBeside ? [{ label: "Open to the side", action: () => onOpen(todo, true) }] : [])];
 
   return (
     <li
       className="todo-row"
       data-row={row}
       data-done={todo.done || undefined}
+      data-gone={gone || undefined}
       data-picking={picked ?? (menu ? "menu" : undefined)}
       onContextMenu={(e) => {
         if (editing !== null) return;
@@ -354,17 +330,17 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
           </span>
         )}
       </span>
-      <span ref={chips} className="todo-chips">
-        {due && (
-          <button className="todo-chip todo-due" data-due={dueState(todo.due!, now)} {...chipProps("due", due)}>
+      <span className="todo-chips">
+        {(due || offers) && (
+          <button className="todo-chip todo-due" data-due={todo.due ? dueState(todo.due, now) : undefined} title={due ? undefined : "Add date"} {...chipProps("due", due)}>
             <Icon name="calendar" />
-            {due}
+            {due || <span className="todo-chip-word">Add date</span>}
           </button>
         )}
-        {repeat && (
-          <button className="todo-chip todo-every" title={everyName(todo.every!)} {...chipProps("every", repeat)}>
+        {(repeat || offers) && (
+          <button className="todo-chip todo-every" title={repeat ? everyName(todo.every!) : "Repeat"} {...chipProps("every", repeat)}>
             <Icon name="repeat" />
-            {repeat}
+            {repeat || <span className="todo-chip-word">Repeat</span>}
           </button>
         )}
         {todo.lastDone && (
@@ -372,10 +348,10 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
             {doneLabel(todo.lastDone, now)}
           </button>
         )}
-        {level && (
-          <button className="todo-chip todo-importance" data-level={todo.importance} {...chipProps("importance", level)}>
+        {(level || offers) && (
+          <button className="todo-chip todo-importance" data-level={todo.importance || undefined} title={level ? undefined : "Priority"} {...chipProps("importance", level)}>
             <Icon name="flag" />
-            {level}
+            {level || <span className="todo-chip-word">Priority</span>}
           </button>
         )}
         {trailing.map((name, i) => (
@@ -383,25 +359,7 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, on
             #{name}
           </button>
         ))}
-        {offers && !due && (
-          <button className="todo-chip todo-due" title="Add date" {...chipProps("due", null)}>
-            <Icon name="calendar" />
-            <span className="todo-chip-word">Add date</span>
-          </button>
-        )}
-        {offers && !repeat && (
-          <button className="todo-chip todo-every" title="Repeat" {...chipProps("every", null)}>
-            <Icon name="repeat" />
-            <span className="todo-chip-word">Repeat</span>
-          </button>
-        )}
-        {offers && !level && (
-          <button className="todo-chip todo-importance" title="Importance" {...chipProps("importance", null)}>
-            <Icon name="flag" />
-            <span className="todo-chip-word">Importance</span>
-          </button>
-        )}
-        {offers && !trailing.length && (
+        {offers && (
           <button className="todo-chip todo-add-tag" title="Add tag" {...chipProps("tag", null)} aria-label="Add tag">
             <span className="chip-hash" aria-hidden="true" />
             <span className="todo-chip-word">Add tag</span>
@@ -429,7 +387,9 @@ export function TodosPage({ host, app, onOpen }: Props) {
   /** What is in the bar, and the query the list is of: the same once typing rests. It is kept in this browser, so the page opens the way it was left. */
   const [typed, setTyped] = useState(() => (linked ?? savedQuery(host.storage.get("query"), host.storage.get("filters"))).slice(0, MAX_SEARCH_LENGTH));
   const [query, setQuery] = useState(typed);
-  const [page, setPage] = useState<Results["todo.list"] | null>(null);
+  /** Whether the list was read yet, and where more of it starts when there is more. */
+  const [page, setPage] = useState<Pick<Results["todo.list"], "next"> | null>(null);
+  const [list, arrange] = useReducer(listing<ListedTodo>, EMPTY as Listing<ListedTodo>);
   const [tags, setTags] = useState<readonly string[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   /** Why the list couldn't be read, until it is. */
@@ -440,30 +400,52 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const [picked, onPicking] = useReducer(picking, null);
   /** The recurring todos whose completion is on its way. Checked again before it lands, one would be completed twice. */
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
-  /** Todos just checked off, by key, and where they were: each stays a moment, struck through, before the list lets it go. */
-  const [lingering, setLingering] = useState<ReadonlyMap<string, { todo: ListedTodo; at: number }>>(new Map());
-  const listed = useMemo(() => {
-    const todos = [...(page?.todos ?? [])];
-    for (const [key, { todo, at }] of lingering) if (!todos.some((t) => keyOf(t) === key)) todos.splice(Math.min(at, todos.length), 0, todo);
-    return todos;
-  }, [page, lingering]);
+  const listed = list.shown;
+  const gone = useMemo(() => left(list), [list]);
   /** The todos as the page shows them now, for an Undo pressed after more was changed. */
   const shown = useRef<readonly ListedTodo[]>([]);
   shown.current = listed;
   // The inspector is about the notes the listed todos are in: History is their history, and Info counts them.
-  useInspected(app, page && { kind: "notes", label: "Todos", noteIds: [...new Set(page.todos.map((t) => t.noteId))].sort() });
+  useInspected(app, page && { kind: "notes", label: "Todos", noteIds: [...new Set(list.fresh.map((t) => t.noteId))].sort() });
   /** The changes on their way to the server, one at a time, how many there are, and the revision each note they changed is at now. */
   const sending = useRef({ last: Promise.resolve(), count: 0, revisions: new Map<string, number>() });
   // Today is the member's own: the day it is in this browser, looked at again each minute.
   const now = dayOf(new Date(useNow()));
   const read = useMemo(() => parseQuery(query, "todos"), [query]);
   const ask = useMemo(() => ({ query, today: now, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }), [query, now]);
-  /** The tags the list is narrowed to: their chips read as pressed, and a todo listed for its note's tag says it beside the note. */
+  /** The tags the list is narrowed to: their chips read as pressed. */
   const narrowedTags = useMemo(() => narrowedTo(query), [query]);
   // The list is read again whenever a note the member can see changes, by anyone, or is archived, trashed, or brought back.
   const version = useMemo(() => (app.notes ?? []).map((n) => `${n.id}:${n.revision}:${n.state}`).join(","), [app.notes]);
   const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
   const titleOf = useCallback((noteId: string) => (titles ? (titles.get(noteId) ?? null) : undefined), [titles]);
+
+  /** The list as the page has it now, and the query it was read for: a list read for another query is shown as read, so a new query is a refresh. */
+  const had = useRef({ list, readFor: "" });
+  had.current.list = list;
+  /** Whether a change the member made, other than checking a todo off or on, is waiting to be read back: one that leaves the list in another order says so. */
+  const announce = useRef(false);
+  /** Whether the member checked a todo off or on, which is said otherwise: the list going out of order for it says nothing. */
+  const quiet = useRef(false);
+  /** Takes down the notice that the order changed, when it is still up. */
+  const notice = useRef<(() => void) | null>(null);
+  const take = (event: ListingEvent<ListedTodo>) => {
+    const next = listing(had.current.list, event);
+    // Said after the member's own change that leaves the list out of order, and when anyone's change first does, a teammate's or one in a note.
+    if (event.type === "read" && pending(next) && (announce.current || (!pending(had.current.list) && !quiet.current))) {
+      notice.current?.();
+      notice.current = app.notify({ message: "Order changed", icon: "list", action: { label: "Refresh", run: () => arrange({ type: "refresh" }) }, stays: true });
+    }
+    if (event.type === "read") announce.current = quiet.current = false;
+    arrange(event);
+  };
+  const out = pending(list);
+  useEffect(() => {
+    if (out) return;
+    notice.current?.();
+    notice.current = null;
+  }, [out]);
+  useEffect(() => () => notice.current?.(), []);
 
   const run = (text: string) => {
     setQuery(text);
@@ -493,14 +475,19 @@ export function TodosPage({ host, app, onOpen }: Props) {
     if (!read.ok) return;
     let stale = false;
     let again: ReturnType<typeof setTimeout> | undefined;
-    Promise.all([host.perform({ type: "todo.list", ...ask }), host.perform({ type: "todo.filters" })]).then(
+    const readFor = JSON.stringify(ask);
+    // Read again, the list is read as far as Show more had read it, so the rows it brought stay; a list read for other filters starts again.
+    const limit = had.current.readFor === readFor ? Math.min(MOST, Math.max(PAGE, had.current.list.fresh.length)) : PAGE;
+    Promise.all([host.perform({ type: "todo.list", ...ask, limit }), host.perform({ type: "todo.filters" })]).then(
       ([listed, narrowing]) => {
         // A list read while changes are on their way doesn't have them yet. It is read again when they have landed.
         if (stale || sending.current.count) return;
         sending.current.revisions.clear();
         setUnread(null);
         setUnanswered(null);
-        setPage(listed);
+        take({ type: "read", rows: listed.todos, refresh: had.current.readFor !== readFor });
+        had.current.readFor = readFor;
+        setPage({ next: listed.next });
         setTags(narrowing.tags);
       },
       (err: unknown) => {
@@ -515,6 +502,8 @@ export function TodosPage({ host, app, onOpen }: Props) {
         // What was listed answered another query, so it is not left under why this one wasn't answered.
         setUnread(null);
         setPage(null);
+        arrange({ type: "read", rows: [], refresh: true });
+        had.current.readFor = "";
         setUnanswered({ query: ask.query, message });
       },
     );
@@ -526,7 +515,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
 
   /** The row that had the keyboard, so the keyboard goes to the row in its place when it leaves the list. */
   const focused = useRef<string | null>(null);
-  const list = useRef<HTMLUListElement>(null);
+  const ul = useRef<HTMLUListElement>(null);
   /** The rows as they were shown before, in order, to find the row in a leaving one's place. */
   const before = useRef<readonly string[]>([]);
   useLayoutEffect(() => {
@@ -540,18 +529,14 @@ export function TodosPage({ host, app, onOpen }: Props) {
     // The first row after it that is still listed, or else the last one before it.
     const at = was.indexOf(had);
     const next = [...was.slice(at + 1), ...was.slice(0, Math.max(at, 0)).reverse()].find((key) => now.includes(key));
-    if (next) list.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(next)}"] .todo-box`)?.focus();
+    if (next) ul.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(next)}"] .todo-box`)?.focus();
   }, [listed]);
 
   /** Makes a change to a todo, after the ones before it. It answers with the todo's note as the change left it, or with why it was refused. */
   const send = useCallback(
-    (todo: ListedTodo, to: TodoChange) => {
+    (todo: ListedTodo, to: TodoChange, hold: Hold = "changed") => {
       // The row reads as changed at once, so the next change to it is made to the line as it will be.
-      setPage((had) => had && { ...had, todos: had.todos.map((t) => (keyOf(t) === keyOf(todo) ? changed(t, to, now) : t)) });
-      setLingering((had) => {
-        const held = had.get(keyOf(todo));
-        return held ? new Map(had).set(keyOf(todo), { ...held, todo: changed(held.todo, to, now) }) : had;
-      });
+      arrange({ type: "change", key: keyOf(todo), to: (t) => changed(t, to, now), hold });
       const queue = sending.current;
       queue.count++;
       // One at a time: each change names the line as the one before it left it, at the revision that one made.
@@ -560,9 +545,11 @@ export function TodosPage({ host, app, onOpen }: Props) {
         .then(
           (note) => {
             queue.revisions.set(keyOf(todo), note.revision);
+            // A row the list no longer has keeps the revision its line was written at, for the next change made to it there.
+            arrange({ type: "change", key: keyOf(todo), to: (t) => ({ ...t, revision: note.revision }) });
             app.noteChanged(note);
           },
-          () => {},
+          () => arrange({ type: "refused", key: keyOf(todo) }),
         )
         // Read again either way: after a change for what it left, and after a refusal for what is there now.
         .finally(() => {
@@ -579,18 +566,21 @@ export function TodosPage({ host, app, onOpen }: Props) {
       const done = to.done === true && !todo.done;
       const rolls = done && comesAround(todo, now);
       if (rolls) setCompleting((keys) => new Set(keys).add(keyOf(todo)));
-      const sent = send(todo, to);
+      // Checking one off says Task completed instead, and opening one again says nothing; either stays where it is until the list is refreshed.
+      if (to.done === undefined) announce.current = true;
+      else quiet.current = true;
+      const sent = send(todo, to, done ? "done" : "changed");
       if (rolls) void sent.catch(() => {}).finally(() => setCompleting((keys) => new Set([...keys].filter((key) => key !== keyOf(todo)))));
       sent.then(
         (note) => {
-          // A recurring todo's completion moved its due date, counted it and filed a line on the daily note: Undo reverts the change that did, which takes all of it back.
-          if (done && note.filed) return completed(host, () => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
-          const left = changed(todo, to, now);
-          if (!done || !left.done) return;
+          if (!done) return;
+          // A todo checked off stays its moment, and then goes when the list no longer has it, as the last time of a repeating one doesn't.
           const key = keyOf(todo);
-          const at = shown.current.findIndex((t) => keyOf(t) === key);
-          setLingering((had) => new Map(had).set(key, { todo: { ...left, revision: note.revision }, at }));
-          setTimeout(() => setLingering((had) => (had.has(key) ? new Map([...had].filter(([k]) => k !== key)) : had)), LINGER_MS);
+          setTimeout(() => arrange({ type: "let go", key }), LINGER_MS);
+          // A recurring todo's completion moved its due date, counted it and filed a line on the daily note: Undo reverts the change that did, which takes all of it back.
+          if (note.filed) return completed(host, () => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
+          const left = changed(todo, to, now);
+          if (!left.done) return;
           // Undo is the same change the other way, made to the line this one left, at the revision it made.
           // It is made to the todo as the page has it by then, which may have been changed again since.
           completed(host, () => send(shown.current.find((t) => keyOf(t) === key && t.done) ?? { ...left, revision: note.revision }, { done: false }).then(() => undefined, refused));
@@ -609,7 +599,10 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const more = () => {
     if (page?.next == null) return;
     void host.perform({ type: "todo.list", ...ask, offset: page.next }).then(
-      (next) => setPage((had) => (had ? { todos: [...had.todos, ...next.todos], next: next.next } : next)),
+      (next) => {
+        take({ type: "more", rows: next.todos });
+        setPage({ next: next.next });
+      },
       (err: unknown) => setUnread(err instanceof Error ? err.message : "The todos couldn't be read."),
     );
   };
@@ -641,7 +634,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
       {page && listed.length === 0 && <p className="todo-none">{query ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}</p>}
       {listed.length > 0 && (
         <ul
-          ref={list}
+          ref={ul}
           className="todo-list"
           aria-label="Todos"
           onFocus={(e) => {
@@ -665,6 +658,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
               titleOf={titleOf}
               picked={picked?.row === keyOf(todo) ? picked.chip : null}
               completing={completing.has(keyOf(todo))}
+              gone={gone.has(keyOf(todo)) && list.held.get(keyOf(todo)) === "changed"}
               onChange={change}
               onOpen={onOpen}
               completions={completions}

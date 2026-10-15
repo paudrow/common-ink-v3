@@ -48,7 +48,8 @@ function useNames(host: PluginHost, app: App, scope: QueryScope, wanted: boolean
 function valuesOf(field: QueryField, scope: QueryScope, names: Names): { label: string; value: string; detail?: string }[] {
   const { value } = filterOf(keyOf(field));
   if (value.type === "words") return wordsIn(field, scope).map((w) => ({ label: w.word, value: w.word, detail: w.means }));
-  if (value.type === "number") return Array.from({ length: value.max - value.min + 1 }, (_, i) => ({ label: String(value.min + i), value: String(value.min + i) }));
+  // Highest first, as the Todos page's chips offer a priority, each said as the app says it.
+  if (value.type === "level") return [...value.levels].reverse().map((level) => ({ label: level[0]!.toUpperCase() + level.slice(1), value: level }));
   if (value.type === "day") return RELATIVE_DAYS.map((day) => ({ label: day, value: day }));
   if (value.type === "folder") return names.folders;
   return (value.type === "tag" ? names.tags : names.people).map((name) => ({ label: name, value: name }));
@@ -74,13 +75,14 @@ function offersAt(text: string, cursor: number, scope: QueryScope, names: Names)
   return offers.length ? { from, to, offers } : null;
 }
 
-const COMPARISONS: { id: Cmp | "between"; label: string }[] = [
-  { id: "=", label: "on" },
-  { id: ">", label: "after" },
-  { id: ">=", label: "on or after" },
-  { id: "<", label: "before" },
-  { id: "<=", label: "on or before" },
-  { id: "between", label: "between" },
+/** How each comparison reads: of a day, and of a level such as a priority. */
+const COMPARISONS: { id: Cmp | "between"; label: string; ofLevel: string }[] = [
+  { id: "=", label: "on", ofLevel: "exactly" },
+  { id: ">", label: "after", ofLevel: "above" },
+  { id: ">=", label: "on or after", ofLevel: "at least" },
+  { id: "<", label: "before", ofLevel: "below" },
+  { id: "<=", label: "on or before", ofLevel: "at most" },
+  { id: "between", label: "between", ofLevel: "between" },
 ];
 
 interface ValueProps {
@@ -100,7 +102,7 @@ function ValueField({ row, scope, names, label, value, onChange, listId, whyId }
   if (row.field === "text") return <input type="text" aria-label={label} placeholder="words to find" value={value} onChange={(e) => onChange(e.target.value)} {...wrong} />;
   const kind = filterOf(keyOf(row.field)).value.type;
   const values = valuesOf(row.field, scope, names);
-  if (kind === "words" || kind === "number" || kind === "folder") {
+  if (kind === "words" || kind === "level" || kind === "folder") {
     const offered = value && !values.some((v) => v.value === value) ? [...values, { label: value, value }] : values;
     return (
       <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} {...wrong}>
@@ -129,6 +131,7 @@ function Condition({ row, at, scope, names, act }: { row: Row; at: number; scope
   const ids = useId();
   const set = (change: Partial<Row>) => act({ type: "set", at, row: { ...row, ...change } });
   const compares = row.field !== "text" && filterOf(keyOf(row.field)).compares;
+  const leveled = row.field !== "text" && filterOf(keyOf(row.field)).value.type === "level";
   const fields = keysFor(scope)
     .filter((key) => !filterOf(key).top)
     .flatMap((key) => fieldsOf(key, scope)) as Exclude<RowField, "text">[];
@@ -160,7 +163,7 @@ function Condition({ row, at, scope, names, act }: { row: Row; at: number; scope
         >
           {COMPARISONS.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.label}
+              {leveled ? c.ofLevel : c.label}
             </option>
           ))}
         </select>

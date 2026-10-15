@@ -25,6 +25,7 @@ export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE
 export {
   EMPTY as EMPTY_QUERY,
   FILTERS,
+  PRIORITIES,
   fieldMeans,
   fieldName,
   fieldOf,
@@ -723,6 +724,8 @@ export interface Notice {
    * without the button. A notice it answers with is said in the card's place; nothing, and the card goes.
    */
   action?: { label: string; run: () => void | Notice | Promise<void | Notice | undefined> };
+  /** Whether it stays until it is answered, pressed or taken down, as one that says something still true does. */
+  stays?: boolean;
 }
 
 export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav">;
@@ -842,8 +845,8 @@ export interface App {
   saveNote(noteId: string): Promise<Written | undefined>;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
-  /** Tells the member something that just happened, such as that a note was moved to Trash. Notices stack, newest at the foot, three at most; one saying what a shown one says takes its place. */
-  notify(notice: Notice): void;
+  /** Tells the member something that just happened, such as that a note was moved to Trash. Notices stack, newest at the foot, three at most; one saying what a shown one says takes its place. It answers with what takes the card down, which does nothing once it has gone. */
+  notify(notice: Notice): () => void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
   toggleOverlay(id: string, state?: unknown): void;
   toggleSidebar(): void;

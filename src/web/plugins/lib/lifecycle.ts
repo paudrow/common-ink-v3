@@ -17,7 +17,9 @@ export function lifecycle(host: PluginHost) {
     // Folder counts are the server's, and leave out an archived or trashed note.
     app.refresh();
   };
-  const failed = (err: unknown) => host.app().notify({ message: why(err) });
+  const failed = (err: unknown) => {
+    host.app().notify({ message: why(err) });
+  };
   /** A refusal said in the place of the notice whose Undo asked for the step. */
   const refusal = (err: unknown): Notice => ({ message: why(err) });
 

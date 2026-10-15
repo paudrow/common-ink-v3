@@ -1,7 +1,8 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { Icon, describeRule, nameKey, parseRule, type IconName, type TodoChange } from "../../plugin-api.ts";
-import { choicesFor, typedTag, type ChipKind, type Choice, type Picked } from "./picking.ts";
-import { RuleEditor } from "./RuleEditor.tsx";
+import { choicesFor, repeatOf, repeats, sameRule, typedTag, type ChipKind, type Choice, type Picked, type Repeat } from "./picking.ts";
+import { everyOf, formOf, preview, type RuleForm } from "./recurrence.ts";
+import { RuleFields, RuleText } from "./RuleEditor.tsx";
 
 interface Props {
   chip: ChipKind;
@@ -9,7 +10,9 @@ interface Props {
   /** Today, where the member is. */
   now: string;
   onPick: (change: TodoChange) => void;
-  /** Shows a recurrence's token in its note, to be typed over. Without it the rule as written is a field in the popover. */
+  /** Closes the popover changing nothing. */
+  onClose: () => void;
+  /** Shows a repeat's token in its note, to be typed over. Without it the rule as written is a field in the popover. */
   onText?: () => void;
 }
 
@@ -20,69 +23,144 @@ const STEPS: Record<string, (at: number, count: number) => number> = {
   End: (_, count) => count - 1,
 };
 
-/** Up and Down from choice to choice, and Home and End to the first and the last. */
-const move = (e: KeyboardEvent<HTMLDivElement>) => {
+/** Up and Down from choice to choice, and Home and End to the first and the last. Answers the choice it went to. */
+const move = (e: KeyboardEvent<HTMLElement>) => {
   const all = [...e.currentTarget.querySelectorAll<HTMLElement>("[data-choice]")];
   const at = all.indexOf(e.target as HTMLElement);
   const step = STEPS[e.key];
-  if (at < 0 || !step || !all.length) return;
+  if (at < 0 || !step || !all.length) return null;
   e.preventDefault();
-  all[step(at, all.length)]!.focus();
+  const to = step(at, all.length);
+  all[to]!.focus();
+  return to;
 };
 
 /** The icon beside a choice: what the chip is, or a cross for one that takes it away, as v1's had. */
 function iconOf(chip: ChipKind, change: TodoChange): IconName {
-  if (chip === "importance") return "flag";
-  if (chip === "due") return change.due === null ? "close" : "calendar";
-  return change.skip ? "chevron" : change.every === null ? "close" : "repeat";
+  if (chip === "importance") return change.importance === 0 ? "close" : "flag";
+  return change.skip ? "chevron" : change.due === null ? "close" : "calendar";
 }
 
 /**
- * What a todo's chip opens, on the Todos page and in a note alike: its choices, each saved the moment it
- * is picked, and for a due date a field for any other day. Up and Down go from choice to choice. A
- * repeat's is one flat panel: the rule in words, the common rules, Skip this one and Stop repeating,
- * and beside them the form that builds any other rule, saved with its own Save.
+ * What a todo's chip opens, on the Todos page and in a note alike. The priority's and the due date's
+ * list their choices, each saved the moment it is picked, and the due date's has a field for any other
+ * day. Up and Down go from choice to choice. The repeat's is its own: see `RepeatMenu`.
  */
-export function ChipMenu({ chip, todo, now, onPick, onText }: Props) {
+export function ChipMenu({ chip, todo, now, onPick, onClose, onText }: Props) {
+  if (chip === "every") return <RepeatMenu todo={todo} now={now} onPick={onPick} onClose={onClose} onText={onText} />;
   const choices = choicesFor(chip, todo, now);
   const first = Math.max(0, choices.findIndex((c) => c.current));
-  const button = (choice: Choice, i: number) => (
-    <button
-      key={choice.label}
-      type="button"
-      className="chip-choice"
-      aria-label={choice.detail ? `${choice.label}, ${choice.detail}` : choice.label}
-      aria-current={choice.current || undefined}
-      data-choice
-      data-autofocus={i === first || undefined}
-      onClick={() => onPick(choice.change)}
-    >
-      <Icon name={iconOf(chip, choice.change)} />
-      <span>{choice.label}</span>
-      {choice.detail && <span className="chip-detail">· {choice.detail}</span>}
-      {choice.current && <span className="chip-now">now</span>}
-    </button>
-  );
-  if (chip === "every") {
-    const rule = todo.every === null ? null : parseRule(todo.every);
-    const picks = choices.filter((choice) => "every" in choice.change && choice.change.every !== null);
-    return (
-      <div className="chip-menu recur-menu" onKeyDown={move}>
-        <div className="recur-picks">
-          <p className="recur-now">{rule ? describeRule(rule, todo.due) : "Doesn't repeat yet"}</p>
-          {picks.map(button)}
-          {choices.length > picks.length && <hr />}
-          {choices.slice(picks.length).map((choice, i) => button(choice, picks.length + i))}
-        </div>
-        <RuleEditor every={todo.every} due={todo.due} now={now} onSet={(every) => onPick({ every })} onText={onText} />
-      </div>
-    );
-  }
   return (
     <div className="chip-menu" onKeyDown={move}>
       {chip === "due" && <DayField due={todo.due} onPick={onPick} />}
-      {choices.map(button)}
+      {choices.map((choice: Choice, i) => (
+        <button
+          key={choice.label}
+          type="button"
+          className="chip-choice"
+          aria-label={choice.detail ? `${choice.label}, ${choice.detail}` : choice.label}
+          aria-current={choice.current || undefined}
+          data-choice
+          data-autofocus={i === first || undefined}
+          onClick={() => onPick(choice.change)}
+        >
+          <Icon name={iconOf(chip, choice.change)} />
+          <span>{choice.label}</span>
+          {choice.detail && <span className="chip-detail">· {choice.detail}</span>}
+          {choice.current && <span className="chip-now">now</span>}
+        </button>
+      ))}
     </div>
+  );
+}
+
+/** The rule being made in the Repeat popover: one of its list, a rule built in Custom's form, or one typed as text there. */
+interface Making {
+  picked: Repeat;
+  form: RuleForm;
+  /** The rule as typed, while Custom is typed as text. */
+  typed: string | null;
+}
+
+/**
+ * The Repeat popover, one column. At its head the rule in words and the next three dates it gives; under
+ * that the common rules, with a check on the one in force, and Custom, which opens the form of any rule
+ * below them. Picking one checks it and says it at the head, and closes nothing: Done, or Enter, saves
+ * what is checked, and Cancel or Escape leave the todo as it was. Doesn't repeat is how a todo stops repeating.
+ */
+function RepeatMenu({ todo, now, onPick, onClose, onText }: Omit<Props, "chip">) {
+  const listed = repeats(todo.due);
+  const [making, setMaking] = useState<Making>(() => ({ picked: repeatOf(todo.every, listed), form: formOf(todo.every === null ? null : parseRule(todo.every), todo.due ?? now), typed: null }));
+  const { picked, form, typed } = making;
+  const custom = picked.custom === true;
+  /** The rule to save, written as its token writes it, or null for none; undefined while Custom doesn't say one. */
+  const every = !custom ? picked.every : typed !== null ? (parseRule(typed.trim()) ? typed.trim() : undefined) : (everyOf(form) ?? undefined);
+  const rule = every ? parseRule(every) : null;
+  const coming = rule && preview(rule, todo.due, now);
+  // Custom opens on the rule checked before it, as a form; another rule leaves Custom as it was, and its rule typed as text with it.
+  const pick = (repeat: Repeat) =>
+    setMaking((had) =>
+      !repeat.custom ? { ...had, picked: repeat, typed: null } : had.picked.custom ? had : { picked: repeat, form: formOf(had.picked.every === null ? null : parseRule(had.picked.every), todo.due ?? now), typed: null },
+    );
+
+  return (
+    <form
+      className="chip-menu repeat-menu"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (every === undefined || coming?.never) return;
+        if (sameRule(every, todo.every)) onClose();
+        else onPick({ every });
+      }}
+    >
+      <div className="repeat-says" role="status">
+        <p className="repeat-rule" data-wrong={every === undefined || undefined}>{every === undefined ? (typed !== null ? "That isn't a rule. Such as 2w, mon,thu, 1st-day,15th-day, mar-1, 3d-after-done or 1m-times-5." : "That isn't a rule yet: a number or a date is missing or out of range.") : rule ? describeRule(rule, todo.due) : "Doesn't repeat"}</p>
+        {coming && <p className="repeat-next">{coming.days.length ? `${coming.lead} ${coming.days.join(coming.days.some((day) => day.includes(",")) ? " · " : ", ")}` : coming.never ? "No day fits this rule, so it would never come round." : "This is the last time."}</p>}
+      </div>
+      <div
+        className="repeat-list"
+        role="radiogroup"
+        aria-label="How it repeats"
+        onKeyDown={(e) => {
+          // Up and Down check as they go, as a radio group's arrows do; Enter is Done.
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.closest("form")?.requestSubmit();
+            return;
+          }
+          const to = move(e);
+          if (to !== null) pick(listed[to]!);
+        }}
+      >
+        {listed.map((repeat) => {
+          const checked = repeat.label === picked.label;
+          return (
+            <button key={repeat.label} type="button" role="radio" aria-checked={checked} tabIndex={checked ? 0 : -1} className="chip-choice repeat-choice" data-choice data-autofocus={checked || undefined} onClick={() => pick(repeat)}>
+              <span className="repeat-check">{checked && <Icon name="check" />}</span>
+              <span>{repeat.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {custom && (
+        <div className="repeat-custom">
+          {typed === null ? <RuleFields form={form} onChange={(form) => setMaking((had) => ({ ...had, form }))} due={todo.due} now={now} /> : <RuleText written={typed} onChange={(typed) => setMaking((had) => ({ ...had, typed }))} />}
+          {typed === null && (
+            <button type="button" className="repeat-as-text" onClick={onText ?? (() => setMaking((had) => ({ ...had, typed: everyOf(had.form) ?? "" })))}>
+              Edit as text
+            </button>
+          )}
+        </div>
+      )}
+      <div className="repeat-foot">
+        <button type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="submit" className="primary" disabled={every === undefined || coming?.never}>
+          Done
+        </button>
+      </div>
+    </form>
   );
 }
 

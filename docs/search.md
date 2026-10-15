@@ -4,7 +4,7 @@ Notes and todos are found by one query language, written the way GitHub's search
 
     budget "second quarter" #money -is:archived
     editor:@me updated:>=7d (has:open-todo OR has:backlink)
-    due:<today importance:>=2 -tag:someday
+    due:<today priority:>=medium -tag:someday
 
 ## How a query is read
 
@@ -114,7 +114,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `has:repeat` | Repeats | `has:repeat` |
 | `no:WORD` | Lacks it: the same as -has:WORD | `no:link` |
 | `due:DAY` | The day a todo is due. Overdue is due:<today | `due:<today` |
-| `importance:N` | A todo's importance: 0 for normal, 1 to 3 for ! to !!! | `importance:>=2` |
+| `priority:LEVEL, importance:LEVEL` | A todo's priority: high, medium, low or none, written !!!, !!, ! or nothing. 3 to 0 read the same | `priority:>=medium` |
 | `in:title` | Every word of the query is looked for in the note's title | `budget in:title` |
 | `in:body` | Every word is looked for in the note's text, or for a todo in its line | `budget in:body` |
 | `sort:updated-desc` | Latest changed first | `sort:updated-desc` |
@@ -125,7 +125,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `sort:title-desc` | By the note's title, Z to A | `sort:title-desc` |
 | `sort:due-asc` | Soonest due first, and those with no due date last | `sort:due-asc` |
 | `sort:due-desc` | Latest due first, and those with no due date last | `sort:due-desc` |
-| `sort:importance-desc` | Most important first | `sort:importance-desc` |
+| `sort:priority-desc` | Highest priority first | `sort:priority-desc` |
 <!-- /syntax -->
 
 Not filters yet: `has:attachment`, which waits for uploads, and `assignee:`, which waits for assignees.
@@ -139,6 +139,8 @@ The search field is a plain text field that takes all of this. As a filter's nam
 On the Search page the inspector is about the notes found (`useInspected`, labelled "Search" and the query): Info counts them and History is theirs, and both follow the query as it is typed.
 
 The Todos page has the same bar and builder, for todos. Its query is kept in the browser, so the page opens the way it was left.
+
+A todo's priority is written `priority:` with a word, `high`, `medium`, `low` or `none`, and compared in that order (`priority:>=medium`). `priority:` is the name the builder, the help and the completions write. `importance:` is another name for it, as `edited-by:` is for `editor:`, and the numbers 3 to 0 read as the words, so a query written before the words still reads; written back, it says `priority:` and the word. `sort:priority-desc` is highest first, and `sort:importance-desc` reads the same.
 
 ## For agents
 

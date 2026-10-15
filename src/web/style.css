@@ -5905,6 +5905,11 @@ button.diff-fold:hover {
   outline-offset: 2px;
 }
 
+/* A row a change took out of the list, which stays where it was until the list is refreshed. */
+.todo-row[data-gone] {
+  opacity: 0.5;
+}
+
 .todo-row[data-done] .todo-words {
   color: var(--muted);
   text-decoration: line-through;
@@ -6244,7 +6249,7 @@ button.todo-tag[aria-pressed="true"] {
 .chip-popover {
   box-sizing: border-box;
   position: fixed;
-  z-index: 40;
+  z-index: 90;
   top: 0;
   left: 0;
   box-sizing: border-box;
@@ -6261,57 +6266,122 @@ button.todo-tag[aria-pressed="true"] {
   font-size: 13px;
 }
 
-/*
- * A recurrence chip's popover, flat: the rule in words, the common rules and Skip and Stop on the left, the form
- * that builds any rule on the right. A window too narrow for both side by side has the form under them.
- */
-.chip-popover:has(> .recur-menu) {
-  max-width: calc(100vw - 16px);
+/* The Repeat popover, one column: the rule in words and its next dates, the rules to pick from, Custom's form, then Cancel and Done. */
+.chip-menu.repeat-menu {
+  width: 300px;
+  max-width: 100%;
 }
 
-.chip-menu.recur-menu {
-  display: grid;
-  grid-template-columns: 210px 300px;
-  align-items: start;
-  width: auto;
+.repeat-says {
+  margin-bottom: 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line);
 }
 
-.recur-picks {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.recur-picks hr {
-  width: 100%;
-  margin: 4px 0;
-  border: 0;
-  border-top: 1px solid var(--line);
-}
-
-.recur-now {
+.repeat-says p {
   margin: 0;
-  padding: 2px 8px 6px;
+}
+
+.repeat-rule {
   font-weight: 600;
 }
 
-.recur-menu > .rule-editor {
-  margin-left: 8px;
-  padding: 2px 0 2px 12px;
-  border-left: 1px solid var(--line);
+.repeat-rule[data-wrong] {
+  color: var(--muted);
+  font-weight: 400;
 }
 
-@media (max-width: 560px) {
-  .chip-menu.recur-menu {
-    grid-template-columns: minmax(0, 300px);
-  }
+.repeat-next {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
 
-  .recur-menu > .rule-editor {
-    margin: 4px 0 0;
-    padding: 10px 0 0;
-    border-top: 1px solid var(--line);
-    border-left: 0;
-  }
+.repeat-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.repeat-check {
+  display: inline-grid;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+}
+
+.chip-choice .repeat-check svg {
+  color: var(--accent);
+}
+
+.repeat-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 8px 2px;
+  border-top: 1px solid var(--line);
+}
+
+.repeat-as-text {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.repeat-as-text:hover,
+.repeat-as-text:focus-visible {
+  color: var(--ink);
+}
+
+/* It stays in sight while the popover scrolls, as it does with Custom's form open in a short window. */
+.repeat-foot {
+  display: flex;
+  position: sticky;
+  bottom: -6px;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 6px -6px -6px;
+  padding: 8px 8px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+
+.repeat-foot button {
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background-color: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.repeat-foot button:hover:enabled {
+  background-color: var(--hover);
+}
+
+.repeat-foot button:focus-visible,
+.repeat-as-text:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.repeat-foot button.primary:enabled {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.repeat-foot button:disabled {
+  color: var(--faint);
+  cursor: default;
 }
 
 /* The form that builds any rule as a sentence. */
@@ -6424,8 +6494,7 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--muted);
 }
 
-.rule-hint,
-.rule-next {
+.rule-hint {
   color: var(--muted);
   font-size: 12px;
 }
@@ -6439,33 +6508,6 @@ button.todo-tag[aria-pressed="true"] {
   border-radius: 6px;
   background: var(--hover);
   font-size: 12px;
-}
-
-.rule-says {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-
-.rule-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.rule-editor .rule-foot button:first-child {
-  padding-left: 0;
-  border-color: transparent;
-  color: var(--muted);
-}
-
-.rule-editor button.primary:enabled {
-  border-color: var(--accent);
-  background-color: var(--accent);
-  color: var(--on-accent);
 }
 
 .completions {

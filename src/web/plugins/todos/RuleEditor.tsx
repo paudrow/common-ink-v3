@@ -1,33 +1,18 @@
-import { useState, type ReactNode } from "react";
-import { DAY_NAMES, MONTH_NAMES, describeRule, ordinal, parseRule, pastThe28th, type Unit, type Weekday } from "../../plugin-api.ts";
-import { DATES, NTHS, UNITS, WEEK, anotherDate, anotherNth, daysInMonth, everyOf, formOf, namesDays, preview, ruleOf, toggledDay, type NthWeekday, type RuleForm } from "./recurrence.ts";
+import type { ReactNode } from "react";
+import { DAY_NAMES, MONTH_NAMES, ordinal, pastThe28th, type Unit, type Weekday } from "../../plugin-api.ts";
+import { DATES, NTHS, UNITS, WEEK, anotherDate, anotherNth, daysInMonth, formOf, namesDays, ruleOf, toggledDay, type NthWeekday, type RuleForm } from "./recurrence.ts";
 
 interface Props {
-  /** How the todo recurs now, as written after `every:`, or null. */
-  every: string | null;
+  form: RuleForm;
+  onChange: (form: RuleForm) => void;
   /** The todo's due date, which a rule that names no day takes its day from. */
   due: string | null;
   /** Today, where the member is. */
   now: string;
-  /** Called with the rule that was built. */
-  onSet: (every: string) => void;
-  /** Shows the token as written in its note, to be typed over. Without it, the token is typed in a field here. */
-  onText?: () => void;
 }
 
 const numberOf = (value: string) => (value.trim() === "" ? Number.NaN : Number(value));
 const shown = (n: number) => (Number.isNaN(n) ? "" : n);
-
-/**
- * Any rule the token can write, built as a sentence, with the dates it gives, and saved with Save or Enter.
- * It sits in the recurrence chip's popover beside the picks that save at once. **Edit as text** shows the
- * token in its note to be typed over, or, away from a note, the rule as written in one field here.
- */
-export function RuleEditor({ every, due, now, onSet, onText }: Props) {
-  const [asText, setAsText] = useState(false);
-  if (asText) return <AsText every={every} due={due} onSet={onSet} />;
-  return <Sentence every={every} due={due} now={now} onSet={onSet} onText={onText ?? (() => setAsText(true))} />;
-}
 
 function Choice<T extends string | number>({ name, value, options, onChange, disabled }: { name: string; value: T; options: readonly (readonly [T, string])[]; onChange: (value: T) => void; disabled?: boolean }) {
   return (
@@ -74,25 +59,21 @@ function Rows<T>({ items, row, onChange, add, adding }: { items: readonly T[]; r
   );
 }
 
-function Sentence({ every, due, now, onSet, onText }: Pick<Props, "every" | "due" | "now" | "onSet"> & { onText: () => void }) {
-  const [form, setForm] = useState<RuleForm>(() => formOf(every === null ? null : parseRule(every), due ?? now));
+/**
+ * Any rule the token can write, built as a sentence: "Every [n] [unit]", then what a week, a month or a
+ * year picks, where it is counted from, and how it ends. It is the Custom part of the Repeat popover,
+ * which says the rule it makes and saves it with Done.
+ */
+export function RuleFields({ form, onChange: setForm, due, now }: Props) {
   const change = (fields: Partial<RuleForm>) => setForm({ ...form, ...fields });
   const rule = ruleOf(form);
   const calendar = namesDays(form);
   const monthEnd = rule && pastThe28th(rule, due);
-  const coming = rule && preview(rule, due, now);
   const at = new Date(`${due ?? now}T00:00:00Z`);
   const fromDue = due && form.from !== "done" ? " (from the due date)" : " (from the day it is done)";
 
   return (
-    <form
-      className="rule-editor"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const chosen = everyOf(form);
-        if (chosen) onSet(chosen);
-      }}
-    >
+    <div className="rule-editor">
       <div className="rule-row">
         Every
         <input type="number" aria-label="How many" min={1} max={999} value={shown(form.n)} onChange={(e) => change({ n: numberOf(e.target.value) })} />
@@ -206,49 +187,18 @@ function Sentence({ every, due, now, onSet, onText }: Pick<Props, "every" | "due
           </button>
         </p>
       )}
-
-      <div className="rule-says" role="status">
-        <p>{rule ? describeRule(rule, due) : "That isn't a rule yet: a number or a date is missing or out of range."}</p>
-        {coming && <p className="rule-next">{coming.days.length ? `${coming.lead} ${coming.days.join(coming.days.some((day) => day.includes(",")) ? " · " : ", ")}` : coming.never ? "No day fits this rule, so it would never come round." : "This is the last time."}</p>}
-      </div>
-
-      <div className="rule-foot">
-        <button type="button" onClick={onText}>
-          Edit as text
-        </button>
-        <button type="submit" className="primary" disabled={!rule || coming?.never}>
-          Save
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }
 
 /** The rule as its token writes it, in one field: where a rule is set away from its note, which has no token to put the cursor on. */
-function AsText({ every, due, onSet }: Pick<Props, "every" | "due" | "onSet">) {
-  const [written, setWritten] = useState(every ?? "");
-  const rule = parseRule(written.trim());
+export function RuleText({ written, onChange }: { written: string; onChange: (written: string) => void }) {
   return (
-    <form
-      className="rule-editor"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (rule) onSet(written.trim());
-      }}
-    >
+    <div className="rule-editor">
       <label className="rule-row">
         every:
-        <input type="text" className="rule-text" aria-label="The rule as written" autoFocus spellCheck={false} value={written} onChange={(e) => setWritten(e.target.value)} />
+        <input type="text" className="rule-text" aria-label="The rule as written" autoFocus spellCheck={false} value={written} onChange={(e) => onChange(e.target.value)} />
       </label>
-      <div className="rule-says" role="status">
-        <p>{rule ? describeRule(rule, due) : "That isn't a rule. Such as 2w, mon,thu, 1st-day,15th-day, mar-1, 3d-after-done or 1m-times-5."}</p>
-      </div>
-      <div className="rule-foot">
-        <span />
-        <button type="submit" className="primary" disabled={!rule}>
-          Save
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }

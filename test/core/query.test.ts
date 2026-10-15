@@ -71,9 +71,12 @@ const READS: [typed: string, scope: Scope, query: Query, printed: string][] = [
   ["-no:link", "notes", q(filter("has", "link")), "has:link"],
   ["has:due no:repeat", "todos", q(and(filter("has", "due"), not(filter("has", "repeat")))), "has:due no:repeat"],
   ["has:recurrence no:recurrence", "todos", q(and(filter("has", "repeat"), not(filter("has", "repeat")))), "has:repeat no:repeat"],
-  ["importance:>=2", "todos", q(filter("importance", "2", ">=")), "importance:>=2"],
-  ["importance:1..3", "todos", q(filter("importance", "1", "=", "3")), "importance:1..3"],
-  ["importance:03", "todos", q(filter("importance", "3")), "importance:3"],
+  ["priority:>=Medium", "todos", q(filter("priority", "medium", ">=")), "priority:>=medium"],
+  ["priority:none", "todos", q(filter("priority", "none")), "priority:none"],
+  ["importance:>=2", "todos", q(filter("priority", "medium", ">=")), "priority:>=medium"],
+  ["importance:1..3", "todos", q(filter("priority", "low", "=", "high")), "priority:low..high"],
+  ["importance:03", "todos", q(filter("priority", "high")), "priority:high"],
+  ["sort:importance-desc", "todos", q(null, { sort: "priority-desc" }), "sort:priority-desc"],
   ["budget in:title", "notes", q(text("budget"), { in: ["title"] }), "budget in:title"],
   ["in:body in:title budget", "notes", q(text("budget"), { in: ["title", "body"] }), "budget in:title in:body"],
   ["in:title,body budget", "notes", q(text("budget"), { in: ["title", "body"] }), "budget in:title in:body"],
@@ -109,8 +112,8 @@ const REFUSED: [typed: string, scope: Scope, at: string, says: RegExp][] = [
   ["updated:2026-02-30", "notes", "2026-02-30", /takes a day/],
   ["updated:2026-10-01..never", "notes", "never", /takes a day/],
   ["updated:*..*", "notes", "*..*", /says nothing/],
-  ["importance:4", "todos", "4", /from 0 to 3/],
-  ["importance:>high", "todos", "high", /from 0 to 3/],
+  ["importance:4", "todos", "4", /priority: takes high, medium, low or none, and "4" isn't one/],
+  ["priority:>urgent", "todos", "urgent", /takes high, medium, low or none/],
   ["tag:12", "notes", "12", /not a tag's name/],
   ['folder:"Common Ink', "notes", '"Common Ink', /never closed/],
   ["(a b", "notes", "(", /never closed/],
@@ -236,7 +239,7 @@ describe("a query written back", () => {
       const { value, compares } = FILTERS[key];
       const range = compares && pick(4) === 0;
       const cmp = compares && !range ? one(CMPS) : "=";
-      const made = (): string => (value.type === "day" ? one(DAYS) : value.type === "number" ? String(pick(4)) : value.type === "words" ? one(wordsFor(key, scope)).word : value.type === "tag" ? one(["money", "work/home", "a_b", "x-1"]) : one(NAMES));
+      const made = (): string => (value.type === "day" ? one(DAYS) : value.type === "level" ? one(value.levels) : value.type === "words" ? one(wordsFor(key, scope)).word : value.type === "tag" ? one(["money", "work/home", "a_b", "x-1"]) : one(NAMES));
       return { kind: "filter", key, cmp, value: made(), ...(range && { to: made() }) };
     };
     const node = (depth: number): Node => {
@@ -385,7 +388,7 @@ describe("what is said of the language", () => {
       for (const row of syntax(scope)) expect(parse(row.example, scope), `${scope}: ${row.example}`).toMatchObject({ ok: true });
       for (const key of keysFor(scope)) expect(syntax(scope).some((row) => row.form.startsWith(`${key}:`)), key).toBe(true);
     }
-    expect(KEYS).toEqual(["folder", "tag", "updated", "created", "editor", "author", "is", "has", "due", "importance", "in", "sort"]);
+    expect(KEYS).toEqual(["folder", "tag", "updated", "created", "editor", "author", "is", "has", "due", "priority", "in", "sort"]);
   });
 
   it("has Shared and Private under Visibility, apart from the states a note or a todo is in, in the builder and the help alike", () => {

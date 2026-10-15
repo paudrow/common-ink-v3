@@ -24,15 +24,15 @@ const cursorLine = (page: Page) =>
     return copy?.textContent;
   });
 const recurrence = (page: Page) => page.getByRole("dialog", { name: "Repeat" });
+/** The Repeat popover's head: the rule in words, and the next dates it gives. */
+const says = (page: Page) => recurrence(page).locator(".repeat-says");
+/** One of the rules the Repeat popover lists, checked or not. */
+const choice = (page: Page, name: string | RegExp) => recurrence(page).getByRole("radio", { name, exact: typeof name === "string" });
+const REPEATS = (weekly: string, monthly: string) => ["Doesn't repeat", "Daily", "Weekdays", weekly, monthly, "Yearly", "Custom"];
 const completions = (page: Page) => page.getByRole("dialog", { name: "Completions" });
 /** Every word the window shows or names, in text, aria-label, title and placeholder: the app says Repeat, never recur. */
 const wordsShown = (page: Page) =>
   page.evaluate(() => [document.body.innerText, ...[...document.querySelectorAll("[aria-label], [title], [placeholder]")].flatMap((el) => ["aria-label", "title", "placeholder"].map((name) => el.getAttribute(name) ?? ""))].join("\n"));
-/** Picks an item of a row's menu, which a right-click on the row opens. */
-const fromMenu = async (page: Page, text: string | RegExp, item: string) => {
-  await row(page, text).locator(".todo-words").click({ button: "right" });
-  await page.getByRole("menu").getByRole("menuitem", { name: item, exact: true }).click();
-};
 const modes = (page: Page) => page.getByRole("navigation", { name: "Modes" });
 
 /** Today on the page's own clock, which is the day the app completes a todo on. */
@@ -120,9 +120,12 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(bins.locator(".todo-every")).toHaveText("every 2 weeks");
   await expect(bins.locator(".todo-every")).toHaveAttribute("title", "Repeats: Every 2 weeks");
   await expect(bins.locator(".todo-done")).toHaveCount(0);
-  // The repeat is a chip to press, as the due date is; the row's menu opens the same popover, under the chip.
+  // The repeat is a chip to press, as the due date is; the row's menu only opens the note.
   await expect(bins.getByRole("button", { name: "Repeat: every 2 weeks" })).toBeEnabled();
-  await fromMenu(page, "Take out the bins", "Repeat…");
+  await bins.locator(".todo-words").click({ button: "right" });
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open note", "Open to the side"]);
+  await page.keyboard.press("Escape");
+  await bins.getByRole("button", { name: "Repeat: every 2 weeks" }).click();
   await expect(page.locator(".chip-popover")).toHaveAccessibleName("Repeat of Take out the bins");
   await expect(bins.getByRole("button", { name: "Repeat: every 2 weeks" })).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("Escape");
@@ -148,12 +151,14 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(completions(page)).toHaveCount(0);
   await expect(bins).not.toHaveAttribute("data-picking");
 
-  // Its recurrence is set and cleared from its chip, in one popover with the form the editor's chip opens.
+  // Its recurrence is set and cleared from its chip, in the popover the editor's chip opens: a rule not listed is Custom.
   await bins.locator(".todo-every").click();
   await expect(recurrence(page)).toHaveAccessibleName("Repeat of Take out the bins");
   await expect(bins).toHaveAttribute("data-picking", "every");
-  await expect(recurrence(page).getByRole("button", { name: "Every 2 weeks", exact: true })).toHaveAttribute("aria-current", "true");
-  await recurrence(page).getByRole("button", { name: "Monthly" }).click();
+  await expect(choice(page, "Custom")).toHaveAttribute("aria-checked", "true");
+  await choice(page, /^Monthly on the /).click();
+  await expect(recurrence(page)).toBeVisible();
+  await recurrence(page).getByRole("button", { name: "Done" }).click();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(rolled.replace("every:2w", "every:1m"));
   await expect(bins.locator(".todo-every")).toHaveText("every month");
   await expect(bins.locator(".todo-every")).toHaveAttribute("title", "Repeats: Every month");
@@ -163,16 +168,22 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await bins.locator(".todo-every").click();
   await expect(completions(page)).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(1);
-  await recurrence(page).getByRole("button", { name: "Stop repeating" }).click();
+  await choice(page, "Doesn't repeat").click();
+  await recurrence(page).getByRole("button", { name: "Done" }).click();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[2]).toBe(rolled.replace(" every:2w", ""));
   await expect(bins.locator(".todo-every")).toHaveText("Repeat");
   await expect(bins.locator(".todo-every")).toHaveAttribute("data-unset", "true");
   await expect(row(page, "Plain one").locator(".todo-every")).toHaveAccessibleName("Repeat: none");
-  // A todo that doesn't recur has a quiet Repeat chip, which opens the same popover under itself, with nothing to skip and nothing to stop.
+  // A todo that doesn't recur has a quiet Repeat chip, which opens the same popover under itself, on Doesn't repeat; with no due date the rules name no day.
   await row(page, "Plain one").locator(".todo-every").click();
-  await expect(recurrence(page).locator(".recur-now")).toHaveText("Doesn't repeat yet");
-  await expect(recurrence(page).locator("[data-choice]")).toHaveText(["Daily", "Every weekday", "Weekly", "Every 2 weeks", "Monthly", "Yearly"]);
-  await recurrence(page).getByRole("button", { name: "Daily" }).click();
+  await expect(says(page)).toHaveText("Doesn't repeat");
+  await expect(recurrence(page).getByRole("radio")).toHaveText(REPEATS("Weekly", "Monthly"));
+  await expect(choice(page, "Doesn't repeat")).toHaveAttribute("aria-checked", "true");
+  await choice(page, "Daily").click();
+  // Picked, it is checked and said at the head, and nothing closes until Done.
+  await expect(choice(page, "Daily")).toHaveAttribute("aria-checked", "true");
+  await expect(says(page)).toContainText(`Every dayIf done today: ${dateSaid(addDays(today, 1), today)}`);
+  await recurrence(page).getByRole("button", { name: "Done" }).click();
   await expect.poll(async () => (await read(page, note.id)).split("\n")[3]).toBe("- [ ] Plain one every:1d");
   await expect(recurrence(page)).toHaveCount(0);
 
@@ -185,7 +196,7 @@ test("checking a recurring todo off on the Todos page leaves its row open, as it
   await expect(plain).toBeFocused();
 });
 
-test("on the Todos page the recurrence chip opens one flat popover under itself with its card marked: each pick saves at once, the form beside them saves, by keyboard too, and nothing in the list moves", async ({ page }) => {
+test("on the Todos page the recurrence chip opens one column under itself with its card marked: a pick checks a rule and closes nothing, Done saves it, Cancel and Escape save nothing, by keyboard too, and nothing in the list moves", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   // 1 January 2031 is a Wednesday.
   const note = await perform(page, { type: "note.create", text: "# Home\n\n- [ ] Water the plants due:2031-01-01 every:1w\n- [ ] Pay rent due:2031-01-02\n" });
@@ -194,6 +205,7 @@ test("on the Todos page the recurrence chip opens one flat popover under itself 
   const plants = row(page, "Water the plants");
   const chip = plants.locator(".todo-every");
   const cards = () => rows(page).evaluateAll((all) => all.map((el) => [...Object.values(el.getBoundingClientRect().toJSON())].map((n) => Math.round(n as number))));
+  const done = () => recurrence(page).getByRole("button", { name: "Done" }).click();
   await expect(chip).toHaveText("every week");
   const before = await cards();
 
@@ -208,28 +220,48 @@ test("on the Todos page the recurrence chip opens one flat popover under itself 
   await expect(chip).toHaveAttribute("aria-expanded", "true");
   await expect(row(page, "Pay rent")).not.toHaveAttribute("data-picking");
   expect(await cards()).toEqual(before);
-  // The picks, Skip, Stop and the form are all in it at once.
-  await expect(recurrence(page).locator(".recur-now")).toHaveText("Every week on Wednesday");
-  await expect(recurrence(page).locator("[data-choice]")).toHaveText(["Daily", "Every weekday", "Weeklynow", "Every 2 weeks", "Monthly", "Yearly", "Skip this one· due Jan 8, 2031", "Stop repeating"]);
-  await expect(sentence(page)).toHaveText("Every week on WednesdayAfter this one: Jan 8, 2031 · Jan 15, 2031 · Jan 22, 2031");
+  // One column: the rule in words and its next dates, the rules with the one in force checked, then Cancel and Done. No form until Custom.
+  await expect(says(page)).toHaveText("Every week on WednesdayAfter this one: Jan 8, 2031 · Jan 15, 2031 · Jan 22, 2031");
+  await expect(recurrence(page).getByRole("radio")).toHaveText(REPEATS("Weekly on Wednesday", "Monthly on the 1st"));
+  await expect(recurrence(page).getByRole("radio", { checked: true })).toHaveText(["Weekly on Wednesday"]);
+  await expect(recurrence(page).getByRole("button", { name: /Skip|Stop/ })).toHaveCount(0);
+  await expect(recurrence(page).getByLabel("How many", { exact: true })).toHaveCount(0);
+  await expect(recurrence(page).getByRole("button")).toHaveText(["Cancel", "Done"]);
+  const columns = await recurrence(page).locator(".repeat-says, .repeat-list").evaluateAll((all) => all.map((el) => Math.round(el.getBoundingClientRect().left)));
+  expect(new Set(columns).size).toBe(1);
   expect(await wordsShown(page)).not.toMatch(/recur/i);
   await page.keyboard.press("Escape");
   await expect(plants).not.toHaveAttribute("data-picking");
 
-  // Each of the six saves the moment it is picked, and the chip says it.
-  for (const [name, every, says] of [
-    ["Daily", "1d", "every day"],
-    ["Every weekday", "mon,tue,wed,thu,fri", "every weekday"],
-    ["Every 2 weeks", "2w", "every 2 weeks"],
-    ["Monthly", "1m", "every month"],
-    ["Yearly", "1y", "every year"],
-    ["Weekly", "1w", "every week"],
+  // Each rule checked stays open and says itself at the head; Done saves it, and the chip says it.
+  for (const [name, every, head, chipSays] of [
+    ["Daily", "1d", "Every day", "every day"],
+    ["Weekdays", "mon,tue,wed,thu,fri", "Every weekday", "every weekday"],
+    ["Monthly on the 1st", "1m", "Every month on the 1st", "every month"],
+    ["Yearly", "1y", "Every year on January 1", "every year"],
+    ["Weekly on Wednesday", "1w", "Every week on Wednesday", "every week"],
   ] as const) {
     await chip.click();
-    await recurrence(page).getByRole("button", { name, exact: true }).click();
+    await choice(page, name).click();
+    await expect(choice(page, name)).toHaveAttribute("aria-checked", "true");
+    await expect(recurrence(page).getByRole("radio", { checked: true })).toHaveCount(1);
+    await expect(recurrence(page).locator(".repeat-rule")).toHaveText(head);
+    await expect(recurrence(page)).toBeVisible();
+    await done();
     await expect(recurrence(page)).toHaveCount(0);
     await expect.poll(lineIn).toBe(`- [ ] Water the plants due:2031-01-01 every:${every}`);
-    await expect(chip).toHaveText(says);
+    await expect(chip).toHaveText(chipSays);
+  }
+
+  // Cancel, Escape and a press outside close it and save nothing that was checked.
+  for (const close of [() => recurrence(page).getByRole("button", { name: "Cancel" }).click(), () => page.keyboard.press("Escape"), () => todosPage(page).getByRole("heading", { level: 1 }).click()]) {
+    await chip.click();
+    await choice(page, "Daily").click();
+    await expect(recurrence(page).locator(".repeat-rule")).toHaveText("Every day");
+    await close();
+    await expect(recurrence(page)).toHaveCount(0);
+    expect(await lineIn()).toBe("- [ ] Water the plants due:2031-01-01 every:1w");
+    await expect(chip).toHaveText("every week");
   }
 
   // One popover at a time: the due date's gives way to the recurrence's, and the mark moves with it.
@@ -241,30 +273,37 @@ test("on the Todos page the recurrence chip opens one flat popover under itself 
   await expect(plants).toHaveAttribute("data-picking", "every");
   await page.keyboard.press("Escape");
 
-  // By keyboard alone: Tab to the chip, Enter opens it on the rule in force, Down and Enter pick, and the keyboard is back on the chip.
+  // By keyboard alone: Tab to the chip, Enter opens it on the rule in force, Down checks the next, Enter is Done, and the keyboard is back on the chip.
   await plants.getByRole("checkbox").focus();
   for (const name of ["Edit Water the plants", "Due date: Jan 1, 2031", "Repeat: every week"]) {
     await page.keyboard.press("Tab");
     await expect(page.locator(":focus")).toHaveAccessibleName(name);
   }
   await page.keyboard.press("Enter");
-  await expect(recurrence(page).getByRole("button", { name: "Weekly", exact: true })).toBeFocused();
+  await expect(choice(page, "Weekly on Wednesday")).toBeFocused();
   await page.keyboard.press("ArrowDown");
+  await expect(choice(page, "Monthly on the 1st")).toBeFocused();
+  await expect(choice(page, "Monthly on the 1st")).toHaveAttribute("aria-checked", "true");
+  await expect(recurrence(page).locator(".repeat-rule")).toHaveText("Every month on the 1st");
   await page.keyboard.press("Enter");
-  await expect.poll(lineIn).toBe("- [ ] Water the plants due:2031-01-01 every:2w");
+  await expect.poll(lineIn).toBe("- [ ] Water the plants due:2031-01-01 every:1m");
   await expect(recurrence(page)).toHaveCount(0);
   await expect(chip).toBeFocused();
 
-  // Then the form: End goes to the last choice, Tab into the form, and Enter there saves.
+  // Custom by keyboard: End checks it and opens the form under the list, from the rule in force; Tab into it, and Enter there is Done.
   await page.keyboard.press("Enter");
   await page.keyboard.press("End");
-  await expect(recurrence(page).getByRole("button", { name: "Stop repeating" })).toBeFocused();
+  await expect(choice(page, "Custom")).toBeFocused();
+  await expect(choice(page, "Custom")).toHaveAttribute("aria-checked", "true");
+  await expect(recurrence(page).getByLabel("Unit")).toHaveValue("m");
+  const [list, form] = [(await recurrence(page).locator(".repeat-list").boundingBox())!, (await recurrence(page).locator(".rule-editor").boundingBox())!];
+  expect(form.y).toBeGreaterThanOrEqual(list.y + list.height);
   await page.keyboard.press("Tab");
   await expect(recurrence(page).getByLabel("How many", { exact: true })).toBeFocused();
   await page.keyboard.press("ControlOrMeta+a");
   await page.keyboard.type("3");
   await recurrence(page).getByLabel("Unit").selectOption("months");
-  await expect(sentence(page)).toContainText("Every 3 months on the 1st");
+  await expect(says(page)).toContainText("Every 3 months on the 1st");
   await recurrence(page).getByLabel("How many", { exact: true }).press("Enter");
   await expect.poll(lineIn).toBe("- [ ] Water the plants due:2031-01-01 every:3m");
   await expect(chip).toHaveText("every 3 months");
@@ -283,11 +322,24 @@ test("in a window where the recurrence popover fits neither under nor over its c
       expect(box.y).toBeGreaterThanOrEqual(0);
       expect(box.y + box.height).toBeLessThanOrEqual(500);
     }).toPass({ timeout: 5000 });
-    // What doesn't fit is a scroll away inside it.
-    await recurrence(page).getByRole("button", { name: "Save" }).scrollIntoViewIfNeeded();
-    await expect(recurrence(page).getByRole("button", { name: "Save" })).toBeInViewport();
+    // What doesn't fit is a scroll away inside it, Custom's form open; Cancel and Done stay in sight while it scrolls.
+    await choice(page, "Custom").click();
+    await expect(recurrence(page).getByRole("button", { name: "Done" })).toBeInViewport();
+    await recurrence(page).getByLabel("Ends", { exact: true }).scrollIntoViewIfNeeded();
+    await expect(recurrence(page).getByRole("button", { name: "Done" })).toBeInViewport();
     await page.keyboard.press("Escape");
   }
+});
+
+test("the last time of a repeating todo, checked off on the Todos page, leaves the list after its moment as any todo does", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const today = await localDay(page);
+  await perform(page, { type: "note.create", text: `# Home\n\n- [ ] Last dose due:${today} every:1d-times-1\n- [ ] Plain one\n` });
+  await page.goto("/todos");
+  await row(page, "Last dose").getByRole("checkbox").check();
+  await expect(page.locator(".toast-card")).toContainText("Task completed");
+  await expect(row(page, "Last dose")).toHaveCount(0, { timeout: 8000 });
+  await expect(rows(page)).toHaveCount(1);
 });
 
 test("typing x into a recurring todo's brackets completes it as its checkbox does", async ({ page }) => {
@@ -379,58 +431,73 @@ test("undoing a completion puts the todo's line back and takes the filed line of
   await expect.poll(() => filedOn(page, today)).toEqual([`- [x] Stretch [[${note.id}]]`]);
 });
 
-/** The form in the recurrence popover, beside the picks: the sentence it builds. */
-const sentence = (page: Page) => recurrence(page).locator(".rule-says");
-/** Opens a recurrence chip's popover, whose form is there beside the picks, with no step to it. */
+/** What the Repeat popover says at its head, which says what Custom's form builds: the rule in words and its next dates. */
+const sentence = says;
+/** Opens a recurrence chip's popover with Custom checked, whose form opens under the list. */
 const openForm = async (page: Page, chip: Locator) => {
   await chip.click();
+  await choice(page, "Custom").click();
   await expect(recurrence(page).getByLabel("How many", { exact: true })).toBeVisible();
 };
 
-test("the recurrence chip in a note opens one popover: a pick saves at once, and beside the picks a form builds any rule as a sentence, by pointer and by keyboard", async ({ page }) => {
+test("the recurrence chip in a note opens the same column: a pick checks a rule, Done saves it as the member's edit, Escape and Cancel save nothing, and Custom's form builds any rule as a sentence, by pointer and by keyboard", async ({ page }) => {
   // 1 January 2031 is a Wednesday.
   const note = await open(page, "# Plan\n\n- [ ] Pay rent every:1w due:2031-01-01 #home\nAfter");
   const rent = () => line(page, "Pay rent");
   const lineIn = async () => (await read(page, note.id)).split("\n")[2];
   const chip = (name: string) => rent().locator(`.md-chip-every[title="${name}"]`);
-  const save = () => recurrence(page).getByRole("button", { name: "Save" }).click();
+  const save = () => recurrence(page).getByRole("button", { name: "Done" }).click();
 
   await chip("Repeats: Every week").click();
   await expect(chip("Repeats: Every week")).toHaveAccessibleName("Repeat: every week");
   await expect(recurrence(page)).toHaveAccessibleName("Repeat");
-  await expect(recurrence(page).locator(".recur-now")).toHaveText("Every week on Wednesday");
+  await expect(says(page)).toHaveText("Every week on WednesdayAfter this one: Jan 8, 2031 · Jan 15, 2031 · Jan 22, 2031");
   expect(await wordsShown(page)).not.toMatch(/recur/i);
-  await expect(recurrence(page).locator("[data-choice]")).toHaveText(["Daily", "Every weekday", "Weeklynow", "Every 2 weeks", "Monthly", "Yearly", "Skip this one· due Jan 8, 2031", "Stop repeating"]);
-  // The form is in the same popover, already there: nothing to open, no second stage.
-  await expect(sentence(page)).toHaveText("Every week on WednesdayAfter this one: Jan 8, 2031 · Jan 15, 2031 · Jan 22, 2031");
-  await expect(recurrence(page).getByRole("button", { name: "More options…" })).toHaveCount(0);
-  await expect(recurrence(page).getByRole("button", { name: "Weekly" })).toHaveAttribute("aria-current", "true");
-  await expect(recurrence(page).getByRole("button", { name: "Weekly" })).toBeFocused();
-  await recurrence(page).getByRole("button", { name: "Monthly" }).click();
+  await expect(recurrence(page).getByRole("radio")).toHaveText(REPEATS("Weekly on Wednesday", "Monthly on the 1st"));
+  await expect(choice(page, "Weekly on Wednesday")).toHaveAttribute("aria-checked", "true");
+  await expect(choice(page, "Weekly on Wednesday")).toBeFocused();
+  // The form is under Custom, not there until it is checked.
+  await expect(recurrence(page).getByLabel("How many", { exact: true })).toHaveCount(0);
+  await choice(page, "Monthly on the 1st").click();
+  await expect(says(page)).toHaveText("Every month on the 1stAfter this one: Feb 1, 2031 · Mar 1, 2031 · Apr 1, 2031");
+  await expect(recurrence(page)).toBeVisible();
+  expect(await lineIn()).toBe("- [ ] Pay rent every:1w due:2031-01-01 #home");
+  await save();
   await expect.poll(lineIn).toBe("- [ ] Pay rent every:1m due:2031-01-01 #home");
   await expect(recurrence(page)).toHaveCount(0);
-  await expectShown(rent(), "Pay rent every month Jan 1, 2031 #home");
-
-  // Escape closes it, changes nothing and gives the keyboard back to the note. A press outside closes it too.
-  await chip("Repeats: Every month").click();
-  await expect(recurrence(page).getByRole("button", { name: "Monthly" })).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(recurrence(page)).toHaveCount(0);
   await expect(editor(page)).toBeFocused();
+  await expectShown(rent(), "Pay rent every month Jan 1, 2031 #home");
+  // The member's edit, undone like typing.
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(lineIn).toBe("- [ ] Pay rent every:1w due:2031-01-01 #home");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect.poll(lineIn).toBe("- [ ] Pay rent every:1m due:2031-01-01 #home");
+
+  // Escape and Cancel close it, save nothing checked, and give the keyboard back to the note. A press outside closes it too.
+  for (const close of [() => page.keyboard.press("Escape"), () => recurrence(page).getByRole("button", { name: "Cancel" }).click()]) {
+    await chip("Repeats: Every month").click();
+    await expect(choice(page, "Monthly on the 1st")).toBeFocused();
+    await choice(page, "Yearly").click();
+    await close();
+    await expect(recurrence(page)).toHaveCount(0);
+    await expect(editor(page)).toBeFocused();
+  }
   await chip("Repeats: Every month").click();
   await line(page, "Plan").click();
   await expect(recurrence(page)).toHaveCount(0);
   await expect.poll(lineIn).toBe("- [ ] Pay rent every:1m due:2031-01-01 #home");
 
-  // In the popover by keyboard: Down goes through the picks, Skip and Stop, Tab on into the form, and Enter there saves.
+  // In the popover by keyboard: Down checks each rule in turn, on to Custom, whose form opens; Tab into it, and Enter there is Done.
   await chip("Repeats: Every month").click();
-  for (const name of ["Yearly", "Skip this one, due Feb 1, 2031", "Stop repeating"]) {
+  for (const name of ["Yearly", "Custom"]) {
     await page.keyboard.press("ArrowDown");
-    await expect(recurrence(page).getByRole("button", { name, exact: true })).toBeFocused();
+    await expect(choice(page, name)).toBeFocused();
+    await expect(choice(page, name)).toHaveAttribute("aria-checked", "true");
   }
+  // Custom starts from the rule checked before it.
+  await expect(sentence(page)).toHaveText("Every year on January 1After this one: Jan 1, 2032 · Jan 1, 2033 · Jan 1, 2034");
   await page.keyboard.press("Tab");
   await expect(recurrence(page).getByLabel("How many", { exact: true })).toBeFocused();
-  await expect(sentence(page)).toHaveText("Every month on the 1stAfter this one: Feb 1, 2031 · Mar 1, 2031 · Apr 1, 2031");
   await page.keyboard.press("ControlOrMeta+a");
   await page.keyboard.type("3");
   await recurrence(page).getByLabel("Unit").selectOption("days");
@@ -490,7 +557,7 @@ test("the recurrence chip in a note opens one popover: a pick saves at once, and
   await openForm(page, chip("Repeats: Every 2 weeks on Monday and Thursday, 5 more times"));
   await recurrence(page).getByLabel("How many", { exact: true }).fill("0");
   await expect(sentence(page)).toContainText("That isn't a rule yet");
-  await expect(recurrence(page).getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(recurrence(page).getByRole("button", { name: "Done" })).toBeDisabled();
   await recurrence(page).getByLabel("How many", { exact: true }).fill("1");
   await recurrence(page).getByLabel("Unit").selectOption("year");
   await expect(recurrence(page).getByLabel("Day of the year")).toContainText("January 1 (from the due date)");
@@ -513,7 +580,7 @@ test("the recurrence chip in a note opens one popover: a pick saves at once, and
   await expect.poll(() => read(page, note.id)).toBe("# Plan\n\n- [ ] Pay rent every:last-fri-nov due:2031-01-01 #home\nAfter");
 });
 
-test("the editor of a rule says when a month is too short for its day and offers the last day, skips one occurrence, shows the token to be typed over, and stops the todo recurring", async ({ page }) => {
+test("the editor of a rule says when a month is too short for its day and offers the last day, the date's popover skips one occurrence, Edit as text shows the token to be typed over, and Doesn't repeat stops the todo recurring", async ({ page }) => {
   const note = await open(page, "# Plan\n\n- [ ] Pay rent every:1m due:2031-01-31 done:2030-12-31x2\n- [ ] Pills every:1d-times-1 due:2031-01-31\nAfter");
   const rent = () => line(page, "Pay rent");
   const lineIn = async () => (await read(page, note.id)).split("\n")[2];
@@ -529,20 +596,27 @@ test("the editor of a rule says when a month is too short for its day and offers
   await recurrence(page).getByLabel("Day 1", { exact: true }).selectOption("30th");
   await expect(note28).toContainText("Months without a 30th use their last day.");
   await recurrence(page).getByLabel("Day 1", { exact: true }).selectOption("last day");
-  await recurrence(page).getByRole("button", { name: "Save" }).click();
+  await recurrence(page).getByRole("button", { name: "Done" }).click();
   await expect.poll(lineIn).toBe("- [ ] Pay rent every:last-day due:2031-01-31 done:2030-12-31x2");
 
-  // Skipping moves the due date on, with nothing checked off, counted or filed.
+  // Skipping is the due date's, for a todo that repeats: it moves the date on, with nothing checked off, counted or filed.
   await rent().locator(`.md-chip-every[title*="Repeats: Every month on the last day"]`).click();
-  await recurrence(page).getByRole("button", { name: "Skip this one, due Feb 28, 2031" }).click();
-  await expect(recurrence(page)).toHaveCount(0);
+  await expect(recurrence(page).getByRole("button", { name: /Skip/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await rent().getByRole("button", { name: /^Due date: / }).click();
+  await expect(page.getByRole("dialog", { name: "Due date" }).getByRole("button")).toHaveText(["Today", "Tomorrow", /^Next week· /, "Skip to Feb 28, 2031", "Clear"]);
+  await page.getByRole("dialog", { name: "Due date" }).getByRole("button", { name: "Skip to Feb 28, 2031" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect.poll(lineIn).toBe("- [ ] Pay rent every:last-day due:2031-02-28 done:2030-12-31x2");
   await expect(rent().getByRole("checkbox")).not.toBeChecked();
   expect((await perform(page, { type: "todo.history", id: note.id, revision: (await perform(page, { type: "note.read", id: note.id })).revision, line: 2, text: (await lineIn())! })).completions).toEqual([]);
   // The last time of a rule that ends has no later one to skip to, so skipping isn't offered.
+  await line(page, "Pills").getByRole("button", { name: /^Due date: / }).click();
+  await expect(page.getByRole("dialog", { name: "Due date" }).getByRole("button")).toHaveText(["Today", "Tomorrow", /^Next week· /, "Clear"]);
+  await page.keyboard.press("Escape");
   await line(page, "Pills").locator(`.md-chip-every[title*="Repeats: Every day, this is the last time"]`).click();
-  await expect(recurrence(page).getByRole("button", { name: /Skip/ })).toHaveCount(0);
-  await expect(recurrence(page).getByRole("button", { name: "Stop repeating" })).toBeVisible();
+  await expect(says(page)).toHaveText("Every day, this is the last timeThis is the last time.");
+  await expect(choice(page, "Custom")).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 
   // Edit as text puts the cursor on the token, which is then shown as written and typed over.
@@ -557,13 +631,15 @@ test("the editor of a rule says when a month is too short for its day and offers
   await expectShown(rent(), "Pay rent monthly on the last day · 3 left Feb 28, 2031 ✓ Dec 31, 2030 ×2");
 
   await rent().locator(`.md-chip-every[title*="Repeats: Every month on the last day, 3 more times"]`).click();
-  await recurrence(page).getByRole("button", { name: "Stop repeating" }).click();
+  await choice(page, "Doesn't repeat").click();
+  await expect(says(page)).toHaveText("Doesn't repeat");
+  await recurrence(page).getByRole("button", { name: "Done" }).click();
   await expect.poll(lineIn).toBe("- [ ] Pay rent due:2031-02-28 done:2030-12-31x2");
   await expect(rent().locator(".md-chip-every")).toHaveCount(0);
 });
 
 for (const scheme of ["light", "dark"] as const) {
-  test(`the recurrence popover stays inside a narrow window, in ${scheme}, and on the Todos page sets a rule typed as text, skips and stops`, async ({ page }) => {
+  test(`the recurrence popover stays inside a narrow window, in ${scheme}, and on the Todos page sets a rule typed as text, skips from the date's popover and stops`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width: 420, height: 720 });
     await signInAsNewPerson(page, "Ada Lovelace");
@@ -588,12 +664,14 @@ for (const scheme of ["light", "dark"] as const) {
         const chip = (await bins.locator(".todo-every").boundingBox())!;
         expect(box.y >= chip.y + chip.height || box.y + box.height <= chip.y, "the popover is not over its chip").toBe(true);
       }).toPass({ timeout: 5000 });
-    // Too narrow for the form beside the picks, it is under them, and the popover scrolls.
+    // Custom's form is under the list, and the popover scrolls.
     await bins.locator(".todo-every").click();
-    await expect(recurrence(page).locator(".recur-now")).toHaveText("Every month on the 1st, 15th and last day, 9 more times");
+    await expect(recurrence(page).locator(".repeat-rule")).toHaveText("Every month on the 1st, 15th and last day, 9 more times");
+    await expect(choice(page, "Custom")).toHaveAttribute("aria-checked", "true");
+    await expect(recurrence(page).getByLabel("How many", { exact: true })).toBeVisible();
     await inside();
     await page.screenshot({ path: test.info().outputPath(`picks-${scheme}.png`) });
-    const picksBox = (await recurrence(page).locator(".recur-picks").boundingBox())!;
+    const picksBox = (await recurrence(page).locator(".repeat-list").boundingBox())!;
     const formBox = (await recurrence(page).locator(".rule-editor").boundingBox())!;
     expect(formBox.y).toBeGreaterThanOrEqual(picksBox.y + picksBox.height);
     await recurrence(page).getByLabel("Day 3", { exact: true }).scrollIntoViewIfNeeded();
@@ -610,18 +688,26 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(typed).toHaveValue("1st-day,15th-day,last-day-times-9");
     await typed.fill("sometimes");
     await expect(sentence(page)).toContainText("That isn't a rule.");
-    await expect(recurrence(page).getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(recurrence(page).getByRole("button", { name: "Done" })).toBeDisabled();
+    // Another rule picked and Custom again: the form, from that rule, and not the text left behind.
+    await choice(page, "Daily").click();
+    await choice(page, "Custom").click();
+    await expect(recurrence(page).getByLabel("The rule as written")).toHaveCount(0);
+    await expect(recurrence(page).getByLabel("Unit")).toHaveValue("d");
+    await recurrence(page).getByRole("button", { name: "Edit as text" }).click();
+    await expect(typed).toHaveValue("1d");
+    await typed.fill("sometimes");
     await typed.fill("1st-tue,3rd-tue");
-    await expect(sentence(page)).toHaveText("Every month on the 1st and 3rd Tuesday");
+    await expect(recurrence(page).locator(".repeat-rule")).toHaveText("Every month on the 1st and 3rd Tuesday");
     await inside();
     await typed.press("Enter");
     await expect.poll(lineIn).toBe("- [ ] Take out the bins due:2031-01-01 every:1st-tue,3rd-tue");
     await expect(bins.locator(".todo-every")).toHaveText("monthly on the 1st & 3rd Tue");
     await expect(recurrence(page)).toHaveCount(0);
 
-    // 7 January 2031 is the first Tuesday after the due date.
-    await bins.locator(".todo-every").click();
-    await recurrence(page).getByRole("button", { name: "Skip this one, due Jan 7, 2031" }).click();
+    // 7 January 2031 is the first Tuesday after the due date: the date's popover skips to it.
+    await bins.locator(".todo-due").click();
+    await page.getByRole("dialog", { name: /^Due date/ }).getByRole("button", { name: "Skip to Jan 7, 2031" }).click();
     await expect.poll(lineIn).toBe("- [ ] Take out the bins due:2031-01-07 every:1st-tue,3rd-tue");
     await expect(bins.locator(".todo-due")).toHaveText("Jan 7, 2031");
     await expect(bins.locator(".todo-done")).toHaveCount(0);
@@ -633,7 +719,8 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(recurrence(page)).toHaveCount(0);
     await expect(bins.locator(".todo-every")).toBeFocused();
     await bins.locator(".todo-every").click();
-    await recurrence(page).getByRole("button", { name: "Stop repeating" }).click();
+    await choice(page, "Doesn't repeat").click();
+    await recurrence(page).getByRole("button", { name: "Done" }).click();
     await expect.poll(lineIn).toBe("- [ ] Take out the bins due:2031-01-07");
     await expect(bins.locator(".todo-every")).toHaveAttribute("data-unset", "true");
   });
@@ -828,7 +915,8 @@ for (const width of [1600, 1100]) {
     // The form opens over the app and takes no room in the note.
     await line(page, "First todo").locator(`.md-chip-every[title*="Repeats: Every 2 weeks"]`).click();
     await expect(recurrence(page)).toBeVisible();
-    await expect(recurrence(page).getByRole("button", { name: "Save" })).toBeVisible();
+    await choice(page, "Custom").click();
+    await expect(recurrence(page).getByRole("button", { name: "Done" })).toBeVisible();
     await expect.poll(() => places(page, MEASURED)).toEqual(before);
     await page.keyboard.press("Escape");
   });
