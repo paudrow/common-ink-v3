@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { connectAgent } from "../../src/core/agents.ts";
 import { binder, perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type OpInput } from "../../src/core/protocol.ts";
@@ -18,6 +18,21 @@ const todos = async (by: Actor, query: string, more: More<"todo.list"> = {}) => 
 const refusal = (run: Promise<unknown>) => run.then(() => "answered", (err: unknown) => (err instanceof OpError ? `${err.code}: ${err.message}` : Promise.reject(err)));
 
 async function library() {
+  // The roadmap links to the budget by its id, which is a word of its text: every id here starts with 0, so no word a query looks for (q, z) is an id's start by chance.
+  const real = crypto.getRandomValues.bind(crypto);
+  const ids = vi.spyOn(crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+    const out = real(array as Uint8Array);
+    if (out instanceof Uint8Array && out.length === 12) out[0] = 0;
+    return array;
+  });
+  try {
+    return await made();
+  } finally {
+    ids.mockRestore();
+  }
+}
+
+async function made() {
   const ada = await newMember("Ada Lovelace");
   const grace = await addMember(ada, "editor", "Grace Hopper");
   const scribe = await connectAgent(env.DB, ada.personId, "Scribe");
@@ -192,6 +207,7 @@ describe("search, by each filter", () => {
     const w = await library();
     const { ada } = w;
     const many = (word: string, between: string) => Array.from({ length: MAX_TERMS }, () => word).join(between);
+    expect([w.budget.id[0], w.roadmap.id[0]]).toEqual(["0", "0"]);
     expect((await titles(ada, many("q", " OR "))).sort()).toEqual(["Budget", "Recipes"]);
     expect((await titles(ada, many("q", " "))).sort()).toEqual(["Budget", "Recipes"]);
     expect((await titles(ada, many("-z", " "))).sort()).toEqual(["Budget", "Diary", "Recipes", "Roadmap"]);

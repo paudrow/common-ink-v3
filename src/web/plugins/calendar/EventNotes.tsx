@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { App, CalendarEvent, ListedFolder, NoteAbout, PluginHost } from "../../plugin-api.ts";
 import { dayIn, dayLabel } from "./dates.ts";
 
@@ -9,6 +9,27 @@ const AUDIENCE: Record<NoteAbout["audience"], { label: string; title: string }> 
 };
 
 type Listed = { is: "reading" } | { is: "listed"; notes: readonly NoteAbout[] } | { is: "failed"; message: string };
+
+/** The notes about the event that the member can see, the one changed last first, as `record.notes` answers. */
+export function useNotesAbout(host: PluginHost, event: Pick<CalendarEvent, "sourceId" | "id">): Listed {
+  const [listed, setListed] = useState<Listed>({ is: "reading" });
+  useEffect(() => {
+    let current = true;
+    host.perform({ type: "record.notes", sourceId: event.sourceId, id: event.id }).then(
+      ({ notes }) => current && setListed({ is: "listed", notes }),
+      (err: Error) => current && setListed({ is: "failed", message: err.message }),
+    );
+    return () => void (current = false);
+  }, [host, event.sourceId, event.id]);
+  return listed;
+}
+
+/** Who sees a note about the event: Private, Shared or Workspace. */
+export const Audience = ({ of }: { of: NoteAbout["audience"] }) => (
+  <span className="event-audience" data-audience={of} title={AUDIENCE[of].title}>
+    {AUDIENCE[of].label}
+  </span>
+);
 
 /** The folders the member may make a note in, each named by its path, in the order the tree has them. */
 function foldersFor(app: App): { id: string; name: string }[] {
@@ -39,13 +60,26 @@ interface Props {
   close: () => void;
 }
 
+/** What starts making the note: the panel's main button, unless another is given. */
+const startButton = (start: () => void) => (
+  <button type="button" className="button primary event-new-note-start" onClick={start}>
+    New note about this event
+  </button>
+);
+
 /** One action that makes a note about the event, in a folder the member picks, last used first, and shared as anything in that folder is. */
-export function NewNoteAbout({ host, app, event, timeZone, close }: Props) {
+export function NewNoteAbout({ host, app, event, timeZone, close, starter = startButton }: Props & { starter?: (start: () => void) => ReactNode }) {
   const [choosing, setChoosing] = useState(false);
   const folders = foldersFor(app);
   const last = host.storage.get("noteFolder");
   const [folder, setFolder] = useState(() => [last, app.folders?.unsortedId].find((id): id is string => typeof id === "string" && folders.some((f) => f.id === id)) ?? folders[0]?.id ?? "");
   const [making, setMaking] = useState<{ busy: boolean; failed?: string }>({ busy: false });
+  // Cancel gives the keyboard back to the action that opened the form, which takes the form's place.
+  const start = useRef<HTMLSpanElement>(null);
+  const [cancelled, setCancelled] = useState(false);
+  useEffect(() => {
+    if (cancelled && !choosing) start.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [cancelled, choosing]);
 
   const make = async () => {
     setMaking({ busy: true });
@@ -65,9 +99,12 @@ export function NewNoteAbout({ host, app, event, timeZone, close }: Props) {
   if (!folders.length) return null;
   if (!choosing)
     return (
-      <button type="button" className="button primary event-new-note-start" onClick={() => setChoosing(true)}>
-        New note about this event
-      </button>
+      <span ref={start} className="event-note-start">
+        {starter(() => {
+          setCancelled(false);
+          setChoosing(true);
+        })}
+      </span>
     );
   return (
     <form
@@ -91,7 +128,14 @@ export function NewNoteAbout({ host, app, event, timeZone, close }: Props) {
       <button type="submit" className="button small primary" disabled={making.busy || !folders.length}>
         Make the note
       </button>
-      <button type="button" className="link" onClick={() => setChoosing(false)}>
+      <button
+        type="button"
+        className="link"
+        onClick={() => {
+          setChoosing(false);
+          setCancelled(true);
+        }}
+      >
         Cancel
       </button>
       <p className="event-note">It is shared as everything in its folder is, and references this event.</p>
@@ -106,16 +150,7 @@ export function NewNoteAbout({ host, app, event, timeZone, close }: Props) {
 
 /** The notes that reference the event that the member can see, each saying who sees it, and under them `children`, the way to make another. */
 export function NotesAbout({ host, app, event, close, children }: Omit<Props, "timeZone"> & { children?: ReactNode }) {
-  const [listed, setListed] = useState<Listed>({ is: "reading" });
-
-  useEffect(() => {
-    let current = true;
-    host.perform({ type: "record.notes", sourceId: event.sourceId, id: event.id }).then(
-      ({ notes }) => current && setListed({ is: "listed", notes }),
-      (err: Error) => current && setListed({ is: "failed", message: err.message }),
-    );
-    return () => void (current = false);
-  }, [host, event.sourceId, event.id]);
+  const listed = useNotesAbout(host, event);
 
   return (
     <section className="event-notes" aria-label="Notes about this event" aria-busy={listed.is === "reading"}>
@@ -140,9 +175,7 @@ export function NotesAbout({ host, app, event, close, children }: Omit<Props, "t
                 >
                   {note.title || "Untitled"}
                 </button>
-                <span className="event-audience" data-audience={note.audience} title={AUDIENCE[note.audience].title}>
-                  {AUDIENCE[note.audience].label}
-                </span>
+                <Audience of={note.audience} />
               </li>
             ))}
           </ul>

@@ -60,7 +60,7 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
                 added.of(now.current.extensions),
                 markdown({ base: markdownLanguage }),
                 noteHighlighting,
-                embedding,
+                embedding(noteId),
                 embedded.of(embedsAre(now.current.embeds)),
                 EditorView.lineWrapping,
                 EditorView.contentAttributes.of({ "aria-label": "Read-only note", "aria-readonly": "true" }),

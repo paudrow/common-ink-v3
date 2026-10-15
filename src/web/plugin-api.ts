@@ -149,7 +149,7 @@ export type Setting = {
   description?: string;
   /**
    * Set for an option the plugin remembers from what the member does in its own views, such as which
-   * calendars the Calendar shows, so it is kept on the server with the member's settings and not in one browser. The
+   * calendars the Calendar shows or the order the Todos page is sorted in, so it is kept on the server with the member's settings and not in one browser. The
    * plugin may change it with `host.settings.set`; it can change no other, and the member can reset it.
    */
   remembered?: true;
@@ -628,6 +628,8 @@ export interface AddressEmbed {
 /** What an embed is handed about one place a note writes it. */
 export interface Embedded {
   config: string;
+  /** The note the embed is written in. */
+  noteId: string;
   /** A block embed's body: the note's lines between its opening and closing lines, each with its line break. Empty for an inline embed. */
   body: string;
   /** Whether the member can't change the note. `update` then does nothing, so an embed draws what it shows without the controls that would call it. */
