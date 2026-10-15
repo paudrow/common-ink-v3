@@ -565,7 +565,7 @@ test("a plugin that asks to change settings is refused and nothing is written, w
   await page.addInitScript(() => {
     interface Handed {
       perform(op: unknown): Promise<unknown>;
-      settings: { get(name: string): unknown };
+      settings: { get(name: string): unknown; set(name: string, value: unknown): boolean };
       commands: { register(command: unknown): void };
       views: { register(slot: string, view: unknown): void };
     }
@@ -584,7 +584,9 @@ test("a plugin that asks to change settings is refused and nothing is written, w
               const wrote = await outcome(host.perform({ type: "settings.write", text: '{"core.theme":"dark","greedy.shout":true}' }));
               const read = await outcome(host.perform({ type: "settings.read" }));
               const listed = await outcome(host.perform({ type: "note.list" }));
-              (window as unknown as { __GREEDY__: unknown }).__GREEDY__ = { wrote, read, listed, setter: Object.keys(host.settings) };
+              const set = await outcome(Promise.resolve().then(() => host.settings.set("shout", true)));
+              const sort = await outcome(Promise.resolve().then(() => host.settings.set("todos.sort", "text")));
+              (window as unknown as { __GREEDY__: unknown }).__GREEDY__ = { wrote, read, listed, set, sort };
             },
           });
         },
@@ -603,7 +605,8 @@ test("a plugin that asks to change settings is refused and nothing is written, w
     wrote: "Greedy can't settings.write: a plugin can't read or change the member's settings",
     read: "Greedy can't settings.read: a plugin can't read or change the member's settings",
     listed: "done",
-    setter: ["get", "subscribe"],
+    set: "Greedy can't change shout: a plugin changes only a setting it declares remembered",
+    sort: "Greedy can't change todos.sort: a plugin changes only a setting it declares remembered",
   });
   await expect.poll(() => stored(page)).toEqual({});
   await expect.poll(() => theme(page)).toBeNull();
