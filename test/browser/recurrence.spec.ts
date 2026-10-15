@@ -679,7 +679,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(recurrence(page).getByLabel("How many times")).toHaveValue("9");
     await inside();
     await page.screenshot({ path: test.info().outputPath(`sentence-${scheme}.png`) });
-    expect(await recurrence(page).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(await page.evaluate(() => getComputedStyle(document.querySelector(".todo-list")!).backgroundColor));
+    expect(await recurrence(page).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(await page.evaluate(() => getComputedStyle(document.querySelector(".todo-card")!).backgroundColor));
 
     // Away from the note there is no token to put the cursor on: the rule is typed in one field.
     await recurrence(page).getByRole("button", { name: "Edit as text" }).click();

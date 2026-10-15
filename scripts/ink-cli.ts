@@ -36,7 +36,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
   todos [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY]
-        [--no-due true] [--importance N,N] [--completed true] [--archived true] [--note ID] [--limit N] [--offset N]
+        [--no-due true] [--importance N,N] [--completed true] [--archived true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
                                       the todos a query finds, such as "due:<today priority:>=medium", or every
                                       open one with none; --query QUERY is the same. "ink syntax todos" lists
                                       what a query can say
@@ -344,9 +344,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
             includeCompleted: ["completed", truth],
             includeArchived: ["archived", truth],
             noteId: ["note"],
+            sort: ["sort"],
             limit: ["limit", integer],
             offset: ["offset", integer],
-  
           }),
         };
         break;
