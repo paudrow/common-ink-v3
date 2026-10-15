@@ -4,6 +4,20 @@ import type { SourceRecord } from "./protocol.ts";
 const WRITTEN = /::(event|contact)\{([^{}\n]*)\}/g;
 const REFERRED = /^[a-z0-9]{12}(?: .*)?$/;
 
+/** The references a text holds outside code and inline code, by the ref each is written with, as `::event{k3j5h8d9f0a1 Lunch}` holds `k3j5h8d9f0a1`. */
+export function referencesIn(text: string): { kind: SourceRecord["kind"]; ref: string }[] {
+  const found = [];
+  for (const { line } of linesOutsideCode(text)) {
+    if (!line.includes("::")) continue;
+    for (const written of line.matchAll(WRITTEN)) {
+      const inCode = (line.slice(0, written.index).match(/`/g) ?? []).length % 2 === 1;
+      const inside = written[2]!.trim();
+      if (!inCode && REFERRED.test(inside)) found.push({ kind: written[1] as SourceRecord["kind"], ref: inside.slice(0, 12) });
+    }
+  }
+  return found;
+}
+
 /**
  * Where a text names a record by what it is called and holds no reference to it, as
  * `::event{Lunch with Sam}` does, outside code. scripts/try-note.ts writes each as the reference of

@@ -14,8 +14,10 @@ const listed = (scope: Page | Locator) => () =>
     .evaluateAll((all) => all.map((el) => el.querySelector(".hist-line")!.textContent!.trim().replace(/\s+/g, " ")));
 /** The other pane of History: what everything picked did. */
 const pane = (scope: Page | Locator) => scope.getByRole("region", { name: "What the selection did" });
+/** What is ticked and what to do with it, at the foot of the list while something is ticked. */
+const bar = (scope: Page | Locator) => scope.getByRole("group", { name: "Selection" });
 const revertDialog = (page: Page) => page.getByRole("dialog", { name: /^Revert/ });
-const toast = (page: Page) => page.locator(".toast");
+const toast = (page: Page) => page.locator(".toast-card");
 /** One note of a revert, in its dialog. */
 const inNote = (page: Page, title: string) => revertDialog(page).getByRole("region", { name: title, exact: true });
 /** The lines a diff adds or removes. A rewritten line is on both sides, as its words on that side. */
@@ -406,7 +408,7 @@ test("reverting an agent is undone from what says it was done, and every note is
   await expect(toast(page).getByRole("button", { name: "Undo" })).toHaveCount(0);
   await expect.poll(() => text(page, plan)).toBe("# Plan\n\nClaude's step\n\nAda's last word");
   await expect.poll(() => text(page, trip)).toBe("# Trip\n\nPack light.\n\nLeave early.");
-  await toast(page).getByRole("button", { name: "Dismiss" }).click();
+  await toast(page).locator(".toast-text").click();
   await expect(toast(page)).toHaveCount(0);
   // What Claude wrote stands again, so it can be reverted again.
   await revertClaude(page).click();
@@ -521,7 +523,7 @@ test("History, narrowed to one agent, reverts what is picked of its changes with
   await expect(mode.getByRole("button", { name: /^Revert .* changes…$/ })).toHaveCount(0);
 
   await mode.getByRole("option").filter({ hasText: "Plan" }).click();
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   const ask = revertDialog(page);
   await expect(ask).toHaveAccessibleName("Revert 1 change to Plan");
   await ask.getByRole("button", { name: "Revert", exact: true }).click();
@@ -536,7 +538,7 @@ test("History, narrowed to one agent, reverts what is picked of its changes with
   await page.goto("/agents");
   await connected(page).getByRole("button", { name: "See its changes" }).click();
   await mode.getByRole("checkbox", { name: "Select all" }).click();
-  await pane(mode).getByRole("button", { name: "Revert…" }).click();
+  await bar(mode).getByRole("button", { name: "Revert…" }).click();
   await expect(ask).toHaveAccessibleName("Revert 2 changes in 1 note");
   await expect(ask).toContainText("Nothing would change in Plan");
 });
@@ -553,4 +555,23 @@ test("the command palette goes to Agents, in focus too", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/agents$/);
   await expect(agentsView(page).getByRole("heading", { name: "Connect an agent" })).toBeVisible();
+});
+
+test("the Agents page lists the agents when who has written can't be read, with no error left uncaught", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (err) => errors.push(err.message));
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await connectAgent(page, "Claude");
+  await page.route("**/ops", async (route) => {
+    if ((route.request().postDataJSON() as { type: string }).type !== "history.authors") return route.continue();
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "unknown", message: "Broke" }) });
+  });
+
+  await page.goto("/agents");
+
+  await expect(connected(page)).toHaveCount(1);
+  await expect(connected(page)).toContainText("Claude");
+  // Time for a rejection nobody handles to be reported.
+  await page.waitForTimeout(500);
+  expect(errors).toEqual([]);
 });

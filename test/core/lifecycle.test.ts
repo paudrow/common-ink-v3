@@ -36,8 +36,8 @@ describe("archive", () => {
   it("leaves the note out of the note list, a folder's count, todos, their filters, tags and search, unless archived notes are asked for", async () => {
     const ada = await newMember();
     const folder = await perform(env.DB, ada, { type: "folder.create", name: "Plans" });
-    await create(ada, "# Current\n\n- [ ] ship +Work #now", folder.id);
-    const old = await create(ada, "# Old plan\n\n- [ ] ponder +Someday #later", folder.id);
+    await create(ada, "# Current\n\n- [ ] ship #now", folder.id);
+    const old = await create(ada, "# Old plan\n\n- [ ] ponder #later", folder.id);
     await perform(env.DB, ada, { type: "note.archive", id: old.id, archived: true });
 
     expect(await titles(ada, { type: "note.list" })).toEqual(["Current"]);
@@ -46,8 +46,8 @@ describe("archive", () => {
     expect((await perform(env.DB, ada, { type: "folder.list" })).folders.find((f) => f.id === folder.id)!.noteCount).toBe(1);
     expect((await perform(env.DB, ada, { type: "todo.list" })).todos.map((t) => t.noteTitle)).toEqual(["Current"]);
     expect((await perform(env.DB, ada, { type: "todo.list", includeArchived: true })).todos.map((t) => t.noteTitle).sort()).toEqual(["Current", "Old plan"]);
-    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ projects: ["Work"], tags: ["now"], assignees: [] });
-    expect(await perform(env.DB, ada, { type: "todo.filters", includeArchived: true })).toEqual({ projects: ["Someday", "Work"], tags: ["later", "now"], assignees: [] });
+    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["now"], assignees: [] });
+    expect(await perform(env.DB, ada, { type: "todo.filters", includeArchived: true })).toEqual({ tags: ["later", "now"], assignees: [] });
     expect((await perform(env.DB, ada, { type: "tag.list" })).tags).toEqual([{ name: "now", notes: 1 }]);
     expect((await perform(env.DB, ada, { type: "tag.list", includeArchived: true })).tags).toEqual([{ name: "later", notes: 1 }, { name: "now", notes: 1 }]);
     expect((await perform(env.DB, ada, { type: "search", query: "ponder" })).results).toEqual([]);
@@ -114,8 +114,8 @@ describe("Trash", () => {
     const ada = await newMember();
     const agent = await agentOf(ada, "Zed");
     const folder = await perform(env.DB, ada, { type: "folder.create", name: "Plans" });
-    await create(ada, "# Kept\n\n- [ ] ship +Work #now", folder.id);
-    const note = await create(ada, "# Mistake\n\n- [ ] regret +Oops #never", folder.id);
+    await create(ada, "# Kept\n\n- [ ] ship #now", folder.id);
+    const note = await create(ada, "# Mistake\n\n- [ ] regret #never", folder.id);
 
     const trashed = await perform(env.DB, agent, { type: "note.trash", id: note.id }, 5000);
     expect(trashed).toMatchObject({ id: note.id, state: "trashed", purgesAt: 5000 + TRASH_MS });
@@ -124,7 +124,7 @@ describe("Trash", () => {
     for (const includeArchived of [false, true]) {
       expect(await titles(ada, { type: "note.list", includeArchived })).toEqual(["Kept"]);
       expect((await perform(env.DB, ada, { type: "todo.list", includeArchived })).todos.map((t) => t.noteTitle)).toEqual(["Kept"]);
-      expect(await perform(env.DB, ada, { type: "todo.filters", includeArchived })).toEqual({ projects: ["Work"], tags: ["now"], assignees: [] });
+      expect(await perform(env.DB, ada, { type: "todo.filters", includeArchived })).toEqual({ tags: ["now"], assignees: [] });
       expect((await perform(env.DB, ada, { type: "tag.list", includeArchived })).tags).toEqual([{ name: "now", notes: 1 }]);
       expect((await perform(env.DB, ada, { type: "search", query: "regret", includeArchived })).results).toEqual([]);
     }

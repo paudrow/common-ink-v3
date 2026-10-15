@@ -35,9 +35,6 @@ export function zoneAt({ left, top, width, height }: { left: number; top: number
   return across < EDGE ? "left" : across > 1 - EDGE ? "right" : down < EDGE ? "up" : down > 1 - EDGE ? "down" : "middle";
 }
 
-/** The group at the top left of the arrangement, whose tab row begins with the window's buttons. */
-const leadOf = (pane: Pane): string => (typeof pane === "string" ? pane : leadOf(pane.panes[0]!));
-
 interface Props {
   layout: EditorLayout;
   titleOf: (tab: Opened) => string;
@@ -49,8 +46,9 @@ interface Props {
   render: (group: Group, tab: Opened) => ReactNode;
   /** What a group with nothing open shows. */
   empty: ReactNode;
-  /** The window's buttons, which go before the first tab of the top left group's tab row. */
-  controls: ReactNode;
+  /** The group whose tab in front is to take the cursor. A folder's list or a page has it on its tab. A note's editor takes it for itself once the note is there, and `onCursorPut` is called if the member has gone elsewhere first. */
+  cursorTo: string | null;
+  onCursorPut: () => void;
   /** Focus: whether the focused group's tab in front fills the window, the keys that toggle it, and the toggle, which a group's own button calls with its id. */
   focusMode: { on: boolean; keys?: string; toggle: (groupId: string) => void };
 }
@@ -64,7 +62,7 @@ export function showTabMenu() {
   tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: left, clientY: bottom }));
 }
 
-export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, dispatch, render, empty, controls, focusMode }: Props) {
+export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -90,8 +88,19 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, di
       removeEventListener("dragend", ended, true);
     };
   }, []);
+  const groups = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const group = layout.groups.find((g) => g.id === cursorTo);
+    if (!group) return;
+    if (group.active?.kind !== "note") {
+      groups.current?.querySelector<HTMLElement>(`[data-group="${group.id}"] [role="tab"][aria-selected="true"]`)?.focus();
+      return onCursorPut();
+    }
+    // A note's editor takes the cursor once the note is there, unless the member has put it somewhere else by then.
+    addEventListener("focusin", onCursorPut, true);
+    return () => removeEventListener("focusin", onCursorPut, true);
+  }, [cursorTo]);
   const root = arrangement(layout);
-  const lead = leadOf(root);
 
   /** Over a drop target the note can't fall through to the editor beneath, which would paste its link. */
   const over = (e: DragEvent, next: Drop) => {
@@ -122,12 +131,12 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, di
         key={group.id}
         className="group"
         data-region
+        data-group={group.id}
         aria-label={`Editor group ${layout.groups.indexOf(group) + 1}`}
         data-focused={(layout.groups.length > 1 && group.id === layout.focusedGroupId) || undefined}
         data-front={group.id === layout.focusedGroupId || undefined}
       >
         <div className="tab-row">
-          {group.id === lead && controls}
             {group.tabs.length > 0 && (
               <div
                 role="tablist"
@@ -230,7 +239,7 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, di
   const drawPane = (pane: Pane, path: number[]): ReactNode => (typeof pane === "string" ? drawGroup(layout.groups.find((g) => g.id === pane)!) : <SplitPanes key={path.join(".")} split={pane} path={path} dispatch={dispatch} draw={drawPane} />);
 
   return (
-    <div className="groups" data-focus-mode={focusMode.on || undefined}>
+    <div ref={groups} className="groups" data-focus-mode={focusMode.on || undefined}>
       {drawPane(root, [])}
       {menu && menuTab && menuGroup && menuAt >= 0 && (
         <ContextMenu

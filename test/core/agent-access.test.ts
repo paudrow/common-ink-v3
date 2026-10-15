@@ -38,7 +38,7 @@ async function team(role: Role) {
 }
 
 /** The operations an agent has a tool for. Settings, changes to members, sharing, and removing a note for good are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
-type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate">;
+type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "contact.update" | "contact.photo" | "contact.create">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -84,7 +84,9 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "source.list": {},
   "event.list": { from: 0, to: 1, timeZone: "UTC" },
   "event.update": { sourceId: "google-calendar", id: "none", etag: "none", title: "No" },
+  "event.create": { sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } },
   "contact.list": {},
+  "person.read": { who: "Sam Okafor" },
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },
   "upload.list": {},
@@ -94,6 +96,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "upload.trash": { id: "aaaaaaaaaaaa" },
   "upload.restore": { id: "aaaaaaaaaaaa" },
   "upload.trashed": {},
+  "record.notes": { sourceId: "google-calendar", id: "none" },
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {

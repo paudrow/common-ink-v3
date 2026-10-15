@@ -1,4 +1,4 @@
-import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type Me, type OpErrorCode, type OpInput, type Results, type Shared, type Upload } from "../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type Shared, type Upload } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -10,17 +10,40 @@ export class ApiError extends Error {
   }
 }
 
+const sessionListeners = new Set<() => void>();
+let signedOut = false;
+const sessionIs = (out: boolean) => {
+  if (out === signedOut) return;
+  signedOut = out;
+  for (const listener of [...sessionListeners]) listener();
+};
+
+/**
+ * Whether the server last said this browser is signed out, as it does once a session ends under an
+ * open page. Nothing is worth sending again until it is false, which any answered request makes it.
+ */
+export const session = {
+  subscribe(listener: () => void) {
+    sessionListeners.add(listener);
+    return () => void sessionListeners.delete(listener);
+  },
+  signedOut: () => signedOut,
+};
+
 /** Browsers cap a keepalive request body at 64 KiB, counted in bytes. */
 const KEEPALIVE_BYTES = 60_000;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, credentials: "same-origin" });
   const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+  // A refusal is an answer to whoever is signed in, as much as a result is. A fault says nothing either way.
+  if (res.status === 401) sessionIs(true);
+  else if (res.status < 500) sessionIs(false);
   if (!res.ok) throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? res.statusText);
   return body as T;
 }
 
-export const getMe = () => request<Me>("/api/me");
+export const getMe = () => request<MeHere>("/api/me");
 
 const refused = new Set<() => void>();
 

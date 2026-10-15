@@ -1,5 +1,5 @@
 import { signIn, whoAmI } from "../core/accounts.ts";
-import { authorizeUrl, DATA_SCOPES, exchange, isGoogleSource, revoke, SOURCE_SCOPES, type Asking, type GoogleConfig, type GoogleSourceId, type GoogleTokens } from "./google.ts";
+import { authorizeUrl, covers, exchange, isGoogleSource, REACHING_SCOPES, revoke, SOURCE_SCOPES, type Asking, type GoogleConfig, type GoogleSourceId, type GoogleTokens } from "./google.ts";
 import { connectionOf, keepTokens } from "./sources/connections.ts";
 import { PROVIDER as GOOGLE } from "./sources/google.ts";
 import { vault } from "./vault.ts";
@@ -58,7 +58,7 @@ async function pkce(): Promise<{ verifier: string; challenge: string }> {
 
 const DATA_SOURCES = Object.keys(SOURCE_SCOPES) as GoogleSourceId[];
 /** The data sources a person agreed to in full. Google lets them untick each thing asked for. */
-const agreedTo = (tokens: GoogleTokens | null) => DATA_SOURCES.filter((id) => SOURCE_SCOPES[id].every((scope) => tokens?.scopes.includes(scope)));
+const agreedTo = (tokens: GoogleTokens | null) => DATA_SOURCES.filter((id) => covers(id, tokens?.scopes ?? []));
 
 /**
  * Ends at Google what a person just agreed to, when it reaches into their calendar or contacts and
@@ -66,7 +66,7 @@ const agreedTo = (tokens: GoogleTokens | null) => DATA_SOURCES.filter((id) => SO
  * stands at Google until someone ends it. A token that only says who they are is left to lapse.
  */
 async function discard(tokens: GoogleTokens | null): Promise<void> {
-  if (tokens?.scopes.some((scope) => DATA_SCOPES.includes(scope))) await revoke(tokens.refreshToken ?? tokens.accessToken);
+  if (tokens?.scopes.some((scope) => REACHING_SCOPES.includes(scope))) await revoke(tokens.refreshToken ?? tokens.accessToken);
 }
 
 /**
@@ -137,7 +137,8 @@ export async function handleAuth(req: Request, env: Env, url: URL): Promise<Resp
     const sources = url.searchParams.getAll("source");
     if (!sources.length || !sources.every(isGoogleSource)) return new Response("Not found", { status: 404 });
     const { email } = (await whoAmI(env.DB, personId)).person;
-    return new Response(null, { status: 302, headers: await toGoogle(google, safeNext(url.searchParams.get("next")), { for: "connect", email, sources }, personId) });
+    const edit = url.searchParams.get("edit") === "1";
+    return new Response(null, { status: 302, headers: await toGoogle(google, safeNext(url.searchParams.get("next")), { for: "connect", email, sources, edit }, personId) });
   }
 
   if (url.pathname === "/auth/google/callback") {

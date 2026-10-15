@@ -1,5 +1,5 @@
 import type { CompletionItem, EmbedInfo, Plugin } from "../plugin-api.ts";
-import { matching } from "./lib/match.ts";
+import { starting } from "./lib/match.ts";
 
 /** How a new embed is written, with its config left selected when there is one to type over. */
 function itemFor({ name, title, block, starts, pick }: EmbedInfo): CompletionItem {
@@ -22,12 +22,14 @@ export const embedMenu: Plugin = {
     host.completions.register({
       id: "embeds",
       trigger: "/",
+      prose: true,
       // The embeds the menu writes come first, then what it can only ask for, such as a file to upload.
       items: (typed) =>
-        matching(
+        starting(
           host.embeds.list().toSorted((a, b) => Number(!!a.pick) - Number(!!b.pick)),
           typed,
-          (e) => `${e.pick?.title ?? e.title} ${e.name}`,
+          // An entry is found by its words, not by "a" or "an" in "Upload a file", so `N /A` is still just words.
+          (e) => `${e.pick?.title ?? e.title} ${e.name}`.replace(/\b(?:a|an|the)\b/gi, " "),
         ).map(itemFor),
     });
   },

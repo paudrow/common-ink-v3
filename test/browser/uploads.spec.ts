@@ -396,7 +396,7 @@ test("a file moved to Trash says so in the notes that use it, comes back when re
   const files = page.getByRole("list", { name: "Files in Trash" });
   await expect(files.getByRole("listitem")).toHaveText([/^chart\.png.*Trashed by Ada Lovelace.*30 days left/]);
   await files.getByRole("button", { name: "Restore" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "chart.png" })).toContainText("Restored from Trash.");
+  await expect(page.locator(".toast-card").filter({ hasText: "chart.png" })).toContainText("Restored from Trash.");
   await open(page, note.id, "after");
   await expect.poll(() => drawnWidth(page)).toBe(320);
 

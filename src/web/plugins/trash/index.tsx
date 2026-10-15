@@ -60,6 +60,7 @@ export const trash: Plugin = {
     host.commands.register({
       id: "note.toggleArchived",
       title: "Archive or unarchive note",
+      group: "Notes",
       // Free in Chrome and Safari, in the editor's own keys, and in vim mode, which has no Ctrl+Shift keys.
       keys: ["mod+shift+e"],
       run() {
@@ -70,6 +71,7 @@ export const trash: Plugin = {
     host.commands.register({
       id: "note.trash",
       title: "Move note to Trash",
+      group: "Notes",
       run() {
         const note = open();
         if (note) void moveToTrash(note.id);

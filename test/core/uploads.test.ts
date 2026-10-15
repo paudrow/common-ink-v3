@@ -163,7 +163,7 @@ describe("a note that refers to an upload", () => {
     const note = await perform(env.DB, ada, { type: "note.create", text: `::image{${picture.id}}` });
     await env.DB.batch([env.DB.prepare("DELETE FROM upload_refs WHERE note_id = ?").bind(note.id), env.DB.prepare("UPDATE notes SET indexed = 4 WHERE id = ?").bind(note.id)]);
     expect((await perform(env.DB, ada, { type: "upload.read", id: picture.id })).usedIn.map((n) => n.id)).toEqual([note.id]);
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 6 });
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 7 });
   });
 
   it("tells a reader who can't see the upload nothing of it: the same as for an upload that never was", async () => {

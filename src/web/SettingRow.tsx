@@ -6,6 +6,7 @@ import { readSetting, type Declared, type Problem } from "./settings.ts";
 const describe = (setting: Setting, value: SettingValue, mac: boolean) => {
   if (setting.type === "boolean") return value ? "on" : "off";
   if (setting.type === "chords") return (value as readonly string[]).map((chord) => chordLabel(chord, mac)).join(", ") || "no key";
+  if (setting.type === "list") return (value as readonly string[]).join(", ") || "none";
   return String(value);
 };
 
@@ -46,6 +47,9 @@ export function SettingRow({ declared: { key, setting, active }, value, modified
               <option key={option}>{option}</option>
             ))}
           </select>
+        ) : setting.type === "list" ? (
+          // Words chosen elsewhere, such as calendars unticked on the Calendar page: shown here, and put back with Reset.
+          <output {...control}>{describe(setting, value, mac)}</output>
         ) : (
           <Typed key={JSON.stringify(value)} control={control} setting={setting} value={value} onSet={set} />
         )}

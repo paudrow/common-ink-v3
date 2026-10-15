@@ -3,8 +3,20 @@ import type { CalendarEvent, EventWhen } from "../../plugin-api.ts";
 /** A calendar date, written YYYY-MM-DD. Days are counted as dates and never as 24 hours: a day a clock changes on is 23 or 25 hours long. */
 export type Day = string;
 
-export const VIEWS = { week: "Week", month: "Month", agenda: "Agenda" } as const;
+/** The views, in the order the toolbar offers them, each with the key that shows it and, for a grid of hours, how many days it shows at most. */
+export const VIEWS = {
+  day: { label: "Day", key: "d", days: 1 },
+  three: { label: "3 days", key: "x", days: 3 },
+  week: { label: "Week", key: "w", days: 7 },
+  month: { label: "Month", key: "m" },
+  agenda: { label: "Agenda", key: "a" },
+} as const satisfies Record<string, { label: string; key: string; days?: 1 | 3 | 7 }>;
 export type View = keyof typeof VIEWS;
+export type GridView = { [V in View]: (typeof VIEWS)[V] extends { days: number } ? V : never }[View];
+export const isGrid = (view: View): view is GridView => "days" in VIEWS[view];
+
+/** The days of the week by name, Sunday first as `weekdayOf` counts them, which is how the setting for the first day of the week says one. */
+export const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
 /** How many days the agenda lists from the day it starts on. */
 export const AGENDA_DAYS = 14;
@@ -33,23 +45,23 @@ export function shiftMonth(day: Day, by: number): Day {
 /** Sunday is 0. */
 export const weekdayOf = (day: Day) => new Date(counted(day)).getUTCDay();
 
-const daysBetween = (from: Day, to: Day) => Math.round((counted(to) - counted(from)) / DAY_MS);
+export const daysBetween = (from: Day, to: Day) => Math.round((counted(to) - counted(from)) / DAY_MS);
 const daysFrom = (day: Day, count: number): Day[] => Array.from({ length: Math.max(0, count) }, (_, i) => shiftDay(day, i));
-const startOfWeek = (day: Day) => shiftDay(day, -weekdayOf(day));
+/** The day the week `day` is in starts on, for a week that starts on `first` (Sunday 0). */
+export const startOfWeek = (day: Day, first = 0) => shiftDay(day, -((weekdayOf(day) - first + 7) % 7));
+export const isWeekend = (day: Day) => weekdayOf(day) === 0 || weekdayOf(day) === 6;
 
-/** The days a view shows around `anchor`: its week from Sunday, the whole weeks its month touches, or the days from it on. */
-export function daysOf(view: View, anchor: Day): Day[] {
-  if (view === "week") return daysFrom(startOfWeek(anchor), 7);
+/** The days a non-grid view shows around `anchor`: the whole weeks its month touches, from the week's first day, or the agenda's days from it on. */
+export function daysOf(view: "month" | "agenda", anchor: Day, firstDay = 0): Day[] {
   if (view === "agenda") return daysFrom(anchor, AGENDA_DAYS);
-  const first = startOfWeek(shiftMonth(anchor, 0));
+  const first = startOfWeek(shiftMonth(anchor, 0), firstDay);
   const last = shiftDay(shiftMonth(anchor, 1), -1);
   return daysFrom(first, Math.ceil((daysBetween(first, last) + 1) / 7) * 7);
 }
 
-/** The anchor of the view before or after. */
-export function step(view: View, anchor: Day, by: 1 | -1): Day {
-  if (view === "month") return shiftMonth(anchor, by);
-  return shiftDay(anchor, (view === "week" ? 7 : AGENDA_DAYS) * by);
+/** The anchor of the month or agenda before or after. */
+export function step(view: "month" | "agenda", anchor: Day, by: 1 | -1): Day {
+  return view === "month" ? shiftMonth(anchor, by) : shiftDay(anchor, AGENDA_DAYS * by);
 }
 
 const clocks = new Map<string, Intl.DateTimeFormat>();
@@ -62,6 +74,9 @@ function clockAt(time: number, timeZone: string): { day: Day; minutes: number } 
   for (const { type, value } of clock.formatToParts(time)) read[type] = value;
   return { day: `${read.year!.padStart(4, "0")}-${read.month}-${read.day}`, minutes: Number(read.hour) * 60 + Number(read.minute) };
 }
+
+/** How many minutes into its day a clock in `timeZone` shows at `time`. */
+export const minutesIn = (time: number, timeZone: string) => clockAt(time, timeZone).minutes;
 
 /** The day it is in `timeZone` at `time`. */
 export const dayIn = (time: number, timeZone: string): Day => clockAt(time, timeZone).day;
@@ -132,8 +147,9 @@ const plain = (text: string) => text.replace(/[  ]/g, " ");
 /** A time of day as the member reads it, such as "11:30 AM". */
 export const timeLabel = (time: number, timeZone: string, locale?: string) => plain(new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(time));
 
-type DayStyle = "short" | "long" | "heading";
+type DayStyle = "short" | "long" | "heading" | "full";
 const DAY_STYLES: Record<DayStyle, Intl.DateTimeFormatOptions> = {
+  full: { weekday: "long", month: "long", day: "numeric", year: "numeric" },
   short: { month: "short", day: "numeric" },
   long: { weekday: "short", month: "short", day: "numeric", year: "numeric" },
   heading: { weekday: "long", month: "long", day: "numeric" },
@@ -154,9 +170,14 @@ export function whenLabel(when: EventWhen, timeZone: string, locale?: string): s
 }
 
 /** What the days on show are called: "October 2026" for a month, and otherwise the first and last of them. */
-export function titleOf(view: View, anchor: Day, locale?: string): string {
+export function titleOf(view: "month" | "agenda", anchor: Day, locale?: string): string {
   if (view === "month") return new Intl.DateTimeFormat(locale, { timeZone: "UTC", month: "long", year: "numeric" }).format(counted(anchor));
-  const days = daysOf(view, anchor);
+  return titleOfDays(daysOf(view, anchor), locale);
+}
+
+/** What days that follow one another are called: "Oct 11 – Oct 17, 2026", or the day in full when there is one. */
+export function titleOfDays(days: readonly Day[], locale?: string): string {
+  if (days.length === 1) return dayLabel(days[0]!, "full", locale);
   return `${dayLabel(days[0]!, "short", locale)} – ${dayLabel(days.at(-1)!, "long", locale).replace(/^[^,]*, /, "")}`;
 }
 

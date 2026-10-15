@@ -1,4 +1,4 @@
-import { ALL_NOTES, SHARED_WITH_ME, type NoteSummary } from "../plugin-api.ts";
+import { ALL_NOTES, SHARED_WITH_ME, type NoteSummary, type SortKey } from "../plugin-api.ts";
 
 export const titleOf = (note: NoteSummary) => note.title || "Untitled";
 
@@ -9,6 +9,16 @@ export const SORTS = [
 ] as const;
 
 export type Sort = (typeof SORTS)[number]["id"];
+
+/** The orders a query's `sort:` asks for, for a list of notes the app already holds. */
+export const ORDERS: Partial<Record<SortKey, (a: NoteSummary, b: NoteSummary) => number>> = {
+  "updated-desc": (a, b) => b.updatedAt - a.updatedAt,
+  "updated-asc": (a, b) => a.updatedAt - b.updatedAt,
+  "created-desc": (a, b) => b.createdAt - a.createdAt,
+  "created-asc": (a, b) => a.createdAt - b.createdAt,
+  "title-asc": (a, b) => titleOf(a).localeCompare(titleOf(b)),
+  "title-desc": (a, b) => titleOf(b).localeCompare(titleOf(a)),
+};
 
 /** How much of an expanded card's note is shown: its first part, fading out, or all of it. A card that isn't here is collapsed. */
 export type Expanded = "excerpt" | "whole";

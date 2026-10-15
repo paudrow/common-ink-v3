@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mentionsIn } from "../../src/core/mentions.ts";
 import type { Contact, Member } from "../../src/core/protocol.ts";
+import { changeOf, draftOf } from "../../src/web/plugins/mentions/fields.ts";
 import { newlyMentioned, offered, shown, startsWords, type People } from "../../src/web/plugins/mentions/people.ts";
 
 const ADA: Member = { personId: "aaaaaaaaaaaa", name: "Ada Lovelace", role: "admin", email: "ada@example.com" };
@@ -62,5 +63,23 @@ describe("who a change newly mentions", () => {
     const now = mentionsIn("@[[aaaaaaaaaaaa|Ada]] and @[[Sam Okafor]] and @[[gggggggggggg|Grace]] @[[gggggggggggg]] @[[Lin Wei]] @[[zzzzzzzzzzzz|Gone]]");
     expect(newlyMentioned(before, now, PEOPLE.members)).toEqual([GRACE]);
     expect(newlyMentioned(now, now, PEOPLE.members)).toEqual([]);
+  });
+});
+
+describe("a contact's form", () => {
+  const sam = { sourceId: "s", id: "sam", name: "Sam Okafor", emails: [], phones: ["+1 555 0142"], organization: "Okafor Plumbing", url: null, title: "Owner", addresses: ["12 Water Lane"], birthday: "--04-21", notes: "Prefers a text", photo: null, urls: ["https://okafor.example"], etag: "3" };
+
+  it("changes nothing when nothing is changed, and only what differs when something is", () => {
+    expect(changeOf(sam, draftOf(sam))).toEqual({ change: {} });
+    const draft = { ...draftOf(sam), emails: ["  sam@okafor.example ", ""], title: " ", birthday: { day: "21", month: "4", year: "1988" }, notes: "Prefers a text\n" };
+    expect(changeOf(sam, draft)).toEqual({ change: { emails: ["sam@okafor.example"], title: null, birthday: "1988-04-21" } });
+  });
+
+  it("says why a draft can't be saved: no name, half a birthday, a day the month doesn't have", () => {
+    expect(changeOf(sam, { ...draftOf(sam), name: "  " })).toEqual({ problem: "A contact needs a name" });
+    expect(changeOf(sam, { ...draftOf(sam), birthday: { day: "21", month: "", year: "" } })).toEqual({ problem: "A birthday needs its day and its month" });
+    expect(changeOf(sam, { ...draftOf(sam), birthday: { day: "29", month: "2", year: "2023" } })).toEqual({ problem: "February 2023 has no day 29" });
+    expect(changeOf(sam, { ...draftOf(sam), birthday: { day: "29", month: "2", year: "" } })).toEqual({ change: { birthday: "--02-29" } });
+    expect(changeOf(sam, { ...draftOf(sam), birthday: { day: "", month: "", year: "" } })).toEqual({ change: { birthday: null } });
   });
 });

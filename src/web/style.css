@@ -4,6 +4,7 @@
   --bg-elev: #ffffff;
   --ink: #1f1e1c;
   --muted: #6f6b66;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%236f6b66' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   --line: #e7e4df;
   --hover: rgb(31 30 28 / 0.06);
   --accent: #5b5bd6;
@@ -18,7 +19,15 @@
   --added: #15803d;
   --added-soft: rgb(21 128 61 / 0.12);
   --removed-soft: rgb(194 65 12 / 0.12);
+  --warn: #c7811b;
+  --warn-ink: #895913;
+  --chip-ink: color-mix(in srgb, var(--muted) 70%, var(--ink));
+  /* How much of a calendar's colour an event card is tinted with: more on a dark surface, where the same share reads fainter. */
+  --cal-tint: 16%;
   --shadow: 0 18px 48px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
+  --shadow-lg: 0 24px 60px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(30 24 12 / 0.05), 0 4px 14px -6px rgb(30 24 12 / 0.1);
+  --accent-ink: #4545b8;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-family: var(--prose);
@@ -37,6 +46,7 @@
     --bg-elev: #22211f;
     --ink: #e8e6e3;
     --muted: #9a958f;
+    --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%239a958f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
     --line: #2c2b29;
     --hover: rgb(232 230 227 / 0.08);
     --accent: #8f8ff0;
@@ -51,7 +61,12 @@
     --added: #6dc98a;
     --added-soft: rgb(109 201 138 / 0.14);
     --removed-soft: rgb(240 138 93 / 0.14);
+    --warn-ink: #c7811b;
     --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+    --shadow-lg: 0 24px 60px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -6px rgb(0 0 0 / 0.4);
+    --accent-ink: #a9a9ff;
+    --cal-tint: 26%;
   }
 }
 
@@ -61,6 +76,7 @@
   --bg-elev: #22211f;
   --ink: #e8e6e3;
   --muted: #9a958f;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%239a958f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   --line: #2c2b29;
   --hover: rgb(232 230 227 / 0.08);
   --accent: #8f8ff0;
@@ -75,7 +91,12 @@
   --added: #6dc98a;
   --added-soft: rgb(109 201 138 / 0.14);
   --removed-soft: rgb(240 138 93 / 0.14);
+  --warn-ink: #c7811b;
   --shadow: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-lg: 0 24px 60px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -6px rgb(0 0 0 / 0.4);
+  --accent-ink: #a9a9ff;
+  --cal-tint: 26%;
 }
 
 html,
@@ -112,6 +133,24 @@ body,
 
 .button.primary:hover {
   filter: brightness(1.08);
+}
+
+/* Every dropdown: the app's own arrow, as far from the right edge as the words are from the left. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-right: 24px;
+  padding-left: 8px;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
+}
+
+@media (forced-colors: active) {
+  select:not([multiple]):not([size]) {
+    appearance: auto;
+    background-image: none;
+  }
 }
 
 button.link {
@@ -315,6 +354,8 @@ button.link:hover {
   position: fixed;
   z-index: 40;
   min-width: 180px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 4px;
   border-radius: 8px;
   background: var(--bg-elev);
@@ -675,9 +716,361 @@ button.link:hover {
   background: var(--accent-soft);
 }
 
+/* The bar a query is typed in, for notes and for todos: the field, Advanced beside it, and under them what is offered while typing, what can't be read, and the builder. */
+.query-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.query-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-line > .finder-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.query-advanced {
+  flex: none;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.query-advanced:hover,
+.query-advanced[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.query-offers {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: min(100%, 260px);
+  max-width: 100%;
+  margin: 0;
+  padding: 4px;
+  border-radius: 9px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  list-style: none;
+  font-size: 13px;
+}
+
+.query-offers li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.query-offers li > span {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.query-offers small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-offers li:hover,
+.query-offers li[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.query-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.query-error code {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.query-error mark {
+  border-bottom: 2px solid var(--danger);
+  background: var(--removed-soft);
+  color: var(--ink);
+}
+
+.query-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.query-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-panel > header strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.query-panel > header span {
+  flex: 1;
+  min-width: 0;
+}
+
+.query-help-toggle {
+  flex: none;
+  font-weight: 600;
+}
+
+.query-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.query-rows:empty {
+  display: none;
+}
+
+.query-row,
+.query-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.query-foot {
+  gap: 8px 14px;
+}
+
+.query-foot label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.query-foot select {
+  flex: 1 1 auto;
+}
+
+.query-panel select,
+.query-panel input[type="text"] {
+  height: 26px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.query-row input[type="text"] {
+  flex: 1 1 5rem;
+}
+
+.query-row select {
+  max-width: 12rem;
+}
+
+.query-why {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.query-unshown {
+  margin: 0;
+}
+
+/* Help over the page: the query syntax and the keyboard shortcuts. */
+
+.help-overlay {
+  width: min(680px, calc(100% - 32px));
+  max-height: calc(100% - 64px);
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.help-overlay::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.help-overlay-body {
+  display: flex;
+  flex-direction: column;
+  max-height: inherit;
+  font-size: 13px;
+}
+
+.help-overlay-body > header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-overlay h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.help-overlay-content {
+  padding: 4px 16px 16px;
+  overflow: auto;
+}
+
+.help-overlay h3 {
+  margin: 16px 0 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.help-lead {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+.help-lead a {
+  color: var(--accent);
+}
+
+.help-overlay table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.help-overlay th,
+.help-overlay td {
+  padding: 5px 8px 5px 0;
+  border-top: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.help-overlay tr:first-child > * {
+  border-top: 0;
+}
+
+/* Every heading's table has the same columns, so the forms, what they mean and the examples line up down the whole help. */
+.query-help table {
+  table-layout: fixed;
+}
+
+.query-help th {
+  width: 32%;
+}
+
+.query-help td:last-child {
+  width: 30%;
+}
+
+.shortcut-sheet-group td {
+  padding-right: 0;
+  text-align: right;
+}
+
+.shortcut-sheet-group td kbd + kbd {
+  margin-left: 4px;
+}
+
+.query-help code,
+.query-example {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.query-example {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.query-example:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 520px) {
+  .query-help th,
+  .query-help td,
+  .query-help td:last-child {
+    display: block;
+    width: auto;
+    padding-right: 0;
+    border-top: 0;
+  }
+
+  .query-help tr {
+    display: block;
+    padding: 5px 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
 .finder-scope button svg {
   width: 11px;
   height: 11px;
+}
+
+/* Where the query is the list's one control, as on the Search page, the list is as far under the bar as under the tools a folder's list has. */
+.folder-list .query-bar:not(:has(+ .finder-tools)) {
+  margin-bottom: 16px;
 }
 
 .finder-tools {
@@ -1123,6 +1516,22 @@ button.link:hover {
   background: var(--accent);
 }
 
+/* The edge of a side that folds has a short grip half way down it, so there is something to see where it is taken hold of. */
+.resize-handle[data-folds]::before {
+  position: absolute;
+  top: calc(50% - 14px);
+  left: 1px;
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.resize-handle[data-folds]:is(:hover, [data-dragging], :focus-visible)::before {
+  background: var(--accent);
+}
+
 .resize-handle:focus-visible {
   outline: none;
 }
@@ -1193,15 +1602,6 @@ button.link:hover {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
-}
-
-/* The window's own buttons, together before the first tab of the top left group, where no tab scrolls over them. */
-.window-controls {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  padding: 0 6px;
 }
 
 /* Each group's focus button, after its last tab. It is fainter on a group that is not the focused one, and is in the same place on every group. */
@@ -1417,7 +1817,7 @@ button.link:hover {
   text-overflow: ellipsis;
 }
 
-/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. */
+/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. The folder has a line and the last edit has the next, each there before it has anything to say, so the bar is as tall while they load as after. */
 @container note (max-width: 520px) {
   .note-bar {
     flex-wrap: wrap;
@@ -1428,16 +1828,23 @@ button.link:hover {
   }
 
   .note-meta {
-    flex-wrap: wrap;
-    row-gap: 2px;
+    flex-direction: column;
+    gap: 2px;
     overflow: visible;
     white-space: normal;
   }
 
   .note-meta > * {
     max-width: 100%;
+    min-height: 1lh;
     overflow: visible;
     overflow-wrap: anywhere;
+  }
+
+  /* The folder's path arrives after the note and is as long as its folders' names: it has its one line and is cut short at the end of it. */
+  .note-meta > .crumbs {
+    overflow: hidden;
+    white-space: nowrap;
   }
 }
 
@@ -1510,7 +1917,7 @@ button.link:hover {
   outline: none;
 }
 
-/* Room left of the text, inside the editor's own margin, for what hangs there: a heading's #s and a bullet's fold toggle. */
+/* Room left of the text, inside the editor's own margin, for what hangs there: a heading's #s. */
 .editor .cm-scroller {
   margin-left: -3rem;
 }
@@ -1982,14 +2389,29 @@ button.link:hover {
   max-width: none;
 }
 
-/* The line of an address that is shown as media: a caption's size, and seen only with the pointer on it or on the media, or the cursor on it. It keeps its room either way, so nothing moves. */
+/* The line of an address shown as media, with the cursor on it (out of sight it is out of the note): above the media, as v1 drew it. */
 .cm-line.embed-address {
-  font-size: 0.8125rem;
-  transition: opacity 120ms;
+  font-family: var(--mono);
+  font-size: 0.74em;
+  line-height: 1.6;
+  padding-top: 0.8em;
+  color: var(--accent);
 }
 
-.cm-line.embed-address:not(.embed-address-seen):not(:hover) {
-  opacity: 0;
+.cm-line.embed-address::after {
+  content: " \2197";
+  font-size: 0.9em;
+}
+
+.cm-line.embed-address * {
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+/* The media whose address the cursor is on. */
+.embed-below.embed-below-on {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 0;
 }
 
 .embed-below-drawn {
@@ -2052,6 +2474,30 @@ button.link:hover {
   border: 0;
   background: none;
   color-scheme: normal;
+}
+
+/* What is below a line while it loads: a placeholder as big as its room, and what loads is there but unseen until it is drawn. */
+.embed-loading {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--muted) 14%, var(--bg));
+  animation: embed-loading 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes embed-loading {
+  to {
+    background: color-mix(in srgb, var(--muted) 7%, var(--bg));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .embed-loading {
+    animation: none;
+  }
+}
+
+.embed-arriving {
+  opacity: 0;
 }
 
 /* A video before it is played: its picture, what it is called along the top, and a play mark in the middle. */
@@ -2744,6 +3190,11 @@ kbd {
   font-size: 13px;
 }
 
+.settings-banner .button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .settings-banner[role="alert"] {
   border-color: var(--danger);
 }
@@ -3132,6 +3583,10 @@ kbd {
   font-size: 13px;
 }
 
+.recorder:focus {
+  outline: none;
+}
+
 .recorder p {
   margin: 0;
 }
@@ -3269,34 +3724,55 @@ kbd {
   display: flex;
   flex: 0 1 auto;
   flex-direction: column;
-  width: var(--inspector-width, 300px);
-  min-width: 180px;
+  width: var(--inspector-width, 256px);
+  /* With its bar, the 180px the inspector gives way down to in a window too narrow for everything. */
+  min-width: 136px;
   min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--bg-side);
 }
 
-.tabs {
+/* Pinned, it is beside the page. Otherwise it lies over the page from the bar's edge, and nothing under it moves. */
+.inspector[data-layout="temporary"] {
+  position: absolute;
+  top: 0;
+  right: 44px;
+  bottom: 0;
+  z-index: 20;
+  max-width: calc(100% - 44px);
+  box-shadow: var(--shadow);
+}
+
+.app[data-bar] > .inspector[data-layout="temporary"] {
+  bottom: 26px;
+}
+
+.inspector:focus {
+  outline: none;
+}
+
+.panel-head {
   display: flex;
   flex: none;
-  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
   height: 38px;
-  padding: 0 14px;
+  padding: 0 8px 0 14px;
   border-bottom: 1px solid var(--line);
 }
 
-.tabs [role="tab"] {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
+.panel-head h2 {
+  margin: 0;
   font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
 }
 
-.tabs [role="tab"][aria-selected="true"] {
-  box-shadow: inset 0 -2px 0 var(--accent);
+.panel-head [aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.rail .icon-button[aria-expanded="true"] {
+  background: var(--hover);
   color: var(--ink);
 }
 
@@ -3368,7 +3844,7 @@ kbd {
   font-size: 11.5px;
 }
 
-/* A closed sidebar and a closed inspector: a bar of icons, one for each thing the open one lists. */
+/* A closed sidebar, and the inspector's bar, which is always there: a bar of icons, one for each thing the sidebar lists or each panel. */
 
 .rail {
   display: flex;
@@ -3387,6 +3863,36 @@ kbd {
 
 .rail:not(:first-child) {
   border-left: 1px solid var(--line);
+}
+
+/* The sidebar's sections over the page, beside its bar. */
+.sidebar-picker {
+  position: fixed;
+  z-index: 30;
+  top: 8px;
+  left: 50px;
+  width: 248px;
+  max-width: calc(100vw - 58px);
+  max-height: calc(100vh - 16px);
+  padding: 2px 6px 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  transition: opacity 0.12s;
+}
+
+.sidebar-picker .section-head {
+  margin-top: 6px;
+}
+
+.sidebar-picker[data-leaving] {
+  opacity: 0;
+}
+
+.sidebar-picker[data-dragging] {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .rail-brand {
@@ -3486,14 +3992,8 @@ kbd {
   background: var(--accent);
 }
 
-.rail .icon-button,
-.tabs [role="tab"] {
+.rail .icon-button {
   position: relative;
-}
-
-.tabs .unseen-dot {
-  top: 9px;
-  right: -9px;
 }
 
 /* History: a list of changes with a tick each, beside what everything picked did */
@@ -3631,8 +4131,6 @@ kbd {
 }
 
 .hist-open-page {
-  align-self: flex-start;
-  margin-bottom: 6px;
   text-decoration: underline;
 }
 
@@ -3680,14 +4178,34 @@ kbd {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 12px 10px 6px;
+  padding: 10px 10px 4px;
   background: var(--bg);
+}
+
+/* A day's heading is its tick: the box stands in the column of its rows' boxes. */
+.hist-day-tick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
   color: var(--muted);
+  font: inherit;
   font-size: 10.5px;
   font-weight: 650;
   letter-spacing: 0.08em;
   line-height: 1;
+  text-align: left;
   text-transform: uppercase;
+  cursor: pointer;
+}
+
+.hist-day-tick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .hist-row {
@@ -3729,11 +4247,13 @@ kbd {
   background: var(--bg-elev);
 }
 
-.hist-all-tick .hist-check {
+.hist-all-tick .hist-check,
+.hist-day-tick .hist-check {
   margin-top: 0;
 }
 
 .hist-row:hover .hist-check,
+.hist-day-tick:hover .hist-check,
 .hist-all-tick:hover .hist-check {
   border-color: var(--muted);
 }
@@ -4034,8 +4554,69 @@ kbd {
   cursor: pointer;
 }
 
-.hist-open {
-  padding: 8px 18px 12px;
+/* What to do with what is ticked, at the foot of the list and only while something is. */
+.hist-picked {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 44px;
+  padding: 6px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.hist-picked-count {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.hist-picked .link {
+  text-decoration: underline;
+}
+
+.hist-sum-text .hist-conflicts {
+  color: var(--danger);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* Lines of a diff that a later change edited: reverting them asks what they become. */
+.diff-conflict {
+  display: block;
+  width: 100%;
+  margin: 2px 0;
+  padding: 0;
+  border: 0;
+  border-left: 3px solid var(--danger);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-conflict:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.diff-conflict:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.diff-conflict-says {
+  display: block;
+  padding: 4px 10px 1px calc(var(--diff-gutter, 14px) - 3px);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.diff-conflict.lone {
+  padding-bottom: 4px;
 }
 
 @container history (max-width: 720px) {
@@ -4083,7 +4664,7 @@ kbd {
   }
 
   .history-panes.page .hist-open {
-    display: block;
+    display: inline;
   }
 
   .history-panes.page .hist-summary,
@@ -4105,8 +4686,19 @@ kbd {
   padding-top: 10px;
 }
 
-.history-panes.panel .hist-open-page {
-  margin: 0 14px 2px;
+.history-panes.panel .hist-filters {
+  justify-content: space-between;
+  padding: 0 14px 2px;
+}
+
+.history-panes.panel .hist-day {
+  padding-right: 8px;
+  padding-left: 8px;
+  background: var(--bg-side);
+}
+
+.history-panes.panel .hist-day-tick {
+  gap: 8px;
 }
 
 .history-panes.panel .hist-all {
@@ -4126,6 +4718,13 @@ kbd {
 
 .history-panes.panel .hist-row[aria-level="2"] {
   margin-left: 14px;
+}
+
+.history-panes.panel .hist-picked {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 6px 12px;
 }
 
 .history-panes.panel .hist-more {
@@ -4159,35 +4758,88 @@ kbd {
   font-size: 13px;
 }
 
-.toast,
-.told {
+/* What just happened, in the window's bottom right corner, as v1's toasts. */
+.toasts {
   position: fixed;
-  bottom: 20px;
-  left: 50%;
-  z-index: 50;
+  right: 18px;
+  bottom: 44px;
+  z-index: 80;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast-card {
+  display: flex;
+  box-sizing: border-box;
   align-items: center;
-  gap: 12px;
-  max-width: min(560px, calc(100vw - 32px));
-  padding: 8px 8px 8px 14px;
-  border-radius: 10px;
-  background: var(--ink);
-  color: var(--bg);
+  gap: 10px;
+  min-width: min(240px, calc(100vw - 36px));
+  max-width: min(340px, calc(100vw - 36px));
+  padding: 10px 14px 10px 10px;
+  border-radius: 12px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
   font-size: 13px;
-  box-shadow: var(--shadow);
-  transform: translateX(-50%);
+  animation: toast-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  transition:
+    opacity 0.35s,
+    transform 0.35s;
 }
 
-.toast .link,
-.told .link {
-  color: inherit;
-  font-weight: 650;
-  text-decoration: underline;
+.toast-card[data-leaving] {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
-.toast .icon-button,
-.told .icon-button {
-  color: inherit;
+.toast-card:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+.toast-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* A long title is cut after five lines, so three cards always fit the window. */
+.toast-text {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.toast-action {
+  margin-left: 4px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--accent-ink);
+  font: 650 12.5px var(--prose);
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: var(--accent-soft);
 }
 
 .change-stat {
@@ -4848,12 +5500,6 @@ button.diff-fold:hover {
   align-self: flex-start;
 }
 
-.hist-cut {
-  margin: 2px 10px 6px 36px;
-  color: var(--muted);
-  font-size: 11.5px;
-}
-
 .members .agent-head {
   flex-wrap: nowrap;
 }
@@ -5161,10 +5807,12 @@ button.diff-fold:hover {
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  max-width: 54rem;
+  /* A list as wide as v1's, about 660px: a todo is not far wider than what it says. */
+  max-width: calc(660px + 4rem);
   height: 100%;
   margin: 0 auto;
-  padding: 2rem 2rem 3rem;
+  /* Less room at the sides in a narrow column, which is the todos' room. */
+  padding: 2rem clamp(12px, 5%, 2rem) 3rem;
   overflow-y: auto;
 }
 
@@ -5173,131 +5821,238 @@ button.diff-fold:hover {
   font-size: 22px;
 }
 
-.todo-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.todo-filters label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.todo-filters select {
-  max-width: 12rem;
-  padding: 2px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
-}
-
+/* The list of todos, as v1's: one panel, a todo to a row. */
 .todo-list {
+  container: todos / inline-size;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
   margin: 0;
-  padding: 0;
+  padding: 8px clamp(6px, 2.5%, 14px) 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
   list-style: none;
 }
 
+/* A todo's row, in two lines. The first is the todo: its checkbox, its words and, at the right, its note's name. The second, under
+   the words, is what is set on it and then what can be. Every row has both, so the list has one rhythm. */
 .todo-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 7px 4px;
-  border-bottom: 1px solid var(--line);
-  font-size: 14px;
+  display: grid;
+  grid-template-columns: 1.02em minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 0;
+  align-items: baseline;
+  margin: 0 -6px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  font-size: 14.5px;
+  line-height: 1.4;
 }
 
-.todo-row > input[type="checkbox"] {
-  flex: none;
-  width: 15px;
-  height: 15px;
-  margin: 3px 0 0;
-  accent-color: var(--accent);
+/* The row being changed, by a chip's popover or its menu, is tinted as a row under the pointer is. Colour only: nothing moves. */
+.todo-row:hover,
+.todo-row[data-picking] {
+  background: var(--hover);
 }
 
-.todo-words {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  line-height: 1.45;
-  text-align: left;
-  overflow-wrap: anywhere;
+.todo-box {
+  grid-row: 1;
+  grid-column: 1;
+  align-self: start;
+  box-sizing: border-box;
+  width: 1.02em;
+  height: 1.02em;
+  margin: calc((1.4em - 1.02em) / 2) 0 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 5px;
+  background: var(--bg-elev) center / 100% no-repeat;
+  appearance: none;
   cursor: pointer;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
 }
 
-.todo-words:hover > :first-child {
-  text-decoration: underline;
+.todo-box:enabled:hover {
+  border-color: var(--accent);
 }
 
-.todo-row[data-done] .todo-words > :first-child {
+.todo-box:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4l2.6 2.6L12 5.5' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.todo-box:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.todo-box:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.todo-text {
+  grid-row: 1;
+  grid-column: 2;
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.todo-words[role="button"] {
+  cursor: text;
+}
+
+.todo-words:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A row a change took out of the list, which stays where it was until the list is refreshed. */
+.todo-row[data-gone] {
+  opacity: 0.5;
+}
+
+.todo-row[data-done] .todo-words {
   color: var(--muted);
   text-decoration: line-through;
+  text-decoration-color: var(--faint);
 }
 
-.todo-note {
-  color: var(--faint);
-  font-size: 12px;
+.todo-words .todo-tag {
+  color: var(--muted);
 }
 
+.todo-words .todo-link {
+  color: var(--accent-ink);
+}
+
+/* The words being edited, in place: a one-line field as wide as v1's where there is room, as tall as the line, laid over the row's
+   padding so nothing moves. */
+.todo-edit {
+  display: inline-block;
+  box-sizing: border-box;
+  width: min(420px, 100%);
+  height: 24px;
+  margin: -2px 0;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg-elev);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  color: var(--ink);
+  font: inherit;
+  vertical-align: top;
+}
+
+/* The second line: what is set, then what isn't, starting under the words. */
 .todo-chips {
   display: flex;
-  flex: none;
+  grid-row: 2;
+  grid-column: 2 / 4;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
-  max-width: 50%;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  min-height: 18px;
 }
 
+/* What is set on a todo, as pills, as v1 drew them: each opens a popover under itself, and a tag's narrows the list. */
 .todo-chip {
-  position: relative;
-  flex: none;
-  padding: 1px 7px;
-  border-radius: 5px;
+  display: inline-flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
   background: var(--hover);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
+  color: var(--chip-ink);
+  font: 500 11.5px/1 var(--prose);
   white-space: nowrap;
 }
 
-.todo-chip > input,
-.todo-chip > select,
-.todo-chip > button {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  opacity: 0;
+.todo-chip svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  opacity: 0.75;
+}
+
+.todo-chip .chip-hash {
+  width: auto;
+  color: inherit;
+}
+
+/* Assign's mark: the @ a mention is written with, where the other chips have an icon. */
+.todo-chip .chip-at {
+  flex: none;
+  width: 12px;
+  opacity: 0.75;
+  text-align: center;
+}
+
+/* What isn't set yet: its icon and word, quiet and without a pill, which is drawn, dashed, while the row is pointed at or has the keyboard. */
+.todo-chip[data-unset] {
+  padding: 0 6px;
+  border: 1px dashed transparent;
+  background: none;
+  color: color-mix(in srgb, var(--muted) 65%, var(--faint));
+  font-weight: 450;
+}
+
+.todo-row:hover .todo-chip[data-unset],
+.todo-row:focus-within .todo-chip[data-unset],
+.todo-row[data-picking] .todo-chip[data-unset] {
+  border-color: var(--faint);
+  color: var(--chip-ink);
+}
+
+button.todo-chip {
   cursor: pointer;
 }
 
-.todo-chip > :disabled {
-  cursor: default;
+button.todo-chip:enabled:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
-.todo-chip:focus-within {
+button.todo-chip[data-unset]:enabled:hover {
+  box-shadow: none;
+  color: var(--ink);
+}
+
+button.todo-chip[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+button.todo-chip[data-unset][aria-expanded="true"] {
+  border-color: var(--accent);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+button.todo-chip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
+button.todo-chip:disabled {
+  cursor: default;
+}
+
+.todo-row[data-done] .todo-chip {
+  opacity: 0.75;
+}
+
 .todo-assignee {
+  color: var(--muted);
   unicode-bidi: isolate;
 }
 
@@ -5306,32 +6061,197 @@ button.diff-fold:hover {
   color: var(--accent);
 }
 
-.todo-importance {
-  min-width: 2.4em;
-  margin-top: 1px;
-  font-weight: 700;
-  text-align: center;
-}
-
-.todo-importance[data-level="0"],
-.todo-due[data-due="none"],
-.todo-every:not([data-set]),
-.todo-add {
-  background: none;
-  color: var(--faint);
-  font-weight: 400;
-}
-
-.todo-due[data-due="overdue"],
 .todo-importance[data-level="3"] {
-  background: var(--removed-soft);
   color: var(--danger);
 }
 
-.todo-due[data-due="today"],
 .todo-importance[data-level="2"] {
+  color: var(--warn-ink);
+}
+
+/* When it was last done: quieter than what is set on the todo, as v1's done chip was. */
+.todo-chip.todo-done {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+}
+
+.todo-due[data-due="today"] {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn-ink);
+}
+
+.todo-due[data-due="overdue"] {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.todo-chip.todo-tag {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
+}
+
+button.todo-tag[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Where a todo is: its note's name, quiet, at the right of its first line, and the way to the note. It gives way to the words, up to
+   38% of the row as v1's label, and ends in an ellipsis. */
+.todo-note {
+  display: flex;
+  grid-row: 1;
+  grid-column: 3;
+  justify-self: end;
+  max-width: 38cqi;
+  min-width: 0;
+  margin: -1px -4px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: 12px/15px var(--prose);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.todo-note-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.todo-note:hover,
+.todo-note:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.todo-note:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* In a narrow list the words have the whole first line, the note's name goes on a line of its own under the chips, where the words
+   start, and what isn't set is its icon alone, named on hover, so the second line still holds a row's chips. */
+@container todos (max-width: 440px) {
+  .todo-text {
+    grid-column: 2 / 4;
+  }
+
+  .todo-note {
+    grid-row: 3;
+    grid-column: 2 / 4;
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .todo-chip[data-unset] {
+    justify-content: center;
+    width: 22px;
+    padding: 0;
+  }
+
+  .todo-chip-word {
+    display: none;
+  }
+}
+
+/* What a todo's chip opens: its choices, as v1's. */
+.chip-menu {
+  display: flex;
+  flex-direction: column;
+  width: 246px;
+}
+
+.chip-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chip-choice svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+/* A tag's mark, as v1's picker drew it, beside the tag's name: drawn, so the name is all the choice says. */
+.chip-hash {
+  flex: none;
+  width: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.chip-hash::before {
+  content: "#";
+}
+
+.chip-choice:hover,
+.chip-choice:focus-visible {
+  outline: none;
+  background: var(--hover);
+}
+
+.chip-choice[aria-current] {
+  color: var(--muted);
+}
+
+.chip-detail {
+  color: var(--muted);
+}
+
+/* What a field is set to, or Add, at the right of its line in a row's fields, as v1's. */
+.chip-value {
+  overflow: hidden;
+  max-width: 55%;
+  margin-left: auto;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-value[data-unset] {
+  color: var(--muted);
+}
+
+.chip-now {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chip-day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -6px -6px 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.chip-day input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
 }
 
 .todo-none {
@@ -5339,7 +6259,7 @@ button.diff-fold:hover {
   font-size: 14px;
 }
 
-.todo-more {
+.todo-next {
   align-self: flex-start;
   padding: 4px 10px;
   border: 1px solid var(--line-strong);
@@ -5351,77 +6271,223 @@ button.diff-fold:hover {
   cursor: pointer;
 }
 
-/* A panel opened from a chip, laid over the app. It is placed by its opener, under its chip. */
+/* A panel opened from a chip, laid over the app, in the look of v1's pickers. It is placed by its opener, under its chip. */
 .chip-popover {
+  box-sizing: border-box;
   position: fixed;
-  z-index: 40;
+  z-index: 90;
   top: 0;
   left: 0;
+  box-sizing: border-box;
   width: max-content;
   max-width: min(22rem, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
-  padding: 8px;
+  padding: 6px;
   overflow-y: auto;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
   background: var(--bg-elev);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg);
   color: var(--ink);
   font-size: 13px;
 }
 
-.rule-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* The Repeat popover, one column: the rule in words and its next dates, the rules to pick from, Custom's form, then Cancel and Done. */
+.chip-menu.repeat-menu {
+  width: 300px;
+  max-width: 100%;
 }
 
-.rule-form button,
-.rule-form input,
-.rule-form select {
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
+.repeat-says {
+  margin-bottom: 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line);
 }
 
-.rule-form button {
-  padding: 3px 8px;
-  cursor: pointer;
+.repeat-says p {
+  margin: 0;
 }
 
-.rule-form button:hover:enabled,
-.rule-form button:focus-visible {
-  background: var(--hover);
-  outline: none;
-}
-
-.rule-form button:focus-visible,
-.completions button:focus-visible {
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
-.rule-form button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
+.repeat-rule {
   font-weight: 600;
 }
 
-.rule-form button:disabled {
+.repeat-rule[data-wrong] {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.repeat-next {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.repeat-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.repeat-check {
+  display: inline-grid;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+}
+
+.chip-choice .repeat-check svg {
+  color: var(--accent);
+}
+
+.repeat-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 8px 2px;
+  border-top: 1px solid var(--line);
+}
+
+.repeat-as-text {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.repeat-as-text:hover,
+.repeat-as-text:focus-visible {
+  color: var(--ink);
+}
+
+/* It stays in sight while the popover scrolls, as it does with Custom's form open in a short window. */
+.repeat-foot {
+  display: flex;
+  position: sticky;
+  bottom: -6px;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 6px -6px -6px;
+  padding: 8px 8px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+
+.repeat-foot button {
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background-color: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.repeat-foot button:hover:enabled {
+  background-color: var(--hover);
+}
+
+.repeat-foot button:focus-visible,
+.repeat-as-text:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.repeat-foot button.primary:enabled {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.repeat-foot button:disabled {
   color: var(--faint);
   cursor: default;
 }
 
-.rule-simple {
+/* The form that builds any rule as a sentence. */
+.rule-editor {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.rule-form .rule-simple button {
-  border-color: transparent;
-  text-align: left;
+.rule-editor p {
+  margin: 0;
+}
+
+.rule-editor button,
+.rule-editor input,
+.rule-editor select {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background-color: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+}
+
+.rule-editor button {
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.rule-editor button:hover:enabled,
+.rule-editor button:focus-visible {
+  background-color: var(--hover);
+  outline: none;
+}
+
+.rule-editor button:focus-visible,
+.rule-editor input:focus-visible,
+.rule-editor select:focus-visible,
+.completions button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.rule-editor button:disabled,
+.rule-editor select:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rule-in {
+  margin-left: 16px;
+}
+
+.rule-row input[type="number"] {
+  width: 4em;
+  padding: 2px 4px;
+}
+
+.rule-row input[type="date"],
+.rule-row input[type="text"] {
+  padding: 2px 6px;
+}
+
+.rule-row .rule-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+.rule-row select {
+  max-width: 100%;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .rule-days {
@@ -5429,70 +6495,45 @@ button.diff-fold:hover {
   gap: 3px;
 }
 
-.rule-days button {
+.rule-editor .rule-days button {
   flex: 1;
   padding: 3px 0;
 }
 
-.rule-form .rule-more {
-  align-self: flex-start;
+.rule-editor button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rule-editor .rule-out {
+  padding: 0 6px;
   border-color: transparent;
-  padding-left: 0;
   color: var(--muted);
 }
 
-.rule-more::before {
-  content: "▸ ";
+.rule-editor .rule-add {
+  align-self: flex-start;
+  padding-left: 0;
+  border-color: transparent;
+  color: var(--muted);
 }
 
-.rule-more[aria-expanded="true"]::before {
-  content: "▾ ";
+.rule-hint {
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.rule-advanced {
+.rule-note {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
-}
-
-.rule-advanced label {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.rule-advanced input[type="radio"] {
-  margin: 0 2px 0 0;
-  accent-color: var(--accent);
-}
-
-.rule-advanced input[type="number"] {
-  width: 3.6em;
-  padding: 2px 4px;
-}
-
-.rule-advanced select {
-  padding: 2px 2px;
-}
-
-.rule-foot {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-
-.rule-says {
-  flex: 1;
-  color: var(--muted);
-}
-
-.rule-form button.primary:enabled {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 12px;
 }
 
 .completions {
@@ -5885,21 +6926,6 @@ button.diff-fold:hover {
   padding: 6px 10px 2px;
 }
 
-.toasts {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  z-index: 60;
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.toasts .told {
-  position: static;
-  transform: none;
-  pointer-events: auto;
-}
-
 .info-tags {
   display: flex;
   flex-wrap: wrap;
@@ -5984,7 +7010,6 @@ button.diff-fold:hover {
 
 /* Calendar and Contacts */
 
-.calendar-page,
 .contacts-page {
   display: flex;
   flex-direction: column;
@@ -6001,24 +7026,89 @@ button.diff-fold:hover {
   max-width: 46rem;
 }
 
-.calendar-page h1,
+/* v1's frame: the page itself never scrolls; in Week and Day only the hours do, under a header that stays put. */
+.calendar-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 1500px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 16px 24px 0;
+  overflow: hidden;
+}
+
+.calendar-page[data-view="month"],
+.calendar-page[data-view="agenda"] {
+  overflow-y: auto;
+  padding-bottom: 2rem;
+}
+
 .contacts-page h1 {
   margin: 0;
   font-size: 22px;
 }
 
-.cal-tools {
+.cal-head {
   display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.cal-head h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.cal-head .cal-zone {
+  flex: 1 1 12em;
+}
+
+.cal-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.cal-choose,
+.cal-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-toolbar {
+  display: flex;
+  flex: none;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
 }
 
-.cal-tools h2 {
+.cal-toolbar h2 {
   flex: 1;
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
   font-size: 15px;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cal-notice {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--accent-soft);
+  font-size: 13px;
 }
 
 .cal-nav,
@@ -6085,10 +7175,6 @@ button.diff-fold:hover {
   min-width: 0;
   min-height: 6.5rem;
   padding: 4px;
-}
-
-.cal-week .cal-day {
-  min-height: 18rem;
 }
 
 .cal-grid .cal-day + .cal-day {
@@ -6172,19 +7258,21 @@ button.diff-fold:hover {
 }
 
 .cal-event[data-all-day] {
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--c, var(--accent)) 18%, var(--bg-elev));
+  box-shadow: inset 3px 0 0 var(--c, var(--accent));
 }
 
 .cal-event[data-all-day]:hover {
   filter: brightness(0.95);
 }
 
-.cal-swatch {
+.cal-swatch,
+.cal-dot {
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--faint);
+  background: var(--c, var(--faint));
 }
 
 .cal-time {
@@ -6198,22 +7286,6 @@ button.diff-fold:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* A week's days are tall and narrow, so a title there takes the lines it needs under its time. */
-.cal-week .cal-event {
-  flex-wrap: wrap;
-}
-
-.cal-week .cal-title {
-  flex-basis: 100%;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
-.cal-week .cal-event[data-all-day] .cal-title {
-  flex: 1;
-  flex-basis: 0;
 }
 
 .cal-agenda {
@@ -6245,6 +7317,478 @@ button.diff-fold:hover {
 
 .cal-agenda .cal-time {
   width: 5.5em;
+}
+
+/* Week and Day: v1's time grid, 48px an hour, with the days sliding sideways under a header and hours that stay put. */
+.cal-tg {
+  --gutter: 56px;
+  --nest: min(28px, 22%);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cal-tg-top {
+  flex: none;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.cal-tg-row {
+  display: flex;
+}
+
+.cal-tg-gutter {
+  flex: none;
+  width: var(--gutter);
+}
+
+.cal-tg-clip {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cal-tg-strip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.cal-tg-head {
+  height: 56px;
+}
+
+.cal-tg-day {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: var(--col);
+}
+
+.cal-tg[data-days="1"] .cal-tg-day {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-left: 10px;
+}
+
+.cal-tg-weekday {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.cal-tg-date {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.cal-tg-day[data-today] .cal-tg-weekday {
+  color: var(--accent);
+}
+
+.cal-tg-day[data-today] .cal-tg-date {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.cal-tg-allday {
+  min-height: 30px;
+}
+
+.cal-tg-allday .cal-tg-gutter {
+  padding: 7px 8px 0 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cal-tg-allday .cal-tg-strip {
+  top: 3px;
+}
+
+.cal-bar {
+  position: absolute;
+  height: 20px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 6px 0 9px;
+  background: color-mix(in srgb, var(--c) calc(var(--cal-tint) + 2%), var(--bg-elev));
+  box-shadow: inset 3px 0 0 var(--c);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 20px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cal-bar[data-before] {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.cal-bar[data-after] {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.cal-tg-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cal-tg-body {
+  position: relative;
+  display: flex;
+  height: calc(24 * var(--hour));
+}
+
+.cal-hours {
+  position: relative;
+  flex: none;
+  width: var(--gutter);
+}
+
+.cal-hours > span {
+  position: absolute;
+  right: 8px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+
+.cal-col {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--col);
+  border-left: 1px solid var(--line);
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), var(--line) calc(var(--hour) - 1px) var(--hour));
+}
+
+.cal-tg-clip[data-adding] .cal-col {
+  cursor: cell;
+}
+
+.cal-col[data-today] {
+  background-color: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.calendar-page[data-weekends] .cal-col[data-weekend]:not([data-today]),
+.calendar-page[data-weekends] .cal-day[data-weekend]:not([data-outside]) {
+  background-color: color-mix(in srgb, var(--ink) 3.5%, transparent);
+}
+
+.calendar-page[data-weekends] .cal-tg-day[data-weekend]:not([data-today]) .cal-tg-weekday {
+  color: var(--faint);
+}
+
+.cal-now {
+  position: absolute;
+  right: 0;
+  left: -1px;
+  z-index: 30;
+  height: 2px;
+  background: var(--danger);
+  pointer-events: none;
+}
+
+.cal-now::before {
+  position: absolute;
+  top: -4px;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  content: "";
+}
+
+/* An event: a card tinted with its calendar's colour, a bar of the colour down its left, its title over its time. */
+.cal-ev {
+  position: absolute;
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-sizing: border-box;
+  margin-left: 2px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 6px 3px 9px;
+  background: color-mix(in srgb, var(--c) var(--cal-tint), var(--bg-elev));
+  box-shadow: inset 3px 0 0 var(--c);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cal-ev:hover {
+  background: color-mix(in srgb, var(--c) calc(var(--cal-tint) + 8%), var(--bg-elev));
+  box-shadow: inset 3px 0 0 var(--c), 0 2px 8px -2px color-mix(in srgb, var(--c) 45%, transparent);
+}
+
+.cal-ev:focus-visible,
+.cal-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* One on top of another is ringed in the page's colour, so it reads as a card of its own. */
+.cal-ev.is-nested {
+  box-shadow: inset 3px 0 0 var(--c), 0 0 0 1px var(--bg);
+}
+
+.cal-ev.is-past {
+  background: color-mix(in srgb, var(--c) calc(var(--cal-tint) / 2), var(--bg-elev));
+  color: var(--muted);
+}
+
+.cal-ev-title {
+  display: -webkit-box;
+  flex: none;
+  overflow: hidden;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lines, 1);
+}
+
+.cal-ev-time {
+  flex: none;
+  overflow: hidden;
+  color: color-mix(in srgb, currentcolor 76%, transparent);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-ev-start,
+.cal-ev-compact {
+  display: none;
+}
+
+.cal-ev.is-narrow {
+  padding-right: 2px;
+  padding-left: 6px;
+}
+
+.cal-ev-compact {
+  font-size: 11px;
+}
+
+/* Under an hour: one line, the title then when it starts. */
+.cal-ev.is-short {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.cal-ev.is-short .cal-ev-time {
+  font-size: inherit;
+}
+
+.cal-ev.is-short .cal-ev-title {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-ev.is-short .cal-ev-range {
+  display: none;
+}
+
+.cal-ev.is-short .cal-ev-start {
+  display: inline;
+}
+
+.cal-ev.is-short .cal-ev-compact {
+  display: none;
+}
+
+/* The time goes from the range to its start as a card narrows, and in the narrowest cards comes first, so it is never what is cut off. */
+@container (max-width: 149px) {
+  .cal-ev-range {
+    display: none;
+  }
+
+  .cal-ev-start {
+    display: inline;
+  }
+}
+
+@container (max-width: 129px) {
+  .cal-ev.is-short .cal-ev-time {
+    order: -1;
+  }
+}
+
+@container (max-width: 55px) {
+  .cal-ev-start {
+    display: none;
+  }
+
+  .cal-ev-compact {
+    display: inline;
+  }
+}
+
+.cal-ev-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 7px;
+  cursor: ns-resize;
+}
+
+.cal-ev:hover .cal-ev-grip::after {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 18px;
+  height: 2px;
+  margin-left: -9px;
+  border-radius: 1px;
+  background: var(--c);
+  content: "";
+}
+
+.cal-ghost {
+  position: absolute;
+  right: 3px;
+  left: 2px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-size: 11.5px;
+  pointer-events: none;
+}
+
+.cal-ev.is-draft,
+.cal-ev.is-dragging {
+  right: 3px;
+  left: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.cal-ev.is-draft {
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  box-shadow: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cal-ev.is-dragging {
+  opacity: 0.88;
+  box-shadow: inset 3px 0 0 var(--c), var(--shadow);
+  cursor: grabbing;
+}
+
+/* The Calendars dialog: each calendar data source, and under one that is connected, its calendars to show or not. */
+.cal-sources {
+  width: min(560px, 100%);
+}
+
+.cal-shown {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 0 0 2px;
+  list-style: none;
+}
+
+.cal-shown label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cal-shown .cal-dot {
+  width: 10px;
+  height: 10px;
+}
+
+.event-form.cal-new {
+  padding: 16px;
+  overflow-y: auto;
+  border-top: 0;
+}
+
+.cal-new-title {
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  padding: 4px 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.cal-new-title:focus {
+  border-bottom-color: var(--accent);
+  outline: none;
+}
+
+.cal-new-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cal-new-length {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .event-scrim {
@@ -6357,6 +7901,85 @@ button.diff-fold:hover {
   border-top: 1px solid var(--line);
 }
 
+.event-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.event-notes h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.event-new-note {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.event-new-note label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.event-new-note select {
+  max-width: 260px;
+}
+
+.event-new-note p {
+  flex-basis: 100%;
+}
+
+.event-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-note-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.event-note-list .link {
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-audience {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.event-audience[data-audience="private"] {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--ink);
+}
+
+.event-audience[data-audience="shared"] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
 .event-form label:not(.check) {
   display: flex;
   flex-direction: column;
@@ -6461,20 +8084,35 @@ button.diff-fold:hover {
   text-underline-offset: 2px;
 }
 
-.contact-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* Contacts as cards, as notes and todos are listed: the whole card opens the person's page. */
+.contact-cards > li {
+  display: block;
 }
 
-.contact-list > li {
+.contact-card {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  padding: 10px 0;
-  border-top: 1px solid var(--line);
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.contact-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The initials are drawn and not written, so a card's words start with the name. */
+.contact-avatar::before {
+  content: attr(data-initials);
 }
 
 .contact-what {
@@ -6482,23 +8120,29 @@ button.diff-fold:hover {
   flex: 1;
   flex-direction: column;
   gap: 2px;
-  min-width: 12rem;
+  min-width: 0;
 }
 
 .contact-name {
-  font-weight: 600;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .contact-organization,
 .contact-reach {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .contact-reach {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 12px;
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -6942,3 +8586,274 @@ a.file-chip:hover .file-chip-name {
 }
 
 /* Uploads: end */
+
+/* A person's page: what a mention leads to. */
+
+.person-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  max-width: 46rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.person-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.person-photo {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 20px;
+  object-fit: cover;
+}
+
+.person-title {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.person-title h1 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.person-what {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.person-page h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.person-contact {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.person-whose {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.person-fields {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.person-field {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 2px 12px;
+}
+
+.person-field dt {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.person-field dd {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.person-contact-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.person-not-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.person-not-contact .person-whose {
+  margin: 0;
+}
+
+/* A contact edited as a contacts app does: a label beside each field, its lines one under another. */
+.contact-form {
+  display: grid;
+  gap: 10px;
+}
+
+.contact-form-photo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.contact-form-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.contact-form-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.contact-form-lines {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.contact-form-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.contact-form-birthday {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.contact-form input,
+.contact-form textarea,
+.contact-form select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.contact-form-birthday input {
+  width: 5rem;
+}
+
+.contact-form-birthday select {
+  width: auto;
+}
+
+.contact-form textarea {
+  resize: vertical;
+}
+
+.contact-form-add {
+  gap: 4px;
+}
+
+.contact-form-add svg {
+  width: 12px;
+  height: 12px;
+}
+
+.contact-form-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .contact-form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.person-source {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.person-mentions ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.person-line:hover,
+.person-line:focus-visible {
+  background: var(--hover);
+}
+
+.person-text {
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+.person-note,
+.person-none {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.person-none {
+  padding: 8px 10px;
+}
+
+@media (max-width: 600px) {
+  .person-page {
+    padding: 1rem 16px 2rem;
+  }
+
+  .person-field {
+    grid-template-columns: 1fr;
+  }
+}
+
+.person-page a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+

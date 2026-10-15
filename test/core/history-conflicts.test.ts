@@ -1,6 +1,6 @@
 import type { ChangeSet } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { resolved, revertedBy, reverting, settledRevert, takeBackOut, type Choice, type Recorded } from "../../src/core/history.ts";
+import { linesAsOf, resolved, revertedBy, reverting, settledRevert, takeBackOut, type Choice, type Recorded } from "../../src/core/history.ts";
 import type { Reverts } from "../../src/core/protocol.ts";
 import { applyChanges, changesBetween } from "../../src/core/text.ts";
 
@@ -315,7 +315,7 @@ describe(`the record through ${FUZZ} random runs of lines added, removed, rewrit
 describe("a note's record replayed", () => {
   it("leaves nothing of a note every line of which was rewritten and then replaced, once going back empties it", () => {
     const n = made("x y z8", "X Y Z8", "a6");
-    expect(n.preview([1]).conflicts).toEqual([{ line: 1, before: [], now: ["a6"], kept: ["a6", "Y", "Z"], later: [2, 3] }]);
+    expect(n.preview([1]).conflicts).toEqual([{ line: 1, before: [], now: ["a6"], kept: ["a6"], later: [3] }]);
     n.revert([1], "back");
     expect(n.text()).toBe("");
     n.edit("hello");
@@ -342,5 +342,38 @@ describe("a note's record replayed", () => {
     const after = joined.text();
     joined.edit(`${after}\ny e c3`);
     expect(joined.backTo(5)).toBe(`${after}\ny e c3`);
+  });
+});
+
+describe("where a conflict is on the diff of the changes reverted", () => {
+  /** A conflict's place in the note as revision `at` left it. */
+  const placed = (n: ReturnType<typeof made>, revisions: number[], at: number) => {
+    const found = n.preview(revisions);
+    return found.conflicts.map((c) => linesAsOf(n.history, found, at, c.line, c.kept.length));
+  };
+
+  it("is the line the reverted change wrote, however the lines around it have moved since", () => {
+    const n = made("one\ntwo\nthree", "one\nTWO\nthree", "zero\none\nTWO, and more\nthree\nfour");
+    expect(n.preview([2]).conflicts).toMatchObject([{ line: 3, now: ["TWO, and more"] }]);
+    expect(placed(n, [2], 2)).toEqual([{ line: 2, lines: 1 }]);
+  });
+
+  it("is every line of a stretch the reverted change wrote, when a later change rewrote part of it", () => {
+    const n = made("a\nz", "a\nb\nc\nd\nz", "top\na\nb\nC!\nd\nz");
+    expect(n.preview([2]).conflicts).toMatchObject([{ now: ["b", "C!", "d"], kept: ["C!"], later: [3] }]);
+    expect(placed(n, [2], 2)).toEqual([{ line: 2, lines: 3 }]);
+  });
+
+  it("is the last line, when the reverted change wrote it at the note's end and a later one added to it", () => {
+    const n = made("a\nb", "a\nb\nc", "a\nb\nc!");
+    expect(n.preview([2]).conflicts).toMatchObject([{ now: ["c!"], kept: ["c!"] }]);
+    expect(placed(n, [2], 2)).toEqual([{ line: 3, lines: 1 }]);
+  });
+
+  it("is told apart for two runs of changes: each conflict on the run that wrote its lines", () => {
+    const n = made("a\nb\nc\nd\ne", "A\nb\nc\nd\ne", "A\nb\nc\nd\ne\nf", "A\nb\nc\nD\ne\nf", "A!\nb\nc\nD?\ne\nf");
+    expect(n.preview([2, 4]).conflicts).toMatchObject([{ now: ["A!"] }, { now: ["D?"] }]);
+    expect(placed(n, [2, 4], 2)).toEqual([{ line: 1, lines: 1 }, { line: 4, lines: 1 }]);
+    expect(placed(n, [2, 4], 4)).toEqual([{ line: 1, lines: 1 }, { line: 4, lines: 1 }]);
   });
 });

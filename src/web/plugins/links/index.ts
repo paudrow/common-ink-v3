@@ -78,6 +78,7 @@ export const links: Plugin = {
     host.commands.register({
       id: "links.follow",
       title: "Follow the link at the cursor",
+      group: "Editor",
       run() {
         const view = focused() ?? editors.get(host.app().noteId ?? "");
         const to = view && linkAt(view.state, view.state.selection.main.head);
@@ -91,6 +92,7 @@ export const links: Plugin = {
     host.commands.register({
       id: "links.edit",
       title: "Edit the link at the cursor",
+      group: "Editor",
       keys: ["alt+enter"],
       when: () => {
         const view = focused();

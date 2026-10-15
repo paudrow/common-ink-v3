@@ -15,7 +15,6 @@ const DUE = "EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND state = 'trashed' AND
 export const REMOVALS = [
   `DELETE FROM note_search WHERE rowid = (SELECT id FROM note_search_rows WHERE note_id = ?1) AND ${DUE}`,
   `DELETE FROM note_search_rows WHERE note_id = ?1 AND ${DUE}`,
-  `DELETE FROM todo_projects WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM todos WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM note_tags WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM mentions WHERE note_id = ?1 AND ${DUE}`,

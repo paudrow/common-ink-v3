@@ -17,6 +17,7 @@ const PATHS = {
       <path d="m5.5 8 1.75 1.75L10.5 6.5" />
     </>
   ),
+  repeat: <path d="M12.5 6.5A4.75 4.75 0 0 0 4 4.75M3.5 2.5v2.5H6M3.5 9.5A4.75 4.75 0 0 0 12 11.25M12.5 13.5V11H10" />,
   calendar: (
     <>
       <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
@@ -62,6 +63,7 @@ const PATHS = {
   plus: <path d="M8 3.5v9M3.5 8h9" />,
   edit: <path d="M9.75 3.75 12.25 6.25M3 13l.6-2.85 7.4-7.4a1.2 1.2 0 0 1 1.7 0l.55.55a1.2 1.2 0 0 1 0 1.7l-7.4 7.4z" />,
   close: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,
+  pin: <path d="M6 2.5h4l-.5 4 2 2.25h-7l2-2.25zM8 8.75v4.75" />,
   chevron: <path d="m6 4.5 3.5 3.5L6 11.5" />,
   sidebar: (
     <>
@@ -180,6 +182,22 @@ const PATHS = {
       <path d="M4 10V6l1.75 2L7.5 6v4M11 6v4M9.5 8.5 11 10l1.5-1.5" />
     </>
   ),
+  flag: <path d="M4 14V2.75h8l-1.5 3 1.5 3H4" />,
+  sliders: (
+    <>
+      <path d="M13.5 4.75h-6M9.5 11.25h-6" />
+      <circle cx="11.5" cy="11.25" r="2" />
+      <circle cx="4.5" cy="4.75" r="2" />
+    </>
+  ),
+  open: <path d="M10 2.5h3.5V6M7 9l6.5-6.5M12 9v3.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 2 12.5v-7A1.5 1.5 0 0 1 3.5 4H7" />,
+  split: (
+    <>
+      <rect x="1.5" y="2.75" width="5.75" height="10.5" rx="1.25" />
+      <rect x="8.75" y="2.75" width="5.75" height="10.5" rx="1.25" />
+    </>
+  ),
+  check: <path d="m3.75 8.25 2.75 2.75 5.75-6" />,
 } as const;
 
 export type IconName = keyof typeof PATHS;

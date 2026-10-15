@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { connectAgent, perform, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -134,7 +134,8 @@ test("the Backlinks tab lists the notes that link to the open note, follows link
   const trip = await create(page, "# Trip\n\n");
   await create(page, "# Unrelated");
   await page.goto(`/note/${plan.id}`);
-  await page.getByRole("tab", { name: "Backlinks" }).click();
+  // Pinned, so it stays while the member writes in the editor.
+  await pinPanel(page, "Backlinks");
   await expect(backlinks(page)).toHaveText([/^Diary\s*First thoughts on\.\s*Unsorted$/]);
 
   // Written in the other side of a split, with this note still the one the inspector is about.
@@ -150,7 +151,7 @@ test("the Backlinks tab lists the notes that link to the open note, follows link
 
   await backlinks(page).click();
   await expect(page).toHaveURL(/\/note\/diary-/);
-  await expect(page.getByRole("tabpanel")).toContainText("No notes link here yet.");
+  await expect(page.getByRole("complementary", { name: "Inspector" })).toContainText("No notes link here yet.");
 });
 
 test("a click on a drawn link opens its note as any note is opened, ⌘-click opens it in a tab behind, and as written a plain click is for the cursor", async ({ page }) => {
@@ -485,4 +486,25 @@ test("nothing moves when the cursor comes to a line with links, and only what fo
   await page.keyboard.press("ControlOrMeta+Home");
   await expect(drawnLinks(page)).toHaveText(["Plan for spring", "the trip"]);
   expectUnmoved(await places(page, ALL), before, "after the cursor left");
+});
+
+test("on a line with a bold word and a link, only the one the cursor is on is shown as written", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const plan = await create(page, "# Plan for spring");
+  const diary = await create(page, `# Diary\n\nA **bold** word, [[${plan.id}]] and an end`);
+  await open(page, diary.id, "Plan for spring");
+  const line = lines(page).nth(2);
+  const drawn = "A bold word, Plan for spring and an end";
+  await expect(line, "the cursor at the line's end shows neither").toHaveText(drawn);
+
+  await page.keyboard.press("Home");
+  await expect(line, "nor at its start").toHaveText(drawn);
+  await keys(page, "ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight");
+  await expect(line, "in the bold word, its marks and not the link's id").toHaveText("A **bold** word, Plan for spring and an end");
+
+  await page.keyboard.press("End");
+  for (let i = 0; i < " and an end".length; i++) await page.keyboard.press("ArrowLeft");
+  await expect(line, "beside the link, both are drawn").toHaveText(drawn);
+  await page.keyboard.press("ArrowLeft");
+  await expect(line, "in the link, its id and not the bold word's marks").toHaveText(`A bold word, [[${plan.id}]] and an end`);
 });

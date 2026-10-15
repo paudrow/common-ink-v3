@@ -93,7 +93,8 @@ describe("an agent limited to folders", () => {
     expect((await connect({ workspaceId: ada.workspaceId, folderIds: [plans, plans, projects] })).agent.folderIds).toEqual([plans, projects]);
   });
 
-  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", async () => {
+  // Some ninety tool calls: a slow runner takes longer than the default 5 s.
+  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", { timeout: 30_000 }, async () => {
     const w = await world();
     const claude = await asAgent(w.limited.token);
 
@@ -273,7 +274,7 @@ describe("an agent limited to folders", () => {
     expect((await listAgents(env.DB, w.ada.personId)).find((a) => a.id === agent.id)!.folderIds).toEqual([w.plans]);
   });
 
-  it("lists the todos, projects and tags of its own notes only, and sets no todo outside", async () => {
+  it("lists the todos and tags of its own notes only, learns nothing of a folder outside by asking for its todos, and sets no todo outside", async () => {
     const w = await world();
     const todo = "- [ ] buy-outside +proj-outside";
     await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Chores-outside\n\n${todo}\n\n#tag-outside` });
@@ -283,14 +284,40 @@ describe("an agent limited to folders", () => {
 
     const listed = await claude.json<{ todos: { text: string }[] }>("list_todos", { includeCompleted: true });
     expect(listed.todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
-    expect((await claude.json<{ todos: unknown[] }>("list_todos", { project: "proj-outside" })).todos).toEqual([]);
+    // Narrowed to a folder: one inside its limit with the folders under it, and a folder outside is no folder, as one that never was.
+    expect((await claude.json<{ todos: { text: string }[] }>("list_todos", { folderId: w.projects })).todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
+    expect((await claude.json<{ todos: { text: string }[] }>("list_todos", { folderId: w.plans })).todos.map((t) => t.text)).toEqual(["- [ ] ship-inside +proj-inside"]);
+    expect(await claude.call("list_todos", { folderId: w.journal })).toEqual(NO_FOLDER);
+    expect(await claude.call("list_todos", { folderId: w.journal, includeCompleted: true, tag: "tag-outside" })).toEqual(await claude.call("list_todos", { folderId: MISSING, includeCompleted: true, tag: "tag-outside" }));
     expect((await claude.json<{ todos: unknown[] }>("list_todos", { tag: "tag-outside" })).todos).toEqual([]);
-    expect(await claude.json("todo_filters")).toEqual({ projects: ["proj-inside"], tags: ["tag-inside"], assignees: [] });
+    expect(await claude.json("todo_filters")).toEqual({ tags: ["tag-inside"], assignees: [] });
     const set = (id: string) => claude.call("set_todo", { id, revision: 1, line: 3, text: todo, done: true });
     expect(await set(chores.id)).toEqual(NO_NOTE);
     expect(await set(MISSING)).toEqual(NO_NOTE);
     expect((await perform(env.DB, w.ada, { type: "note.read", id: chores.id })).text).toContain(todo);
-    expect(claude.said.join("\n")).not.toMatch(/buy-outside|proj-outside|tag-outside|Chores-outside/);
+    expect(claude.said.join("\n")).not.toMatch(/buy-outside|proj-outside|tag-outside|Chores-outside|Journal/);
+  });
+
+  it("skips a recurring todo inside its folders and completes the last time of one that ends, with nothing filed outside them, and neither outside", async () => {
+    const w = await world();
+    const todo = "- [ ] Water-inside every:1w-times-2 due:2026-10-10";
+    const chores = await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: todo });
+    const elsewhere = await perform(env.DB, w.ada, { type: "note.create", text: "- [ ] Water-outside every:1w due:2026-10-10" });
+    const daily = await perform(env.DB, w.ada, { type: "daily.open", on: "2026-10-11" });
+    const claude = await asAgent(w.limited.token);
+
+    const skipped = await claude.json<{ text: string; revision: number; filed?: unknown }>("set_todo", { id: chores.id, revision: 1, line: 0, text: todo, skip: true, on: "2026-10-11" });
+    expect(skipped.text).toBe("- [ ] Water-inside every:1w-times-1 due:2026-10-17");
+    expect(skipped.filed).toBeUndefined();
+
+    const last = await claude.json<{ text: string; filed: { dailyNoteId: string | null; todos: number } }>("set_todo", { id: chores.id, revision: skipped.revision, line: 0, text: skipped.text, done: true, on: "2026-10-11" });
+    expect(last.text).toBe("- [x] Water-inside every:1w-times-1 due:2026-10-17");
+    expect(last.filed).toEqual({ on: "2026-10-11", dailyNoteId: null, todos: 1 });
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: daily.id })).revision).toBe(1);
+
+    expect(await claude.call("set_todo", { id: elsewhere.id, revision: 1, line: 0, text: "- [ ] Water-outside every:1w due:2026-10-10", skip: true, on: "2026-10-11" })).toEqual(NO_NOTE);
+    expect((await perform(env.DB, w.ada, { type: "note.read", id: elsewhere.id })).revision).toBe(1);
+    expect(await claude.call("set_todo", { id: chores.id, revision: 3, line: 0, text: last.text, skip: true })).toMatchObject({ isError: true, text: expect.stringContaining("invalid") });
   });
 
   it("completes a recurring todo inside its folders and files nothing on a daily note outside them, makes no daily folder, and is told of no daily note", async () => {
@@ -332,11 +359,11 @@ describe("an agent limited to folders", () => {
     const w = await world();
     const { ada } = w;
     const note = (folderId: string | undefined, text: string) => perform(env.DB, ada, { type: "note.create", folderId, text });
-    // Inside and outside share a word, a tag and a project, so a count that took in what is outside would be one too many.
-    const tagged = await note(w.projects, "# Budget\n\ncommonword #sharedtag #insidetag\n\n- [ ] file it +Sharedproject");
+    // Inside and outside share a word, a tag and a todo's word, so a count that took in what is outside would be one too many.
+    const tagged = await note(w.projects, "# Budget\n\ncommonword #sharedtag #insidetag\n\n- [ ] file it sharedtodo");
     const filed = await note(w.plans, "# Old plan\n\ncommonword archived-inside");
     const binned = await note(w.plans, "# Scrapped plan\n\ncommonword trashed-inside");
-    const hush = await note(w.journal, "# Hush-outside\n\ncommonword #sharedtag #hushtag\n\n- [ ] hide it +Sharedproject +Hideout");
+    const hush = await note(w.journal, "# Hush-outside\n\ncommonword #sharedtag #hushtag\n\n- [ ] hide it sharedtodo Hideout");
     const shelved = await note(w.journal, "# Shelved-outside\n\ncommonword #sharedtag archived-words-outside");
     const dumped = await note(undefined, "# Dumped-outside\n\ncommonword #sharedtag trashed-words-outside");
     await perform(env.DB, ada, { type: "note.archive", id: filed.id, archived: true });
@@ -351,15 +378,15 @@ describe("an agent limited to folders", () => {
     // A word only notes outside have finds what a word no note has finds, to the letter.
     const nothing = await claude.call("search", { query: "nosuchwordanywhere" });
     expect(JSON.parse(nothing.text)).toEqual({ results: [], next: null, indexing: false });
-    for (const query of ["private-words-outside", "Diary-outside", "Hush-outside", "#hushtag", "+Hideout", "archived-words-outside", "trashed-words-outside", "scribe-words-outside", '"unsorted-words-outside ghost"']) {
+    for (const query of ["private-words-outside", "Diary-outside", "Hush-outside", "#hushtag", "Hideout", "archived-words-outside", "trashed-words-outside", "scribe-words-outside", '"unsorted-words-outside ghost"']) {
       for (const includeArchived of [false, true, "only"]) expect(await claude.call("search", { query, includeArchived }), `${query} ${includeArchived}`).toEqual(nothing);
     }
-    // A word, a tag and a project both sides have find its own notes, in each state asked for, however they are sorted and paged.
+    // A word, a tag and a todo's word both sides have find its own notes, in each state asked for, however they are sorted and paged.
     expect(await found({ query: "commonword" })).toEqual([tagged.id]);
     expect(await found({ query: "commonword", includeArchived: true })).toEqual([filed.id, tagged.id].sort());
     expect(await found({ query: "commonword", includeArchived: "only" })).toEqual([filed.id]);
     expect(await found({ query: "#sharedtag", includeArchived: true })).toEqual([tagged.id]);
-    expect(await found({ query: "+Sharedproject", includeArchived: true })).toEqual([tagged.id]);
+    expect(await found({ query: "sharedtodo", includeArchived: true })).toEqual([tagged.id]);
     expect(await found({ query: "commonword", hasTodos: true, includeArchived: true })).toEqual([tagged.id]);
     for (const sort of ["match", "recent", "created", "title"]) {
       const paged: string[] = [];
@@ -381,7 +408,7 @@ describe("an agent limited to folders", () => {
     expect(await claude.json("list_tags", { includeArchived: true })).toEqual({ tags: [{ name: "insidetag", notes: 1 }, { name: "sharedtag", notes: 1 }], indexing: false });
     expect(idsOf(await claude.json<Note[]>("list_notes", { tag: "sharedtag", includeArchived: true }))).toEqual([tagged.id]);
     expect(await claude.json("list_notes", { tag: "hushtag", includeArchived: true })).toEqual(await claude.json("list_notes", { tag: "nosuchtag", includeArchived: true }));
-    expect(await claude.json("todo_filters", { includeArchived: true })).toMatchObject({ projects: ["Sharedproject"] });
+    expect(await claude.json("todo_filters", { includeArchived: true })).toEqual({ tags: ["insidetag", "sharedtag"], assignees: [] });
 
     // The archived notes and Trash it is shown are its own.
     expect(idsOf(await claude.json<Note[]>("list_notes", { includeArchived: "only" }))).toEqual([filed.id]);
@@ -413,6 +440,113 @@ describe("an agent limited to folders", () => {
     expect(await claude.json("list_trash")).toEqual([]);
 
     for (const mark of marks) expect(claude.said.filter((text) => text.includes(mark)), mark).toEqual([]);
+  });
+
+  it("learns nothing through the query language: a filter naming what is outside is one naming what was never there, and no filter finds or counts a note outside", async () => {
+    const w = await world();
+    const { ada } = w;
+    const note = (folderId: string | undefined, text: string) => perform(env.DB, ada, { type: "note.create", folderId, text });
+    // Both sides have a todo with the same words, due the same day, and a note of each is shared and one outside is private.
+    const tagged = await note(w.projects, "# Budget\n\ncommonword #sharedtag\n\n- [ ] !! sharedtodo due:2026-10-01 every:1w");
+    const hush = await note(w.journal, "# Hush-outside\n\ncommonword #sharedtag #hushtag\n\n- [ ] !!! sharedtodo Hideout due:2026-10-01 every:1w");
+    const sealed = await note(w.journal, "# Sealed-outside\n\ncommonword sealed-words-outside");
+    await perform(env.DB, ada, { type: "note.setPrivate", id: sealed.id, private: true });
+    await perform(env.DB, ada, { type: "grant.link", noteId: hush.id, link: "public" });
+    await perform(env.DB, ada, { type: "grant.link", noteId: tagged.id, link: "public" });
+    const marks = [...w.marks, "Hush-outside", "hushtag", "Hideout", "Sealed-outside", "sealed-words-outside", hush.id, sealed.id];
+    const claude = await asAgent(w.limited.token);
+    /** What it asks by a name of its own choosing says that name back, so those answers are compared and not searched for marks. */
+    const naming = await asAgent(w.limited.token);
+    const today = "2026-10-13";
+    type Found = { results: { note: { id: string } }[]; next: number | null; indexing: boolean };
+    type Listed = { todos: { noteId: string }[]; next: number | null };
+    const found = async (query: string) => idsOf((await claude.json<Found>("search", { query, today })).results.map((r) => r.note));
+    const listed = async (query: string) => (await claude.json<Listed>("list_todos", { query, today })).todos.map((t) => t.noteId).sort();
+    const INSIDE = [w.inside.id, w.deep.id, tagged.id].sort();
+
+    // A folder outside, by name or by id, one that is empty, and Unsorted: each is refused in the words a folder that never was is.
+    const blank = (text: string) => text.replace(/"[^"]*"/g, '"…"');
+    for (const tool of ["search", "list_todos"]) {
+      const never = await naming.call(tool, { query: "folder:Nowhere commonword", today });
+      expect(never).toEqual({ isError: true, text: 'invalid: No folder named "Nowhere"' });
+      for (const name of ["Journal", "journal", w.journal, "Vacant", w.empty, "Unsorted", MISSING]) {
+        for (const query of [`folder:${name} commonword`, `-folder:${name}`, `commonword OR folder:${name}`, `NOT (folder:${name} OR nosuchword)`]) {
+          const answer = await naming.call(tool, { query, today });
+          expect({ ...answer, text: blank(answer.text) }, `${tool} ${query}`).toEqual({ ...never, text: blank(never.text) });
+        }
+      }
+      // Someone who has only written outside is nobody, as a name nobody has is; and one who has written on both sides is found for the inside alone.
+      const nobody = await naming.call(tool, { query: "editor:Nobody-at-all", today });
+      expect(nobody).toEqual({ isError: true, text: 'invalid: Nobody named "Nobody-at-all" has changed a note you can see' });
+      for (const query of ['editor:"Ghost-outside"', 'author:"Ghost-outside"', 'edited-by:"ghost-outside" OR commonword', '-editor:"Ghost-outside"']) {
+        const answer = await naming.call(tool, { query, today });
+        expect({ ...answer, text: blank(answer.text) }, `${tool} ${query}`).toEqual({ ...nobody, text: blank(nobody.text) });
+      }
+    }
+    expect(await found('editor:"Scribe-everywhere"')).toEqual([w.deep.id]);
+    expect(await found('editor:"Ada Lovelace"')).toEqual(INSIDE);
+    expect(await found('author:"Ada Lovelace" -editor:"Scribe-everywhere"')).toEqual([w.inside.id, tagged.id].sort());
+    expect(await found("editor:@me")).toEqual([]);
+    expect(await found('folder:Projects -folder:Plans')).toEqual([w.inside.id, tagged.id].sort());
+    expect(await found(`folder:${w.plans} OR #sharedtag`)).toEqual([w.deep.id, tagged.id].sort());
+
+    // Every filter and operator, over words and tags both sides have: only its own notes are found, and no page is left over.
+    const nothing = await claude.call("search", { query: "nosuchwordanywhere" });
+    expect(JSON.parse(nothing.text)).toEqual({ results: [], next: null, indexing: false });
+    for (const query of [
+      "private-words-outside OR Hideout OR sealed-words-outside",
+      "#hushtag",
+      "tag:hushtag OR Diary-outside in:title",
+      "is:private",
+      "is:private OR is:shared",
+      "is:shared",
+      "has:backlink",
+      "commonword is:private",
+      "commonword -folder:Projects",
+      'sharedtodo "Hideout"',
+      "commonword (has:backlink OR is:shared OR #hushtag)",
+      "scribe-words-outside updated:>=2020-01-01",
+    ]) {
+      expect(await claude.call("search", { query, today }), query).toEqual(nothing);
+    }
+    for (const [query, ids] of [
+      ["commonword", [tagged.id]],
+      ["commonword OR nosuchword", [tagged.id]],
+      ["-nosuchword", INSIDE],
+      ["NOT (Hideout OR #hushtag OR is:private OR is:shared)", INSIDE],
+      ["no:backlink", INSIDE],
+      ["-is:shared -is:private", INSIDE],
+      ["has:link", [w.inside.id]],
+      ["#sharedtag", [tagged.id]],
+      ["has:open-todo", [tagged.id]],
+      ["has:todo OR has:tag", [tagged.id]],
+      ["updated:>=7d OR created:<=today", INSIDE],
+      ["is:open sort:title-desc", INSIDE],
+      ["commonword in:body", [tagged.id]],
+    ] as const) {
+      expect(await found(query), query).toEqual([...ids].sort());
+      const page = await claude.json<Found>("search", { query, today, limit: Math.max(1, ids.length) });
+      expect(page.next, `${query}: nothing more than its own notes to page to`).toBeNull();
+    }
+
+    // Todos the same: a todo outside with the same words, the same due date and a higher importance is never listed, counted or sorted in.
+    const none = await claude.call("list_todos", { query: "nosuchwordanywhere" });
+    expect(JSON.parse(none.text)).toEqual({ todos: [], next: null });
+    for (const query of ["Hideout", "importance:3", "sharedtodo importance:>2", "is:shared", "is:private", "has:backlink", "#hushtag", "sharedtodo -folder:Projects", "Hush-outside in:title", "is:done"]) {
+      expect(await claude.call("list_todos", { query, today }), query).toEqual(none);
+    }
+    for (const query of ["", "sharedtodo", "due:<today", "due:2026-10-01", "priority:>=medium", "has:repeat", "has:due", "#sharedtag", "sort:priority-desc", "sharedtodo OR Hideout", "-Hideout", "NOT is:shared", "Budget in:title", "is:open OR is:done"]) {
+      expect(await listed(query), query).toEqual([tagged.id]);
+      expect((await claude.json<Listed>("list_todos", { query, today, limit: 1 })).next, `${query}: one todo, and no page after it`).toBeNull();
+    }
+
+    // A query it can't be read says where, in its own words alone.
+    expect(await claude.call("search", { query: "commonword titel:x" })).toEqual({ isError: true, text: 'invalid: There is no filter "titel:". To search for the words, put them in quotes (characters 12 to 17 of the query: titel:)' });
+    expect(await claude.call("list_todos", { query: "due:today" })).toEqual({ isError: true, text: 'invalid: "today" is counted from today, and the server doesn\'t know your day: pass today, as YYYY-MM-DD' });
+
+    for (const mark of marks) expect(claude.said.filter((text) => text.includes(mark)), mark).toEqual([]);
+    // And what named a thing outside was told nothing but that name back.
+    for (const text of naming.said) expect(text).toMatch(/^invalid: (No folder named|Nobody named) "[^"]*"( has changed a note you can see)?$/);
   });
 
   it("is told its own notes are still being indexed, and nothing of the notes outside that are", async () => {
@@ -451,15 +585,24 @@ describe("an agent limited to folders", () => {
   it("is refused its member's calendar and contacts, which are in no folder, and reads a reference in its notes as its label alone", async () => {
     const w = await world();
     const asked: string[] = [];
-    const lunch = { sourceId: "cal", id: "a1", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
-    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null };
+    const lunch = { sourceId: "cal", id: "a1", calendarId: "mine", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
+    const mine = { sourceId: "cal", id: "mine", name: "Mine-calendar-outside", color: null, writable: true };
+    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null, title: "Plumber-outside", addresses: ["Lane-outside"], birthday: null, notes: "notes-outside", photo: null, urls: [], etag: "e1" };
     const changed: unknown[] = [];
     const sources: Sources = {
       async of(personId) {
         asked.push(personId);
         const info = (id: string, name: string) => ({ id, name, provider: "Test", state: "connected" as const, account: "ada-account-outside@test" });
         return [
-          { kind: "calendar", info: info("cal", "Calendar-source-outside"), list: async () => [lunch], get: async (id) => (id === "a1" ? lunch : null), update: async (id, change) => (changed.push([id, change]), lunch) },
+          {
+            kind: "calendar",
+            info: info("cal", "Calendar-source-outside"),
+            list: async () => ({ calendars: [mine], events: [lunch] }),
+            get: async (id) => (id === "a1" ? lunch : null),
+            calendar: async (id) => (id === mine.id ? mine : null),
+            update: async (id, change) => (changed.push([id, change]), lunch),
+            create: async (calendarId, fields) => (changed.push([calendarId, fields]), lunch),
+          },
           { kind: "contacts", info: info("people", "Contacts-source-outside"), list: async () => ({ contacts: [sam], more: false }), get: async (id) => (id === sam.id ? sam : null) },
         ];
       },
@@ -484,14 +627,19 @@ describe("an agent limited to folders", () => {
       expect(await claude.call("list_contacts", { query: "sam" })).toEqual(refused("contact.list"));
       // A reference in a note it reads, one in a note it can't, and one that was never made are refused alike.
       for (const ref of [event.ref, contact.ref, MISSING]) expect(await claude.call("read_record", { ref })).toEqual(refused("record.read"));
+      // Which notes reference an event, the one inside the limit or the one outside it, is refused too.
+      expect(await claude.call("notes_about_record", { sourceId: "cal", id: "a1" })).toEqual(refused("record.notes"));
       const changes = token === readOnly.token ? (op: string) => ({ isError: true, text: `forbidden: A read-only token can't ${op}` }) : refused;
       expect(await claude.call("refer_record", { sourceId: "cal", id: "a1" })).toEqual(changes("record.refer"));
       expect(await claude.call("update_event", { sourceId: "cal", id: "a1", etag: "e1", title: "Taken" })).toEqual(changes("event.update"));
+      expect(await claude.call("create_event", { sourceId: "cal", calendarId: "mine", title: "Taken", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } })).toEqual(changes("event.create"));
       // What its note says of them is what every reader of the note is told: the reference and its label.
       expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n::event{${event.ref} Lunch with Sam} with ::contact{${contact.ref} Sam Okafor}`);
       await claude.json("search", { query: "Lunch" });
       await claude.json("note_history", { id: w.deep.id });
-      expect(claude.said.join("\n")).not.toMatch(/Cafe-Lula-outside|contract-outside|sam-outside@example\.com|Mine-calendar-outside|ada-account-outside|source-outside|people\/c1/);
+      // Sam's page tells it the name it asked by and nothing of its member's contact.
+      expect(await claude.json("read_person", { who: "Sam Okafor" })).toMatchObject({ who: "Sam Okafor", name: "Sam Okafor", member: null, contacts: [] });
+      expect(claude.said.join("\n")).not.toMatch(/Cafe-Lula-outside|contract-outside|sam-outside@example\.com|Plumber-outside|Lane-outside|notes-outside|Mine-calendar-outside|ada-account-outside|source-outside|people\/c1/);
       for (const mark of w.marks) expect(claude.said.join("\n")).not.toContain(mark);
     }
     // Refused before anything was asked of a data source, and nothing was changed there.
@@ -515,7 +663,7 @@ describe("an agent limited to folders", () => {
     // What its note says of a mention is the note's text, and nothing is added from who is a member now.
     const read = await claude.json<{ mentions: unknown[] }>("read_note", { id: sprint.id });
     expect(read.mentions).toEqual([{ id: null, name: "Robert", member: false }, { id: null, name: "Dana-inside", member: false }, { id: bob.personId, name: "Robert", member: false }]);
-    expect(await claude.json("todo_filters")).toEqual({ projects: [], tags: [], assignees: [{ id: null, name: "Dana-inside", member: false }, { id: null, name: "Robert", member: false }] });
+    expect(await claude.json("todo_filters")).toEqual({ tags: [], assignees: [{ id: null, name: "Dana-inside", member: false }, { id: null, name: "Robert", member: false }] });
     for (const assignee of [bob.personId, "Carol-outside", "Bob-outside-only"]) expect((await claude.json<{ todos: unknown[] }>("list_todos", { assignee })).todos, assignee).toEqual([]);
     expect((await claude.json<{ todos: unknown[] }>("list_todos", { assignedToMe: true })).todos).toEqual([]);
 
