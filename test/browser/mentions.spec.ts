@@ -430,9 +430,18 @@ test("a click on a mention opens that person's page: my contact's details for me
   // One read of the page, which lists my contacts again each time.
   expect(reads).toHaveLength(1);
 
+  // The inspector is about the notes that mention him: Info counts them, and History is theirs.
+  await pinPanel(page, "Info");
+  const panel = page.getByRole("complementary", { name: "Inspector" });
+  await expect(panel.getByRole("definition").first()).toHaveText("Sam Okafor");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("3 notes");
+
   // An OR typed here is still among the notes that mention him: the catalogue mentions nobody.
   await sam.getByRole("searchbox", { name: "Search the notes that mention Sam Okafor" }).fill("leak OR catalogue");
   await expect(sam.getByRole("list", { name: "Found" }).getByRole("listitem")).toHaveText([/^Plumbing log/]);
+  // While a search is shown, the inspector is about what it found.
+  await expect(panel.getByRole("definition").first()).toHaveText("Sam Okafor: leak OR catalogue");
+  await expect(panel.getByRole("definition").nth(1)).toHaveText("1 note");
   await sam.getByRole("searchbox", { name: "Search the notes that mention Sam Okafor" }).fill("");
   await lines.nth(2).click();
   await expect(page).toHaveURL(new RegExp(`/note/`));

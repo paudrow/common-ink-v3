@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MAX_SEARCH_LENGTH, writtenMention, type App, type ContactCard, type PersonPage as Person, type PluginHost, type Results } from "../../plugin-api.ts";
+import { MAX_SEARCH_LENGTH, useInspected, writtenMention, type App, type ContactCard, type PersonPage as Person, type PluginHost, type Results, type Showing } from "../../plugin-api.ts";
 import { QueryBar } from "../lib/QueryBar.tsx";
 import { fieldsOf, initialsOf } from "./fields.ts";
 
@@ -102,6 +102,14 @@ export function PersonPage({ host, app, who, openAt }: Props) {
       stale = true;
     };
   }, [host, person, query, version]);
+
+  // The inspector is about the notes that mention them, or while a search among those is shown, the notes it found.
+  const showing = useMemo((): Showing | null => {
+    if (!person) return null;
+    if (found?.answer) return { kind: "notes", label: `${person.name}: ${found.query}`, noteIds: [...new Set(found.answer.results.map((r) => r.note.id))].sort() };
+    return { kind: "notes", label: person.name, noteIds: [...new Set(person.mentionedIn.map((line) => line.noteId))].sort() };
+  }, [person, found]);
+  useInspected(app, showing);
 
   const newNote = async () => {
     if (!person) return;
