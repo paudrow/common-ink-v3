@@ -303,7 +303,7 @@ test("the Todos page lists open todos from every note, and narrows by folder, ta
   await expect(todosPage(page).getByRole("heading", { level: 1 })).toHaveText("Todos");
   // A +Name is words of the todo: nothing is made of it.
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
-  await expect(row(page, "Ship it").locator(".todo-note")).toHaveText("Work #office");
+  await expect(row(page, "Ship it").locator(".todo-note")).toHaveText("Work");
   await expect(filter(page, "Project")).toHaveCount(0);
 
   await filter(page, "Include completed").check();
@@ -355,27 +355,33 @@ test("the Todos page lists open todos from every note, and narrows by folder, ta
   await expect(todosPage(page).getByRole("alert")).toHaveCount(0);
 });
 
-test("a todo has the tags on its own line and its note's: its own are drawn as chips after its words, and one listed for its note's tag says so beside the note's name", async ({ page }) => {
+test("a todo has the tags on its own line and its note's: its own are drawn as chips after its words, and its note's name is said alone, narrowed to a tag or not", async ({ page }) => {
   await twoNotes(page);
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
+  const names = () => rows(page).locator(".todo-note");
+  // Nothing follows the note's name, not even a tag its title ends in.
+  await expect(names()).toHaveText(["Work", "Home", "Home", "Work"]);
+  await expect(row(page, "Ship it").locator(".todo-note")).toHaveAttribute("title", "Open Work");
 
   // A tag written at the end of its words is a chip under them, and no row says a tag its line doesn't write.
   await expect(row(page, "Water plants").locator(".todo-chips .todo-tag")).toHaveText(["#outside"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
 
-  // Under the tag of its own line: both todos of the note are tagged with it, and only the other one is told why.
+  // Under the tag of one todo's line: both todos of the note are tagged with it, and only the one whose line writes it has its chip.
   await filter(page, "Tag").selectOption("#outside");
   await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
-  await expect(row(page, "Call the bank").locator(".todo-note")).toHaveText("Home #outside");
-  await expect(row(page, "Call the bank").locator(".todo-via")).toHaveText("#outside");
-  await expect(row(page, "Water plants").locator(".todo-via")).toHaveCount(0);
+  await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
+  await expect(names()).toHaveText(["Home", "Home"]);
+  await expect(row(page, "Call the bank").locator(".todo-note")).toHaveAttribute("title", "Open Home");
 
-  // Under a tag only the note's title writes: every todo of the note, each with the tag beside the note's name.
+  // Under a tag only the note's title writes: every todo of the note, and still only the note's name.
   await filter(page, "Tag").selectOption("#office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
-  await expect(rows(page).locator(".todo-via")).toHaveText(["#office", "#office"]);
-  // It is said, not drawn as a chip: the note's tag is not one to press.
-  await expect(rows(page).locator(".todo-note .todo-chip")).toHaveCount(0);
+  await expect(names()).toHaveText(["Work", "Work"]);
+  await expect(rows(page).locator(".todo-tag")).toHaveCount(0);
+
+  await filter(page, "Tag").selectOption("");
+  await expect(names()).toHaveText(["Work", "Home", "Home", "Work"]);
 });
 
 test("a tag's chip narrows the list to that tag, and pressed again takes that off; a tag inside the words stays in them", async ({ page }) => {
@@ -418,10 +424,14 @@ test("a row is two lines: the first only its checkbox, its words and its note's 
     };
   });
   // What isn't set is quiet: no pill, and its dashed edge is drawn only while the row is pointed at or has the keyboard.
-  expect(look).toEqual({ list: ["14px", "1px"], row: ["14.5px", "6px", "7px"], chip: ["20px", "11.5px", "7px", "999px"], unset: ["20px", "rgba(0, 0, 0, 0)", "dashed", "rgba(0, 0, 0, 0)"] });
-  // Every row is the same height, whatever is set on it: its words' line and its chips' line.
-  const heights = await rows(page).evaluateAll((all) => all.map((el) => Math.round(el.getBoundingClientRect().height)));
-  expect(new Set(heights)).toEqual(new Set([55]));
+  expect(look).toEqual({ list: ["14px", "1px"], row: ["14.5px", "4px", "7px"], chip: ["18px", "11.5px", "7px", "999px"], unset: ["18px", "rgba(0, 0, 0, 0)", "dashed", "rgba(0, 0, 0, 0)"] });
+  // Every row is the same height, whatever is set on it, in either scheme: its words' line and its chips' line, close under it.
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    const heights = await rows(page).evaluateAll((all) => all.map((el) => Math.round(el.getBoundingClientRect().height)));
+    expect(new Set(heights), colorScheme).toEqual(new Set([46]));
+  }
+  await page.emulateMedia({ colorScheme: "light" });
 
   // About 660px wide, in a window with room for far more.
   await page.setViewportSize({ width: 1800, height: 900 });
@@ -475,7 +485,7 @@ test("at 1280px with both sidebars open, no row wraps raggedly: chips stay on on
     expect(new Set(chips.map((c) => Math.round(c.top))), `the chips of "${said.text}"`).toEqual(new Set([Math.round(chips[0]!.top)]));
     const lines = await each.locator(".todo-words").evaluate((el) => [...el.getClientRects()].map((r) => Math.round(r.left)));
     expect(new Set(lines), `where each line of "${said.text}" starts`).toEqual(new Set([Math.round(said.left)]));
-    if (lines.length === 1) expect(Math.round((await each.boundingBox())!.height), said.text).toBe(55);
+    if (lines.length === 1) expect(Math.round((await each.boundingBox())!.height), said.text).toBe(46);
   }
   expect(await row(page, "A long todo").locator(".todo-words").evaluate((el) => el.getClientRects().length)).toBeGreaterThan(1);
 });
@@ -1105,7 +1115,7 @@ test("pressing a todo's words edits them right there, with its chips where they 
   await expect(field).toBeFocused();
   await expect(field).toHaveValue("Call the bank +Home");
   // A one-line field in v1's look, laid where the words were: the chips stay on the row after it, and no row moves.
-  expect(await field.evaluate((el) => [getComputedStyle(el).borderRadius, getComputedStyle(el).height, getComputedStyle(el).boxShadow.includes("3px")])).toEqual(["6px", "26px", true]);
+  expect(await field.evaluate((el) => [getComputedStyle(el).borderRadius, getComputedStyle(el).height, getComputedStyle(el).boxShadow.includes("3px")])).toEqual(["6px", "24px", true]);
   expect(await chips()).toEqual(before.chips);
   expect(await rows(page).evaluateAll((all) => all.map((el) => JSON.stringify(el.getBoundingClientRect())))).toEqual(before.rows);
 
@@ -1248,12 +1258,12 @@ test("a row has nothing at its right but its note's name: pointing at it moves n
   await notes.hover();
   await expect(notes.locator(".todo-chip[data-unset]").first()).not.toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
   expect(await laidOut(page, shape)).toEqual(before);
-  await expect(notes.getByRole("button")).toHaveText(["Write notes", "Add date", "Repeat", "Importance", "Add tag", "Work #office"]);
+  await expect(notes.getByRole("button")).toHaveText(["Write notes", "Add date", "Repeat", "Importance", "Add tag", "Work"]);
 
   // The keyboard: the box, the words, the chips in the order they are shown, the note's name, and on to the next row.
   await page.mouse.move(1, 1);
   await row(page, "Ship it").getByRole("checkbox").focus();
-  for (const name of ["Edit Ship it", /^Due date: /, "Importance: !!!", "Repeat: none", "Add tag", "Work #office", "Not done"]) {
+  for (const name of ["Edit Ship it", /^Due date: /, "Importance: !!!", "Repeat: none", "Add tag", "Work", "Not done"]) {
     await page.keyboard.press("Tab");
     await expect(page.locator(":focus")).toHaveAccessibleName(name);
   }
@@ -1360,8 +1370,8 @@ test("in a narrow list with both sidebars open, a row's words have the whole fir
       if (width === 700) expect(lines, `${width}: ${said.text}`).toHaveLength(1);
       for (const top of lines) expect(Math.min(...chips.filter((c) => Math.round(c.top) === top).map((c) => c.left)) - said.left, `${width}: ${said.text}`).toBeCloseTo(0, 0);
       for (const chip of chips.filter((c) => /^(Add date|Repeat|Importance|Add tag)$/.test(c.text))) expect(Math.round(chip.width)).toBe(22);
-      // The note's name is under the chips, where the words start, and whole (its press area reaches 3px past its words).
-      expect(note.top + 3).toBeGreaterThanOrEqual(Math.max(...chips.map((c) => c.bottom)));
+      // The note's name is under the chips, where the words start, and whole (its press area reaches 1px above its words and 4px before them).
+      expect(note.top + 1).toBeGreaterThanOrEqual(Math.max(...chips.map((c) => c.bottom)));
       expect(Math.abs(note.left + 4 - said.left)).toBeLessThanOrEqual(0.5);
       expect(await each.locator(".todo-note-title").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     }
