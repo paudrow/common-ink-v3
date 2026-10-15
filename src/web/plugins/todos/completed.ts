@@ -1,5 +1,4 @@
 import type { PluginHost } from "../../plugin-api.ts";
-import { showToast } from "../lib/toast.tsx";
 
 /** What Undo says when the line is no longer the todo that was checked off. Nothing is changed then. */
 export const CHANGED = "That todo was changed since it was checked off, so it was left as it is.";
@@ -15,7 +14,18 @@ export const refused = (err: unknown) => ((err as { code?: unknown } | null)?.co
  * say it here: the Todos page and a note's checkbox. It doesn't say which todo: the member has just
  * pressed it. `undo` answers with what to say when the todo couldn't be opened again, and with nothing when it was.
  */
-export const completed = (undo: () => Promise<string | undefined> | string | undefined) => showToast({ text: "Task completed", undo });
+export const completed = (host: PluginHost, undo: () => Promise<string | undefined> | string | undefined) =>
+  host.app().notify({
+    message: "Task completed",
+    icon: "check",
+    action: {
+      label: "Undo",
+      run: async () => {
+        const problem = await undo();
+        return problem ? { message: problem } : undefined;
+      },
+    },
+  });
 
 /**
  * Takes back the completion of a recurring todo that the note's change `revision` made, whole: that

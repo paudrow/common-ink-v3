@@ -4666,38 +4666,6 @@ kbd {
   font-size: 13px;
 }
 
-/* It stands clear of the bar at the foot of History's list, which has what the toast may send the member to: Revert… */
-.toast,
-.told {
-  position: fixed;
-  bottom: 84px;
-  left: 50%;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: min(560px, calc(100vw - 32px));
-  padding: 8px 8px 8px 14px;
-  border-radius: 10px;
-  background: var(--ink);
-  color: var(--bg);
-  font-size: 13px;
-  box-shadow: var(--shadow);
-  transform: translateX(-50%);
-}
-
-.toast .link,
-.told .link {
-  color: inherit;
-  font-weight: 650;
-  text-decoration: underline;
-}
-
-.toast .icon-button,
-.told .icon-button {
-  color: inherit;
-}
-
 /* What just happened, in the window's bottom right corner, as v1's toasts. */
 .toasts {
   position: fixed;
@@ -4714,8 +4682,8 @@ kbd {
   box-sizing: border-box;
   align-items: center;
   gap: 10px;
-  min-width: 240px;
-  max-width: 340px;
+  min-width: min(240px, calc(100vw - 36px));
+  max-width: min(340px, calc(100vw - 36px));
   padding: 10px 14px 10px 10px;
   border-radius: 12px;
   background: var(--bg-elev);
@@ -4756,9 +4724,15 @@ kbd {
   color: var(--accent);
 }
 
+/* A long title is cut after five lines, so three cards always fit the window. */
 .toast-text {
+  display: -webkit-box;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
 }
 
 .toast-action {
@@ -6762,21 +6736,6 @@ button.todo-tag[aria-pressed="true"] {
   display: flex;
   flex: none;
   padding: 6px 10px 2px;
-}
-
-.notices {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  z-index: 60;
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.notices .told {
-  position: static;
-  transform: none;
-  pointer-events: auto;
 }
 
 .info-tags {

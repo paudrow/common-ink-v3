@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
-import { Icon, MAX_NOTES_AT_ONCE, useDismiss, type Author, type AuthorRef, type Diff, type HistorySummary, type NoteRevertPreview, type OpInput, type PluginHost, type Resolve, type RevertConflict, type RevertedNote, type RevertedNotes } from "../../plugin-api.ts";
+import { Icon, MAX_NOTES_AT_ONCE, useDismiss, type Author, type AuthorRef, type Diff, type HistorySummary, type NoteRevertPreview, type Notice, type OpInput, type PluginHost, type Resolve, type RevertConflict, type RevertedNote, type RevertedNotes } from "../../plugin-api.ts";
 import { DiffView, Stat } from "./HistoryDiff.tsx";
 import { authorKey, count, titleOf } from "./historyView.ts";
 
@@ -509,12 +509,6 @@ export async function asksOfAuthor(host: PluginHost, author: AuthorRef): Promise
   return { asks, cut: true };
 }
 
-interface Said {
-  text: string;
-  /** The changes a revert made, which Undo reverts. */
-  undo?: RevertedNote[];
-}
-
 const names = (notes: readonly { noteTitle: string }[]) => {
   const titles = notes.map((n) => titleOf(n.noteTitle));
   return titles.length > 3 ? `${titles.slice(0, 3).join(", ")} and ${titles.length - 3} more` : titles.length > 1 ? `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}` : (titles[0] ?? "");
@@ -536,7 +530,6 @@ interface Reverts {
  */
 export function useReverts({ host, version, found = "in the list", onChanged }: Reverts): { ask: (asks: RevertAsk[], beyond?: string, at?: ConflictAt) => void; shown: ReactNode } {
   const [asked, setAsked] = useState<{ asks: RevertAsk[]; beyond?: string; at?: ConflictAt } | null>(null);
-  const [said, say] = useState<Said | null>(null);
   const ask = useCallback((asks: RevertAsk[], beyond?: string, at?: ConflictAt) => setAsked({ asks, beyond, at }), []);
   const close = useCallback(() => setAsked(null), []);
 
@@ -544,48 +537,31 @@ export function useReverts({ host, version, found = "in the list", onChanged }: 
     const total = done.reverted.reduce((sum, r) => sum + r.reverted.length, 0);
     const [one] = done.reverted;
     const did = done.reverted.length === 1 && one ? `Reverted ${count(total, "change")} to ${titleOf(one.noteTitle)}` : `Reverted ${count(total, "change")} in ${count(done.reverted.length, "note")}`;
-    say({ text: asked?.beyond ? `${did}. ${asked.beyond}` : did, undo: done.reverted });
+    host.app().notify({ message: asked?.beyond ? `${did}. ${asked.beyond}` : did, icon: "history", action: undoing(done.reverted) });
     onChanged();
   };
-  const undoing = useRef(false);
-  const undo = async (made: RevertedNote[]) => {
-    if (undoing.current) return;
-    undoing.current = true;
-    say({ text: "Undoing…" });
-    try {
-      const done = { reverted: [] as RevertedNote[], skipped: [] as { noteTitle: string; why: string }[] };
-      for (const some of chunks(made, MAX_NOTES_AT_ONCE)) {
-        const part = await host.perform({ type: "history.revert", changes: some.map((r) => ({ noteId: r.noteId, revisions: [r.revision], at: r.revision })) });
-        done.reverted.push(...part.reverted);
-        done.skipped.push(...part.skipped);
+  /** Undo for what a revert made: it reverts those changes, and says how that went in the notice's place. */
+  const undoing = (made: RevertedNote[]): NonNullable<Notice["action"]> => ({
+    label: "Undo",
+    run: async () => {
+      try {
+        const done = { reverted: [] as RevertedNote[], skipped: [] as { noteTitle: string; why: string }[] };
+        for (const some of chunks(made, MAX_NOTES_AT_ONCE)) {
+          const part = await host.perform({ type: "history.revert", changes: some.map((r) => ({ noteId: r.noteId, revisions: [r.revision], at: r.revision })) });
+          done.reverted.push(...part.reverted);
+          done.skipped.push(...part.skipped);
+        }
+        const back = done.reverted.length === 1 ? `${names(done.reverted)} is as it was before the revert` : `${count(done.reverted.length, "note")} are as they were before the revert`;
+        const stays = done.skipped.length ? `${names(done.skipped)} ${done.skipped.length === 1 ? "has" : "have"} changed since, so ${done.skipped.length === 1 ? "its revert stays" : "their reverts stay"}. Pick ${done.skipped.length === 1 ? "that revert" : "those reverts"} ${found} to revert ${done.skipped.length === 1 ? "it" : "them"}.` : "";
+        return { message: done.reverted.length ? `Undone: ${back}.${stays && ` ${stays}`}` : `Nothing was undone. ${stays}`, icon: "history" };
+      } catch (err) {
+        return { message: `The undo didn't go through: ${(err as Error).message}`, action: undoing(made) };
+      } finally {
+        onChanged();
       }
-      const back = done.reverted.length === 1 ? `${names(done.reverted)} is as it was before the revert` : `${count(done.reverted.length, "note")} are as they were before the revert`;
-      const stays = done.skipped.length ? `${names(done.skipped)} ${done.skipped.length === 1 ? "has" : "have"} changed since, so ${done.skipped.length === 1 ? "its revert stays" : "their reverts stay"}. Pick ${done.skipped.length === 1 ? "that revert" : "those reverts"} ${found} to revert ${done.skipped.length === 1 ? "it" : "them"}.` : "";
-      say({ text: done.reverted.length ? `Undone: ${back}.${stays && ` ${stays}`}` : `Nothing was undone. ${stays}` });
-    } catch (err) {
-      say({ text: `The undo didn't go through: ${(err as Error).message}`, undo: made });
-    }
-    undoing.current = false;
-    onChanged();
-  };
+    },
+  });
 
-  const shown = (
-    <>
-      {asked && <RevertDialog host={host} asks={asked.asks} version={version} beyond={asked.beyond} at={asked.at} onReverted={reverted} onClose={close} />}
-      {said && (
-        <div className="toast" role="status">
-          <span>{said.text}</span>
-          {said.undo && (
-            <button type="button" className="link" onClick={() => void undo(said.undo!)}>
-              Undo
-            </button>
-          )}
-          <button type="button" className="icon-button" aria-label="Dismiss" onClick={() => say(null)}>
-            <Icon name="close" />
-          </button>
-        </div>
-      )}
-    </>
-  );
+  const shown = asked && <RevertDialog host={host} asks={asked.asks} version={version} beyond={asked.beyond} at={asked.at} onReverted={reverted} onClose={close} />;
   return { ask, shown };
 }

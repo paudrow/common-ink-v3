@@ -679,11 +679,16 @@ export interface Folders {
   pathName(id: string | null): string;
 }
 
-/** Something the app tells the member in a line at its foot, which goes after a few seconds or when dismissed. */
+/** Something the app tells the member in a card in the window's bottom right corner, which goes after a few seconds or when pressed. */
 export interface Notice {
   message: string;
-  /** A button beside the message, such as Undo. The notice goes when it is pressed. */
-  action?: { label: string; run: () => void };
+  /** The icon in the card's tile: "info" unless said. */
+  icon?: IconName;
+  /**
+   * A button beside the message, such as Undo. While what `run` answers is on its way the card stays,
+   * without the button. A notice it answers with is said in the card's place; nothing, and the card goes.
+   */
+  action?: { label: string; run: () => void | Notice | Promise<void | Notice | undefined> };
 }
 
 export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav">;
@@ -803,7 +808,7 @@ export interface App {
   saveNote(noteId: string): Promise<Written | undefined>;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
-  /** Tells the member something that just happened, such as that a note was moved to Trash. One notice shows at a time: the next takes its place. */
+  /** Tells the member something that just happened, such as that a note was moved to Trash. Notices stack, newest at the foot, three at most; one saying what a shown one says takes its place. */
   notify(notice: Notice): void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
   toggleOverlay(id: string, state?: unknown): void;

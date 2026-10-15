@@ -588,7 +588,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
       sent.then(
         (note) => {
           // A recurring todo's completion moved its due date, counted it and filed a line on the daily note: Undo reverts the change that did, which takes all of it back.
-          if (done && note.filed) return completed(() => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
+          if (done && note.filed) return completed(host, () => takeBack(host, todo.noteId, note.revision).finally(() => setAsked((n) => n + 1)));
           const left = changed(todo, to, now);
           if (!done || !left.done) return;
           const key = keyOf(todo);
@@ -597,7 +597,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
           setTimeout(() => setLingering((had) => (had.has(key) ? new Map([...had].filter(([k]) => k !== key)) : had)), LINGER_MS);
           // Undo is the same change the other way, made to the line this one left, at the revision it made.
           // It is made to the todo as the page has it by then, which may have been changed again since.
-          completed(() => send(shown.current.find((t) => keyOf(t) === key && t.done) ?? { ...left, revision: note.revision }, { done: false }).then(() => undefined, refused));
+          completed(host, () => send(shown.current.find((t) => keyOf(t) === key && t.done) ?? { ...left, revision: note.revision }, { done: false }).then(() => undefined, refused));
         },
         (err: unknown) => setProblem(err instanceof Error ? err.message : "The todo couldn't be changed."),
       );

@@ -809,7 +809,8 @@ test("checking a todo off on the Todos page says so in a toast, and Undo opens i
   await expect.poll(lineIn).toBe("- [x] !! Call the bank due:2026-10-14 +Home");
   // It says just that a task was completed, not which: the member has just pressed it.
   await expect(toast(page)).toHaveText("Task completedUndo");
-  await expect(toast(page)).toHaveAttribute("role", "status");
+  // It is said to a screen reader: the stack it arrives in is a live region.
+  await expect(toast(page).locator("xpath=..")).toHaveAttribute("aria-live", "polite");
   await expect(toast(page).getByRole("button")).toHaveText(["Undo"]);
   // It is laid over the page: nothing that was there has moved for it, and nothing moves when it goes.
   expect(await toast(page).evaluate((el) => getComputedStyle(el.parentElement!).position)).toBe("fixed");
@@ -878,7 +879,8 @@ test("checking a todo off in a note says so in the same toast, and Undo opens it
   await line(page, "Call the bank").getByRole("checkbox").click();
   await expect.poll(lineIn).toBe("- [x] !! Call the bank due:2026-10-14 +Home");
   await expect(toast(page)).toHaveText("Task completedUndo");
-  await expect(toast(page)).toHaveAttribute("role", "status");
+  // It is said to a screen reader: the stack it arrives in is a live region.
+  await expect(toast(page).locator("xpath=..")).toHaveAttribute("aria-live", "polite");
   expect(await toast(page).evaluate((el) => getComputedStyle(el.parentElement!).position)).toBe("fixed");
   expect(await places(page, measured)).toEqual(before);
   // The keyboard is still in the note.
