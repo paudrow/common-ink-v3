@@ -17,6 +17,7 @@ export const sharing: Plugin = {
     host.commands.register({
       id: SHARE_COMMAND,
       title: "Share this note…",
+      group: "Notes",
       run() {
         const app = host.app();
         if (app.noteId) app.toggleOverlay(SHARE_OVERLAY, { noteId: app.noteId });

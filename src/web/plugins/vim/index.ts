@@ -71,8 +71,8 @@ export const vim: Plugin = {
         host.settings.subscribe(byRows);
         /** In a field, these keys are the field's. In a note they are jumps only where vim would take them for jumps. */
         const when = () => !isField(document.activeElement) || editing.jumpsFrom(document.activeElement);
-        host.commands.register({ id: "vim.back", title: "Go back to the note before", keys: ["ctrl+o"], when, run: go(-1) });
-        host.commands.register({ id: "vim.forward", title: "Go forward to the note after", keys: ["ctrl+i"], when, run: go(1) });
+        host.commands.register({ id: "vim.back", title: "Go back to the note before", keys: ["ctrl+o"], group: "Vim", when, run: go(-1) });
+        host.commands.register({ id: "vim.forward", title: "Go forward to the note after", keys: ["ctrl+i"], group: "Vim", when, run: go(1) });
 
         const outside = (ui = surfaces({ normal: editing.jumpsFrom, dismissing }));
         calm = editing.toNormal;
@@ -83,6 +83,7 @@ export const vim: Plugin = {
             id: `vim.${key.id}`,
             title: key.title,
             keys: key.keys,
+            group: "Vim",
             when: outside.on[key.surface],
             run: () => {
               if (key.arrives) arriving = Date.now();

@@ -1,4 +1,4 @@
-import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
+import { bind, chordLabel, onPlatform } from "./keybindings.ts";
 import type { AddressEmbed, App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, Setting, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
@@ -362,8 +362,10 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
 
   /** The hint is the chord that runs the command now, which another command may have claimed first. */
   const infoOf = (c: Command): CommandInfo => {
-    const chord = chordFor(c.id, contributions().keybindings);
-    return { id: c.id, title: c.title, shortcut: chord === undefined ? undefined : chordLabel(chord, mac) };
+    const { keybindings } = contributions();
+    // Two chords can read the same, as / and Shift with / do.
+    const keys = [...new Set(Object.keys(keybindings).filter((chord) => keybindings[chord] === c.id).map((chord) => chordLabel(chord, mac)))];
+    return { id: c.id, title: c.title, shortcut: keys[0], keys, group: c.group };
   };
 
   function startAll() {

@@ -36,6 +36,8 @@ export interface Word {
   sql?: (c: Compiling, given: Given) => string;
   /** The order, for `sort:`. */
   order?: string;
+  /** The field it is offered under where it is not its filter's own, as Shared and Private are under Visibility and not State. */
+  field?: "visibility";
 }
 
 /** A filter as it is handed to SQL: its names looked up, and its days the days they stand for. */
@@ -171,8 +173,8 @@ export const FILTERS = {
         { word: "done", scopes: TODOS, means: "Done. With is:open OR is:done, both", sql: () => "t.done = 1" },
         { word: "archived", scopes: BOTH, means: "Archived. A query that doesn't say so leaves archived notes out", sql: () => "n.state = 'archived'" },
         { word: "trashed", scopes: BOTH, means: "In Trash. A query that doesn't say so leaves Trash out", sql: () => "n.state = 'trashed'" },
-        { word: "shared", scopes: BOTH, means: "Shared by itself with a person or by a link, where you may see how it is shared", sql: (c, given) => `n.id IN ${among(c, given)}` },
-        { word: "private", scopes: BOTH, means: "Private to one member", sql: () => "n.private_owner IS NOT NULL" },
+        { word: "shared", scopes: BOTH, field: "visibility", means: "Shared by itself with a person or by a link, where you may see how it is shared", sql: (c, given) => `n.id IN ${among(c, given)}` },
+        { word: "private", scopes: BOTH, field: "visibility", means: "Private to one member", sql: () => "n.private_owner IS NOT NULL" },
       ],
     },
     compares: false,
@@ -301,6 +303,33 @@ export const wordsFor = (key: Key, scope: Scope): Word[] => {
   return value.type === "words" ? value.words.filter((w) => w.scopes.includes(scope)) : [];
 };
 const wordOf = (key: Key, scope: Scope, written: string) => wordsFor(key, scope).find((w) => w.word === written || w.aliases?.includes(written));
+
+/**
+ * What a builder offers as one field and the help lists under one heading: a filter, or Visibility,
+ * which is the words of `is:` that say who can see a note. Those say no state it is in.
+ */
+export type Field = Key | "visibility";
+const FIELDS: Partial<Record<Field, { name: string; means?: string }>> = {
+  is: { name: "State" },
+  visibility: { name: "Visibility", means: "Who can see it: shared, or private to one member" },
+  has: { name: "Has" },
+  in: { name: "Words in" },
+};
+export const fieldName = (field: Field) => FIELDS[field]?.name ?? field[0]!.toUpperCase() + field.slice(1);
+export const fieldMeans = (field: Field) => FIELDS[field]?.means ?? spec(keyOf(field)).means;
+/** The filter a field writes. */
+export const keyOf = (field: Field): Key => (field === "visibility" ? "is" : field);
+const fieldOfWord = (key: Key, word: Word): Field => word.field ?? key;
+/** The field a filter with this value is shown in. */
+export function fieldOf(key: Key, value: string): Field {
+  const { value: kind } = spec(key);
+  const word = kind.type === "words" ? kind.words.find((w) => w.word === value || w.aliases?.includes(value)) : undefined;
+  return word ? fieldOfWord(key, word) : key;
+}
+/** The fields a filter is offered as in a scope: itself, or for `is:` State and Visibility. */
+export const fieldsOf = (key: Key, scope: Scope): Field[] => [...new Set([key, ...wordsFor(key, scope).map((w) => fieldOfWord(key, w))])];
+/** The words a field takes in a scope. */
+export const wordsIn = (field: Field, scope: Scope): Word[] => wordsFor(keyOf(field), scope).filter((w) => fieldOfWord(keyOf(field), w) === field);
 
 const RELATIVE = /^(today|yesterday|tomorrow|[+]?\d{1,4}d)$/;
 /** Whether a day is written as one that depends on what today is: `today`, `yesterday`, `tomorrow`, `7d` for seven days ago, `+7d` for seven days ahead. */
@@ -756,10 +785,12 @@ export interface SyntaxRow {
   form: string;
   means: string;
   example: string;
+  /** The heading it is listed under: a field, or null for how terms are written and joined. */
+  field: Field | null;
 }
 
 /** What is written between and around terms, which no filter is. */
-const FORMS: readonly (SyntaxRow & { scopes: readonly Scope[] })[] = [
+const FORMS: readonly (Omit<SyntaxRow, "field"> & { scopes: readonly Scope[] })[] = [
   { form: "word", means: "Has the word, or one that starts with it, ignoring case and accents", example: "budget", scopes: BOTH },
   { form: '"a phrase"', means: "Has the words together, in that order", example: '"second quarter"', scopes: BOTH },
   { form: "a b", means: "Both: a space is AND, which can also be written", example: "budget plan", scopes: BOTH },
@@ -778,13 +809,13 @@ export function syntax(scope: Scope): SyntaxRow[] {
   const filters = keysFor(scope).flatMap((key): SyntaxRow[] => {
     const { means, example, shown, aliases, value } = spec(key);
     const names = [key, ...aliases].map((name) => `${name}:${shown}`).join(", ");
-    if (value.type !== "words") return [{ form: names, means, example }];
+    if (value.type !== "words") return [{ form: names, means, example, field: key }];
     return [
-      ...wordsFor(key, scope).map((w) => ({ form: `${key}:${w.word}`, means: w.means, example: key === "in" ? `budget ${key}:${w.word}` : `${key}:${w.word}` })),
-      ...(key === "has" ? [{ form: `${LACKS}:WORD`, means: "Lacks it: the same as -has:WORD", example: `${LACKS}:${wordsFor(key, scope)[0]!.word}` }] : []),
+      ...wordsFor(key, scope).map((w) => ({ form: `${key}:${w.word}`, means: w.means, example: key === "in" ? `budget ${key}:${w.word}` : `${key}:${w.word}`, field: fieldOfWord(key, w) })),
+      ...(key === "has" ? [{ form: `${LACKS}:WORD`, means: "Lacks it: the same as -has:WORD", example: `${LACKS}:${wordsFor(key, scope)[0]!.word}`, field: key }] : []),
     ];
   });
-  return [...FORMS.filter((form) => form.scopes.includes(scope)), ...filters];
+  return [...FORMS.filter((form) => form.scopes.includes(scope)).map(({ form, means, example }) => ({ form, means, example, field: null })), ...filters];
 }
 
 /** The language in a few lines, for a tool's description. */

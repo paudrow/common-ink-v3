@@ -316,9 +316,11 @@ test("the Todos page lists open todos from every note, and its builder narrows b
 
   // Done todos too: any of open or done, which the builder writes in the bar.
   await advanced(page).click();
-  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  // The first condition is there, ready to fill in. Shared and Private are who can see a todo's note, apart from its state.
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Visibility" });
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "shared", "private"]);
   await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
-  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "open", "done", "archived", "trashed", "shared", "private"]);
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "open", "done", "archived", "trashed"]);
   await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption("open");
   await builder(page).getByRole("button", { name: "Add a condition" }).click();
   await condition(page, 2).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
@@ -332,6 +334,9 @@ test("the Todos page lists open todos from every note, and its builder narrows b
   await condition(page, 2).getByRole("button", { name: "Remove condition 2" }).click();
   await condition(page, 1).getByRole("button", { name: "Remove condition 1" }).click();
   await expect(bar(page)).toHaveValue("");
+  // With the last condition gone, an empty one is left to fill in.
+  await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(1);
+  await expect(condition(page, 1).getByRole("textbox", { name: "Value" })).toHaveValue("");
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
 
   // A folder lists its notes' todos and those of the folders under it.
@@ -342,7 +347,6 @@ test("the Todos page lists open todos from every note, and its builder narrows b
   await perform(page, { type: "note.move", id: work.id, folderId: office.id });
   await page.reload();
   await advanced(page).click();
-  await builder(page).getByRole("button", { name: "Add a condition" }).click();
   await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Folder" });
   const folder = condition(page, 1).getByRole("combobox", { name: "Value" });
   await expect(folder.getByRole("option")).toHaveText(["Choose…", "House", "House / Garden", "Office", "Unsorted"]);
@@ -475,6 +479,13 @@ test("the Todos page's bar and builder fit a window 380 wide, and nothing in the
   await bar(page).fill("due:2026-10-01..2026-10-31 OR importance:>=2 OR -tag:office");
   await advanced(page).click();
   await builder(page).getByRole("button", { name: "Query syntax" }).click();
+  const help = page.getByRole("dialog", { name: "Query syntax" });
+  await expect(help.getByRole("table", { name: "State" }).getByRole("rowheader")).toHaveText(["is:open", "is:done", "is:archived", "is:trashed"]);
+  await expect(help.getByRole("table", { name: "Visibility" }).getByRole("rowheader")).toHaveText(["is:shared", "is:private"]);
+  const box = (await help.boundingBox())!;
+  expect(box.x >= 0 && box.x + box.width <= 380 && box.y >= 0 && box.y + box.height <= 800).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(help).toHaveCount(0);
   await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(3);
   await builder(page).getByRole("combobox", { name: "Sort" }).selectOption("due-desc");
   await expect(bar(page)).toHaveValue("due:2026-10-01..2026-10-31 OR importance:>=2 OR -tag:office sort:due-desc");
@@ -526,7 +537,6 @@ test("a todo has the tags on its own line and its note's: its own are drawn as c
 
   // Under the tag of one todo's line: both todos of the note are tagged with it, and only the one whose line writes it has its chip. The builder offers the tags todos have.
   await advanced(page).click();
-  await builder(page).getByRole("button", { name: "Add a condition" }).click();
   await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Tag" });
   await expect.poll(() => condition(page, 1).locator("datalist option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))).toEqual(["office", "outside"]);
   await condition(page, 1).getByRole("combobox", { name: "Value" }).fill("outside");
