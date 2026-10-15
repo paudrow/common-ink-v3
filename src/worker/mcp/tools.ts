@@ -1,6 +1,6 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { perform, type Actor } from "../../core/operations.ts";
-import { NO_SUCH_WORKSPACE, OpError, type OpInput, type OpType } from "../../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } from "../../core/protocol.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 
@@ -184,7 +184,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the highest priority. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 to 3), due, the note's tags, and access. Narrow it by folder, by a tag of the note, by a range of due days, both included, or to those with no due date, and by priority (importance). Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
+    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless sort orders them another way. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 to 3), due, the note's tags, and access. Narrow it by folder, by a tag of the note, by a range of due days, both included, or to those with no due date, and by priority (importance). Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
     inputSchema: object({
       folderId: { type: "string", description: "Only todos in notes in this folder or in a folder under it, from list_folders" },
       tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case: a tag on the todo's own line, or anywhere else in its note" },
@@ -194,6 +194,7 @@ export const TOOLS: Tool[] = [
       importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these priorities: 0 is None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
       includeCompleted: { type: "boolean", description: "True to list done todos too" },
       noteId: { type: "string", description: "Only the todos in this note" },
+      sort: { type: "string", enum: [...TODO_SORTS], description: "The order, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
       limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
       offset: { type: "integer", minimum: 0, description: "The next of the page before" },
     }),

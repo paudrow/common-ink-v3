@@ -249,6 +249,22 @@ describe("listing todos", () => {
     expect([first, second, third].map((page) => [page.todos.map((t) => t.words), page.next])).toEqual([[["t0", "t1"], 2], [["t2", "t3"], 4], [["t4"], null]]);
   });
 
+  it("sorts by due date, priority, when the note changed, the note's title or the words, the done ones always last", async () => {
+    const ada = await newMember();
+    const zoo = await create(ada, "# Zoo\n\n- [ ] ! feed the cats due:2026-03-01\n- [ ] !!! Buy hay\n- [x] Clean up");
+    const attic = await create(ada, "# attic\n\n- [ ] zebra tickets due:2026-02-01\n- [ ] !! apples due:2026-05-01");
+    await env.DB.prepare("UPDATE notes SET updated_at = CASE id WHEN ?1 THEN 2000 ELSE 1000 END WHERE id IN (?1, ?2)").bind(zoo.id, attic.id).run();
+    const sorted = (sort: Listing["sort"]) => words(ada, { includeCompleted: true, ...(sort && { sort }) });
+
+    expect(await sorted(undefined)).toEqual(["zebra tickets", "feed the cats", "apples", "Buy hay", "Clean up"]);
+    expect(await sorted("due")).toEqual(["zebra tickets", "feed the cats", "apples", "Buy hay", "Clean up"]);
+    expect(await sorted("priority")).toEqual(["Buy hay", "apples", "feed the cats", "zebra tickets", "Clean up"]);
+    expect(await sorted("changed")).toEqual(["feed the cats", "Buy hay", "zebra tickets", "apples", "Clean up"]);
+    expect(await sorted("note")).toEqual(["zebra tickets", "apples", "feed the cats", "Buy hay", "Clean up"]);
+    expect(await sorted("text")).toEqual(["apples", "Buy hay", "feed the cats", "zebra tickets", "Clean up"]);
+    expect(await codeOf(perform(env.DB, ada, { type: "todo.list", sort: "size" as never }))).toMatch(/^invalid: /);
+  });
+
   it("says nothing of a todo in a note the asker can't see: not the todo, its note's tag, or a count", async () => {
     const ada = await newMember("Ada Lovelace");
     const eve = await addMember(ada, "editor", "Eve Editor");

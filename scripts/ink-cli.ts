@@ -21,7 +21,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
   todos [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY] [--no-due true] [--importance N,N]
-        [--completed true] [--note ID] [--limit N] [--offset N]
+        [--completed true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
                                       the todos in the notes you can see, open ones unless --completed
   todo-filters                        the tags that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
@@ -260,6 +260,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           importance: ["importance", integers],
           includeCompleted: ["completed", truth],
           noteId: ["note"],
+          sort: ["sort"],
           limit: ["limit", integer],
           offset: ["offset", integer],
         });

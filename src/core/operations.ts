@@ -35,6 +35,7 @@ import {
   type Reverts,
   type Role,
   type SharedNote,
+  type TodoSort,
   type Written,
 } from "./protocol.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
@@ -366,6 +367,15 @@ function inParts(rows: readonly unknown[]): string[] {
   }
   return parts.filter((part) => part.length).map((part) => `[${part.join(",")}]`);
 }
+
+/** Each order of todo.list, before its ties by note and line. A todo's words are its line after its checkbox and priority marks. */
+const TODO_ORDER: Record<TodoSort, string> = {
+  due: "t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE",
+  priority: "t.importance DESC, t.due IS NULL, t.due, n.title COLLATE NOCASE",
+  changed: "n.updated_at DESC",
+  note: "n.title COLLATE NOCASE",
+  text: "ltrim(substr(t.text, instr(t.text, ']') + 1), ' !') COLLATE NOCASE",
+};
 
 const INDEXED = {
   todos: "INSERT INTO todos (note_id, line, done, importance, due, text) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]')",
@@ -1154,7 +1164,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
              AND (?8 = 0 OR t.due IS NULL)
              AND (?9 IS NULL OR t.importance IN (SELECT value FROM json_each(?9)))
              AND (?10 IS NULL OR t.note_id = ?10)
-           ORDER BY t.done, t.due IS NULL, t.due, t.importance DESC, n.title COLLATE NOCASE, t.note_id, t.line
+           ORDER BY t.done, ${TODO_ORDER[op.sort]}, t.note_id, t.line
            LIMIT ?11 OFFSET ?12`,
         )
         .bind(
