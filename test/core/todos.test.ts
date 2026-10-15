@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
-import { OpError, type OpInput } from "../../src/core/protocol.ts";
+import { OpError, TODO_SORT_WORDS, type OpInput } from "../../src/core/protocol.ts";
 import { todoIndex } from "../../src/core/todos.ts";
 import { addMember, newMember } from "./members.ts";
 
@@ -250,6 +250,27 @@ describe("listing todos", () => {
     const second = await perform(env.DB, ada, { type: "todo.list", limit: 2, offset: first.next! });
     const third = await perform(env.DB, ada, { type: "todo.list", limit: 2, offset: second.next! });
     expect([first, second, third].map((page) => [page.todos.map((t) => t.words), page.next])).toEqual([[["t0", "t1"], 2], [["t2", "t3"], 4], [["t4"], null]]);
+  });
+
+  it("sorts by due date, priority, when the note changed, the note's title or the words, the done ones always last", async () => {
+    const ada = await newMember();
+    const zoo = await create(ada, "# Zoo\n\n- [ ] ! feed the cats due:2026-03-01\n- [ ] !!! Buy hay\n- [x] Clean up");
+    const attic = await create(ada, "# attic\n\n- [ ] zebra tickets due:2026-02-01\n- [ ] !! apples due:2026-05-01");
+    await env.DB.prepare("UPDATE notes SET updated_at = CASE id WHEN ?1 THEN 2000 ELSE 1000 END WHERE id IN (?1, ?2)").bind(zoo.id, attic.id).run();
+    const sorted = (sort: Listing["sort"]) => words(ada, { includeCompleted: true, ...(sort && { sort }) });
+
+    expect(await sorted(undefined)).toEqual(["zebra tickets", "feed the cats", "apples", "Buy hay", "Clean up"]);
+    expect(await sorted("due")).toEqual(["zebra tickets", "feed the cats", "apples", "Buy hay", "Clean up"]);
+    expect(await sorted("priority")).toEqual(["Buy hay", "apples", "feed the cats", "zebra tickets", "Clean up"]);
+    expect(await sorted("changed")).toEqual(["feed the cats", "Buy hay", "zebra tickets", "apples", "Clean up"]);
+    expect(await sorted("note")).toEqual(["zebra tickets", "apples", "feed the cats", "Buy hay", "Clean up"]);
+    expect(await sorted("text")).toEqual(["apples", "Buy hay", "feed the cats", "zebra tickets", "Clean up"]);
+    expect(await codeOf(perform(env.DB, ada, { type: "todo.list", sort: "size" as never }))).toMatch(/^invalid: /);
+    // The query's sort: is the same choice, and wins over sort: each order's word lists as the order does, the done ones last.
+    for (const [order, word] of Object.entries(TODO_SORT_WORDS)) {
+      expect(await words(ada, { includeCompleted: true, query: `sort:${word}`, sort: order === "text" ? "due" : "text" })).toEqual(await sorted(order as Listing["sort"]));
+    }
+    expect(await words(ada, { query: "is:open OR is:done sort:due-desc" })).toEqual(["apples", "feed the cats", "zebra tickets", "Buy hay", "Clean up"]);
   });
 
   it("says nothing of a todo in a note the asker can't see: not the todo, its note's tag, or a count", async () => {

@@ -21,6 +21,14 @@ export const todos: Plugin = {
   description: "Checkbox lines with due dates, priorities and repeats, and a page of every todo.",
   icon: "todos",
   screenshots: [{ src: "/plugin-shots/todos-light.png", dark: "/plugin-shots/todos-dark.png", alt: "The Todos page: every open todo with its priority, its due date and the note it is in." }],
+  settings: {
+    sayWhyLeaving: {
+      type: "boolean",
+      default: true,
+      title: "Say why a changed todo will leave the list",
+      description: "On the Todos page, a todo you change so that it no longer matches the filters stays, greyed, until you refresh. On, a line under it says what changed and why it will leave. Off, it is only greyed.",
+    },
+  },
   activate(host) {
     const editors = new Map<string, EditorView>();
     /** The editors there are now, a reading of a note among them. */

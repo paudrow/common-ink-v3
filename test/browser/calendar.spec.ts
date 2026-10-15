@@ -589,8 +589,13 @@ test("New note about this event makes a note in the folder picked, last used fir
   await showHours(page, 9 * 60);
   await card(page, week[1]!, "Lunch with Sam").click();
   const event = page.getByRole("dialog", { name: "Event: Lunch with Sam" });
-  await expect(event.getByRole("region", { name: "Notes about this event" })).toContainText("No note references this event yet.");
-  await event.getByRole("button", { name: "New note about this event" }).click();
+  const about = event.getByRole("region", { name: "Notes about this event" });
+  await expect(about).toContainText("No note references this event yet.");
+  // The panel's main action, with the notes it adds to, after everything else the panel says; no Copy reference beside it.
+  await expect(event.getByRole("button", { name: "Copy reference" })).toHaveCount(0);
+  await expect(about.getByRole("button", { name: "New note about this event" })).toHaveClass(/\bprimary\b/);
+  expect(await event.evaluate((el) => el.querySelector(".event-body")!.lastElementChild!.getAttribute("aria-label"))).toBe("Notes about this event");
+  await about.getByRole("button", { name: "New note about this event" }).click();
   await event.getByRole("combobox").selectOption({ label: "Meetings" });
   await event.getByRole("button", { name: "Make the note" }).click();
   await expect(page).toHaveURL(/\/note\//);

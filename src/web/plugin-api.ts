@@ -16,7 +16,7 @@ import type { Showing } from "./inspected.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, WORKSPACE_UPLOAD_BYTES } from "../core/protocol.ts";
+export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, WORKSPACE_UPLOAD_BYTES } from "../core/protocol.ts";
 /**
  * The query language notes and todos are found by, as the server reads it: what is typed to a query
  * and back, every filter there is with what it takes and means, and what is being typed at the
@@ -763,14 +763,25 @@ export interface Completion {
   prose?: boolean;
   /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
   items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
+  /**
+   * Where its items go in the list among those of the other completions that fit: lower first, 0 when
+   * not said, and in the order of their plugins where it is the same. The calendar's events come after
+   * the notes `[[` offers this way.
+   */
+  order?: number;
 }
 
 export interface CompletionItem {
   label: string;
   /** Said after the label, more quietly. */
   detail?: string;
-  /** What takes the place of the trigger and what was typed after it. */
-  insert: string;
+  /**
+   * What takes the place of the trigger and what was typed after it. A function is asked only when
+   * the item is picked, for text that is made then, as a reference to an event is: what it answers is
+   * written once it does, where the trigger and what was typed still are. Null, a failure, or a change
+   * to them meanwhile writes nothing.
+   */
+  insert: string | (() => Promise<string | null>);
   /** The part of `insert` left selected, as offsets into it, such as a value to type over. Without it the cursor goes after. */
   select?: readonly [from: number, to: number];
   /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after. */

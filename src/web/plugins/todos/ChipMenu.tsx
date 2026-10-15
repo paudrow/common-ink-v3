@@ -219,6 +219,8 @@ export function TagMenu({ tags, has, onPick }: TagProps) {
           placeholder="Add a tag…"
           value={typed}
           data-autofocus
+          // Opened in place of the list "+N" opens, it takes the keyboard itself.
+          autoFocus
           onChange={(e) => setTyped(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && name) {
@@ -241,6 +243,79 @@ export function TagMenu({ tags, has, onPick }: TagProps) {
         <button type="button" className="chip-choice" data-choice onClick={() => onPick(name)}>
           <Icon name="plus" />
           <span>Add #{name}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A tag after a todo's words, and where it is among them, counted from 0. */
+export interface PlacedTag {
+  name: string;
+  at: number;
+}
+
+interface MoreProps extends TagProps {
+  /** The tags past the first ones a row shows. */
+  rest: readonly PlacedTag[];
+  /** Whether the list is narrowed to this tag. */
+  pressed: (name: string) => boolean;
+  /** Narrows the list to the tag, or takes that off. */
+  onTag: (name: string) => void;
+  /** Takes the tag off the todo's line, false when it no longer has it there. Left out when the todo can't be changed. */
+  onRemove?: (tag: PlacedTag) => boolean;
+}
+
+/**
+ * What a row's "+N" opens: the tags it doesn't show, each narrowing the list as its chip does, each with
+ * a cross that takes it off the todo, as do Delete and Backspace on it, and Add tag, which opens the same
+ * field as the row's own Add tag in its place.
+ */
+export function MoreTags({ rest, pressed, onTag, onRemove, ...adding }: MoreProps) {
+  // Each keeps the key it opened with, so the line after one taken off is the same element and keeps the keyboard.
+  const [left, setLeft] = useState(() => rest.map((tag, key) => ({ ...tag, key })));
+  const [add, setAdd] = useState(false);
+  if (add) return <TagMenu {...adding} />;
+  const remove = (tag: (typeof left)[number], from: HTMLElement) => {
+    // The line after it has the keyboard, or the one before it when it was last, or Add tag.
+    const lines = [...from.closest(".chip-menu")!.querySelectorAll<HTMLElement>("[data-choice]")];
+    const at = lines.indexOf(from.closest(".tag-line")!.querySelector<HTMLElement>("[data-choice]")!);
+    if (!onRemove!({ name: tag.name, at: tag.at })) return;
+    setLeft((had) => had.filter((t) => t !== tag).map((t) => (t.at > tag.at ? { ...t, at: t.at - 1 } : t)));
+    setTimeout(() => (lines[at + 1] ?? lines[at - 1])?.focus());
+  };
+  return (
+    <div className="chip-menu tag-lines" onKeyDown={move}>
+      {left.map((tag) => (
+        <div key={tag.key} className="tag-line">
+          <button
+            type="button"
+            className="chip-choice"
+            data-choice
+            aria-pressed={pressed(tag.name)}
+            title={`Todos tagged #${tag.name}`}
+            aria-keyshortcuts={onRemove && "Delete"}
+            onClick={() => onTag(tag.name)}
+            onKeyDown={(e) => {
+              if (!onRemove || (e.key !== "Delete" && e.key !== "Backspace")) return;
+              e.preventDefault();
+              remove(tag, e.currentTarget);
+            }}
+          >
+            <span className="chip-hash" aria-hidden="true" />
+            <span className="tag-line-name">{tag.name}</span>
+          </button>
+          {onRemove && (
+            <button type="button" className="tag-line-remove" aria-label={`Remove #${tag.name}`} title={`Remove #${tag.name}`} onClick={(e) => remove(tag, e.currentTarget)}>
+              <Icon name="close" />
+            </button>
+          )}
+        </div>
+      ))}
+      {onRemove && (
+        <button type="button" className="chip-choice" data-choice onClick={() => setAdd(true)}>
+          <Icon name="plus" />
+          <span>Add tag</span>
         </button>
       )}
     </div>

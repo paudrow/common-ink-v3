@@ -389,6 +389,7 @@ export const FILTERS = {
         { word: "due-asc", scopes: TODOS, means: "Soonest due first, and those with no due date last", order: "t.due IS NULL, t.due" },
         { word: "due-desc", scopes: TODOS, means: "Latest due first, and those with no due date last", order: "t.due IS NULL, t.due DESC" },
         { word: "priority-desc", aliases: ["importance-desc"], scopes: TODOS, means: "Highest priority first", order: "t.importance DESC" },
+        { word: "text-asc", scopes: TODOS, means: "By the todo's words, A to Z", order: "ltrim(substr(t.text, instr(t.text, ']') + 1), ' !') COLLATE NOCASE" },
         { word: "uploaded-desc", scopes: UPLOADS, means: "Latest uploaded first", order: "u.created_at DESC" },
         { word: "uploaded-asc", scopes: UPLOADS, means: "Earliest uploaded first", order: "u.created_at" },
         { word: "name-asc", scopes: UPLOADS, means: "By the file's name, A to Z", order: "u.name COLLATE NOCASE" },
@@ -405,7 +406,7 @@ export const FILTERS = {
 
 export type Key = keyof typeof FILTERS;
 export type In = "title" | "body";
-export type SortKey = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc" | "due-asc" | "due-desc" | "priority-desc" | "uploaded-desc" | "uploaded-asc" | "name-asc" | "size-desc";
+export type SortKey = "updated-desc" | "updated-asc" | "created-desc" | "created-asc" | "title-asc" | "title-desc" | "due-asc" | "due-desc" | "priority-desc" | "text-asc" | "uploaded-desc" | "uploaded-asc" | "name-asc" | "size-desc";
 export type FilterKey = Exclude<Key, "in" | "sort">;
 
 export type Filter = { kind: "filter"; key: FilterKey; cmp: Cmp; value: string; to?: string };
