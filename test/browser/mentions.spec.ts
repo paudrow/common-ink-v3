@@ -155,6 +155,9 @@ test("mentioning a member in a private note of mine offers to share it, and shar
 
   await notice(page).getByRole("button", { name: "Share with Grace Hopper" }).click();
   await expect(notice(page)).toContainText("Grace Hopper can now read this note.");
+  // A press on the card sends it away. Pressed now, before the few seconds it is shown for are up.
+  await notice(page).locator(".toast-text").click();
+  await expect(notice(page)).toHaveCount(0);
   const { grants } = await perform(page, { type: "grant.list", noteId: note.id });
   expect(grants.map((g) => [g.access, g.to.kind === "person" && g.to.personId])).toEqual([["view", graceId]]);
   await grace.reload();
@@ -168,8 +171,6 @@ test("mentioning a member in a private note of mine offers to share it, and shar
 
   // Mentioned again, she can already see it, so nothing is asked.
   await shareDialog(page).getByRole("button", { name: "Close" }).click();
-  // A press on the card sends it away.
-  await notice(page).locator(".toast-text").click();
   await editor(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("Enter");
@@ -354,6 +355,8 @@ test("nothing moves when the cursor comes to a line with mentions, a deletion ta
   await expect.poll(() => text(page, note.id)).toContain("\nUp  mid end\n");
   await page.keyboard.press("ControlOrMeta+z");
   await page.keyboard.press("ControlOrMeta+z");
+  // Each undo is its own trip to the server, and either may land first: the line is as it was only once both have.
+  await expect(editor(page).locator(".cm-line").filter({ hasText: /^Up / })).toHaveText("Up @Grace Hopper mid end");
   await expect(mentions(page)).toHaveCount(4);
 
   // An arrow key goes into a mention from either side, which shows it as written, and out again, which draws it.
