@@ -393,7 +393,7 @@ export function whoWrote(host: PluginHost, toggles: WhoWroteToggles, read: Map<s
         clearTimeout(timer);
         timer = setTimeout(() => void ask(), !had ? 0 : mine ? OWN_PAUSE_MS : 300);
       });
-    const stops = [toggles.subscribe(sync), host.onNotes(sync)];
+    const stops = [toggles.subscribe(sync), host.onItems(sync)];
     const scrolled = (e: Event) => e.target === scroller && view.state.field(column, false) && repin();
     window.addEventListener("scroll", scrolled, { capture: true, passive: true });
     const focused = () => editors.set(noteId, [view, ...(editors.get(noteId) ?? []).filter((v) => v !== view)]);

@@ -1,5 +1,5 @@
 import { whoAmI } from "../../core/accounts.ts";
-import { perform, type Actor } from "../../core/operations.ts";
+import { agentActor, perform } from "../../core/operations.ts";
 import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } from "../../core/protocol.ts";
 import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
@@ -34,7 +34,7 @@ const MEMBERS =
   "Who is in a workspace decides who can read and change everything in it, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could invite a stranger as admin or remove the other admins. Only the member, signed in, changes who is in a workspace.";
 
 const SHARING =
-  "Who a note or a folder is shared with decides who can read it, up to anyone on the internet for a public link, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could publish a note or hand a folder to a stranger. Only the member, signed in, shares.";
+  "Who a note, a folder or an upload is shared with decides who can read it, up to anyone on the internet for a public link, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could publish a note or hand a folder to a stranger. Only the member, signed in, shares.";
 
 /**
  * Operations an agent is deliberately not given, each with the reason. Every other operation has a
@@ -52,7 +52,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "member.leave": "Leaving ends the member's own access and their agents' with it, and only an admin can undo it. The member does that themself.",
   "invite.list": "Invites name people who are not in the workspace yet, by email, and are only of use for managing them, which an agent can't do.",
   "invite.revoke": MEMBERS,
-  "grant.list": "How a note is shared names people outside the workspace by email, and is only of use for sharing it, which an agent can't do. What the agent itself may do with a note is in every listing of it, as access.",
+  "grant.list": "How a note, a folder or an upload is shared names people outside the workspace by email, and is only of use for sharing it, which an agent can't do. What the agent itself may do with a note or an upload is in every listing of it, as access.",
   "grant.set": SHARING,
   "grant.link": SHARING,
   "grant.revoke": SHARING,
@@ -65,6 +65,20 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "contact.create": CONTACTS,
   "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
+  "shared.upload": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the uploads its member can see.",
+  "upload.setPrivate": "A private upload is hidden from every other member, admins too, and that is not a change in history. The member who uploaded it decides it, in the app.",
+  "upload.purge": "Removing an upload from Trash for good removes its bytes, and nothing brings them back: not Trash, and no note that showed it. An agent reads notes other people wrote, so one that was talked into it could destroy files past recovery. An agent moves an upload to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
+};
+
+/**
+ * Operations an agent performs with its token at an HTTP address instead of with a tool, each with
+ * the reason and the address. A file's bytes are the body of a request there. `ink upload` and
+ * `ink download` use them.
+ */
+export const OVER_HTTP: Partial<Record<OpType, string>> = {
+  "upload.create":
+    "A file's bytes are not text, and a tool call carries only text. POST /api/workspaces/<workspace>/uploads with the token as Authorization: Bearer, the bytes as the body, Content-Type: application/octet-stream, Content-Length, and X-Ink-Upload: encodeURIComponent of the JSON { name, folderId? }. The answer is 201 with the upload.",
+  "upload.open": "A file's bytes are not text, and a tool answer carries only text. GET /api/workspaces/<workspace>/uploads/<id> with the token as Authorization: Bearer answers with the bytes. Range and If-None-Match are honoured.",
 };
 
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -80,10 +94,10 @@ const mentionNames = { type: "string", enum: ["resolve", "keep"], description: '
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
 /** The query language, as much of it as a model needs to write a query unaided. It is read from the filters' table, as docs/search.md is. */
 const QUERY = (scope: Scope) =>
-  `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or an editor: naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`;
+  `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or ${scope === "uploads" ? "an uploader:" : "an editor:"} naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`;
 const queryDays = {
   today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
-  zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated: and created:. Left out, it is the zone your member's settings name, or UTC" },
+  zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated:, created: and uploaded:. Left out, it is the zone your member's settings name, or UTC" },
 };
 const TODOS =
   "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), due:YYYY-MM-DD for the day it is due, and @[[Name]] for someone it is assigned to. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\
@@ -131,6 +145,9 @@ const noteIds = (description: string) => ({ type: "array", items: { type: "strin
 const includeArchived = { type: "boolean", description: "True to cover archived notes too, which are left out otherwise" };
 const archivedToo = { enum: [true, false, "only"], description: 'True to cover archived notes too, which are left out otherwise, or "only" for the archived notes alone' };
 const LIFE = "A note is live, archived or in Trash, which its state says. An archived note is left out of listings unless includeArchived is true, and is read and changed as any other. A note in Trash is listed only by list_trash, can be read, and can't be changed until restore_note brings it back.";
+const uploadId = { type: "string", description: "The upload's id, from list_uploads" };
+const UPLOADS =
+  "A note shows an upload with an embed on a line of its own that starts with the upload's id: ::image{<id> WIDTHxHEIGHT} or ::video{<id> WIDTHxHEIGHT}, with the room to keep for it, ::audio{<id>}, or ::file{<id>} for anything else. The upload's name is never in the note. Its bytes are not in any tool's answer: GET /api/workspaces/<workspace>/uploads/<id> with the same bearer token answers with them, and POST /api/workspaces/<workspace>/uploads takes a new file. A token limited to folders reaches only the uploads in them, at those addresses too.";
 const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
 const selected = (item: Record<string, unknown>, required: string[], description: string) => ({
   type: "array",
@@ -181,7 +198,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are @[[id|Name]] or @[[Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. A note in Trash is read as any other, and its state says trashed.",
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. Mentions in the text are @[[id|Name]] or @[[Name]]: mentions names each person once, with member true and their name now for a member of the workspace, and otherwise the name as written. Uploads in the text are ::image{id ...}, ::video{id ...}, ::audio{id} or ::file{id}: uploads names each one's id with its name, type, kind and size, or a null upload for one that doesn't exist or that you can't see. A note in Trash is read as any other, and its state says trashed.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "An earlier revision; default is the latest" } }, ["id"]),
     op: "note.read",
   },
@@ -352,8 +369,65 @@ ${RULE_GRAMMAR}` },
     op: "trash.list",
   },
   {
+    name: "list_uploads",
+    description: `The uploads you can see that query finds, latest uploaded first unless its sort: says otherwise: with no query, every live one. Each has its id, name, type, which is what its bytes are served as, kind (image, video, audio or file), size in bytes, width and height for an image whose bytes say them, folder, who uploaded it, private, state, access, which is edit or view, and uses: how many notes you can see show it. An upload you can't see is never listed or counted, and reads as no such upload everywhere. Archived uploads are left out unless the query says is:archived, and those in Trash unless it says is:trashed. ${UPLOADS}\
+\
+${QUERY("uploads")}\
+\
+The arguments beside query are from before it could say them, and narrow it further.`,
+    inputSchema: object({
+      query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: "Which uploads, such as: type:image uploader:@me, or: size:>1mb used:no -type:video" },
+      ...queryDays,
+      folderId: folderId("Only uploads in this folder, not those of the folders inside it, from list_folders. In the query, folder: takes the folders inside too"),
+      includeArchived: { type: "boolean", description: "True to cover archived uploads too, which are left out otherwise. In the query: is:archived" },
+    }),
+    op: "upload.list",
+  },
+  {
+    name: "read_upload",
+    description: `One upload as list_uploads gives it, and usedIn: the notes you can see that refer to it, each as list_notes gives it. An upload in Trash is read as any other, and its state says trashed. ${UPLOADS}`,
+    inputSchema: object({ id: uploadId }, ["id"]),
+    op: "upload.read",
+  },
+  {
+    name: "move_upload",
+    description: "Put an upload in another folder. Its id stays the same, so the notes that refer to it still show it. Needs edit on the upload and on the folder.",
+    inputSchema: object({ id: uploadId, folderId: folderId("The folder to move it to, from list_folders") }, ["id", "folderId"]),
+    op: "upload.move",
+  },
+  {
+    name: "place_upload",
+    description: "Put an upload you can see in a note, before you write its embed in the note's text with write_note: it writes nothing itself. An upload private to your member, seen by nobody else, is refused: only your member can let others see it, in the app. In a private note it stays private and is placed. An upload that isn't private is left where it is. Made twice, it changes nothing more. Needs edit on the upload and on the note. The answer is the upload as it now is.",
+    inputSchema: object({ id: uploadId, noteId: { type: "string", description: "The note it is put in" } }, ["id", "noteId"]),
+    op: "upload.place",
+  },
+  {
+    name: "archive_upload",
+    description: "Archive an upload, or with archived false bring it back. An archived upload keeps its folder and id, is left out of list_uploads unless includeArchived is true, and is still shown by the notes that refer to it. Needs edit on the upload.",
+    inputSchema: object({ id: uploadId, archived: { type: "boolean", description: "True to archive, false to unarchive" } }, ["id", "archived"]),
+    op: "upload.archive",
+  },
+  {
+    name: "trash_upload",
+    description: "Move an upload to Trash. It waits there 30 days, listed by list_trashed_uploads, and is then removed for good with its bytes. Until then restore_upload brings it back as it was. The answer's usedIn is how many notes you can see refer to it: each says the upload is in Trash until it is restored. Needs edit on the upload.",
+    inputSchema: object({ id: uploadId }, ["id"]),
+    op: "upload.trash",
+  },
+  {
+    name: "restore_upload",
+    description: "Bring an upload back from Trash to the folder it was in, archived if it was, and to every note that refers to it. When that folder was deleted meanwhile it comes back to Unsorted and folderGone is true, which also needs edit on Unsorted. Needs edit on the upload.",
+    inputSchema: object({ id: uploadId }, ["id"]),
+    op: "upload.restore",
+  },
+  {
+    name: "list_trashed_uploads",
+    description: "The uploads in Trash that you can see, latest trashed first: each as list_uploads gives it, with who trashed it and when, and purgesAt, the time it is removed for good. An agent can't remove one sooner; a member does that in the app.",
+    inputSchema: object({}),
+    op: "upload.trashed",
+  },
+  {
     name: "list_folders",
-    description: "The folders in a workspace: id, name, the folder each is inside (parentId), and how many notes are directly in it. unsortedId is the folder a note goes to when none is named.",
+    description: "The folders in a workspace: id, name, the folder each is inside (parentId), and how many notes and uploads are directly in it. unsortedId is the folder a note goes to when none is named.",
     inputSchema: object({}),
     op: "folder.list",
   },
@@ -620,8 +694,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
-    const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly, folderIds: agent.folderIds } };
-    return text(await perform(db, actor, { ...rest, type: tool.op! } as OpInput, Date.now(), sources));
+    return text(await perform(db, agentActor(agent, workspaceId), { ...rest, type: tool.op! } as OpInput, Date.now(), sources));
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${err.message}`, true);
     throw err;

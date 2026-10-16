@@ -2,6 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Results } from "../core/protocol.ts";
 import { perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
 import { embedding, embedsAre } from "./embedding.ts";
@@ -17,6 +18,8 @@ interface Props {
   revision: number | undefined;
   embeds: readonly (Embed | AddressEmbed)[];
   extensions: readonly EditorExtension[];
+  /** Called with each reading, which says what the note's uploads are before they are drawn. */
+  onRead: (note: Results["note.read"]) => void;
 }
 
 /**
@@ -25,15 +28,15 @@ interface Props {
  * written, and what is only for editing, such as vim, is left out of it. Its text is selected and
  * copied as a page's is. It is as tall as its text and scrolls with whatever it is in.
  */
-export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: contributed }: Props) {
+export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: contributed, onRead }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [embedded] = useState(() => new Compartment());
   const [added] = useState(() => new Compartment());
   const mine = useMemo(() => forEditor({ noteId, reading: true }), [noteId]);
   const extensions = useMemo(() => mine(contributed).extensions, [mine, contributed]);
-  const now = useRef({ embeds, extensions });
-  now.current = { embeds, extensions };
+  const now = useRef({ embeds, extensions, onRead });
+  now.current = { embeds, extensions, onRead };
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -45,6 +48,7 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
         (note) => {
           if (!live || !el.current) return;
           setFailed(false);
+          now.current.onRead(note);
           const { text } = note;
           const view = viewRef.current;
           if (view) {

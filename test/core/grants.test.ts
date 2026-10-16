@@ -85,8 +85,8 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     expect(await perform(env.DB, gus.actor, { type: "folder.list" })).toEqual({
       unsortedId: null,
       folders: [
-        { id: inside.id, name: "Inside", parentId: shared.id, noteCount: 1, access: "edit" },
-        { id: shared.id, name: "Shared", parentId: null, noteCount: 0, access: "edit" },
+        { id: inside.id, name: "Inside", parentId: shared.id, noteCount: 1, uploadCount: 0, access: "edit" },
+        { id: shared.id, name: "Shared", parentId: null, noteCount: 0, uploadCount: 0, access: "edit" },
       ],
     });
     const written = await write(gus.actor, plan.id, 1, "# Plan\n\nfrom Gus");
@@ -511,7 +511,7 @@ describe("a link", () => {
       "Set-Cookie": null,
     });
     const text = await (await fetchAs(`/api/shared/${token}/notes/${plan.id}`)).text();
-    expect(JSON.parse(text)).toEqual({ id: plan.id, title: "Plan", slug: "plan", folderId: null, updatedAt: expect.any(Number), snippet: expect.any(String), text: `# Plan\n\nsee [[${other.id}]]`, revision: 1, links: [{ id: other.id, title: null, state: null }] });
+    expect(JSON.parse(text)).toEqual({ id: plan.id, title: "Plan", slug: "plan", folderId: null, updatedAt: expect.any(Number), snippet: expect.any(String), text: `# Plan\n\nsee [[${other.id}]]`, revision: 1, links: [{ id: other.id, title: null, state: null }], uploads: [] });
     expect(text).not.toMatch(/Ada|Lovelace/);
     expect(text).not.toContain(ada.personId);
 

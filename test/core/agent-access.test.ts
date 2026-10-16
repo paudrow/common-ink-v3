@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, and removing a note for good are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts check. */
-type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "contact.update" | "contact.photo" | "contact.create">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, and removing a note for good are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
+type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "contact.update" | "contact.photo" | "contact.create">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -91,6 +91,14 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "person.read": { who: "Sam Okafor" },
   "record.refer": { sourceId: "google-calendar", id: "none" },
   "record.read": { ref: "aaaaaaaaaaaa" },
+  "upload.list": {},
+  "upload.read": { id: "aaaaaaaaaaaa" },
+  "upload.move": { id: "aaaaaaaaaaaa", folderId },
+  "upload.place": { id: "aaaaaaaaaaaa", noteId },
+  "upload.archive": { id: "aaaaaaaaaaaa", archived: false },
+  "upload.trash": { id: "aaaaaaaaaaaa" },
+  "upload.restore": { id: "aaaaaaaaaaaa" },
+  "upload.trashed": {},
   "record.notes": { sourceId: "google-calendar", id: "none" },
 });
 
@@ -118,6 +126,11 @@ describe("an agent's access is its member's", () => {
       "note.archive",
       "note.trash",
       "note.restore",
+      "upload.move",
+      "upload.place",
+      "upload.archive",
+      "upload.trash",
+      "upload.restore",
       "note.label",
       "note.revert",
       "note.revertChanges",

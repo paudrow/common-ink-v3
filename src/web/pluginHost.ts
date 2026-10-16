@@ -53,7 +53,7 @@ export interface MemberSettings {
 }
 
 /** What the app gives each plugin beyond registering: its reach into the workspace, bound to that plugin. */
-export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "sharing" | "storage">;
+export type Provided = Pick<PluginHost, "workspace" | "app" | "perform" | "agents" | "members" | "sharing" | "uploads" | "storage">;
 
 export interface HostOptions {
   /**
@@ -65,8 +65,8 @@ export interface HostOptions {
   required?: readonly string[];
   /**
    * The plugins that are Common Ink's own, as the very values in `plugins`: nothing a plugin says of
-   * itself, such as its id, puts it here. Only they are given `host.agents`, `host.members` and
-   * `host.sharing`. Any other plugin is handed ones whose every method refuses.
+   * itself, such as its id, puts it here. Only they are given `host.agents`, `host.members`,
+   * `host.sharing` and `host.uploads`. Any other plugin is handed ones whose every method refuses.
    */
   trusted?: readonly Plugin[];
   /** The ids of the plugins that came with the app. */
@@ -139,17 +139,31 @@ function withheld(plugin: Plugin, given: Provided): Pick<Provided, (typeof OWN_O
   return Object.fromEntries(OWN_ONLY.map((capability) => [capability, refusing(capability)])) as never;
 }
 
+/** `host.uploads` for a plugin that isn't Common Ink's own: no upload is known, none has an address, nothing is read, and nothing is sent. */
+const noUploads = (plugin: Plugin): Provided["uploads"] => ({
+  referred: () => null,
+  onReferred: () => () => {},
+  learn: () => {},
+  address: () => "about:blank",
+  tabAddress: () => null,
+  bytes: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.bytes: only Common Ink's own plugins are`)),
+  send: () => Promise.reject(new Error(`${plugin.name} isn't given host.uploads.send: only Common Ink's own plugins are`)),
+});
+
 /** Why `host.perform` won't take an operation, or null when it will. The type `KeptFromPerform` says the same to a plugin written in TypeScript. */
 function keptFromPerform(type: string): string | null {
   if (type.startsWith("settings.")) return "a plugin can't read or change the member's settings";
   if (type.startsWith("invite.") || (type.startsWith("member.") && type !== "member.list")) return "who is in a workspace is changed through host.members, by a plugin that is given it";
   if (type.startsWith("grant.") || type === "note.setPrivate") return "who a note or folder is shared with is read and changed through host.sharing, by a plugin that is given it";
+  if (type === "upload.setPrivate") return "who an upload is shared with is read and changed through host.sharing, by a plugin that is given it";
+  if (type === "upload.create" || type === "upload.open") return "an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it";
   if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
   return null;
 }
 
 /** Why a plugin that isn't Common Ink's own is refused an operation, or null when it isn't. The type `OwnOnly` says the same. */
-const ownOnly = (type: string): string | null => (/^(source|event|contact|record)\./.test(type) ? "a member's data sources are theirs, and are read only by Common Ink's own plugins" : null);
+const ownOnly = (type: string): string | null =>
+  /^(source|event|contact|record)\./.test(type) ? "a member's data sources are theirs, and are read only by Common Ink's own plugins" : type.startsWith("upload.") ? "a workspace's uploads are read and changed only by Common Ink's own plugins" : null;
 
 export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
   const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
@@ -211,7 +225,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
 
   function hostFor(plugin: Plugin, index: number, mine: Set<Dispose>): PluginHost {
     const given = provide({ id: plugin.id, name: plugin.name });
-    const provided = trusted.includes(plugin) ? given : { ...given, ...withheld(plugin, given) };
+    const provided = trusted.includes(plugin) ? given : { ...given, ...withheld(plugin, given), uploads: noUploads(plugin) };
     const keep = (dispose: Dispose) => {
       mine.add(dispose);
       return dispose;
@@ -285,14 +299,16 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       },
       embeds: {
         register(embed) {
-          const dispose = keep(add(embeds, embed.name, embed, index, "an embed named"));
+          const address = "claims" in embed;
+          // An address embed is in no note by its name, so it is no clash with an embed a note writes by the same one: a video by its address, and `::video{}`.
+          const dispose = keep(add(embeds, address ? `address ${embed.name}` : embed.name, embed, index, address ? "an address embed named" : "an embed named"));
           owners.set(embed, owner);
           return dispose;
         },
         list: () =>
           contributions()
-            .embeds.filter((e): e is Embed => !("claims" in e))
-            .map(({ name, title, block, starts }) => ({ name, title, block, starts })),
+            .embeds.filter((e): e is Embed => !("claims" in e) && e.menu !== false)
+            .map(({ name, title, block, starts, pick }) => ({ name, title, block, starts, ...(pick && { pick }) })),
       },
       completions: {
         register(completion) {
@@ -318,7 +334,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
         if (arrived) queueMicrotask(() => arriving.has(heard) && heard());
         return keep(() => void arriving.delete(heard));
       },
-      onNotes(listener) {
+      onItems(listener) {
         const heard = () => listener();
         listing.add(heard);
         return keep(() => void listing.delete(heard));

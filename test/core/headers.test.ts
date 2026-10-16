@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { secured } from "../../src/worker/headers.ts";
 
 const PAGE =
-  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://*.googleusercontent.com; font-src 'self' data:; connect-src 'self' https:; manifest-src 'self'; frame-src https://commonink.app/embed-frame https://www.youtube-nocookie.com https://platform.twitter.com https://embed.bsky.app; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
+  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https://*.googleusercontent.com; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' https:; manifest-src 'self'; frame-src https://commonink.app/embed-frame https://www.youtube-nocookie.com https://platform.twitter.com https://embed.bsky.app; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
 const EMBED_FRAME =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 const DATA = "default-src 'none'; frame-ancestors 'none'";

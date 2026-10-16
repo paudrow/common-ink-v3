@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FILTERS, KEYS, MAX_DEPTH, MAX_SEARCH_LENGTH, MAX_TERMS, conditionOf, dayOf, fieldName, fieldOf, fieldsOf, filterOf, folded, keysFor, keysStarting, parse, print, shift, syntax, syntaxDocs, typingAt, wordsFor, wordsIn, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "../../src/core/query.ts";
+import { FILTERS, KEYS, SCOPES, bytesOf, MAX_DEPTH, MAX_SEARCH_LENGTH, MAX_TERMS, conditionOf, dayOf, fieldName, fieldOf, fieldsOf, filterOf, folded, keysFor, keysStarting, parse, print, shift, syntax, syntaxDocs, typingAt, wordsFor, wordsIn, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "../../src/core/query.ts";
 
 import docs from "../../docs/search.md?raw";
 
@@ -99,6 +99,36 @@ const READS: [typed: string, scope: Scope, query: Query, printed: string][] = [
   ["a OR ++", "notes", q(text("a")), "a"],
   ["a -- b - c", "notes", q(and(text("a"), text("b"), text("c"))), "a b c"],
   ["a ) b", "notes", q(and(text("a"), text("b"))), "a b"],
+
+  ["has:attachment", "notes", q(filter("has", "attachment")), "has:attachment"],
+  ["no:attachment", "notes", q(not(filter("has", "attachment"))), "no:attachment"],
+
+  // Uploads: words find a file by its name, and `#` is no tag of one.
+  ["q2-report", "uploads", q(text("q2 report")), "q2-report"],
+  ['"q2 report" #money', "uploads", q(and(text("q2 report", true), text("money"))), '"q2 report" money'],
+  ['name:"50%_off \\ sale"', "uploads", q(filter("name", "50%_off \\ sale")), 'name:"50%_off \\ sale"'],
+  ["name:>x", "uploads", q(filter("name", ">x")), "name:>x"],
+  ["type:image OR type:video OR type:audio", "uploads", q(or(filter("type", "image"), filter("type", "video"), filter("type", "audio"))), "type:image OR type:video OR type:audio"],
+  ["kind:pdf -type:text type:other", "uploads", q(and(filter("type", "pdf"), not(filter("type", "text")), filter("type", "other"))), "type:pdf -type:text type:other"],
+  ["uploader:@me", "uploads", q(filter("uploader", "@me")), "uploader:@me"],
+  ['uploaded-by:"Ada Lovelace"', "uploads", q(filter("uploader", "Ada Lovelace")), 'uploader:"Ada Lovelace"'],
+  ["used:yes", "uploads", q(filter("used", "yes")), "used:yes"],
+  ["-used:no", "uploads", q(not(filter("used", "no"))), "-used:no"],
+  ["size:>1MB", "uploads", q(filter("size", "1mb", ">")), "size:>1mb"],
+  ["size:<=500kb", "uploads", q(filter("size", "500kb", "<=")), "size:<=500kb"],
+  ["size:1mb..5mb", "uploads", q(filter("size", "1mb", "=", "5mb")), "size:1mb..5mb"],
+  ["size:1.5gb..*", "uploads", q(filter("size", "1.5gb", ">=")), "size:>=1.5gb"],
+  ["size:1048576", "uploads", q(filter("size", "1048576")), "size:1048576"],
+  ["size:10b", "uploads", q(filter("size", "10b")), "size:10b"],
+  ["uploaded:>=7d", "uploads", q(filter("uploaded", "7d", ">=")), "uploaded:>=7d"],
+  ["uploaded:2026-10-01..2026-10-14", "uploads", q(filter("uploaded", "2026-10-01", "=", "2026-10-14")), "uploaded:2026-10-01..2026-10-14"],
+  ['folder:"Common Ink" -folder:Old', "uploads", q(and(filter("folder", "Common Ink"), not(filter("folder", "Old")))), 'folder:"Common Ink" -folder:Old'],
+  ["is:open OR is:archived OR is:trashed", "uploads", q(or(filter("is", "open"), filter("is", "archived"), filter("is", "trashed"))), "is:open OR is:archived OR is:trashed"],
+  ["is:shared -is:private", "uploads", q(and(filter("is", "shared"), not(filter("is", "private")))), "is:shared -is:private"],
+  ["sort:size-desc", "uploads", q(null, { sort: "size-desc" }), "sort:size-desc"],
+  ["chart sort:uploaded-asc", "uploads", q(text("chart"), { sort: "uploaded-asc" }), "chart sort:uploaded-asc"],
+  ["sort:name-asc type:image", "uploads", q(filter("type", "image"), { sort: "name-asc" }), "type:image sort:name-asc"],
+  ["sort:uploaded-desc", "uploads", q(null, { sort: "uploaded-desc" }), "sort:uploaded-desc"],
 ];
 
 /** What can't be read, and the part of it the error points at. */
@@ -136,6 +166,23 @@ const REFUSED: [typed: string, scope: Scope, at: string, says: RegExp][] = [
   ["sort:due-asc", "notes", "due-asc", /sort:due-asc is for todos/],
   ["sort:newest", "notes", "newest", /doesn't take "newest"/],
   ["in:heading x", "notes", "heading", /doesn't take "heading"/],
+  ["tag:money", "uploads", "tag:money", /tag: is for notes and todos, and this is a search of uploads/],
+  ["no:attachment", "uploads", "no:attachment", /has: is for notes and todos/],
+  ["in:title x", "uploads", "in:title", /in: is for notes and todos/],
+  ["is:done", "uploads", "done", /is:done is for todos, and this is a search of uploads/],
+  ["sort:title-asc", "uploads", "title-asc", /sort:title-asc is for notes/],
+  ["sort:size-desc", "notes", "size-desc", /sort:size-desc is for uploads, and this is a search of notes/],
+  ["type:image", "notes", "type:image", /type: is for uploads, and this is a search of notes/],
+  ["type:spreadsheet", "uploads", "spreadsheet", /type: doesn't take "spreadsheet"\. It takes image, video, audio, pdf, text or other/],
+  ["type:imag", "uploads", "imag", /Did you mean image\?/],
+  ["used:maybe", "uploads", "maybe", /used: doesn't take "maybe"/],
+  ["size:big", "uploads", "big", /size: takes a number of bytes, or one with kb, mb or gb after it/],
+  ["size:>1tb", "uploads", "1tb", /takes a number of bytes/],
+  ["size:1mb..lots", "uploads", "lots", /takes a number of bytes/],
+  ["size:-1", "uploads", "-1", /takes a number of bytes/],
+  ["a name:", "uploads", "name:", /name: needs a value, such as name:report/],
+  ["uploaded:soon", "uploads", "soon", /takes a day/],
+  ["uploder:@me", "uploads", "uploder:", /Did you mean uploader: or uploaded:\?/],
 ];
 
 describe("a query as typed", () => {
@@ -159,7 +206,7 @@ describe("a query as typed", () => {
       return (node.kind === "not" ? [node.of] : node.of).flatMap(forms);
     };
     const read = new Set(READS.flatMap(([, , query]) => [...forms(query.where), ...query.in.map((where) => `in:${where}`), ...(query.sort ? ["sort"] : [])]));
-    const said = (["notes", "todos"] as const).flatMap((scope) => keysFor(scope).flatMap((key) => (FILTERS[key].value.type === "words" && key !== "sort" ? wordsFor(key, scope).map((w) => `${key}:${w.word}`) : [key])));
+    const said = SCOPES.flatMap((scope) => keysFor(scope).flatMap((key) => (FILTERS[key].value.type === "words" && key !== "sort" ? wordsFor(key, scope).map((w) => `${key}:${w.word}`) : [key])));
     expect(said.filter((form) => !read.has(form))).toEqual([]);
   });
 
@@ -227,7 +274,8 @@ function seeded(seed: number) {
 describe("a query written back", () => {
   const WORDS = ["a", "budget", "Ünïcode", "2026", "x1", "plan", "or", "and", "not", "名前", "AND", "NOT"];
   const DAYS = ["2026-10-01", "2026-12-31", "today", "yesterday", "tomorrow", "7d", "+30d"];
-  const NAMES = ["Projects", "Common Ink", "@me", "a..b", ">x", "it's", "(group)", "é", "x:y", "-dash", "AND", "#hash"];
+  const NAMES = ["Projects", "Common Ink", "@me", "a..b", ">x", "it's", "(group)", "é", "x:y", "-dash", "AND", "#hash", "50%_off"];
+  const SIZES = ["0", "10b", "500kb", "1mb", "1.5gb", "123456789"];
   const CMPS = ["=", ">", ">=", "<", "<="] as const;
 
   function generate(scope: Scope, pick: (below: number) => number): Query {
@@ -243,7 +291,8 @@ describe("a query written back", () => {
       const { value, compares } = FILTERS[key];
       const range = compares && pick(4) === 0;
       const cmp = compares && !range ? one(CMPS) : "=";
-      const made = (): string => (value.type === "day" ? one(DAYS) : value.type === "level" ? one(value.levels) : value.type === "words" ? one(wordsFor(key, scope)).word : value.type === "tag" ? one(["money", "work/home", "a_b", "x-1"]) : one(NAMES));
+      const made = (): string =>
+        value.type === "day" ? one(DAYS) : value.type === "level" ? one(value.levels) : value.type === "words" ? one(wordsFor(key, scope)).word : value.type === "tag" ? one(["money", "work/home", "a_b", "x-1"]) : value.type === "size" ? one(SIZES) : one(NAMES);
       return { kind: "filter", key, cmp, value: made(), ...(range && { to: made() }) };
     };
     const node = (depth: number): Node => {
@@ -257,13 +306,14 @@ describe("a query written back", () => {
       return { kind: kind === 4 ? "and" : "or", of: Array.from({ length: 2 + pick(2) }, () => node(depth + 1)) };
     };
     const sorts = wordsFor("sort", scope).map((w) => w.word) as NonNullable<Query["sort"]>[];
-    return { where: pick(10) === 0 ? null : node(0), in: [[], ["title"], ["body"], ["title", "body"]][pick(4)] as Query["in"], sort: pick(3) === 0 ? one(sorts) : null };
+    const ins = keysFor(scope).includes("in") ? [[], ["title"], ["body"], ["title", "body"]] : [[]];
+    return { where: pick(10) === 0 ? null : node(0), in: one(ins) as Query["in"], sort: pick(3) === 0 ? one(sorts) : null };
   }
 
-  it("is read back as the same query, for two thousand made-up queries", () => {
+  it("is read back as the same query, for three thousand made-up queries", () => {
     const pick = seeded(47);
-    for (let i = 0; i < 2000; i++) {
-      const scope = pick(2) === 0 ? "notes" : "todos";
+    for (let i = 0; i < 3000; i++) {
+      const scope = SCOPES[pick(3)]!;
       const query = generate(scope, pick);
       const printed = print(query);
       if (printed.length > MAX_SEARCH_LENGTH) continue;
@@ -318,7 +368,7 @@ describe("a query nobody meant well", () => {
   ];
 
   it.each(HOSTILE.map((typed) => [typed]))("%j is answered, never thrown", (typed) => {
-    for (const scope of ["notes", "todos"] as const) {
+    for (const scope of SCOPES) {
       const parsed = parse(typed, scope);
       if (parsed.ok) expect(parse(print(parsed.query), scope)).toEqual(parsed);
       else {
@@ -343,8 +393,8 @@ describe("a query nobody meant well", () => {
   };
 
   it("puts nothing that was typed into the SQL: every value is bound", () => {
-    for (const typed of [...HOSTILE, 'zqzq "zqzq zqzq" folder:zqzq tag:zqzq editor:zqzq author:zqzq -zqzq (zqzq OR #zqzq)', "is:archived has:link updated:2026-10-01 created:>7d"]) {
-      for (const scope of ["notes", "todos"] as const) {
+    for (const typed of [...HOSTILE, 'zqzq "zqzq zqzq" folder:zqzq tag:zqzq editor:zqzq author:zqzq -zqzq (zqzq OR #zqzq)', "is:archived has:link updated:2026-10-01 created:>7d", 'zqzq name:zqzq name:"zqzq DROP" uploader:zqzq size:>1mb uploaded:>7d type:text used:no']) {
+      for (const scope of SCOPES) {
         const made = compiled(typed.replace(/7d/, "2026-10-02"), scope);
         if (!made) continue;
         expect(made.sql).not.toMatch(/zqzq|DROP|1=1|NEAR|evil|--|;/);
@@ -367,7 +417,8 @@ describe("a query nobody meant well", () => {
     expect(WORDS.length).toBe(MAX_TERMS);
     const largest = [WORDS.join(" OR "), WORDS.join(" "), WORDS.map((word) => `-${word}`).join(" "), `${WORDS.slice(0, 36).join(" OR ")} in:title in:body`, `${WORDS.slice(0, 38).map((word) => `-${word}`).join(" ")} in:title in:body`];
     for (const typed of largest) {
-      for (const scope of ["notes", "todos"] as const) {
+      for (const scope of SCOPES) {
+        if (typed.includes("in:") && scope === "uploads") continue;
         const made = compiled(typed, scope)!;
         expect(made.binds.length, `${scope}: ${typed}`).toBeLessThanOrEqual(2 * MAX_TERMS);
       }
@@ -376,6 +427,13 @@ describe("a query nobody meant well", () => {
     const days = Array.from({ length: 7 }, () => "due:2026-10-01..2026-10-02").join(" ");
     expect(days.length).toBeLessThanOrEqual(MAX_SEARCH_LENGTH);
     expect(compiled(days, "todos")!.binds.length).toBe(14);
+  });
+
+  it("finds an upload by its name, with what LIKE reads as more than a character read as itself, and its size in bytes", () => {
+    expect(compiled('Q2-report "q2 report"', "uploads")).toEqual({ sql: "((u.name LIKE ?1 AND u.name LIKE ?2))", binds: ["%Q2%report%", "%q2%report%"] });
+    expect(compiled('name:"50%_off \\ sale"', "uploads")).toEqual({ sql: "IFNULL(u.name LIKE ?1 ESCAPE '\\', 0)", binds: ["%50\\%\\_off \\\\ sale%"] });
+    expect(compiled("size:1mb..1.5mb", "uploads")).toEqual({ sql: "IFNULL((u.size >= ?1 AND u.size <= ?2), 0)", binds: [1_048_576, 1_572_864] });
+    expect(["0", "10b", "2kb", "1mb", "1.5gb", "123"].map(bytesOf)).toEqual([0, 10, 2048, 1_048_576, 1_610_612_736, 123]);
   });
 
   it("finds a todo's words by their starts in its folded line, as the index finds a note's", () => {
@@ -388,11 +446,12 @@ describe("a query nobody meant well", () => {
 
 describe("what is said of the language", () => {
   it("is all read from the one table: every example reads, in the scope it is shown for", () => {
-    for (const scope of ["notes", "todos"] as const) {
+    for (const scope of SCOPES) {
       for (const row of syntax(scope)) expect(parse(row.example, scope), `${scope}: ${row.example}`).toMatchObject({ ok: true });
       for (const key of keysFor(scope)) expect(syntax(scope).some((row) => row.form.startsWith(`${key}:`)), key).toBe(true);
     }
-    expect(KEYS).toEqual(["folder", "tag", "updated", "created", "editor", "author", "mentions", "assignee", "is", "has", "due", "priority", "in", "sort"]);
+    expect(KEYS).toEqual(["folder", "tag", "updated", "created", "editor", "author", "mentions", "assignee", "name", "type", "uploader", "used", "size", "uploaded", "is", "has", "due", "priority", "in", "sort"]);
+    expect(keysFor("uploads")).toEqual(["folder", "name", "type", "uploader", "used", "size", "uploaded", "is", "sort"]);
   });
 
   it("has Shared and Private under Visibility, apart from the states a note or a todo is in, in the builder and the help alike", () => {
@@ -427,6 +486,10 @@ describe("what is said of the language", () => {
     expect(typingAt("budget", 3, "notes")).toBeNull();
     expect(typingAt("Budget", 6, "notes")).toBeNull();
     expect(typingAt("due:x", 5, "notes")).toBeNull();
+    expect(keysStarting("u", "uploads")).toEqual(["uploaded", "uploaded-by", "uploader", "used"]);
+    expect(keysStarting("n", "uploads")).toEqual(["name"]);
+    expect(typingAt("size:>=1", 8, "uploads")).toEqual({ from: 7, to: 8, key: "size", typed: "1", lead: ">=" });
+    expect(typingAt("#mo", 3, "uploads")).toBeNull();
   });
 
   it("counts a day from today", () => {

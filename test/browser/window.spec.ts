@@ -609,8 +609,9 @@ test("a closed sidebar leaves a bar with an icon for each thing the sidebar list
   await withNote(page);
   // The Tags section is drawn once the tags have been asked for.
   await expect(sidebar(page).locator(".section-head > span")).toHaveText(["Folders", "Tags"]);
-  const open = await listedIn(sidebar(page), ".new-note, nav[aria-label=Modes] > *, .section-head > span");
-  expect(open.map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders", "Tags"]);
+  const listedOpen = () => listedIn(sidebar(page), ".new-note, nav[aria-label=Modes] > *, .section-head > span");
+  await expect.poll(async () => (await listedOpen()).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders", "Tags"]);
+  const open = await listedOpen();
 
   await toggleSidebar(page);
   const bar = page.getByRole("navigation", { name: "Sidebar bar" });

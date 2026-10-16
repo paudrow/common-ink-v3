@@ -1,13 +1,18 @@
 import { syntaxTree } from "@codemirror/language";
 import { Annotation, EditorState, Facet, Prec, StateField, Transaction, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { keptBelow } from "./below.ts";
+import { aloneIn, aloneOn, boxOf, keptBelow } from "./below.ts";
 import { closeOptions, refreshOptions, toggleOptions, type Options } from "./embedOptions.ts";
 import { blocksIn, inlineIn, rewriteOf, sameWritten, type Written } from "./embedSyntax.ts";
 import type { AddressEmbed, Drawn, Embed, Embedded } from "./plugin-api.ts";
 import { isReading } from "./readOnly.ts";
 
 type ByName = ReadonlyMap<string, Embed>;
+
+/** An embed that draws something in its line or as a block. */
+type Drawing = Embed & Required<Pick<Embed, "render">>;
+
+const drawing = (embed: Embed | undefined): embed is Drawing => !!embed?.render;
 
 /** The embeds plugins have registered, by name. */
 const registered = Facet.define<readonly Embed[], ByName>({ combine: (values) => new Map(values.flat().map((e) => [e.name, e])) });
@@ -42,7 +47,7 @@ const optionsIn = (frame: HTMLElement) => frame.querySelector<HTMLButtonElement>
  */
 class EmbedWidget extends WidgetType {
   constructor(
-    private readonly embed: Embed,
+    private readonly embed: Drawing,
     private readonly written: Written,
     private readonly source: string,
     private readonly readOnly: boolean,
@@ -103,7 +108,7 @@ class EmbedWidget extends WidgetType {
     return true;
   }
 
-  private draw(frame: HTMLElement, el: HTMLElement, view: EditorView, show: (handed: Embedded) => ReturnType<Embed["render"]>) {
+  private draw(frame: HTMLElement, el: HTMLElement, view: EditorView, show: (handed: Embedded) => ReturnType<Drawing["render"]>) {
     const { embed, written } = this;
     /** What the note says here now, if it is still what this was drawn from. */
     const still = () => {
@@ -214,7 +219,7 @@ class EmbedWidget extends WidgetType {
 /** What a press on a frame's own card, off what the embed drew, does now. */
 const pressed = new WeakMap<HTMLElement, () => void>();
 
-const widgetFor = (state: EditorState, embed: Embed, written: Written) => new EmbedWidget(embed, written, state.sliceDoc(written.from, written.to), state.readOnly);
+const widgetFor = (state: EditorState, embed: Drawing, written: Written) => new EmbedWidget(embed, written, state.sliceDoc(written.from, written.to), state.readOnly);
 
 /** On a cursor the host puts in an embed itself, which is where it says and nowhere else. */
 const placed = Annotation.define<true>();
@@ -261,6 +266,9 @@ class SourceRows extends WidgetType {
 }
 
 const unseen = Decoration.replace({});
+const asText = Decoration.mark({ class: "embed-written" });
+/** A line that is one such embed and nothing else is only as tall as its text as written. */
+const alone = Decoration.line({ class: "embed-alone" });
 
 /**
  * An inline embed's drawing is a widget of its own before the embed's text, and the text is hidden
@@ -273,7 +281,7 @@ function inlineDrawn(view: EditorView): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const { state } = view;
   const byName = state.facet(registered);
-  const drawnBlocks = state.field(blocks).all.filter((b) => byName.get(b.name)?.block);
+  const drawnBlocks = drawnBy(state, state.field(blocks).all);
   const shown = new Map<number, string[]>();
   for (const { from, to } of view.visibleRanges) {
     for (const written of inlineIn(state.sliceDoc(from, to), from)) {
@@ -281,6 +289,14 @@ function inlineDrawn(view: EditorView): DecorationSet {
       if (!embed || embed.block || /Code/.test(syntaxTree(state).resolveInner(written.from, 1).name)) continue;
       // A block's body is the block's to draw.
       if (drawnBlocks.some((b) => b.from <= written.from && b.to >= written.to)) continue;
+      const lone = aloneIn(state, written);
+      // All of it is below its line: there is nothing of it in the line but its text, while the cursor is on it. A line it is alone on is out of sight with the cursor elsewhere, and shown with the cursor anywhere on it.
+      if ((!drawing(embed) || (lone && embed.below?.alone)) && boxOf(embed, written)) {
+        ranges.push(((lone ? aloneOn(state, written.from, state.field(used)) : cursorOn(state, written)) ? asText : unseen).range(written.from, written.to));
+        if (lone) ranges.push(alone.range(state.doc.lineAt(written.from).from));
+        continue;
+      }
+      if (!drawing(embed)) continue;
       ranges.push(Decoration.widget({ widget: widgetFor(state, embed, written), side: -1 }).range(written.from));
       if (!cursorOn(state, written)) {
         ranges.push(unseen.range(written.from, written.to));
@@ -318,7 +334,7 @@ interface Blocks {
   drawn: DecorationSet;
 }
 
-const drawnBy = (state: EditorState, all: readonly Written[]) => all.filter((b) => state.facet(registered).get(b.name)?.block);
+const drawnBy = (state: EditorState, all: readonly Written[]) => all.filter((b) => state.facet(registered).get(b.name)?.block && drawing(state.facet(registered).get(b.name)));
 
 /**
  * A block's drawing is a widget of its own under the block's lines, and the lines are hidden above
@@ -336,7 +352,7 @@ function blocksDrawn(state: EditorState, all: readonly Written[], revealed: numb
   return Decoration.set(
     drawnBy(state, all).flatMap((written) => [
       ...(written.from === revealed ? shown(written) : [Decoration.replace({ block: true }).range(written.from, written.to)]),
-      Decoration.widget({ widget: widgetFor(state, byName.get(written.name)!, written), block: true, side: 1 }).range(written.to),
+      Decoration.widget({ widget: widgetFor(state, byName.get(written.name) as Drawing, written), block: true, side: 1 }).range(written.to),
     ]),
     true,
   );

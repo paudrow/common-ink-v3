@@ -120,7 +120,7 @@ test("in focus the bottom bar and its clocks are out of sight while the clock in
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:[45]\d$/]);
   await expect(bar(page).getByLabel("Word count")).toHaveText("3 words · 1 min read");
 
-  for (const name of ["Note clocks", "Quick timer", "Word count"]) await run(page, `Disable plugin: ${name}`);
+  for (const name of ["Note clocks", "Quick timer", "Word count", "Uploads"]) await run(page, `Disable plugin: ${name}`);
   await expect(page.locator(".bar")).toHaveCount(0);
   await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveAttribute("aria-pressed", "true");
 });
@@ -146,7 +146,7 @@ test("every embed is in the / menu and every command-started widget is in the co
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("/");
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/, /^Event/, /^Contact/]);
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveText([/^Timer/, /^Stopwatch/, /^Kanban board/, /^HTML/, /^Event/, /^Contact/, /^Upload a file/, /^Insert an upload/]);
   await page.keyboard.press("Escape");
 
   await page.keyboard.press("ControlOrMeta+Shift+P");

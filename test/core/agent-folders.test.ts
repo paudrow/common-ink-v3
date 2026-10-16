@@ -9,6 +9,7 @@ import type { Sources } from "../../src/core/sources.ts";
 import { callTool } from "../../src/worker/mcp/tools.ts";
 import { sign } from "../../src/worker/session.ts";
 import { addMember, newMember } from "./members.ts";
+import { PNG, bytesOf, upload } from "./uploading.ts";
 
 /*
  * An agent limited to folders, attacked through the tools it is given. Whatever it asks of a note or
@@ -102,8 +103,8 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     expect(await claude.json("list_folders")).toEqual({
       unsortedId: null,
       folders: [
-        { id: w.plans, name: "Plans", parentId: w.projects, noteCount: 1, access: "edit" },
-        { id: w.projects, name: "Projects", parentId: null, noteCount: 1, access: "edit" },
+        { id: w.plans, name: "Plans", parentId: w.projects, noteCount: 1, uploadCount: 0, access: "edit" },
+        { id: w.projects, name: "Projects", parentId: null, noteCount: 1, uploadCount: 0, access: "edit" },
       ],
     });
 
@@ -691,11 +692,11 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const w = await world();
     const { unsortedId } = await perform(env.DB, w.ada, { type: "folder.list" });
     const inner = await asAgent((await connectAgent(env.DB, w.ada.personId, "Inner", { workspaceId: w.ada.workspaceId, folderIds: [w.plans] })).token);
-    expect(await inner.json("list_folders")).toEqual({ unsortedId: null, folders: [{ id: w.plans, name: "Plans", parentId: null, noteCount: 1, access: "edit" }] });
+    expect(await inner.json("list_folders")).toEqual({ unsortedId: null, folders: [{ id: w.plans, name: "Plans", parentId: null, noteCount: 1, uploadCount: 0, access: "edit" }] });
     expect(inner.said.join("\n")).not.toContain(w.projects);
 
     const loose = await asAgent((await connectAgent(env.DB, w.ada.personId, "Loose", { workspaceId: w.ada.workspaceId, folderIds: [unsortedId!] })).token);
-    expect(await loose.json("list_folders")).toEqual({ unsortedId, folders: [{ id: unsortedId, name: "Unsorted", parentId: null, noteCount: 1, access: "edit" }] });
+    expect(await loose.json("list_folders")).toEqual({ unsortedId, folders: [{ id: unsortedId, name: "Unsorted", parentId: null, noteCount: 1, uploadCount: 0, access: "edit" }] });
     expect((await loose.json<Note>("create_note", { text: "# No folder named" })).folderId).toBe(unsortedId);
     expect((await loose.call("create_folder", { name: "Mine" })).text).toBe("forbidden: An agent limited to folders can make a folder only inside one of them");
     expect((await loose.call("rename_folder", { id: unsortedId, name: "Mine" })).isError).toBe(true);
@@ -859,5 +860,119 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
     expect(made.status).toBe(201);
     expect(((await made.json()) as { agent: { folderIds: unknown } }).agent.folderIds).toEqual([w.journal]);
     expect((await send({ method: "POST", headers: { ...cookie, ...json }, body: JSON.stringify({ name: "Fenced", workspaceId: w.ada.workspaceId, folderIds: [MISSING] }) }, "/api/agents")).status).toBe(404);
+  });
+
+  it("is given no upload outside its folders, by any tool or by either address that carries bytes, and can put none there", async () => {
+    const w = await world();
+    const NO_UPLOAD = { isError: true, text: "not_found: No such upload" };
+    const inside = await upload(w.ada, "Chart-inside.png", PNG, { folderId: w.projects });
+    const outside = await upload(w.ada, "Photo-outside.png", bytesOf("bytes-outside"), { folderId: w.journal });
+    const loose = await upload(w.ada, "Scan-outside.pdf", bytesOf("%PDF-loose-outside"));
+    const binned = await upload(w.ada, "Binned-outside.png", PNG, { folderId: w.journal });
+    await perform(env.DB, w.ada, { type: "upload.trash", id: binned.id });
+    // A note inside shows one of each, and a note outside shows the one inside.
+    const showing = await perform(env.DB, w.ada, { type: "note.create", folderId: w.projects, text: `# Gallery\n\n::image{${inside.id} 1x1}\n\n::image{${outside.id} 1x1}\n\n::file{${loose.id}}\n\n::image{${binned.id} 1x1}` });
+    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Album-outside\n\n::image{${inside.id} 1x1}` });
+    const marks = [...w.marks, "Photo-outside", "Scan-outside", "Binned-outside", "Album-outside", "bytes-outside", "loose-outside"];
+
+    const claude = await asAgent(w.limited.token);
+    expect(idsOf(await claude.json<{ id: string }[]>("list_uploads", { includeArchived: true }))).toEqual([inside.id]);
+    expect(await claude.call("list_uploads", { folderId: w.journal })).toEqual(await claude.call("list_uploads", { folderId: MISSING }));
+    expect(await claude.call("list_uploads", { folderId: MISSING })).toEqual(NO_FOLDER);
+    expect(await claude.json("list_trashed_uploads")).toEqual([]);
+    expect((await claude.json<{ folders: { id: string; uploadCount: number }[] }>("list_folders")).folders.map((f) => [f.id, f.uploadCount])).toEqual([
+      [w.plans, 0],
+      [w.projects, 1],
+    ]);
+    // Whichever one it names, each tool answers as for an upload that never was.
+    for (const id of [outside.id, loose.id, binned.id, MISSING]) {
+      for (const [tool, more] of [["read_upload", {}], ["move_upload", { folderId: w.projects }], ["archive_upload", { archived: true }], ["trash_upload", {}], ["restore_upload", {}]] as const) {
+        expect(await claude.call(tool, { id, ...more }), `${tool} ${id}`).toEqual(NO_UPLOAD);
+      }
+    }
+    // The one inside can't be sent out, to a folder outside or to one that never was.
+    expect(await claude.call("move_upload", { id: inside.id, folderId: w.journal })).toEqual(NO_FOLDER);
+    expect(await claude.call("move_upload", { id: inside.id, folderId: MISSING })).toEqual(NO_FOLDER);
+    // It is told which notes use the upload inside only among the notes it sees, and of the uploads a note inside shows only the one inside.
+    expect((await claude.json<{ usedIn: { id: string }[] }>("read_upload", { id: inside.id })).usedIn.map((n) => n.id)).toEqual([showing.id]);
+    expect((await claude.json<{ uploads: unknown }>("read_note", { id: showing.id })).uploads).toEqual([
+      { id: inside.id, upload: expect.objectContaining({ name: "Chart-inside.png" }) },
+      { id: outside.id, upload: null },
+      { id: loose.id, upload: null },
+      { id: binned.id, upload: null },
+    ]);
+    expect(await claude.call("search", { query: "Photo-outside" })).toEqual(await claude.call("search", { query: "nosuchwordanywhere" }));
+
+    // No filter of list_uploads finds what is outside, counts a note outside, or names someone who uploaded only there.
+    const grace = await addMember(w.ada, "editor", "Grace-outside");
+    await upload(grace, "Grace-photo-outside.png", PNG, { folderId: w.journal });
+    marks.push("Grace-outside", grace.personId);
+    const finds = async (query: string) => idsOf(await claude.json<{ id: string }[]>("list_uploads", { query, today: "2026-10-15" }));
+    for (const query of ["", "type:image", "type:pdf OR type:other", "-type:image", "used:yes", "used:no", "outside", "name:outside", "size:>0", "size:<1kb", "uploaded:>=2020-01-01", "is:open OR is:archived OR is:trashed", "is:private OR -is:private", "uploader:@me OR -uploader:@me", "sort:size-desc"]) {
+      expect((await finds(query)).filter((id) => id !== inside.id), query).toEqual([]);
+    }
+    expect(await finds("type:image")).toEqual([inside.id]);
+    // The picture inside is shown by a note inside and one outside: it is told of the one it sees.
+    expect((await claude.json<{ id: string; uses: number }[]>("list_uploads", { query: "used:yes" })).map((u) => [u.id, u.uses])).toEqual([[inside.id, 1]]);
+    expect(await finds('uploader:"Ada Lovelace"')).toEqual([inside.id]);
+    // A name it asks by is said back to it, so these are asked apart from what is checked for marks below.
+    const echo = await asAgent(w.limited.token);
+    const nobody = await echo.call("list_uploads", { query: 'uploader:"Nobody-at-all"' });
+    expect(nobody.text).toBe('invalid: Nobody named "Nobody-at-all" has uploaded a file you can see');
+    expect((await echo.call("list_uploads", { query: 'uploader:"Grace-outside"' })).text).toBe(nobody.text.replace("Nobody-at-all", "Grace-outside"));
+    expect((await echo.call("list_uploads", { query: "uploader:Ghost-outside" })).text).toBe(nobody.text.replace("Nobody-at-all", "Ghost-outside"));
+    expect((await echo.call("list_uploads", { query: "folder:Journal" })).text).toBe((await echo.call("list_uploads", { query: "folder:Nowhere" })).text.replace("Nowhere", "Journal"));
+    // Nor is anything put in a note outside, or anything outside put in a note inside.
+    expect(await claude.call("place_upload", { id: outside.id, noteId: showing.id })).toEqual(NO_UPLOAD);
+    expect(await claude.call("place_upload", { id: inside.id, noteId: w.outside.id })).toEqual(NO_NOTE);
+    expect(await claude.call("place_upload", { id: inside.id, noteId: showing.id })).toMatchObject({ isError: false });
+
+    const send = (path: string, init: RequestInit = {}) => worker.fetch(new Request(`https://ink.test${path}`, init) as never, { ...env, SESSION_SECRET: "test-secret" });
+    const token = { Authorization: `Bearer ${w.limited.token}` };
+    const bytes = (id: string, headers: Record<string, string> = token) => send(`/api/workspaces/${w.ada.workspaceId}/uploads/${id}`, { headers });
+    const post = (named: object, headers: Record<string, string> = token) =>
+      send(`/api/workspaces/${w.ada.workspaceId}/uploads`, { method: "POST", headers: { ...headers, "Content-Type": "application/octet-stream", "Content-Length": String(PNG.byteLength), "X-Ink-Upload": encodeURIComponent(JSON.stringify(named)) }, body: PNG });
+    const kept = () => perform(env.DB, w.ada, { type: "upload.list", includeArchived: true });
+    const before = idsOf(await kept());
+
+    const got = await bytes(inside.id);
+    expect(got.status).toBe(200);
+    expect([...new Uint8Array(await got.arrayBuffer())]).toEqual([...PNG]);
+    const never = await bytes(MISSING);
+    expect(never.status).toBe(404);
+    const neverSaid = await never.text();
+    for (const id of [outside.id, loose.id, binned.id]) {
+      for (const headers of [token, { ...token, Range: "bytes=0-3" }, { ...token, "If-None-Match": '"x"' }]) {
+        const res = await bytes(id, headers);
+        expect([res.status, await res.text()], `the bytes of ${id}`).toEqual([404, neverSaid]);
+        expect(res.headers.get("ETag")).toBeNull();
+        expect(res.headers.get("Content-Disposition")).toBeNull();
+      }
+      expect((await send(`/api/workspaces/${w.ada.workspaceId}/uploads/${id}`, { method: "HEAD", headers: token })).status).toBe(404);
+    }
+    // Nor does it put a file where it can't see: a folder outside, a folder that never was, and Unsorted, which is where one goes when no folder is named.
+    const refusals = [];
+    for (const named of [{ name: "in.png", folderId: w.journal }, { name: "in.png", folderId: MISSING }, { name: "in.png" }]) {
+      const res = await post(named);
+      refusals.push([res.status, await res.text()]);
+    }
+    expect(refusals.map(([status]) => status)).toEqual([404, 404, 400]);
+    expect(refusals[0]![1]).toBe(refusals[1]![1]);
+    // Unsorted is no secret: it is told why it has no folder to fall back on, as for a note.
+    expect(refusals[2]![1]).toContain("Say which folder: this agent is limited to folders, and Unsorted isn't one of them");
+    expect(idsOf(await kept())).toEqual(before);
+    // What it can do: put a file in its own folder, and read it back.
+    const made = await post({ name: "mine.png", folderId: w.plans });
+    expect(made.status).toBe(201);
+    const mine = (await made.json()) as { id: string; folderId: string };
+    expect(mine.folderId).toBe(w.plans);
+    expect((await bytes(mine.id)).status).toBe(200);
+    // The same token that reaches everything is the control: these were there to be read.
+    const scribe = { Authorization: `Bearer ${w.scribe.token}` };
+    expect(await (await bytes(outside.id, scribe)).text()).toBe("bytes-outside");
+    expect((await bytes(loose.id, scribe)).status).toBe(200);
+
+    const said = claude.said.join("\n") + neverSaid + refusals[0]![1];
+    expect(marks.filter((mark) => said.includes(mark))).toEqual([]);
   });
 });

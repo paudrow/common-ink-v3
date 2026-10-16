@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
-import type { MeHere, Note, NoteSummary, WorkspaceSummary } from "../core/protocol.ts";
+import type { MeHere, Note, NoteSummary, Results, WorkspaceSummary } from "../core/protocol.ts";
 import { noteIdFromPath, notePath } from "../core/slug.ts";
-import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, signOut } from "./api.ts";
+import { ApiError, connectAgent, disconnectAgent, editAgent, listAgents, perform, readUpload, sendUpload, signOut, uploadAddress } from "./api.ts";
 import { Drawn } from "./Drawn.tsx";
 import { usable } from "./editorExtensions.ts";
 import { folderTree } from "./folders.ts";
@@ -13,12 +13,14 @@ import { layoutOf, reduce, restored, showing, type Side, type SideAction } from 
 import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, typed } from "./keybindings.ts";
 import { lastChange, relisted, withChanged } from "./knownNotes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
+import { MarkdownReader } from "./MarkdownReader.tsx";
 import { NoteReader } from "./NoteReader.tsx";
 import { stacked, type Told } from "./notices.ts";
 import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
 import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
+import { referredUploads } from "./referredUploads.ts";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, keepsATab, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
@@ -183,6 +185,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const frontFolderId = routeFolderId ?? (current ? (current.folderId ?? SHARED_WITH_ME) : null);
 
   const appNow = useRef<App>(null!);
+  /** What each read of a note said of the uploads it refers to, which is what an embed of one is drawn from. */
+  const [referred] = useState(referredUploads);
   /** What the app's own commands do, as of the latest render. */
   const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
   const panel = useRef<HTMLElement>(null);
@@ -252,8 +256,17 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           grant: (on, to, access) => perform(workspaceId, { type: "grant.set", ...on, ...(typeof to === "string" ? { email: to } : to), access }),
           link: (on, link) => perform(workspaceId, { type: "grant.link", ...on, link }),
           revoke: (grantId) => perform(workspaceId, { type: "grant.revoke", id: grantId }).then(() => {}),
-          setPrivate: (noteId, isPrivate) => perform(workspaceId, { type: "note.setPrivate", id: noteId, private: isPrivate }),
+          setPrivate: (on, isPrivate) => perform(workspaceId, typeof on === "string" ? { type: "note.setPrivate", id: on, private: isPrivate } : { type: "upload.setPrivate", id: on.uploadId, private: isPrivate }),
           all: () => perform(workspaceId, { type: "grant.list" }).then((all) => all.grants),
+        },
+        uploads: {
+          referred: referred.get,
+          onReferred: referred.subscribe,
+          learn: referred.learn,
+          address: (id) => uploadAddress(workspaceId, id),
+          tabAddress: (id) => (me.setup.fileSite ? `${uploadAddress(workspaceId, id)}?open=tab` : null),
+          bytes: (id, upTo) => readUpload(uploadAddress(workspaceId, id), upTo),
+          send: (file, as, onProgress) => sendUpload(workspaceId, file, as, onProgress),
         },
         storage: {
           // By member too: two people who share a browser and a workspace don't share what a plugin keeps, such as which notes are open.
@@ -295,12 +308,12 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const embeds = useMemo(
     () =>
       contributed.embeds.map((embed) => {
-        if ("claims" in embed) return embed;
+        if ("claims" in embed || !embed.render) return embed;
         const guard: Embed = guarded.get(embed) ?? {
           ...embed,
           render(el, written) {
             try {
-              return embed.render(el, written);
+              return embed.render!(el, written);
             } catch (err) {
               host.fail(embed, err);
               throw err;
@@ -407,6 +420,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
 
   const remember = useCallback(
     (note: Note) => {
+      // A read says what the note's uploads are, before the editor that draws them is made.
+      if ("uploads" in note) referred.learn((note as Results["note.read"]).uploads);
       const summary = summaryOf(note);
       // Before the app goes to a note it has just made, so it doesn't stop to ask where the note is.
       noteIsHere(note.id, workspaceId);
@@ -415,7 +430,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       setGone((was) => (was.has(note.id) ? new Set([...was].filter((id) => id !== note.id)) : was));
       if (location.pathname.startsWith("/note/") && location.pathname.endsWith(note.id)) navigate(notePath(note), { replace: true });
     },
-    [navigate, noteIsHere, workspaceId],
+    [navigate, noteIsHere, workspaceId, referred],
   );
 
   /** A save was refused because its note is in Trash, which the app hadn't heard. It reads the note, and sends the typing after all if the note is back by then. */
@@ -737,6 +752,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     sectionNames: contributed.views.section.flatMap(({ id, label, icon }) => (label && icon ? [{ id, label, icon }] : [])),
     sectionsOpening: () => null,
     readNote: () => null,
+    readMarkdown: (text) => <MarkdownReader text={text} />,
     overlay: overlay?.id ?? null,
     ...actions,
     openBeside: contributed.views.editor.at(-1)?.split ? actions.openBeside : null,
@@ -835,7 +851,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   };
 
   const readNote = (noteId: string) => (
-    <NoteReader key={noteId} workspaceId={workspaceId} noteId={noteId} revision={byId.get(noteId)?.revision} embeds={embeds} extensions={extensions} />
+    <NoteReader key={noteId} workspaceId={workspaceId} noteId={noteId} revision={byId.get(noteId)?.revision} embeds={embeds} extensions={extensions} onRead={(note) => referred.learn(note.uploads)} />
   );
   app.readNote = readNote;
   const folderView = contributed.views.folder.at(-1);

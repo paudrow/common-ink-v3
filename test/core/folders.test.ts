@@ -12,9 +12,9 @@ describe("folders", () => {
     const { unsortedId, folders } = await perform(env.DB, ada, { type: "folder.list" });
 
     expect(folders).toEqual([
-      { id: projects.id, name: "projects", parentId: work.id, noteCount: 0, access: "edit" },
-      { id: unsortedId, name: "Unsorted", parentId: null, noteCount: 0, access: "edit" },
-      { id: work.id, name: "Work", parentId: null, noteCount: 0, access: "edit" },
+      { id: projects.id, name: "projects", parentId: work.id, noteCount: 0, uploadCount: 0, access: "edit" },
+      { id: unsortedId, name: "Unsorted", parentId: null, noteCount: 0, uploadCount: 0, access: "edit" },
+      { id: work.id, name: "Work", parentId: null, noteCount: 0, uploadCount: 0, access: "edit" },
     ]);
   });
 

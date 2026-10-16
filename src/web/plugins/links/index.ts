@@ -68,7 +68,7 @@ export const links: Plugin = {
 
     // A link is drawn from its note's title, which changes without the linking note changing.
     let titles = "";
-    host.onNotes(() => {
+    host.onItems(() => {
       const now = JSON.stringify((notes() ?? []).map((n) => [n.id, n.title, n.state]).sort());
       if (now === titles) return;
       titles = now;

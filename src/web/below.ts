@@ -4,7 +4,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import { keep } from "./belowIdentity.ts";
 import { inlineIn, rewriteOf, type Written } from "./embedSyntax.ts";
 import { guardFrames } from "./frameGuard.ts";
-import type { AddressEmbed, Below, BelowBox, Embed } from "./plugin-api.ts";
+import type { AddressEmbed, Below, BelowBox, BelowDrawn, BelowEmbedded, Embed } from "./plugin-api.ts";
 
 /** One embed with something kept below its line. */
 interface Shown {
@@ -20,6 +20,8 @@ interface Shown {
   box: BelowBox;
   /** Whether the note writes it as an address alone on a line, and not in an embed's syntax. */
   bare: boolean;
+  /** Whether its line holds it and nothing else, which takes no room while the cursor is elsewhere: what is drawn is where that line was. */
+  alone: boolean;
 }
 
 /** An embed with something to keep below its line, however the note writes it. */
@@ -27,11 +29,16 @@ type Kept = (Embed | AddressEmbed) & { below: Below };
 
 let ids = 0;
 
-/** Above and below each box, in pixels. A block's box has none above: it is the rest of the block's card. */
+/**
+ * Above and below each box, in pixels. A block's box has none above: it is the rest of the block's
+ * card. A box whose line is out of sight has none either side: the blank lines around it are its gaps,
+ * the same above as below.
+ */
 const GAP = 6;
-const UNDER_CARD = 12;
+/** About what the card's own padding above it is, which is in the note's ems and set in the stylesheet: this is only for estimates. */
+const UNDER_CARD = 13;
 
-const sameBox = (a: BelowBox, b: BelowBox) => a.maxWidth === b.maxWidth && ("ratio" in a ? "ratio" in b && a.ratio === b.ratio : "height" in b && a.height === b.height);
+const sameBox = (a: BelowBox, b: BelowBox) => a.maxWidth === b.maxWidth && a.share === b.share && ("ratio" in a ? "ratio" in b && a.ratio === b.ratio : "height" in b && a.height === b.height);
 
 /** How tall each box was when last measured, for the ones sized by their width. */
 const heights = new Map<number, number>();
@@ -46,19 +53,19 @@ class BoxWidget extends WidgetType {
     private readonly box: BelowBox,
     /** Whether it is the rest of a block's card. */
     private readonly joined: boolean,
-    /** Whether it is for an address alone on its line, which is out of sight while the cursor is elsewhere: the media is where that line was. */
-    private readonly bare: boolean,
+    /** Whether it is for something alone on its line, which is out of sight while the cursor is elsewhere. */
+    private readonly alone: boolean,
   ) {
     super();
   }
 
   override eq(other: BoxWidget) {
-    return other.id === this.id && other.joined === this.joined && other.bare === this.bare && sameBox(other.box, this.box);
+    return other.id === this.id && other.joined === this.joined && other.alone === this.alone && sameBox(other.box, this.box);
   }
 
   /** The room's padding above and below what is drawn in it. */
   get padding(): [number, number] {
-    return this.joined ? [0, UNDER_CARD] : this.bare ? [0, GAP] : [GAP, GAP];
+    return this.joined ? [0, UNDER_CARD] : this.alone ? [0, 0] : [GAP, GAP];
   }
 
   override get estimatedHeight() {
@@ -66,10 +73,15 @@ class BoxWidget extends WidgetType {
     return inner === undefined ? -1 : inner + this.padding[0] + this.padding[1];
   }
 
+  /** The padding written on the room. A block's is the stylesheet's, as far below the card as the card's own is above it. */
+  private get written() {
+    return this.joined ? "" : this.padding.map((px) => `${px}px`).join(" ");
+  }
+
   override toDOM() {
     const el = document.createElement("div");
     el.className = this.joined ? "embed-below-room embed-below-room-joined" : "embed-below-room";
-    el.style.paddingBlock = this.padding.map((px) => `${px}px`).join(" ");
+    el.style.paddingBlock = this.written;
     const box = el.appendChild(document.createElement("div"));
     box.dataset.below = String(this.id);
     this.size(box);
@@ -79,7 +91,7 @@ class BoxWidget extends WidgetType {
   /** A room that is only another size is the same element at that size, so what is over it is moved and not looked for again. */
   override updateDOM(el: HTMLElement) {
     const box = el.firstElementChild as HTMLElement | null;
-    if (!box || box.dataset.below !== String(this.id) || el.classList.contains("embed-below-room-joined") !== this.joined || el.style.paddingBlock !== this.padding.map((px) => `${px}px`).join(" ")) return false;
+    if (!box || box.dataset.below !== String(this.id) || el.classList.contains("embed-below-room-joined") !== this.joined || el.style.paddingBlock !== this.written) return false;
     this.size(box);
     return true;
   }
@@ -88,6 +100,7 @@ class BoxWidget extends WidgetType {
     box.style.aspectRatio = "ratio" in this.box ? String(this.box.ratio) : "";
     box.style.height = "height" in this.box ? `${this.box.height}px` : "";
     box.style.maxWidth = this.box.maxWidth ? `${this.box.maxWidth}px` : "";
+    box.style.width = this.box.share ? `${this.box.share * 100}%` : "";
   }
 
   override ignoreEvent() {
@@ -103,16 +116,24 @@ interface Reading {
   written: boolean;
 }
 
-function boxOf(embed: Kept, written: Written): BelowBox | null {
+/** The room an embed asks for below what the note writes of it, or null for none or for one that makes no sense. A share that makes none is the whole column. */
+export function boxOf(embed: { below?: Below }, written: Pick<Written, "config" | "body">): BelowBox | null {
   try {
-    const box = embed.below.box({ config: written.config, body: written.body });
+    const box = embed.below?.box({ config: written.config, body: written.body });
     if (!box) return null;
     const size = "ratio" in box ? box.ratio : box.height;
-    return Number.isFinite(size) && size > 0 ? box : null;
+    const width = box.maxWidth ?? 1;
+    if (!(Number.isFinite(size) && size > 0 && Number.isFinite(width) && width > 0)) return null;
+    if (box.share === undefined || (box.share > 0 && box.share <= 1)) return box;
+    const { share: _, ...whole } = box;
+    return whole;
   } catch {
     return null;
   }
 }
+
+/** Whether what the note writes at `from` to `to` is all there is on its line. */
+export const aloneIn = (state: EditorState, { from, to }: { from: number; to: number }) => state.doc.lineAt(from).text.trim() === state.sliceDoc(from, to);
 
 /** A line that is one https address and nothing else. */
 const ALONE = /^[ \t]*(https:\/\/\S+)[ \t]*$/;
@@ -127,12 +148,13 @@ function claims(embed: AddressEmbed, address: string): boolean {
 
 function read(state: EditorState, { embeds, addresses, blocks }: Reading, before: readonly Shown[], moved: (pos: number) => number, sized: ReadonlyMap<number, number>): Shown[] {
   const has = (embed: Embed | undefined): embed is Embed & { below: Below } => !!embed?.below;
-  const drawnBlocks = blocks.filter((b) => embeds.get(b.name)?.block);
+  const drawnBlocks = blocks.filter((b) => embeds.get(b.name)?.block && embeds.get(b.name)?.render);
   const found: Written[] = drawnBlocks.filter((b) => has(embeds.get(b.name)));
   if ([...embeds.values()].some((e) => !e.block && has(e))) {
     for (const written of inlineIn(state.doc.toString())) {
       const embed = embeds.get(written.name);
       if (!has(embed) || embed.block || drawnBlocks.some((b) => b.from <= written.from && b.to >= written.to)) continue;
+      if (embed.below.alone && !aloneIn(state, written)) continue;
       if (/Code/.test(syntaxTree(state).resolveInner(written.from, 1).name)) continue;
       found.push(written);
     }
@@ -157,7 +179,8 @@ function read(state: EditorState, { embeds, addresses, blocks }: Reading, before
   const boxed = found.flatMap((written) => {
     const embed = bare.get(written) ?? (embeds.get(written.name) as Embed & { below: Below });
     const box = boxOf(embed, written);
-    return box ? [{ written, embed, box, from: written.from, name: written.name, source: `${written.config}\n${written.body}`, bare: bare.has(written) }] : [];
+    const alone = bare.has(written) || (!written.block && aloneIn(state, written));
+    return box ? [{ written, embed, box, from: written.from, name: written.name, source: `${written.config}\n${written.body}`, bare: bare.has(written), alone }] : [];
   });
   // An embed another plugin now draws is not the one that was there, whatever the note says.
   const same = before.filter((was) => ("claims" in was.embed ? addresses.includes(was.embed) : embeds.get(was.embed.name) === was.embed));
@@ -192,25 +215,27 @@ const resized = StateEffect.define<{ id: number; height: number }>();
 const HIDDEN = Decoration.replace({ block: true });
 const SEEN = Decoration.line({ class: "embed-address" });
 
-/** Whether the cursor is on the line of an address shown as media, which shows the address. */
-function addressOn(state: EditorState, shown: Shown, written: boolean): boolean {
-  const line = state.doc.lineAt(shown.from);
-  return shown.bare && written && state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from);
+/** Whether the cursor is on the line of something alone on it, which shows what the line says. */
+export function aloneOn(state: EditorState, from: number, written: boolean): boolean {
+  const line = state.doc.lineAt(from);
+  return written && state.selection.ranges.some((r) => r.from <= line.to && r.to >= line.from);
 }
 
 /**
- * An address shown as media takes no room while the cursor is elsewhere: its line is out of the
- * note's flow and the media is where it was, as far below the line above as a paragraph is. With the
- * cursor on its line the address is shown above the media, which moves down by that line and is
- * otherwise left as it is.
+ * What is drawn below a line it is alone on, an address shown as media or an uploaded picture, takes
+ * the line's place while the cursor is elsewhere: the line is out of the note's flow, and what is
+ * drawn is as far below the line above as a paragraph is and as far above the line below. With the
+ * cursor on its line the line is shown above it, which moves down by that line and is otherwise left
+ * as it is. An embed's own line is drawn as its text by the editor; an address's is drawn here.
  */
-function addressLines(state: EditorState, shown: readonly Shown[], written: boolean): DecorationSet {
+function aloneLines(state: EditorState, shown: readonly Shown[], written: boolean): DecorationSet {
   return Decoration.set(
     shown
-      .filter((s) => s.bare)
-      .map((s) => {
+      .filter((s) => s.alone)
+      .flatMap((s) => {
         const line = state.doc.lineAt(s.from);
-        return addressOn(state, s, written) ? SEEN.range(line.from) : HIDDEN.range(line.from, line.to);
+        if (!aloneOn(state, s.from, written)) return [HIDDEN.range(line.from, line.to)];
+        return s.bare ? [SEEN.range(line.from)] : [];
       }),
     true,
   );
@@ -225,7 +250,7 @@ function addressLines(state: EditorState, shown: readonly Shown[], written: bool
  * blocks the note writes.
  */
 export function keptBelow(reading: (state: EditorState) => Reading): Extension {
-  const rooms = (shown: readonly Shown[]) => Decoration.set(shown.map((s): Range<Decoration> => Decoration.widget({ widget: new BoxWidget(s.id, s.box, s.written.block, s.bare), block: true, side: 1 }).range(s.at)), true);
+  const rooms = (shown: readonly Shown[]) => Decoration.set(shown.map((s): Range<Decoration> => Decoration.widget({ widget: new BoxWidget(s.id, s.box, s.written.block, s.alone), block: true, side: 1 }).range(s.at)), true);
 
   interface Value {
     shown: readonly Shown[];
@@ -240,7 +265,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     create(state) {
       const now = reading(state);
       const shown = read(state, now, [], (pos) => pos, new Map());
-      return { shown, rooms: rooms(shown), lines: addressLines(state, shown, now.written), reading: now, sized: new Map() };
+      return { shown, rooms: rooms(shown), lines: aloneLines(state, shown, now.written), reading: now, sized: new Map() };
     },
     update(value, tr) {
       const now = reading(tr.state);
@@ -252,7 +277,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
       if (!reread && !tr.selection && now.written === value.reading.written) return value;
       const shown = reread ? read(tr.state, now, value.shown, (pos) => tr.changes.mapPos(pos, 1), sized) : value.shown;
       if (reread && sized.size) sized = new Map([...sized].filter(([id]) => shown.some((s) => s.id === id)));
-      return { shown, rooms: reread ? rooms(shown) : value.rooms, lines: addressLines(tr.state, shown, now.written), reading: now, sized };
+      return { shown, rooms: reread ? rooms(shown) : value.rooms, lines: aloneLines(tr.state, shown, now.written), reading: now, sized };
     },
     provide: (f) => [EditorView.decorations.from(f, (value) => value.rooms), EditorView.decorations.from(f, (value) => value.lines)],
   });
@@ -270,7 +295,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     drawn: HTMLElement;
     /** What the note said of the embed when this was drawn. */
     source: string;
-    stop: (() => void) | void;
+    made: BelowDrawn;
     unguard: () => void;
     place?: Place;
   }
@@ -346,7 +371,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
             const drawn = el.appendChild(document.createElement("div"));
             drawn.className = "embed-below-drawn";
             const { id } = shown;
-            const made: Live = (live = { el, drawn, source: shown.source, stop: undefined, unguard: guardFrames(el, () => this.taken(made, id, view)).stop });
+            const made: Live = (live = { el, drawn, source: shown.source, made: {}, unguard: guardFrames(el, () => this.taken(made, id, view)).stop });
             this.live.set(id, made);
             this.draw(made, shown, view);
           }
@@ -354,13 +379,15 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           // The note says something else of it now: it is drawn again, in the element and the place it has. A block
           // being written is drawn again once the cursor has left it, and not at each key, half-written.
           if (live.source !== shown.source && !(shown.written.block && within(view.state, shown.written))) {
-            this.stop(live);
-            live.drawn.replaceChildren();
+            if (!live.made.update) {
+              this.stop(live);
+              live.drawn.replaceChildren();
+            }
             this.draw(live, shown, view);
           }
           // With no room, as inside something else that is drawn, it is kept and not shown.
           live.el.style.visibility = place ? "" : "hidden";
-          live.el.classList.toggle("embed-below-on", addressOn(view.state, shown, view.state.field(field).reading.written));
+          live.el.classList.toggle("embed-below-on", shown.alone && aloneOn(view.state, shown.from, view.state.field(field).reading.written));
           if (!place) continue;
           const was = live.place;
           if (was && was.left === place.left && was.top === place.top && was.width === place.width && was.height === place.height) continue;
@@ -369,6 +396,7 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
         }
       }
 
+      /** Draws an embed in its element, or has it change what it drew to fit what the note says of it now, where it knows how. */
       draw(live: Live, { id, embed, written, source }: Shown, view: EditorView) {
         live.source = source;
         let drawing = true;
@@ -379,21 +407,33 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
           const changes = rewriteOf(now.written, next);
           if (changes.length) view.dispatch({ changes, userEvent: "input.embed" });
         };
+        const handed: BelowEmbedded = {
+          config: written.config,
+          body: written.body,
+          readOnly: view.state.readOnly,
+          // The editor can't be changed while it is being measured, which is when this is drawn.
+          update: (next) => (drawing ? queueMicrotask(() => rewrite(next)) : rewrite(next)),
+          resize: (height) => {
+            if (!Number.isFinite(height) || height <= 0 || this.live.get(id) !== live || !view.state.field(field, false)) return;
+            const effects = resized.of({ id, height: Math.round(height) });
+            if (drawing) queueMicrotask(() => view.dispatch({ effects }));
+            else view.dispatch({ effects });
+          },
+          column: () => {
+            const room = view.contentDOM.querySelector(`[data-below="${id}"]`)?.parentElement;
+            if (!room) return 0;
+            const style = getComputedStyle(room);
+            return room.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+          },
+        };
         try {
-          live.stop = embed.below.render(live.drawn, {
-            config: written.config,
-            body: written.body,
-            readOnly: view.state.readOnly,
-            // The editor can't be changed while it is being measured, which is when this is drawn.
-            update: (next) => (drawing ? queueMicrotask(() => rewrite(next)) : rewrite(next)),
-            resize: (height) => {
-              if (!Number.isFinite(height) || height <= 0 || this.live.get(id) !== live || !view.state.field(field, false)) return;
-              const effects = resized.of({ id, height: Math.round(height) });
-              if (drawing) queueMicrotask(() => view.dispatch({ effects }));
-              else view.dispatch({ effects });
-            },
-          });
+          if (live.made.update) live.made.update(handed);
+          else {
+            const made = embed.below.render(live.drawn, handed);
+            live.made = typeof made === "function" ? { stop: made } : (made ?? {});
+          }
         } catch (err) {
+          this.stop(live);
           live.drawn.replaceChildren(`${embed.title} couldn't be shown: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
           drawing = false;
@@ -422,8 +462,8 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
       }
 
       stop(live: Live) {
-        const stop = live.stop;
-        live.stop = undefined;
+        const { stop } = live.made;
+        live.made = {};
         try {
           stop?.();
         } catch {
@@ -439,24 +479,34 @@ export function keptBelow(reading: (state: EditorState) => Reading): Extension {
     },
   );
 
+  /** Whether the key being handled is one that steps a line up or down: an arrow, or vim's `j` or `k`. */
+  let stepKey = false;
+  const stepKeys = EditorView.domEventObservers({
+    keydown(e) {
+      stepKey = (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "j" || e.key === "k") && !e.ctrlKey && !e.metaKey && !e.altKey;
+      queueMicrotask(() => (stepKey = false));
+    },
+  });
+
   /**
-   * A step from a line to the next, as the arrow keys and vim's `j` and `k` take, stops on the line of
-   * an address that is out of sight, which shows it: out of the note's flow, it is still a line of the
-   * note, and the editor would step over it, and over the next address's line too. A move that goes
-   * over any other line is no step and is left as it is.
+   * A step from a line to the next, as the arrow keys and vim's `j` and `k` take, stops on a line that
+   * is out of sight under what it draws, which shows it: out of the note's flow, it is still a line of
+   * the note, and the editor would step over it, and over the next such line too. A move that goes
+   * over any other line, and a move by any other key, to the note's end or by a search, is no step and
+   * is left as it is.
    */
   const stopping = EditorState.transactionFilter.of((tr) => {
-    if (tr.docChanged || !tr.selection || tr.isUserEvent("select.pointer")) return tr;
+    if (!stepKey || tr.docChanged || !tr.selection) return tr;
     const { doc } = tr.startState;
     const [was, now] = [doc.lineAt(tr.startState.selection.main.head).number, doc.lineAt(tr.newSelection.main.head).number];
     const step = Math.sign(now - was);
     const next = was + step;
     if (Math.abs(now - was) < 2) return tr;
-    const hidden = new Set(tr.startState.field(field).shown.filter((s) => s.bare).map((s) => doc.lineAt(s.from).number));
+    const hidden = new Set(tr.startState.field(field).shown.filter((s) => s.alone).map((s) => doc.lineAt(s.from).number));
     for (let n = next; n !== now; n += step) if (!hidden.has(n)) return tr;
     const { anchor, empty } = tr.newSelection.main;
     return [tr, { selection: empty ? { anchor: doc.line(next).from } : { anchor, head: doc.line(next).from } }];
   });
 
-  return [field, layer, stopping];
+  return [field, layer, stepKeys, stopping];
 }

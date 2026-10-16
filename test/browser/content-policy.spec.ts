@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { perform, signInAsNewPerson } from "./helpers.ts";
 import { standIns } from "./media-helpers.ts";
+import { pdf } from "./pdfs.ts";
 
 /** Every report of something the page's policy refused, from every document the page loads, and the console's word on any. */
 async function watchRefusals(page: Page) {
@@ -196,4 +197,54 @@ test("each kind of address gets its own policy, and all of them nosniff and a re
     const h = await headers(path);
     expect([path, h["content-security-policy"], h["x-content-type-options"]]).toEqual([path, "default-src 'none'; frame-ancestors 'none'", "nosniff"]);
   }
+});
+
+test("a PDF is drawn by pdf.js under the page's policy, in a note and over the app, its library and its worker the app's own", async ({ page, baseURL }) => {
+  const watch = await watchRefusals(page);
+  const loaded: string[] = [];
+  page.on("request", (request) => /pdf/i.test(new URL(request.url()).pathname) && loaded.push(request.url()));
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const sent = await page.evaluate(async (base64) => {
+    const id = (await (await fetch("/api/me")).json()).workspaces[0].id;
+    const res = await fetch(`/api/workspaces/${id}/uploads`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name: "paper.pdf" })) }, body: Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)) });
+    return ((await res.json()) as { id: string }).id;
+  }, pdf({ pages: 2, script: "app.alert('ran')" }).toString("base64"));
+  const note = await perform(page, { type: "note.create", text: `# Paper\n\n::file{${sent}}\n\nThe end.` });
+  await page.goto(`/note/${note.id}`);
+  const card = page.locator('.embed-below[data-embed="file"]');
+  await expect(card.locator("canvas")).toHaveCount(2);
+  await expect(card.locator(".upload-card-head")).toContainText("2 pages");
+  await card.getByRole("button", { name: "Preview paper.pdf" }).click();
+  await expect(page.getByRole("dialog", { name: "Preview of paper.pdf" }).locator("canvas")).toHaveCount(2);
+  expect(loaded.some((url) => /pdf\.worker/.test(url)), "its worker was loaded").toBe(true);
+  expect(loaded.filter((url) => !url.startsWith(baseURL!)), "from the app's own address").toEqual([]);
+  expect(await watch.refused()).toEqual([]);
+});
+
+test("an upload's bytes keep their own sealed policy under the page's, in place or as a download, and a refusal is no page either", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const sealed = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'";
+  const sent = (name: string, text: string) =>
+    page.evaluate(
+      async ({ name, text }) => {
+        const id = (await (await fetch("/api/me")).json()).workspaces[0].id;
+        const res = await fetch(`/api/workspaces/${id}/uploads`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name })) }, body: text });
+        return { workspaceId: id as string, id: ((await res.json()) as { id: string }).id };
+      },
+      { name, text },
+    );
+  const pdf = await sent("paper.pdf", "%PDF-1.4\n%%EOF\n");
+  const gif = await sent("dot.gif", "GIF89a\x01\x00\x01\x00\x00\x00\x00;");
+  const html = await sent("page.html", "<script>alert(1)</script>");
+  const headers = async (path: string) => {
+    const res = await page.request.get(path);
+    const h = res.headers();
+    return [res.status(), h["content-security-policy"], h["content-disposition"]?.split(";")[0], h["x-content-type-options"], h["cross-origin-resource-policy"]];
+  };
+  // A picture is shown in place; a PDF, with no site kept for files, is a download.
+  expect(await headers(`/api/workspaces/${gif.workspaceId}/uploads/${gif.id}`)).toEqual([200, sealed, "inline", "nosniff", "same-origin"]);
+  expect(await headers(`/api/workspaces/${pdf.workspaceId}/uploads/${pdf.id}`)).toEqual([200, sealed, "attachment", "nosniff", "same-origin"]);
+  expect(await headers(`/api/workspaces/${html.workspaceId}/uploads/${html.id}`)).toEqual([200, sealed, "attachment", "nosniff", "same-origin"]);
+  const missing = await headers(`/api/workspaces/${pdf.workspaceId}/uploads/zzzzzzzzzzzz`);
+  expect(missing.slice(0, 2)).toEqual([404, "default-src 'none'; frame-ancestors 'none'"]);
 });

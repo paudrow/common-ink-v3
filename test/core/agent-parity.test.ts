@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { run } from "../../scripts/ink-cli.ts";
+import { run, type Io } from "../../scripts/ink-cli.ts";
 import { Op, type OpType } from "../../src/core/protocol.ts";
-import { NOT_FOR_AGENTS, TOOLS } from "../../src/worker/mcp/tools.ts";
+import { NOT_FOR_AGENTS, OVER_HTTP, TOOLS } from "../../src/worker/mcp/tools.ts";
 
 const ID = "aaaaaaaaaaaa";
 const AUTHOR = `agent:${ID}`;
@@ -34,6 +34,14 @@ const COMMANDS: Record<string, string[][]> = {
   daily_note: [["daily", "--on", "2026-10-11"]],
   rebuild_todos: [["todos-rebuild"]],
   move_note: [["move", ID, "--folder", ID]],
+  list_uploads: [["uploads", "type:image uploader:@me", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--archived", "true"]],
+  place_upload: [["upload-place", ID, "--note", ID]],
+  read_upload: [["upload-info", ID]],
+  move_upload: [["upload-move", ID, "--folder", ID]],
+  archive_upload: [["upload-archive", ID], ["upload-unarchive", ID]],
+  trash_upload: [["upload-trash", ID]],
+  restore_upload: [["upload-restore", ID]],
+  list_trashed_uploads: [["uploads-trashed"]],
   list_folders: [["folders"]],
   create_folder: [["folder-create", "Plans", "--parent", ID]],
   rename_folder: [["folder-rename", ID, "--name", "Plans"]],
@@ -81,9 +89,72 @@ describe("what an agent can do, against what the web app can", () => {
     for (const type of OPS.keys()) {
       const tools = TOOLS.filter((t) => t.op === type).map((t) => t.name);
       if (NOT_FOR_AGENTS[type]) expect(tools, `${type} is kept from agents, so it has no tool`).toEqual([]);
-      else expect(tools, `${type} needs a tool in src/worker/mcp/tools.ts, or a reason in NOT_FOR_AGENTS`).toHaveLength(1);
+      else if (OVER_HTTP[type]) expect(tools, `${type} is done over HTTP, so it has no tool`).toEqual([]);
+      else expect(tools, `${type} needs a tool in src/worker/mcp/tools.ts, a reason in NOT_FOR_AGENTS, or an address in OVER_HTTP`).toHaveLength(1);
     }
     expect(Object.keys(NOT_FOR_AGENTS).filter((type) => !OPS.has(type as OpType))).toEqual([]);
+    expect(Object.keys(OVER_HTTP).filter((type) => !OPS.has(type as OpType))).toEqual([]);
+    expect(Object.keys(OVER_HTTP).filter((type) => type in NOT_FOR_AGENTS), "an operation is kept from agents or done over HTTP, not both").toEqual([]);
+  });
+
+  it("has an ink command for every operation done over HTTP, which sends the token to the operation's address", async () => {
+    expect(Object.keys(OVER_HTTP).sort()).toEqual(["upload.create", "upload.open"]);
+    const WS = "wwwwwwwwwwww";
+    const PNG_BYTES = Uint8Array.of(0x89, 0x50, 0x4e, 0x47);
+    const requests: { method: string; url: string; headers: Record<string, string>; body: unknown }[] = [];
+    const written: { path: string; bytes: number[]; replace: boolean }[] = [];
+    const out: string[] = [];
+    const uploaded = { id: ID, name: "cat.png", type: "image/png", kind: "image", size: 4, width: 640, height: 480 };
+    const tools: Record<string, unknown> = { list_workspaces: { workspaces: [{ id: WS }] }, read_upload: { ...uploaded, name: "../../etc/cat.png" } };
+    const io: Io = {
+      env: { INK_TOKEN: "cink_x", INK_URL: "https://ink.test" },
+      stdin: async () => "",
+      out: (line) => out.push(line),
+      readFile: async (path) => (path === "pictures/cat.png" ? PNG_BYTES : Promise.reject(new Error("no such file"))),
+      writeFile: async (path, bytes, replace) => {
+        if (path === "taken.png" && !replace) return false;
+        written.push({ path, bytes: [...bytes], replace });
+        return true;
+      },
+      fetch: (async (url: string, init: RequestInit = {}) => {
+        const headers = init.headers as Record<string, string>;
+        if (url === "https://ink.test/mcp") {
+          const { name } = JSON.parse(init.body as string).params;
+          return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify(tools[name]) }] } });
+        }
+        requests.push({ method: init.method ?? "GET", url, headers, body: init.body });
+        return init.method === "POST" ? Response.json(uploaded, { status: 201 }) : new Response(PNG_BYTES, { headers: { "Content-Type": "image/png" } });
+      }) as unknown as typeof fetch,
+    };
+
+    expect(await run(["upload", "pictures/cat.png", "--folder", ID], io)).toBe(0);
+    expect(requests).toEqual([
+      {
+        method: "POST",
+        url: `https://ink.test/api/workspaces/${WS}/uploads`,
+        headers: { Authorization: "Bearer cink_x", "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name: "cat.png", folderId: ID })) },
+        body: PNG_BYTES,
+      },
+    ]);
+    expect(out.at(-1)).toBe(`In a note: ::image{${ID} 640x480}`);
+
+    requests.length = 0;
+    expect(await run(["upload", "pictures/cat.png", "--name", "Tabby.png", "--workspace", "vvvvvvvvvvvv"], io)).toBe(0);
+    expect(requests.map((r) => [r.url, JSON.parse(decodeURIComponent(r.headers["X-Ink-Upload"]!))])).toEqual([["https://ink.test/api/workspaces/vvvvvvvvvvvv/uploads", { name: "Tabby.png" }]]);
+
+    requests.length = 0;
+    expect(await run(["download", ID], io)).toBe(0);
+    expect(requests).toEqual([{ method: "GET", url: `https://ink.test/api/workspaces/${WS}/uploads/${ID}`, headers: { Authorization: "Bearer cink_x" }, body: undefined }]);
+    expect(written, "only the last part of an upload's name says where it is saved").toEqual([{ path: "cat.png", bytes: [0x89, 0x50, 0x4e, 0x47], replace: false }]);
+
+    expect(await run(["download", ID, "--out", "taken.png"], io)).toBe(2);
+    expect(out.at(-1)).toBe("ink: taken.png is already there. Pass --force true to replace it, or --out for another place");
+    expect(await run(["download", ID, "--out", "taken.png", "--force", "true"], io)).toBe(0);
+    expect(written.at(-1)).toEqual({ path: "taken.png", bytes: [0x89, 0x50, 0x4e, 0x47], replace: true });
+
+    tools.list_workspaces = { workspaces: [{ id: WS }, { id: "vvvvvvvvvvvv" }] };
+    expect(await run(["download", ID], io)).toBe(2);
+    expect(out.at(-1)).toBe(`ink: Pass --workspace: you can reach 2 (${WS}, vvvvvvvvvvvv)`);
   });
 
   it("takes nothing from a request that says who is asking, since a tool passes its arguments straight on", () => {

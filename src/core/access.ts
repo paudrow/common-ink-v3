@@ -63,7 +63,7 @@ export const canShare = (asked: Asked): boolean =>
   !asked.outside && asked.role !== null && (asked.private === "mine" || ((asked.role === "admin" || asked.role === "editor") && asked.private !== "theirs" && resolve(asked) === "edit"));
 
 /** A grant that reaches the one asking, and what it is on. */
-export type Reaching = { access: GrantLevel } & ({ noteId: string; folderId?: undefined } | { folderId: string; noteId?: undefined });
+export type Reaching = { access: GrantLevel } & ({ itemId: string; folderId?: undefined } | { folderId: string; itemId?: undefined });
 
 /**
  * What one actor can see and do across a workspace: the single thing every operation asks. It is made
@@ -73,8 +73,8 @@ export interface Sight {
   /** The person asking, when they are a member. A private note is its owner's only while they are one. */
   memberId: string | null;
   role: Role | null;
-  /** The grant on each note that has one. */
-  onNotes: ReadonlyMap<string, GrantLevel>;
+  /** The grant on each note and each upload that has one. Their ids are drawn from one space of 36^12. */
+  onItems: ReadonlyMap<string, GrantLevel>;
   /** For each folder under a grant, the nearest one at or above it. */
   onFolders: ReadonlyMap<string, GrantLevel>;
   /** The folders an agent is limited to, each with every folder under it. Null when nothing limits it. */
@@ -83,10 +83,9 @@ export interface Sight {
   bind: string;
 }
 
-/** A note as access to it is decided. */
-export interface NoteFacts {
+/** An item in a folder, a note or an upload, as access to it is decided. Both are decided the same way. */
+export interface ItemFacts {
   id: string;
-  /** Null for a note that is going to be made. */
   folder_id: string;
   private_owner: string | null;
 }
@@ -116,27 +115,27 @@ function nearest<T>(parents: ReadonlyMap<string, string | null>, marked: Readonl
  * A folder in `limit` that isn't in `parents` (deleted, or another workspace's) stands for nothing.
  */
 export function sightOf(who: { personId: string | null; role: Role | null }, grants: readonly Reaching[], parents: ReadonlyMap<string, string | null>, limit: readonly string[] | null = null): Sight {
-  const onNotes = new Map<string, GrantLevel>();
+  const onItems = new Map<string, GrantLevel>();
   const granted = new Map<string, GrantLevel>();
   for (const grant of grants) {
-    if (grant.noteId !== undefined) onNotes.set(grant.noteId, grant.access);
+    if (grant.itemId !== undefined) onItems.set(grant.itemId, grant.access);
     else granted.set(grant.folderId, grant.access);
   }
   const onFolders = nearest(parents, granted);
   const within = limit && new Set(nearest(parents, new Map(limit.map((id) => [id, true]))).keys());
   const memberId = who.role ? who.personId : null;
-  const sight = { memberId, role: who.role, onNotes, onFolders, within };
+  const sight = { memberId, role: who.role, onItems, onFolders, within };
   const bind = JSON.stringify({
     owner: memberId,
     all: who.role && !within ? 1 : 0,
     folders: [...parents.keys()].filter((id) => allows(folderLevel(sight, id), "view")),
-    notes: [...onNotes.keys()],
+    items: [...onItems.keys()],
     within: within && [...within],
   });
   return { ...sight, bind };
 }
 
-type Seeing = Pick<Sight, "memberId" | "role" | "onNotes" | "onFolders" | "within">;
+type Seeing = Pick<Sight, "memberId" | "role" | "onItems" | "onFolders" | "within">;
 
 const outside = (sight: Seeing, folderId: string) => sight.within !== null && !sight.within.has(folderId);
 
@@ -145,29 +144,30 @@ export const seesEveryFolder = (sight: Seeing) => sight.role !== null && sight.w
 
 export const folderAsked = (sight: Seeing, folderId: string): Asked => ({ role: sight.role, grants: [sight.onFolders.get(folderId) ?? null], private: null, outside: outside(sight, folderId) });
 
-export const noteAsked = (sight: Seeing, note: NoteFacts): Asked => ({
+export const itemAsked = (sight: Seeing, item: ItemFacts): Asked => ({
   role: sight.role,
-  grants: [sight.onNotes.get(note.id) ?? null, sight.onFolders.get(note.folder_id) ?? null],
-  private: note.private_owner === null ? null : note.private_owner === sight.memberId ? "mine" : "theirs",
-  outside: outside(sight, note.folder_id),
+  grants: [sight.onItems.get(item.id) ?? null, sight.onFolders.get(item.folder_id) ?? null],
+  private: item.private_owner === null ? null : item.private_owner === sight.memberId ? "mine" : "theirs",
+  outside: outside(sight, item.folder_id),
 });
 
 export const folderLevel = (sight: Seeing, folderId: string): Level => resolve(folderAsked(sight, folderId));
-export const noteLevel = (sight: Seeing, note: NoteFacts): Level => resolve(noteAsked(sight, note));
+export const itemLevel = (sight: Seeing, item: ItemFacts): Level => resolve(itemAsked(sight, item));
 
 /**
- * The one query shape for "which notes is this actor shown": a condition on the notes row named
- * `alias`, true for exactly the notes {@link noteLevel} gives view or more that are in a state
- * `covering` covers. `param` is the placeholder that {@link Sight.bind} is bound to, such as `?2`.
+ * The one query shape for "which notes is this actor shown", and which uploads: a condition on the
+ * row of `notes` or `uploads` named `alias`, true for exactly the ones {@link itemLevel} gives view
+ * or more that are in a state `covering` covers. An upload still arriving or being removed is in no
+ * state anything covers. `param` is the placeholder that {@link Sight.bind} is bound to, such as `?2`.
  * Every query that lists notes, or reads anything by way of a note (a change, a link, a count),
  * carries it, and so says which states it means.
  */
 export const SEEN = (alias: string, param: string, covering: Covering) =>
   `(${IN_STATE(alias, covering)} AND (json_extract(${param}, '$.within') IS NULL OR ${alias}.folder_id IN (SELECT value FROM json_each(${param}, '$.within'))) AND CASE WHEN ${alias}.private_owner IS NOT NULL AND ${alias}.private_owner IS NOT json_extract(${param}, '$.owner')
-      THEN ${alias}.id IN (SELECT value FROM json_each(${param}, '$.notes'))
+      THEN ${alias}.id IN (SELECT value FROM json_each(${param}, '$.items'))
       ELSE json_extract(${param}, '$.all') = 1
         OR ${alias}.folder_id IN (SELECT value FROM json_each(${param}, '$.folders'))
-        OR ${alias}.id IN (SELECT value FROM json_each(${param}, '$.notes'))
+        OR ${alias}.id IN (SELECT value FROM json_each(${param}, '$.items'))
     END)`;
 
 /** The same for folders: true for the folders row named `alias` when the actor can see that folder. */

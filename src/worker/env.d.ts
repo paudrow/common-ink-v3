@@ -14,6 +14,8 @@ interface InkSettings {
   DEV_SERVER?: string;
   /** A host given to HTML embeds alone, such as https://embed.commonink.app. Without one the app's own host serves their document. */
   EMBED_ORIGIN?: string;
+  /** A site kept for opening files in a tab, such as https://files.commonink.example. Without one a PDF is downloaded. */
+  FILE_ORIGIN?: string;
 }
 
 interface Env extends InkSettings {}

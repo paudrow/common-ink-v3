@@ -6,6 +6,7 @@ import { builderReducer, readBuilder, termOf, withField, type BuilderEvent, type
 const REST_MS = 700;
 const MAX_OFFERS = 8;
 const RELATIVE_DAYS = ["today", "yesterday", "tomorrow", "7d", "+7d"];
+const SIZES = ["100kb", "1mb", "10mb"];
 
 /** One thing offered while typing: what it reads as, what it means, and what it puts in the field. */
 interface Offer {
@@ -28,6 +29,16 @@ function useNames(host: PluginHost, app: App, scope: QueryScope, wanted: boolean
   useEffect(() => {
     if (!wanted) return;
     let left = false;
+    if (scope === "uploads") {
+      // Who uploaded is offered from the uploads the member can list, as who changed notes is from the history they can read.
+      void host
+        .perform({ type: "upload.list", includeArchived: true })
+        .then((uploads) => [...new Set(uploads.map((u) => u.uploadedBy.name))].sort((a, b) => a.localeCompare(b)), () => [])
+        .then((people) => !left && setRead({ tags: [], people, mentioned: [] }));
+      return () => {
+        left = true;
+      };
+    }
     const tags = scope === "todos" ? host.perform({ type: "todo.filters", includeArchived: true }).then((r) => [...r.tags]) : host.perform({ type: "tag.list", includeArchived: true }).then((r) => r.tags.map((t) => t.name));
     const people = host.perform({ type: "history.authors" }).then((authors) => [...new Set(authors.map((a) => a.name))]);
     const members = host.perform({ type: "member.list" }).then((r) => r.map((m) => m.name));
@@ -57,6 +68,8 @@ function valuesOf(field: QueryField, scope: QueryScope, names: Names): { label: 
   // Highest first, as the Todos page's chips offer a priority, each said as the app says it.
   if (value.type === "level") return [...value.levels].reverse().map((level) => ({ label: level[0]!.toUpperCase() + level.slice(1), value: level }));
   if (value.type === "day") return RELATIVE_DAYS.map((day) => ({ label: day, value: day }));
+  if (value.type === "size") return SIZES.map((size) => ({ label: size, value: size }));
+  if (value.type === "contains") return [];
   if (value.type === "folder") return names.folders;
   return (value.type === "tag" ? names.tags : value.type === "mentioned" ? names.mentioned : names.people).map((name) => ({ label: name, value: name }));
 }
@@ -91,6 +104,8 @@ const COMPARISONS: { id: Cmp | "between"; label: string; ofLevel: string }[] = [
   { id: "between", label: "between", ofLevel: "between" },
 ];
 
+const PLACEHOLDERS: Partial<Record<string, string>> = { day: "YYYY-MM-DD or today", tag: "tag", size: "1mb", contains: "part of a name" };
+
 interface ValueProps {
   row: Row;
   scope: QueryScope;
@@ -123,7 +138,7 @@ function ValueField({ row, scope, names, label, value, onChange, listId, whyId }
   }
   return (
     <>
-      <input type="text" aria-label={label} list={listId} placeholder={kind === "day" ? "YYYY-MM-DD or today" : kind === "tag" ? "tag" : "name"} value={value} onChange={(e) => onChange(e.target.value)} {...wrong} />
+      <input type="text" aria-label={label} list={listId} placeholder={PLACEHOLDERS[kind] ?? "name"} value={value} onChange={(e) => onChange(e.target.value)} {...wrong} />
       <datalist id={listId}>
         {values.map((v) => (
           <option key={v.value} value={v.value} />
@@ -137,7 +152,8 @@ function Condition({ row, at, scope, names, act }: { row: Row; at: number; scope
   const ids = useId();
   const set = (change: Partial<Row>) => act({ type: "set", at, row: { ...row, ...change } });
   const compares = row.field !== "text" && filterOf(keyOf(row.field)).compares;
-  const leveled = row.field !== "text" && filterOf(keyOf(row.field)).value.type === "level";
+  // A priority and a size are more or less, where a day is before or after.
+  const leveled = row.field !== "text" && ["level", "size"].includes(filterOf(keyOf(row.field)).value.type);
   const fields = keysFor(scope)
     .filter((key) => !filterOf(key).top)
     .flatMap((key) => fieldsOf(key, scope)) as Exclude<RowField, "text">[];
@@ -187,6 +203,9 @@ function Condition({ row, at, scope, names, act }: { row: Row; at: number; scope
     </li>
   );
 }
+
+/** What the order is when no sort: is said. */
+const UNSORTED: Record<QueryScope, string> = { notes: "Best match", todos: "Soonest due", uploads: "Latest uploaded" };
 
 const UNSHOWN = {
   nested: "This query has groups, or AND and OR together, which rows can't show. It stays as it is typed: change it in the bar.",
@@ -263,7 +282,7 @@ function Advanced({ id, scope, text, names, run, close }: PanelProps) {
       id={id}
       className="query-panel"
       role="group"
-      aria-label={scope === "todos" ? "Advanced filter" : "Advanced search"}
+      aria-label={scope === "notes" ? "Advanced search" : "Advanced filter"}
       onKeyDown={(e) => {
         if (e.key !== "Escape") return;
         e.stopPropagation();
@@ -308,18 +327,20 @@ function Advanced({ id, scope, text, names, run, close }: PanelProps) {
                 </label>
               ))}
             </div>
-            <label>
-              Words in
-              <select aria-label="Words in" value={looked} onChange={(e) => act({ type: "in", in: e.target.value ? [e.target.value as QueryIn] : [] })}>
-                <option value="">{scope === "todos" ? "the todo" : "title or text"}</option>
-                <option value="title">the note's title</option>
-                {scope === "notes" && <option value="body">the text</option>}
-              </select>
-            </label>
+            {keysFor(scope).includes("in") && (
+              <label>
+                Words in
+                <select aria-label="Words in" value={looked} onChange={(e) => act({ type: "in", in: e.target.value ? [e.target.value as QueryIn] : [] })}>
+                  <option value="">{scope === "todos" ? "the todo" : "title or text"}</option>
+                  <option value="title">the note's title</option>
+                  {scope === "notes" && <option value="body">the text</option>}
+                </select>
+              </label>
+            )}
             <label>
               Sort
               <select aria-label="Sort" value={built.sort ?? ""} onChange={(e) => act({ type: "sort", sort: (e.target.value || null) as SortKey | null })}>
-                <option value="">{scope === "todos" ? "Soonest due" : "Best match"}</option>
+                <option value="">{UNSORTED[scope]}</option>
                 {wordsFor("sort", scope).map((w) => (
                   <option key={w.word} value={w.word}>
                     {w.means}
@@ -356,7 +377,7 @@ export interface QueryBarProps {
 }
 
 /**
- * The one field a query is typed in, for notes and for todos. It is a plain text field: it offers
+ * The one field a query is typed in, for notes, todos and uploads. It is a plain text field: it offers
  * the filter or the value being typed, says quietly under it where a query can't be read, and has
  * Advanced beside it, which opens the builder and the help.
  */

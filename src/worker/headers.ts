@@ -13,7 +13,8 @@ type Policy = Readonly<Record<string, readonly string[]>>;
  * The app's pages and the sign-in pages. Everything is the app's own but what media and embeds
  * bring: CodeMirror writes its styles into `<style>` elements and the sign-in pages carry one, the
  * icons in `style.css` are `data:` masks, a video's picture is YouTube's, a Google contact's picture is
- * where Google keeps it (`*.googleusercontent.com`) and a sample contact's is `data:`, `askSite` asks any https
+ * where Google keeps it (`*.googleusercontent.com`) and a sample contact's is `data:`, an upload is played and drawn
+ * from the app's own address and measured from a `blob:` of the file before it is sent, `askSite` asks any https
  * site for what it tells anyone, and the page frames the sites in `FRAME_ORIGINS` and the document an
  * HTML embed runs in (`framed`). The app is framed by nothing.
  */
@@ -21,7 +22,8 @@ export const PAGE: Policy = {
   "default-src": ["'none'"],
   "script-src": ["'self'"],
   "style-src": ["'self'", "'unsafe-inline'"],
-  "img-src": ["'self'", "data:", "https://i.ytimg.com", "https://*.googleusercontent.com"],
+  "img-src": ["'self'", "data:", "blob:", "https://i.ytimg.com", "https://*.googleusercontent.com"],
+  "media-src": ["'self'", "blob:"],
   "font-src": ["'self'", "data:"],
   "connect-src": ["'self'", "https:"],
   "manifest-src": ["'self'"],

@@ -14,13 +14,17 @@ export const LINK_LABEL: Record<LinkChoice, string> = {
 
 export const linkAddress = (origin: string, token: string) => `${origin}/s/${token}`;
 
-/** What an overlay was handed, when it is a note or a folder to share. */
+/** What an overlay was handed, when it is a note, a folder or an upload to share. */
 export function itemOf(state: unknown): SharedItem | null {
   if (typeof state !== "object" || state === null) return null;
-  const { noteId, folderId } = state as Record<string, unknown>;
+  const { noteId, folderId, uploadId } = state as Record<string, unknown>;
   if (typeof noteId === "string") return { noteId };
-  return typeof folderId === "string" ? { folderId } : null;
+  if (typeof folderId === "string") return { folderId };
+  return typeof uploadId === "string" ? { uploadId } : null;
 }
+
+/** What an upload is called, which whoever opens the dialog for one hands over beside it: the app keeps no list of uploads to look it up in. */
+export const nameOf = (state: unknown): string | undefined => (typeof state === "object" && state !== null && typeof (state as { name?: unknown }).name === "string" ? (state as { name: string }).name : undefined);
 
 type Person = Extract<Grant["to"], { kind: "person" }>;
 

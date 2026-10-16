@@ -1,4 +1,4 @@
-import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type Shared } from "../core/protocol.ts";
+import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type Shared, type Upload } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -81,6 +81,44 @@ export function perform<T extends OpInput>(workspaceId: string, op: T): Promise<
     if (err instanceof ApiError && (err.code === "forbidden" || err.message === NO_SUCH_WORKSPACE)) for (const listener of [...refused]) listener();
   });
   return answer;
+}
+
+/** Where an upload's bytes are asked for by the member's session. */
+export const uploadAddress = (workspaceId: string, id: string) => `/api/workspaces/${workspaceId}/uploads/${id}`;
+
+/** Where they are asked for by whoever holds a link, which decides in place of a session. */
+export const sharedUploadAddress = (token: string, id: string) => `/api/shared/${token}/uploads/${id}`;
+
+/**
+ * Sends a file's bytes to a workspace, as the body of one request that says how far it has got.
+ * The file is named in a header, and the type is never the browser's guess: the server reads it from the bytes.
+ */
+export function sendUpload(workspaceId: string, file: Blob, as: { name: string; folderId?: string; private?: boolean }, onProgress?: (sent: number) => void): Promise<Upload> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/workspaces/${workspaceId}/uploads`);
+    xhr.responseType = "json";
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.setRequestHeader("X-Ink-Upload", encodeURIComponent(JSON.stringify(as)));
+    xhr.upload.onprogress = (event) => onProgress?.(event.loaded);
+    xhr.onerror = xhr.onabort = () => reject(new ApiError(0, "unknown", "The file didn't reach Common Ink. Check your connection and try again."));
+    xhr.onload = () => {
+      const body = (xhr.response ?? {}) as { error?: string; message?: string };
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as Upload);
+      else reject(new ApiError(xhr.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? (xhr.statusText || "The file couldn't be uploaded.")));
+    };
+    xhr.send(file);
+  });
+}
+
+/** The first `upTo` bytes of an upload, from the address its bytes are asked for, which answers as it answers a picture: by the session, through the same check. */
+export async function readUpload(address: string, upTo: number): Promise<Uint8Array> {
+  const res = await fetch(address, { headers: { Range: `bytes=0-${upTo - 1}` }, credentials: "same-origin", cache: "no-store" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new ApiError(res.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? "The file couldn't be read.");
+  }
+  return new Uint8Array(await res.arrayBuffer()).subarray(0, upTo);
 }
 
 /** What a link opens, asked as whoever holds it. Neither asks who that is unless the link is for people signed in. */

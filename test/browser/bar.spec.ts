@@ -142,7 +142,7 @@ test("with a note in two editors, Word count reads the one the member is in, and
 
 test("with Word count turned off, and the clocks that share the bar, nothing is left in it, so there is no bar, and its own page says what it adds", async ({ page }) => {
   await open(page, "# Tea\n\nSteep the leaves.\n");
-  await perform(page, { type: "settings.write", text: JSON.stringify({ "note-clocks.enabled": false, "quick-timer.enabled": false }), baseRevision: 0 });
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "note-clocks.enabled": false, "quick-timer.enabled": false, "uploads.enabled": false }), baseRevision: 0 });
   await page.reload();
   await expect(bar(page).getByLabel("Word count")).toBeVisible();
   const withBar = await boxOf(page, "main");

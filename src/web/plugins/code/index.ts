@@ -3,6 +3,7 @@ import type { Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType } from "@codemirror/view";
 import type { Plugin } from "../../plugin-api.ts";
 import { drawnInView, ghost, ghostLook, lineTouched, redraw, whenSeen } from "../lib/live.ts";
+import { tokenColors } from "./colors.ts";
 import { fencedIn } from "./fence.ts";
 
 type Highlighted = typeof import("./highlighting.ts").highlighted;
@@ -33,14 +34,6 @@ const look = EditorView.baseTheme({
   ".code-tools button:focus-visible": { outline: "2px solid var(--accent)", outlineOffset: "1px" },
   ".code-tools button[aria-pressed=true]": { background: "var(--accent-soft)", color: "var(--accent)" },
   ".code-tools svg": { width: "14px", height: "14px", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round" },
-  ".tok-keyword, .tok-operatorKeyword, .tok-modifier": { color: "light-dark(#8b3fc7, #c792ea)" },
-  ".tok-string, .tok-string2, .tok-inserted": { color: "light-dark(#3d7a3d, #a5d6a7)" },
-  ".tok-comment, .tok-meta": { color: "light-dark(#8a8580, #7d7870)", fontStyle: "italic" },
-  ".tok-number, .tok-bool, .tok-atom, .tok-literal": { color: "light-dark(#b25d0f, #f0a868)" },
-  ".tok-typeName, .tok-className, .tok-namespace": { color: "light-dark(#0f7a8a, #7fd0dd)" },
-  ".tok-propertyName, .tok-macroName, .tok-labelName": { color: "light-dark(#2f5fc4, #8fb4ff)" },
-  ".tok-variableName.tok-definition, .tok-heading": { color: "light-dark(#2f5fc4, #8fb4ff)" },
-  ".tok-deleted, .tok-invalid": { color: "light-dark(#b3261e, #f28b82)" },
 });
 
 /**
@@ -199,7 +192,7 @@ export const codeBlocks: Plugin = {
         () => !stopped && host.report(new Error("The colors for code couldn't be loaded, so code is shown without them. Reload the page to try again.")),
       );
 
-    host.editorExtensions.register({ id: "code-blocks", extension: [tracked, nearing, blocks, whenSeen((text) => /^ {0,3}(```|~~~)/m.test(text), load), look, ghostLook] });
+    host.editorExtensions.register({ id: "code-blocks", extension: [tracked, nearing, blocks, whenSeen((text) => /^ {0,3}(```|~~~)/m.test(text), load), look, tokenColors, ghostLook] });
     return () => {
       stopped = true;
     };
