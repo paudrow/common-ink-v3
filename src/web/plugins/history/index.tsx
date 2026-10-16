@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { ALL_NOTES, useInspected, type About, type Blame, type NoteSummary, type Plugin, type PluginHost, type Showing, type ViewProps } from "../../plugin-api.ts";
 import { titleOf } from "../lib/historyView.ts";
 import { History, isScope, type Kept, type Left, type Scope } from "./History.tsx";
-import { whoWrote, whoWroteToggles, type WhoWroteToggles } from "./whoWrote.ts";
+import { stepHunk, whoWrote, whoWroteToggles, type Editors, type WhoWroteToggles } from "./whoWrote.ts";
 
 const PATH = "/history";
 /** The page's state that asks for every note and everyone's changes, where no state leaves the page as it is. */
@@ -70,7 +70,7 @@ function OfNotes({ host, app, name, notes, empty, left }: OfNotesProps) {
   return <History host={host} me={app.me.id} canEdit={canEdit} scope={scope} layout="panel" version={versionOf(notes)} empty={empty} onOpenHistory={() => app.go(PATH, { state: scope ?? EVERYTHING })} onOpenNote={app.openNote} onChanged={app.refresh} left={left} />;
 }
 
-/** The changes asked for from a line's bar, by note, until the note's History panel shows them; and the notes whose panel is showing. */
+/** The changes asked for from a run of Who wrote this, by note, until the note's History panel shows them; and the notes whose panel is showing. */
 interface Asked {
   of(noteId: string): number | null;
   subscribe(listener: () => void): () => void;
@@ -78,7 +78,7 @@ interface Asked {
   showing: Set<string>;
 }
 
-/** The switch for a note's bars, in its History panel. */
+/** The switch for a note's Who wrote this, in its History panel. */
 function WhoWroteSwitch({ toggles, noteId }: { toggles: WhoWroteToggles; noteId: string }) {
   const on = useSyncExternalStore(toggles.subscribe, () => toggles.has(noteId));
   return (
@@ -161,7 +161,8 @@ export const history: Plugin = {
       told();
       if (!asked.showing.has(noteId)) host.app().togglePanel("history");
     };
-    host.editorExtensions.register({ id: "whoWrote", extension: (editor) => (editor.reading ? [] : whoWrote(host, toggles, read, openAt, editor.noteId)) });
+    const editors: Editors = new Map();
+    host.editorExtensions.register({ id: "whoWrote", extension: (editor) => (editor.reading ? [] : whoWrote(host, toggles, read, editors, openAt, editor.noteId)) });
     host.commands.register({
       id: "history.whoWrote",
       title: "Who wrote this",
@@ -171,6 +172,27 @@ export const history: Plugin = {
         if (noteId) toggles.toggle(noteId);
       },
     });
+    // No keys of their own, as the mode has none: a member who uses them gives them keys in Keyboard shortcuts.
+    for (const [id, title, by] of [
+      ["history.whoWroteNext", "Next change in Who wrote this", 1],
+      ["history.whoWrotePrevious", "Previous change in Who wrote this", -1],
+    ] as const) {
+      host.commands.register({
+        id,
+        title,
+        when: () => {
+          const { noteId } = host.app();
+          return noteId !== null && toggles.has(noteId);
+        },
+        run: () => {
+          const { noteId } = host.app();
+          const view = noteId && toggles.has(noteId) ? editors.get(noteId)?.[0] : undefined;
+          const revision = view && stepHunk(view, by);
+          if (noteId && revision) openAt(noteId, revision);
+          view?.focus();
+        },
+      });
+    }
     host.views.register("page", {
       id: "history",
       path: PATH,

@@ -1,29 +1,35 @@
-import { StateEffect, StateField, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, layer, showTooltip, type LayerMarker } from "@codemirror/view";
+import { EditorSelection, StateEffect, StateField, type EditorState, type Extension } from "@codemirror/state";
+import { EditorView, ViewPlugin, layer, type LayerMarker } from "@codemirror/view";
 import { ago, lineHunks, reline, type Author, type Blame, type ChangeEntry, type Dispose, type PluginHost } from "../../plugin-api.ts";
+import { did, initials } from "../lib/historyView.ts";
 
 /*
- * Who wrote this: a thin bar in the margin beside each line of a note, coloured by who last wrote
- * or edited the line. Members are one family of colours and agents another, drawn dashed; the
- * member's own lines are a quiet grey. The bars are drawn in a layer of their own over the margin,
- * so nothing in the text moves when they come or go.
+ * Who wrote this: a column left of the text, as a blame view has. Each run of lines one change last
+ * wrote is a hunk, and the hunk's first row names who wrote it and when, with the change's summary
+ * where History has one. Members are one family of colours and agents another; the member's own
+ * lines are grey. A strip at the column's edge is stronger the newer the change. The column is drawn
+ * in a layer of its own, in room the editor makes left of the text when the mode is on, so the text
+ * moves at most once, as the mode comes on, and never while scrolling or typing.
  */
 
 /** Who wrote a line: the revision of the change that did, or what the member typed here since the note was read. */
 type Wrote = number;
 const TYPED = 0;
 
-/** How a bar is drawn: the member's own, or one of the colours of a family. */
+/** How a hunk is drawn: the member's own, or one of the colours of a family. */
 type Tone = "self" | `member-${number}` | `agent-${number}`;
 const MEMBER_TONES = 5;
 const AGENT_TONES = 4;
+/** How new a change is among the note's, from 0 for the oldest to the newest. */
+const HEAT_STEPS = 4;
 
-/** What the bars of one note are drawn from. */
+/** What the column of one note is drawn from. */
 interface Read {
   blame: Blame;
   me: string;
   changes: ReadonlyMap<number, ChangeEntry>;
   tones: ReadonlyMap<number, Tone>;
+  heat: ReadonlyMap<number, number>;
 }
 
 interface Shown extends Read {
@@ -31,7 +37,10 @@ interface Shown extends Read {
   lines: Wrote[];
 }
 
-/** The member's notes with the bars on, the latest turned on last, kept in this browser. */
+/** The mode for one editor: off, on and waiting for the note's answer, or on and drawn from it. */
+type Column = null | "waiting" | Shown;
+
+/** The member's notes with the column on, the latest turned on last, kept in this browser. */
 export interface WhoWroteToggles {
   has(noteId: string): boolean;
   toggle(noteId: string): void;
@@ -86,6 +95,12 @@ function tonesOf(changes: readonly ChangeEntry[], me: string): Map<number, Tone>
   return new Map(changes.map((c) => [c.revision, taken.get(keyOf(c.author)) ?? "self"]));
 }
 
+/** How new each change the lines name is among them, by rank: the oldest 0 and the newest `HEAT_STEPS`. */
+function heatOf(blame: Blame): Map<number, number> {
+  const named = [...new Set(blame.lines.map((run) => run.revision))].sort((a, b) => a - b);
+  return new Map(named.map((revision, i) => [revision, named.length < 2 ? HEAT_STEPS : Math.round((i * HEAT_STEPS) / (named.length - 1))]));
+}
+
 /** Who wrote each line of `text`, the editor's text now: as the answer says where the line is as it was read, and the member's typing where it isn't. */
 function aligned({ text: then, lines: runs }: Blame, now: string): Wrote[] {
   const wrote = runs.flatMap((run) => Array<Wrote>(run.to - run.from + 1).fill(run.revision));
@@ -101,35 +116,45 @@ function aligned({ text: then, lines: runs }: Blame, now: string): Wrote[] {
   return lines;
 }
 
-const show = StateEffect.define<Read | null>();
-/** A bar the pointer is on: the line it is beside, counted from 1, and what it says. */
-interface Hover {
-  line: number;
-  label: string;
-}
+const show = StateEffect.define<Read | "waiting" | null>();
+/** Each minute while the column is on, so how long ago a change was made stays true. */
+const tick = StateEffect.define<null>();
+const MINUTE_MS = 60_000;
 
-const hover = StateEffect.define<Hover | null>();
-
-const shown = StateField.define<Shown | null>({
+const column = StateField.define<Column>({
   create: () => null,
   update(value, tr) {
     const read = tr.effects.find((e) => e.is(show));
-    if (read) return read.value && { ...read.value, lines: aligned(read.value.blame, tr.state.doc.toString()) };
-    if (!value || !tr.docChanged) return value;
+    if (read) return read.value === null || read.value === "waiting" ? read.value : { ...read.value, lines: aligned(read.value.blame, tr.state.doc.toString()) };
+    if (!value || value === "waiting" || !tr.docChanged) return value;
     // A note read before the editor took in the change that made it, such as another member's, is true of it once it has.
     const { doc } = tr.state;
     if (doc.length === value.blame.text.length && doc.toString() === value.blame.text) return { ...value, lines: aligned(value.blame, value.blame.text) };
     return { ...value, lines: reline(value.lines, tr.changes, tr.startState.doc, TYPED) };
   },
+  provide: (field) => EditorView.editorAttributes.from(field, (value): Record<string, string> => (value ? { class: "who-on" } : {})),
 });
 
-const hovered = StateField.define<Hover | null>({
-  create: () => null,
-  update(value, tr) {
-    for (const e of tr.effects) if (e.is(hover)) value = e.value;
-    return value !== null && tr.docChanged ? null : value;
-  },
-});
+const drawn = (state: EditorState) => {
+  const value = state.field(column, false);
+  return value && value !== "waiting" ? value : null;
+};
+
+/** Lines one change last wrote, next to each other, from one line to another counted from 1. */
+interface Hunk {
+  from: number;
+  to: number;
+  wrote: Wrote;
+}
+
+/** The hunk the line is in. */
+function hunkAt(lines: readonly Wrote[], line: number): Hunk {
+  const wrote = lines[line - 1]!;
+  let [from, to] = [line, line];
+  while (from > 1 && lines[from - 2] === wrote) from--;
+  while (to < lines.length && lines[to] === wrote) to++;
+  return { from, to, wrote };
+}
 
 /** The latest of the lines from one to another, counted from 1: what typing here did is later than any change read. */
 function latest(lines: readonly Wrote[], first: number, last: number): Wrote | undefined {
@@ -141,88 +166,200 @@ function latest(lines: readonly Wrote[], first: number, last: number): Wrote | u
   return found;
 }
 
-/** What a bar's pointer is told of who wrote its line. */
-function said(read: Read, wrote: Wrote): string {
-  const change = read.changes.get(wrote);
-  if (!change) return "You, just now";
-  const when = ago(change.createdAt, Date.now());
-  const { author } = change;
-  if (author.kind === "member") return `${author.personId === read.me ? "You" : author.name}, ${when}`;
-  const owner = author.onBehalfOf === read.me ? "your agent" : read.blame.owners[author.onBehalfOf] ? `${read.blame.owners[author.onBehalfOf]}'s agent` : "an agent";
-  return `${author.name} (${owner}), ${when}`;
+/** What a hunk's first row says: who, when, and what the change was where History says more than that it edited. */
+interface Label {
+  who: string;
+  when: string;
+  what: string | null;
 }
 
-class Bar implements LayerMarker {
+function labelOf(read: Read, wrote: Wrote): Label {
+  const change = read.changes.get(wrote);
+  if (!change) return { who: "You", when: "just now", what: null };
+  const when = ago(change.createdAt, Date.now());
+  const what = change.label ?? (change.reverts ? capital(did({ reverts: change.reverts, restores: change.restores, revisions: [change.revision] }, false)) : null);
+  const { author } = change;
+  if (author.kind === "member") return { who: author.personId === read.me ? "You" : author.name, when, what };
+  const owner = author.onBehalfOf === read.me ? "your agent" : read.blame.owners[author.onBehalfOf] ? `${read.blame.owners[author.onBehalfOf]}'s agent` : "an agent";
+  return { who: `${author.name} (${owner})`, when, what };
+}
+
+const capital = (words: string) => words.charAt(0).toUpperCase() + words.slice(1);
+const said = (label: Label) => `${label.who} · ${label.when}${label.what ? ` · ${label.what}` : ""}`;
+
+class HunkMark implements LayerMarker {
   constructor(
-    readonly line: number,
-    readonly wrote: Wrote,
+    readonly hunk: Hunk,
     readonly tone: Tone,
+    readonly heat: number,
+    readonly initial: string,
+    readonly label: Label,
     readonly left: number,
     readonly top: number,
+    readonly width: number,
     readonly height: number,
-    readonly label: string,
+    readonly row: number,
   ) {}
 
   draw() {
     const el = document.createElement("div");
-    el.className = "who-bar";
+    el.className = "who-hunk";
+    const col = el.appendChild(document.createElement("div"));
+    col.className = "who-col";
+    const pinned = col.appendChild(document.createElement("div"));
+    pinned.className = "who-label";
+    const avatar = pinned.appendChild(document.createElement("span"));
+    avatar.className = "who-avatar";
+    const text = pinned.appendChild(document.createElement("span"));
+    text.className = "who-text";
+    const head = text.appendChild(document.createElement("span"));
+    head.className = "who-head";
+    for (const part of ["who-name", "who-when"]) head.appendChild(document.createElement("span")).className = part;
+    text.appendChild(document.createElement("span")).className = "who-what";
+    el.appendChild(document.createElement("div")).className = "who-band";
     this.update(el);
     return el;
   }
 
   update(el: HTMLElement) {
-    el.dataset.tone = this.tone;
-    el.dataset.line = String(this.line);
-    el.dataset.revision = String(this.wrote);
-    el.setAttribute("aria-label", this.label);
-    el.style.left = `${this.left}px`;
-    el.style.top = `${this.top}px`;
-    el.style.height = `${this.height}px`;
+    const { hunk, label } = this;
+    Object.assign(el.dataset, { from: String(hunk.from), to: String(hunk.to), revision: String(hunk.wrote), tone: this.tone, heat: String(this.heat) });
+    el.setAttribute("aria-label", said(label));
+    el.title = said(label);
+    Object.assign(el.style, { left: `${this.left}px`, top: `${this.top}px`, width: `${this.width}px`, height: `${this.height}px` });
+    el.style.setProperty("--who-row", `${this.row}px`);
+    // A hunk of one row has its summary on that row, after who and when.
+    el.dataset.rows = this.height < this.row * 1.75 ? "one" : "more";
+    el.querySelector(".who-avatar")!.textContent = this.initial;
+    el.querySelector(".who-name")!.textContent = label.who;
+    el.querySelector(".who-when")!.textContent = label.when;
+    el.querySelector(".who-what")!.textContent = label.what ?? "";
     return true;
   }
 
-  eq(other: Bar) {
-    return this.line === other.line && this.wrote === other.wrote && this.tone === other.tone && this.left === other.left && this.top === other.top && this.height === other.height && this.label === other.label;
+  eq(other: HunkMark) {
+    return (
+      this.hunk.from === other.hunk.from &&
+      this.hunk.to === other.hunk.to &&
+      this.hunk.wrote === other.hunk.wrote &&
+      this.tone === other.tone &&
+      this.heat === other.heat &&
+      this.initial === other.initial &&
+      said(this.label) === said(other.label) &&
+      this.left === other.left &&
+      this.top === other.top &&
+      this.width === other.width &&
+      this.height === other.height &&
+      this.row === other.row
+    );
   }
 }
 
-function barsOf(view: EditorView): Bar[] {
-  const read = view.state.field(shown, false);
+/** The hunks in sight. A block drawn in place of several lines, such as a table, is of whoever last changed one of them. */
+function hunksOf(view: EditorView): HunkMark[] {
+  const read = drawn(view.state);
   if (!read?.lines.length) return [];
   const scroller = view.scrollDOM.getBoundingClientRect();
   const [baseLeft, baseTop] = [scroller.left - view.scrollDOM.scrollLeft * view.scaleX, scroller.top - view.scrollDOM.scrollTop * view.scaleY];
-  // At the outer edge of the room kept left of the text, clear of a heading's #s, which hang right next to it.
-  const left = (view.contentDOM.getBoundingClientRect().left - baseLeft) / view.scaleX + 2;
-  const bars: Bar[] = [];
-  // One bar for each block of lines, whatever is drawn in it: a table or a board drawn in place of its lines is beside the bar of those lines.
+  const content = view.contentDOM.getBoundingClientRect();
+  const [left, width] = [(content.left - baseLeft) / view.scaleX, content.width / view.scaleX];
+  const marks: HunkMark[] = [];
+  let open = null as { first: number; last: number; wrote: Wrote; top: number; bottom: number } | null;
+  const close = (last: boolean) => {
+    if (!open) return;
+    const { wrote } = open;
+    // The first and last hunks in sight run on past it, and a block such as a table may take in lines of other hunks.
+    const [head, tail] = [hunkAt(read.lines, open.first), hunkAt(read.lines, open.last)];
+    const hunk = { from: !marks.length && head.wrote === wrote ? head.from : open.first, to: last && tail.wrote === wrote ? tail.to : open.last, wrote };
+    const author = read.changes.get(wrote)?.author;
+    const tone = wrote === TYPED ? "self" : (read.tones.get(wrote) ?? "self");
+    const heat = wrote === TYPED ? HEAT_STEPS : (read.heat.get(wrote) ?? HEAT_STEPS);
+    const initial = initials(!author || (author.kind === "member" && author.personId === read.me) ? "You" : author.name);
+    marks.push(new HunkMark(hunk, tone, heat, initial, labelOf(read, wrote), left, (open.top - baseTop) / view.scaleY, width, (open.bottom - open.top) / view.scaleY, view.defaultLineHeight));
+  };
   for (const part of view.viewportLineBlocks) {
     if (!part.height) continue;
     const [first, last] = [view.state.doc.lineAt(part.from).number, view.state.doc.lineAt(part.to).number];
     const wrote = latest(read.lines, first, last);
     if (wrote === undefined) continue;
-    const tone = wrote === TYPED ? "self" : (read.tones.get(wrote) ?? "self");
-    bars.push(new Bar(first, wrote, tone, left, (part.top + view.documentTop - baseTop) / view.scaleY, part.height, said(read, wrote)));
+    const [top, bottom] = [part.top + view.documentTop, part.bottom + view.documentTop];
+    if (open?.wrote === wrote) Object.assign(open, { last, bottom });
+    else {
+      close(false);
+      open = { first, last, wrote, top, bottom };
+    }
   }
-  return bars;
+  close(true);
+  return marks;
 }
 
-const barOf = (target: EventTarget | null) => (target instanceof Element ? target.closest<HTMLElement>(".who-bar") : null);
+const hunkOf = (target: EventTarget | null) => (target instanceof Element ? target.closest<HTMLElement>(".who-col")?.parentElement : null);
+
+/** The nearest element above `el` that scrolls up and down, where the top of what is in sight is. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let at = el.parentElement; at; at = at.parentElement) if (/(auto|scroll)/.test(getComputedStyle(at).overflowY)) return at;
+  return null;
+}
+
+/** How far down each hunk's label in sight goes to stay at the top of what is in sight while its hunk is. */
+function pinsOf(view: EditorView, scroller: HTMLElement | null): [HTMLElement, number][] {
+  const top = Math.max(scroller?.getBoundingClientRect().top ?? 0, 0);
+  return [...view.dom.querySelectorAll<HTMLElement>(".who-hunk")].map((el) => {
+    const box = el.getBoundingClientRect();
+    const label = el.querySelector<HTMLElement>(".who-label")!;
+    return [label, Math.max(0, Math.min(top - box.top, box.height - label.offsetHeight)) / view.scaleY];
+  });
+}
+
+/** The editors with a column, by note, the one used last first: a note may be open in two parts of a split. */
+export type Editors = Map<string, EditorView[]>;
 
 /**
- * The bars, for the editor of one note. They are drawn while the member has them on for the note:
- * read for the note's revision, kept true to typing as it happens, and read again each time the
- * note has a newer revision. Pressing one opens its change in History.
+ * Moves the cursor of the note's editor to the first line of the hunk after or before the one it is
+ * in, and answers the change that wrote it: none where there is no such hunk, or the member wrote it
+ * since the note was read.
  */
-export function whoWrote(host: PluginHost, toggles: WhoWroteToggles, read: Map<string, Blame>, openAt: (noteId: string, revision: number) => void, noteId: string): Extension {
+export function stepHunk(view: EditorView, by: 1 | -1): number | null {
+  const read = drawn(view.state);
+  if (!read?.lines.length) return null;
+  const at = hunkAt(read.lines, view.state.doc.lineAt(view.state.selection.main.head).number);
+  const line = by > 0 ? at.to + 1 : at.from - 1;
+  if (line < 1 || line > read.lines.length) return null;
+  const next = hunkAt(read.lines, line);
+  const pos = view.state.doc.line(next.from).from;
+  view.dispatch({ selection: EditorSelection.cursor(pos), effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+  return next.wrote === TYPED ? null : next.wrote;
+}
+
+/**
+ * The column, for the editor of one note. It is drawn while the member has the mode on for the
+ * note: read for the note's revision, kept true to typing as it happens, and read again each time
+ * the note has a newer revision. Pressing a hunk opens its change in History.
+ */
+export function whoWrote(host: PluginHost, toggles: WhoWroteToggles, read: Map<string, Blame>, editors: Editors, openAt: (noteId: string, revision: number) => void, noteId: string): Extension {
   const loader = ViewPlugin.define((view) => {
     let asking = false;
     let gone = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const showing = () => view.state.field(shown, false)?.blame;
-    const put = (blame: Blame | null) => {
-      if (gone || showing() === (blame ?? undefined)) return;
+    let scroller: HTMLElement | null = null;
+    // In the editor's own measuring, after it has drawn the column, so a label is never drawn where it was before it is pinned.
+    const repin = () =>
+      view.requestMeasure({
+        key: pinsOf,
+        read: () => {
+          if (!scroller?.isConnected) scroller = scrollerOf(view.dom);
+          return pinsOf(view, scroller);
+        },
+        write: (pins) => {
+          for (const [label, by] of pins) label.style.transform = by > 0 ? `translateY(${by}px)` : "";
+        },
+      });
+    const showing = () => view.state.field(column, false);
+    const put = (blame: Blame | "waiting" | null) => {
+      const now = showing();
+      if (gone || (blame === "waiting" ? now !== null : now === blame || (now && now !== "waiting" && now.blame === blame))) return;
       const me = host.app().me.id;
-      view.dispatch({ effects: show.of(blame && { blame, me, changes: new Map(blame.changes.map((c) => [c.revision, c])), tones: tonesOf(blame.changes, me) }) });
+      view.dispatch({ effects: show.of(blame && blame !== "waiting" ? { blame, me, changes: new Map(blame.changes.map((c) => [c.revision, c])), tones: tonesOf(blame.changes, me), heat: heatOf(blame) } : blame) });
     };
     const ask = async () => {
       asking = true;
@@ -232,7 +369,7 @@ export function whoWrote(host: PluginHost, toggles: WhoWroteToggles, read: Map<s
         read.set(noteId, blame);
         if (read.size > MOST_READ) read.delete(read.keys().next().value!);
       } catch {
-        // The bars stay as they were, and are read again when the note next changes.
+        // The column stays as it was, and is read again when the note next changes.
         return;
       } finally {
         asking = false;
@@ -248,7 +385,7 @@ export function whoWrote(host: PluginHost, toggles: WhoWroteToggles, read: Map<s
           return put(null);
         }
         const had = read.get(noteId);
-        if (had) put(had);
+        put(had ?? "waiting");
         const note = host.app().notes?.find((n) => n.id === noteId);
         if (asking || (had && (!note || had.revision >= note.revision))) return;
         // The member's own saves are drawn already, as they type: what they wrote is read once they pause, and someone else's change at once.
@@ -257,52 +394,43 @@ export function whoWrote(host: PluginHost, toggles: WhoWroteToggles, read: Map<s
         timer = setTimeout(() => void ask(), !had ? 0 : mine ? OWN_PAUSE_MS : 300);
       });
     const stops = [toggles.subscribe(sync), host.onNotes(sync)];
+    const scrolled = (e: Event) => e.target === scroller && view.state.field(column, false) && repin();
+    window.addEventListener("scroll", scrolled, { capture: true, passive: true });
+    const focused = () => editors.set(noteId, [view, ...(editors.get(noteId) ?? []).filter((v) => v !== view)]);
+    view.contentDOM.addEventListener("focus", focused);
+    editors.set(noteId, [...(editors.get(noteId) ?? []), view]);
+    const ticking = setInterval(() => view.state.field(column, false) && view.dispatch({ effects: tick.of(null) }), MINUTE_MS);
     sync();
     return {
+      update: (u) => u.state.field(column, false) && repin(),
       destroy() {
         gone = true;
         clearTimeout(timer);
+        clearInterval(ticking);
         for (const stop of stops) stop();
+        window.removeEventListener("scroll", scrolled, { capture: true });
+        view.contentDOM.removeEventListener("focus", focused);
+        const left = (editors.get(noteId) ?? []).filter((v) => v !== view);
+        if (left.length) editors.set(noteId, left);
+        else editors.delete(noteId);
       },
     };
   });
 
-  const bars = layer({
+  const hunks = layer({
     above: true,
     class: "who-wrote",
-    markers: barsOf,
-    update: (u) => u.docChanged || u.viewportChanged || u.startState.field(shown, false) !== u.state.field(shown, false),
-    mount(dom, view) {
-      dom.addEventListener("mouseover", (e) => {
-        const bar = barOf(e.target);
-        if (bar) view.dispatch({ effects: hover.of({ line: Number(bar.dataset.line), label: bar.getAttribute("aria-label") ?? "" }) });
-      });
-      dom.addEventListener("mouseout", (e) => {
-        if (barOf(e.target) && !barOf(e.relatedTarget)) view.dispatch({ effects: hover.of(null) });
-      });
-      dom.addEventListener("mousedown", (e) => barOf(e.target) && e.preventDefault());
+    markers: hunksOf,
+    update: (u) => u.docChanged || u.viewportChanged || u.geometryChanged || u.startState.field(column, false) !== u.state.field(column, false) || u.transactions.some((tr) => tr.effects.some((e) => e.is(tick))),
+    mount(dom) {
+      dom.addEventListener("mousedown", (e) => hunkOf(e.target) && e.preventDefault());
       dom.addEventListener("click", (e) => {
-        const wrote = Number(barOf(e.target)?.dataset.revision);
+        const wrote = Number(hunkOf(e.target)?.dataset.revision);
         if (wrote) openAt(noteId, wrote);
       });
     },
   });
 
-  const tip = showTooltip.compute([hovered, shown], (state) => {
-    const on = state.field(hovered);
-    if (!on || !state.field(shown) || on.line > state.doc.lines) return null;
-    return {
-      pos: state.doc.line(on.line).from,
-      above: true,
-      create: () => {
-        const dom = document.createElement("div");
-        dom.className = "who-tip";
-        dom.setAttribute("role", "tooltip");
-        dom.textContent = on.label;
-        return { dom };
-      },
-    };
-  });
-
-  return [shown, hovered, loader, bars, tip];
+  // The loader measures after the column is drawn.
+  return [column, hunks, loader];
 }
