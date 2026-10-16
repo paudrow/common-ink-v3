@@ -869,7 +869,10 @@ test("checking a todo off on the Todos page says so in a toast, and Undo opens i
   // A newer completion takes the toast's place, and a press on it takes it away with nothing else moving.
   await row(page, "Call the bank").getByRole("checkbox").check();
   await expect(toast(page)).toHaveText("Task completedUndo");
+  // The newer card comes when the server answers, so it is waited for by the first card going.
+  await toast(page).evaluate((el) => el.setAttribute("data-first", ""));
   await row(page, "Write notes").getByRole("checkbox").check();
+  await expect(page.locator(".toast-card[data-first]")).toHaveCount(0);
   await expect(toast(page)).toHaveCount(1);
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes", "Book flights"]);
   const withToast = await laidOut(page, ".todos-page *");
