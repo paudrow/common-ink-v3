@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { shiftDay } from "../../core/events.ts";
-import type { Calendar, CalendarEvent, Contact, ContactCard, ContactChange, EventWhen } from "../../core/protocol.ts";
+import { CONTACT_LABELS, labelType, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactLine, type EventWhen, type LabelledField } from "../../core/protocol.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type DataSource, type Described, type EventChange } from "../../core/sources.ts";
 import { covers, isGoogleSource, refresh, revoke, writes as agreedToWrite, type GoogleConfig, type GoogleSourceId } from "../google.ts";
 import type { Vault } from "../vault.ts";
@@ -414,20 +414,22 @@ export function patchOf(change: EventChange): Record<string, unknown> {
   };
 }
 
+/** A line of a person's as People gives it, with its `type` and, for one People doesn't know, the label as written in `formattedType`. */
+const Labelled = { type: z.string().optional(), formattedType: z.string().optional() };
 const Person = z.object({
   resourceName: z.string(),
   etag: z.string().optional(),
   names: z.array(z.object({ displayName: z.string().optional() })).optional(),
-  emailAddresses: z.array(z.object({ value: z.string().optional() })).optional(),
-  phoneNumbers: z.array(z.object({ value: z.string().optional() })).optional(),
+  emailAddresses: z.array(z.object({ value: z.string().optional(), ...Labelled })).optional(),
+  phoneNumbers: z.array(z.object({ value: z.string().optional(), ...Labelled })).optional(),
   organizations: z.array(z.object({ name: z.string().optional(), title: z.string().optional() })).optional(),
 });
 const Detailed = Person.extend({
-  addresses: z.array(z.object({ formattedValue: z.string().optional() })).optional(),
+  addresses: z.array(z.object({ formattedValue: z.string().optional(), ...Labelled })).optional(),
   birthdays: z.array(z.object({ date: z.object({ year: z.number().int().optional(), month: z.number().int().optional(), day: z.number().int().optional() }).optional() })).optional(),
   biographies: z.array(z.object({ value: z.string().optional() })).optional(),
   photos: z.array(z.object({ url: z.string().optional(), default: z.boolean().optional() })).optional(),
-  urls: z.array(z.object({ value: z.string().optional() })).optional(),
+  urls: z.array(z.object({ value: z.string().optional(), ...Labelled })).optional(),
 });
 const Connections = z.object({ connections: z.array(z.unknown()).default([]), nextPageToken: z.string().optional() });
 const PERSON = /^people\/([A-Za-z0-9_-]{1,100})$/;
@@ -445,8 +447,41 @@ type Entry = Record<string, unknown>;
 /** An entry of a person's as it can be sent back: what Google works out itself taken off. */
 const kept = ({ metadata: _, formattedType: __, canonicalForm: ___, ...entry }: Entry): Entry => entry;
 const entries = (was: Entry, field: string): Entry[] => (Array.isArray(was[field]) ? (was[field] as unknown[]).filter((e): e is Entry => typeof e === "object" && e !== null) : []);
-/** A list as the member wrote it, each value that was there before kept as Google had it, with its label. */
-const listed = (values: string[], before: Entry[], key: "value" | "formattedValue") => values.map((value) => before.find((e) => e[key] === value) ?? { [key]: value }).map(kept);
+
+/** Where People keeps each of a contact's labelled fields, and the key of an entry there that holds its value. */
+const LINES = { emails: ["emailAddresses", "value"], phones: ["phoneNumbers", "value"], addresses: ["addresses", "formattedValue"], urls: ["urls", "value"] } as const satisfies Record<LabelledField, readonly [string, string]>;
+
+/** An entry's label as a contact holds it: People's own type, or for a type it doesn't know, the label as Google shows it. */
+export function labelOf(field: LabelledField, { type, formattedType }: { type?: unknown; formattedType?: unknown }): string | null {
+  const own = typeof type === "string" ? type.trim() : "";
+  if (!own) return null;
+  if (Object.hasOwn(CONTACT_LABELS[field], own)) return own;
+  return (typeof formattedType === "string" && formattedType.trim()) || own;
+}
+
+/** A field's entries as lines, each with its value and label; one with no value is no line. */
+function linesOf<E extends { type?: string; formattedType?: string }>(field: LabelledField, items: E[] | undefined, value: (entry: E) => string | undefined): ContactLine[] {
+  return (items ?? []).flatMap((entry) => {
+    const said = value(entry);
+    return said ? [{ value: said, type: labelOf(field, entry) }] : [];
+  });
+}
+
+/**
+ * A field's lines as the member wrote them, as People takes them. A line that was there with the same
+ * label is sent back as Google had it. A label read from Google is sent as Google's own type, so one
+ * Common Ink has no words for, such as `workMobile`, stays what it was.
+ */
+function listed(field: LabelledField, lines: ContactLine[], before: Entry[]): Entry[] {
+  const key = LINES[field][1];
+  return lines.map((line) => {
+    const same = before.find((e) => e[key] === line.value && labelOf(field, e) === line.type);
+    if (same) return kept(same);
+    const { type: _, ...was } = kept(before.find((e) => e[key] === line.value) ?? {});
+    const type = line.type === null ? null : (before.find((e) => labelOf(field, e) === line.type)?.type ?? labelType(field, line.type));
+    return { ...was, [key]: line.value, ...(type !== null && { type }) };
+  });
+}
 
 /**
  * A change as People's `updateContact` and `createContact` take it: each field the change names, as a
@@ -456,10 +491,10 @@ const listed = (values: string[], before: Entry[], key: "value" | "formattedValu
 export function personOf(change: ContactChange, was: Entry = {}): { person: Entry; fields: string[] } {
   const person: Entry = {};
   if (change.name !== undefined) person.names = [{ unstructuredName: change.name }];
-  if (change.emails !== undefined) person.emailAddresses = listed(change.emails, entries(was, "emailAddresses"), "value");
-  if (change.phones !== undefined) person.phoneNumbers = listed(change.phones, entries(was, "phoneNumbers"), "value");
-  if (change.addresses !== undefined) person.addresses = listed(change.addresses, entries(was, "addresses"), "formattedValue");
-  if (change.urls !== undefined) person.urls = listed(change.urls, entries(was, "urls"), "value");
+  for (const field of Object.keys(LINES) as LabelledField[]) {
+    const lines = change[field];
+    if (lines !== undefined) person[LINES[field][0]] = listed(field, lines, entries(was, LINES[field][0]));
+  }
   if (change.organization !== undefined || change.title !== undefined) {
     const [first = {}, ...rest] = entries(was, "organizations").map(kept);
     const named = { ...first, ...(change.organization !== undefined && { name: change.organization }), ...(change.title !== undefined && { title: change.title }) };
@@ -479,11 +514,10 @@ function toContact(raw: unknown): Contact | null {
   const parsed = Person.safeParse(raw);
   const key = parsed.success ? PERSON.exec(parsed.data.resourceName)?.[1] : undefined;
   if (!parsed.success || !key) return null;
-  const values = (items: { value?: string }[] | undefined) => (items ?? []).flatMap((i) => (i.value ? [i.value] : []));
-  const emails = values(parsed.data.emailAddresses);
-  const phones = values(parsed.data.phoneNumbers);
+  const emails = linesOf("emails", parsed.data.emailAddresses, (e) => e.value);
+  const phones = linesOf("phones", parsed.data.phoneNumbers, (e) => e.value);
   const organization = parsed.data.organizations?.find((o) => o.name)?.name ?? null;
-  const name = parsed.data.names?.find((n) => n.displayName)?.displayName ?? emails[0] ?? organization ?? phones[0];
+  const name = parsed.data.names?.find((n) => n.displayName)?.displayName ?? emails[0]?.value ?? organization ?? phones[0]?.value;
   // A contact with nothing to call it by is nothing to list.
   if (!name) return null;
   return { sourceId: "google-contacts", id: parsed.data.resourceName, name, emails, phones, organization, url: `https://contacts.google.com/person/${key}` };
@@ -503,11 +537,11 @@ export function toCard(raw: unknown): ContactCard | null {
     ...contact,
     etag: parsed.data.etag ?? "",
     title: organizations?.find((o) => o.title)?.title ?? null,
-    addresses: (addresses ?? []).flatMap((a) => (a.formattedValue ? [a.formattedValue] : [])),
+    addresses: linesOf("addresses", addresses, (a) => a.formattedValue),
     birthday: date ? `${date.year ? String(date.year).padStart(4, "0") : "-"}-${pad(date.month!)}-${pad(date.day!)}` : null,
     notes: biographies?.find((b) => b.value)?.value ?? null,
     photo: picture && PICTURE.test(picture) ? picture : null,
-    urls: (urls ?? []).flatMap((u) => https(u.value) ?? []),
+    urls: linesOf("urls", urls, (u) => https(u.value) ?? undefined),
   };
 }
 

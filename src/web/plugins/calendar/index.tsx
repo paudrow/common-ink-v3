@@ -2,6 +2,7 @@ import type { Plugin } from "../../plugin-api.ts";
 import { referenceEmbed } from "../lib/references.tsx";
 import { CalendarPage } from "./Calendar.tsx";
 import { whenLabel } from "./dates.ts";
+import { EventLink } from "./EventLink.tsx";
 import { eventsToFind, finding, listedAs } from "./finding.ts";
 import { copyEventReference, referTo } from "./referring.ts";
 
@@ -72,22 +73,7 @@ export const calendar: Plugin = {
         hint: "copy a reference from an event on the Calendar page, and paste it over this",
         // The title alone: adding the time as the details arrive would widen the chip, and a line that just fit would gain a row.
         shown: ({ event }) => ({ text: event.title || "Untitled", title: `${whenLabel(event.when, zone())} · ${event.calendar}${event.location ? ` · ${event.location}` : ""}` }),
-        details: ({ event }) => (
-          <dl className="ref-details">
-            <dt>Event</dt>
-            <dd>{event.title || "Untitled"}</dd>
-            <dt>When</dt>
-            <dd>{whenLabel(event.when, zone())}</dd>
-            <dt>Calendar</dt>
-            <dd>{event.calendar}</dd>
-            {event.location && (
-              <>
-                <dt>Location</dt>
-                <dd>{event.location}</dd>
-              </>
-            )}
-          </dl>
-        ),
+        details: ({ event }, { noteId, close }) => <EventLink host={host} event={event} noteId={noteId} close={close} />,
       }),
     );
   },

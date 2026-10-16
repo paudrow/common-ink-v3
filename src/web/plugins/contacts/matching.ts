@@ -5,7 +5,7 @@ const plain = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toL
 
 /** Whether every word typed starts a word of the contact's name, email or organization, which is how `contact.list` narrows by `query`. */
 export function matches(contact: Contact, typed: string): boolean {
-  const words = plain([contact.name, contact.organization ?? "", ...contact.emails].join(" ")).split(/[^\p{L}\p{N}]+/u);
+  const words = plain([contact.name, contact.organization ?? "", ...contact.emails.map((e) => e.value)].join(" ")).split(/[^\p{L}\p{N}]+/u);
   return plain(typed)
     .split(/\s+/)
     .filter(Boolean)

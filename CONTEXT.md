@@ -139,7 +139,7 @@ The changes made since a member's last visit by anyone but the member, their own
 A note a member has chosen to show on their own dashboard. It is theirs alone, kept for them in that workspace and the same in every browser, and is not written into the note: pinning is not a change. A pinned note that is archived or in Trash is left off the dashboard and returns with the note. A pin on a note the member can no longer see is left off too, says nothing of the note, and returns if the note does. A member's agent can pin for them.
 
 **Contact**:
-A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. The member edits a contact from its person page, every field as a contacts app does, and the change is written back where the contact is kept: Google's contacts through the People API, once the member has agreed to changes as well as reading ("Connect again to edit contacts"). A person who isn't one of the member's contacts can be added to them from their page. Only the member changes or adds a contact: not another member, whatever their role, and not an agent.
+A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. Each email, phone, address and website a contact has carries a **label**: one of Google's own for that kind of line (Home email, Work email, Mobile, Work phone, Home address, Blog, and the rest), one the member wrote, or none. It is shown in plain words beside the line, and written back with it. The member edits a contact from its person page, every field as a contacts app does, and the change is written back where the contact is kept: Google's contacts through the People API, once the member has agreed to changes as well as reading ("Connect again to edit contacts"). A person who isn't one of the member's contacts can be added to them from their page. Only the member changes or adds a contact: not another member, whatever their role, and not an agent.
 _Avoid_: Member, user
 
 **Tag**:
@@ -429,11 +429,12 @@ _Avoid_: Setting
 A non-admin's yes to a capability. It allows nothing: the capability stays off until an admin approves, and a denial clears it.
 
 **Settings**:
-JSON that configures one member's behavior in one workspace, such as theme, vim, keybindings, the daily-note folder, whether the share prompt appears, which plugins are on, and plugin options that only change that member's layout. It holds only what the member changed from a default, and follows them to any browser. A change made in one window is kept when another window changes a different key, and the later change wins on the same key. The member changes it as options or as the JSON itself. An admin does not set or lock these, a plugin cannot change them, and an agent can neither read nor change them.
+JSON that configures one member's behavior in one workspace, such as theme, vim, keybindings, the daily-note folder, whether the share prompt appears, which plugins are on, and plugin options that only change that member's layout. It holds only what the member changed from a default, and follows them to any browser. A change made in one window is kept when another window changes a different key, and the later change wins on the same key. The member changes it as options or as the JSON itself. An admin does not set or lock these, a plugin cannot change them except a remembered setting of its own, and an agent can neither read nor change them.
 _Avoid_: Preferences, config
 
 **Setting**:
 One key in a member's settings, with a type, a default, and a description. The core declares some, each plugin declares its options under its own id, each plugin has one that turns it on and off, and each command has one for its keybinding. A value the setting doesn't allow is flagged and its default used. A key no setting has is flagged and does nothing. Neither is taken out of the member's JSON.
+A remembered setting is a plugin option kept from what the member does in the plugin's own views, such as the Todos page's Sort (`todos.sort`): the plugin that declares it may change it for the member, and nothing else may.
 _Avoid_: Option (except for a plugin's own), preference
 
 **Settings schema**:
@@ -451,8 +452,12 @@ What a person calls an upload: image, video, audio, PDF, text or other (`fileCla
 _Avoid_: File type (that is what the bytes are served as)
 
 **Opening a file**:
-What pressing an upload's chip, or Open on the Uploads page, does, by its file class (`openUpload`): a picture, a video or a recording is shown in a preview over the app; a PDF is downloaded, and opens in a tab of the browser, in its own viewer, only where the server has a site kept for files (`FILE_ORIGIN`), from that site; text is read in the app at `/file/<id>`, drawn and not changed (markdown as a note is, a CSV or TSV as a table, anything else as code); anything else is downloaded. Text read in the app can be copied into a new note. An uploaded file is not changed in place.
-_Avoid_: Preview (for anything but a picture, a video or a recording), viewer
+What pressing an upload's chip, or Open on the Uploads page, does, by its file class (`openUpload`): a picture, a video, a recording or a PDF is shown in a file preview over the app, which offers Download, and a PDF in a tab of the browser, in its own viewer, from the site kept for files where the server has one (`FILE_ORIGIN`); text is read in the app at `/file/<id>`, drawn and not changed (markdown as a note is, a CSV or TSV as a table, anything else as code); anything else is downloaded. Text read in the app can be copied into a new note. An uploaded file is not changed in place.
+_Avoid_: viewer
+
+**File preview**:
+As much of an upload as can be seen without opening it, drawn the same wherever it is (`drawPreview`): a picture, a player for a video or a recording, the first pages of a PDF drawn by pdf.js inside the app, the first rows of a CSV or TSV, the first lines of markdown or other text, and a large icon of its type for anything else. A file on a line of its own in a note is a **file card** below that line, its name, size and Download over its preview; among words it is a chip. The Uploads page's panel leads with the selected file's preview. Pressing a preview shows it larger over the app.
+_Avoid_: Thumbnail (that is the small picture in a list), viewer
 
 **Uses**:
 How many notes the asker can see show an upload. A note they can't see is never counted, so a count says nothing of it. `used:` in a query is whether there are any.

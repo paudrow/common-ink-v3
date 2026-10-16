@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Note } from "../../src/core/protocol.ts";
-import { agentWith, anotherPerson, connectAgent, join, perform, signInAsNewPerson } from "./helpers.ts";
+import { agentWith, anotherPerson, connectAgent, join, perform, shownToken, signInAsNewPerson } from "./helpers.ts";
 
 const agentsView = (page: Page) => page.getByRole("region", { name: "Agents" });
 const connected = (page: Page) => page.getByRole("list", { name: "Connected agents" }).getByRole("listitem");
@@ -45,7 +45,7 @@ async function connectInApp(page: Page, name: string, fill: (form: Locator) => P
   await form.getByRole("button", { name: "Connect" }).click();
   const shown = page.getByRole("region", { name: "New token" });
   await expect(shown).toContainText(`${name} is connected.`);
-  return { shown, token: await shown.getByRole("textbox", { name: "Token" }).inputValue() };
+  return { shown, token: await shownToken(shown) };
 }
 
 /** Ada's two notes, each of which her agent Claude edited between her own edits. */
@@ -102,6 +102,99 @@ test("a member connects an agent from the workspace menu and is shown its token 
   await expect(connected(page)).toContainText("last used just now");
   await expect(connected(page).getByRole("button", { name: "See its changes" })).toBeVisible();
   expect(await page.content()).not.toContain(token);
+});
+
+test("a new agent's setup leads with one prompt to paste into it, copied with one button, and keeps the commands under Set it up by hand", async ({ page, context, baseURL }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const sent: string[] = [];
+  page.on("request", (req) => sent.push(`${req.url()} ${req.postData() ?? ""} ${JSON.stringify(req.headers())}`));
+  const logged: string[] = [];
+  page.on("console", (message) => logged.push(message.text()));
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.goto("/agents");
+  const form = page.getByRole("form", { name: "Connect an agent" });
+  await form.getByRole("textbox", { name: "Name" }).fill("Claude");
+  await form.getByRole("button", { name: "Connect" }).click();
+  const shown = page.getByRole("region", { name: "New token" });
+  await expect(shown).toContainText("Claude is connected. Paste this prompt into it, and it adds the connection to itself and checks that it works.");
+
+  await expect(shown).toContainText("The token goes into that conversation with the prompt. If it ends up anywhere it shouldn't, disconnect Claude and its token stops at once.");
+  await expect(shown.getByRole("button", { name: /^Copy/ })).toHaveText(["Copy"]);
+  await expect(shown.getByRole("textbox")).toHaveCount(1);
+  const prompt = shown.getByRole("textbox", { name: "Prompt" });
+  const text = await prompt.inputValue();
+  const token = /- Token: (cink_[A-Za-z0-9_-]{43})\n/.exec(text)![1]!;
+  expect(text.split("\n").slice(0, 8)).toEqual([
+    "Please connect yourself to my notes in Common Ink, then check that the connection works.",
+    "",
+    `Common Ink is a markdown notes app at ${baseURL}. I connected you to it as an agent named "Claude". Through its MCP server you can read my notes, my folders and their history, and create, edit, move and revert them. You act as me, with my role in each workspace and no more, and every change you make is recorded under the name "Claude". It reaches every workspace I'm in.`,
+    "",
+    "The connection:",
+    `- MCP server: ${baseURL}/mcp`,
+    "- Transport: Streamable HTTP (JSON over POST; no SSE, no OAuth)",
+    `- Token: ${token}`,
+  ]);
+  expect(text).toContain(`   claude mcp add --scope user --transport http common-ink ${baseURL}/mcp --header "Authorization: Bearer ${token}"`);
+
+  await page.evaluate(() => navigator.clipboard.writeText("before the click"));
+  await prompt.focus();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("before the click");
+  await shown.getByRole("button", { name: "Copy Prompt" }).click();
+  await expect(shown.getByRole("button", { name: "Copy Prompt" })).toHaveText("Copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(text);
+
+  await shown.getByText("Set it up by hand").click();
+  await expect(shown.getByRole("textbox")).toHaveCount(5);
+  await expect(shown.getByRole("textbox", { name: "Token" })).toHaveValue(token);
+  await expect(shown.getByRole("textbox", { name: "Claude Code" })).toHaveValue(`claude mcp add --transport http common-ink ${baseURL}/mcp --header "Authorization: Bearer $INK_TOKEN"`);
+  await expect(shown.getByRole("textbox", { name: "ink command" })).toHaveValue(`export INK_URL=${baseURL}\nexport INK_TOKEN=${token}\nnpm run ink -- notes`);
+  expect(JSON.parse(await shown.getByRole("textbox", { name: "MCP config" }).inputValue())).toEqual({
+    mcpServers: { "common-ink": { type: "http", url: `${baseURL}/mcp`, headers: { Authorization: `Bearer ${token}` } } },
+  });
+
+  await shown.getByRole("button", { name: "Done" }).click();
+  await expect(shown).toHaveCount(0);
+  expect(await page.content()).not.toContain(token);
+  expect(await page.evaluate(() => JSON.stringify([location.href, { ...localStorage }, { ...sessionStorage }]))).not.toContain(token);
+  expect(sent.filter((line) => line.includes(token) || line.includes("Please connect yourself"))).toEqual([]);
+  expect(logged.filter((line) => line.includes(token))).toEqual([]);
+});
+
+test("an agent's setup can be shown again, with no token in its prompt or its commands", async ({ page, baseURL }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.goto("/agents");
+  const { shown, token } = await connectInApp(page, "Reader", async (form) => {
+    await form.getByRole("checkbox", { name: /^Read only/ }).check();
+    await form.getByRole("combobox", { name: "Reaches" }).selectOption({ index: 1 });
+  });
+  const workspace = (await page.getByRole("form", { name: "Connect an agent" }).getByRole("combobox", { name: "Reaches" }).getByRole("option").nth(1).textContent())!.replace(/^Only /, "");
+  await expect(shown.getByRole("textbox", { name: "Prompt" })).toHaveValue(
+    new RegExp(`This connection is read only: you can't change anything\\. It reaches only my workspace "${workspace}"\\.\n[^]*- Token: ${token}\n[^]*it lets whoever has it read my notes\\.`),
+  );
+  await shown.getByRole("button", { name: "Done" }).click();
+  await expect(shown).toHaveCount(0);
+
+  await connected(page).getByRole("button", { name: "Set up again" }).click();
+  const again = page.getByRole("region", { name: "Set up Reader" });
+  await expect(again).toContainText("Set up Reader again. Its token was shown once, when it was connected, so this prompt has no token in it and asks for the one you kept.");
+  await expect(again).toBeFocused();
+  await expect(connected(page).getByRole("button", { name: "Set up again" })).toHaveAttribute("aria-expanded", "true");
+  const prompt = await again.getByRole("textbox", { name: "Prompt" }).inputValue();
+  expect(prompt).toContain(`It reaches only my workspace "${workspace}".`);
+  expect(prompt).toContain(`- Token: not shown here. Common Ink shows a token only once, when the agent is connected.`);
+  expect(prompt).toContain(`ask me to connect a new agent at ${baseURL}/agents`);
+  expect(prompt).not.toContain("cink_");
+
+  await again.getByText("Set it up by hand").click();
+  await expect(again.getByRole("textbox", { name: "Token" })).toHaveCount(0);
+  await expect(again.getByRole("textbox", { name: "ink command" })).toHaveValue(`export INK_URL=${baseURL}\nexport INK_TOKEN="<token>"\nnpm run ink -- notes`);
+  expect(JSON.parse(await again.getByRole("textbox", { name: "MCP config" }).inputValue()).mcpServers["common-ink"].headers).toEqual({ Authorization: "Bearer <token>" });
+  expect(await page.content()).not.toContain(token);
+
+  await again.getByRole("button", { name: "Close" }).click();
+  await expect(again).toHaveCount(0);
+  await expect(connected(page).getByRole("button", { name: "Set up again" })).toBeFocused();
+  await expect(connected(page).getByRole("button", { name: "Set up again" })).toHaveAttribute("aria-expanded", "false");
 });
 
 test("a token can be limited to reading, and the agent is refused a write", async ({ page }) => {

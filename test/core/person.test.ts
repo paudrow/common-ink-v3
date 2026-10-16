@@ -45,10 +45,10 @@ async function world() {
   const members = await perform(env.DB, ada, { type: "member.list" });
   const graceEmail = members.find((m) => m.personId === grace.personId)!.email!;
   const byPerson = new Map<string, ContactCard[]>([
-    [ada.personId, [card("ada-sam", "Sam Okafor", { phones: ["+1 555 0142"], title: "Plumber-of-ada", addresses: ["Ada-lane"], birthday: "--04-21", notes: "ada-note-on-sam", urls: ["https://okafor.example"] }), card("ada-g", "G. Hopper", { emails: [graceEmail.toUpperCase()], notes: "ada-note-on-grace" })]],
-    [grace.personId, [card("grace-sam", "sam okafor", { phones: ["+44 20 grace-number"] })]],
+    [ada.personId, [card("ada-sam", "Sam Okafor", { phones: [{ value: "+1 555 0142", type: null }], title: "Plumber-of-ada", addresses: [{ value: "Ada-lane", type: null }], birthday: "--04-21", notes: "ada-note-on-sam", urls: [{ value: "https://okafor.example", type: null }] }), card("ada-g", "G. Hopper", { emails: [{ value: graceEmail.toUpperCase(), type: null }], notes: "ada-note-on-grace" })]],
+    [grace.personId, [card("grace-sam", "sam okafor", { phones: [{ value: "+44 20 grace-number", type: null }] })]],
     // Bob has Grace's address under another name: who it is, he isn't told.
-    [bob.personId, [card("bob-g", "Totally Unrelated", { emails: [graceEmail] })]],
+    [bob.personId, [card("bob-g", "Totally Unrelated", { emails: [{ value: graceEmail, type: null }] })]],
   ]);
   const { sources, read } = contactsOf(byPerson);
   const inside = await perform(env.DB, ada, { type: "folder.create", name: "Inside" });
@@ -69,7 +69,7 @@ describe("a person's page", () => {
     const w = await world();
     const sam = await w.page(w.ada, "Sam Okafor");
     expect(sam).toMatchObject({ who: "Sam Okafor", name: "Sam Okafor", member: null, more: false, query: 'mentions:"Sam Okafor"' });
-    expect(sam.contacts).toEqual([card("ada-sam", "Sam Okafor", { phones: ["+1 555 0142"], title: "Plumber-of-ada", addresses: ["Ada-lane"], birthday: "--04-21", notes: "ada-note-on-sam", urls: ["https://okafor.example"] })]);
+    expect(sam.contacts).toEqual([card("ada-sam", "Sam Okafor", { phones: [{ value: "+1 555 0142", type: null }], title: "Plumber-of-ada", addresses: [{ value: "Ada-lane", type: null }], birthday: "--04-21", notes: "ada-note-on-sam", urls: [{ value: "https://okafor.example", type: null }] })]);
     expect(sam.todos.map((t) => t.words)).toEqual(["Fix the boiler"]);
     expect(sam.mentionedIn.map((m) => [m.noteTitle, m.line, m.text])).toEqual([
       ["Far", 2, `outside-line with @Sam Okafor and @Grace Hopper`],
@@ -85,7 +85,7 @@ describe("a person's page", () => {
     const w = await world();
     for (const asker of [w.grace, await agentOf(w.grace)]) {
       const sam = await w.page(asker, "Sam Okafor");
-      expect(sam.contacts.map((c) => [c.id, c.phones])).toEqual([["grace-sam", ["+44 20 grace-number"]]]);
+      expect(sam.contacts.map((c) => [c.id, c.phones])).toEqual([["grace-sam", [{ value: "+44 20 grace-number", type: null }]]]);
       expect(notesOf(sam)).toEqual(["Far", "Boiler"]);
       expect(said(sam)).not.toMatch(/ada-|Plumber-of-ada|secret-line|Secret/);
     }

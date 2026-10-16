@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { CalendarEvent } from "../../src/core/protocol.ts";
-import { anotherPerson, perform, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -128,4 +128,153 @@ test("quick open finds events by title and day after the notes, and opens one on
   await palette.getByRole("combobox").fill("standup");
   await expect(palette.getByRole("option").first()).toHaveText(/^Standup notes/);
   await expect(palette.getByRole("option").nth(1)).toHaveText(/^StandupEvent · /);
+});
+
+/** A note of Ada's that links the nearest Standup, from the sample calendar, and the event and its reference. */
+async function withLink(page: Page) {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "source.connect", id: "sample-calendar", back: "/calendar" });
+  const event = (await nearestFirst(page, "Standup"))[0]!;
+  const { text: reference } = await perform(page, { type: "record.refer", sourceId: event.sourceId, id: event.id });
+  const here = await perform(page, { type: "note.create", text: `# Standup notes\n\nWe met at ${reference} today\n` });
+  return { event, reference, here };
+}
+
+const linkIn = (page: Page) => editor(page).locator(".ref-chip");
+const popover = (page: Page) => page.getByRole("dialog", { name: "Event" });
+/** The popover's actions, by what each says, once it has read the notes about the event. */
+const actions = async (page: Page) => {
+  await expect(popover(page).getByText("Finding notes about it…")).toHaveCount(0);
+  return popover(page).locator("[data-action]");
+};
+
+/** Opens the note and presses its link. */
+async function pressLink(page: Page, noteId: string) {
+  await page.goto(`/note/${noteId}`);
+  await expect(linkIn(page)).toHaveAttribute("data-state", "live");
+  await linkIn(page).click();
+  await expect(popover(page)).toBeVisible();
+}
+
+test("an event link with no other note about its event says what and when it is, and offers to make one, which asks for a folder and references the event", async ({ page }) => {
+  const { event, reference, here } = await withLink(page);
+  const day = dayIn(event.when.from as number, await zoneOf(page));
+  await pressLink(page, here.id);
+  const head = popover(page).locator(".event-link-head");
+  await expect(head.locator("strong")).toHaveText("Standup");
+  await expect(head).toContainText(longDay(day));
+  await expect(head).toContainText("Work");
+  await expect(await actions(page)).toHaveText(["New note about this event", "Go to calendar"]);
+  await expect(popover(page).getByRole("region", { name: "Notes about this event" })).toHaveCount(0);
+
+  await popover(page).getByRole("button", { name: "New note about this event" }).click();
+  await expect(popover(page).getByRole("combobox")).toHaveValue((await perform(page, { type: "note.read", id: here.id })).folderId!);
+  await popover(page).getByRole("button", { name: "Make the note" }).click();
+  await expect(popover(page)).toHaveCount(0);
+  await expect(page).not.toHaveURL(new RegExp(here.id));
+  const madeId = /([a-z0-9]{12})$/.exec(new URL(page.url()).pathname)![1]!;
+  const shortDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(Date.parse(`${day}T00:00:00Z`));
+  expect((await perform(page, { type: "note.read", id: madeId })).text).toBe(`# Standup, ${shortDay}\n\n${reference}\n\n`);
+  expect((await perform(page, { type: "record.notes", sourceId: event.sourceId, id: event.id })).notes.map((n) => n.id).toSorted()).toEqual([here.id, madeId].toSorted());
+
+  // Back in the first note, its link now opens the new one, and lists nothing.
+  await pressLink(page, here.id);
+  await expect(await actions(page)).toHaveText([`Open note about itStandup, ${shortDay}`, "Go to calendar"]);
+});
+
+test("an event link with one other note about its event opens it, and lists nothing", async ({ page }) => {
+  const { reference, here } = await withLink(page);
+  const other = await perform(page, { type: "note.create", text: `# Retro\n\n${reference}\n` });
+  await pressLink(page, here.id);
+  await expect(await actions(page)).toHaveText(["Open note about itRetro", "Go to calendar"]);
+  await expect(popover(page).getByRole("region", { name: "Notes about this event" })).toHaveCount(0);
+  await popover(page).getByRole("button", { name: "Open note about it" }).click();
+  await expect(page).toHaveURL(new RegExp(`${other.id}$`));
+  await expect(popover(page)).toHaveCount(0);
+  await expect(editor(page)).toContainText("Retro");
+});
+
+test("an event link with several notes about its event opens the one changed last that the member can see, and lists them with who sees each, never one they can't", async ({ page }) => {
+  const { reference, here } = await withLink(page);
+  const first = await perform(page, { type: "note.create", text: `# First take\n\n${reference}\n` });
+  const mine = await perform(page, { type: "note.create", text: `# Ada-private-thoughts\n\n${reference}\n` });
+  await perform(page, { type: "note.setPrivate", id: mine.id, private: true });
+  // Grace copies Ada's reference into a private note of her own, the latest of all, which Ada can't see.
+  const grace = await anotherPerson(page, "Grace Hopper");
+  const { workspaceId } = await join(grace, page, "editor");
+  const hers = await perform(grace, { type: "note.create", text: `# Grace-secret-plans\n\n${reference}\n` }, workspaceId);
+  await perform(grace, { type: "note.setPrivate", id: hers.id, private: true }, workspaceId);
+
+  await pressLink(page, here.id);
+  await expect(await actions(page)).toHaveText(["Open note about itAda-private-thoughts", "Ada-private-thoughtsPrivate", "First takeWorkspace", "Go to calendar"]);
+  await expect(popover(page).getByRole("region", { name: "Notes about this event" }).getByRole("button")).toHaveText(["Ada-private-thoughtsPrivate", "First takeWorkspace"]);
+  await expect(popover(page)).not.toContainText("Grace");
+  await expect(popover(page)).not.toContainText("Standup notes");
+
+  await popover(page).getByRole("button", { name: "Open note about it" }).click();
+  await expect(page).toHaveURL(new RegExp(`${mine.id}$`));
+  await pressLink(page, here.id);
+  await popover(page).getByRole("region", { name: "Notes about this event" }).getByRole("button", { name: /^First take/ }).click();
+  await expect(page).toHaveURL(new RegExp(`${first.id}$`));
+});
+
+test("Go to calendar opens the Calendar at the event's day with the event open", async ({ page }) => {
+  const { event, here } = await withLink(page);
+  const day = dayIn(event.when.from as number, await zoneOf(page));
+  await pressLink(page, here.id);
+  await (await actions(page)).filter({ hasText: "Go to calendar" }).click();
+  await expect(page).toHaveURL(/\/calendar$/);
+  await expect(page.getByRole("dialog", { name: "Event: Standup" })).toContainText(longDay(day));
+  await expect(page.getByRole("region", { name: "Calendar", exact: true }).locator(`.cal-col[data-day="${day}"]`)).toBeVisible();
+});
+
+test("an event link opens from the keyboard on its first action, the arrows and Tab go through the actions, and Escape gives the keyboard back to the link", async ({ page }) => {
+  const { reference, here } = await withLink(page);
+  await perform(page, { type: "note.create", text: `# Retro\n\n${reference}\n` });
+  await page.goto(`/note/${here.id}`);
+  await expect(linkIn(page)).toHaveAttribute("data-state", "live");
+  await linkIn(page).focus();
+  await page.keyboard.press("Enter");
+  const open = popover(page).getByRole("button", { name: "Open note about it" });
+  const go = popover(page).getByRole("button", { name: "Go to calendar" });
+  await expect(open).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(go).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(open).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(go).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(open).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(popover(page)).toHaveCount(0);
+  await expect(linkIn(page)).toBeFocused();
+  const line = editor(page).locator(".cm-line").filter({ hasText: "We met at" });
+  await expect(line, "nothing was typed into the note").toHaveText("We met at Standup today");
+
+  await page.keyboard.press(" ");
+  await expect(open).toBeFocused();
+  await expect(line).toHaveText("We met at Standup today");
+  await page.keyboard.press("Tab");
+  await expect(go).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/calendar$/);
+  await expect(page.getByRole("dialog", { name: "Event: Standup" })).toBeVisible();
+});
+
+test("Cancel in the new note form gives the keyboard back to New note about this event, and Escape then back to the link", async ({ page }) => {
+  const { here } = await withLink(page);
+  await page.goto(`/note/${here.id}`);
+  await expect(linkIn(page)).toHaveAttribute("data-state", "live");
+  await linkIn(page).focus();
+  await page.keyboard.press("Enter");
+  const start = popover(page).getByRole("button", { name: "New note about this event" });
+  await expect(start).toBeFocused();
+  await page.keyboard.press("Enter");
+  await popover(page).getByRole("button", { name: "Cancel" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(start).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(popover(page)).toHaveCount(0);
+  await expect(linkIn(page)).toBeFocused();
 });

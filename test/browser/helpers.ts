@@ -1,4 +1,4 @@
-import { expect, test, type Frame, type Page } from "@playwright/test";
+import { expect, test, type Frame, type Locator, type Page } from "@playwright/test";
 import type { Me, OpInput, Results, Role } from "../../src/core/protocol.ts";
 
 /** Signs in without Google, which only this machine and Previews allow (`devSignIn` in src/worker/auth.ts). `next` is where the app opens. */
@@ -84,6 +84,12 @@ export function agentWith(page: Page, token: string) {
     return JSON.parse(result.content[0]!.text) as T;
   };
   return { tool, status: async () => (await call("list_workspaces", {})).status() };
+}
+
+/** The token a new agent's setup shows once, under "Set it up by hand". */
+export async function shownToken(shown: Locator) {
+  await shown.getByText("Set it up by hand").click();
+  return shown.getByRole("textbox", { name: "Token" }).inputValue();
 }
 
 /** Connects an agent for the signed-in person, and returns a way to call its MCP tools as it. */

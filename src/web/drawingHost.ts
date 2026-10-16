@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { NoteSummary, Results } from "../core/protocol.ts";
+import { readUpload } from "./api.ts";
 import { usable } from "./editorExtensions.ts";
 import type { App, Plugin } from "./plugin-api.ts";
 import { createPluginHost } from "./pluginHost.ts";
@@ -57,7 +58,7 @@ export function useDrawing(address: (uploadId: string) => string, open: (noteId:
         agents: { list: NOT_HERE, connect: NOT_HERE, edit: NOT_HERE, disconnect: NOT_HERE },
         members: { invite: NOT_HERE, setRole: NOT_HERE, remove: NOT_HERE, leave: NOT_HERE, invites: NOT_HERE, revoke: NOT_HERE },
         sharing: { of: NOT_HERE, grant: NOT_HERE, link: NOT_HERE, revoke: NOT_HERE, setPrivate: NOT_HERE, all: NOT_HERE },
-        uploads: { referred: (id) => referred.get(id) ?? null, onReferred: referred.subscribe, learn: () => {}, address, tabAddress: () => null, bytes: NOT_HERE, send: NOT_HERE },
+        uploads: { referred: (id) => referred.get(id) ?? null, onReferred: referred.subscribe, learn: () => {}, address, tabAddress: () => null, bytes: (id, upTo) => readUpload(address(id), upTo), send: NOT_HERE },
         storage: { get: (key) => kept.get(`${plugin.id}.${key}`), set: (key, value) => void kept.set(`${plugin.id}.${key}`, value) },
       }),
     });

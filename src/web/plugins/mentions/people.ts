@@ -37,7 +37,7 @@ export function offered(typed: string, { members, contacts }: People, meId: stri
     .map((m): CompletionItem => ({ label: m.name || "No name", detail: m.personId === meId ? "You" : "Member", insert: writtenMention({ id: m.personId, name: m.name }), tone: "accent" }));
   const fromContacts = (contacts ?? [])
     // Someone already offered as a member isn't offered again as a contact, where the two can be told to be one.
-    .filter((c) => c.name.trim() && !c.emails.some((email) => emails.has(email.toLowerCase())) && startsWords(typed, [c.name, c.organization ?? "", ...c.emails]))
+    .filter((c) => c.name.trim() && !c.emails.some((email) => emails.has(email.value.toLowerCase())) && startsWords(typed, [c.name, c.organization ?? "", ...c.emails.map((e) => e.value)]))
     .map((c): CompletionItem => ({ label: c.name, detail: ["Contact", c.organization].filter(Boolean).join(" · "), insert: writtenMention({ name: c.name }), tone: "muted" }))
     .filter((item) => item.insert);
   return [...fromMembers, ...fromContacts].slice(0, MOST_OFFERED);

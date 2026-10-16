@@ -7,7 +7,9 @@ import { QueryBar } from "../lib/QueryBar.tsx";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "../sharing/Summary.tsx";
 import { toldOf } from "./drawing.ts";
 import { onlyMine, reachWords, selectedIn, uploaderWords, uploadPath, UPLOADS_PATH, withMine } from "./finding.ts";
-import { openUpload } from "./opening.ts";
+import { openUpload, previewUpload } from "./opening.ts";
+import { FilePreview } from "./Preview.tsx";
+import { previewOf } from "./previewing.ts";
 import { writtenNow, type Sender } from "./sending.ts";
 import { formatBytes, KIND_LABEL } from "./sizing.ts";
 import { Thumb } from "./Thumb.tsx";
@@ -198,7 +200,10 @@ interface DetailProps {
 /** A menu open on the card: what can be done with the file, or the folders it can be moved to. */
 type Opened = { menu: "more" | "folders"; x: number; y: number } | null;
 
-/** One upload: what it is, the notes that use it, Open, and everything else behind one "…" menu. */
+/**
+ * One upload: a preview of it, the same as a note draws, which shows it larger when pressed; then what
+ * it is, Open and everything else behind one "…" menu, and the notes that use it.
+ */
 function Detail({ host, app, id, listed, onChanged }: DetailProps) {
   const now = useNow();
   const [read, setRead] = useState<Read | null>(null);
@@ -207,6 +212,7 @@ function Detail({ host, app, id, listed, onChanged }: DetailProps) {
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
   const [opened, setOpened] = useState<Opened>(null);
+  const [said, setSaid] = useState("");
   const more = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -332,14 +338,11 @@ function Detail({ host, app, id, listed, onChanged }: DetailProps) {
       }}
     >
       <DetailHead name={read.name} onClose={close} />
-      {read.kind === "image" && !trashed && (
-        <button type="button" className="upload-detail-picture" aria-label={`Preview ${read.name}`} onClick={() => openUpload(host, read)}>
-          <img src={address} alt="" draggable={false} />
-        </button>
-      )}
+      {!trashed && <DetailPreview host={host} upload={read} onSaid={setSaid} />}
       <p className="upload-meta">
         <span>{KIND_LABEL[read.kind]}</span>
         <span>{formatBytes(read.size)}</span>
+        {!trashed && said && <span>{said}</span>}
         {read.width && read.height && (
           <span>
             {read.width} × {read.height}
@@ -413,6 +416,29 @@ function Detail({ host, app, id, listed, onChanged }: DetailProps) {
       {opened?.menu === "more" && <ContextMenu label={`More for ${read.name}`} x={opened.x} y={opened.y} items={items} onClose={closeMenu} />}
       {opened?.menu === "folders" && <ContextMenu label={`Move ${read.name} to`} x={opened.x} y={opened.y} items={folders} onClose={closeMenu} />}
     </aside>
+  );
+}
+
+/** The panel's preview, which a press or Enter shows larger over the app. A player is pressed to play, and Open shows it larger. */
+function DetailPreview({ host, upload, onSaid }: { host: PluginHost; upload: Read; onSaid: (words: string) => void }) {
+  const shown = <FilePreview host={host} upload={upload} place="panel" onSaid={onSaid} />;
+  if (previewOf(upload).shows === "player") return <div className="upload-detail-preview">{shown}</div>;
+  const open = () => previewUpload(host, upload);
+  return (
+    <div
+      className="upload-detail-preview upload-card-opens"
+      role="button"
+      tabIndex={0}
+      aria-label={`Preview ${upload.name}`}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        open();
+      }}
+    >
+      {shown}
+    </div>
   );
 }
 

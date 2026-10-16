@@ -121,7 +121,7 @@ async function goTo(page: Page, lineNumber: number, where: "Home" | "End" = "End
 /** Each of `boxes` that starts below `top`, lower by `by`. */
 const lowered = (boxes: number[][], top: number, by: number) => boxes.map(([left, y, width, height]) => [left!, y! > top ? Math.round((y! + by) * 10) / 10 : y!, width!, height!]);
 
-test("a picture, a video and a recording are only themselves: nothing of them is in their line until the cursor is on it, and then their text is where it is written and nothing moves", async ({ page }) => {
+test("a picture, a video and a recording are only themselves: their line takes no room until the cursor is on it, and then their text is above them, which are lower by that line and nothing else moves", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const photo = await send(page, "harbour.png", png(1200, 800));
   const film = await send(page, "box.webm", VIDEO);
@@ -133,8 +133,11 @@ test("a picture, a video and a recording are only themselves: nothing of them is
   await expect.poll(() => below(page, "video").locator("video").evaluate((v: HTMLVideoElement) => v.readyState >= 2)).toBe(true);
   await settled(page);
 
-  for (const n of [5, 9, 13]) await expect(lineAt(page, n)).toHaveText("");
-  await expect(lineAt(page, 15)).toHaveText("See  here.");
+  // Their lines are out of the note's flow: of its 18 lines, 15 are drawn.
+  await expect(page.locator(".cm-content .cm-line")).toHaveCount(15);
+  for (const text of written) await expect(page.locator(".cm-content .cm-line", { hasText: text })).toHaveCount(0);
+  const words = page.locator(".cm-line", { hasText: "here." });
+  await expect(words).toHaveText("See  here.");
   await expect(editor(page).locator(".embed-frame, .embed-card, .media-name")).toHaveCount(0);
   await expect(pictures(page).first()).toHaveAttribute("title", /^harbour\.png\nImage · 1200 × 800 · \d+(\.\d)? KB$/);
   await expect(below(page, "video").locator("video")).toHaveAttribute("title", /^box\.webm\nVideo · \d+(\.\d)? KB$/);
@@ -143,28 +146,34 @@ test("a picture, a video and a recording are only themselves: nothing of them is
   for (const embed of ["image", "video", "audio"]) expect(await below(page, embed).first().evaluate((el) => getComputedStyle(el).borderTopWidth), embed).toBe("0px");
 
   const before = await measured(page);
+  const near = (a: number[][], b: number[][]) => a.length === b.length && a.every((box, i) => box.every((v, j) => Math.abs(v - b[i]![j]!) <= 0.25));
   for (const [n, text] of [
     [5, written[0]],
     [9, written[1]],
     [13, written[2]],
   ] as const) {
     await goTo(page, n);
-    await expect(lineAt(page, n)).toHaveText(text!);
-    await expect.poll(() => measured(page), `with the cursor on line ${n}`).toEqual(before);
+    const shown = page.locator(".cm-content .cm-line", { hasText: text! });
+    await expect(shown).toHaveText(text!);
+    const line = (await shown.boundingBox())!;
+    const on = await measured(page);
+    const at = on.lines.findIndex(([, top]) => Math.abs(top! - line.y) < 0.5);
+    expect(near(on.lines.filter((_, i) => i !== at), lowered(before.lines, line.y - 0.5, line.height)), `with the cursor on line ${n}, the lines under it are lower by it`).toBe(true);
+    expect(near(on.rooms, lowered(before.rooms, line.y - 0.5, line.height)) && near(on.shown, lowered(before.shown, line.y - 0.5, line.height)), `with the cursor on line ${n}, what is under it is lower by it`).toBe(true);
     await goTo(page, n + 2);
-    await expect(lineAt(page, n)).toHaveText("");
+    await expect(shown).toHaveCount(0);
     await expect.poll(() => measured(page), `with the cursor off line ${n}`).toEqual(before);
   }
 
   // On a line with words, it is as written only with the cursor on it, or touching it.
   await goTo(page, 15, "Home");
-  await expect(lineAt(page, 15)).toHaveText("See  here.");
+  await expect(words).toHaveText("See  here.");
   for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
-  await expect(lineAt(page, 15)).toHaveText("See  here.");
+  await expect(words).toHaveText("See  here.");
   await page.keyboard.press("ArrowRight");
-  await expect(lineAt(page, 15)).toHaveText(`See ${written[0]} here.`);
+  await expect(words).toHaveText(`See ${written[0]} here.`);
   await page.keyboard.press("End");
-  await expect(lineAt(page, 15)).toHaveText("See  here.");
+  await expect(words).toHaveText("See  here.");
   await expect.poll(() => measured(page), "with the cursor off the line").toEqual(before);
 });
 
@@ -277,6 +286,12 @@ test("the size handle is seen on hover or focus, snaps a drag to small, medium, 
   await expect.poll(() => noteText(page, note.id)).toBe(text(" small"));
   await page.keyboard.press("ArrowUp");
   await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
+  // Presses come faster than the note redraws, as a key held down: each one is a step.
+  const twice = (key: string) => handle.evaluate((el, key) => [0, 1].forEach(() => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))), key);
+  await twice("ArrowRight");
+  await expect.poll(() => noteText(page, note.id)).toBe(text());
+  await twice("ArrowLeft");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
   expect(await pictures(page).evaluate((img) => (img as HTMLImageElement & { marked?: boolean }).marked), "the same picture, never drawn again").toBe(true);
 
   // A drag shows where it will snap, and writes that on release.
@@ -368,7 +383,7 @@ test("a video plays in the note from its first frame, and typing elsewhere, the 
   await expect(lineAt(page, 5)).toHaveText(embed());
   await goesOn("with the cursor on its line");
   await goTo(page, 3);
-  await expect(lineAt(page, 5)).toHaveText("");
+  await expect(page.locator(".cm-content .cm-line", { hasText: embed() })).toHaveCount(0);
   await goesOn("with the cursor off its line");
   const typed = await measured(page);
   expect(typed.rooms).toEqual(before.rooms);

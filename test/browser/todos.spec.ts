@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { todosIn } from "../../src/core/todos.ts";
-import { asViewerOfNote, connectAgent, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, connectAgent, join, me, perform, pinPanel, signInAs, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -869,7 +869,10 @@ test("checking a todo off on the Todos page says so in a toast, and Undo opens i
   // A newer completion takes the toast's place, and a press on it takes it away with nothing else moving.
   await row(page, "Call the bank").getByRole("checkbox").check();
   await expect(toast(page)).toHaveText("Task completedUndo");
+  // The newer card comes when the server answers, so it is waited for by the first card going.
+  await toast(page).evaluate((el) => el.setAttribute("data-first", ""));
   await row(page, "Write notes").getByRole("checkbox").check();
+  await expect(page.locator(".toast-card[data-first]")).toHaveCount(0);
   await expect(toast(page)).toHaveCount(1);
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes", "Book flights"]);
   const withToast = await laidOut(page, ".todos-page *");
@@ -2146,16 +2149,126 @@ test("the Sort menu orders the list by due date, priority, recently changed, not
   await bar(page).fill("#nothing");
   await sort.selectOption("Priority");
   await expect(bar(page)).toHaveValue("#nothing sort:priority-desc");
+  await expect.poll(() => keptSort(page), "a pick is kept with the account").toBe("priority");
   await bar(page).fill("sort:updated-desc");
   await expect(sort).toHaveValue("changed");
+  await expect.poll(() => keptSort(page), "and so is a sort: run from the bar").toBe("changed");
   // attic's note changed last, when zebra tickets was set to High.
   await expect(words(page)).toHaveText(["zebra tickets", "apples", "feed the cats", "Buy hay"]);
   await bar(page).fill("sort:due-desc");
   await expect(sort).toHaveValue("due-desc");
   await expect(words(page)).toHaveText(["apples", "feed the cats", "zebra tickets", "Buy hay"]);
+  expect(await keptSort(page), "a sort: the menu has no name for leaves the account's as it was").toBe("changed");
   await sort.selectOption("Due date");
   await expect(bar(page)).toHaveValue("");
   await expect(words(page)).toHaveText(["zebra tickets", "feed the cats", "apples", "Buy hay"]);
+  await expect.poll(() => keptSort(page), "Due date is the setting's default, so nothing is kept").toBeUndefined();
+});
+
+/** The member's Sort as their settings on the server hold it, in their first workspace unless one is named. */
+const keptSort = async (page: Page, workspaceId?: string) => JSON.parse((await perform(page, { type: "settings.read" }, workspaceId)).text)["todos.sort"] as string | undefined;
+/** Where a browser kept the Sort before it was kept with the account. */
+const browserSortKey = async (page: Page) => {
+  const { person, workspaces } = await me(page);
+  return `ink.plugin.todos.${workspaces[0]!.id}.${person.id}.sort`;
+};
+const SORT_NOTES = ["# Zoo\n\n- [ ] ! feed the cats due:2031-03-01\n- [ ] !!! Buy hay\n", "# attic\n\n- [ ] zebra tickets due:2031-02-01\n- [ ] !! apples due:2031-05-01\n"];
+
+test("the Sort is kept with the account: another browser signed in as the same member opens the Todos page in that order, and another member's Sort is their own", async ({ page, browser, baseURL }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  for (const text of SORT_NOTES) await perform(page, { type: "note.create", text });
+  await page.goto("/todos");
+  const sort = todosPage(page).getByLabel("Sort", { exact: true });
+  await sort.selectOption("Priority");
+  await expect(words(page)).toHaveText(["Buy hay", "apples", "feed the cats", "zebra tickets"]);
+  await expect.poll(() => keptSort(page)).toBe("priority");
+
+  const { person, workspaces } = await me(page);
+  const elsewhere = await (await browser.newContext({ baseURL })).newPage();
+  await signInAs(elsewhere, person.email, person.name, "/todos");
+  const sortThere = todosPage(elsewhere).getByLabel("Sort", { exact: true });
+  await expect(sortThere, "the same member in a browser that never chose").toHaveValue("priority");
+  await expect(words(elsewhere)).toHaveText(["Buy hay", "apples", "feed the cats", "zebra tickets"]);
+  await sortThere.selectOption("A–Z");
+  await expect.poll(() => keptSort(elsewhere)).toBe("text");
+  await page.reload();
+  await expect(sort, "and the first browser follows the account").toHaveValue("text");
+  await expect(bar(page), "its bar too, though it had kept sort:priority-desc").toHaveValue("sort:text-asc");
+  await expect(words(page)).toHaveText(["apples", "Buy hay", "feed the cats", "zebra tickets"]);
+  await elsewhere.context().close();
+
+  const grace = await anotherPerson(page, "Grace Hopper");
+  await join(grace, page, "editor");
+  const zoo = (await perform(page, { type: "note.list" })).find((n) => n.title === "Zoo")!;
+  await grace.goto(`/note/${zoo.id}`);
+  await expect(grace.locator(".workspace-button")).toContainText("Ada");
+  await grace.goto("/todos");
+  const graceSort = todosPage(grace).getByLabel("Sort", { exact: true });
+  await expect(graceSort, "another member of the workspace starts from their own").toHaveValue("due");
+  await expect(words(grace)).toHaveText(["zebra tickets", "feed the cats", "apples", "Buy hay"]);
+  await graceSort.selectOption("Note");
+  await expect.poll(() => keptSort(grace, workspaces[0]!.id)).toBe("note");
+  expect(await keptSort(page), "Ada's is still hers").toBe("text");
+  await page.reload();
+  await expect(sort).toHaveValue("text");
+  await grace.context().close();
+});
+
+test("a Sort this browser kept before moves to the account once, even when the settings are slow to come, and after that the account's wins", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  for (const text of SORT_NOTES) await perform(page, { type: "note.create", text });
+  const key = await browserSortKey(page);
+  const inBrowser = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null") as unknown, key);
+  await page.evaluate((key) => localStorage.setItem(key, JSON.stringify("priority")), key);
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"settings.read"')) await new Promise((done) => setTimeout(done, 2500));
+    await route.fallback();
+  });
+  await page.goto("/todos");
+  const sort = todosPage(page).getByLabel("Sort", { exact: true });
+  await expect(sort).toHaveValue("priority");
+  await expect(words(page)).toHaveText(["Buy hay", "apples", "feed the cats", "zebra tickets"]);
+  await expect.poll(() => keptSort(page)).toBe("priority");
+  expect(await inBrowser(), "moved once, and not again").toBeNull();
+  await page.unroute("**/ops");
+
+  // A browser left holding an older choice: the account's is the one shown, and the old one is let go.
+  await page.evaluate((key) => localStorage.setItem(key, JSON.stringify("note")), key);
+  await page.reload();
+  await expect(sort).toHaveValue("priority");
+  await expect.poll(inBrowser).toBeNull();
+  expect(await keptSort(page)).toBe("priority");
+});
+
+test("a link that names its order opens in it and leaves the account's as it was; a link that names none opens in the account's", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  for (const text of SORT_NOTES) await perform(page, { type: "note.create", text });
+  await page.goto("/todos");
+  const sort = todosPage(page).getByLabel("Sort", { exact: true });
+  await sort.selectOption("Priority");
+  await expect.poll(() => keptSort(page)).toBe("priority");
+
+  // The member's settings come after the page has opened the link, as they can on a slow connection.
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"settings.read"')) await new Promise((done) => setTimeout(done, 1500));
+    await route.fallback();
+  });
+  const settingsRead = () => page.waitForResponse((r) => r.url().endsWith("/ops") && (r.request().postData()?.includes('"settings.read"') ?? false));
+  let read = settingsRead();
+  await page.goto(`/todos?q=${encodeURIComponent("sort:text-asc")}`);
+  await read;
+  await page.waitForTimeout(500);
+  await expect(bar(page)).toHaveValue("sort:text-asc");
+  await expect(sort).toHaveValue("text");
+  await expect(words(page)).toHaveText(["apples", "Buy hay", "feed the cats", "zebra tickets"]);
+  expect(await keptSort(page)).toBe("priority");
+
+  read = settingsRead();
+  await page.goto(`/todos?q=${encodeURIComponent("has:due")}`);
+  await read;
+  await expect(bar(page), "the account's order, once it is read").toHaveValue("has:due sort:priority-desc");
+  await expect(sort).toHaveValue("priority");
+  await expect(words(page)).toHaveText(["apples", "feed the cats", "zebra tickets"]);
 });
 
 test("what isn't set on a todo shows only while its row is pointed at or has the keyboard, and nothing moves when it shows", async ({ page }) => {

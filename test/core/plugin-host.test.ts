@@ -3,6 +3,7 @@ import type { App, Dispose, OpInput, Plugin, PluginHost, SettingValue } from "..
 import { createPluginHost, type Host, type HostOptions, type Installed } from "../../src/web/pluginHost.ts";
 import { onPlatform } from "../../src/web/keybindings.ts";
 import { html as htmlPlugin } from "../../src/web/plugins/html/index.ts";
+import { todos } from "../../src/web/plugins/todos/index.tsx";
 import { documentOf, editSetting } from "../../src/web/settings.ts";
 
 const View = () => null;
@@ -445,6 +446,30 @@ describe("plugin host", () => {
     expect(() => html!.settings.set("run", "automatically")).toThrow("HTML embeds can't change run");
     expect(asked!.settings.set("hidden", ["x".repeat(20)]), "within what the setting takes").toBe(true);
     expect(stored()).toEqual({ "calendar.hidden": ["x".repeat(20)] });
+  });
+
+  it("lets the Todos page keep its order as a remembered setting, one of its sorts, and no other plugin change it", () => {
+    let asked: PluginHost | null = null;
+    let other: PluginHost | null = null;
+    let html: PluginHost | null = null;
+    const { stored } = hostWith([
+      { ...todos, activate: (h) => void (asked = h) },
+      { id: "other", name: "Other", activate: (h) => void (other = h) },
+      { ...htmlPlugin, activate: (h) => void (html = h) },
+    ]);
+    expect(asked!.settings.get("sort")).toBe("due");
+    expect(asked!.settings.set("sort", "priority")).toBe(true);
+    expect(stored()).toEqual({ "todos.sort": "priority" });
+    expect(asked!.settings.get("sort")).toBe("priority");
+    expect(asked!.settings.set("sort", "loudest"), "not one of the sorts").toBe(false);
+    expect(asked!.settings.set("sort", 3 as never), "not a word").toBe(false);
+    expect(stored()).toEqual({ "todos.sort": "priority" });
+    expect(() => asked!.settings.set("sayWhyLeaving", false)).toThrow("Todos can't change sayWhyLeaving: a plugin changes only a setting it declares remembered");
+    expect(() => other!.settings.set("todos.sort" as never, "text")).toThrow("Other can't change todos.sort");
+    expect(() => html!.settings.set("run", "automatically")).toThrow("HTML embeds can't change run");
+    expect(stored()).toEqual({ "todos.sort": "priority" });
+    expect(asked!.settings.set("sort", "due"), "the default is taken out").toBe(true);
+    expect(stored()).toEqual({});
   });
 
   it("refuses a remembered setting whose key would be another's: a dotted name, or an id that makes a keybinding's", () => {

@@ -1,6 +1,6 @@
-import { useRef, useState, type ReactNode } from "react";
-import { Icon, type ContactCard, type ContactChange, type PluginHost, type Source } from "../../plugin-api.ts";
-import { MONTH_NAMES, changeOf, draftOf, fieldsOf, type Draft, type ListKey } from "./fields.ts";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Icon, type ContactCard, type ContactChange, type ContactLine, type LabelledField, type PluginHost, type Source } from "../../plugin-api.ts";
+import { MONTH_NAMES, changeOf, draftOf, fieldsOf, labelChoices, typeOf, writtenLabel, type Draft } from "./fields.ts";
 
 /** The longest side of a picture as it is sent: enough for any place a contact's picture is drawn. */
 const PICTURE_SIDE = 512;
@@ -25,29 +25,97 @@ async function pictureOf(file: File): Promise<string> {
 /** What the server said of a field it refused, as a sentence: its first line, without the field's path. */
 const said = (message: string) => message.split("\n")[0]!.replace(/^✖\s*/, "").replace(/\s*→ at .*$/, "");
 
-const LIST_WORDS: Record<ListKey, { label: string; one: string; type: string }> = {
+const LIST_WORDS: Record<LabelledField, { label: string; one: string; type: string }> = {
   emails: { label: "Email", one: "email", type: "email" },
   phones: { label: "Phone", one: "phone", type: "tel" },
   addresses: { label: "Address", one: "address", type: "text" },
   urls: { label: "Website", one: "website", type: "url" },
 };
 
-/** One of a contact's lists as lines to edit, each with a way to take it off, and a way to add one. */
-function Lines({ field, values, onChange }: { field: ListKey; values: string[]; onChange: (values: string[]) => void }) {
+/** The menu entry that turns a line's label into a box to write one in. */
+const CUSTOM = "custom";
+
+/**
+ * A line's label: a small menu of none, Google's own labels and the line's own, and Custom…, which
+ * puts a box in its place to write a label in. Enter or leaving the box keeps what was written, and
+ * Escape goes back to the label it had.
+ */
+function LabelMenu({ field, type, name, onChange }: { field: LabelledField; type: string | null; name: string; onChange: (type: string | null) => void }) {
+  const [writing, setWriting] = useState<string | null>(null);
+  const menu = useRef<HTMLSelectElement>(null);
+  // Done with the keys, the keyboard goes back to the menu; done by leaving the box, it stays where it went.
+  const backToMenu = useRef(false);
+  useEffect(() => {
+    if (writing === null && backToMenu.current) menu.current?.focus();
+    backToMenu.current = false;
+  }, [writing]);
+  const choices = labelChoices(field, type);
+  if (writing !== null) {
+    const done = (keep: boolean, keys: boolean) => {
+      // A browser that blurs the box as it is taken away would otherwise end it twice, keeping what Escape dropped.
+      if (backToMenu.current) return;
+      if (keep) onChange(typeOf(field, writing));
+      backToMenu.current = keys;
+      setWriting(null);
+    };
+    return (
+      <input
+        className="contact-form-type"
+        aria-label={name}
+        placeholder="Label"
+        maxLength={100}
+        autoFocus
+        value={writing}
+        onChange={(e) => setWriting(e.target.value)}
+        onBlur={() => done(true, false)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== "Escape") return;
+          // Neither sends the form nor closes it: each is for the label alone.
+          e.preventDefault();
+          e.stopPropagation();
+          done(e.key === "Enter", true);
+        }}
+      />
+    );
+  }
+  return (
+    <select
+      ref={menu}
+      className="contact-form-type"
+      aria-label={name}
+      value={String(choices.findIndex((choice) => choice.type === type))}
+      onChange={(e) => (e.target.value === CUSTOM ? setWriting(writtenLabel(field, type) ?? "") : onChange(choices[Number(e.target.value)]!.type))}
+    >
+      {choices.map((choice, i) => (
+        <option key={i} value={String(i)}>
+          {choice.words}
+        </option>
+      ))}
+      <option value={CUSTOM}>Custom…</option>
+    </select>
+  );
+}
+
+/** One of a contact's lists as lines to edit, each with its label, a way to take it off, and a way to add one. */
+function Lines({ field, lines, onChange }: { field: LabelledField; lines: ContactLine[]; onChange: (lines: ContactLine[]) => void }) {
   const words = LIST_WORDS[field];
+  const change = (i: number, line: Partial<ContactLine>) => onChange(lines.map((was, at) => (at === i ? { ...was, ...line } : was)));
   return (
     <div className="contact-form-row" role="group" aria-label={words.label}>
       <span className="contact-form-label">{words.label}</span>
       <div className="contact-form-lines">
-        {values.map((value, i) => (
+        {lines.map((line, i) => (
           <div key={i} className="contact-form-line">
-            <input type={words.type} aria-label={`${words.label} ${i + 1}`} value={value} onChange={(e) => onChange(values.map((v, at) => (at === i ? e.target.value : v)))} />
-            <button type="button" className="icon-button" aria-label={`Remove ${words.one} ${value || i + 1}`} title={`Remove ${words.one}`} onClick={() => onChange(values.filter((_, at) => at !== i))}>
-              <Icon name="close" />
-            </button>
+            <LabelMenu field={field} type={line.type} name={`${words.label} label ${i + 1}`} onChange={(type) => change(i, { type })} />
+            <span className="contact-form-value">
+              <input type={words.type} aria-label={`${words.label} ${i + 1}`} value={line.value} onChange={(e) => change(i, { value: e.target.value })} />
+              <button type="button" className="icon-button" aria-label={`Remove ${words.one} ${line.value || i + 1}`} title={`Remove ${words.one}`} onClick={() => onChange(lines.filter((_, at) => at !== i))}>
+                <Icon name="close" />
+              </button>
+            </span>
           </div>
         ))}
-        <button type="button" className="button small contact-form-add" onClick={() => onChange([...values, ""])}>
+        <button type="button" className="button small contact-form-add" onClick={() => onChange([...lines, { value: "", type: null }])}>
           <Icon name="plus" />
           Add {words.one}
         </button>
@@ -136,15 +204,15 @@ function ContactForm({ host, card, onSaved, onCancel }: FormProps) {
       <Row label="Name">
         <input value={draft.name} autoFocus onChange={(e) => set("name", e.target.value)} />
       </Row>
-      <Lines field="emails" values={draft.emails} onChange={(v) => set("emails", v)} />
-      <Lines field="phones" values={draft.phones} onChange={(v) => set("phones", v)} />
+      <Lines field="emails" lines={draft.emails} onChange={(v) => set("emails", v)} />
+      <Lines field="phones" lines={draft.phones} onChange={(v) => set("phones", v)} />
       <Row label="Organization">
         <input value={draft.organization} onChange={(e) => set("organization", e.target.value)} />
       </Row>
       <Row label="Title">
         <input value={draft.title} onChange={(e) => set("title", e.target.value)} />
       </Row>
-      <Lines field="addresses" values={draft.addresses} onChange={(v) => set("addresses", v)} />
+      <Lines field="addresses" lines={draft.addresses} onChange={(v) => set("addresses", v)} />
       <div className="contact-form-row" role="group" aria-label="Birthday">
         <span className="contact-form-label">Birthday</span>
         <div className="contact-form-birthday">
@@ -160,7 +228,7 @@ function ContactForm({ host, card, onSaved, onCancel }: FormProps) {
           <input aria-label="Year" inputMode="numeric" placeholder="Year" maxLength={4} value={draft.birthday.year} onChange={(e) => set("birthday", { ...draft.birthday, year: e.target.value })} />
         </div>
       </div>
-      <Lines field="urls" values={draft.urls} onChange={(v) => set("urls", v)} />
+      <Lines field="urls" lines={draft.urls} onChange={(v) => set("urls", v)} />
       <Row label="Notes">
         <textarea rows={3} value={draft.notes} onChange={(e) => set("notes", e.target.value)} />
       </Row>
@@ -230,8 +298,8 @@ export function ContactSection({ host, card, source, onSaved, onConnect }: Props
       </div>
       {source?.reconnectToWrite && <p className="person-whose">{source.name} is connected for reading only, so these can't be changed here yet.</p>}
       <dl className="person-fields">
-        {fieldsOf(card).map((field) => (
-          <div key={field.key} className="person-field" data-field={field.key}>
+        {fieldsOf(card).map((field, i) => (
+          <div key={i} className="person-field" data-field={field.key}>
             <dt>{field.label}</dt>
             <dd>
               {field.values.map((value) => (

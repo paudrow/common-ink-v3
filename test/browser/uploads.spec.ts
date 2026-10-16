@@ -219,7 +219,7 @@ test("a picture pasted into a note is sent to the note's folder and written with
   expect(changes.every((c) => c.author.kind === "member")).toBe(true);
 });
 
-test("a file dropped on a private note is uploaded private, a file that is no picture, video, recording, PDF or text is a chip that downloads, and a file over 50 MB is refused before it is sent", async ({ page }) => {
+test("a file dropped on a private note is uploaded private, a file that is no picture, video, recording, PDF or text is a card on its own line whose name downloads it, and a file over 50 MB is refused before it is sent", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Diary\n\nWords.\n" });
   await perform(page, { type: "note.setPrivate", id: note.id, private: true });
@@ -235,8 +235,10 @@ test("a file dropped on a private note is uploaded private, a file that is no pi
   await expect.poll(async () => (await perform(page, { type: "upload.list", includeArchived: false })).map((u) => [u.name, u.private, u.kind])).toEqual([["minutes.bin", true, "file"]]);
   const [upload] = await perform(page, { type: "upload.list", includeArchived: false });
   await expect.poll(() => noteText(page, note.id)).toBe(`# Diary\n\nWords.\n::file{${upload!.id}}\n`);
-  const chip = editor(page).getByRole("link", { name: "minutes.bin" });
-  await expect(chip).toContainText("14 bytes");
+  const card = below(page, "file");
+  await expect(card.locator(".upload-card-head")).toContainText("14 bytes");
+  const chip = card.getByRole("link", { name: "minutes.bin", exact: true });
+  await expect(chip).toHaveAttribute("download", "minutes.bin");
   const download = page.waitForEvent("download");
   await chip.click();
   await expect.poll(async () => (await download).suggestedFilename()).toBe("minutes.bin");
@@ -260,7 +262,7 @@ test("Upload a file in the / menu asks for a file and writes it where the menu w
   await expect.poll(() => drawnWidth(page)).toBe(200);
 });
 
-test("with the cursor on a picture's line its text is in that line and nothing moves, and typing elsewhere neither draws the picture again nor asks for it again", async ({ page }) => {
+test("with the cursor on a picture's line its text is shown above the picture, which is lower by that line and nothing else moves, and typing elsewhere neither draws the picture again nor asks for it again", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const wide = await send(page, "wide.png", png(320, 200));
   const tall = await send(page, "tall.png", png(300, 900));
@@ -291,8 +293,16 @@ test("with the cursor on a picture's line its text is in that line and nothing m
     }
     await goTo(page, lineNumber);
     await settled(page);
-    await expect(page.locator(".cm-line").nth(lineNumber - 1)).toHaveText(written);
-    await expect.poll(() => measured(page), `with the cursor on line ${lineNumber}`).toEqual(before);
+    const shown = page.locator(".cm-line", { hasText: written });
+    await expect(shown).toHaveText(written);
+    const line = (await shown.boundingBox())!;
+    const on = await measured(page);
+    const at = on.lines.findIndex(([, top]) => Math.abs(top! - line.y) < 0.5);
+    const lower = (boxes: number[][]) => boxes.map(([left, top, width, height]) => [left!, top! >= line.y - 0.5 ? top! + line.height : top!, width!, height!]);
+    const near = (a: number[][], b: number[][]) => a.length === b.length && a.every((box, i) => box.every((n, j) => Math.abs(n - b[i]![j]!) <= 0.25));
+    expect(near(on.lines.filter((_, i) => i !== at), lower(before.lines)), `with the cursor on line ${lineNumber}, the lines under it are lower by it`).toBe(true);
+    expect(near(on.rooms, lower(before.rooms)) && near(on.shown, lower(before.shown)), `with the cursor on line ${lineNumber}, the pictures under it are lower by it`).toBe(true);
+    expect(on.shown.find(([, top]) => top! >= line.y)![1], "the picture is under its line").toBeGreaterThanOrEqual(line.y + line.height - 0.25);
     await expect(picture(page)).toHaveCount(2);
   }
 
