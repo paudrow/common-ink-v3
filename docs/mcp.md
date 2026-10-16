@@ -1,6 +1,6 @@
 # Connecting an agent
 
-A member connects an agent in the web app, on the Agents page (`/agents`, from the workspace menu or the "Go to Agents" command), and gets a token for it. The page shows the token once with the command to paste, lists the member's agents, edits what each may do, and disconnects them. The agent sends the token to `/mcp` (the MCP server) or uses the `ink` command, which calls `/mcp`. Both go through the same operations as the web app (`src/core/operations.ts`), as the member who connected the agent.
+A member connects an agent in the web app, on the Agents page (`/agents`, from the workspace menu or the "Go to Agents" command), and gets a token for it. The page shows the token once, inside a prompt to paste into the agent: what Common Ink is, what the agent may reach, the server's URL and the token, how to add the connection to its own client (the config's shape, and `claude mcp add` for Claude Code), how to check it works by listing its workspaces and folders, and to keep the token secret (`src/web/plugins/agents/prompt.ts`). The commands and config to set it up by hand are under "Set it up by hand". An agent's "Set up again" shows the prompt later with no token in it, since the token can't be shown again. The page also lists the member's agents, edits what each may do, and disconnects them. The agent sends the token to `/mcp` (the MCP server) or uses the `ink` command, which calls `/mcp`. Both go through the same operations as the web app (`src/core/operations.ts`), as the member who connected the agent.
 
 ## Rules
 
