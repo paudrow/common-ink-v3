@@ -498,6 +498,16 @@ button.link:hover {
   outline-offset: -2px;
 }
 
+/* The room under the tree is the top of the workspace: a folder dragged off every row goes there. */
+.folders {
+  flex: 1 0 auto;
+  border-radius: 8px;
+}
+
+.folders[data-drop-top] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
 .folder-row:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -4143,6 +4153,289 @@ kbd {
 
 .hist-open-page {
   text-decoration: underline;
+}
+
+/* Who wrote this: the switch in a note's History panel, a dot that fills when it is on. */
+.who-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.who-switch::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.who-switch[aria-checked="true"] {
+  color: var(--ink);
+}
+
+.who-switch[aria-checked="true"]::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/*
+ * Who wrote this: a column left of the text, one label for each run of lines one change last wrote.
+ * The editor makes room for it out of its margin, and moves over only by what the margin lacks, once,
+ * as the mode comes on. Members are cool colours and agents warm ones, the member's own grey. The
+ * strip at the column's right edge is stronger the newer the change. One value of each holds in both
+ * themes.
+ */
+.editor {
+  --who-col: 15rem;
+}
+
+.editor:has(> .cm-editor.who-on) {
+  margin-left: max(calc(var(--who-col) + 1.75rem), calc((100% - 46rem) / 2));
+  margin-right: auto;
+  max-width: min(46rem, calc(100% - var(--who-col) - 1.75rem));
+}
+
+.editor .cm-editor.who-on .cm-scroller {
+  margin-left: calc(-3rem - var(--who-col));
+}
+
+.editor .cm-editor.who-on .cm-content {
+  padding-left: calc(3rem + var(--who-col));
+}
+
+.editor .cm-editor.who-on .cm-selectionLayer {
+  clip-path: inset(0 -100000px -100000000px calc(3rem + var(--who-col)));
+}
+
+/* In a narrow pane, each hunk is its author's mark and no more. */
+@container note (max-width: 700px) {
+  .editor {
+    --who-col: 2rem;
+  }
+
+  .who-text {
+    display: none;
+  }
+}
+
+.who-wrote {
+  pointer-events: none;
+}
+
+.who-hunk {
+  --who: var(--faint);
+}
+
+.who-col {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(var(--who-col) - 0.5rem);
+  overflow: hidden;
+  border-radius: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+/* A thin rule between one hunk and the next. */
+.who-hunk:not([data-from="1"]) .who-col {
+  box-shadow: inset 0 1px var(--line);
+}
+
+.who-col::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 0;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--who);
+  opacity: var(--heat);
+}
+
+.who-hunk[data-tone^="agent"] .who-col::after {
+  background: repeating-linear-gradient(to bottom, var(--who) 0 5px, transparent 5px 8px);
+}
+
+.who-hunk[data-heat="0"] {
+  --heat: 0.25;
+}
+
+.who-hunk[data-heat="1"] {
+  --heat: 0.42;
+}
+
+.who-hunk[data-heat="2"] {
+  --heat: 0.6;
+}
+
+.who-hunk[data-heat="3"] {
+  --heat: 0.8;
+}
+
+.who-hunk[data-heat="4"] {
+  --heat: 1;
+}
+
+.who-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-height: 100%;
+  padding-right: 10px;
+  overflow: hidden;
+  font-family: var(--ui, system-ui);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.who-avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: calc((var(--who-row) - 18px) / 2);
+  border-radius: 50%;
+  background: var(--who);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.who-hunk[data-tone^="agent"] .who-avatar {
+  border-radius: 5px;
+}
+
+/* Light colours carry dark initials. */
+.who-hunk:is([data-tone="member-4"], [data-tone="agent-0"], [data-tone="agent-3"]) .who-avatar {
+  color: #1c1c1c;
+}
+
+.who-hunk[data-tone="self"] .who-avatar {
+  background: var(--line-strong);
+  color: var(--ink);
+}
+
+.who-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-top: calc((var(--who-row) - 16px) / 2);
+}
+
+.who-head {
+  display: flex;
+  min-width: 0;
+}
+
+.who-name,
+.who-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.who-name {
+  color: var(--ink);
+}
+
+.who-hunk[data-tone^="agent"] .who-name {
+  color: color-mix(in srgb, var(--who) 70%, var(--ink));
+}
+
+.who-when {
+  flex: none;
+  color: var(--muted);
+  white-space: pre;
+}
+
+.who-when::before {
+  content: " · ";
+}
+
+.who-what {
+  color: var(--muted);
+}
+
+.who-hunk[data-rows="one"] .who-text {
+  flex-direction: row;
+}
+
+.who-hunk[data-rows="one"] .who-head {
+  flex-shrink: 0;
+  max-width: 70%;
+}
+
+.who-hunk[data-rows="one"] .who-what::before {
+  content: " · ";
+  white-space: pre;
+}
+
+.who-what:empty {
+  display: none;
+}
+
+/* Pointing at a hunk lights up its lines. */
+.who-band {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: calc(var(--who-col) + 2.5rem);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.who-hunk:hover .who-col,
+.who-hunk:hover .who-band {
+  background: color-mix(in srgb, var(--who) 12%, transparent);
+}
+
+.who-hunk[data-tone="self"]:hover .who-col,
+.who-hunk[data-tone="self"]:hover .who-band {
+  background: var(--hover, color-mix(in srgb, var(--ink) 6%, transparent));
+}
+
+.who-hunk[data-tone="member-0"] {
+  --who: #3e8ee6;
+}
+
+.who-hunk[data-tone="member-1"] {
+  --who: #12a594;
+}
+
+.who-hunk[data-tone="member-2"] {
+  --who: #8e4ec6;
+}
+
+.who-hunk[data-tone="member-3"] {
+  --who: #46a758;
+}
+
+.who-hunk[data-tone="member-4"] {
+  --who: #05a2c2;
+}
+
+.who-hunk[data-tone="agent-0"] {
+  --who: #f76b15;
+}
+
+.who-hunk[data-tone="agent-1"] {
+  --who: #e5484d;
+}
+
+.who-hunk[data-tone="agent-2"] {
+  --who: #d6409f;
+}
+
+.who-hunk[data-tone="agent-3"] {
+  --who: #e2b100;
 }
 
 .hist-all {

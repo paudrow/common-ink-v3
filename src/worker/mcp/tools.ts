@@ -469,6 +469,13 @@ The arguments beside query are from before it could say them, and narrow it furt
     op: "folder.rename",
   },
   {
+    name: "move_folder",
+    description:
+      "Put a folder inside another, or at the top level with a null parentId. The notes and folders in it go with it and keep their ids. A folder can't go inside itself or a folder in it, and Unsorted stays where it is. Needs the editor or admin role, and edit on both folders.",
+    inputSchema: object({ id: folderId("The folder to move"), parentId: { type: ["string", "null"], description: "The folder to put it inside, from list_folders, or null for the top level" } }, ["id", "parentId"]),
+    op: "folder.move",
+  },
+  {
     name: "delete_folder",
     description: "Delete a folder that has no notes and no folders in it. Archived notes count, and notes in Trash don't: those are restored to Unsorted afterwards. Needs the admin role.",
     inputSchema: object({ id: folderId("The folder id") }, ["id"]),
@@ -480,6 +487,13 @@ The arguments beside query are from before it could say them, and narrow it furt
       "A note's recorded changes, oldest first: revision, the revision it was based on, who made it (a member, or an agent by name), when, its label, the lines it added and removed, the changes it reverted (reverts) and the later change that reverted it (revertedBy).",
     inputSchema: object({ id: noteId }, ["id"]),
     op: "note.history",
+  },
+  {
+    name: "note_blame",
+    description:
+      "Who wrote each line of a note as it is now: the change that last wrote or edited the line. Answers the note's text and revision, lines as runs { from, to, revision } counted from 1, the changes those name (each with its author, a member or an agent by name, and when), and for a member who sees the whole workspace the name of each member whose agent wrote a line (owners, by person id). Lines put in or taken out around a line don't change it; a word taken out of it does. A line a revert brought back is named by the change that wrote it, not the revert.",
+    inputSchema: object({ id: noteId }, ["id"]),
+    op: "note.blame",
   },
   {
     name: "change_diff",

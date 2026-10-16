@@ -9,7 +9,7 @@ The only container a person signs into. It holds notes, folders, and uploads. A 
 _Avoid_: Space, vault, project
 
 **Folder**:
-A named location in a workspace. A note or upload has exactly one parent folder. An editor can create and rename a folder they can edit. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty: no notes, uploads or folders in it.
+A named location in a workspace. A note or upload has exactly one parent folder. An editor can create, rename and move a folder they can edit, into one they can edit or to the top of the workspace, and never into itself or a folder inside it; what is in it goes with it. A guest, or an agent limited to folders, moves only the folders inside one they were given, and into one they were given. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty: no notes, uploads or folders in it.
 _Avoid_: Directory, space
 
 **Unsorted**:
@@ -327,6 +327,10 @@ Reverting the author's own latest change to a note that still stands. Redo rever
 
 **Unseen change**:
 A change to a note by anyone but the member, their own agent included, made since the member last looked at that note's history. It is kept in the browser the member looked in, and has nothing to do with their last visit: marking the dashboard's summary read doesn't show them a note's history, and looking at a note's history doesn't take it out of the summary.
+
+**Who wrote this**:
+A note's lines marked by who last changed each, in a column left of the text as a blame view has. Lines next to each other that one change last wrote are a run, and the column names, on each run's first line, who wrote it and when, with the change's label or what its revert did; the member's (one family of colours), the agent's (another, with whose agent it is), or the member's own ("You", grey). A strip at the column's edge is stronger the newer the change. A line is changed by an edit inside it and by being written; lines put in or taken out around it leave it as it was, and a line a revert, undo or redo brings back is still its writer's, while a line it writes anew (a conflict settled by hand) is the reverter's; the revert itself shows in History. Pressing a run opens that change in History, and two commands move to the next or previous run and open its change. The member turns it on for one note at a time, from the command or the note's History panel, and the note keeps it on for them in that browser. Agents ask the same of `note_blame`, named as git names it.
+_Avoid_: Annotate
 
 **Label**:
 A name attached to one revision in history. A revision has at most one, and a note uses a name once.

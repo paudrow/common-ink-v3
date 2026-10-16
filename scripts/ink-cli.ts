@@ -84,9 +84,11 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   folders                             the folders in a workspace
   folder-create NAME [--parent ID]    a new folder
   folder-rename ID --name NAME        give a folder another name
+  folder-move ID [--parent ID]        put a folder inside another, or at the top level without --parent
   folder-delete ID                    delete an empty folder
   history ID                          a note's changes and who made them
   diff ID --change N                  what one change did to its note, as a line diff
+  blame ID                            who wrote each line of a note: the change that last wrote or edited it
   changed [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
                                       the notes that changed, latest first, with the lines added and removed in each
   changes [--note ID,ID] [--author KIND:ID] [--not-author KIND:ID] [--by people|agents] [--from TIME] [--to TIME]
@@ -571,12 +573,20 @@ export async function run(argv: string[], io: Io): Promise<number> {
         tool = "rename_folder";
         args = { id: need("a folder id"), name: needFlag("name") };
         break;
+      case "folder-move":
+        tool = "move_folder";
+        args = { id: need("a folder id"), parentId: flags.get("parent") ?? null };
+        break;
       case "folder-delete":
         tool = "delete_folder";
         args = { id: need("a folder id") };
         break;
       case "history":
         tool = "note_history";
+        args = { id: needId() };
+        break;
+      case "blame":
+        tool = "note_blame";
         args = { id: needId() };
         break;
       case "diff":
