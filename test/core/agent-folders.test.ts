@@ -289,7 +289,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     expect(await claude.call("list_todos", { folderId: w.journal })).toEqual(NO_FOLDER);
     expect(await claude.call("list_todos", { folderId: w.journal, includeCompleted: true, tag: "tag-outside" })).toEqual(await claude.call("list_todos", { folderId: MISSING, includeCompleted: true, tag: "tag-outside" }));
     expect((await claude.json<{ todos: unknown[] }>("list_todos", { tag: "tag-outside" })).todos).toEqual([]);
-    expect(await claude.json("todo_filters")).toEqual({ tags: ["tag-inside"] });
+    expect(await claude.json("todo_filters")).toEqual({ tags: ["tag-inside"], assignees: [] });
     const set = (id: string) => claude.call("set_todo", { id, revision: 1, line: 3, text: todo, done: true });
     expect(await set(chores.id)).toEqual(NO_NOTE);
     expect(await set(MISSING)).toEqual(NO_NOTE);
@@ -407,7 +407,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     expect(await claude.json("list_tags", { includeArchived: true })).toEqual({ tags: [{ name: "insidetag", notes: 1 }, { name: "sharedtag", notes: 1 }], indexing: false });
     expect(idsOf(await claude.json<Note[]>("list_notes", { tag: "sharedtag", includeArchived: true }))).toEqual([tagged.id]);
     expect(await claude.json("list_notes", { tag: "hushtag", includeArchived: true })).toEqual(await claude.json("list_notes", { tag: "nosuchtag", includeArchived: true }));
-    expect(await claude.json("todo_filters", { includeArchived: true })).toEqual({ tags: ["insidetag", "sharedtag"] });
+    expect(await claude.json("todo_filters", { includeArchived: true })).toEqual({ tags: ["insidetag", "sharedtag"], assignees: [] });
 
     // The archived notes and Trash it is shown are its own.
     expect(idsOf(await claude.json<Note[]>("list_notes", { includeArchived: "only" }))).toEqual([filed.id]);
@@ -586,7 +586,7 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const asked: string[] = [];
     const lunch = { sourceId: "cal", id: "a1", calendarId: "mine", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
     const mine = { sourceId: "cal", id: "mine", name: "Mine-calendar-outside", color: null, writable: true };
-    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null };
+    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: [{ value: "sam-outside@example.com", type: null }], phones: [], organization: null, url: null, title: "Plumber-outside", addresses: [{ value: "Lane-outside", type: null }], birthday: null, notes: "notes-outside", photo: null, urls: [], etag: "e1" };
     const changed: unknown[] = [];
     const sources: Sources = {
       async of(personId) {
@@ -636,7 +636,9 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
       expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n::event{${event.ref} Lunch with Sam} with ::contact{${contact.ref} Sam Okafor}`);
       await claude.json("search", { query: "Lunch" });
       await claude.json("note_history", { id: w.deep.id });
-      expect(claude.said.join("\n")).not.toMatch(/Cafe-Lula-outside|contract-outside|sam-outside@example\.com|Mine-calendar-outside|ada-account-outside|source-outside|people\/c1/);
+      // Sam's page tells it the name it asked by and nothing of its member's contact.
+      expect(await claude.json("read_person", { who: "Sam Okafor" })).toMatchObject({ who: "Sam Okafor", name: "Sam Okafor", member: null, contacts: [] });
+      expect(claude.said.join("\n")).not.toMatch(/Cafe-Lula-outside|contract-outside|sam-outside@example\.com|Plumber-outside|Lane-outside|notes-outside|Mine-calendar-outside|ada-account-outside|source-outside|people\/c1/);
       for (const mark of w.marks) expect(claude.said.join("\n")).not.toContain(mark);
     }
     // Refused before anything was asked of a data source, and nothing was changed there.
@@ -644,6 +646,37 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     expect(changed).toEqual([]);
     // Her agent that reaches everything reads the record, as she does.
     expect((await (await asAgent(w.scribe.token, sources)).json<{ event: { location: string } }>("read_record", { ref: event.ref })).event.location).toBe("Cafe-Lula-outside");
+  });
+
+  it("is told by no mention who is a member: a name it writes stays a name, an id is given no name, and nobody's todos outside are found by who they are assigned to", async () => {
+    const w = await world();
+    const bob = await addMember(w.ada, "editor", "Bob-outside-only");
+    const twin = await addMember(w.ada, "editor", "Twin-outside");
+    const twin2 = await addMember(w.ada, "editor", "Twin-outside");
+    // Bob is renamed after he is mentioned inside, and is assigned a todo outside.
+    await perform(env.DB, w.ada, { type: "note.create", folderId: w.journal, text: `# Chores-outside\n\n- [ ] buy-outside @[[${bob.personId}|Bob-outside-only]] @[[Carol-outside]]` });
+    const sprint = await perform(env.DB, w.ada, { type: "note.create", folderId: w.plans, text: `# Sprint\n\n- [ ] ship-inside @[[Robert]] @[[Dana-inside]]\n\nAsk @[[${bob.personId}|Robert]].` });
+    expect(sprint.text).toContain("@[[Dana-inside]]");
+    const claude = await asAgent(w.limited.token);
+
+    // What its note says of a mention is the note's text, and nothing is added from who is a member now.
+    const read = await claude.json<{ mentions: unknown[] }>("read_note", { id: sprint.id });
+    expect(read.mentions).toEqual([{ id: null, name: "Robert", member: false }, { id: null, name: "Dana-inside", member: false }, { id: bob.personId, name: "Robert", member: false }]);
+    expect(await claude.json("todo_filters")).toEqual({ tags: [], assignees: [{ id: null, name: "Dana-inside", member: false }, { id: null, name: "Robert", member: false }] });
+    for (const assignee of [bob.personId, "Carol-outside", "Bob-outside-only"]) expect((await claude.json<{ todos: unknown[] }>("list_todos", { assignee })).todos, assignee).toEqual([]);
+    expect((await claude.json<{ todos: unknown[] }>("list_todos", { assignedToMe: true })).todos).toEqual([]);
+
+    // A member's name, a name two members have, a member's id, and a name nobody has are all written as they were given.
+    const written = `# Sprint\n\n- [ ] ship-inside @[[Robert]] @[[Dana-inside]]\n\nAsk @[[${bob.personId}|Robert]].\n\n@[[Bob-outside-only]] @[[Twin-outside]] @[[${twin.personId}]] @[[Nobody-at-all]]`;
+    const wrote = await claude.json<Note>("write_note", { id: sprint.id, baseRevision: sprint.revision, text: written });
+    expect(wrote.text).toBe(written);
+    const set = await claude.json<{ text: string }>("set_todo", { id: sprint.id, revision: wrote.revision, line: 2, text: "- [ ] ship-inside @[[Robert]] @[[Dana-inside]]", assign: "Twin-outside" });
+    expect(set.text).toContain("- [ ] ship-inside @[[Robert]] @[[Dana-inside]] @[[Twin-outside]]");
+    expect(claude.said.join("\n")).not.toMatch(new RegExp(`${twin2.personId}|members are named|Chores-outside|buy-outside|Carol-outside`));
+    // Her agent that sees everything is told, as she is.
+    const scribe = await asAgent(w.scribe.token);
+    expect((await scribe.json<{ mentions: { name: string; member: boolean }[] }>("read_note", { id: sprint.id })).mentions).toContainEqual({ id: bob.personId, name: "Bob-outside-only", member: true });
+    expect(await scribe.call("write_note", { id: sprint.id, baseRevision: wrote.revision + 1, text: `${set.text}\n\n@[[twin-OUTSIDE]]` })).toMatchObject({ isError: true, text: expect.stringContaining("2 members are named") });
   });
 
   it("isn't told who is in the workspace, some of whom have only written outside its folders", async () => {

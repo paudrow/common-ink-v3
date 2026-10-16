@@ -29,21 +29,23 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   restore ID                          bring a note back from Trash, to the folder it was in
   trashed                             the notes in Trash, and when each is removed for good
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
-  create [--text TEXT] [--folder ID] [--link-titles keep]
+  create [--text TEXT] [--folder ID] [--link-titles keep] [--mention-names keep]
                                       a new note (text from stdin if --text is left out)
-  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles keep] [--on DAY]
+  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles keep] [--mention-names keep] [--on DAY]
                                       replace a note's text (from stdin if --text is left out)
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
   todos [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY]
-        [--no-due true] [--importance N,N] [--completed true] [--archived true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
+        [--no-due true] [--importance N,N] [--assignee WHO]
+        [--assigned-to-me true] [--completed true] [--archived true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
                                       the todos a query finds, such as "due:<today priority:>=medium", or every
                                       open one with none; --query QUERY is the same. "ink syntax todos" lists
                                       what a query can say
   syntax [todos]                      the query language of search, or of todos
-  todo-filters [--archived true]      the tags that todos can be narrowed by
+  todo-filters [--archived true]      the tags and assignees that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
-        [--every RULE|none] [--skip true] [--on DAY]
+        [--every RULE|none] [--skip true] [--assign WHO]
+        [--unassign WHO] [--on DAY]
                                       check a todo off, change it, or skip a repeating todo to its next
                                       due date; ID, both Ns and LINE are from todos
   todo-history ID --revision N --line N --text LINE
@@ -93,6 +95,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
             [--location TEXT] [--description TEXT]
                                       add an event to one of the calendars events lists
   contacts [QUERY]                    your member's contacts, or those matching every word
+  person WHO [--limit N]              a person's page: the member they are, your member's contacts that are
+                                      them, their open todos, and the lines that mention them
   refer SOURCE RECORD                 the ::event{...} or ::contact{...} a note writes to reference a record
   record REF                          the event or contact a reference stands for, as it is now
   notes-about SOURCE RECORD           the notes that reference a record, by your member's reference or a teammate's to the same event, and who sees each
@@ -105,6 +109,11 @@ from authors, such as agent:abc123def456. NEXT is the next of the page before, a
 A link to a note is [[ID]] or [[ID|display text]]. Write [[Title]] and create and write store it by
 the id of the one note with that title, or refuse when none or several have it. --link-titles keep
 leaves such text as it is.
+
+A mention of a person is @[[ID|Name]] for a member, with ids from members, or @[[Name]] for anyone
+else. Write @[[Name]] for a member and create and write store it by their id, or refuse when several
+members have the name. --mention-names keep leaves every mention as written. On a todo's line a
+mention assigns the todo. WHO is a member's id or a name. A mention gives nobody access.
 
 A todo is a checkbox line in a note, with its options on the line: - [ ] !! Call the bank due:2026-10-14
 DAY is a calendar date, YYYY-MM-DD. --importance is the priority: 0 for None, 1 Low (!), 2 Medium (!!), 3 High (!!!).
@@ -313,12 +322,12 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "create":
         tool = "create_note";
-        args = { text: flags.get("text") ?? (await io.stdin()), ...given({ folderId: ["folder"], linkTitles: ["link-titles"] }) };
+        args = { text: flags.get("text") ?? (await io.stdin()), ...given({ folderId: ["folder"], linkTitles: ["link-titles"], mentionNames: ["mention-names"] }) };
         break;
       case "write":
         if (!flags.has("base")) throw new UsageError("write needs --base, the revision you read");
         tool = "write_note";
-        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], on: ["on"] }) };
+        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], on: ["on"] }) };
         break;
       case "backlinks":
         tool = "backlinks";
@@ -341,6 +350,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
             dueTo: ["due-to"],
             noDue: ["no-due", truth],
             importance: ["importance", integers],
+            assignee: ["assignee"],
+            assignedToMe: ["assigned-to-me", truth],
             includeCompleted: ["completed", truth],
             includeArchived: ["archived", truth],
             noteId: ["note"],
@@ -362,7 +373,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           revision: integer("--revision", flags.get("revision")!),
           line: integer("--line", flags.get("line")!),
           text: flags.get("text")!,
-          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], every: ["every", (_, value) => (value === "none" ? null : value)], skip: ["skip", truth], on: ["on"], words: ["words"] }),
+          ...given({ done: ["done", truth], importance: ["importance", integer], due: ["due", (_, value) => (value === "none" ? null : value)], every: ["every", (_, value) => (value === "none" ? null : value)], skip: ["skip", truth], assign: ["assign"], unassign: ["unassign"], on: ["on"], words: ["words"] }),
         };
         break;
       case "todo-history":
@@ -462,6 +473,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "contacts":
         tool = "list_contacts";
         args = id === undefined ? {} : { query: id };
+        break;
+      case "person":
+        tool = "read_person";
+        args = { who: need("a member's id or a name"), ...given({ limit: ["limit", integer] }) };
         break;
       case "refer":
         if (positional.length < 2) throw new UsageError("refer needs a data source and a record id");

@@ -19,17 +19,23 @@ interface Names {
   folders: { label: string; value: string }[];
   tags: string[];
   people: string[];
+  /** Who notes mention: the members, and whoever a todo the member can see is assigned to. */
+  mentioned: string[];
 }
 
 function useNames(host: PluginHost, app: App, scope: QueryScope, wanted: boolean): Names {
-  const [read, setRead] = useState<{ tags: string[]; people: string[] }>({ tags: [], people: [] });
+  const [read, setRead] = useState<{ tags: string[]; people: string[]; mentioned: string[] }>({ tags: [], people: [], mentioned: [] });
   useEffect(() => {
     if (!wanted) return;
     let left = false;
     const tags = scope === "todos" ? host.perform({ type: "todo.filters", includeArchived: true }).then((r) => [...r.tags]) : host.perform({ type: "tag.list", includeArchived: true }).then((r) => r.tags.map((t) => t.name));
     const people = host.perform({ type: "history.authors" }).then((authors) => [...new Set(authors.map((a) => a.name))]);
+    const members = host.perform({ type: "member.list" }).then((r) => r.map((m) => m.name));
+    const assigned = host.perform({ type: "todo.filters", includeArchived: true }).then((r) => r.assignees.map((a) => a.name));
     // A list that can't be read leaves nothing to offer, and the query is still typed by hand.
-    void Promise.all([tags.catch(() => []), people.catch(() => [])]).then(([t, p]) => !left && setRead({ tags: t, people: p }));
+    void Promise.all([tags.catch(() => []), people.catch(() => []), members.catch(() => []), assigned.catch(() => [])]).then(
+      ([t, p, m, a]) => !left && setRead({ tags: t, people: p, mentioned: [...new Set([...m, ...a])] }),
+    );
     return () => {
       left = true;
     };
@@ -41,7 +47,7 @@ function useNames(host: PluginHost, app: App, scope: QueryScope, wanted: boolean
     // A name two folders have, or one that can't be written in quotes, is said by the folder's id.
     return all.map((f) => ({ label: app.folders!.pathName(f.id), value: count.get(f.name.toLowerCase()) === 1 && !f.name.includes('"') ? f.name : f.id })).sort((a, b) => a.label.localeCompare(b.label));
   }, [app.folders]);
-  return { folders, tags: read.tags, people: ["@me", ...read.people] };
+  return { folders, tags: read.tags, people: ["@me", ...read.people], mentioned: ["@me", ...read.mentioned] };
 }
 
 /** The values a field can be given, as what is shown and what is written. */
@@ -52,7 +58,7 @@ function valuesOf(field: QueryField, scope: QueryScope, names: Names): { label: 
   if (value.type === "level") return [...value.levels].reverse().map((level) => ({ label: level[0]!.toUpperCase() + level.slice(1), value: level }));
   if (value.type === "day") return RELATIVE_DAYS.map((day) => ({ label: day, value: day }));
   if (value.type === "folder") return names.folders;
-  return (value.type === "tag" ? names.tags : names.people).map((name) => ({ label: name, value: name }));
+  return (value.type === "tag" ? names.tags : value.type === "mentioned" ? names.mentioned : names.people).map((name) => ({ label: name, value: name }));
 }
 
 function offersAt(text: string, cursor: number, scope: QueryScope, names: Names): { from: number; to: number; offers: Offer[] } | null {
@@ -368,7 +374,7 @@ export function QueryBar({ host, app, scope, value, onChange, label, placeholder
   const typing = cursor === null ? null : typingAt(value, cursor, scope);
   const typed = typing?.key ? filterOf(typing.key).value.type : null;
   // Tags and people are asked of the server only once something is about to offer them.
-  const names = useNames(host, app, scope, open || typed === "tag" || typed === "person");
+  const names = useNames(host, app, scope, open || typed === "tag" || typed === "person" || typed === "mentioned");
 
   useEffect(() => {
     setRested(false);

@@ -86,7 +86,7 @@ describe("the index of todos", () => {
 
     // Whoever lists first mends every note they can see. One they can't waits for someone who can, so nothing about it shows in what they are told.
     expect((await list(ada)).length).toBe(45);
-    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["t"] });
+    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["t"], assignees: [] });
     for (const note of notes) expect(await indexed(note.id)).toEqual(todoIndex(note.text));
     expect(await indexed(diary.id)).toEqual({ todos: [], tags: [] });
     expect(await words(eve, { tag: "secret" })).toEqual(["hers alone #secret"]);
@@ -100,7 +100,7 @@ describe("the index of todos", () => {
 
     const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "# Old, renamed\n\n- [ ] from before +P #t" });
     expect(await indexed(note.id)).toEqual(todoIndex(written.text));
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 4 });
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 5 });
   });
 
   it("is made again from every note's text by an admin, another member's private note included, and the answer says nothing of how many", async () => {
@@ -156,6 +156,7 @@ describe("listing todos", () => {
       recurs: null,
       lastDone: null,
       tags: ["work", "garden"],
+      assignees: [],
       words: "Water plants +home #garden",
       access: "edit",
     });
@@ -202,7 +203,7 @@ describe("listing todos", () => {
       ["- [ ] Water plants #weekly", ["outside", "weekly", "someday"]],
       ["- [ ] Mow", ["outside", "weekly", "someday"]],
     ]);
-    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["outside", "someday", "weekly"] });
+    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["outside", "someday", "weekly"], assignees: [] });
   });
 
   it("narrows to a folder with every folder under it, inside what the asker can see, and a folder they can't see is no folder", async () => {
@@ -293,9 +294,9 @@ describe("listing todos", () => {
     });
     const hidden = { byTag: [], byNote: [] };
 
-    expect(await seenBy(eve)).toEqual({ todos: ["for the guest +Lent", "hidden +Secret", "hidden and done +Secret", "seen by all +Common"], byTag: ["hidden +Secret", "hidden and done +Secret"], byNote: ["hidden +Secret", "hidden and done +Secret"], filters: { tags: ["lent", "open", "private"] } });
-    for (const admin of [ada, adasAgent]) expect(await seenBy(admin)).toEqual({ ...hidden, todos: ["for the guest +Lent", "seen by all +Common"], filters: { tags: ["lent", "open"] } });
-    expect(await seenBy(guest)).toEqual({ ...hidden, todos: ["for the guest +Lent"], filters: { tags: ["lent"] } });
+    expect(await seenBy(eve)).toEqual({ todos: ["for the guest +Lent", "hidden +Secret", "hidden and done +Secret", "seen by all +Common"], byTag: ["hidden +Secret", "hidden and done +Secret"], byNote: ["hidden +Secret", "hidden and done +Secret"], filters: { tags: ["lent", "open", "private"], assignees: [] } });
+    for (const admin of [ada, adasAgent]) expect(await seenBy(admin)).toEqual({ ...hidden, todos: ["for the guest +Lent", "seen by all +Common"], filters: { tags: ["lent", "open"], assignees: [] } });
+    expect(await seenBy(guest)).toEqual({ ...hidden, todos: ["for the guest +Lent"], filters: { tags: ["lent"], assignees: [] } });
     expect((await list(guest))[0]!.access).toBe("view");
     expect(await codeOf(perform(env.DB, ada, { type: "todo.set", id: secret.id, revision: 1, line: 2, text: "- [ ] hidden +Secret due:2026-01-01", done: true }))).toBe("not_found: No such note");
   });
@@ -332,7 +333,7 @@ describe("changing a todo from a listing", () => {
     const cleared = await perform(env.DB, ada, { type: "todo.set", id: note.id, revision: 2, line: 2, text: "- [ ] !!! Call the bank due:2026-11-01 +Home", importance: 0, due: null, done: false });
     expect(cleared.text).toBe(PLAN.replace("- [ ] !! Call the bank due:2026-10-14 +Home", "- [ ] Call the bank +Home"));
     expect(cleared.revision).toBe(3);
-    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["garden", "work"] });
+    expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["garden", "work"], assignees: [] });
   });
 
   it("rewrites its words, keeping its importance before them and its due date after them, is done once when asked again, and refuses words of more than one line", async () => {

@@ -4324,6 +4324,14 @@ kbd {
   color: hsl(var(--hue) 85% 80%);
 }
 
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-accent .cm-completionLabel {
+  color: var(--accent);
+}
+
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completion-muted .cm-completionLabel {
+  color: var(--muted);
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .avatar {
     background: hsl(var(--hue) 35% 24%);
@@ -6114,6 +6122,14 @@ button.diff-fold:hover {
   color: inherit;
 }
 
+/* Assign's mark: the @ a mention is written with, where the other chips have an icon. */
+.todo-chip .chip-at {
+  flex: none;
+  width: 12px;
+  opacity: 0.75;
+  text-align: center;
+}
+
 /* What isn't set yet: its icon alone, named on hover, quiet and without a pill, which is drawn, dashed, while the row is pointed at
    or has the keyboard. It shows only then, so it needs no word, and the line keeps its room for what is set. */
 .todo-chip-word {
@@ -6182,6 +6198,16 @@ button.todo-chip:disabled {
 
 .todo-row[data-done] .todo-chip {
   opacity: 0.75;
+}
+
+.todo-assignee {
+  color: var(--muted);
+  unicode-bidi: isolate;
+}
+
+.todo-assignee[data-member] {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .todo-importance[data-level="3"] {
@@ -8397,20 +8423,35 @@ button.todo-tag[aria-pressed="true"] {
   text-underline-offset: 2px;
 }
 
-.contact-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* Contacts as cards, as notes and todos are listed: the whole card opens the person's page. */
+.contact-cards > li {
+  display: block;
 }
 
-.contact-list > li {
+.contact-card {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  padding: 10px 0;
-  border-top: 1px solid var(--line);
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.contact-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The initials are drawn and not written, so a card's words start with the name. */
+.contact-avatar::before {
+  content: attr(data-initials);
 }
 
 .contact-what {
@@ -8418,23 +8459,29 @@ button.todo-tag[aria-pressed="true"] {
   flex: 1;
   flex-direction: column;
   gap: 2px;
-  min-width: 12rem;
+  min-width: 0;
 }
 
 .contact-name {
-  font-weight: 600;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .contact-organization,
 .contact-reach {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .contact-reach {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 12px;
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -8463,6 +8510,303 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 /* Calendar and Contacts: end */
+
+/* A person's page: what a mention leads to. */
+
+.person-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  max-width: 46rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.person-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.person-photo {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 20px;
+  object-fit: cover;
+}
+
+.person-title {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.person-title h1 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.person-what {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.person-page h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.person-contact {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.person-whose {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.person-fields {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.person-field {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 2px 12px;
+}
+
+.person-field dt {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.person-field dd {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.person-contact-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.person-not-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.person-not-contact .person-whose {
+  margin: 0;
+}
+
+/* A contact edited as a contacts app does: a label beside each field, its lines one under another. */
+.contact-form {
+  display: grid;
+  gap: 10px;
+}
+
+.contact-form-photo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.contact-form-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.contact-form-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.contact-form-lines {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.contact-form-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+/* Where a line is too narrow for its label and value side by side, the value and its remove button go under the label. */
+.contact-form-value {
+  display: flex;
+  flex: 1 1 12rem;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* A line's label: a quiet menu before it, framed only while pointed at or in use. */
+.contact-form .contact-form-type {
+  flex: none;
+  width: 8.5rem;
+  padding-inline: 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.contact-form .contact-form-type:hover,
+.contact-form .contact-form-type:focus,
+.contact-form input.contact-form-type {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.contact-form-birthday {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.contact-form input,
+.contact-form textarea,
+.contact-form select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.contact-form-birthday input {
+  width: 5rem;
+}
+
+.contact-form-birthday select {
+  width: auto;
+}
+
+.contact-form textarea {
+  resize: vertical;
+}
+
+.contact-form-add {
+  gap: 4px;
+}
+
+.contact-form-add svg {
+  width: 12px;
+  height: 12px;
+}
+
+.contact-form-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .contact-form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.person-source {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.person-mentions ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.person-line:hover,
+.person-line:focus-visible {
+  background: var(--hover);
+}
+
+.person-text {
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+.person-note,
+.person-none {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.person-none {
+  padding: 8px 10px;
+}
+
+@media (max-width: 600px) {
+  .person-page {
+    padding: 1rem 16px 2rem;
+  }
+
+  .person-field {
+    grid-template-columns: 1fr;
+  }
+}
+
+.person-page a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
 
 .event-note-start {
   display: contents;

@@ -60,6 +60,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `created:DAY` | The day the note was made | `created:2026-10-01..2026-10-14` |
 | `editor:NAME, edited-by:NAME` | Changed by a member or an agent, by name. @me is you | `editor:@me` |
 | `author:NAME` | First written by a member or an agent, by name. @me is you | `author:@me` |
+| `mentions:NAME, mention:NAME` | Mentions a person, by name or id. @me is you | `mentions:"Grace Hopper"` |
 | `is:open` | Not archived and not in Trash | `is:open` |
 | `is:archived` | Archived. A query that doesn't say so leaves archived notes out | `is:archived` |
 | `is:trashed` | In Trash. A query that doesn't say so leaves Trash out | `is:trashed` |
@@ -101,6 +102,7 @@ The tables are generated from `FILTERS` in `src/core/query.ts`, the one place a 
 | `created:DAY` | The day the note was made | `created:2026-10-01..2026-10-14` |
 | `editor:NAME, edited-by:NAME` | Changed by a member or an agent, by name. @me is you | `editor:@me` |
 | `author:NAME` | First written by a member or an agent, by name. @me is you | `author:@me` |
+| `assignee:NAME, assigned:NAME` | Assigned to a person: mentioned on the todo's line, by name or id. @me is you | `assignee:@me` |
 | `is:open` | Not done. A query that says neither is:open nor is:done lists only open todos | `is:open` |
 | `is:done` | Done. With is:open OR is:done, both | `is:done` |
 | `is:archived` | Archived. A query that doesn't say so leaves archived notes out | `is:archived` |

@@ -59,6 +59,7 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
 
   /** `after` is how far the item's own trigger is past where the list starts, which is the earliest trigger of those that fit. */
   const optionFor = (completion: Completion, item: CompletionItem, after: number): Option => ({
+    ...(item.tone && { type: item.tone }),
     label: item.label,
     detail: item.detail,
     apply(view, _picked, listFrom, end) {
@@ -104,7 +105,7 @@ export function completing(given: readonly Completion[], onFail: (completion: Co
   // No delays: a member who types `/timer` and Enter without a pause means the timer.
   return [
     // A list opens with nothing highlighted, and its first item is highlighted in the same turn unless a prose trigger follows other words on its line, where Enter stays a new line.
-    autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0, selectOnOpen: false }),
+    autocompletion({ override: [source], icons: false, activateOnTypingDelay: 0, interactionDelay: 0, selectOnOpen: false, optionClass: (option) => (option.type ? `cm-completion-${option.type}` : "") }),
     EditorView.updateListener.of(({ view, state }) => {
       if (currentCompletions(state).length && selectedCompletionIndex(state) === null && entersAt(state)) view.dispatch({ effects: setSelectedCompletion(0) });
     }),

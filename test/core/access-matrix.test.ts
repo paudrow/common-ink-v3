@@ -67,8 +67,8 @@ interface World {
 
 const address = () => `${crypto.randomUUID()}@example.com`;
 
-/** Each note has a todo with words of its own, and a tag of its own, which give the note away as its title does. */
-const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name}`;
+/** Each note has a todo with words of its own, a tag of its own, and someone of its own it is assigned to, which give the note away as its title does. */
+const todoOf = (name: NoteName) => `- [ ] todo-${name} +proj-${name} #tag-${name} @[[who-${name}]]`;
 const textOf = (name: NoteName, more = "") => `# Title-${name}\n\nbody-${name} ${more}\n${todoOf(name)}`;
 
 /** `more` is written in every note's text, after its own words. */
@@ -118,7 +118,7 @@ async function world(more = ""): Promise<World> {
   for (const name of NOTES) spare[name] = (await perform(env.DB, name === "secret" ? eve : name === "vpriv" ? vera : ada, { type: "grant.set", noteId: notes[name], email: `spare-${name}-${address()}`, access: "view" })).id;
 
   const marks = {} as World["marks"];
-  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`];
+  for (const name of NOTES) marks[name] = [notes[name], `Title-${name}`, `body-${name}`, `spare-${name}-`, `todo-${name}`, `proj-${name}`, `tag-${name}`, `who-${name}`];
   for (const name of FOLDERS) marks[name] = [folders[name], `${name}-folder`];
   marks.secret.push(zed.agent.id, "Zed-agent");
 
@@ -260,6 +260,12 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "event.update": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none", etag: "none", title: "No" }) },
   "event.create": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", calendarId: "none", title: "No", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } }) },
   "contact.list": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  // Only the member changes a contact, and only their own: with nothing connected here there is none of anyone's to change. Agents are refused each (NOT_FOR_AGENTS).
+  "contact.update": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", id: "people/c1", etag: "none", name: "No" }) },
+  "contact.photo": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", id: "people/c1", photo: null }) },
+  "contact.create": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-contacts", name: "No" }) },
+  // Asked in capitals, so the answer's echo of who it is about is no mark of the note: only a line of it would be.
+  "person.read": { on: "workspace", who: EVERYONE, args: () => ({ who: "WHO-TEAM" }) },
   "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
   "record.notes": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
@@ -294,9 +300,9 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "record.refer"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer"];
 /** What answers from the asker's own data sources, which are in no folder. */
-const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "record.refer", "record.read", "record.notes"];
+const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "record.refer", "record.read", "record.notes"];
 const AGENTS = [
   "their agent",
   "their read-only agent",
@@ -668,6 +674,12 @@ const NOTE_FILTERS: Record<string, Row[]> = {
     { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) },
     { query: "no:backlink", finds: ({ sees }) => NOTES.filter((note) => note !== "open" || !sees("secret")) },
   ],
+  mentions: [
+    { query: "mentions:who-team", finds: ["team"] },
+    { query: "mention:WHO-DEEP OR mentions:who-secret", finds: ["deep", "secret"] },
+    { query: "-mentions:who-open", finds: NOTES.filter((note) => note !== "open") },
+    { query: "mentions:@me", finds: [] },
+  ],
   in: [{ query: "Title in:title", finds: NOTES }, { query: "body in:title", finds: [] }, { query: "body in:body -Title-team", finds: NOTES.filter((note) => note !== "team") }],
   sort: [{ query: "body sort:title-desc", finds: NOTES }],
 };
@@ -688,6 +700,12 @@ const TODO_FILTERS: Record<string, Row[]> = {
     { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
   ],
   has: [{ query: "has:due", finds: [] }, { query: "no:due", finds: NOTES }, { query: "has:repeat", finds: [] }, { query: "no:repeat has:tag", finds: NOTES }, { query: "has:link", finds: ["secret"] }, { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) }],
+  assignee: [
+    { query: "assignee:who-team", finds: ["team"] },
+    { query: "assigned:WHO-LONE OR assignee:who-secret", finds: ["lone", "secret"] },
+    { query: "-assignee:who-open", finds: NOTES.filter((note) => note !== "open") },
+    { query: "assignee:@me", finds: [] },
+  ],
   due: [{ query: "due:<today", finds: [] }, { query: "-due:<today", finds: NOTES }, { query: "due:2020-01-01..2030-01-01", finds: [] }],
   priority: [{ query: "priority:none", finds: NOTES }, { query: "priority:>=low", finds: [] }, { query: "importance:0..3", finds: NOTES }],
   in: [{ query: "todo-team", finds: ["team"] }, { query: "Title-team", finds: [] }, { query: "Title-team in:title", finds: ["team"] }, { query: "body-team in:body", finds: [] }],

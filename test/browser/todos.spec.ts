@@ -1056,7 +1056,7 @@ test("an agent lists todos by folder and by tag and checks one off, and the Todo
   const listed = await agent.tool<Listed>("list_todos", { folderId: house.id, importance: [2] });
   expect(listed.todos.map((t) => t.words)).toEqual(["Call the bank +Home"]);
   expect(listed.todos[0]).not.toHaveProperty("projects");
-  expect(await agent.tool("todo_filters", {})).toEqual({ tags: ["office", "outside"] });
+  expect(await agent.tool("todo_filters", {})).toEqual({ tags: ["office", "outside"], assignees: [] });
   const { noteId, revision, line: at, text } = listed.todos[0]!;
   await agent.tool("set_todo", { id: noteId, revision, line: at, text, done: true, due: "2026-10-20" });
   // The same call again, as after an answer that never arrived, changes nothing more.

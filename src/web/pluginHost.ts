@@ -148,6 +148,9 @@ function keptFromPerform(type: string): string | null {
   return null;
 }
 
+/** Why a plugin that isn't Common Ink's own is refused an operation, or null when it isn't. The type `OwnOnly` says the same. */
+const ownOnly = (type: string): string | null => (/^(source|event|contact|record)\./.test(type) ? "a member's data sources are theirs, and are read only by Common Ink's own plugins" : null);
+
 export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
   const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);
   const commands = new Map<string, Owned<Command>>();
@@ -223,7 +226,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
       perform(op) {
         const sent = { ...(op as OpInput) };
         const type: unknown = sent.type;
-        const why = typeof type === "string" ? keptFromPerform(type) : "a plugin can't read or change the member's settings";
+        const why = typeof type === "string" ? (keptFromPerform(type) ?? (trusted.includes(plugin) ? null : ownOnly(type))) : "a plugin can't read or change the member's settings";
         return why ? Promise.reject(new Error(`${plugin.name} can't ${String(type)}: ${why}`)) : provided.perform(sent as typeof op);
       },
       settings: {

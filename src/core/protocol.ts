@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { NoteState } from "./lifecycle.ts";
+import { readableName } from "./mentions.ts";
 import { parseRule } from "./recurrence.ts";
 import { dayIn } from "./history.ts";
 import { MAX_SEARCH_LENGTH, type SortKey } from "./query.ts";
@@ -84,6 +85,23 @@ const FolderName = z
  */
 const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 
+/**
+ * What a write does with a mention it introduces, `@[[Name]]` or `@[[id]]`, outside code. `resolve`
+ * stores a mention of the one member with that name, ignoring case, by their id, as
+ * `@[[id|Name]]`, and refuses the write when several members have the name. A name no member has is
+ * left as written: a mention of someone by name, who is told nothing and given nothing. `keep`
+ * leaves every mention as written. A writer who isn't a member is never told who is one, so theirs
+ * are kept.
+ */
+const MentionNames = z.enum(["resolve", "keep"]).default("resolve");
+/** A member's id, or the name of anyone else as a mention writes it. */
+const Person = z
+  .string()
+  .max(200)
+  .regex(/^[^[\]|\n]*$/, "can't contain brackets, | or a line break")
+  .transform(readableName)
+  .refine((name) => name.length > 0, "is no name: nothing in it shows");
+
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
 /** A time zone by its name, such as Europe/Paris. */
@@ -128,6 +146,37 @@ export type SearchSort = (typeof SEARCH_SORTS)[number];
 const SourceId = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, "not a data source's id");
 /** A record's id as its data source gave it. It is passed back to that data source and read as nothing else. */
 const RecordId = z.string().min(1).max(1024);
+/** What one line of a contact's says: an email, a phone number, an address, a page. */
+const LineValue = (max: number) => z.string().trim().min(1).max(max);
+/** A line of a contact's with its label: Google's own type, one the member wrote, or none. */
+const Labelled = <V extends z.ZodString>(value: V) => z.object({ value, type: z.string().trim().min(1).max(100).nullable().default(null) });
+/** A birthday as YYYY-MM-DD, or --MM-DD when the year isn't known, on a day the month has. */
+const Birthday = z
+  .string()
+  .regex(/^(\d{4}|-)-(\d{2})-(\d{2})$/, "a birthday is YYYY-MM-DD, or --MM-DD without the year")
+  .refine((day) => {
+    const [, year, month, date] = /^(\d{4}|-)-(\d{2})-(\d{2})$/.exec(day)!;
+    const last = new Date(Date.UTC(year === "-" ? 2024 : Number(year), Number(month), 0)).getUTCDate();
+    return Number(month) >= 1 && Number(month) <= 12 && Number(date) >= 1 && Number(date) <= last;
+  }, "not a day of the year");
+/** What a contact's page can change of them. Each is the whole of that field: a list given is the list it becomes, and null takes it away. */
+const ContactFields = {
+  name: z.string().trim().min(1).max(500),
+  emails: z.array(Labelled(LineValue(320).regex(/^[^\s@]+@[^\s@]+$/, "not an email address"))).max(20),
+  phones: z.array(Labelled(LineValue(100).regex(/^[\d\s()+.\-/*#,;ext]+$/i, "not a phone number"))).max(20),
+  organization: LineValue(500).nullable(),
+  title: LineValue(500).nullable(),
+  addresses: z.array(Labelled(LineValue(1000))).max(10),
+  birthday: Birthday.nullable(),
+  urls: z.array(Labelled(LineValue(2000).regex(/^https?:\/\/[^\s]+$/, "a website starts https:// or http://"))).max(20),
+  notes: z.string().max(8000).nullable(),
+};
+/** A picture as its bytes in base64: a JPEG or a PNG, up to half a megabyte. */
+const Photo = z
+  .string()
+  .max(700_000)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/, "not base64")
+  .refine((b64) => b64.startsWith("/9j/") || b64.startsWith("iVBORw0KGgo"), "a picture is a JPEG or a PNG");
 /**
  * When an event is. An all-day event is on calendar dates, `from` its first day and `to` its last,
  * with no time and no zone. Any other is between two instants.
@@ -148,7 +197,7 @@ export const Op = z.discriminatedUnion("type", [
    * archived notes and no live one.
    */
   z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived }),
-  z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles }),
+  z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles, mentionNames: MentionNames }),
   /** The note, and for each note its text links to by id, that note's title now. A note in Trash is read as any other, and its `state` says where it is. */
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
   z.object({
@@ -159,6 +208,7 @@ export const Op = z.discriminatedUnion("type", [
     /** Chosen by the writer; a write sent again with the same id is recorded once. */
     writeId: z.string().min(1).max(64).optional(),
     linkTitles: LinkTitles,
+    mentionNames: MentionNames,
     /**
      * The day it is for the writer, which counts when the write checks off a recurring todo: the todo
      * is completed on that day, as todo.set does it. Left out, it is today in the time zone the
@@ -296,7 +346,9 @@ export const Op = z.discriminatedUnion("type", [
    * The fields beside `query` are from before it could say them, and narrow it further. `dueFrom` and
    * `dueTo` are days, both included, and leave out todos with no due date; `noDue` lists only those.
    * `importance` lists the priority levels wanted, 0 for None to 3 for High. `tag` matches ignoring case, and is a tag
-   * of the todo's note: one written on the todo's own line, or anywhere else in the note. `folderId`
+   * of the todo's note: one written on the todo's own line, or anywhere else in the note. `assignee`
+   * is `assignee:` of the query: a member's id, or anyone else's name, ignoring case. `assignedToMe`
+   * is `assignee:@me`: the asker, or the member an agent acts for. `folderId`
    * lists the todos of the notes in that folder and in every folder under it; one the asker can't see
    * is no folder. Pass the answer's `next` as `offset` for the page after. A field it doesn't know is
    * refused, so a filter it no longer has, such as a project, is never read as no filter.
@@ -315,6 +367,8 @@ export const Op = z.discriminatedUnion("type", [
     dueTo: Day.optional(),
     noDue: z.boolean().optional(),
     importance: z.array(ImportanceLevel).min(1).max(4).optional(),
+    assignee: Person.optional(),
+    assignedToMe: z.boolean().optional(),
     includeCompleted: z.boolean().default(false),
     includeArchived: IncludeArchived,
     noteId: Id.optional(),
@@ -322,7 +376,7 @@ export const Op = z.discriminatedUnion("type", [
     limit: z.number().int().min(1).max(200).default(100),
     offset: z.number().int().min(0).default(0),
   }).strict(),
-  /** What todo.list can be narrowed by, besides the folders of folder.list: the tags of the notes that have todos, in notes the asker can see. */
+  /** What todo.list can be narrowed by, besides the folders of folder.list: the tags of the notes that have todos, and who todos are assigned to, in notes the asker can see. */
   z.object({ type: z.literal("todo.filters"), includeArchived: IncludeArchived }),
   /**
    * Changes one todo by rewriting its line, as a change to its note by whoever asks. `revision`,
@@ -343,6 +397,11 @@ export const Op = z.discriminatedUnion("type", [
    * `skip` moves a recurring todo's due date to its next one with nothing checked off, recorded or
    * filed. It counts as one of a rule's times. It is refused for a todo that doesn't recur, for the
    * last time of a rule that ends, and together with `done`.
+   *
+   * `assign` assigns it to a person by writing a mention of them on the line: a member's id, or a
+   * name. A name one member has is theirs, as it is for a mention note.write introduces, and a name
+   * no member has is written as a name. `unassign` takes it from a member's id or name, or from
+   * anyone else's name, and is refused when the listed line isn't assigned to them.
    */
   z.object({
     type: z.literal("todo.set"),
@@ -354,6 +413,8 @@ export const Op = z.discriminatedUnion("type", [
     importance: ImportanceLevel.optional(),
     due: Day.nullable().optional(),
     every: Recurrence.nullable().optional(),
+    assign: Person.optional(),
+    unassign: Person.optional(),
     skip: z.boolean().optional(),
     on: Day.optional(),
     /** What the todo says instead: its words and tags, as todo.list's `words`, on one line. */
@@ -435,9 +496,10 @@ export const Op = z.discriminatedUnion("type", [
    * Gives whoever signs in with `email` view or edit on a note or a folder, or changes what they
    * have. Someone who isn't a member becomes a guest, who sees that and nothing else. Naming a
    * member only narrows what their role allows there, which an admin does; on a private note of
-   * one's own it lets that member in.
+   * one's own it lets that member in. A member can be named by `memberId` in place of `email`,
+   * since only an admin is told a member's email. The grant then keeps the email from whoever made it.
    */
-  z.object({ type: z.literal("grant.set"), ...On, email: Email, access: GrantAccess }),
+  z.object({ type: z.literal("grant.set"), ...On, email: Email.optional(), memberId: Id.optional(), access: GrantAccess }),
   /**
    * Sets the link on a note or a folder: `public` opens for anyone who has it, `signed_in` for
    * anyone signed in to Common Ink who has it, and null takes the link away, which stops it at once.
@@ -464,9 +526,10 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("source.list") }),
   /**
    * Connects a data source. `redirect`, when there is one, is where the member's browser goes to
-   * agree to it, and `back` is the path in Common Ink it returns to.
+   * agree to it, and `back` is the path in Common Ink it returns to. `edit` asks to change it as well
+   * as read it, where that is agreed to apart, as Google's contacts are.
    */
-  z.object({ type: z.literal("source.connect"), id: SourceId, back: z.string().max(1000).default("/") }),
+  z.object({ type: z.literal("source.connect"), id: SourceId, back: z.string().max(1000).default("/"), edit: z.boolean().default(false) }),
   /** Disconnects a data source, and every other one that came through the same account: they were agreed to as one. */
   z.object({ type: z.literal("source.disconnect"), id: SourceId }),
   /**
@@ -506,6 +569,25 @@ export const Op = z.discriminatedUnion("type", [
   }),
   /** The asker's contacts by name. `query` keeps those with every word of it at the start of a word of their name, email or organization. */
   z.object({ type: z.literal("contact.list"), query: z.string().max(100).optional() }),
+  /**
+   * Changes one of the asker's contacts where it is kept, as the member whose it is: only the fields
+   * given, each as a whole. `etag` is the contact's as it was read: the change is refused when the
+   * contact has changed there since. A data source that is read-only refuses.
+   */
+  z.object({ type: z.literal("contact.update"), sourceId: SourceId, id: RecordId, etag: z.string().min(1).max(200), ...z.object(ContactFields).partial().shape }),
+  /** Puts a picture on one of the asker's contacts where it is kept, in place of the one it had, or with null takes its own off. */
+  z.object({ type: z.literal("contact.photo"), sourceId: SourceId, id: RecordId, photo: Photo.nullable() }),
+  /** Adds a contact to the asker's own contacts where they are kept: a name, and whatever else is known of them. */
+  z.object({ type: z.literal("contact.create"), sourceId: SourceId, ...z.object(ContactFields).partial().shape, name: ContactFields.name }),
+  /**
+   * A person, as a mention names them, as the asker may be told of them: what their page shows. `who`
+   * is a member's id, or a name. A name one member has is that member, for an asker told who the
+   * members are. The member they are, only for such an asker. The asker's own contacts that are them,
+   * matched by name or by the member's email, with all those contacts hold, and nobody else's. The
+   * open todos assigned to them, and each line that mentions them, in the notes the asker can see,
+   * the note changed latest first, `limit` of them.
+   */
+  z.object({ type: z.literal("person.read"), who: Person, limit: z.number().int().min(1).max(200).default(50) }),
   /**
    * What a note writes to reference an event or a contact: `ref`, an id that says nothing of the
    * record, and `text`, the embed that carries it. Asked again of the same record it answers the same.
@@ -616,9 +698,23 @@ export interface LinkedNote {
   state: NoteState | null;
 }
 
+/**
+ * Someone a note mentions, or a todo is assigned to. `id` is the person's id when the mention names
+ * one, and null for a name alone. `member` says they are a member of the workspace now, and `name`
+ * is then their name now. Otherwise, and always for an asker who isn't a member themself, `name` is
+ * the name as the note writes it, and nothing else is told of them.
+ */
+export interface Mentioned {
+  id: string | null;
+  name: string;
+  member: boolean;
+}
+
 export interface ReadNote extends Note {
   /** Each note the text links to by id, once, in the order they first appear. */
   links: LinkedNote[];
+  /** Each person the text mentions, once, in the order they first appear. */
+  mentions: Mentioned[];
 }
 
 /** A todo as a listing gives it. `revision`, `line` and `text` are what todo.set finds it by. */
@@ -644,7 +740,9 @@ export interface ListedTodo {
   lastDone: LastDone | null;
   /** The tags of the note it is in. The ones written on its own line are those `text` has. */
   tags: string[];
-  /** The line without its list mark, checkbox, importance and due date. */
+  /** Who it is assigned to: each person mentioned on its line. */
+  assignees: Mentioned[];
+  /** The line without its list mark, checkbox, importance, due date and assignees. */
   words: string;
   /** What the one asking may do with its note. With edit, todo.set changes it. */
   access: GrantAccess;
@@ -694,7 +792,7 @@ export interface Grant {
   to:
     | {
         kind: "person";
-        /** Kept from anyone but an admin and whoever made the grant, once a person has taken the grant up. */
+        /** Kept from anyone but an admin and whoever made the grant by typing it, once a person has taken the grant up. */
         email: string | null;
         /** Null until someone signs in with the email. */
         personId: string | null;
@@ -984,7 +1082,7 @@ export interface Results {
   /** `next` is the `offset` of the page after, or null on the last. */
   "todo.list": { todos: ListedTodo[]; next: number | null };
   /** Each name once, ignoring case, as a note writes it. */
-  "todo.filters": { tags: string[] };
+  "todo.filters": { tags: string[]; assignees: Mentioned[] };
   "todo.set": Written;
   "todo.history": { completions: Completion[] };
   "daily.open": Note;
@@ -1051,6 +1149,10 @@ export interface Results {
   "event.create": CalendarEvent;
   /** `more` when a data source has more contacts than it lists. */
   "contact.list": { contacts: Contact[]; sources: Source[]; more: boolean };
+  "contact.update": ContactCard;
+  "contact.photo": ContactCard;
+  "contact.create": ContactCard;
+  "person.read": PersonPage;
   "record.refer": Reference;
   "record.read": SourceRecord;
   "record.notes": { notes: NoteAbout[] };
@@ -1070,6 +1172,8 @@ export interface Source {
   state: SourceState;
   /** False for a read-only data source, which refuses every change. */
   writable: boolean;
+  /** Set on one that is read-only only because the member agreed to no more: connecting it again with `edit` asks to change it too. */
+  reconnectToWrite?: true;
   /** The account it is connected to, or null when it isn't. */
   account: string | null;
 }
@@ -1110,14 +1214,85 @@ export interface CalendarEvent {
   url: string | null;
 }
 
+/**
+ * The labels Google's contacts have of their own for each kind of line, as People's `type` names
+ * them, each with the plain words it is shown in. Any other label is one the member wrote.
+ */
+export const CONTACT_LABELS = {
+  emails: { home: "Home email", work: "Work email", other: "Other email" },
+  phones: { mobile: "Mobile", home: "Home phone", work: "Work phone", main: "Main", homeFax: "Home fax", workFax: "Work fax", pager: "Pager", other: "Other phone" },
+  addresses: { home: "Home address", work: "Work address", other: "Other address" },
+  urls: { homePage: "Home page", work: "Work website", blog: "Blog", profile: "Profile", other: "Other website" },
+} as const satisfies Record<string, Record<string, string>>;
+/** A contact's fields that are lines, each with a label. */
+export type LabelledField = keyof typeof CONTACT_LABELS;
+
+/** The label a member typed, as it is kept: one of Google's own when it names one, in any case and either as its key or its words; else the words as typed, spaces made one; null when empty. */
+export function labelType(field: LabelledField, typed: string): string | null {
+  const said = typed.trim().replace(/\s+/g, " ");
+  if (!said) return null;
+  const folded = said.toLowerCase();
+  return Object.entries(CONTACT_LABELS[field]).find(([type, words]) => type.toLowerCase() === folded || words.toLowerCase() === folded)?.[0] ?? said;
+}
+
+/** One line of a contact's and its label: a key of `CONTACT_LABELS` for its field, a label the member wrote, or null for none. */
+export interface ContactLine {
+  value: string;
+  type: string | null;
+}
+
 export interface Contact {
   sourceId: string;
   id: string;
   name: string;
-  emails: string[];
-  phones: string[];
+  emails: ContactLine[];
+  phones: ContactLine[];
   organization: string | null;
   url: string | null;
+}
+
+/** A contact with all its data source holds of them, as its owner alone is shown it. */
+export interface ContactCard extends Contact {
+  /** Their job title, where the organization is. */
+  title: string | null;
+  addresses: ContactLine[];
+  /** YYYY-MM-DD, or --MM-DD when the year isn't known. */
+  birthday: string | null;
+  notes: string | null;
+  /** An https address of their picture, or a data: address for one kept here. */
+  photo: string | null;
+  urls: ContactLine[];
+  /** Sent back with a change, which is refused when the contact has changed since. */
+  etag: string;
+}
+
+/** A change to a contact: each field given is the whole of it, and null takes it away. */
+export type ContactChange = Partial<{ name: string; emails: ContactLine[]; phones: ContactLine[]; organization: string | null; title: string | null; addresses: ContactLine[]; birthday: string | null; urls: ContactLine[]; notes: string | null }>;
+
+/** One line of a note that mentions a person, as the asker is shown it: each mention on it written as the name it shows. */
+export interface MentionLine {
+  noteId: string;
+  noteTitle: string;
+  line: number;
+  text: string;
+  updatedAt: number;
+}
+
+/** A person as one asker may be told of them. */
+export interface PersonPage {
+  /** Who it is, as a mention names them: a member's id, or a name. */
+  who: string;
+  name: string;
+  member: Member | null;
+  contacts: ContactCard[];
+  todos: ListedTodo[];
+  mentionedIn: MentionLine[];
+  /** Whether more lines mention them than are listed. */
+  more: boolean;
+  /** The query that finds the notes that mention them, which a search from their page is narrowed by. */
+  query: string;
+  /** The query that lists the todos assigned to them, as the Todos page reads it. */
+  todoQuery: string;
 }
 
 export type SourceRecord = { kind: "event"; ref: string; event: CalendarEvent } | { kind: "contact"; ref: string; contact: Contact };

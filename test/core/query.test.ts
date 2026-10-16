@@ -58,6 +58,10 @@ const READS: [typed: string, scope: Scope, query: Query, printed: string][] = [
   ["due:<today", "todos", q(filter("due", "today", "<")), "due:<today"],
   ["editor:@me", "notes", q(filter("editor", "@me")), "editor:@me"],
   ['edited-by:"Ada Lovelace"', "notes", q(filter("editor", "Ada Lovelace")), 'editor:"Ada Lovelace"'],
+  ['mentions:"Grace Hopper"', "notes", q(filter("mentions", "Grace Hopper")), 'mentions:"Grace Hopper"'],
+  ["mention:@me", "notes", q(filter("mentions", "@me")), "mentions:@me"],
+  ["assignee:@me", "todos", q(filter("assignee", "@me")), "assignee:@me"],
+  ['assigned:"Sam Okafor"', "todos", q(filter("assignee", "Sam Okafor")), 'assignee:"Sam Okafor"'],
   ["author:Scribe", "todos", q(filter("author", "Scribe")), "author:Scribe"],
   ["is:archived", "notes", q(filter("is", "archived")), "is:archived"],
   ["is:open", "notes", q(filter("is", "open")), "is:open"],
@@ -388,7 +392,7 @@ describe("what is said of the language", () => {
       for (const row of syntax(scope)) expect(parse(row.example, scope), `${scope}: ${row.example}`).toMatchObject({ ok: true });
       for (const key of keysFor(scope)) expect(syntax(scope).some((row) => row.form.startsWith(`${key}:`)), key).toBe(true);
     }
-    expect(KEYS).toEqual(["folder", "tag", "updated", "created", "editor", "author", "is", "has", "due", "priority", "in", "sort"]);
+    expect(KEYS).toEqual(["folder", "tag", "updated", "created", "editor", "author", "mentions", "assignee", "is", "has", "due", "priority", "in", "sort"]);
   });
 
   it("has Shared and Private under Visibility, apart from the states a note or a todo is in, in the builder and the help alike", () => {

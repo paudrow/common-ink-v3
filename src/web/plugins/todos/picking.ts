@@ -11,8 +11,8 @@ export type ChipKind = "due" | "importance" | "every";
 /** The chips of a row on the Todos page that open a popover: those, and Add tag. A tag's own chip narrows the list instead. */
 export type RowChip = ChipKind | "tag";
 
-/** What a row's popover can be open for: one of its chips, its last-done chip, which lists its completions, or its "+N", which lists the tags it doesn't show. */
-export type Opened = RowChip | "done" | "tags";
+/** What a row's popover can be open for: one of its chips, its last-done chip, which lists its completions, its "+N", which lists the tags it doesn't show, or an assignee's, which lists who it can be assigned to. */
+export type Opened = RowChip | "done" | "tags" | "who";
 
 /** Which todo's chip has its popover open, by the todo's key in the list, or nothing. One at a time, in the whole app. */
 export type Picking = { row: string; chip: Opened } | null;

@@ -526,10 +526,11 @@ test("a completion that throws offers nothing, typing carries on, and the Plugin
         activate(host: { completions: { register(completion: unknown): void } }) {
           host.completions.register({
             id: "people",
-            trigger: "@",
+            // Not `@`, which the mentions plugin offers people on: completions that share a trigger share a list.
+            trigger: "%",
             items: (typed: string) => {
               if (typed === "x") throw new Error("The people list broke");
-              return [{ label: "Ada Lovelace", insert: "@ada" }];
+              return [{ label: "Ada Lovelace", insert: "%ada" }];
             },
           });
         },
@@ -538,14 +539,14 @@ test("a completion that throws offers nothing, typing carries on, and the Plugin
   });
   const note = await open(page, "# People\n\n");
 
-  await slash(page, "ask @");
+  await slash(page, "ask %");
   await expect(options(page)).toHaveText(["Ada Lovelace"]);
   await page.keyboard.type("x");
   await expect(menu(page)).toHaveCount(0);
-  await slash(page, " ada@example.com and @");
+  await slash(page, " ada%example.com and %");
   await expect(options(page)).toHaveText(["Ada Lovelace"]);
   await page.keyboard.press("Enter");
-  await expect.poll(() => read(page, note.id)).toBe("# People\n\nask @x ada@example.com and @ada");
+  await expect.poll(() => read(page, note.id)).toBe("# People\n\nask %x ada%example.com and %ada");
   await openPlugins(page);
   await expect(page.getByRole("list", { name: "Plugins" }).getByRole("listitem").filter({ hasText: "Broken fixture" }).getByRole("alert")).toContainText("The people list broke");
 });

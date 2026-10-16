@@ -1,6 +1,6 @@
 import { shiftDay } from "../../core/events.ts";
 import { newId } from "../../core/ids.ts";
-import type { Calendar, CalendarEvent, Contact, EventWhen } from "../../core/protocol.ts";
+import { CONTACT_LABELS, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactLine, type EventWhen, type LabelledField } from "../../core/protocol.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type Described } from "../../core/sources.ts";
 import { connectPlain, connectionOf } from "./connections.ts";
 import type { Provider } from "./index.ts";
@@ -64,13 +64,36 @@ const PATTERNS: readonly Pattern[] = [
   { key: "holiday", days: [5], title: "Company holiday", calendar: "holidays", lasts: 1 },
 ];
 
-const CONTACTS: readonly Omit<Contact, "sourceId" | "url">[] = [
-  { id: "ada", name: "Ada Lovelace", emails: ["ada@example.com"], phones: ["+1 555 0100"], organization: "Analytical Engines" },
-  { id: "grace", name: "Grace Hopper", emails: ["grace@example.com", "hopper@navy.example"], phones: [], organization: "Navy" },
-  { id: "sam", name: "Sam Okafor", emails: [], phones: ["+1 555 0142"], organization: "Okafor Plumbing" },
-  { id: "zoe", name: "Zoë Álvarez", emails: ["zoe@example.com"], phones: [], organization: null },
-  { id: "lin", name: "Lin Wei", emails: ["lin@example.org"], phones: ["+86 10 5550 0199"], organization: "Harbor Books" },
+const NOTHING_MORE = { title: null, addresses: [], birthday: null, notes: null, photo: null, urls: [], etag: "0" };
+/** A line with no label. */
+const plain = (value: string): ContactLine => ({ value, type: null });
+const CONTACTS: readonly Omit<ContactCard, "sourceId" | "url">[] = [
+  { ...NOTHING_MORE, id: "ada", name: "Ada Lovelace", emails: [{ value: "ada@example.com", type: "work" }], phones: [{ value: "+1 555 0100", type: "mobile" }], organization: "Analytical Engines", title: "Analyst", birthday: "1815-12-10" },
+  { ...NOTHING_MORE, id: "grace", name: "Grace Hopper", emails: [{ value: "grace@example.com", type: "work" }, { value: "hopper@navy.example", type: "Navy" }], phones: [], organization: "Navy", title: "Rear Admiral", notes: "Met at the compiler workshop." },
+  {
+    id: "sam",
+    name: "Sam Okafor",
+    emails: [],
+    phones: [plain("+1 555 0142")],
+    organization: "Okafor Plumbing",
+    title: "Owner",
+    addresses: [plain("12 Water Lane, Springfield")],
+    birthday: "--04-21",
+    notes: "Fixed the boiler in March. Prefers a text to a call.",
+    photo: null,
+    urls: [plain("https://okafor-plumbing.example")],
+    etag: "0",
+  },
+  { ...NOTHING_MORE, id: "zoe", name: "Zoë Álvarez", emails: [plain("zoe@example.com")], phones: [], organization: null },
+  { ...NOTHING_MORE, id: "lin", name: "Lin Wei", emails: [plain("lin@example.org")], phones: [plain("+86 10 5550 0199")], organization: "Harbor Books", addresses: [plain("3 Harbor Road, Ningbo")] },
 ];
+
+/** A contact's row as it was kept, read as a contact is now: a line kept before lines had labels was a string, and is a line with none. */
+function keptAs(data: string): Partial<ContactCard> {
+  const card = JSON.parse(data) as Partial<Record<keyof ContactCard, unknown>>;
+  for (const field of Object.keys(CONTACT_LABELS) as LabelledField[]) if (Array.isArray(card[field])) card[field] = (card[field] as (string | ContactLine)[]).map((line) => (typeof line === "string" ? plain(line) : line));
+  return card as Partial<ContactCard>;
+}
 
 const dayOf = (time: number) => new Date(time).toISOString().slice(0, 10);
 
@@ -174,9 +197,65 @@ function calendar(db: D1Database, personId: string, info: Described): CalendarSo
   };
 }
 
-function contacts(info: Described): ContactsSource {
-  const all = CONTACTS.map((contact) => ({ ...contact, sourceId: "sample-contacts", url: null }));
-  return { kind: "contacts", info, list: async () => ({ contacts: all, more: false }), get: async (id) => all.find((c) => c.id === id) ?? null };
+/** What a contact's row in `sample_records` is kept as: its id there starts with this, so it is never taken for an event. */
+const CONTACT = "contact:";
+/** What agreeing to change the sample contacts, beyond reading them, is kept as on the connection. */
+export const EDIT_CONTACTS = "contacts.edit";
+
+/**
+ * The sample contacts, with the person's changes to them and the ones they added. As Google's are,
+ * they are read-only until the person agrees to more: connected again with `edit`.
+ */
+function contacts(db: D1Database, personId: string, info: Described, writable: boolean): ContactsSource {
+  const made: ContactCard[] = CONTACTS.map((contact) => ({ ...contact, sourceId: "sample-contacts", url: null }));
+  const all = async (): Promise<ContactCard[]> => {
+    const rows = new Map(
+      (await db.prepare("SELECT record_id, revision, data FROM sample_records WHERE person_id = ? AND record_id LIKE 'contact:%'").bind(personId).all<Changed & { record_id: string }>()).results.map((row) => [row.record_id.slice(CONTACT.length), row]),
+    );
+    const kept = (card: ContactCard, row: Changed | undefined): ContactCard => (row ? { ...card, ...keptAs(row.data), etag: String(row.revision) } : card);
+    const added = [...rows].filter(([id]) => id.startsWith(ADDED)).map(([id, row]) => kept({ ...made[0]!, ...NOTHING_MORE, id, name: "", emails: [], phones: [], organization: null }, row));
+    return [...made.map((card) => kept(card, rows.get(card.id))), ...added];
+  };
+  const get = async (id: string) => (await all()).find((c) => c.id === id) ?? null;
+  /** Keeps a contact as it now is. One statement either way, so of two changes made from the same reading exactly one is taken; with no reading named, it is taken as it comes. */
+  const keep = async (card: ContactCard, etag: string | null): Promise<ContactCard> => {
+    const { sourceId: _, url: __, etag: ___, ...data } = card;
+    const id = `${CONTACT}${card.id}`;
+    const row = await (etag === "0"
+      ? db.prepare("INSERT INTO sample_records (person_id, record_id, revision, data) VALUES (?, ?, 1, ?) ON CONFLICT (person_id, record_id) DO NOTHING RETURNING revision").bind(personId, id, JSON.stringify(data))
+      : db
+          .prepare("INSERT INTO sample_records (person_id, record_id, revision, data) VALUES (?1, ?2, 1, ?3) ON CONFLICT (person_id, record_id) DO UPDATE SET revision = revision + 1, data = ?3 WHERE ?4 IS NULL OR CAST(revision AS TEXT) = ?4 RETURNING revision")
+          .bind(personId, id, JSON.stringify(data), etag)
+    ).first<{ revision: number }>();
+    if (!row) throw new SourceError("stale", "It was changed since you opened it. Open it again, then make your change.");
+    return { ...card, etag: String(row.revision) };
+  };
+  const changed = (card: ContactCard, change: ContactChange): ContactCard => ({ ...card, ...Object.fromEntries(Object.entries(change).filter(([, v]) => v !== undefined)) });
+  return {
+    kind: "contacts",
+    info,
+    // A listing holds what a contact is found by, as a source's listing does; the rest is read one contact at a time.
+    list: async () => ({ contacts: (await all()).map(({ sourceId, id, name, emails, phones, organization, url }): Contact => ({ sourceId, id, name, emails, phones, organization, url })), more: false }),
+    get,
+    ...(writable && {
+      changes: {
+        async update(id, change, etag) {
+          const card = await get(id);
+          if (!card) throw new SourceError("refused", "No such contact");
+          if (card.etag !== etag) throw new SourceError("stale", "It was changed since you opened it. Open it again, then make your change.");
+          return keep(changed(card, change), etag);
+        },
+        async photo(id, photo) {
+          const card = await get(id);
+          if (!card) throw new SourceError("refused", "No such contact");
+          return keep({ ...card, photo: photo === null ? null : `data:image/${photo.startsWith("/9j/") ? "jpeg" : "png"};base64,${photo}` }, null);
+        },
+        async create(fields) {
+          return keep(changed({ ...made[0]!, ...NOTHING_MORE, id: `${ADDED}${newId()}`, emails: [], phones: [], organization: null }, fields as ContactChange), "0");
+        },
+      },
+    }),
+  };
 }
 
 export function sample(db: D1Database, now: () => number): Provider {
@@ -185,10 +264,13 @@ export function sample(db: D1Database, now: () => number): Provider {
     async of(personId) {
       const connection = await connectionOf(db, personId, PROVIDER);
       const info = (id: (typeof SOURCES)[number], name: string): Described => ({ id, name, provider: "Sample data", state: connection ? "connected" : "not_connected", account: connection?.account ?? null });
-      return [calendar(db, personId, info(SOURCE_ID, "Sample calendar")), contacts(info("sample-contacts", "Sample contacts"))];
+      const writable = connection?.scopes.includes(EDIT_CONTACTS) ?? false;
+      const people = info("sample-contacts", "Sample contacts");
+      return [calendar(db, personId, info(SOURCE_ID, "Sample calendar")), contacts(db, personId, connection && !writable ? { ...people, reconnectToWrite: true } : people, writable)];
     },
-    async connect(personId) {
+    async connect(personId, _sourceId, _back, edit) {
       await connectPlain(db, personId, PROVIDER, "Sample data", now());
+      if (edit) await db.prepare("UPDATE source_connections SET scopes = ?, updated_at = ? WHERE person_id = ? AND provider = ?").bind(EDIT_CONTACTS, now(), personId, PROVIDER).run();
       return { redirect: null };
     },
     async disconnect(personId) {

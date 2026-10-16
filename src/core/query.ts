@@ -25,7 +25,8 @@ export type ValueKind =
   | { type: "level"; levels: readonly string[] }
   | { type: "folder" }
   | { type: "tag" }
-  | { type: "person" };
+  | { type: "person" }
+  | { type: "mentioned" };
 
 /** One of the words a filter such as `is:` takes. The same word can mean one thing of a note and another of a todo. */
 export interface Word {
@@ -46,7 +47,7 @@ export interface Given {
   cmp: Cmp;
   value: string;
   to?: string;
-  /** What a folder's or a person's name was found to be, or for `is:shared` the notes it is true of. */
+  /** What a folder's or a person's name was found to be, who a mention of someone is matched by, or for `is:shared` the notes it is true of. */
   ids?: readonly string[];
 }
 
@@ -165,6 +166,26 @@ export const FILTERS = {
     example: "author:@me",
     shown: "NAME",
     sql: changedBy(true),
+  },
+  mentions: {
+    scopes: NOTES,
+    aliases: ["mention"],
+    value: { type: "mentioned" },
+    compares: false,
+    means: "Mentions a person, by name or id. @me is you",
+    example: 'mentions:"Grace Hopper"',
+    shown: "NAME",
+    sql: (c, given) => `EXISTS (SELECT 1 FROM mentions a WHERE a.note_id = n.id AND a.who IN ${among(c, given)})`,
+  },
+  assignee: {
+    scopes: TODOS,
+    aliases: ["assigned"],
+    value: { type: "mentioned" },
+    compares: false,
+    means: "Assigned to a person: mentioned on the todo's line, by name or id. @me is you",
+    example: "assignee:@me",
+    shown: "NAME",
+    sql: (c, given) => `EXISTS (SELECT 1 FROM mentions a WHERE a.note_id = t.note_id AND a.line = t.line AND a.who IN ${among(c, given)})`,
   },
   is: {
     scopes: BOTH,

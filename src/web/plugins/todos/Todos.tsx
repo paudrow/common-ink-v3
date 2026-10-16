@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
-import { Icon, MAX_SEARCH_LENGTH, TODO_SORT_WORDS, changeTodo, isNoteId, linksOn, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useInspected, useNow, type App, type ListedTodo, type PluginHost, type Results, type SortKey, type TodoChange, type TodoCompletion, type TodoSort, type WrittenLink } from "../../plugin-api.ts";
+import { Icon, MAX_SEARCH_LENGTH, TODO_SORT_WORDS, changeTodo, isNoteId, isPersonId, linksOn, mentionKey, mentionName, nameKey, parseQuery, parseTodo, ruleLabel, tagsOn, useInspected, useNow, type App, type ListedTodo, type Mentioned, type PluginHost, type Results, type SortKey, type TodoChange, type TodoCompletion, type TodoSort, type WrittenLink } from "../../plugin-api.ts";
 import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 import { closePopover, openPopover } from "../lib/Popover.tsx";
 import { QueryBar } from "../lib/QueryBar.tsx";
 import { EMPTY, keyOf, left, listing, pending, type Hold, type Listing, type ListingEvent } from "./arranged.ts";
+import { Assignees, sameWho, whoOf } from "./Assignees.tsx";
 import { ChipMenu, MoreTags, TagMenu, type PlacedTag } from "./ChipMenu.tsx";
 import { completed, refused, takeBack } from "./completed.ts";
 import { Completions } from "./Completions.tsx";
@@ -51,11 +52,17 @@ const fault = (err: unknown) => {
   return typeof status !== "number" || status >= 500 || status === 408 || status === 429;
 };
 
+/** What a row changes about its todo: as the todo's line is changed, with whoever is assigned or taken off named as the listing names them. */
+export type RowChange = Omit<TodoChange, "assign" | "unassign"> & { assign?: Mentioned; unassign?: Mentioned };
+
+const lineChange = ({ assign, unassign, ...rest }: RowChange): TodoChange => ({ ...rest, ...(assign && { assign: { id: assign.id, name: assign.name } }), ...(unassign && { unassign: whoOf(unassign) }) });
+const opChange = ({ assign, unassign, ...rest }: RowChange) => ({ ...rest, ...(assign && { assign: whoOf(assign) }), ...(unassign && { unassign: whoOf(unassign) }) });
+
 /** The todo as it reads once `change` is made on the day `on`, by the function the server makes it with: a recurring todo checked off stays open, due next. */
-function changed(todo: ListedTodo, change: TodoChange, on: string): ListedTodo {
+function changed(todo: ListedTodo, change: RowChange, on: string): ListedTodo {
   let text: string;
   try {
-    text = changeTodo(todo.text, change, on).line;
+    text = changeTodo(todo.text, lineChange(change), on).line;
   } catch {
     // A change the line no longer takes, such as a skip of a todo someone else just stopped: the server says why, and the row stays.
     return todo;
@@ -63,7 +70,9 @@ function changed(todo: ListedTodo, change: TodoChange, on: string): ListedTodo {
   const read = parseTodo(text);
   if (!read) return todo;
   const lastDone = read.lastDone && { on: read.lastDone.on, times: read.lastDone.times };
-  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, words: read.words };
+  const known = [...todo.assignees, ...(change.assign ? [change.assign] : [])];
+  const assignees = new Map(read.assignees.map((a) => [mentionKey(a), known.find((person) => sameWho(person, mentionKey(a))) ?? { id: isPersonId(a.target) ? a.target : null, name: mentionName(a), member: false }]));
+  return { ...todo, text, done: read.done, importance: read.importance, due: read.due?.date ?? null, every: read.every?.written ?? null, recurs: read.every ? ruleLabel(read.every.rule) : null, lastDone, assignees: [...assignees.values()], words: read.words };
 }
 
 /** Whether checking the todo off leaves it open, as a recurring one's completion does. */
@@ -148,13 +157,15 @@ interface RowProps {
   titleOf: TitleOf;
   /** Which of its chips has its popover open, if one does. */
   picked: Opened | null;
+  /** Who a todo can be assigned to from here: the members, and everyone a todo the member can see is assigned to. */
+  people: readonly Mentioned[];
   /** Whether its completion is on its way to the server. */
   completing: boolean;
   /** Whether a change the member made took it out of the list, which it stays in, greyed, until the list is refreshed. */
   gone: boolean;
   /** What is said under a row that is gone: what changed and why it will leave, or nothing. */
   why: string | null;
-  onChange: (todo: ListedTodo, change: TodoChange) => void;
+  onChange: (todo: ListedTodo, change: RowChange) => void;
   /** Takes one of the tags after its words off the todo's line; false when the line no longer has that tag there. */
   onUntag: (todo: ListedTodo, tag: PlacedTag) => boolean;
   onOpen: (todo: ListedTodo, beside?: boolean) => void;
@@ -175,7 +186,7 @@ interface RowProps {
  * narrows the list through its query; its cross, or Delete on it, takes the tag off. The row's menu, a right-click, Shift+F10 or the menu key, opens the note,
  * in front or beside the list.
  */
-function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, gone, why, onChange, onUntag, onOpen, completions, onPicking, onTag }: RowProps) {
+function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, completing, gone, why, onChange, onUntag, onOpen, completions, onPicking, onTag }: RowProps) {
   /** While the words are edited, how tall they were, which their line keeps so that nothing under it moves. */
   const [editing, setEditing] = useState<number | null>(null);
   /** Where the row's menu is open, if it is. */
@@ -219,7 +230,7 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, go
     show(chip, anchor, pickerLabel(chip, words), (close) => {
       const made = (to: TodoChange) => {
         close();
-        if (latest.current.text === todo.text) onChange(latest.current, to);
+        if (latest.current.text === todo.text) onChange(latest.current, to as RowChange);
       };
       return chip === "tag" ? (
         <TagMenu tags={tags} has={trailing} onPick={(name) => made({ words: tagged(latest.current.words, name) })} />
@@ -227,6 +238,18 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, go
         <ChipMenu chip={chip} todo={todo} now={now} onPick={made} onClose={close} />
       );
     });
+  /** Opens the list of who it can be assigned to under `anchor`: an assignee's chip, or Assign when it has nobody. */
+  const pickWho = (anchor: HTMLElement) =>
+    show("who", anchor, `Assignees of ${words}`, (close) => (
+      <Assignees
+        assigned={todo.assignees}
+        people={people}
+        onPick={(to) => {
+          close();
+          if (latest.current.text === todo.text) onChange(latest.current, to);
+        }}
+      />
+    ));
   // Listing them changes nothing, so someone who can only read may look.
   const listDone = (anchor: HTMLElement) =>
     show("done", anchor, "Completions", (close) => (
@@ -427,6 +450,30 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, picked, completing, go
             {level || <span className="todo-chip-word">Priority</span>}
           </button>
         )}
+        {todo.assignees.map((person) => (
+          <button
+            key={whoOf(person)}
+            type="button"
+            className="todo-chip todo-assignee"
+            data-chip="who"
+            data-member={person.member || undefined}
+            title={person.member ? `Assigned to ${person.name}, a member of this workspace` : `Assigned to ${person.name}, mentioned by name`}
+            aria-label={`Assigned to ${person.name}`}
+            aria-haspopup="dialog"
+            aria-expanded={picked === "who"}
+            disabled={readOnly}
+            onClick={(e) => pickWho(e.currentTarget)}
+          >
+            @{person.name}
+          </button>
+        ))}
+        {/* Only where there is someone to assign it to besides the member: a workspace of one has no Assign chip. */}
+        {offers && !todo.assignees.length && people.length > 1 && (
+          <button type="button" className="todo-chip todo-assign" data-chip="who" data-unset title="Assign" aria-label="Assign: nobody" aria-haspopup="dialog" aria-expanded={picked === "who"} onClick={(e) => pickWho(e.currentTarget)}>
+            <span className="chip-at" aria-hidden="true">@</span>
+            <span className="todo-chip-word">Assign</span>
+          </button>
+        )}
         {trailing.slice(0, SHOWN_TAGS).map((name, at) => (
           <span key={`${at} ${name}`} className="todo-tag-chip">
             <button
@@ -488,14 +535,32 @@ interface Props {
   onOpen: (todo: ListedTodo, beside?: boolean) => void;
 }
 
-export function TodosPage({ host, app, onOpen }: Props) {
-  /** The query the page's address names with `?q=`, as a link to the page does. */
-  const linked = useMemo(() => new URLSearchParams(app.query).get("q")?.trim() ?? null, [app.query]);
-  /** The member's order, kept with the account: the bar's `sort:` follows it, and the member's own `sort:` changes it. */
-  const sort = host.settings.get<TodoSort>("sort");
-  /** What is in the bar, and the query the list is of: the same once typing rests. It is kept in this browser, so the page opens the way it was left, in the account's order. */
-  const [typed, setTyped] = useState(() => (linked ?? sortedAs(savedQuery(host.storage.get("query"), host.storage.get("filters")), sort)).slice(0, MAX_SEARCH_LENGTH));
-  const [query, setQuery] = useState(typed);
+/** Stands in for the inspector where a list of todos is part of a page that tells the inspector itself. */
+const NO_INSPECTOR = { inspect: () => {} };
+
+interface ListProps extends Props {
+  /** The query the list is of, as the Todos page's bar takes it. */
+  query: string;
+  /** What the list is called, to the inspector and to a screen reader. With `inspected`, the inspector is about the notes its todos are in. */
+  label: string;
+  inspected?: boolean;
+  /** The tags the list is narrowed to, whose chips read as pressed. */
+  narrowedTo?: readonly string[];
+  onTag: (name: string) => void;
+  /** Told what the server said of a query that reads and can't be answered, and null once one is answered. */
+  onUnanswered?: (message: string | null, query: string) => void;
+  /** What the list says when it has no todo, or null to say nothing. */
+  none: string | null;
+  /** Whether a row a change took out of the list says why under itself: the Todos page's setting, which another plugin's page can't read. */
+  sayWhy?: boolean;
+}
+
+/**
+ * Todos as rows, read for a query and read again whenever a note changes: each row changed in place,
+ * one change after another, a checked one lingering struck through, and a row a change took out of the
+ * query staying, dimmed, until Refresh. The Todos page is its bar over one of these, and a person's page has one of their open todos.
+ */
+export function TodoList({ host, app, onOpen, query, label, inspected = false, narrowedTo: narrowedTags = [], onTag, onUnanswered, none, sayWhy = false }: ListProps) {
   /** Whether the list was read yet, and where more of it starts when there is more. */
   const [page, setPage] = useState<Pick<Results["todo.list"], "next"> | null>(null);
   const [list, arrange] = useReducer(listing<ListedTodo>, EMPTY as Listing<ListedTodo>);
@@ -503,8 +568,8 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const [problem, setProblem] = useState<string | null>(null);
   /** Why the list couldn't be read, until it is. */
   const [unread, setUnread] = useState<string | null>(null);
-  /** What the server said of a query that reads and can't be answered, and the query it said it of. */
-  const [unanswered, setUnanswered] = useState<{ query: string; message: string } | null>(null);
+  const unanswered = useRef(onUnanswered);
+  unanswered.current = onUnanswered;
   const [asked, setAsked] = useState(0);
   const [picked, onPicking] = useReducer(picking, null);
   /** The recurring todos whose completion is on its way. Checked again before it lands, one would be completed twice. */
@@ -515,15 +580,14 @@ export function TodosPage({ host, app, onOpen }: Props) {
   const shown = useRef<readonly ListedTodo[]>([]);
   shown.current = listed;
   // The inspector is about the notes the listed todos are in: History is their history, and Info counts them.
-  useInspected(app, page && { kind: "notes", label: "Todos", noteIds: [...new Set(list.fresh.map((t) => t.noteId))].sort() });
+  useInspected(inspected ? app : NO_INSPECTOR, page && { kind: "notes", label, noteIds: [...new Set(list.fresh.map((t) => t.noteId))].sort() });
   /** The changes on their way to the server, one at a time, how many there are, and the revision each note they changed is at now. */
   const sending = useRef({ last: Promise.resolve(), count: 0, revisions: new Map<string, number>() });
   // Today is the member's own: the day it is in this browser, looked at again each minute.
   const now = dayOf(new Date(useNow()));
   const read = useMemo(() => parseQuery(query, "todos"), [query]);
   const ask = useMemo(() => ({ query, today: now, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }), [query, now]);
-  /** The tags the list is narrowed to: their chips read as pressed. */
-  const narrowedTags = useMemo(() => narrowedTo(query), [query]);
+  useEffect(() => setProblem(null), [query]);
   // The list is read again whenever a note the member can see changes, by anyone, or is archived, trashed, or brought back.
   const version = useMemo(() => (app.notes ?? []).map((n) => `${n.id}:${n.revision}:${n.state}`).join(","), [app.notes]);
   const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
@@ -550,48 +614,6 @@ export function TodosPage({ host, app, onOpen }: Props) {
     if (!out) setTold(false);
   }, [out]);
 
-  const run = (text: string) => {
-    setQuery(text);
-    setProblem(null);
-    host.storage.set("query", text);
-    // A link's query stays in the address only while it is the page's: a reload then opens the query the member left.
-    if (linked !== null && text !== linked) app.go(app.path, { replace: true });
-  };
-  /** Runs a query the member asked for: its `sort:`, or none, is their order from now on, kept with the account. */
-  const askFor = (text: string) => {
-    run(text);
-    const choice = choiceIn(text);
-    if (choice !== null && choice !== host.settings.get<TodoSort>("sort") && !host.settings.set("sort", choice))
-      app.notify({ message: "The order couldn't be kept: your settings aren't read yet. Try again in a moment.", icon: "list" });
-  };
-  // The account's order is the bar's `sort:`: once the member's settings are read, and when it is reset or changed in another tab.
-  const lastSort = useRef(sort);
-  useEffect(() => {
-    if (lastSort.current === sort) return;
-    lastSort.current = sort;
-    // A link that names its order opens in that order.
-    if (typed === linked && /(^|\s)sort:/iu.test(typed)) return;
-    const next = sortedAs(typed, sort);
-    if (next === typed) return;
-    setTyped(next);
-    run(next);
-  }, [sort]);
-  // A link's query is the one the page is left at, whether the link opened the page or was followed while it was open.
-  const followed = useRef<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (linked === followed.current) return;
-    followed.current = linked;
-    if (linked === null) return;
-    setTyped(linked.slice(0, MAX_SEARCH_LENGTH));
-    run(linked.slice(0, MAX_SEARCH_LENGTH));
-  }, [linked]);
-  const wanted = typed.trim();
-  useEffect(() => {
-    if (wanted === query) return;
-    const timer = setTimeout(() => askFor(wanted), PAUSE_MS);
-    return () => clearTimeout(timer);
-  }, [wanted, query]);
-
   useEffect(() => {
     // A query that can't be read is said so under the bar, and the list stays as it was.
     if (!read.ok) return;
@@ -606,7 +628,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
         if (stale || sending.current.count) return;
         sending.current.revisions.clear();
         setUnread(null);
-        setUnanswered(null);
+        unanswered.current?.(null, ask.query);
         take({ type: "read", rows: listed.todos, refresh: had.current.readFor !== readFor });
         had.current.readFor = readFor;
         setPage({ next: listed.next });
@@ -626,7 +648,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
         setPage(null);
         arrange({ type: "read", rows: [], refresh: true });
         had.current.readFor = "";
-        setUnanswered({ query: ask.query, message });
+        unanswered.current?.(message, ask.query);
       },
     );
     return () => {
@@ -659,42 +681,18 @@ export function TodosPage({ host, app, onOpen }: Props) {
     if (button.matches(":focus-visible")) requestAnimationFrame(() => ul.current?.querySelector<HTMLElement>(".todo-box")?.focus());
   };
 
-  /** The order the list is in, as the Sort menu shows it: the query's `sort:`, which picking one writes in the bar. */
-  const sorted = sortChoice(read.ok ? read.query.sort : null);
-  const sortBy = (choice: string) => {
-    const next = withSort(typed, choice === "due" ? null : choice in SORTS ? TODO_SORT_WORDS[choice as TodoSort] : (choice as SortKey));
-    setTyped(next);
-    askFor(next);
-  };
-
-  // A Sort chosen in this browser before it was kept with the account moves there once, as soon as the member's settings are read, unless the account has one already.
-  useEffect(() => {
-    const move = () => {
-      const kept: unknown = host.storage.get("sort");
-      if (kept === undefined || kept === null) return true;
-      if (typeof kept === "string" && kept in SORTS && host.settings.get("sort") === "due" && !host.settings.set("sort", kept)) return false;
-      host.storage.set("sort", null);
-      return true;
-    };
-    if (move()) return;
-    const stop = host.settings.subscribe(() => void (move() && stop()));
-    return stop;
-  }, [host]);
-
-  /** What a row that a change took out of the list says under itself, unless the member turned that off. */
-  const sayWhy = host.settings.get<boolean>("sayWhyLeaving");
   const narrowing = useMemo(() => narrowingOf(query), [query]);
   const whyGone = (todo: ListedTodo) => leaving(todo, narrowing, now)?.says ?? null;
 
   /** Makes a change to a todo, after the ones before it. It answers with the todo's note as the change left it, or with why it was refused. */
   const send = useCallback(
-    (todo: ListedTodo, to: TodoChange, hold: Hold = "changed") => {
+    (todo: ListedTodo, to: RowChange, hold: Hold = "changed") => {
       // The row reads as changed at once, so the next change to it is made to the line as it will be.
       arrange({ type: "change", key: keyOf(todo), to: (t) => changed(t, to, now), hold });
       const queue = sending.current;
       queue.count++;
       // One at a time: each change names the line as the one before it left it, at the revision that one made.
-      const sent = queue.last.then(() => host.perform({ type: "todo.set", id: todo.noteId, revision: queue.revisions.get(keyOf(todo)) ?? todo.revision, line: todo.line, text: todo.text, ...to, on: now }));
+      const sent = queue.last.then(() => host.perform({ type: "todo.set", id: todo.noteId, revision: queue.revisions.get(keyOf(todo)) ?? todo.revision, line: todo.line, text: todo.text, ...opChange(to), on: now }));
       queue.last = sent
         .then(
           (note) => {
@@ -715,7 +713,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
   );
 
   const change = useCallback(
-    (todo: ListedTodo, to: TodoChange) => {
+    (todo: ListedTodo, to: RowChange) => {
       setProblem(null);
       const done = to.done === true && !todo.done;
       const rolls = done && comesAround(todo, now);
@@ -778,6 +776,23 @@ export function TodosPage({ host, app, onOpen }: Props) {
     [app, change, send],
   );
 
+  /** Who a todo can be assigned to: the members, when the member may list them, and whoever todos are assigned to now. */
+  const [people, setPeople] = useState<readonly Mentioned[]>([]);
+  useEffect(() => {
+    let stale = false;
+    const members = host.perform({ type: "member.list" }).then((list) => list.map((m): Mentioned => ({ id: m.personId, name: m.name, member: true })), () => []);
+    const assigned = host.perform({ type: "todo.filters", includeArchived: true }).then((filters) => filters.assignees, () => []);
+    void Promise.all([members, assigned]).then(([m, a]) => {
+      if (stale) return;
+      const all = new Map<string, Mentioned>();
+      for (const person of [...m, ...a]) if (!all.has(mentionKey({ target: whoOf(person) }))) all.set(mentionKey({ target: whoOf(person) }), person);
+      setPeople([...all.values()].sort((x, y) => Number(y.member) - Number(x.member) || x.name.localeCompare(y.name, undefined, { sensitivity: "base" })));
+    });
+    return () => {
+      stale = true;
+    };
+  }, [host, version]);
+
   const completions = useCallback(
     (todo: ListedTodo) => host.perform({ type: "todo.history", id: todo.noteId, revision: sending.current.revisions.get(keyOf(todo)) ?? todo.revision, line: todo.line, text: todo.text }).then((history) => history.completions),
     [host],
@@ -795,44 +810,13 @@ export function TodosPage({ host, app, onOpen }: Props) {
   };
 
   return (
-    <section className="todos-page" aria-label="Todos">
-      <h1>Todos</h1>
-      <div className="todo-tools">
-        <QueryBar
-          host={host}
-          app={app}
-          scope="todos"
-          value={typed}
-          label="Filter todos"
-          placeholder="Filter todos: words, #tag, due:<today, is:done"
-          problem={unanswered?.query === query ? unanswered.message : null}
-          onChange={(text, how) => {
-            setTyped(text);
-            if (how === "set" || !text.trim()) askFor(text.trim());
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && wanted !== query) askFor(wanted);
-          }}
-        />
-        <label className="todo-sort">
-          Sort
-          {/* Named by its label alone: the options it holds, Due date and Priority, are the names of filters. */}
-          <select aria-label="Sort" value={sorted} onChange={(e) => sortBy(e.target.value)}>
-            {Object.entries(SORTS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-            {!(sorted in SORTS) && <option value={sorted}>sort:{sorted}</option>}
-          </select>
-        </label>
-      </div>
+    <>
       {(problem ?? unread) && (
         <p className="notice" role="alert">
           {problem ?? unread}
         </p>
       )}
-      {page && listed.length === 0 && <p className="todo-none">{query ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}</p>}
+      {page && listed.length === 0 && none && <p className="todo-none">{none}</p>}
       {listed.length > 0 && (
         <div className="todo-card">
           <div className="todo-order-slot" role="status">
@@ -868,7 +852,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
           <ul
             ref={ul}
             className="todo-list"
-            aria-label="Todos"
+            aria-label={label}
             onFocus={(e) => {
               const row = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
               focused.current = row?.dataset.row ?? null;
@@ -887,6 +871,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
                 narrowedTo={narrowedTags}
                 tags={tags}
                 app={app}
+                people={people}
                 titleOf={titleOf}
                 picked={picked?.row === keyOf(todo) ? picked.chip : null}
                 completing={completing.has(keyOf(todo))}
@@ -897,14 +882,7 @@ export function TodosPage({ host, app, onOpen }: Props) {
                 onOpen={onOpen}
                 completions={completions}
                 onPicking={onPicking}
-                onTag={(name) => {
-                  // The chip does what it shows: a tag already typed and not yet run is not taken off by a chip that reads unpressed.
-                  const typedHas = narrowedTo(typed).some((tag) => nameKey(tag) === nameKey(name));
-                  const shownHas = narrowedTags.some((tag) => nameKey(tag) === nameKey(name));
-                  const next = typedHas === shownHas ? toggledTag(typed, name) : typed.trim();
-                  setTyped(next);
-                  run(next);
-                }}
+                onTag={onTag}
               />
             ))}
           </ul>
@@ -915,6 +893,139 @@ export function TodosPage({ host, app, onOpen }: Props) {
           Show more
         </button>
       )}
+    </>
+  );
+}
+
+export function TodosPage({ host, app, onOpen }: Props) {
+  /** The query the page's address names with `?q=`, as a link to the page does. */
+  const linked = useMemo(() => new URLSearchParams(app.query).get("q")?.trim() ?? null, [app.query]);
+  /** What is in the bar, and the query the list is of: the same once typing rests. It is kept in this browser, so the page opens the way it was left. */
+  /** The member's order, kept with the account: the bar's `sort:` follows it, and the member's own `sort:` changes it. */
+  const sort = host.settings.get<TodoSort>("sort");
+  const [typed, setTyped] = useState(() => (linked ?? sortedAs(savedQuery(host.storage.get("query"), host.storage.get("filters")), sort)).slice(0, MAX_SEARCH_LENGTH));
+  const [query, setQuery] = useState(typed);
+  /** What the server said of a query that reads and can't be answered, and the query it said it of. */
+  const [unanswered, setUnanswered] = useState<{ query: string; message: string } | null>(null);
+  /** The tags the list is narrowed to: their chips read as pressed. */
+  const narrowedTags = useMemo(() => narrowedTo(query), [query]);
+  const read = useMemo(() => parseQuery(query, "todos"), [query]);
+
+  const run = (text: string) => {
+    setQuery(text);
+    host.storage.set("query", text);
+    // A link's query stays in the address only while it is the page's: a reload then opens the query the member left.
+    if (linked !== null && text !== linked) app.go(app.path, { replace: true });
+  };
+  /** Runs a query the member asked for: its `sort:`, or none, is their order from now on, kept with the account. */
+  const askFor = (text: string) => {
+    run(text);
+    const choice = choiceIn(text);
+    if (choice !== null && choice !== host.settings.get<TodoSort>("sort") && !host.settings.set("sort", choice))
+      app.notify({ message: "The order couldn't be kept: your settings aren't read yet. Try again in a moment.", icon: "list" });
+  };
+  // The account's order is the bar's `sort:`: once the member's settings are read, and when it is reset or changed in another tab.
+  const lastSort = useRef(sort);
+  useEffect(() => {
+    if (lastSort.current === sort) return;
+    lastSort.current = sort;
+    // A link that names its order opens in that order.
+    if (typed === linked && /(^|\s)sort:/iu.test(typed)) return;
+    const next = sortedAs(typed, sort);
+    if (next === typed) return;
+    setTyped(next);
+    run(next);
+  }, [sort]);
+  // A Sort chosen in this browser before it was kept with the account moves there once, as soon as the member's settings are read, unless the account has one already.
+  useEffect(() => {
+    const move = () => {
+      const kept: unknown = host.storage.get("sort");
+      if (kept === undefined || kept === null) return true;
+      if (typeof kept === "string" && kept in SORTS && host.settings.get("sort") === "due" && !host.settings.set("sort", kept)) return false;
+      host.storage.set("sort", null);
+      return true;
+    };
+    if (move()) return;
+    const stop = host.settings.subscribe(() => void (move() && stop()));
+    return stop;
+  }, [host]);
+  // A link's query is the one the page is left at, whether the link opened the page or was followed while it was open.
+  const followed = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (linked === followed.current) return;
+    followed.current = linked;
+    if (linked === null) return;
+    setTyped(linked.slice(0, MAX_SEARCH_LENGTH));
+    run(linked.slice(0, MAX_SEARCH_LENGTH));
+  }, [linked]);
+  const wanted = typed.trim();
+  useEffect(() => {
+    if (wanted === query) return;
+    const timer = setTimeout(() => askFor(wanted), PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [wanted, query]);
+
+  /** The order the list is in, as the Sort menu shows it: the query's `sort:`, which picking one writes in the bar. */
+  const sorted = sortChoice(read.ok ? read.query.sort : null);
+  const sortBy = (choice: string) => {
+    const next = withSort(typed, choice === "due" ? null : choice in SORTS ? TODO_SORT_WORDS[choice as TodoSort] : (choice as SortKey));
+    setTyped(next);
+    askFor(next);
+  };
+
+  return (
+    <section className="todos-page" aria-label="Todos">
+      <h1>Todos</h1>
+      <div className="todo-tools">
+        <QueryBar
+          host={host}
+          app={app}
+          scope="todos"
+          value={typed}
+          label="Filter todos"
+          placeholder="Filter todos: words, #tag, due:<today, assignee:@me"
+          problem={unanswered?.query === query ? unanswered.message : null}
+          onChange={(text, how) => {
+            setTyped(text);
+            if (how === "set" || !text.trim()) askFor(text.trim());
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && wanted !== query) askFor(wanted);
+          }}
+        />
+        <label className="todo-sort">
+          Sort
+          {/* Named by its label alone: the options it holds, Due date and Priority, are the names of filters. */}
+          <select aria-label="Sort" value={sorted} onChange={(e) => sortBy(e.target.value)}>
+            {Object.entries(SORTS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+            {!(sorted in SORTS) && <option value={sorted}>sort:{sorted}</option>}
+          </select>
+        </label>
+      </div>
+      <TodoList
+        host={host}
+        app={app}
+        onOpen={onOpen}
+        query={query}
+        label="Todos"
+        inspected
+        narrowedTo={narrowedTags}
+        onUnanswered={(message, of) => setUnanswered(message === null ? null : { query: of, message })}
+        none={query ? "No todos match." : "Nothing to do. A todo is a line that starts - [ ] in any note."}
+        sayWhy={host.settings.get<boolean>("sayWhyLeaving")}
+        onTag={(name) => {
+          // The chip does what it shows: a tag already typed and not yet run is not taken off by a chip that reads unpressed.
+          const typedHas = narrowedTo(typed).some((tag) => nameKey(tag) === nameKey(name));
+          const shownHas = narrowedTags.some((tag) => nameKey(tag) === nameKey(name));
+          const next = typedHas === shownHas ? toggledTag(typed, name) : typed.trim();
+          setTyped(next);
+          run(next);
+        }}
+      />
     </section>
   );
 }

@@ -1,7 +1,7 @@
 import { inOrder, widened, within, type Span } from "./events.ts";
 import { dayIn } from "./history.ts";
 import { newId } from "./ids.ts";
-import { OpError, type Calendar, type CalendarEvent, type Contact, type EventWhen, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
+import { OpError, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type EventWhen, type Reference, type Source, type SourceKind, type SourceRecord } from "./protocol.ts";
 
 /*
  * A data source is one person's: their calendar, their contacts. The core never reaches one itself.
@@ -41,11 +41,23 @@ export interface CalendarSource {
   create?(calendarId: string, fields: NewEvent): Promise<CalendarEvent>;
 }
 
+/** How a contacts data source that takes changes makes them. Each answers the contact as it is kept after. */
+export interface ContactChanges {
+  /** `etag` is the contact's as the member read it. */
+  update(id: string, change: ContactChange, etag: string): Promise<ContactCard>;
+  /** A JPEG or PNG in base64, or null to take the contact's own picture off. */
+  photo(id: string, photo: string | null): Promise<ContactCard>;
+  create(fields: ContactChange & { name: string }): Promise<ContactCard>;
+}
+
 export interface ContactsSource {
   kind: "contacts";
   info: Described;
   list(): Promise<{ contacts: Contact[]; more: boolean }>;
-  get(id: string): Promise<Contact | null>;
+  /** One contact with all the source holds of them. */
+  get(id: string): Promise<ContactCard | null>;
+  /** Absent on a read-only data source. */
+  changes?: ContactChanges;
 }
 
 export type DataSource = CalendarSource | ContactsSource;
@@ -53,8 +65,8 @@ export type DataSource = CalendarSource | ContactsSource;
 /** Where data sources come from. Each call answers for one person, from what that person connected. */
 export interface Sources {
   of(personId: string): Promise<DataSource[]>;
-  /** Connects one, or says where the person's browser goes to agree to it. `back` is where they return to. */
-  connect(personId: string, sourceId: string, back: string): Promise<{ redirect: string | null }>;
+  /** Connects one, or says where the person's browser goes to agree to it. `back` is where they return to. `edit` asks to change it too. */
+  connect(personId: string, sourceId: string, back: string, edit?: boolean): Promise<{ redirect: string | null }>;
   disconnect(personId: string, sourceId: string): Promise<void>;
 }
 
@@ -95,7 +107,7 @@ interface Asker {
   now: number;
 }
 
-const describe = (source: DataSource, state = source.info.state): Source => ({ ...source.info, state, kind: source.kind, writable: source.kind === "calendar" && source.update !== undefined });
+const describe = (source: DataSource, state = source.info.state): Source => ({ ...source.info, state, kind: source.kind, writable: (source.kind === "calendar" ? source.update : source.changes) !== undefined });
 
 const reconnect = (source: DataSource) => new OpError("conflict", `Reconnect ${source.info.name} first`);
 
@@ -204,7 +216,7 @@ const words = (text: string) =>
 
 /** Whether every word asked for starts a word of the contact's name, emails or organization. */
 export function contactMatches(contact: Contact, query: string): boolean {
-  const has = words([contact.name, ...contact.emails, contact.organization ?? ""].join(" "));
+  const has = words([contact.name, ...contact.emails.map((e) => e.value), contact.organization ?? ""].join(" "));
   return words(query).every((word) => has.some((w) => w.startsWith(word)));
 }
 
@@ -213,6 +225,69 @@ export async function listContacts(asker: Asker, query: string | undefined): Pro
   const contacts = read.flatMap((r) => r.contacts).filter((contact) => !query || contactMatches(contact, query));
   contacts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || (a.id < b.id ? -1 : 1));
   return { contacts, sources, more: read.some((r) => r.more) };
+}
+
+/** A contacts data source's way to change them, or why there is none: read-only, or agreed to for reading alone. */
+function changesOf(source: ContactsSource): ContactChanges {
+  if (source.changes) return source.changes;
+  throw new OpError("forbidden", source.info.reconnectToWrite ? `Connect ${source.info.name} again to edit contacts` : `${source.info.name} is read-only`);
+}
+
+/** Runs a change on a contacts data source, saying what went wrong outside as an operation says it. */
+async function changing(source: ContactsSource, change: () => Promise<ContactCard>): Promise<ContactCard> {
+  try {
+    return await change();
+  } catch (err) {
+    if (err instanceof OpError) throw err;
+    return failed(source, err);
+  }
+}
+
+/** One of the asker's contacts, where it is kept and as it is now, before anything is sent to change it. */
+const contactOf = (source: ContactsSource, id: string) =>
+  changing(source, async () => {
+    const card = await source.get(id);
+    if (!card) throw new OpError("not_found", "No such contact");
+    return card;
+  });
+
+/**
+ * Changes one of the asker's contacts where it is kept. Whether it may be changed is decided here,
+ * from the data source as it is now: a read-only one is refused before anything is sent.
+ */
+export async function updateContact(asker: Asker, sourceId: string, id: string, etag: string, change: ContactChange): Promise<ContactCard> {
+  const source = await sourceOf(asker, sourceId, "contacts");
+  const changes = changesOf(source);
+  const card = await contactOf(source, id);
+  if (Object.values(change).every((value) => value === undefined)) {
+    if (card.etag !== etag) throw new OpError("conflict", "It was changed since you opened it. Open it again, then make your change.");
+    return card;
+  }
+  return changing(source, () => changes.update(id, change, etag));
+}
+
+/** Puts a picture on one of the asker's contacts, or takes theirs off. */
+export async function photoContact(asker: Asker, sourceId: string, id: string, photo: string | null): Promise<ContactCard> {
+  const source = await sourceOf(asker, sourceId, "contacts");
+  const changes = changesOf(source);
+  await contactOf(source, id);
+  return changing(source, () => changes.photo(id, photo));
+}
+
+/** Adds a contact to the asker's own contacts where they are kept. */
+export async function createContact(asker: Asker, sourceId: string, fields: ContactChange & { name: string }): Promise<ContactCard> {
+  const source = await sourceOf(asker, sourceId, "contacts");
+  const changes = changesOf(source);
+  return changing(source, () => changes.create(fields));
+}
+
+/** The asker's own contacts that `is` says are someone, each with all its source holds. A source that can't be read gives none. */
+export async function contactCards(asker: Asker, is: (contact: Contact) => boolean): Promise<ContactCard[]> {
+  const { read } = await readEach<ContactsSource, ContactCard[]>(asker, "contacts", async (source) => {
+    const { contacts } = await source.list();
+    return (await Promise.all(contacts.filter(is).map((contact) => source.get(contact.id)))).filter((card) => card !== null);
+  });
+  return read.flat();
 }
 
 /**

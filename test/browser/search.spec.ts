@@ -571,7 +571,7 @@ test("Advanced builds the query a row at a time, writes each change in the field
   await expect(field(page)).toHaveValue("budget");
   await expect.poll(async () => (await titles(page).allTextContents()).sort()).toEqual(["Budget", "Roadmap"]);
   await builder(page).getByRole("button", { name: "Add a condition" }).click();
-  await expect(condition(page, 2).getByRole("combobox", { name: "Field" }).getByRole("option")).toHaveText(["Words", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "State", "Visibility", "Has"]);
+  await expect(condition(page, 2).getByRole("combobox", { name: "Field" }).getByRole("option")).toHaveText(["Words", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "Mentions", "State", "Visibility", "Has"]);
   await condition(page, 2).getByRole("combobox", { name: "Field" }).selectOption({ label: "Folder" });
   // A row with nothing chosen is no part of the query yet.
   await expect(field(page)).toHaveValue("budget");
@@ -698,7 +698,7 @@ test("the ? in Advanced opens the help over the page: every filter and operator 
   // What is for todos alone is not offered where notes are searched.
   for (const form of ["due:DAY", "priority:LEVEL, importance:LEVEL", "is:done", "has:repeat", "sort:due-asc"]) expect(forms, form).not.toContain(form);
   // The headings are the builder's fields: Shared and Private are Visibility, apart from the states.
-  await expect(help(page).getByRole("heading", { level: 3 })).toHaveText(["Writing a query", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "State", "Visibility", "Has", "Words in", "Sort"]);
+  await expect(help(page).getByRole("heading", { level: 3 })).toHaveText(["Writing a query", "Folder", "Tag", "Updated", "Created", "Editor", "Author", "Mentions", "State", "Visibility", "Has", "Words in", "Sort"]);
   await expect(help(page).getByRole("table", { name: "State" }).getByRole("rowheader")).toHaveText(["is:open", "is:archived", "is:trashed"]);
   await expect(help(page).getByRole("table", { name: "Visibility" }).getByRole("rowheader")).toHaveText(["is:shared", "is:private"]);
   await expect(help(page).getByRole("row").filter({ hasText: "is:archived" }).first()).toContainText("Archived. A query that doesn't say so leaves archived notes out");

@@ -26,7 +26,7 @@ describe("a todo's line", () => {
   it("has no projects: a +Name is words like any other, read and left as written", () => {
     const line = "- [ ] !! Call the bank due:2026-10-14 +Home about +Follow-up.";
     expect(read(line)).toEqual({ done: false, importance: 2, due: "2026-10-14", tags: [], words: "Call the bank +Home about +Follow-up." });
-    expect(Object.keys(parseTodo(line)!).sort()).toEqual(["box", "done", "due", "every", "importance", "importanceAt", "lastDone", "tags", "words"]);
+    expect(Object.keys(parseTodo(line)!).sort()).toEqual(["assignees", "box", "done", "due", "every", "importance", "importanceAt", "lastDone", "tags", "words"]);
     expect(completeTodo(line, "2026-10-11")).toEqual({ line: "- [x] !! Call the bank due:2026-10-14 +Home about +Follow-up.", filed: null });
     expect(rewriteTodo(line, { importance: 0, due: null })).toBe("- [ ] Call the bank +Home about +Follow-up.");
     expect(Object.keys(todoIndex(line)).sort()).toEqual(["tags", "todos"]);

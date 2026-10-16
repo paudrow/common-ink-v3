@@ -249,7 +249,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         },
         sharing: {
           of: (on) => perform(workspaceId, { type: "grant.list", ...on }),
-          grant: (on, email, access) => perform(workspaceId, { type: "grant.set", ...on, email, access }),
+          grant: (on, to, access) => perform(workspaceId, { type: "grant.set", ...on, ...(typeof to === "string" ? { email: to } : to), access }),
           link: (on, link) => perform(workspaceId, { type: "grant.link", ...on, link }),
           revoke: (grantId) => perform(workspaceId, { type: "grant.revoke", id: grantId }).then(() => {}),
           setPrivate: (noteId, isPrivate) => perform(workspaceId, { type: "note.setPrivate", id: noteId, private: isPrivate }),

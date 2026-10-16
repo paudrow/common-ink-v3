@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { shiftDay } from "../../core/events.ts";
-import type { Calendar, CalendarEvent, Contact, EventWhen } from "../../core/protocol.ts";
+import { CONTACT_LABELS, labelType, type Calendar, type CalendarEvent, type Contact, type ContactCard, type ContactChange, type ContactLine, type EventWhen, type LabelledField } from "../../core/protocol.ts";
 import { SourceError, type CalendarSource, type ContactsSource, type DataSource, type Described, type EventChange } from "../../core/sources.ts";
-import { SOURCE_SCOPES, isGoogleSource, refresh, revoke, type GoogleConfig, type GoogleSourceId } from "../google.ts";
+import { covers, isGoogleSource, refresh, revoke, writes as agreedToWrite, type GoogleConfig, type GoogleSourceId } from "../google.ts";
 import type { Vault } from "../vault.ts";
 import { connectionOf, forget, keepRenewed, markBroken, markLapsed, openToken, type Connection } from "./connections.ts";
 import type { Provider } from "./index.ts";
@@ -86,6 +86,11 @@ function shaped<T extends z.ZodType>(shape: T, answer: unknown): z.output<T> {
   const parsed = shape.safeParse(answer);
   if (!parsed.success) throw new SourceError("busy", "Google answered with something Common Ink can't read");
   return parsed.data;
+}
+
+/** The status an error of Google's names, such as FAILED_PRECONDITION. */
+async function statusOf(res: Response): Promise<string | undefined> {
+  return GoogleError.safeParse(await res.clone().json().catch(() => null)).data?.error.status;
 }
 
 const SCOPE_REASONS = ["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"];
@@ -194,7 +199,8 @@ class Session {
     // An answer that isn't JSON is no answer: what it says instead is not passed on.
     if (res.ok) return res.json().catch(() => Promise.reject(new SourceError("busy", "Google answered with something Common Ink couldn't read. Try again in a moment.")));
     if (res.status === 404 || res.status === 410) return null;
-    if (res.status === 412) throw new SourceError("stale", "It was changed in Google since you opened it. Open it again, then make your change.");
+    // Calendar says a stale etag with 412, People with 400 and FAILED_PRECONDITION.
+    if (res.status === 412 || (res.status === 400 && (await statusOf(res)) === "FAILED_PRECONDITION")) throw new SourceError("stale", "It was changed in Google since you opened it. Open it again, then make your change.");
     if (res.status === 403) {
       const reasons = await reasonsOf(res);
       if (SCOPE_REASONS.some((r) => reasons.has(r))) {
@@ -408,36 +414,177 @@ export function patchOf(change: EventChange): Record<string, unknown> {
   };
 }
 
+/** A line of a person's as People gives it, with its `type` and, for one People doesn't know, the label as written in `formattedType`. */
+const Labelled = { type: z.string().optional(), formattedType: z.string().optional() };
 const Person = z.object({
   resourceName: z.string(),
+  etag: z.string().optional(),
   names: z.array(z.object({ displayName: z.string().optional() })).optional(),
-  emailAddresses: z.array(z.object({ value: z.string().optional() })).optional(),
-  phoneNumbers: z.array(z.object({ value: z.string().optional() })).optional(),
-  organizations: z.array(z.object({ name: z.string().optional() })).optional(),
+  emailAddresses: z.array(z.object({ value: z.string().optional(), ...Labelled })).optional(),
+  phoneNumbers: z.array(z.object({ value: z.string().optional(), ...Labelled })).optional(),
+  organizations: z.array(z.object({ name: z.string().optional(), title: z.string().optional() })).optional(),
+});
+const Detailed = Person.extend({
+  addresses: z.array(z.object({ formattedValue: z.string().optional(), ...Labelled })).optional(),
+  birthdays: z.array(z.object({ date: z.object({ year: z.number().int().optional(), month: z.number().int().optional(), day: z.number().int().optional() }).optional() })).optional(),
+  biographies: z.array(z.object({ value: z.string().optional() })).optional(),
+  photos: z.array(z.object({ url: z.string().optional(), default: z.boolean().optional() })).optional(),
+  urls: z.array(z.object({ value: z.string().optional(), ...Labelled })).optional(),
 });
 const Connections = z.object({ connections: z.array(z.unknown()).default([]), nextPageToken: z.string().optional() });
 const PERSON = /^people\/([A-Za-z0-9_-]{1,100})$/;
 const PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations";
+/** All a contact's page shows of them, which is read one contact at a time. */
+const CARD_FIELDS = `${PERSON_FIELDS},addresses,birthdays,biographies,photos,urls`;
+const pad = (n: number) => String(n).padStart(2, "0");
+/** Where Google keeps a contact's picture. */
+const PICTURE = /^https:\/\/[a-z0-9-]+\.googleusercontent\.com\//;
+
+/** What each field of a change is called in People's `updatePersonFields`. */
+const PERSON_FIELD = { name: "names", emails: "emailAddresses", phones: "phoneNumbers", organization: "organizations", title: "organizations", addresses: "addresses", birthday: "birthdays", urls: "urls", notes: "biographies" } as const satisfies Record<keyof ContactChange, string>;
+
+type Entry = Record<string, unknown>;
+/** An entry of a person's as it can be sent back: what Google works out itself taken off. */
+const kept = ({ metadata: _, formattedType: __, canonicalForm: ___, ...entry }: Entry): Entry => entry;
+const entries = (was: Entry, field: string): Entry[] => (Array.isArray(was[field]) ? (was[field] as unknown[]).filter((e): e is Entry => typeof e === "object" && e !== null) : []);
+
+/** Where People keeps each of a contact's labelled fields, and the key of an entry there that holds its value. */
+const LINES = { emails: ["emailAddresses", "value"], phones: ["phoneNumbers", "value"], addresses: ["addresses", "formattedValue"], urls: ["urls", "value"] } as const satisfies Record<LabelledField, readonly [string, string]>;
+
+/** An entry's label as a contact holds it: People's own type, or for a type it doesn't know, the label as Google shows it. */
+export function labelOf(field: LabelledField, { type, formattedType }: { type?: unknown; formattedType?: unknown }): string | null {
+  const own = typeof type === "string" ? type.trim() : "";
+  if (!own) return null;
+  if (Object.hasOwn(CONTACT_LABELS[field], own)) return own;
+  return (typeof formattedType === "string" && formattedType.trim()) || own;
+}
+
+/** A field's entries as lines, each with its value and label; one with no value is no line. */
+function linesOf<E extends { type?: string; formattedType?: string }>(field: LabelledField, items: E[] | undefined, value: (entry: E) => string | undefined): ContactLine[] {
+  return (items ?? []).flatMap((entry) => {
+    const said = value(entry);
+    return said ? [{ value: said, type: labelOf(field, entry) }] : [];
+  });
+}
+
+/**
+ * A field's lines as the member wrote them, as People takes them. A line that was there with the same
+ * label is sent back as Google had it. A label read from Google is sent as Google's own type, so one
+ * Common Ink has no words for, such as `workMobile`, stays what it was.
+ */
+function listed(field: LabelledField, lines: ContactLine[], before: Entry[]): Entry[] {
+  const key = LINES[field][1];
+  return lines.map((line) => {
+    const same = before.find((e) => e[key] === line.value && labelOf(field, e) === line.type);
+    if (same) return kept(same);
+    const { type: _, ...was } = kept(before.find((e) => e[key] === line.value) ?? {});
+    const type = line.type === null ? null : (before.find((e) => labelOf(field, e) === line.type)?.type ?? labelType(field, line.type));
+    return { ...was, [key]: line.value, ...(type !== null && { type }) };
+  });
+}
+
+/**
+ * A change as People's `updateContact` and `createContact` take it: each field the change names, as a
+ * whole, and the fields to name in `updatePersonFields`. `was` is the person as Google holds them, so
+ * an email, a number or an address left as it was keeps its label, and a first organization its department.
+ */
+export function personOf(change: ContactChange, was: Entry = {}): { person: Entry; fields: string[] } {
+  const person: Entry = {};
+  if (change.name !== undefined) person.names = [{ unstructuredName: change.name }];
+  for (const field of Object.keys(LINES) as LabelledField[]) {
+    const lines = change[field];
+    if (lines !== undefined) person[LINES[field][0]] = listed(field, lines, entries(was, LINES[field][0]));
+  }
+  if (change.organization !== undefined || change.title !== undefined) {
+    const [first = {}, ...rest] = entries(was, "organizations").map(kept);
+    const named = { ...first, ...(change.organization !== undefined && { name: change.organization }), ...(change.title !== undefined && { title: change.title }) };
+    const org = Object.fromEntries(Object.entries(named).filter(([, v]) => v !== null && v !== undefined));
+    person.organizations = org.name || org.title ? [org, ...rest] : rest;
+  }
+  if (change.birthday !== undefined) {
+    const [, year, month, day] = /^(\d{4}|-)-(\d{2})-(\d{2})$/.exec(change.birthday ?? "") ?? [];
+    person.birthdays = change.birthday === null ? [] : [{ date: { ...(year !== "-" && { year: Number(year) }), month: Number(month), day: Number(day) } }];
+  }
+  if (change.notes !== undefined) person.biographies = change.notes ? [{ value: change.notes, contentType: "TEXT_PLAIN" }] : [];
+  const fields = [...new Set((Object.keys(change) as (keyof ContactChange)[]).filter((key) => change[key] !== undefined).map((key) => PERSON_FIELD[key]))];
+  return { person, fields };
+}
 
 function toContact(raw: unknown): Contact | null {
   const parsed = Person.safeParse(raw);
   const key = parsed.success ? PERSON.exec(parsed.data.resourceName)?.[1] : undefined;
   if (!parsed.success || !key) return null;
-  const values = (items: { value?: string }[] | undefined) => (items ?? []).flatMap((i) => (i.value ? [i.value] : []));
-  const emails = values(parsed.data.emailAddresses);
-  const phones = values(parsed.data.phoneNumbers);
+  const emails = linesOf("emails", parsed.data.emailAddresses, (e) => e.value);
+  const phones = linesOf("phones", parsed.data.phoneNumbers, (e) => e.value);
   const organization = parsed.data.organizations?.find((o) => o.name)?.name ?? null;
-  const name = parsed.data.names?.find((n) => n.displayName)?.displayName ?? emails[0] ?? organization ?? phones[0];
+  const name = parsed.data.names?.find((n) => n.displayName)?.displayName ?? emails[0]?.value ?? organization ?? phones[0]?.value;
   // A contact with nothing to call it by is nothing to list.
   if (!name) return null;
   return { sourceId: "google-contacts", id: parsed.data.resourceName, name, emails, phones, organization, url: `https://contacts.google.com/person/${key}` };
 }
 
-function contactsSource(session: Session, info: Described): ContactsSource {
-  const ask = (url: string) => session.ask("google-contacts", url);
+/** A contact with all Google holds of them that a page shows: a birthday without a year is --MM-DD, and only an https address is kept for a picture or a page. */
+export function toCard(raw: unknown): ContactCard | null {
+  const contact = toContact(raw);
+  const parsed = Detailed.safeParse(raw);
+  if (!contact || !parsed.success) return null;
+  const { organizations, addresses, birthdays, biographies, photos, urls } = parsed.data;
+  const date = birthdays?.find((b) => b.date?.month && b.date.day)?.date;
+  const https = (address: string | undefined) => (address && /^https:\/\//.test(address) ? address : null);
+  // A picture is drawn from where Google keeps it, which the page policy lets in, and from nowhere else.
+  const picture = photos?.find((p) => p.url && !p.default)?.url;
+  return {
+    ...contact,
+    etag: parsed.data.etag ?? "",
+    title: organizations?.find((o) => o.title)?.title ?? null,
+    addresses: linesOf("addresses", addresses, (a) => a.formattedValue),
+    birthday: date ? `${date.year ? String(date.year).padStart(4, "0") : "-"}-${pad(date.month!)}-${pad(date.day!)}` : null,
+    notes: biographies?.find((b) => b.value)?.value ?? null,
+    photo: picture && PICTURE.test(picture) ? picture : null,
+    urls: linesOf("urls", urls, (u) => https(u.value) ?? undefined),
+  };
+}
+
+/** A person Google answered a change with, as a card, or a failure that says nothing of what it held. */
+function answered(answer: unknown): ContactCard {
+  const card = answer === null ? null : toCard(answer);
+  if (!card) throw new SourceError("refused", "No such contact");
+  return card;
+}
+
+function contactsSource(session: Session, info: Described, writable: boolean): ContactsSource {
+  const ask = (url: string, init?: RequestInit) => session.ask("google-contacts", url, init);
+  const sent = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const card = new URLSearchParams({ personFields: CARD_FIELDS });
+  const keyOf = (id: string) => {
+    const key = PERSON.exec(id)?.[1];
+    if (!key) throw new SourceError("refused", "No such contact");
+    return key;
+  };
   return {
     kind: "contacts",
     info,
+    ...(writable && {
+      changes: {
+        async update(id, change, etag) {
+          const key = keyOf(id);
+          const was = await ask(`${PEOPLE}/people/${key}?${new URLSearchParams({ personFields: CARD_FIELDS })}`);
+          if (was === null) throw new SourceError("refused", "No such contact");
+          const { person, fields } = personOf(change, was as Entry);
+          // Google changes the contact only if it is still as the member read it.
+          return answered(await ask(`${PEOPLE}/people/${key}:updateContact?${new URLSearchParams({ updatePersonFields: fields.join(","), personFields: CARD_FIELDS })}`, sent("PATCH", { ...person, etag })));
+        },
+        async photo(id, photo) {
+          const key = keyOf(id);
+          const answer =
+            photo === null ? await ask(`${PEOPLE}/people/${key}:deleteContactPhoto?${card}`, { method: "DELETE" }) : await ask(`${PEOPLE}/people/${key}:updateContactPhoto`, sent("PATCH", { photoBytes: photo, personFields: CARD_FIELDS }));
+          return answered(shaped(z.object({ person: z.unknown() }), answer ?? {}).person ?? null);
+        },
+        async create(fields) {
+          return answered(await ask(`${PEOPLE}/people:createContact?${card}`, sent("POST", personOf(fields).person)));
+        },
+      },
+    }),
     async list() {
       const contacts: Contact[] = [];
       let pageToken: string | undefined;
@@ -452,8 +599,8 @@ function contactsSource(session: Session, info: Described): ContactsSource {
     async get(id) {
       const key = PERSON.exec(id)?.[1];
       if (!key) return null;
-      const person = await ask(`${PEOPLE}/people/${key}?${new URLSearchParams({ personFields: PERSON_FIELDS })}`);
-      return person === null ? null : toContact(person);
+      const person = await ask(`${PEOPLE}/people/${key}?${new URLSearchParams({ personFields: CARD_FIELDS })}`);
+      return person === null ? null : toCard(person);
     },
   };
 }
@@ -461,7 +608,7 @@ function contactsSource(session: Session, info: Described): ContactsSource {
 /** Whether a data source is connected, from what the person agreed to and whether Google still takes it. */
 function stateOf(connection: Connection | null, id: GoogleSourceId, now: number): Described["state"] {
   if (!connection) return "not_connected";
-  const agreed = SOURCE_SCOPES[id].every((scope) => connection.scopes.includes(scope));
+  const agreed = covers(id, connection.scopes);
   if (connection.broken || connection.lapsed.includes(id)) return agreed || connection.broken ? "needs_reconnect" : "not_connected";
   if (!agreed) return "not_connected";
   // With no way to renew it, a token that has lapsed is the end of the connection.
@@ -477,10 +624,13 @@ export function google(deps: Deps): Provider {
       // With no connection there is nothing to open, and a source that isn't connected is never asked.
       const session = new Session(deps, connection ?? { personId, provider: PROVIDER, account: "", accessToken: null, refreshToken: null, expiresAt: 0, scopes: [], broken: true, lapsed: [] });
       const info = (id: GoogleSourceId): Described => ({ id, name: NAMES[id], provider: "Google", state: stateOf(connection, id, deps.now()), account: connection?.account ?? null });
-      return [calendarSource(session, info("google-calendar")), contactsSource(session, info("google-contacts"))] satisfies DataSource[];
+      // Contacts are read with one scope and changed with another, which a member who connected before editing came agrees to by connecting again.
+      const editsContacts = agreedToWrite("google-contacts", connection?.scopes ?? []);
+      const contacts = info("google-contacts");
+      return [calendarSource(session, info("google-calendar")), contactsSource(session, editsContacts || contacts.state !== "connected" ? contacts : { ...contacts, reconnectToWrite: true }, editsContacts)] satisfies DataSource[];
     },
     // Agreeing happens at Google, in the person's browser: /auth/google/connect in src/worker/auth.ts.
-    connect: async (_personId, sourceId, back) => ({ redirect: `/auth/google/connect?${new URLSearchParams({ source: sourceId, next: back })}` }),
+    connect: async (_personId, sourceId, back, edit) => ({ redirect: `/auth/google/connect?${new URLSearchParams({ source: sourceId, ...(edit && { edit: "1" }), next: back })}` }),
     /**
      * Ends the connection: Google is told to end everything the person agreed to, and the tokens
      * are deleted whether or not it answers, so nothing here can use them again.
