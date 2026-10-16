@@ -280,7 +280,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "member.setRole": { on: "workspace", who: ADMINS, args: () => ({ memberId: "aaaaaaaaaaaa", as: "viewer" }) },
   "member.remove": { on: "workspace", who: ADMINS, args: () => ({ memberId: "aaaaaaaaaaaa" }) },
   "member.leave": { on: "workspace", who: [], args: () => ({}) },
-  // Asked about a member who isn't there: anyone may sign out themself, which test/core/sessions.test.ts checks, and only an admin anyone else.
+  // Asked about a member who isn't there: anyone may sign out themself, which test/core/sessions.test.ts checks, and only an admin anyone else,
+  // which by default disconnects their agents too: the one way an admin reaches a member's agents.
   "member.signOut": { on: "workspace", who: ADMINS, args: () => ({ memberId: "aaaaaaaaaaaa" }) },
   "invite.list": { on: "workspace", who: ADMINS, args: () => ({}) },
   "invite.revoke": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },

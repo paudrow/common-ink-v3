@@ -534,8 +534,12 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("member.remove"), memberId: Id }),
   /** Takes whoever asks out of the workspace. */
   z.object({ type: z.literal("member.leave") }),
-  /** Signs `memberId` out of every browser they are signed in on. Anyone may ask it of themself, and an admin of any member. */
-  z.object({ type: z.literal("member.signOut"), memberId: Id }),
+  /**
+   * Signs `memberId` out of every browser they are signed in on. Anyone may ask it of themself, and an
+   * admin of any member. With `agents`, the default, it disconnects their agents too: every one of
+   * their own, or a member's that reach this workspace.
+   */
+  z.object({ type: z.literal("member.signOut"), memberId: Id, agents: z.boolean().default(true) }),
   /** The invites nobody has taken up yet. */
   z.object({ type: z.literal("invite.list") }),
   /** Takes back an invite nobody has taken up. */

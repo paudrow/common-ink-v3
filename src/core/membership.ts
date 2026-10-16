@@ -113,21 +113,32 @@ export const SIGN_OUT_EVERY_MS = 86_400_000;
  * next request. Anyone may end their own, as often as they like. An admin may end a member's of this
  * workspace, so someone who lost a laptop is cut off without being taken out, once a day: an admin of
  * one workspace can't keep a member signed out of the others, and a day is time enough to leave it.
- * Agents have tokens, not sessions, and keep them.
+ *
+ * With `agents`, their agents are disconnected in the same batch, as each would be from the Agents page:
+ * all of them when it is their own, and those that reach this workspace when an admin asks. The agents
+ * go only if the sessions did, which for an admin is when the person now carries this moment's mark.
  */
-export async function signOut(asking: Asking, memberId: string): Promise<{ memberId: string }> {
+export async function signOut(asking: Asking, memberId: string, agents: boolean): Promise<{ memberId: string }> {
   const { db, workspaceId, personId, now } = asking;
   const own = memberId === personId;
-  const { meta } = await (own
+  const sessions = own
     ? db.prepare("UPDATE people SET sessions_ended = sessions_ended + 1 WHERE id = ?").bind(personId)
     : db
         .prepare(
           `UPDATE people SET sessions_ended = sessions_ended + 1, ended_by_admin_at = ?4 WHERE id = ?3 AND ${STILL_ADMIN}
              AND EXISTS (SELECT 1 FROM members m WHERE m.workspace_id = ?1 AND m.person_id = ?3) AND (ended_by_admin_at IS NULL OR ended_by_admin_at <= ?4 - ?5)`,
         )
-        .bind(workspaceId, personId, memberId, now, SIGN_OUT_EVERY_MS)
-  ).run();
-  if (meta.changes) return { memberId };
+        .bind(workspaceId, personId, memberId, now, SIGN_OUT_EVERY_MS);
+  const disconnected = own
+    ? db.prepare("UPDATE agents SET revoked_at = ?2 WHERE person_id = ?1 AND revoked_at IS NULL").bind(personId, now)
+    : db
+        .prepare(
+          `UPDATE agents SET revoked_at = ?4 WHERE person_id = ?3 AND revoked_at IS NULL AND (workspace_id IS NULL OR workspace_id = ?1) AND ${STILL_ADMIN}
+             AND EXISTS (SELECT 1 FROM people p WHERE p.id = ?3 AND p.ended_by_admin_at = ?4)`,
+        )
+        .bind(workspaceId, personId, memberId, now);
+  const [ended] = await db.batch(agents ? [sessions, disconnected] : [sessions]);
+  if (ended!.meta.changes) return { memberId };
   const refused = await refusal(asking, "member.signOut", memberId);
   throw refused.message === LAST_ADMIN ? new OpError("invalid", "They were signed out everywhere by an admin less than a day ago. Remove them to cut them off now.") : refused;
 }

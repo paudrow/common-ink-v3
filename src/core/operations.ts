@@ -2694,7 +2694,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     by: "member",
     run(ctx, op) {
       if (op.memberId !== ctx.personId && ctx.role !== "admin") throw new OpError("forbidden", "Only an admin signs out someone else");
-      return signOut(asking(ctx), op.memberId);
+      return signOut(asking(ctx), op.memberId, op.agents);
     },
   },
   "invite.list": { needs: "manage", by: "member", run: (ctx) => listInvites(ctx.db, ctx.workspaceId) },

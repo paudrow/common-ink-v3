@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
+import { whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { perform } from "../../src/core/operations.ts";
 import { OpError } from "../../src/core/protocol.ts";
@@ -26,6 +27,10 @@ async function browser(email: string) {
     },
   };
 }
+
+/** What answers an agent asking which tools it has: 200 while it is connected. */
+const tools = async (token: string) =>
+  (await send("/mcp", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) })).status;
 
 const emailOf = async (personId: string) => (await env.DB.prepare("SELECT email FROM people WHERE id = ?").bind(personId).first<{ email: string }>())!.email;
 
@@ -82,15 +87,48 @@ describe("signing out everywhere", () => {
     expect([await adas.me(), await strangers.me()]).toEqual([await emailOf(ada.personId), await emailOf(stranger.personId)]);
   });
 
-  it("is kept from agents, and leaves the member's agents connected", async () => {
+  it("is kept from agents", async () => {
     const ada = await newMember();
-    const { agent, token } = await connectAgent(env.DB, ada.personId, "Claude");
+    const { agent } = await connectAgent(env.DB, ada.personId, "Claude");
     const asAgent = { kind: "agent", agentId: agent.id, personId: ada.personId, workspaceId: ada.workspaceId } as const;
     await expect(perform(env.DB, asAgent, { type: "member.signOut", memberId: ada.personId })).rejects.toThrow(new OpError("forbidden", "An agent can't member.signOut"));
+  });
+
+  it("disconnects every one of a person's own agents unless they say otherwise, and an agent disconnected is refused", async () => {
+    const ada = await newMember();
+    const [claude, cursor] = [(await connectAgent(env.DB, ada.personId, "Claude")).token, (await connectAgent(env.DB, ada.personId, "Cursor", { workspaceId: ada.workspaceId })).token];
+    expect([await tools(claude), await tools(cursor)]).toEqual([200, 200]);
+
+    await perform(env.DB, ada, { type: "member.signOut", memberId: ada.personId, agents: false });
+    expect([await tools(claude), await tools(cursor)]).toEqual([200, 200]);
 
     await perform(env.DB, ada, { type: "member.signOut", memberId: ada.personId });
-    const listed = await send("/mcp", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
-    expect(listed.status).toBe(200);
+    expect([await tools(claude), await tools(cursor)]).toEqual([401, 401]);
+  });
+
+  it("lets an admin disconnect a member's agents that reach the workspace, and only those, only by signing them out", async () => {
+    const ada = await newMember();
+    const ed = await addMember(ada, "editor", "Ed Editor");
+    const elsewhere = (await whoAmI(env.DB, ed.personId)).workspaces.find((w) => w.id !== ada.workspaceId)!.id;
+    const everywhere = (await connectAgent(env.DB, ed.personId, "Claude")).token;
+    const here = (await connectAgent(env.DB, ed.personId, "Cursor", { workspaceId: ada.workspaceId })).token;
+    const there = (await connectAgent(env.DB, ed.personId, "Codex", { workspaceId: elsewhere })).token;
+
+    await perform(env.DB, ada, { type: "member.signOut", memberId: ed.personId }, Date.now());
+    expect([await tools(everywhere), await tools(here), await tools(there)]).toEqual([401, 401, 200]);
+  });
+
+  it("leaves a member's agents connected when the admin unticks it, and when an admin's sign-out is refused", async () => {
+    const ada = await newMember();
+    const ed = await addMember(ada, "editor", "Ed Editor");
+    const al = await addMember(ada, "admin", "Al Admin");
+    const now = Date.now();
+    const first = (await connectAgent(env.DB, ed.personId, "Claude")).token;
+    await perform(env.DB, ada, { type: "member.signOut", memberId: ed.personId, agents: false }, now);
+    expect(await tools(first)).toBe(200);
+
+    await expect(perform(env.DB, al, { type: "member.signOut", memberId: ed.personId }, now + 1)).rejects.toThrow(OpError);
+    expect(await tools(first)).toBe(200);
   });
 
   it("ends a session started before sessions could be ended, which holds until then", async () => {

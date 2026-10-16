@@ -195,7 +195,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const [host] = useState(() => {
     let created: Host;
     // Every session ends, this one with them, so the page is read again signed out.
-    const account: Account = { email: me.person.email, signOutEverywhere: () => perform(workspaceId, { type: "member.signOut", memberId: me.person.id }).then(() => location.assign("/")) };
+    const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
@@ -250,7 +250,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           setRole: (memberId, as) => perform(workspaceId, { type: "member.setRole", memberId, as }),
           remove: (memberId) => perform(workspaceId, { type: "member.remove", memberId }).then(() => {}),
           leave: () => perform(workspaceId, { type: "member.leave" }).then(() => {}),
-          signOut: (memberId) => perform(workspaceId, { type: "member.signOut", memberId }).then(() => {}),
+          signOut: (memberId, agents) => perform(workspaceId, { type: "member.signOut", memberId, agents }).then(() => {}),
           invites: () => perform(workspaceId, { type: "invite.list" }),
           revoke: (inviteId) => perform(workspaceId, { type: "invite.revoke", id: inviteId }).then(() => {}),
         },
