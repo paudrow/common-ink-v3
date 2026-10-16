@@ -450,6 +450,8 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("folder.list") }),
   z.object({ type: z.literal("folder.create"), name: FolderName, parentId: Id.optional() }),
   z.object({ type: z.literal("folder.rename"), id: Id, name: FolderName }),
+  /** Puts a folder inside another, or at the top with a null `parentId`. What is in it goes with it. */
+  z.object({ type: z.literal("folder.move"), id: Id, parentId: Id.nullable() }),
   z.object({ type: z.literal("folder.delete"), id: Id }),
   /** The settings of whoever asks, in this workspace. Nobody reads another member's. */
   z.object({ type: z.literal("settings.read") }),
@@ -1117,6 +1119,7 @@ export interface Results {
   "folder.list": { unsortedId: string | null; folders: ListedFolder[] };
   "folder.create": Folder;
   "folder.rename": Folder;
+  "folder.move": Folder;
   "folder.delete": { id: string };
   "settings.read": StoredSettings;
   "settings.write": StoredSettings;

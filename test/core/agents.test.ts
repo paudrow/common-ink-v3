@@ -143,6 +143,7 @@ describe("MCP protocol", () => {
       "list_folders",
       "create_folder",
       "rename_folder",
+      "move_folder",
       "delete_folder",
       "note_history",
       "change_diff",

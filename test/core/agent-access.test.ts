@@ -73,6 +73,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "folder.list": {},
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
+  "folder.move": { id: folderId, parentId: null },
   "folder.delete": { id: "aaaaaaaaaaaa" },
   "member.list": {},
   "tag.list": {},
@@ -125,6 +126,7 @@ describe("an agent's access is its member's", () => {
       "history.revert",
       "folder.create",
       "folder.rename",
+      "folder.move",
       "folder.delete",
     ],
   };

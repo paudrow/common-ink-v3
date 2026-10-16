@@ -117,7 +117,7 @@ test("a folder with notes in it can't be deleted, and an empty one can", async (
 
   await folder(page, "Empty").hover();
   await page.getByRole("button", { name: "Actions for Empty" }).click();
-  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in a split right", "Open in a split down", "New folder inside", "Rename", "Delete"]);
+  await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in a split right", "Open in a split down", "New folder inside", "Move to…", "Share", "Rename", "Delete"]);
   await page.getByRole("menuitem", { name: "Delete" }).click();
 
   await expect(tree(page).getByRole("treeitem")).toHaveText([/^All notes/, /^Unsorted/, /^Full/]);

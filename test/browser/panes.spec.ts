@@ -177,10 +177,11 @@ test("a mode or a folder dragged from the sidebar lands in a pane as a tab does:
   await expect(page.getByRole("region", { name: /Editor group/ }).filter({ has: page.getByRole("heading", { name: "Calendar", level: 1 }) })).toHaveAttribute("data-focused", "true");
   await expect(page).toHaveURL(/\/calendar$/);
 
-  // A folder's row dropped on the tree goes nowhere, and a note still moves to a folder dropped on its row.
+  // A folder's row dropped on another folder's row goes inside it and opens nothing, and a note still moves to a folder dropped on its row.
   await toggleSidebar(page);
   const before = await page.getByRole("tab").count();
   await folderRow(page, "Plans").dragTo(folderRow(page, "Unsorted"));
+  await expect(folderRow(page, "Plans")).toHaveAttribute("aria-level", "2");
   expect(await page.getByRole("tab").count()).toBe(before);
   await tab(page, "All notes").click();
   await noteCard(page, "Beta").dragTo(folderRow(page, "Plans"));

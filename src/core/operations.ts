@@ -311,9 +311,9 @@ export async function loadFolder(ctx: Context, id: string | undefined, need: Gra
 }
 
 /** A write naming a folder or putting something in one, whose folder may have been deleted since it was loaded. */
-async function intoFolder(write: Promise<unknown>, name?: string): Promise<void> {
+async function intoFolder<T>(write: Promise<T>, name?: string): Promise<T> {
   try {
-    await write;
+    return await write;
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
     if (/FOREIGN KEY constraint failed/.test(message)) throw new OpError("not_found", NO_SUCH_FOLDER);
@@ -2319,6 +2319,39 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         throw new OpError("forbidden", ctx.sight.within ? "An agent limited to folders can rename only the folders inside one of them" : "A guest can rename only the folders inside one shared with them");
       await intoFolder(ctx.db.prepare("UPDATE folders SET name = ? WHERE id = ?").bind(op.name, folder.id).run(), op.name);
       return toFolder(ctx, { ...folder, name: op.name });
+    },
+  },
+
+  "folder.move": {
+    needs: "edit",
+    async run(ctx, op) {
+      const folder = await loadFolder(ctx, op.id, "edit");
+      if (folder.unsorted) throw new OpError("invalid", "Unsorted can't be moved");
+      const guest = !ctx.sight.within;
+      // As with a rename: beside a folder shared with a guest, or one an agent is limited to, are folders they can't see.
+      if (!seesEveryFolder(ctx.sight) && !(folder.parent_id && allows(folderLevel(ctx.sight, folder.parent_id), "view")))
+        throw new OpError("forbidden", guest ? "A guest can move only the folders inside one shared with them" : "An agent limited to folders can move only the folders inside one of them");
+      // Taking a folder out changes the one it leaves, and Undo has to be able to put it back.
+      if (folder.parent_id && !allows(folderLevel(ctx.sight, folder.parent_id), "edit")) throw new OpError("forbidden", "You can read the folder it is in, and not change it");
+      if (op.parentId) await loadFolder(ctx, op.parentId, "edit");
+      else if (!seesEveryFolder(ctx.sight)) throw new OpError("forbidden", guest ? "A guest can move a folder only into one shared with them" : "An agent limited to folders can move a folder only into one of them");
+      // One statement, so two folders moved into each other at once can't both go: the second finds itself above where it would go.
+      const moved = await intoFolder(
+        ctx.db
+          .prepare(
+            `UPDATE folders SET parent_id = ?1 WHERE id = ?2 AND workspace_id = ?3 AND NOT EXISTS (
+               WITH RECURSIVE above(id) AS (SELECT ?1 UNION SELECT f.parent_id FROM folders f JOIN above ON f.id = above.id WHERE f.parent_id IS NOT NULL)
+               SELECT 1 FROM above WHERE id = ?2)`,
+          )
+          .bind(op.parentId, folder.id, ctx.workspaceId)
+          .run(),
+        folder.name,
+      );
+      if (!moved.meta.changes) {
+        await loadFolder(ctx, op.id, "edit");
+        throw new OpError("invalid", "A folder can't go inside itself, or inside a folder in it");
+      }
+      return toFolder(ctx, { ...folder, parent_id: op.parentId });
     },
   },
 
