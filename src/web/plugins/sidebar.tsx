@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { Icon, carry, useDismiss, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
+import { Icon, carry, useDismiss, type App, type Opened, type PageInfo, type Plugin, type Standing, type ViewProps } from "../plugin-api.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 
 const ROLE_LABEL: Record<Standing, string> = { admin: "Admin", editor: "Editor", viewer: "Viewer", guest: "Guest" };
@@ -16,10 +16,11 @@ function Sidebar({ app }: ViewProps) {
     if (on !== null) setMore(true);
   }
   const open = app.sidebarOpen;
-  const [picking, setPicking] = useState(false);
-  const foldersButton = useRef<HTMLButtonElement>(null);
-  const closePicker = useCallback(() => setPicking(false), []);
-  if ((open || app.focus) && picking) setPicking(false);
+  /** The section shown over the page from the closed bar, if any. */
+  const [picking, setPicking] = useState<App["sectionNames"][number] | null>(null);
+  const pickerButton = useRef<HTMLButtonElement>(null);
+  const closePicker = useCallback(() => setPicking(null), []);
+  if ((open || app.focus) && picking) setPicking(null);
   const links = (nav: PageInfo["nav"]) => under(nav).map((page) => <PageLink key={page.id} app={app} page={page} labelled={open} />);
   const pages = (
     <>
@@ -38,12 +39,22 @@ function Sidebar({ app }: ViewProps) {
         <img src="/favicon.svg" alt="" width={18} height={18} className="rail-brand" />
         <NewNote app={app} />
         {pages}
-        {app.sections != null && (
-          <button ref={foldersButton} type="button" className="icon-button" aria-label="Folders" title="Folders" aria-haspopup="dialog" aria-expanded={picking} onClick={() => setPicking(!picking)}>
-            <Icon name="folders" />
+        {app.sectionNames.map((section) => (
+          <button
+            key={section.id}
+            ref={picking?.id === section.id ? pickerButton : undefined}
+            type="button"
+            className="icon-button"
+            aria-label={section.label}
+            title={section.label}
+            aria-haspopup="dialog"
+            aria-expanded={picking?.id === section.id}
+            onClick={() => setPicking(picking?.id === section.id ? null : section)}
+          >
+            <Icon name={section.icon} />
           </button>
-        )}
-        {picking && <Picker app={app} anchor={foldersButton} onClose={closePicker} />}
+        ))}
+        {picking && <Picker app={app} section={picking} anchor={pickerButton} onClose={closePicker} />}
       </nav>
     );
   return (
@@ -63,11 +74,11 @@ const LINGER_MS = 300;
 const EDGE = 8;
 
 /**
- * The sidebar's sections over the page beside its bar, for picking a folder while the sidebar is
- * closed. It takes no room: nothing under it moves. It goes once something is opened from it, on
+ * One of the sidebar's sections over the page beside its bar, for picking a folder or a tag while
+ * the sidebar is closed. It takes no room: nothing under it moves. It goes once something is opened from it, on
  * Escape, and on a press outside it, and the cursor goes back to the button that opened it.
  */
-function Picker({ app, anchor, onClose }: ViewProps & { anchor: RefObject<HTMLButtonElement | null>; onClose: () => void }) {
+function Picker({ app, section, anchor, onClose }: ViewProps & { section: App["sectionNames"][number]; anchor: RefObject<HTMLButtonElement | null>; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [leaving, setLeaving] = useState(false);
   /** A row being dragged out of it to the editor area, which it then lets the pointer through to. */
@@ -104,7 +115,7 @@ function Picker({ app, anchor, onClose }: ViewProps & { anchor: RefObject<HTMLBu
     <div
       ref={ref}
       role="dialog"
-      aria-label="Folders"
+      aria-label={section.label}
       className="sidebar-picker"
       data-leaving={leaving || undefined}
       data-dragging={dragging || undefined}
@@ -114,7 +125,7 @@ function Picker({ app, anchor, onClose }: ViewProps & { anchor: RefObject<HTMLBu
       // The cursor taken out of it, as by Tab, leaves nothing floating over the page behind it.
       onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && e.relatedTarget !== anchor.current && onClose()}
     >
-      {app.sectionsOpening(opened)}
+      {app.sectionsOpening(opened, section.id)}
     </div>
   );
 }
@@ -131,7 +142,7 @@ function NewNote({ app }: ViewProps) {
   const refused = app.canCreateNote ? null : folder ? `You can read ${folder.name}, and not add notes to it` : "Open a folder you can change to add a note to it";
   const title = refused ?? `New note in ${where}`;
   const create = () => {
-    if (!refused) app.createNote().catch(() => {});
+    if (!refused) app.createNote().catch((err: Error) => app.notify({ message: err.message }));
   };
   if (!app.sidebarOpen)
     return (

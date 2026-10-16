@@ -1,10 +1,11 @@
 import { ChangeSet, MapMode } from "@codemirror/state";
 import { z } from "zod";
-import { SEEN, SEEN_FOLDER, allows, folderLevel, noteLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
+import { SEEN, SEEN_FOLDER, allows, canShare, folderLevel, noteAsked, noteLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { dailySettings, dailyText, dayFor, filedOn, type DailySettings } from "./daily.ts";
 import { lineDiff, textDiff } from "./diff.ts";
 import { following as lineFollowing } from "./follow.ts";
-import { dayIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
+import { dayIn, dayStartIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
+import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
 import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
@@ -15,12 +16,15 @@ import {
   MAX_SETTINGS_LENGTH,
   Op,
   OpError,
+  TODO_SORTS,
+  TODO_SORT_WORDS,
   type Author,
   type AuthorRef,
   type ChangeEntry,
   type DiffRun,
   type Folder,
   type HistoryEntry,
+  type LinkedNote,
   type ListedTodo,
   type Note,
   type NoteDiff,
@@ -35,9 +39,13 @@ import {
   type Reverts,
   type Role,
   type SharedNote,
+  type TrashedNote,
   type TodoSort,
   type Written,
 } from "./protocol.ts";
+import { removing, forgetRemoved } from "./purge.ts";
+import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
+import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
@@ -147,20 +155,29 @@ interface SummaryRow {
   updated_by_name: string | null;
   updated_by_owner: string | null;
   private_owner: string | null;
+  state: NoteState;
+  /** When its state last changed: when it was archived, trashed, unarchived or restored. Null for a note that has only ever been live. */
+  state_at: number | null;
 }
 
 export interface NoteRow extends SummaryRow {
   text: string;
   /** The person who made it, or whose agent did. Null for a note made before that was kept. */
   created_by: string | null;
-  /** Below {@link MADE} for a note whose links and todos haven't been made from its text since there were tables for them. */
+  /** Below {@link MADE} for a note whose links, todos and search text haven't been made from its text since there were tables for them. */
   indexed: number;
+  /** For a note in Trash: the state it had, and the folder it was in. */
+  restores_as?: "live" | "archived" | null;
+  restores_to?: string | null;
 }
 
-/** What a note's `indexed` is once its links, todos and tags have been made from its text. */
-const MADE = 1;
+/** What a note's `indexed` is once its links, todos, tags and search text have been made from its text. */
+const MADE = 4;
 
-const SUMMARY_COLUMNS = `n.id, n.folder_id, n.revision, n.title, n.snippet, n.open_todos, n.created_at, n.updated_at, n.updated_by, n.updated_by_kind, n.private_owner,
+/** A note as it is made: live. */
+const NEW = { state: "live", state_at: null } as const;
+
+const SUMMARY_COLUMNS = `n.id, n.folder_id, n.revision, n.title, n.snippet, n.open_todos, n.created_at, n.updated_at, n.updated_by, n.updated_by_kind, n.private_owner, n.state, n.state_at,
     COALESCE(p.name, a.name) AS updated_by_name, a.person_id AS updated_by_owner
   FROM notes n
   LEFT JOIN people p ON n.updated_by_kind = 'member' AND p.id = n.updated_by
@@ -184,6 +201,9 @@ const toSummary = (ctx: Context, row: SummaryRow): NoteSummary => ({
   openTodos: row.open_todos,
   access: noteLevel(ctx.sight, row) === "edit" ? "edit" : "view",
   private: row.private_owner !== null,
+  state: row.state,
+  purgesAt: row.state === "trashed" && row.state_at !== null ? purgesAt(row.state_at) : null,
+  stateAt: row.state_at,
 });
 
 /** A note as whoever holds a link is told of it: nothing of who wrote it, or of how it is shared. */
@@ -232,16 +252,19 @@ const CANT_CHANGE = "You can read this note, and not change it";
 
 /**
  * The note, for someone who may do `need` with it. This is the one place a single note is read, so
- * it is where a note the actor can't see is the same as no note at all.
+ * it is where a note the actor can't see is the same as no note at all, and where every operation
+ * says what it does with a note in Trash. Who is asking is settled first: only someone who may do
+ * `need` with the note is ever told it is in Trash.
  */
-export async function loadNote(ctx: Context, id: string, need: GrantLevel): Promise<NoteRow> {
+export async function loadNote(ctx: Context, id: string, need: GrantLevel, trashed: Trashed): Promise<NoteRow> {
   const row = await ctx.db
-    .prepare(`SELECT n.text, n.created_by, n.indexed, ${SUMMARY_COLUMNS} WHERE n.id = ? AND n.workspace_id = ?`)
+    .prepare(`SELECT n.text, n.created_by, n.indexed, n.restores_as, n.restores_to, ${SUMMARY_COLUMNS} WHERE n.id = ? AND n.workspace_id = ?`)
     .bind(id, ctx.workspaceId)
     .first<NoteRow>();
   const level = row ? noteLevel(ctx.sight, row) : "none";
-  if (!row || level === "none") throw new OpError("not_found", NO_SUCH_NOTE);
+  if (!row || level === "none" || (row.state === "trashed" && trashed === "hidden")) throw new OpError("not_found", NO_SUCH_NOTE);
   if (!allows(level, need)) throw new OpError("forbidden", CANT_CHANGE);
+  if (row.state === "trashed" && trashed === "refused") throw new OpError("conflict", IN_TRASH);
   return row;
 }
 
@@ -291,15 +314,22 @@ async function intoFolder(write: Promise<unknown>, name?: string): Promise<void>
  * of a link is only ever read through here: a backlink, a linked note's title, a title to link by.
  * So a note the actor can't see is left out of all three by narrowing this one query.
  */
-async function seenAmong(ctx: Context, among: string, ...binds: unknown[]): Promise<SummaryRow[]> {
+async function seenAmong(ctx: Context, covering: Covering, among: string, ...binds: unknown[]): Promise<SummaryRow[]> {
   const { results } = await ctx.db
-    .prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (${among}) AND ${SEEN("n", `?${binds.length + 2}`)} ORDER BY n.updated_at DESC, n.id`)
+    .prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (${among}) AND ${SEEN("n", `?${binds.length + 2}`, covering)} ORDER BY n.updated_at DESC, n.id`)
     .bind(ctx.workspaceId, ...binds, ctx.sight.bind)
     .all<SummaryRow>();
   return results;
 }
 
 const IDS_IN = "SELECT value FROM json_each(?2)";
+
+/** Each note `text` links to by id, with its title and state now for the ones the actor is shown. */
+async function linksOf(ctx: Context, text: string, covering: Covering): Promise<LinkedNote[]> {
+  const ids = linkedIds(text);
+  const seen = new Map(ids.length ? (await seenAmong(ctx, covering, IDS_IN, JSON.stringify(ids))).map((r) => [r.id, r]) : []);
+  return ids.map((id) => ({ id, title: seen.get(id)?.title ?? null, state: seen.get(id)?.state ?? null }));
+}
 
 const quoted = (title: string) => JSON.stringify(title);
 
@@ -309,6 +339,8 @@ const quoted = (title: string) => JSON.stringify(title);
  * note already had is left exactly as it is, wherever in the note it now stands and however often,
  * and a writer is only ever refused for a link they wrote themselves. A new target is looked up as
  * an id and as a title: a note with that id is the one meant, and otherwise the one note so titled.
+ * A note in Trash is never the one meant. An archived note is, by its id, and by its title when no
+ * live note has that title.
  */
 async function linkedById(ctx: Context, text: string, base: string, how: "resolve" | "keep"): Promise<string> {
   if (how === "keep") return text;
@@ -318,6 +350,7 @@ async function linkedById(ctx: Context, text: string, base: string, how: "resolv
   // Each title as written and in lower case: the database folds case for unaccented letters only.
   const found = await seenAmong(
     ctx,
+    "kept",
     "SELECT t.id FROM notes t WHERE t.workspace_id = ?1 AND (t.id IN (SELECT value FROM json_each(?2)) OR t.title COLLATE NOCASE IN (SELECT value FROM json_each(?3)))",
     JSON.stringify(introduced.filter(isNoteId)),
     JSON.stringify(introduced.flatMap((target) => [target, target.toLowerCase()])),
@@ -326,7 +359,9 @@ async function linkedById(ctx: Context, text: string, base: string, how: "resolv
   const byTitle = Map.groupBy(found, (row) => row.title.toLowerCase());
   const stored = retargeted(text, (target) => {
     if (had.has(target) || ids.has(target)) return undefined;
-    const notes = byTitle.get(target.toLowerCase()) ?? [];
+    const titled = byTitle.get(target.toLowerCase()) ?? [];
+    const live = titled.filter((n) => n.state === "live");
+    const notes = live.length ? live : titled;
     if (notes.length > 1) throw new OpError("invalid", `${notes.length} notes are titled ${quoted(target)}: ${notes.map((n) => n.id).join(", ")}. Link the one you mean as [[id]].`);
     if (!notes.length) throw new OpError("invalid", `No note ${isNoteId(target) ? "has the id or the title" : "is titled"} ${quoted(target)}. Link a note by its title or as [[id]], with ids from note.list, or pass linkTitles "keep" to leave [[${target}]] as text.`);
     return notes[0]!.id;
@@ -378,7 +413,8 @@ const TODO_ORDER: Record<TodoSort, string> = {
 };
 
 const INDEXED = {
-  todos: "INSERT INTO todos (note_id, line, done, importance, due, text) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]')",
+  todos:
+    "INSERT INTO todos (note_id, line, done, importance, due, text, words, recurs) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'), json_extract(value, '$[0]') IN (SELECT value FROM json_each(?4))",
   tags: "INSERT INTO note_tags (note_id, tag, name) SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]')",
 } as const;
 const INDEX_TABLE = { todos: "todos", tags: "note_tags" } as const;
@@ -393,34 +429,69 @@ function indexing(ctx: Context, noteId: string, text: string, { was, atRevision 
   const before = was === undefined ? null : todoIndex(was);
   const current = "(?2 IS NULL OR EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND revision = ?2))";
   const at = atRevision ?? null;
+  // Whether a todo recurs is said by its line, so it changes only when the todos do.
+  const recurring = JSON.stringify(todosIn(text).filter((todo) => todo.every).map((todo) => todo.line));
   return (Object.keys(INDEXED) as (keyof typeof INDEXED)[]).flatMap((part) => {
     if (before && JSON.stringify(before[part]) === JSON.stringify(now[part])) return [];
     return [
       ctx.db.prepare(`DELETE FROM ${INDEX_TABLE[part]} WHERE note_id = ?1 AND ${current}`).bind(noteId, at),
-      ...inParts(now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows)),
+      // Each todo with its line's words as the index folds them, a space before each, so a word is found by its start.
+      ...inParts(part === "todos" ? now.todos.map((row) => [...row, ` ${folded(row[4])}`]) : now[part]).map((rows) => ctx.db.prepare(`${INDEXED[part]} FROM json_each(?3) WHERE ${current}`).bind(noteId, at, rows, ...(part === "todos" ? [recurring] : []))),
     ];
   });
 }
 
 /**
- * Makes the links, todos and tags of the notes that have never had them made, from their
- * text: notes written before there were tables for them, and every note after a rebuild asks. It
- * covers every note in the workspace, whoever asks, since it tells the asker nothing: what it writes
- * is only ever read back through `SEEN`. It does so many a call. False when there are more.
+ * The statements that make the text search reads what `text` says, or none when `was` says the same.
+ * Like `linking`, they go in the batch that changes the text, and with `atRevision` do nothing
+ * unless the note is still at that revision.
  */
-async function mend(ctx: Context): Promise<boolean> {
+function searching(ctx: Context, noteId: string, text: string, { was, atRevision }: { was?: string; atRevision?: number } = {}): D1PreparedStatement[] {
+  if (was === text) return [];
+  const current = "(?2 IS NULL OR EXISTS (SELECT 1 FROM notes WHERE id = ?1 AND revision = ?2))";
+  const at = atRevision ?? null;
+  return [
+    ctx.db.prepare(`INSERT OR IGNORE INTO note_search_rows (note_id) SELECT ?1 WHERE ${current}`).bind(noteId, at),
+    ctx.db.prepare(`DELETE FROM note_search WHERE rowid = (SELECT id FROM note_search_rows WHERE note_id = ?1) AND ${current}`).bind(noteId, at),
+    ctx.db.prepare(`INSERT INTO note_search (rowid, workspace, title, text) SELECT r.id, ?3, ?4, ?5 FROM note_search_rows r WHERE r.note_id = ?1 AND ${current}`).bind(noteId, at, ctx.workspaceId, summarize(text).title, text),
+  ];
+}
+
+/** Everything that is made from a note's text and kept beside it: its links, its todos and tags, and what search reads. */
+const deriving = (ctx: Context, noteId: string, text: string, from: { was?: string; atRevision?: number } = {}): D1PreparedStatement[] => [
+  ...linking(ctx, noteId, text, from),
+  ...indexing(ctx, noteId, text, from),
+  ...searching(ctx, noteId, text, from),
+];
+
+/** Whose notes are read in: the asker's own, or every note of the workspace. */
+type Mending = "seen" | "all";
+
+/** A condition on `notes`, true for a note of the workspace (`?1`) that is waiting to be read in and that `mending` covers. `?2` is the asker's sight. */
+function waiting(mending: Mending): string {
+  return `workspace_id = ?1 AND indexed < ${MADE} AND ${mending === "seen" ? SEEN("notes", "?2", "any") : "?2 IS NOT NULL"}`;
+}
+
+/**
+ * Makes the links, todos, tags and search rows of notes that have never had them made,
+ * from their text: notes written before there were tables for them, and every note after a rebuild
+ * asks. It reads in the notes the asker is shown, so many a call, and is false when there are more.
+ * A note they can't see waits for someone who can: whether it is waiting, and how many are, would
+ * otherwise show in how often the asker is told to ask again. A rebuild by someone who sees every
+ * folder covers every note.
+ */
+async function mend(ctx: Context, mending: Mending = "seen"): Promise<boolean> {
   for (let batch = 0; batch < MEND_BATCHES; batch++) {
     const { results } = await ctx.db
-      .prepare(`SELECT id, revision, text FROM notes WHERE workspace_id = ? AND indexed < ${MADE} LIMIT ?`)
-      .bind(ctx.workspaceId, MEND_NOTES + 1)
+      .prepare(`SELECT id, revision, text FROM notes WHERE ${waiting(mending)} LIMIT ?3`)
+      .bind(ctx.workspaceId, ctx.sight.bind, MEND_NOTES + 1)
       .all<{ id: string; revision: number; text: string }>();
     const notes = results.slice(0, MEND_NOTES);
     // A note written since it was read here is left to that write, which made all of it.
     if (notes.length) {
       await ctx.db.batch(
         notes.flatMap((n) => [
-          ...linking(ctx, n.id, n.text, { atRevision: n.revision }),
-          ...indexing(ctx, n.id, n.text, { atRevision: n.revision }),
+          ...deriving(ctx, n.id, n.text, { atRevision: n.revision }),
           ctx.db.prepare("UPDATE notes SET indexed = ? WHERE id = ? AND revision = ?").bind(MADE, n.id, n.revision),
         ]),
       );
@@ -432,14 +503,16 @@ async function mend(ctx: Context): Promise<boolean> {
 
 /**
  * Has every note's links and index made again. A call that finds notes still waiting from the call
- * before carries on with them, and one that finds none starts over.
+ * before carries on with them, and one that finds none starts over. An agent limited to folders
+ * rebuilds its own notes and is told of no other.
  */
 const rebuild = {
   needs: "manage",
   async run(ctx: Context) {
-    const waiting = await ctx.db.prepare(`SELECT 1 FROM notes WHERE workspace_id = ? AND indexed < ${MADE} LIMIT 1`).bind(ctx.workspaceId).first();
-    if (!waiting) await ctx.db.prepare("UPDATE notes SET indexed = 0 WHERE workspace_id = ?").bind(ctx.workspaceId).run();
-    return { done: await mend(ctx) };
+    const mending: Mending = seesEveryFolder(ctx.sight) ? "all" : "seen";
+    const left = await ctx.db.prepare(`SELECT 1 FROM notes WHERE ${waiting(mending)} LIMIT 1`).bind(ctx.workspaceId, ctx.sight.bind).first();
+    if (!left) await ctx.db.prepare(`UPDATE notes SET indexed = 0 WHERE ${waiting(mending).replace(`indexed < ${MADE}`, "indexed >= 0")}`).bind(ctx.workspaceId, ctx.sight.bind).run();
+    return { done: await mend(ctx, mending) };
   },
 } as const;
 
@@ -465,7 +538,7 @@ const WRITE_RETRY_MS = 15;
 /** Reverting an author reads each note's whole record and costs a few queries a note, and a request is allowed only so many. */
 const REVERT_AUTHOR_NOTES = 10;
 /** A handful of statements a note, in one batch. */
-const MEND_NOTES = 20;
+const MEND_NOTES = 15;
 /** As many batches as one request makes, so a workspace of any size is mended over a few. */
 const MEND_BATCHES = 20;
 /** A write that lost to another: its revision of a note, a member's daily note for a day, or a folder's name was taken first. */
@@ -543,8 +616,7 @@ function recording(ctx: Context, row: NoteRow, changes: ChangeSet, baseRevision:
       ctx.db
         .prepare("UPDATE notes SET revision = ?, text = ?, title = ?, snippet = ?, open_todos = ?, updated_at = ?, updated_by = ?, updated_by_kind = ?, indexed = ? WHERE id = ? AND revision = ?")
         .bind(revision, next.text, next.title, next.snippet, next.open_todos, next.updated_at, next.updated_by, next.updated_by_kind, MADE, row.id, row.revision),
-      ...linking(ctx, row.id, text, was),
-      ...indexing(ctx, row.id, text, was),
+      ...deriving(ctx, row.id, text, was),
     ],
   };
 }
@@ -601,14 +673,15 @@ const NOTE_BY_ID = `SELECT n.text, n.created_by, n.indexed, ${SUMMARY_COLUMNS} W
 /**
  * The daily note for `day` of the member acting, or of the member an agent acts for, that can still
  * be used: the one place that says which note that is. `stale` is the note the day is kept for when
- * that note can no longer be used, which a new daily note then takes the place of. Every note can
- * be used today. A lifecycle that takes one out of use, such as Trash, says so here and nowhere else.
+ * that note can no longer be used, which a new daily note then takes the place of. A note in Trash
+ * can't be used: the member threw that day's note away, so the next thing filed gets a new one, and
+ * the trashed one is an ordinary note if it is restored after that. Restored before, it is still the day's.
  */
 async function usableDaily(ctx: Context, day: string): Promise<{ note: NoteRow | null; stale: string | null }> {
   const kept = await ctx.db.prepare("SELECT note_id FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ?").bind(ctx.workspaceId, ctx.personId, day).first<{ note_id: string }>();
   if (!kept) return { note: null, stale: null };
   const note = await ctx.db.prepare(NOTE_BY_ID).bind(kept.note_id).first<NoteRow>();
-  return note ? { note, stale: null } : { note: null, stale: kept.note_id };
+  return note && note.state !== "trashed" ? { note, stale: null } : { note: null, stale: kept.note_id };
 }
 
 /** The folder at the top of the workspace that the member's settings name for daily notes, ignoring case, when there is one. */
@@ -626,7 +699,7 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
   if (folder ? !allows(folderLevel(ctx.sight, folder.id), "edit") : !ctx.role || ctx.role === "viewer" || !seesEveryFolder(ctx.sight)) return null;
   const folderId = folder?.id ?? newId();
   const id = newId();
-  const row: NoteRow = { id, folder_id: folderId, revision: 1, created_at: ctx.now, created_by: ctx.personId, private_owner: settings.private ? ctx.personId : null, indexed: MADE, ...written(ctx, text) };
+  const row: NoteRow = { id, folder_id: folderId, revision: 1, created_at: ctx.now, created_by: ctx.personId, private_owner: settings.private ? ctx.personId : null, indexed: MADE, ...NEW, ...written(ctx, text) };
   return {
     row,
     statements: [
@@ -640,8 +713,7 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
       insertChange(ctx, id, 1, 0, "", changesBetween("", text)),
       ...(stale ? [ctx.db.prepare("DELETE FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ? AND note_id = ?").bind(ctx.workspaceId, ctx.personId, day, stale)] : []),
       ctx.db.prepare("INSERT INTO daily_notes (workspace_id, person_id, day, note_id) VALUES (?, ?, ?, ?)").bind(ctx.workspaceId, ctx.personId, day, id),
-      ...linking(ctx, id, text, { was: "" }),
-      ...indexing(ctx, id, text, { was: "" }),
+      ...deriving(ctx, id, text, { was: "" }),
     ],
   };
 }
@@ -789,7 +861,8 @@ interface Refiling {
  * note's changes since, never by what it says. One that was edited or deleted since is left as the
  * member has it. The statements go in the batch that records the change itself. The daily note is
  * the completer's, and is changed whether or not the one taking the change back can see it: they are
- * told of it only when they can.
+ * told of it only when they can. A daily note in Trash can't be changed, so its lines are left as
+ * they are and counted as left.
  */
 async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[], reverts: Reverts): Promise<Refiling> {
   const { results } = await ctx.db
@@ -803,6 +876,10 @@ async function refiling(ctx: Context, row: NoteRow, history: readonly Recorded[]
   for (const [dailyId, completions] of Map.groupBy(moved, (c) => c.daily_note_id)) {
     const daily = await ctx.db.prepare(NOTE_BY_ID).bind(dailyId).first<NoteRow>();
     if (!daily) continue;
+    if (daily.state === "trashed") {
+      refiled.unfiled!.left += completions.filter((c) => after.has(c.revision)).length;
+      continue;
+    }
     const removals: { from: number; to: number }[] = [];
     const additions: { completion: (typeof completions)[number]; line: string }[] = [];
     let touched = false;
@@ -962,7 +1039,7 @@ const RECORDED_COLUMNS = `c.note_id, c.revision, c.author_kind, c.author_id, COA
        LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id`;
 
 async function takingBack(ctx: Context, id: string, need: GrantLevel, choose: Choose, resolve?: Resolve): Promise<TakingBack> {
-  const row = await loadNote(ctx, id, need);
+  const row = await loadNote(ctx, id, need, need === "edit" ? "refused" : "opens");
   const { results } = await ctx.db.prepare(`SELECT ${RECORDED_COLUMNS} WHERE c.note_id = ? AND c.revision <= ? ORDER BY c.revision`).bind(row.id, row.revision).all<RecordedRow>();
   return takingBackOf(row, results.map(toRecorded), choose, resolve);
 }
@@ -975,9 +1052,9 @@ async function takingBack(ctx: Context, id: string, need: GrantLevel, choose: Ch
 async function loadWithHistory(ctx: Context, ids: readonly string[]): Promise<Map<string, { row: NoteRow; history: Recorded[] }>> {
   const named = JSON.stringify(ids);
   const [notes, changes] = await ctx.db.batch<NoteRow & RecordedRow & { note_id: string }>([
-    ctx.db.prepare(`SELECT n.text, n.created_by, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3")}`).bind(ctx.workspaceId, named, ctx.sight.bind),
+    ctx.db.prepare(`SELECT n.text, n.created_by, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3", "any")}`).bind(ctx.workspaceId, named, ctx.sight.bind),
     ctx.db
-      .prepare(`SELECT ${RECORDED_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ?1 AND c.note_id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3")} ORDER BY c.note_id, c.revision`)
+      .prepare(`SELECT ${RECORDED_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ?1 AND c.note_id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3", "any")} ORDER BY c.note_id, c.revision`)
       .bind(ctx.workspaceId, named, ctx.sight.bind),
   ]);
   const recorded = Map.groupBy(changes!.results, (r) => r.note_id);
@@ -1044,6 +1121,18 @@ function isJsonObject(text: string) {
   }
 }
 
+/**
+ * Moves a note to Trash, remembering the state it had and the folder it was in. One statement, which
+ * does nothing to a note already there, or one `only` rules out. It answers how many notes it moved.
+ */
+async function trashing(ctx: Context, id: string, only = "state <> 'trashed'"): Promise<number> {
+  const { meta } = await ctx.db
+    .prepare(`UPDATE notes SET restores_as = state, restores_to = folder_id, state = 'trashed', state_at = ?3, state_by = ?4, state_by_kind = ?5 WHERE id = ?1 AND workspace_id = ?2 AND ${only}`)
+    .bind(id, ctx.workspaceId, ctx.now, authorId(ctx), ctx.author.kind)
+    .run();
+  return meta.changes;
+}
+
 /** Only for an operation that is `by: "member"`, which is always asked by a person. */
 const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now });
 
@@ -1089,15 +1178,149 @@ function takingBackItem(row: NoteRow, history: Recorded[], item: RevertedItem): 
 const titled = (row: NoteRow) => ({ noteId: row.id, noteTitle: row.title });
 
 /** As many diff lines as one answer of `history.diff` holds. A run past them comes without its diff. */
+const is = (word: string): Filter => ({ kind: "filter", key: "is", cmp: "=", value: word });
+/** Says a word of `is:` without narrowing by it, which is what the old fields that widen a listing do. */
+const either = (word: string): Node => ({ kind: "or", of: [is(word), { kind: "not", of: is(word) }] });
+
+const any = (of: Node[]): Node => (of.length > 1 ? { kind: "or", of } : of[0]!);
+
+/** What the fields a listing had before there was a query language say, as the query says it. */
+const OLD = {
+  archived: (includeArchived: boolean | "only"): Node[] => (includeArchived === "only" ? [is("archived")] : includeArchived ? [either("archived")] : []),
+  completed: (includeCompleted: boolean): Node[] => (includeCompleted ? [either("done")] : []),
+};
+
+/** What a query asks of the database: a condition over the notes row `n` and, for todos, the todos row `t`, with what it binds after the workspace and the asker's sight. */
+interface Finding {
+  query: Query;
+  covering: Covering;
+  condition: string;
+  /** Binds one more value, for what the operation asks besides the condition, and answers its placeholder. */
+  bind: (value: string | number) => string;
+  /** The statement that asks it, with every value bound: the workspace is `?1` and the asker's sight `?2`. */
+  prepare: (sql: string) => D1PreparedStatement;
+}
+
+/**
+ * What a statement's values are bound through: each is given a placeholder, the one it already has
+ * when it was bound before, so a statement holds each of its values once. D1 takes a hundred, and
+ * one more is refused here, in words, where the database would refuse the whole statement.
+ */
+export function binder(values: (string | number)[]): (value: string | number) => string {
+  return (value) => {
+    const had = values.indexOf(value);
+    if (had >= 0) return `?${had + 1}`;
+    if (values.length >= MAX_BOUND) throw new OpError("invalid", `This query asks for more than the ${MAX_BOUND} values a search can take: say it in fewer terms`);
+    return `?${values.push(value)}`;
+  };
+}
+
+/**
+ * Reads a query and makes it a condition, for `search` and for `todo.list` alike: the one place a
+ * query meets the database. Every value is bound. A name is looked up among what the asker can
+ * already see, so a folder they can't see, or someone who has changed no note they can see, is
+ * refused in the very words a name nobody has is. `also` is ANDed with it: the old fields of the
+ * operation, said as a query says them. Which states of a note it covers is read from its `is:`.
+ */
+async function finding(ctx: Context, scope: Scope, op: { query: string; today?: string; zone?: string }, also: readonly Bound[]): Promise<Finding> {
+  const parsed = parse(op.query, scope);
+  if (!parsed.ok) {
+    const { message, from, to } = parsed.error;
+    throw new OpError("invalid", `${message} (characters ${from + 1} to ${Math.max(to, from + 1)} of the query${to > from ? `: ${op.query.slice(from, to)}` : ""})`);
+  }
+  const { query } = parsed;
+  const said = (word: string) => names(query.where, word) || also.some((node) => names(node as Node, word));
+  const covering: Covering = said("trashed") ? "any" : said("archived") ? "kept" : "live";
+  // Todos are the open ones until a query says anything of whether one is done, a NOT of it included.
+  const open = scope === "todos" && !said("open") && !said("done");
+
+  let folders: Promise<{ id: string; parent_id: string | null; name: string }[]> | undefined;
+  const folderIds = async (named: string): Promise<string[]> => {
+    folders ??= ctx.db.prepare("SELECT id, parent_id, name FROM folders WHERE workspace_id = ?").bind(ctx.workspaceId).all<{ id: string; parent_id: string | null; name: string }>().then((r) => r.results);
+    const all = await folders;
+    const found = all.filter((f) => (f.id === named || f.name.toLowerCase() === named.toLowerCase()) && allows(folderLevel(ctx.sight, f.id), "view")).map((f) => f.id);
+    if (!found.length) throw new OpError("invalid", `No folder named "${named}"`);
+    const under = new Set(found);
+    // A folder's parent is listed before or after it, so the folders are gone over until none is added.
+    for (let added = true; added; ) {
+      added = false;
+      for (const f of all) if (f.parent_id && under.has(f.parent_id) && !under.has(f.id)) added = !!under.add(f.id);
+    }
+    return [...under];
+  };
+  const authors = async (named: string): Promise<string[]> => {
+    if (named.toLowerCase() === "@me") return [`${ctx.author.kind}:${authorId(ctx)}`];
+    const changed = (kind: string, id: string) => `EXISTS (SELECT 1 FROM changes c JOIN notes n ON n.id = c.note_id WHERE c.author_kind = '${kind}' AND c.author_id = ${id} AND n.workspace_id = ?1 AND ${SEEN("n", "?2", "any")})`;
+    const { results } = await ctx.db
+      .prepare(
+        `SELECT 'member:' || p.id AS author FROM people p WHERE p.name = ?3 COLLATE NOCASE AND ${changed("member", "p.id")}
+         UNION ALL SELECT 'agent:' || a.id FROM agents a WHERE a.name = ?3 COLLATE NOCASE AND ${changed("agent", "a.id")}`,
+      )
+      .bind(ctx.workspaceId, ctx.sight.bind, named)
+      .all<{ author: string }>();
+    if (!results.length) throw new OpError("invalid", `Nobody named "${named}" has changed a note you can see`);
+    return results.map((r) => r.author);
+  };
+  let shared: Promise<string[]> | undefined;
+  /** The notes with a grant of their own that the asker may list the grants of: what sharing a note shows them, and no more. */
+  const sharedIds = () =>
+    (shared ??= (async () => {
+      if (ctx.actor.kind !== "member") return [];
+      const { results } = await ctx.db
+        .prepare(`SELECT DISTINCT n.id, n.folder_id, n.private_owner FROM grants g JOIN notes n ON n.id = g.note_id WHERE g.workspace_id = ?1 AND ${SEEN("n", "?2", "any")}`)
+        .bind(ctx.workspaceId, ctx.sight.bind)
+        .all<{ id: string; folder_id: string; private_owner: string | null }>();
+      return results.filter((note) => canShare(noteAsked(ctx.sight, note))).map((note) => note.id);
+    })());
+  const day = (written: string): string => {
+    if (!isRelative(written)) return written;
+    if (!op.today) throw new OpError("invalid", `"${written}" is counted from today, and the server doesn't know your day: pass today, as YYYY-MM-DD`);
+    return dayOf(written, op.today);
+  };
+  const resolved = async (node: Node | Bound): Promise<Bound> => {
+    if (node.kind === "and" || node.kind === "or") return { kind: node.kind, of: await Promise.all(node.of.map(resolved)) };
+    if (node.kind === "not") return { kind: "not", of: await resolved(node.of) };
+    if (node.kind !== "filter" || "ids" in node) return node;
+    const { type } = FILTERS[node.key].value;
+    if (type === "folder") return { ...node, ids: await folderIds(node.value) };
+    if (type === "person") return { ...node, ids: await authors(node.value) };
+    if (type === "day") return { ...node, value: day(node.value), ...(node.to !== undefined && { to: day(node.to) }) };
+    if (node.key === "is" && node.value === "shared") return { ...node, ids: await sharedIds() };
+    return node;
+  };
+  const parts = [...(query.where ? [query.where] : []), ...also, ...(open ? [is("open")] : [])];
+  const where = parts.length > 1 ? await resolved({ kind: "and", of: parts as Bound[] }) : parts.length ? await resolved(parts[0]!) : null;
+
+  let zone: (day: string) => number;
+  let settingsZone: string | null | undefined;
+  const timed = [...walk(where as Node | null)].some(({ node }) => node.kind === "filter" && (node.key === "updated" || node.key === "created"));
+  if (timed && !op.zone) {
+    const row = await ctx.db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(ctx.workspaceId, ctx.personId).first<{ text: string }>();
+    settingsZone = dailySettings(row?.text).timeZone;
+  }
+  const start = () => (zone ??= dayStartIn(op.zone ?? settingsZone ?? "UTC"));
+
+  const binds: (string | number)[] = [ctx.workspaceId, ctx.sight.bind];
+  const bind = binder(binds);
+  const compiling: Compiling = { scope, workspaceId: ctx.workspaceId, in: query.in, bind, seen: (alias) => SEEN(alias, "?2", "kept"), dayStart: (d) => start()(d), dayEnd: (d) => start()(shift(d, 1)) };
+  return { query, covering, condition: conditionOf(where, compiling), bind, prepare: (sql) => ctx.db.prepare(sql).bind(...binds) };
+}
+
+
 export const MAX_ANSWER_LINES = 2000;
 
 const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.list": {
     needs: "view",
     async run(ctx, op) {
+      if (op.tag !== undefined) await mend(ctx);
       const { results } = await ctx.db
-        .prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR n.folder_id = ?2) AND (?3 IS NULL OR n.updated_at >= ?3) AND ${SEEN("n", "?4")} ORDER BY n.updated_at DESC`)
-        .bind(ctx.workspaceId, op.folderId ?? null, op.updatedSince ?? null, ctx.sight.bind)
+        .prepare(
+          `SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND (?2 IS NULL OR n.folder_id = ?2) AND (?3 IS NULL OR n.updated_at >= ?3 OR n.state_at >= ?3) AND ${SEEN("n", "?4", listing(op.includeArchived))}
+             AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = n.id AND g.tag = ?5))
+           ORDER BY n.updated_at DESC`,
+        )
+        .bind(ctx.workspaceId, op.folderId ?? null, op.updatedSince ?? null, ctx.sight.bind, op.tag === undefined ? null : nameKey(op.tag))
         .all<SummaryRow>();
       return results.map((row) => toSummary(ctx, row));
     },
@@ -1110,14 +1333,14 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const id = newId();
       const revision = op.text ? 1 : 0;
       const text = await linkedById(ctx, op.text, "", op.linkTitles);
-      const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...written(ctx, text) };
+      const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
           `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, indexed)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, row.indexed);
-      await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text)), ...linking(ctx, id, text, { was: "" }), ...indexing(ctx, id, text, { was: "" })] : [insertNote]));
+      await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text)), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
       return toNote(ctx, row);
     },
   },
@@ -1125,20 +1348,19 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.read": {
     needs: "view",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id, "view");
+      const row = await loadNote(ctx, op.id, "view", "opens");
       if (op.revision !== undefined && op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
       const note = op.revision === undefined || op.revision === row.revision ? toNote(ctx, row) : toNote(ctx, row, (await replay(ctx, op.id, op.revision, row.revision)).text, op.revision);
-      const ids = linkedIds(note.text);
-      const titles = new Map(ids.length ? (await seenAmong(ctx, IDS_IN, JSON.stringify(ids))).map((r) => [r.id, r.title]) : []);
-      return { ...note, links: ids.map((id) => ({ id, title: titles.get(id) ?? null })) };
+      return { ...note, links: await linksOf(ctx, note.text, "any") };
     },
   },
 
   "note.backlinks": {
     needs: "view",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id, "view");
-      return (await seenAmong(ctx, "SELECT source_id FROM links WHERE target_id = ?2", row.id)).map((from) => toSummary(ctx, from));
+      const row = await loadNote(ctx, op.id, "view", "opens");
+      // An archived note keeps its links, so it is still what links here. A note in Trash is in no listing but Trash.
+      return (await seenAmong(ctx, "kept", "SELECT source_id FROM links WHERE target_id = ?2", row.id)).map((from) => toSummary(ctx, from));
     },
   },
 
@@ -1150,38 +1372,30 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       await mend(ctx);
       // The folder narrows inside what the asker sees and never widens it: one they can't see is no folder.
       const folder = op.folderId === undefined ? null : (await loadFolder(ctx, op.folderId, "view")).id;
-      const { results } = await ctx.db
-        .prepare(
-          `${UNDER} SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
-             (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
-           FROM todos t JOIN notes n ON n.id = t.note_id
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")}
-             AND (?3 = 1 OR t.done = 0)
-             AND (?4 IS NULL OR n.folder_id IN (SELECT id FROM under))
-             AND (?5 IS NULL OR EXISTS (SELECT 1 FROM note_tags g WHERE g.note_id = t.note_id AND g.tag = ?5))
-             AND (?6 IS NULL OR t.due >= ?6)
-             AND (?7 IS NULL OR t.due <= ?7)
-             AND (?8 = 0 OR t.due IS NULL)
-             AND (?9 IS NULL OR t.importance IN (SELECT value FROM json_each(?9)))
-             AND (?10 IS NULL OR t.note_id = ?10)
-           ORDER BY t.done, ${TODO_ORDER[op.sort]}, t.note_id, t.line
-           LIMIT ?11 OFFSET ?12`,
-        )
-        .bind(
-          ctx.workspaceId,
-          ctx.sight.bind,
-          op.includeCompleted ? 1 : 0,
-          folder,
-          op.tag === undefined ? null : nameKey(op.tag),
-          op.dueFrom ?? null,
-          op.dueTo ?? null,
-          op.noDue ? 1 : 0,
-          op.importance ? JSON.stringify(op.importance) : null,
-          op.noteId ?? null,
-          op.limit + 1,
-          op.offset,
-        )
-        .all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
+      const due = (cmp: Filter["cmp"], value: string): Filter => ({ kind: "filter", key: "due", cmp, value });
+      const { query, covering, condition, bind, prepare } = await finding(ctx, "todos", op, [
+        ...(folder ? [{ kind: "filter", key: "folder", cmp: "=", value: folder } as const] : []),
+        ...(op.tag === undefined ? [] : [{ kind: "filter", key: "tag", cmp: "=", value: nameKey(op.tag) } as const]),
+        ...(op.dueFrom ? [due(">=", op.dueFrom)] : []),
+        ...(op.dueTo ? [due("<=", op.dueTo)] : []),
+        ...(op.noDue ? [{ kind: "not", of: { kind: "filter", key: "has", cmp: "=", value: "due" } } as const] : []),
+        ...(op.importance ? [any(op.importance.map((level): Filter => ({ kind: "filter", key: "priority", cmp: "=", value: PRIORITIES[level] })))] : []),
+        ...(op.noteId ? [{ kind: "note", id: op.noteId } as const] : []),
+        ...OLD.completed(op.includeCompleted),
+        ...OLD.archived(op.includeArchived),
+      ]);
+      // The query's sort: says the order where it has one, and `sort` where it hasn't. The done ones are last either way, and a
+      // word the Todos page's Sort menu offers breaks its ties as the menu's order does.
+      const sort = query.sort ? TODO_SORTS.find((s) => TODO_SORT_WORDS[s] === query.sort) : op.sort;
+      const order = `t.done, ${sort ? TODO_ORDER[sort] : orderOf(query.sort!)}`;
+      const { results } = await prepare(
+        `SELECT t.note_id, t.line, t.done, t.importance, t.due, t.text, n.title, n.revision, n.folder_id, n.private_owner,
+           (SELECT json_group_array(name) FROM (SELECT g.name FROM note_tags g WHERE g.note_id = t.note_id ORDER BY g.rowid)) AS tags
+         FROM todos t JOIN notes n ON n.id = t.note_id
+         WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition}
+         ORDER BY ${order}, t.note_id, t.line
+         LIMIT ${bind(op.limit + 1)} OFFSET ${bind(op.offset)}`,
+      ).all<{ note_id: string; line: number; done: number; importance: ListedTodo["importance"]; due: string | null; text: string; title: string; revision: number; folder_id: string; private_owner: string | null; tags: string }>();
       const page = results.slice(0, op.limit);
       return {
         todos: page.map((r) => {
@@ -1210,12 +1424,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
 
   "todo.filters": {
     needs: "view",
-    async run(ctx) {
+    async run(ctx, op) {
       await mend(ctx);
+      const covering = listing(op.includeArchived);
       const { results } = await ctx.db
         .prepare(
           `SELECT MIN(g.name) AS name FROM note_tags g JOIN notes n ON n.id = g.note_id
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} AND EXISTS (SELECT 1 FROM todos t WHERE t.note_id = g.note_id) GROUP BY g.tag ORDER BY g.tag`,
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND EXISTS (SELECT 1 FROM todos t WHERE t.note_id = g.note_id) GROUP BY g.tag ORDER BY g.tag`,
         )
         .bind(ctx.workspaceId, ctx.sight.bind)
         .all<{ name: string }>();
@@ -1227,7 +1442,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "edit",
     run: (ctx, op) =>
       settle(async (): Promise<Written | null> => {
-        const row = await loadNote(ctx, op.id, "edit");
+        const row = await loadNote(ctx, op.id, "edit", "refused");
         const { id: _, type: __, revision: ___, line: ____, text: listedAs, on, ...change } = op;
         const mine = change.done || change.skip ? await completing(ctx, on) : null;
         let wanted: Completed;
@@ -1252,12 +1467,12 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "todo.history": {
     needs: "view",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id, "view");
+      const row = await loadNote(ctx, op.id, "view", "opens");
       const todo = await listedTodo(ctx, row, op);
       if (!todo) throw new OpError("conflict", "This todo was changed since it was listed. List the todos again.");
       const mine = (await completionsNow(ctx, row.id)).filter(({ at }) => at === todo.from).map((f) => f.completion);
       const dailies = [...new Set(mine.flatMap((c) => (c.daily_note_id ? [c.daily_note_id] : [])))];
-      const seen = new Set(dailies.length ? (await seenAmong(ctx, IDS_IN, JSON.stringify(dailies))).map((r) => r.id) : []);
+      const seen = new Set(dailies.length ? (await seenAmong(ctx, "any", IDS_IN, JSON.stringify(dailies))).map((r) => r.id) : []);
       return {
         completions: mine
           .map((c) => ({ on: c.done_on, at: c.created_at, by: authorOf(c.author_kind, c.author_id, c.name, c.agent_owner), dailyNoteId: c.daily_note_id && seen.has(c.daily_note_id) ? c.daily_note_id : null }))
@@ -1289,7 +1504,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "edit",
     run: (ctx, op) =>
       settle(async (): Promise<Written | null> => {
-        const row = await loadNote(ctx, op.id, "edit");
+        const row = await loadNote(ctx, op.id, "edit", "refused");
         if (op.writeId) {
           const recorded = await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(row.id, op.writeId).first();
           if (recorded) return toNote(ctx, row);
@@ -1322,7 +1537,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.history": {
     needs: "view",
     async run(ctx, op) {
-      await loadNote(ctx, op.id, "view");
+      await loadNote(ctx, op.id, "view", "opens");
       await countLines(ctx, [op.id]);
       const { results } = await ctx.db.prepare(`SELECT ${CHANGE_COLUMNS} WHERE c.note_id = ? ORDER BY c.revision`).bind(op.id).all<ChangeRow>();
       const standing = standingOf(results.map(stepOf));
@@ -1333,7 +1548,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.diff": {
     needs: "view",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id, "view");
+      const row = await loadNote(ctx, op.id, "view", "opens");
       if (op.revision > row.revision) throw new OpError("not_found", `The note has no change ${op.revision}`);
       const { text, since } = await replay(ctx, row.id, op.revision - 1, op.revision);
       return lineDiff(text, since[0]!);
@@ -1343,7 +1558,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.label": {
     needs: "edit",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id, "edit");
+      const row = await loadNote(ctx, op.id, "edit", "refused");
       if (op.revision > row.revision) throw new OpError("not_found", `The note has no revision ${op.revision}`);
       if (op.name === null) {
         await ctx.db.prepare("DELETE FROM labels WHERE note_id = ? AND revision = ?").bind(row.id, op.revision).run();
@@ -1409,7 +1624,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "history.summary": {
     needs: "view",
     async run(ctx, op) {
-      const narrowed = `n.workspace_id = ?1 AND ${SEEN("n", "?6")}
+      const narrowed = `n.workspace_id = ?1 AND ${SEEN("n", "?6", op.noteIds ? "any" : "kept")}
              AND (?2 IS NULL OR c.note_id IN (SELECT value FROM json_each(?2)))
              AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
              AND (?4 IS NULL OR c.created_at >= ?4)
@@ -1486,7 +1701,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           .prepare(
             `SELECT n.title, ${CHANGE_COLUMNS}
              JOIN notes n ON n.id = c.note_id
-             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?10")}
+             WHERE n.workspace_id = ?1 AND ${SEEN("n", "?10", op.noteIds ? "any" : "kept")}
                AND (?2 IS NULL OR c.note_id IN (SELECT value FROM json_each(?2)))
                AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
                AND (?4 IS NULL OR c.created_at >= ?4)
@@ -1554,7 +1769,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
            JOIN notes n ON n.id = c.note_id
            LEFT JOIN people p ON c.author_kind = 'member' AND p.id = c.author_id
            LEFT JOIN agents a ON c.author_kind = 'agent' AND a.id = c.author_id
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} ORDER BY name COLLATE NOCASE, c.author_id`,
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} ORDER BY name COLLATE NOCASE, c.author_id`,
         )
         .bind(ctx.workspaceId, ctx.sight.bind)
         .all<Pick<ChangeRow, "author_kind" | "author_id" | "name" | "agent_owner">>();
@@ -1570,7 +1785,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const { results } = await ctx.db
         .prepare(
           `SELECT n.id, n.title FROM notes n
-           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?7")}
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?7", "kept")}
              AND (?2 IS NULL OR n.id IN (SELECT value FROM json_each(?2)))
              AND (?3 IS NULL OR n.id > ?3)
              AND EXISTS (SELECT 1 FROM changes c WHERE c.note_id = n.id AND c.author_kind = ?4 AND c.author_id = ?5)
@@ -1587,7 +1802,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           const { text, ...note } = await takeBack(ctx, id, (history) => (reverts = revertOfAuthor(history, theirs)), op.resolve?.[id]);
           if (!reverts) continue;
           answer.reverted.push({ note, revisions: (reverts as Reverts).revisions });
-          if (!text.trim()) answer.emptied.push({ noteId: id, title });
+          if (text.trim()) continue;
+          // A note someone wrote in since is left where it is: only one still empty goes.
+          const trashed = op.trashEmptied && (await trashing(ctx, id, "state <> 'trashed' AND trim(text, char(9, 10, 13, 32)) = ''")) > 0;
+          answer.emptied.push({ noteId: id, title, trashed });
         } catch (err) {
           // One note that can't take the change doesn't keep it from the notes after, or lose the answer for the notes before.
           answer.failed.push({ noteId: id, title, message: err instanceof OpError ? err.message : "Common Ink couldn't change this note just now. Try again." });
@@ -1603,9 +1821,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const asked = new Map(op.changes.map((c) => [c.noteId, c.revisions]));
       const named = JSON.stringify([...asked.keys()]);
       const [read, recorded] = await ctx.db.batch<SummaryRow & ChangeRow & { diff: string }>([
-        ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3")}`).bind(ctx.workspaceId, named, ctx.sight.bind),
+        ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3", "any")}`).bind(ctx.workspaceId, named, ctx.sight.bind),
         ctx.db
-          .prepare(`SELECT c.diff, ${CHANGE_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ?1 AND c.note_id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3")} ORDER BY c.note_id, c.revision`)
+          .prepare(`SELECT c.diff, ${CHANGE_COLUMNS} JOIN notes n ON n.id = c.note_id WHERE n.workspace_id = ?1 AND c.note_id IN (SELECT value FROM json_each(?2)) AND ${SEEN("n", "?3", "any")} ORDER BY c.note_id, c.revision`)
           .bind(ctx.workspaceId, named, ctx.sight.bind),
       ]);
       const rows = Map.groupBy(recorded!.results, (r) => r.note_id);
@@ -1692,6 +1910,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
           done.skipped.push({ ...titled(row), why: "refused", message: CANT_CHANGE });
           continue;
         }
+        if (row.state === "trashed") {
+          done.skipped.push({ ...titled(row), why: "refused", message: IN_TRASH });
+          continue;
+        }
         const moved = () => done.skipped.push({ ...titled(row), why: "changed", message: `${name} has changed since this revert was previewed, so it was left as it is. Preview its revert again` });
         if (item.at !== undefined && item.at !== row.revision) {
           moved();
@@ -1719,10 +1941,143 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.move": {
     needs: "edit",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id, "edit");
+      const row = await loadNote(ctx, op.id, "edit", "refused");
       const folder = await loadFolder(ctx, op.folderId, "edit");
       if (folder.id !== row.folder_id) await intoFolder(ctx.db.prepare("UPDATE notes SET folder_id = ? WHERE id = ?").bind(folder.id, row.id).run());
       return toNote(ctx, { ...row, folder_id: folder.id });
+    },
+  },
+
+  "note.archive": {
+    needs: "edit",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "edit", "refused");
+      const state = op.archived ? "archived" : "live";
+      if (row.state === state) return toNote(ctx, row);
+      await ctx.db
+        .prepare("UPDATE notes SET state = ?2, state_at = ?3, state_by = ?4, state_by_kind = ?5 WHERE id = ?1 AND state <> 'trashed'")
+        .bind(row.id, state, ctx.now, authorId(ctx), ctx.author.kind)
+        .run();
+      return toNote(ctx, { ...row, state, state_at: ctx.now });
+    },
+  },
+
+  "note.trash": {
+    needs: "edit",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "edit", "opens");
+      if (row.state === "trashed") return toNote(ctx, row);
+      await trashing(ctx, row.id);
+      return toNote(ctx, { ...row, state: "trashed", state_at: ctx.now });
+    },
+  },
+
+  "note.restore": {
+    needs: "edit",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "edit", "opens");
+      if (row.state !== "trashed") return { ...toNote(ctx, row), folderGone: false };
+      // Whoever could trash it can put it back where it was. Only a note whose folder was deleted since goes somewhere new, to Unsorted, and that takes edit there.
+      const folderGone = row.restores_to != null && row.restores_to !== row.folder_id;
+      if (folderGone && !allows(folderLevel(ctx.sight, row.folder_id), "edit")) throw new OpError("forbidden", "The folder this note was in was deleted, so it returns to Unsorted, which you can't change");
+      const state = row.restores_as ?? "live";
+      const at = ctx.now;
+      const { meta } = await ctx.db
+        .prepare("UPDATE notes SET state = ?2, state_at = ?3, state_by = ?4, state_by_kind = ?5, restores_as = NULL, restores_to = NULL WHERE id = ?1 AND state = 'trashed'")
+        .bind(row.id, state, at, authorId(ctx), ctx.author.kind)
+        .run();
+      // Removed for good, or restored by someone else, in the moment since it was read.
+      if (!meta.changes) return { ...toNote(ctx, await loadNote(ctx, op.id, "edit", "opens")), folderGone: false };
+      return { ...toNote(ctx, { ...row, state, state_at: at }), folderGone };
+    },
+  },
+
+  // Removing a note for good is the one change nothing takes back. Only the member does it: see NOT_FOR_AGENTS.
+  "note.purge": {
+    needs: "edit",
+    by: "member",
+    members: true,
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "edit", "opens");
+      if (ctx.role !== "admin" && row.created_by !== ctx.personId && row.private_owner !== ctx.personId) throw new OpError("forbidden", "Only an admin or the member who made a note can delete it for good");
+      if (row.state !== "trashed") throw new OpError("invalid", "Only a note in Trash can be deleted for good. Move it to Trash first.");
+      await ctx.db.batch(removing(ctx.db, row.id));
+      await forgetRemoved(ctx.db);
+      return { id: row.id };
+    },
+  },
+
+  "trash.list": {
+    needs: "view",
+    async run(ctx) {
+      const { results } = await ctx.db
+        .prepare(
+          `SELECT n.state_by, n.state_by_kind, COALESCE(tp.name, ta.name) AS state_by_name, ta.person_id AS state_by_owner, ${SUMMARY_COLUMNS}
+           LEFT JOIN people tp ON n.state_by_kind = 'member' AND tp.id = n.state_by
+           LEFT JOIN agents ta ON n.state_by_kind = 'agent' AND ta.id = n.state_by
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "trashed")} ORDER BY n.state_at DESC, n.id`,
+        )
+        .bind(ctx.workspaceId, ctx.sight.bind)
+        .all<SummaryRow & { state_by: string; state_by_kind: AuthorRef["kind"]; state_by_name: string | null; state_by_owner: string | null }>();
+      return results.map((row): TrashedNote => ({ ...toSummary(ctx, row), trashedAt: row.state_at!, trashedBy: authorOf(row.state_by_kind, row.state_by, row.state_by_name, row.state_by_owner) }));
+    },
+  },
+
+  "tag.list": {
+    needs: "view",
+    async run(ctx, op) {
+      const indexing = !(await mend(ctx));
+      const { results } = await ctx.db
+        .prepare(
+          `SELECT MIN(g.name) AS name, COUNT(*) AS notes FROM note_tags g JOIN notes n ON n.id = g.note_id
+           WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", listing(op.includeArchived))} GROUP BY g.tag ORDER BY g.tag`,
+        )
+        .bind(ctx.workspaceId, ctx.sight.bind)
+        .all<{ name: string; notes: number }>();
+      return { tags: results, indexing };
+    },
+  },
+
+  search: {
+    needs: "view",
+    async run(ctx, op) {
+      if (op.folderId !== undefined) await loadFolder(ctx, op.folderId, "view");
+      const { query, covering, condition, bind, prepare } = await finding(ctx, "notes", op, [
+        // The folder's own notes, not those of the folders inside it, which `folder:` in the query covers.
+        ...(op.folderId === undefined ? [] : [{ kind: "filter", key: "folder", cmp: "=", value: op.folderId, ids: [op.folderId] } as const]),
+        ...(op.hasTodos ? [{ kind: "filter", key: "has", cmp: "=", value: "open-todo" } as const] : []),
+        ...OLD.archived(op.includeArchived),
+      ]);
+      if (!query.where) return { results: [], next: null, indexing: false };
+      const indexing = !(await mend(ctx));
+      const inTitle = !query.sort && op.sort === "match" ? topTerms(query.where) : [];
+      const order = query.sort ? orderOf(query.sort) : orderOf(({ match: "updated-desc", recent: "updated-desc", created: "created-desc", title: "title-asc" } as const)[op.sort]);
+      // What a note the asker isn't shown matches is left out before anything is counted, ordered or read. The
+      // order asked for is of the note itself, as the title's match and then the time of the last change are: a rank worked
+      // out across every note would move with the notes that are hidden. Each match names the workspace, so the
+      // index is walked for this workspace's notes and no other's.
+      const titleFirst = inTitle.length ? `n.id IN (SELECT r.note_id FROM note_search s JOIN note_search_rows r ON r.id = s.rowid WHERE s.note_search MATCH ${bind(matchOf(ctx.workspaceId, inTitle, ["title"]))}) DESC,` : "";
+      const { results: found } = await prepare(
+        `SELECT n.id FROM notes n
+         WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", covering)} AND ${condition}
+         ORDER BY ${titleFirst} ${order}, n.id
+         LIMIT ${bind(op.limit + 1)} OFFSET ${bind(op.offset)}`,
+      ).all<{ id: string }>();
+      const page = found.slice(0, op.limit).map((r) => r.id);
+      const { results: rows } = await ctx.db
+        .prepare(`SELECT n.text, ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND n.id IN (SELECT value FROM json_each(?3)) AND ${SEEN("n", "?2", covering)}`)
+        .bind(ctx.workspaceId, ctx.sight.bind, JSON.stringify(page))
+        .all<SummaryRow & { text: string }>();
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const sought = soughtIn(query);
+      return {
+        results: page.flatMap((id) => {
+          const row = byId.get(id);
+          return row ? [{ note: toSummary(ctx, row), matches: matchesIn(row.text, sought) }] : [];
+        }),
+        next: found.length > op.limit ? op.offset + op.limit : null,
+        indexing,
+      };
     },
   },
 
@@ -1731,7 +2086,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx) {
       const { results } = await ctx.db
         .prepare(
-          `SELECT (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND ${SEEN("n", "?2")}) AS note_count, ${FOLDER_COLUMNS}
+          `SELECT (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND ${SEEN("n", "?2", "live")}) AS note_count, ${FOLDER_COLUMNS}
            WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`,
         )
         .bind(ctx.workspaceId, ctx.sight.bind)
@@ -1771,12 +2126,13 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const UNSORTED = "(SELECT unsorted_folder_id FROM workspaces WHERE id = ?2)";
       const [, deleted] = await ctx.db.batch([
         // A folder that holds only notes the admin can't see is empty to them, and refusing to delete it would say otherwise. Those notes go to Unsorted, where their owners find them.
+        // A note in Trash doesn't keep its folder either. It goes to Unsorted too, and is restored there.
         ctx.db
           .prepare(
             `UPDATE notes SET folder_id = ${UNSORTED}
-             WHERE folder_id = ?1 AND workspace_id = ?2 AND ?1 <> ${UNSORTED} AND NOT ${SEEN("notes", "?3")}
+             WHERE folder_id = ?1 AND workspace_id = ?2 AND ?1 <> ${UNSORTED} AND NOT ${SEEN("notes", "?3", "kept")}
                AND EXISTS (SELECT 1 FROM folders f WHERE f.id = ?1 AND ${SEEN_FOLDER("f", "?3")})
-               AND NOT EXISTS (SELECT 1 FROM notes v WHERE v.folder_id = ?1 AND ${SEEN("v", "?3")})
+               AND NOT EXISTS (SELECT 1 FROM notes v WHERE v.folder_id = ?1 AND ${SEEN("v", "?3", "kept")})
                AND NOT EXISTS (SELECT 1 FROM folders child WHERE child.parent_id = ?1)`,
           )
           .bind(op.id, ctx.workspaceId, ctx.sight.bind),
@@ -1791,7 +2147,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       if (deleted!.meta.changes) return { id: op.id };
       const folder = await loadFolder(ctx, op.id, "edit");
       if (folder.unsorted) throw new OpError("invalid", "Unsorted can't be deleted");
-      throw new OpError("invalid", `"${folder.name}" isn't empty. Move or delete what's in it first.`);
+      const archived = await ctx.db.prepare(`SELECT 1 FROM notes n WHERE n.folder_id = ?1 AND ${SEEN("n", "?2", "kept")} AND n.state = 'archived' LIMIT 1`).bind(folder.id, ctx.sight.bind).first();
+      throw new OpError("invalid", `"${folder.name}" isn't empty. Move or delete what's in it first${archived ? ", archived notes too" : ""}.`);
     },
   },
 
@@ -1859,7 +2216,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const [link, folders, notes] = await ctx.db.batch<{ kind: "public" | "signed_in"; note_id: string | null; folder_id: string | null; name: string | null } & FolderRow & SummaryRow>([
         ctx.db.prepare("SELECT g.kind, g.note_id, g.folder_id, f.name FROM grants g LEFT JOIN folders f ON f.id = g.folder_id WHERE g.token = ?").bind(token),
         ctx.db.prepare(`SELECT ${FOLDER_COLUMNS} WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`).bind(ctx.workspaceId, ctx.sight.bind),
-        ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2")} ORDER BY n.title COLLATE NOCASE, n.id`).bind(ctx.workspaceId, ctx.sight.bind),
+        ctx.db.prepare(`SELECT ${SUMMARY_COLUMNS} WHERE n.workspace_id = ?1 AND ${SEEN("n", "?2", "kept")} ORDER BY n.title COLLATE NOCASE, n.id`).bind(ctx.workspaceId, ctx.sight.bind),
       ]);
       const on = link!.results[0];
       if (!on) throw new OpError("not_found", NO_SUCH_LINK);
@@ -1869,7 +2226,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         link: on.kind,
         on: on.note_id !== null ? { kind: "note", id: on.note_id } : { kind: "folder", id: on.folder_id!, name: on.name! },
         folders: folders!.results.filter((f) => f.id !== on.folder_id).map((f) => ({ ...toFolder(ctx, f), parentId: within(f.parent_id) })),
-        notes: notes!.results.map((row) => toShared(ctx, row, within)),
+        // A link on an archived note still opens it. A folder's link lists what the folder does: its live notes.
+        notes: notes!.results.filter((row) => on.note_id !== null || row.state === "live").map((row) => toShared(ctx, row, within)),
       };
     },
   },
@@ -1878,10 +2236,8 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     needs: "view",
     by: "visitor",
     async run(ctx, op) {
-      const row = await loadNote(ctx, op.id, "view");
-      const ids = linkedIds(row.text);
-      const titles = new Map(ids.length ? (await seenAmong(ctx, IDS_IN, JSON.stringify(ids))).map((r) => [r.id, r.title]) : []);
-      return { ...toShared(ctx, row, (folderId) => folderId), text: row.text, revision: row.revision, links: ids.map((id) => ({ id, title: titles.get(id) ?? null })) };
+      const row = await loadNote(ctx, op.id, "view", "hidden");
+      return { ...toShared(ctx, row, (folderId) => folderId), text: row.text, revision: row.revision, links: await linksOf(ctx, row.text, "kept") };
     },
   },
 };

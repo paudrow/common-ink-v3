@@ -1,6 +1,11 @@
 import { z } from "zod";
+import type { NoteState } from "./lifecycle.ts";
 import { parseRule } from "./recurrence.ts";
+import { dayIn } from "./history.ts";
+import { MAX_SEARCH_LENGTH, type SortKey } from "./query.ts";
 import { isDay, type LastDone } from "./todos.ts";
+
+export { MAX_SEARCH_LENGTH };
 
 export const MAX_NOTE_LENGTH = 500_000;
 export const MAX_SETTINGS_LENGTH = 100_000;
@@ -81,19 +86,56 @@ const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
 
 /** A calendar date, such as 2026-10-14. Whose day it is, is the asker's to say: the server never works out today. */
 const Day = z.string().refine(isDay, "not a date written YYYY-MM-DD");
+/** A time zone by its name, such as Europe/Paris. */
+const Zone = z
+  .string()
+  .max(64)
+  .refine((zone) => {
+    try {
+      dayIn(zone);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "not a time zone, such as Europe/Paris");
+/**
+ * What a query's days are read by. `today` is the day it is for the asker, which `today`, `yesterday`,
+ * `tomorrow`, `7d` and `+7d` are counted from: the server never works it out, so a query with one of
+ * them and no `today` is refused. `zone` is where a day begins and ends for `updated:` and `created:`.
+ * Left out, it is the zone the member's settings name, or UTC.
+ */
+const Days = { today: Day.optional(), zone: Zone.optional() };
 /** How a todo recurs, as it is written after `every:`, such as `2w`, `mon,thu`, `3d-after-done`, `last-fri`, `mar-1` or `1m-times-5`. docs/todos.md has every rule. */
 const Recurrence = z.string().max(1000).refine((rule) => parseRule(rule) !== null, "not a way to repeat, such as 2w, mon,thu, 3d-after-done, last-fri, mar-1 or 1m-times-5");
 /** The orders todo.list can list todos in. */
 export const TODO_SORTS = ["due", "priority", "changed", "note", "text"] as const;
 export type TodoSort = (typeof TODO_SORTS)[number];
+/** The `sort:` word of a query that says each order: the query's `sort:` and `sort` are one choice. */
+export const TODO_SORT_WORDS: Record<TodoSort, SortKey> = { due: "due-asc", priority: "priority-desc", changed: "updated-desc", note: "title-asc", text: "text-asc" };
 
 const ImportanceLevel = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+/**
+ * Whether a listing also covers archived notes, which it leaves out unless asked. Nothing but
+ * trash.list covers a note in Trash.
+ */
+const IncludeArchived = z.boolean().default(false);
+/** For a listing of notes that can also be asked for the archived ones alone, with `"only"`. */
+const Archived = z.union([z.boolean(), z.literal("only")]).default(false);
+/** The orders a search answers in. `match` is notes whose title matches first, then the latest changed. */
+export const SEARCH_SORTS = ["match", "recent", "created", "title"] as const;
+export type SearchSort = (typeof SEARCH_SORTS)[number];
 
 export const Op = z.discriminatedUnion("type", [
-  /** `updatedSince` leaves out notes whose text hasn't changed since that time. */
-  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional() }),
+  /**
+   * `updatedSince` leaves out notes that haven't changed since that time: neither their text, nor
+   * their state, as by being unarchived or restored. A note that left the listing since, by being
+   * archived or trashed, is not in it to be told of: ask with `includeArchived`, and trash.list.
+   * `tag` lists only the notes with that tag, ignoring case. `includeArchived: "only"` lists the
+   * archived notes and no live one.
+   */
+  z.object({ type: z.literal("note.list"), folderId: Id.optional(), updatedSince: Time.optional(), tag: z.string().min(1).max(100).optional(), includeArchived: Archived }),
   z.object({ type: z.literal("note.create"), text: NoteText.default(""), folderId: Id.optional(), linkTitles: LinkTitles }),
-  /** The note, and for each note its text links to by id, that note's title now. */
+  /** The note, and for each note its text links to by id, that note's title now. A note in Trash is read as any other, and its `state` says where it is. */
   z.object({ type: z.literal("note.read"), id: Id, revision: Revision.optional() }),
   z.object({
     type: z.literal("note.write"),
@@ -116,6 +158,55 @@ export const Op = z.discriminatedUnion("type", [
   /** What one change did to its note, as a line diff. */
   z.object({ type: z.literal("note.diff"), id: Id, revision: Revision.min(1) }),
   z.object({ type: z.literal("note.move"), id: Id, folderId: Id }),
+  /**
+   * Archives a note, or with `archived` false brings it back. An archived note keeps its folder, id
+   * and links, opens and is changed as before, and is left out of every listing that isn't asked to
+   * include archived notes. Done twice, it changes nothing more.
+   */
+  z.object({ type: z.literal("note.archive"), id: Id, archived: z.boolean() }),
+  /**
+   * Moves a note to Trash, where it waits 30 days and is then removed with its history. Until then
+   * it is listed only by trash.list, opens to be read, can't be changed, and any link on it opens
+   * nothing. note.restore brings it back.
+   */
+  z.object({ type: z.literal("note.trash"), id: Id }),
+  /**
+   * Brings a note back from Trash to the folder it was in, archived if it was. When that folder was
+   * deleted meanwhile it comes back to Unsorted, and the answer's `folderGone` says so.
+   */
+  z.object({ type: z.literal("note.restore"), id: Id }),
+  /** Removes a note in Trash now, with its history, instead of after its 30 days. Nothing brings it back. */
+  z.object({ type: z.literal("note.purge"), id: Id }),
+  /** The notes in Trash that the asker can see, latest trashed first. */
+  z.object({ type: z.literal("trash.list") }),
+  /** The tags of the notes the asker can see, each with how many of those notes have it. */
+  z.object({ type: z.literal("tag.list"), includeArchived: IncludeArchived }),
+  /**
+   * The notes the asker can see that `query` finds, written in the query language of docs/search.md:
+   * words, each matching the start of a word in the note, ignoring case and accents; "a phrase"; filters
+   * such as `folder:`, `tag:` or `#name`, `updated:`, `editor:`, `is:`, `has:`; `-` and `NOT`, `OR`, and
+   * parentheses. A query that can't be read is refused as invalid, saying where and why, and so is a
+   * `folder:` or an `editor:` that names nothing the asker can see. A query with no words and no filter
+   * finds nothing. Notes whose title matches come first, then the latest changed, unless the query's
+   * `sort:` or else `sort` asks for another order. Archived notes are left out unless the query says
+   * `is:archived`, and notes in Trash unless it says `is:trashed`.
+   *
+   * The fields beside `query` are from before it could say them, and narrow it further: `folderId` to
+   * the notes in one folder, not those of the folders inside it, where a folder the asker can't see is
+   * no such folder; `hasTodos` to notes with an open todo; `includeArchived` to cover archived notes
+   * too, or with `"only"` them alone. Pass the answer's `next` as `offset` for more.
+   */
+  z.object({
+    type: z.literal("search"),
+    query: z.string().max(MAX_SEARCH_LENGTH),
+    folderId: Id.optional(),
+    includeArchived: Archived,
+    hasTodos: z.boolean().default(false),
+    sort: z.enum(SEARCH_SORTS).default("match"),
+    ...Days,
+    limit: z.number().int().min(1).max(50).default(20),
+    offset: z.number().int().min(0).default(0),
+  }),
   /** Names a revision, or takes its name away when `name` is null. */
   z.object({ type: z.literal("note.label"), id: Id, revision: Revision.min(1), name: LabelName.nullable() }),
   /** Puts the note back to how it was at `revision`, as a new change. */
@@ -173,7 +264,7 @@ export const Op = z.discriminatedUnion("type", [
    * by whoever asks. It covers a few notes at a time; pass the answer's `next` as `after` for the rest.
    */
   /** `resolve` settles the conflicts of the notes it names, by note id, as `note.previewRevert` with `author` listed them. A note it leaves out keeps every later edit. */
-  z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional(), resolve: z.record(Id, Resolve).refine((byNote) => Object.keys(byNote).length <= 200, "resolve names at most 200 notes").optional() }),
+  z.object({ type: z.literal("history.revertAuthor"), author: AuthorRef, noteIds: z.array(Id).min(1).max(200).optional(), after: Id.optional(), /** Moves each note the revert left with no text to Trash, such as one the author created. */ trashEmptied: z.boolean().default(false), resolve: z.record(Id, Resolve).refine((byNote) => Object.keys(byNote).length <= 200, "resolve names at most 200 notes").optional() }),
   /**
    * Makes what is derived from the notes' text again, for every note in the workspace: which notes
    * link to which, and the index of todos and tags. Nothing needs it while every write
@@ -182,20 +273,28 @@ export const Op = z.discriminatedUnion("type", [
    */
   z.object({ type: z.literal("links.rebuild") }),
   /**
-   * The todos in the notes the asker can see: open ones, or done ones too with `includeCompleted`.
-   * Open ones come first, then by due date with those that have none last, then the most important.
-   * `dueFrom` and `dueTo` are days, both included, and leave out todos with no due date; `noDue`
-   * lists only those. `importance` lists the priority levels wanted, 0 for None to 3 for High. `tag` matches ignoring
-   * case, and is a tag of the todo's note: one written on the todo's own line, or anywhere else in the
-   * note. `folderId` lists the todos of the notes in that folder and in every folder under it; one the
-   * asker can't see is no folder. Pass the answer's `next` as `offset` for the page after. A field it
-   * doesn't know is refused, so a filter it no longer has, such as a project, is never read as no filter.
+   * The todos in the notes the asker can see that `query` finds, in the same language as search's:
+   * words are looked for in the todo's own line, and `is:done`, `due:`, `priority:`, `has:due` and
+   * `has:repeat` are of the todo. With no query it is every open todo. Done ones are listed when
+   * the query says `is:done`, and both with `is:open OR is:done`. Open ones come first, then by due
+   * date with those that have none last, then the most important, unless the query's `sort:` says otherwise.
+   *
+   * The fields beside `query` are from before it could say them, and narrow it further. `dueFrom` and
+   * `dueTo` are days, both included, and leave out todos with no due date; `noDue` lists only those.
+   * `importance` lists the priority levels wanted, 0 for None to 3 for High. `tag` matches ignoring case, and is a tag
+   * of the todo's note: one written on the todo's own line, or anywhere else in the note. `folderId`
+   * lists the todos of the notes in that folder and in every folder under it; one the asker can't see
+   * is no folder. Pass the answer's `next` as `offset` for the page after. A field it doesn't know is
+   * refused, so a filter it no longer has, such as a project, is never read as no filter.
    * `sort` orders the open ones, and the done ones after them, another way: `priority` the highest
    * first, then by due date; `changed` those whose note changed last first; `note` by their note's
-   * title; `text` by their words, A to Z. Ties go by note and line.
+   * title; `text` by their words, A to Z. Ties go by note and line. A `sort:` in the query wins over it
+   * (`TODO_SORT_WORDS` names the word for each).
    */
   z.object({
     type: z.literal("todo.list"),
+    query: z.string().max(MAX_SEARCH_LENGTH).default(""),
+    ...Days,
     folderId: Id.optional(),
     tag: z.string().min(1).max(100).optional(),
     dueFrom: Day.optional(),
@@ -203,13 +302,14 @@ export const Op = z.discriminatedUnion("type", [
     noDue: z.boolean().optional(),
     importance: z.array(ImportanceLevel).min(1).max(4).optional(),
     includeCompleted: z.boolean().default(false),
+    includeArchived: IncludeArchived,
     noteId: Id.optional(),
     sort: z.enum(TODO_SORTS).default("due"),
     limit: z.number().int().min(1).max(200).default(100),
     offset: z.number().int().min(0).default(0),
   }).strict(),
   /** What todo.list can be narrowed by, besides the folders of folder.list: the tags of the notes that have todos, in notes the asker can see. */
-  z.object({ type: z.literal("todo.filters") }),
+  z.object({ type: z.literal("todo.filters"), includeArchived: IncludeArchived }),
   /**
    * Changes one todo by rewriting its line, as a change to its note by whoever asks. `revision`,
    * `line` and `text` are the todo as todo.list gave it: the line it was on at that revision of its
@@ -388,6 +488,41 @@ export interface NoteSummary {
   access: GrantAccess;
   /** Whether the note is private: hidden from every member but its owner and whoever the owner let in. */
   private: boolean;
+  /** Where the note is in its life: live, archived, or trashed. */
+  state: NoteState;
+  /** For a note in Trash, when it is removed for good. Null otherwise. */
+  purgesAt: number | null;
+  /** When its state last changed, or null for a note that has only ever been live. */
+  stateAt: number | null;
+}
+
+/** A note in Trash. */
+export interface TrashedNote extends NoteSummary {
+  trashedAt: number;
+  trashedBy: Author;
+}
+
+/** A line of a note that a search matched. */
+export interface SearchMatch {
+  /** Which line of the note, counted from 0. */
+  line: number;
+  /** The line as the note writes it, or the part of a long line around the first match. Markdown, not HTML. */
+  text: string;
+  /** Where in `text` the matches are, each as [from, to]. */
+  marks: [number, number][];
+}
+
+export interface SearchResult {
+  note: NoteSummary;
+  /** The first few lines that matched. Empty when only the note's tag did, or the match can't be shown on one line. */
+  matches: SearchMatch[];
+}
+
+export interface ListedTag {
+  /** The tag as a note writes it, without the #. */
+  name: string;
+  /** How many notes the asker can see have it. */
+  notes: number;
 }
 
 export interface Note extends NoteSummary {
@@ -397,8 +532,10 @@ export interface Note extends NoteSummary {
 /** A note that a note's text links to. */
 export interface LinkedNote {
   id: string;
-  /** Null when there is no such note or the one asking can't see it. Nothing tells the two apart. */
+  /** Null when there is no such note or the one asking can't see it. Nothing tells the two apart, and a note removed from Trash is no such note. */
   title: string | null;
+  /** Where the linked note is in its life, so a link can say it is in Trash. Null with a null title. */
+  state: NoteState | null;
 }
 
 export interface ReadNote extends Note {
@@ -733,8 +870,8 @@ export interface HistorySummary {
 export interface AuthorReverted {
   /** Each note that got a new change, and the author's changes it took back out. */
   reverted: { note: NoteSummary & Pick<Written, "unfiled">; revisions: number[] }[];
-  /** The reverted notes left with no text, each under the title it had. There is no deleting a note yet, so they stay. */
-  emptied: { noteId: string; title: string }[];
+  /** The reverted notes left with no text, each under the title it had, and whether it was moved to Trash, as `trashEmptied` asks. */
+  emptied: { noteId: string; title: string; trashed: boolean }[];
   /** Notes that refused the change, such as one it would make too long. They are left as they were. */
   failed: { noteId: string; title: string; message: string }[];
   /** Pass as `after` to cover the notes not reached yet; null when every note was. */
@@ -776,6 +913,16 @@ export interface Results {
   "todos.rebuild": Rebuilt;
   "note.history": ChangeEntry[];
   "note.move": Note;
+  "note.archive": Note;
+  "note.trash": Note;
+  /** `folderGone` when the folder it was in was deleted while it was in Trash, so it came back to Unsorted. */
+  "note.restore": Note & { folderGone: boolean };
+  "note.purge": { id: string };
+  "trash.list": TrashedNote[];
+  /** `indexing` is true while some notes are still to be read into the index, as after a deploy: the answer may lack them, and asking again reads more. */
+  "tag.list": { tags: ListedTag[]; indexing: boolean };
+  /** `next` is the `offset` of the page after, or null on the last. `indexing` is as for tag.list. */
+  search: { results: SearchResult[]; next: number | null; indexing: boolean };
   "note.label": { id: string; revision: number; label: string | null };
   "note.revert": Written;
   "note.revertChanges": Written;

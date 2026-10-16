@@ -32,6 +32,8 @@ const SLOT_WORDS: Record<keyof Slots, string> = {
   page: "A page",
   bar: "The bottom bar",
   overlay: "Something drawn over the app",
+  mark: "A mark in a note's bar",
+  notice: "A banner above a note's text",
 };
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

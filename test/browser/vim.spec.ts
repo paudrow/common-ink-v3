@@ -439,10 +439,10 @@ test("ctrl+o and ctrl+i are left to a field that has focus, vim's own prompt inc
   await tabs(page).filter({ hasText: "Beta" }).dblclick();
 
   await openAllNotes(page);
-  await page.getByRole("searchbox", { name: "Filter notes" }).click();
+  await page.getByRole("searchbox", { name: "Search notes" }).click();
   await page.keyboard.press("Control+o");
   await page.keyboard.type("a");
-  await expect(page.getByRole("searchbox", { name: "Filter notes" })).toHaveValue("a");
+  await expect(page.getByRole("searchbox", { name: "Search notes" })).toHaveValue("a");
   await expect(page).toHaveURL(/\/folder\/all$/);
   await tabs(page).filter({ hasText: "Beta" }).click();
   await expect(page).toHaveURL(/\/note\/beta-/);

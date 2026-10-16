@@ -64,7 +64,7 @@ function useHash() {
  * open note links to that the link covers.
  */
 function useDrawing(open: (noteId: string) => void) {
-  const app = useRef<Pick<App, "notes" | "folders" | "noteId" | "openNote">>({ notes: [], folders: null, noteId: null, openNote: open });
+  const app = useRef<Pick<App, "notes" | "trashed" | "folders" | "noteId" | "openNote">>({ notes: [], trashed: [], folders: null, noteId: null, openNote: open });
   app.current.openNote = open;
   const [host] = useState(() => {
     const kept = new Map<string, unknown>();
@@ -91,7 +91,7 @@ function useDrawing(open: (noteId: string) => void) {
   /** Says which notes the open one links to that the link covers, so each such link is drawn with its title and opens. */
   const linksTo = (note: Results["shared.read"]) => {
     app.current.noteId = note.id;
-    app.current.notes = note.links.flatMap((l) => (l.title === null ? [] : [{ id: l.id, title: l.title } as NoteSummary]));
+    app.current.notes = note.links.flatMap((l) => (l.title === null ? [] : [{ id: l.id, title: l.title, state: l.state ?? "live" } as NoteSummary]));
     host.notesChanged();
   };
   return { embeds: contributed.embeds, extensions, linksTo };

@@ -19,6 +19,26 @@ The default folder. A note created with no folder in front is placed here.
 The notes in one folder, shown in the editor area as cards: each a title, a line of details, and the note's first lines. A folder's list is of the folder's own notes, not those of the folders inside it.
 _Avoid_: List column, feed
 
+**Search bar**:
+What heads every folder's list, and the Search page, which is the same list of every note: a field that takes a query, with the folder it searches shown in it and Advanced beside it. A folder's list also has the choice of Open, Archived or All, Has todos, and the order; on the Search page the query says all three (`is:archived`, `has:todo`, `sort:`), and the bar and Advanced are its only controls. With nothing typed the list is the folder's notes. With a query typed it is what the server's search finds among them, each card with the lines that matched. The Todos page is headed by the same field and Advanced, for todos.
+_Avoid_: Filter box
+
+**Query**:
+What a search or a list of todos is asked for, as text: words, phrases, filters, and `-`, `NOT`, `OR` and parentheses between them, written as GitHub's search writes them. One language, read by one parser, for notes and for todos. `docs/search.md` has all of it.
+_Avoid_: Search string, search expression
+
+**Filter**:
+A `key:value` in a query that narrows by something other than words: `folder:`, `tag:`, `updated:`, `editor:`, `is:`, `has:`, `due:`. `no:word` is `-has:word`, and `#name` is `tag:name`. `in:` and `sort:` are written the same way and narrow nothing: they say where words are looked for and in what order the answer comes.
+_Avoid_: Qualifier, operator (for a filter)
+
+**Builder**:
+The panel Advanced opens under a search bar: the bar's query as a row for each condition, to be changed by picking. Each change is written into the bar, and what is typed in the bar is read back into the rows. A query rows can't show stays as typed. It opens on a first row to fill in. Its fields are the filters, with `is:` offered as two: State (open, archived, in Trash, and done for a todo) and Visibility (shared or private). Its **?** opens the help over the page, every form of the language under the same headings with an example to try.
+_Avoid_: Filter panel, advanced search form
+
+**Open, Archived, All**:
+Which notes a folder's list or its search is of, by where each is in its life: the live ones, the archived ones alone, or both. Never one in Trash. The Search page says it in its query: `is:archived`, `is:open OR is:archived`.
+_Avoid_: Show archived, include archived (for a list of notes)
+
 **All notes**:
 The list of every note the member can see, whatever folder it is in. It is the first row of the folder tree.
 
@@ -38,11 +58,11 @@ _Avoid_: Wikilink, reference
 A note whose text links to the note in front. The inspector's Backlinks panel lists the ones the member can see.
 
 **Todo**:
-A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, repeat, priority, and assignees are written on that line and shown as chips. It has the tags written on its line and the tags of its note. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a repeating todo leaves the open line with its next due date and files the checked line on the daily note of the member who checked it off, however the box was checked. Taking the completion back takes the filed line back off the daily note. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, with a control to include completed ones.
+A markdown checkbox line in a note, anywhere outside a code block: `- [ ]` open, `- [x]` done. Its due date, repeat, priority, and assignees are written on that line and shown as chips. It has the tags written on its line and the tags of its note. `docs/todos.md` has how each is written. An `@` person on the line is an assignee. A due date is a calendar date, and whether it is due today uses the viewing member's timezone. Checking the box marks it done. A todo has no id: it is its line, and a change made from a list finds it again by what the line says. Checking off a repeating todo leaves the open line with its next due date and files the checked line on the daily note of the member who checked it off, however the box was checked. Taking the completion back takes the filed line back off the daily note. The todos view lists open todos in notes the member can see, leaving out archived and trashed notes, until its query says otherwise.
 _Avoid_: Task, item
 
 **Priority**:
-How urgent a todo is: High, Medium or Low, written `!!!`, `!!` or `!` immediately after the checkbox, or None when none is written. The app says the words; the note keeps the marks. Operations, tools and the `ink` CLI still call the field `importance`, a number from 0 (None) to 3 (High).
+How urgent a todo is: High, Medium or Low, written `!!!`, `!!` or `!` immediately after the checkbox, or None when none is written. The app says the words; the note keeps the marks. Operations, tools and the `ink` CLI still call the field `importance`, a number from 0 (None) to 3 (High). A query says `priority:high`; `importance:` reads the same.
 _Avoid_: Importance, normal
 
 **Due date**:
@@ -92,7 +112,7 @@ An inline `#tag` in a note, with no space after the `#`, outside code. It tags t
 _Avoid_: Label, project
 
 **Search**:
-A search of the text of notes a member can see, including todo lines and tags. Archived and trashed notes are excluded unless included.
+A search of the text of notes a member can see, including todo lines, and tags. Every word typed must be in the note, each matching the start of a word, ignoring case and accents. Words in double quotes match as a phrase, and `#name` narrows to notes with that tag. Notes whose title matches come first, then the latest changed. Archived notes are excluded unless included, and trashed notes always.
 
 **Quick open**:
 A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included.
@@ -152,6 +172,13 @@ _Avoid_: Shortcut, hotkey
 **Command palette**:
 The list of commands, narrowed by typing.
 
+**Keyboard shortcuts sheet**:
+Every command that has keys now, under Navigation, Notes, Editor and then a plugin's own heading such as Vim, opened over the page by **?** wherever nothing is being typed, or from the command palette. It shows the member's keys where they changed them.
+_Avoid_: Cheat sheet, help menu (for the sheet)
+
+**Help overlay**:
+Help shown over the page in a dialog with a title and a close button, the one look for help in the app: the query syntax and the keyboard shortcuts sheet are drawn in it.
+
 **Vim mode**:
 A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
 
@@ -203,11 +230,19 @@ _Avoid_: Link on its own, which is a link between notes; public link for both ki
 **Private note**:
 A note hidden from every other member, admins too. Only the member who made a note can make it private, and they are its owner. The owner lets a member in by a grant on the note itself, for no more than that member's role allows, and can give it a share link. Nothing above it reaches it: not a folder's grant and not a folder's share link. Only the owner shares it or stops it being private, whatever their role. As a note becomes private, every grant and share link someone else put on it is taken away, and the owner is told how many. An owner can't leave the workspace while they have private notes. When an admin removes an owner, their private notes stop being private, since nobody else could reach them, and each records whose it was and when. Privacy is a note's, not a folder's. Sharing it with a mentioned member adds that member as an exception. Sharing it with a non-member who has an account creates a grant for that note only. The prompt that offers this can be turned off in the member's settings. A contact with no account is recorded and is not offered a grant.
 
+**State**:
+Where a note or upload is in its life: live, archived, or trashed. It is decided apart from access, and is the same for every member. A note removed from Trash has no state: it is gone.
+_Avoid_: Status, deleted flag
+
 **Archive**:
-A state of a note or upload, stored outside the file, that keeps it and its links and leaves it out of folder listings, search, the dashboard, and the todos view. It keeps its folder and id. A link still opens it. Archive and unarchive are actions on the open note and require edit. It applies to every member.
+A state of a note or upload, stored outside the file, that keeps it and its links and leaves it out of folder listings, search, the dashboard, and the todos view unless archived notes are included. It keeps its folder and id. A link still opens it, and it is edited as any note. Archive and unarchive are actions on the open note and require edit. It applies to every member.
 
 **Trash**:
-Where a deleted note or upload waits for 30 days from the delete. It remembers its folder, and restore puts it back there. A link opens it and shows that it is in Trash. After 30 days the note or upload and its history are removed, and references show that it is gone. Deleting a note does not delete an upload the note references. Restoring requires edit on the folder it returns to.
+Where a deleted note or upload waits for 30 days from the delete. It remembers its folder, and restore puts it back there. A link opens it and shows that it is in Trash. It can be read and not changed, it is in no listing but Trash, and a share link on it opens nothing. Restore returns it as it was, archived if it was, and to Unsorted when its folder was deleted meanwhile. Moving a note to Trash and restoring it need edit on the note, and an agent can do both. Restoring also needs edit on Unsorted when the note's folder was deleted and it returns there. After 30 days the note or upload and its history are removed, and references show that it is gone. Deleting a note does not delete an upload the note references.
+
+**Gone**:
+A note that was removed from Trash, after 30 days or sooner by an admin or the member who made it. Nothing of it is kept, so a link to it reads the same as a link to a note that never existed or that the reader can't see. Only a member, signed in, removes a note before its 30 days. An agent can't.
+_Avoid_: Deleted, purged
 
 ## History
 

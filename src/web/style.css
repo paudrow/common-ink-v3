@@ -635,21 +635,491 @@ button.link:hover {
   gap: 6px;
 }
 
-.folder-list .filter {
+/* The search bar of a folder's list: the field, with the folder it searches in it, and under it which notes are shown and in what order. */
+.finder-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   height: 38px;
-  padding: 0 12px;
+  padding: 0 6px 0 12px;
+  border: 1px solid var(--line-strong);
   border-radius: 9px;
   background: var(--bg-elev);
+  color: var(--faint);
+}
+
+.finder-field:focus-within {
+  border-color: var(--accent);
+}
+
+.finder-field > svg {
+  flex: none;
+}
+
+.finder-field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
   font-size: 14.5px;
 }
 
-.folder-list .chips {
-  margin: 10px 0 16px;
+.finder-scope {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  max-width: 45%;
+  height: 24px;
+  padding: 0 3px 0 9px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
-.folder-list .chip {
+.finder-scope > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-scope:not(:has(button)) {
+  padding-right: 9px;
+}
+
+.finder-scope button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.finder-scope button:hover {
+  background: var(--accent-soft);
+}
+
+/* The bar a query is typed in, for notes and for todos: the field, Advanced beside it, and under them what is offered while typing, what can't be read, and the builder. */
+.query-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.query-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-line > .finder-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.query-advanced {
+  flex: none;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.query-advanced:hover,
+.query-advanced[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.query-offers {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: min(100%, 260px);
+  max-width: 100%;
+  margin: 0;
+  padding: 4px;
+  border-radius: 9px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  list-style: none;
+  font-size: 13px;
+}
+
+.query-offers li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.query-offers li > span {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.query-offers small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-offers li:hover,
+.query-offers li[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.query-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.query-error code {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.query-error mark {
+  border-bottom: 2px solid var(--danger);
+  background: var(--removed-soft);
+  color: var(--ink);
+}
+
+.query-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.query-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-panel > header strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.query-panel > header span {
+  flex: 1;
+  min-width: 0;
+}
+
+.query-help-toggle {
+  flex: none;
+  font-weight: 600;
+}
+
+.query-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.query-rows:empty {
+  display: none;
+}
+
+.query-row,
+.query-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.query-foot {
+  gap: 8px 14px;
+}
+
+.query-foot label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.query-foot select {
+  flex: 1 1 auto;
+}
+
+.query-panel select,
+.query-panel input[type="text"] {
+  height: 26px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.query-row input[type="text"] {
+  flex: 1 1 5rem;
+}
+
+.query-row select {
+  max-width: 12rem;
+}
+
+.query-why {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.query-unshown {
+  margin: 0;
+}
+
+/* Help over the page: the query syntax and the keyboard shortcuts. */
+
+.help-overlay {
+  width: min(680px, calc(100% - 32px));
+  max-height: calc(100% - 64px);
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.help-overlay::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.help-overlay-body {
+  display: flex;
+  flex-direction: column;
+  max-height: inherit;
+  font-size: 13px;
+}
+
+.help-overlay-body > header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-overlay h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.help-overlay-content {
+  padding: 4px 16px 16px;
+  overflow: auto;
+}
+
+.help-overlay h3 {
+  margin: 16px 0 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.help-lead {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+.help-lead a {
+  color: var(--accent);
+}
+
+.help-overlay table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.help-overlay th,
+.help-overlay td {
+  padding: 5px 8px 5px 0;
+  border-top: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.help-overlay tr:first-child > * {
+  border-top: 0;
+}
+
+/* Every heading's table has the same columns, so the forms, what they mean and the examples line up down the whole help. */
+.query-help table {
+  table-layout: fixed;
+}
+
+.query-help th {
+  width: 32%;
+}
+
+.query-help td:last-child {
+  width: 30%;
+}
+
+.shortcut-sheet-group td {
+  padding-right: 0;
+  text-align: right;
+}
+
+.shortcut-sheet-group td kbd + kbd {
+  margin-left: 4px;
+}
+
+.query-help code,
+.query-example {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.query-example {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.query-example:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 520px) {
+  .query-help th,
+  .query-help td,
+  .query-help td:last-child {
+    display: block;
+    width: auto;
+    padding-right: 0;
+    border-top: 0;
+  }
+
+  .query-help tr {
+    display: block;
+    padding: 5px 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
+.finder-scope button svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Where the query is the list's one control, as on the Search page, the list is as far under the bar as under the tools a folder's list has. */
+.folder-list .query-bar:not(:has(+ .finder-tools)) {
+  margin-bottom: 16px;
+}
+
+.finder-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 10px 0 16px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.finder-tools .chip {
   padding: 2px 11px;
   font-size: 12.5px;
+}
+
+/* One choice of a few, as a row of words with the chosen one raised. */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--hover);
+}
+
+.segmented label {
+  position: relative;
+  cursor: pointer;
+}
+
+.segmented input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.segmented span {
+  display: block;
+  padding: 2px 11px;
+  border-radius: 6px;
+}
+
+.segmented input:checked + span {
+  background: var(--bg-elev);
+  box-shadow: 0 0 0 1px var(--line-strong);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.segmented input:focus-visible + span {
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .finder-sort {
@@ -666,6 +1136,18 @@ button.link:hover {
   background: var(--bg-elev);
   color: var(--ink);
   font: inherit;
+}
+
+.folder-column > .search-status {
+  margin: 0 0 12px;
+}
+
+.folder-column > .search-more {
+  margin-top: 14px;
+}
+
+.cards[aria-busy="true"] {
+  opacity: 0.55;
 }
 
 .cards {
@@ -737,14 +1219,21 @@ button.link:hover {
   vertical-align: -1px;
 }
 
+.card[data-state="archived"] .card-title,
+.card[data-state="archived"] .card-preview {
+  color: var(--faint);
+}
+
+/* What can be done with a card is drawn where it will be from the start, and only shown later, so nothing beside it moves when it is. */
+.card-archive,
 .card-edit {
-  margin-left: auto;
   opacity: 0;
 }
 
-.card:hover .card-edit,
-.card:focus-within .card-edit,
-.card[data-expanded] .card-edit {
+.card:hover :is(.card-archive, .card-edit),
+.card:focus-visible :is(.card-archive, .card-edit),
+.card:focus-within :is(.card-archive, .card-edit),
+.card[data-expanded] :is(.card-archive, .card-edit) {
   opacity: 1;
 }
 
@@ -772,6 +1261,14 @@ button.link:hover {
   content: "·";
 }
 
+.card-details .state-label {
+  margin-left: 8px;
+}
+
+.card-details .state-label::before {
+  content: none;
+}
+
 .card-preview {
   display: -webkit-box;
   margin: 7px 0 0;
@@ -781,6 +1278,13 @@ button.link:hover {
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.card-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 7px 0 0;
 }
 
 .card-body {
@@ -1350,7 +1854,8 @@ button.link:hover {
 }
 
 .note[data-save-state="failed"] .save-state,
-.note[data-save-state="rejected"] .save-state {
+.note[data-save-state="rejected"] .save-state,
+.note[data-save-state="inTrash"] .save-state {
   color: var(--danger);
 }
 
@@ -4241,35 +4746,6 @@ kbd {
   font-size: 13px;
 }
 
-/* It stands clear of the bar at the foot of History's list, which has what the toast may send the member to: Revert… */
-.toast {
-  position: fixed;
-  bottom: 84px;
-  left: 50%;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: min(560px, calc(100vw - 32px));
-  padding: 8px 8px 8px 14px;
-  border-radius: 10px;
-  background: var(--ink);
-  color: var(--bg);
-  font-size: 13px;
-  box-shadow: var(--shadow);
-  transform: translateX(-50%);
-}
-
-.toast .link {
-  color: inherit;
-  font-weight: 650;
-  text-decoration: underline;
-}
-
-.toast .icon-button {
-  color: inherit;
-}
-
 /* What just happened, in the window's bottom right corner, as v1's toasts. */
 .toasts {
   position: fixed;
@@ -4286,8 +4762,8 @@ kbd {
   box-sizing: border-box;
   align-items: center;
   gap: 10px;
-  min-width: 240px;
-  max-width: 340px;
+  min-width: min(240px, calc(100vw - 36px));
+  max-width: min(340px, calc(100vw - 36px));
   padding: 10px 14px 10px 10px;
   border-radius: 12px;
   background: var(--bg-elev);
@@ -4328,9 +4804,15 @@ kbd {
   color: var(--accent);
 }
 
+/* A long title is cut after five lines, so three cards always fit the window. */
 .toast-text {
+  display: -webkit-box;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
 }
 
 .toast-action {
@@ -5327,28 +5809,30 @@ button.diff-fold:hover {
   font-size: 22px;
 }
 
-.todo-filters {
+/* The query bar and, at the end of its line, the order, which is the query's sort: said as a menu. */
+.todo-tools {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px 14px;
+}
+
+.todo-tools > .query-bar {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.todo-sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  margin-left: auto;
   color: var(--muted);
   font-size: 12px;
 }
 
-.todo-filters label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-}
-
-/* The order is not a filter: it sits at the end of their line. */
-.todo-sort {
-  margin-left: auto;
-}
-
-.todo-filters select {
+.todo-sort select {
   min-width: 0;
   max-width: 12rem;
   padding: 2px 6px;
@@ -6345,6 +6829,344 @@ button.todo-tag[aria-pressed="true"] {
 .daily-opening p {
   color: var(--muted);
 }
+
+/* Search and tags (plugins/search, plugins/tags, plugins/lib/FoundNote.tsx) */
+
+.search-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 46rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.search-page h1 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 22px;
+}
+
+.search-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.search-tools .filter {
+  padding: 8px 11px;
+  font-size: 15px;
+}
+
+.include-archived {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.search-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.search-status .indexing {
+  display: block;
+}
+
+.found-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.found-list[aria-busy="true"] {
+  opacity: 0.55;
+}
+
+.found-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.found-note:hover {
+  background: var(--hover);
+}
+
+.found-note:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.found-list [aria-selected="true"] .found-note {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.found-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.found-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.found-archived {
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 99px;
+  color: var(--muted);
+}
+
+.found-line {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.found-line mark {
+  border-radius: 2px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.search-more {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.found-more {
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.found-more:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.tag-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 4px 0 10px;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.tag-row:hover {
+  background: var(--hover);
+}
+
+.tag-row[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 550;
+}
+
+.tag-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tag-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tags-all,
+.tags-hint {
+  margin: 0;
+  padding: 0 10px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.tags-hint {
+  line-height: 26px;
+}
+
+/* End of search and tags */
+
+/* Archive and Trash: begin */
+
+.note-row[data-state="archived"] .row-title,
+.note-row[data-state="archived"] .row-snippet {
+  color: var(--faint);
+}
+
+.state-label {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+}
+
+.state-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.state-mark button.link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.trash-banner {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.trash-banner > span:first-child {
+  flex: 1;
+  min-width: 14rem;
+}
+
+.button.small.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.trash-lede,
+.trash-none {
+  color: var(--muted);
+}
+
+.trash-list {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trash-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.trash-what {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 12rem;
+}
+
+.trash-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-title:hover {
+  text-decoration: underline;
+}
+
+.trash-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.trash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.palette-tools {
+  display: flex;
+  flex: none;
+  padding: 6px 10px 2px;
+}
+
+.info-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.info-tags a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.info-tags a:hover {
+  text-decoration: underline;
+}
+
+/* Archive and Trash: end */
 
 /* The row vim's keys are on, in any list. A card's row has the card's corners, so its mark does too. */
 .cards > li {

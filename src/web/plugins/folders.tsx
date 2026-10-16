@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ALL_NOTES, Icon, NOTE_DRAG, SHARED_WITH_ME, carry, type Folders as Tree, type ListedFolder, type Plugin, type PluginHost, type PluginOp, type Standing } from "../plugin-api.ts";
 import { useKept } from "./lib/kept.ts";
+import { listable } from "./lib/listable.ts";
 import { ContextMenu } from "./lib/Menu.tsx";
 import { SHARE_COMMAND, SHARE_OVERLAY } from "./sharing/Summary.tsx";
 
@@ -352,8 +353,10 @@ export const folders: Plugin = {
   activate(host) {
     host.views.register("section", {
       id: "folders",
+      label: "Folders",
+      icon: "folders",
       component: ({ app }) => {
-        const live = app.notes ?? [];
+        const live = listable(app.notes ?? [], false);
         return (
           app.folders && (
           <FolderTree

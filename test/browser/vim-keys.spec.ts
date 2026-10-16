@@ -131,7 +131,7 @@ test("a folder's notes move with j, k, gg, G and half pages; / goes to the searc
 
   // / is the list's search box. Letters are typed there, and move nothing.
   await page.keyboard.press("/");
-  const search = page.getByRole("searchbox", { name: "Filter notes" });
+  const search = page.getByRole("searchbox", { name: "Search notes" });
   await expect(search).toBeFocused();
   await page.keyboard.type("jGk plum");
   await expect(search).toHaveValue("jGk plum");
@@ -307,7 +307,7 @@ test("in Settings, Enter on a setting goes to its field and Escape comes back to
   await expect(shown("Vim: first row of a list")).toHaveText([/^G G/]);
   await expect(shown("Vim: last row of a list")).toHaveText([MAC ? /^⇧G/ : /^Shift\+G/]);
   await expect(shown("Vim: half a page down a list")).toHaveText([MAC ? /^⌃D/ : /^Ctrl\+D/]);
-  await expect(shown("Vim: open the selected row")).toHaveText([/^ENTER/, /^L/]);
+  await expect(shown("Vim: open the selected row")).toHaveText([/^Enter/, /^L/]);
   await expect(shown("Vim: expand or collapse the selected row")).toHaveText([/^Z A/]);
   await expect(shown("Vim: go to the region on the left")).toHaveText([MAC ? /^⌃W H/ : /^Ctrl\+W H/]);
   await expect(shown("Vim: next tab")).toHaveText([/^G T/]);

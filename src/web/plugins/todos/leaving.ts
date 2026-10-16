@@ -1,6 +1,7 @@
-import { nameKey, tagsOn, type ListedTodo } from "../../plugin-api.ts";
+import { PRIORITIES, nameKey, parseQuery, tagsOn, type ListedTodo } from "../../plugin-api.ts";
 import { DUE_FILTERS, dueLabel, dueRange, type DueFilter } from "./dates.ts";
 import { PRIORITY } from "./picking.ts";
+import { conjuncts } from "./tagged.ts";
 
 /** What the Todos page is narrowed to, as a changed row is checked against it. */
 export interface Narrowing {
@@ -44,4 +45,27 @@ export function leaving(todo: Pick<ListedTodo, "done" | "due" | "importance" | "
   if (by.folder && !by.folder.holds) return say("folder", `Its note is no longer in ${by.folder.name}, so it no longer shows there.`);
   if (by.search) return say("search", `Changed, so it no longer matches “${by.search}”.`);
   return null;
+}
+
+/**
+ * What a todos query narrows the list to, as the sentences under a changed row read it: its terms at the
+ * top that say a due date as a filter of its own did (`due:today`, `due:<today`, `due:today..+6d`,
+ * `no:due`), a priority (`priority:high`) and a tag (`#health`), and the whole query as the search for
+ * anything else. A todo checked off is said of by the Task completed notice, not here.
+ */
+export function narrowingOf(text: string): Narrowing {
+  const by: Narrowing = { completed: true, due: "any", importance: "", tag: "", folder: null, search: text.trim() };
+  const read = parseQuery(text, "todos");
+  if (!read.ok) return by;
+  for (const node of conjuncts(read.query.where)) {
+    if (node.kind === "not" && node.of.kind === "filter" && node.of.key === "has" && node.of.value === "due") by.due = "none";
+    if (node.kind !== "filter") continue;
+    if (node.key === "due" && node.value === "today") {
+      const due = node.cmp === "<" ? "overdue" : node.cmp !== "=" ? null : node.to === undefined ? "today" : node.to === "+6d" ? "week" : null;
+      if (due) by.due = due;
+    }
+    if (node.key === "priority" && node.cmp === "=") by.importance = String(PRIORITIES.indexOf(node.value as (typeof PRIORITIES)[number]));
+    if (node.key === "tag" && node.cmp === "=" && !by.tag) by.tag = node.value;
+  }
+  return by;
 }

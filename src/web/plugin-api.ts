@@ -16,7 +16,48 @@ import type { Showing } from "./inspected.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE } from "../core/protocol.ts";
+export { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, TODO_SORT_WORDS } from "../core/protocol.ts";
+/**
+ * The query language notes and todos are found by, as the server reads it: what is typed to a query
+ * and back, every filter there is with what it takes and means, and what is being typed at the
+ * cursor. A bar that takes a query, a builder of one and the help are all made from these.
+ */
+export {
+  EMPTY as EMPTY_QUERY,
+  FILTERS,
+  PRIORITIES,
+  fieldMeans,
+  fieldName,
+  fieldOf,
+  fieldsOf,
+  filterOf,
+  keyNamed,
+  keyOf,
+  keysFor,
+  keysStarting,
+  names as queryNames,
+  parse as parseQuery,
+  print as printQuery,
+  soughtIn,
+  syntax as querySyntax,
+  typingAt,
+  wordsFor,
+  wordsIn,
+  wordsOf,
+  written as writtenValue,
+  type Cmp,
+  type Field as QueryField,
+  type Filter as QueryFilter,
+  type FilterKey,
+  type In as QueryIn,
+  type Key as QueryKey,
+  type Node as QueryNode,
+  type Query,
+  type QueryError,
+  type Scope as QueryScope,
+  type SortKey,
+  type SyntaxRow,
+} from "../core/query.ts";
 /** Where two lists of lines differ, for a view that marks what changed inside a line. */
 export { lineHunks } from "../core/text.ts";
 
@@ -24,7 +65,10 @@ export { lineHunks } from "../core/text.ts";
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
 
 /** How a note writes a todo and its options, read and rewritten by the functions the core indexes todos with. */
-export { changeTodo, completeTodo, skipTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+export { changeTodo, completeTodo, skipTodo, isDay, locateTodo, nameKey, parseTodo, rewriteTodo, tagsIn, tagsOn, todosIn, type Completed, type Importance, type LastDone, type NoteTodo, type Todo, type TodoChange } from "../core/todos.ts";
+
+/** The lines of a note that aren't in a fenced code block, which is where the core reads todos and tags. */
+export { linesOutsideCode } from "../core/lines.ts";
 
 /** How a todo's `every:` token writes when it comes around again, read, written and said by the functions the core rolls a todo forward with. */
 export { DAY_NAMES, MONTHS, MONTH_NAMES, WEEKDAYS, counted, describeRule, endLabel, isInterval, nextDue, occurrences, ordinal, parseRule, pastThe28th, ruleLabel, skippedTo, writeRule, type End, type Rule, type Unit, type Weekday } from "../core/recurrence.ts";
@@ -45,6 +89,8 @@ export { isReading } from "./readOnly.ts";
 export { ResizeHandle } from "./resize.tsx";
 export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
+/** Help shown over the page, such as the query syntax or the keyboard shortcuts: one look for every help there is. */
+export { HelpOverlay } from "./HelpOverlay.tsx";
 export { ago, dayOf, today, useNow } from "./time.ts";
 /** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
 export { useOpenNote, type OpenNote } from "./openNotes.ts";
@@ -279,6 +325,11 @@ export interface Command {
   when?: () => boolean;
   /** A text field has its own answer to this command, so its keys are left to a field that has focus. */
   leaveToFields?: boolean;
+  /**
+   * The heading the keyboard shortcuts list it under: by convention one of `Navigation`, `Notes`,
+   * `Editor`, or a plugin's own, as vim's are under `Vim`. One with none is under Other.
+   */
+  group?: string;
 }
 
 export interface CommandInfo {
@@ -286,6 +337,9 @@ export interface CommandInfo {
   title: string;
   /** The first chord that runs it now, as a person reads it, such as `⇧⌘P`. */
   shortcut: string | undefined;
+  /** Every chord that runs it now, as a person reads them: its own, or the member's in their place. */
+  keys: readonly string[];
+  group: string | undefined;
 }
 
 /** What a view is drawn with. */
@@ -304,8 +358,12 @@ export interface Slots {
    * In focus it is still drawn, out of sight.
    */
   column: { id: string; component: View };
-  /** A section of the sidebar, such as the folder tree. A column places them with `app.sections` while it is open, and may show them over the page from its bar with `app.sectionsOpening`. */
-  section: { id: string; component: View };
+  /**
+   * A section of the sidebar, such as the folder tree. A column places them with `app.sections` while it is open, and may show one
+   * over the page from its bar with `app.sectionsOpening`. `label` and `icon` are what stands for it there: one with both is in
+   * `app.sectionNames`.
+   */
+  section: { id: string; component: View; label?: string; icon?: IconName };
   /** What fills the editor area when a note, a folder's list, a page, or nothing is open. The last one registered is used; with none, the app shows what the address names alone. */
   editor: {
     id: string;
@@ -363,6 +421,18 @@ export interface Slots {
    * it is out of sight.
    */
   bar: { id: string; component: View; side?: "left" | "right"; order?: number };
+  /**
+   * A word or two about a note in the bar above its text, after its folder, in every editor showing
+   * it: that it is archived, say, with a button that undoes it. The bar keeps its height, so the
+   * note's text doesn't move when a mark comes or goes. One with nothing to say of a note draws nothing.
+   */
+  mark: { id: string; component: ComponentType<ViewProps & { note: NoteSummary }> };
+  /**
+   * A banner between a note's bar and its text, in every editor showing it, for what changes what
+   * the member can do with the note: that it is in Trash. One with nothing to say of a note draws
+   * nothing. When one appears the text moves down by the banner's height and no further.
+   */
+  notice: { id: string; component: ComponentType<ViewProps & { note: NoteSummary }> };
   /** Something drawn over the app, such as the command palette. One is open at a time; `app.toggleOverlay` opens it, and what it hands over is `state`. */
   overlay: { id: string; component: ComponentType<ViewProps & { close: () => void; state: unknown }> };
 }
@@ -370,7 +440,8 @@ export interface Slots {
 /**
  * What the inspector is about: what the editor area has in front. A note; a folder's list, where
  * `folderId` is a folder's id or {@link ALL_NOTES}, `name` is what the list is called and `notes`
- * are the notes in it; or the notes a page says it is showing, under the name the page gave them.
+ * are the live notes in it, as its list counts them, none archived or in Trash; or the notes a page
+ * says it is showing, under the name the page gave them.
  */
 export type About =
   | { kind: "note"; note: NoteSummary }
@@ -641,6 +712,20 @@ export interface Folders {
   pathName(id: string | null): string;
 }
 
+/** Something the app tells the member in a card in the window's bottom right corner, which goes after a few seconds or when pressed. */
+export interface Notice {
+  message: string;
+  /** The icon in the card's tile: "info" unless said. */
+  icon?: IconName;
+  /**
+   * A button beside the message, such as Undo. While what `run` answers is on its way the card stays,
+   * without the button. A notice it answers with is said in the card's place; nothing, and the card goes.
+   */
+  action?: { label: string; run: () => void | Notice | Promise<void | Notice | undefined> };
+  /** Whether it stays until it is answered, pressed or taken down, as one that says something still true does. */
+  stays?: boolean;
+}
+
 export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav">;
 
 /** The app at one moment: what is open, and what can be done about it. */
@@ -658,18 +743,26 @@ export interface App {
   canCreateNote: boolean;
   /** The address the app is at, such as `/history`. */
   path: string;
+  /** The address's query as the browser has it, such as `?q=plan`, or empty. A page reads it with `URLSearchParams`. */
+  query: string;
   /** What `go` was handed for this address, if anything. It is handed over once: Back or a reload finds nothing. */
   pageState: unknown;
   /** What the address names in the editor area: the note, the folder's list or the page in front. Null when nothing is open, and at an address nothing is at. */
   opened: Opened | null;
   /** The note the address names. Null on a page, on a folder's list, and when nothing is open. */
   noteId: string | null;
-  /** That note, once the workspace's notes have loaded and if the member can see it. */
+  /** That note, once the workspace's notes have loaded and if the member can see it. It may be archived, or in Trash. */
   note: NoteSummary | null;
   /** Whether the open note has changes by someone else that the member hasn't been shown. */
   unseen: boolean;
-  /** Every note in the workspace the member can see. Null while they load. */
+  /**
+   * Every note in the workspace the member can see that isn't in Trash: the live ones and the
+   * archived ones, told apart by `state`. A listing leaves the archived ones out unless the member
+   * asked for them. Null while they load.
+   */
   notes: readonly NoteSummary[] | null;
+  /** The notes in Trash that the member can see. No listing but Trash's own shows them; they are here so a tab or a link can say what one is. */
+  trashed: readonly NoteSummary[];
   /** Null while they load. */
   folders: Folders | null;
   /**
@@ -690,18 +783,20 @@ export interface App {
   pages: readonly PageInfo[];
   /** What plugins put in the `section` slot, for the column that shows them. Null when there is nothing in it. */
   sections: ReactNode;
+  /** Each section that says what it is called, in the order they are drawn, for a column that is closed to stand an icon for. */
+  sectionNames: readonly { id: string; label: string; icon: IconName }[];
   /**
-   * The same sections, for a place that goes away once something is opened from it, as the closed
-   * sidebar's folder tree over the page does. `opened` is called each time one of them opens a
-   * note, a folder's list or a page, or goes to an address.
+   * One of those sections by its id, for a place that goes away once something is opened from it, as
+   * the closed sidebar's picker over the page does. `opened` is called each time it opens a note, a
+   * folder's list or a page, or goes to an address.
    */
-  sectionsOpening: (opened: () => void) => ReactNode;
+  sectionsOpening: (opened: () => void, id: string) => ReactNode;
   /** Draws a note's text to be read and not changed, as {@link FolderProps.readNote} does, for a page that lists notes. */
   readNote: (noteId: string) => ReactNode;
   /** The overlay that is open. */
   overlay: string | null;
 
-  /** Goes to an address. `state` is for the page there, which reads it as `pageState`. `replace` keeps Back from retracing the step. */
+  /** Goes to an address, which may carry a query. `state` is for the page there, which reads it as `pageState`. `replace` keeps Back from retracing the step. */
   go(path: string, options?: { state?: unknown; replace?: boolean }): void;
   /** Where a note lives, such as `/note/plan-3k2j5h8d9f0a`. */
   notePath(noteId: string): string;
@@ -735,7 +830,7 @@ export interface App {
    */
   createNote(folderId?: string): Promise<void>;
   moveNote(noteId: string, folderId: string): Promise<void>;
-  /** Tells the app a note changed, with the note as it is now. */
+  /** Tells the app a note changed, with the note as it is now: its text, its folder, or its state. */
   noteChanged(note: Note): void;
   /** Reads the folders and notes again, after a change the app wasn't told about. */
   refresh(): void;
@@ -748,6 +843,8 @@ export interface App {
   saveNote(noteId: string): Promise<Written | undefined>;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
+  /** Tells the member something that just happened, such as that a note was moved to Trash. Notices stack, newest at the foot, three at most; one saying what a shown one says takes its place. It answers with what takes the card down, which does nothing once it has gone. */
+  notify(notice: Notice): () => void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */
   toggleOverlay(id: string, state?: unknown): void;
   toggleSidebar(): void;

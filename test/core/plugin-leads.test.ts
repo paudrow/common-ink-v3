@@ -3,7 +3,7 @@ import type { WorkspaceSummary } from "../../src/core/protocol.ts";
 import { showing, targetOf } from "../../src/web/leads.ts";
 import { routeOf, type Place } from "../../src/web/router.ts";
 
-const at = (path: string): Place => ({ path, state: null, route: routeOf(path) });
+const at = (path: string): Place => ({ path, query: "", state: null, route: routeOf(path) });
 const OWN: WorkspaceSummary = { id: "own000000000", name: "Grace's workspace", role: "admin" };
 const TEAM: WorkspaceSummary = { id: "team00000000", name: "Ada's workspace", role: "viewer" };
 const BOTH = [OWN, TEAM];
@@ -32,7 +32,7 @@ describe("what an address shows", () => {
   });
 
   it("is an address with nothing at it, in the chosen workspace, for a note in none of the person's workspaces", () => {
-    const nothing = { kind: "workspace", workspace: OWN, place: { path: NOTE.path, state: null, route: { kind: "page", path: NOTE.path } } };
+    const nothing = { kind: "workspace", workspace: OWN, place: { path: NOTE.path, query: "", state: null, route: { kind: "page", path: NOTE.path } } };
 
     expect(showing(NOTE, new Map([["aaaaaaaaaaaa", null]]), BOTH, OWN.id)).toEqual(nothing);
     expect(showing(NOTE, new Map([["aaaaaaaaaaaa", "left00000000"]]), BOTH, OWN.id), "a workspace they have since left").toEqual(nothing);

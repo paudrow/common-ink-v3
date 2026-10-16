@@ -1,6 +1,7 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { perform, type Actor } from "../../core/operations.ts";
 import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } from "../../core/protocol.ts";
+import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
 
@@ -52,6 +53,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "grant.link": SHARING,
   "grant.revoke": SHARING,
   "note.setPrivate": "A private note is hidden from every other member, admins too, and that is not a change in history. The member who made the note decides it, in the app.",
+  "note.purge": "Removing a note from Trash for good takes its history with it, and nothing brings it back: not a revert, not Trash. An agent reads notes other people wrote, so one that was talked into it could destroy them past recovery. An agent moves a note to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
   "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
 };
@@ -66,6 +68,13 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
 const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
 const day = (description: string) => ({ type: "string", description: `${description}, as YYYY-MM-DD` });
+/** The query language, as much of it as a model needs to write a query unaided. It is read from the filters' table, as docs/search.md is. */
+const QUERY = (scope: Scope) =>
+  `The query language, where a space is AND and every form can be combined:\n${syntaxText(scope)}\nA query that can't be read is refused, saying which characters and why, and so is a folder: or an editor: naming nothing you can see. A word with a colon that is no filter is an error unless it is in quotes.`;
+const queryDays = {
+  today: day("The day it is for you, which today, yesterday, tomorrow, 7d and +7d in the query are counted from. The server doesn't know your day, so a query with one of them and no today is refused"),
+  zone: { type: "string", description: "Your time zone, such as Europe/Paris, which says when a day begins and ends for updated: and created:. Left out, it is the zone your member's settings name, or UTC" },
+};
 const TODOS =
   "A todo is a checkbox line in a note: - [ ] open, - [x] done. Its options are tokens on the line: !, !! or !!! right after the checkbox for its priority (Low, Medium, High; none is None), and due:YYYY-MM-DD for the day it is due. every:RULE makes it repeat, and each listed todo's recurs says its rule in words. The rules:\n" +
   RULE_GRAMMAR +
@@ -106,6 +115,9 @@ const author = {
   additionalProperties: false,
 };
 const noteIds = (description: string) => ({ type: "array", items: { type: "string" }, minItems: 1, description });
+const includeArchived = { type: "boolean", description: "True to cover archived notes too, which are left out otherwise" };
+const archivedToo = { enum: [true, false, "only"], description: 'True to cover archived notes too, which are left out otherwise, or "only" for the archived notes alone' };
+const LIFE = "A note is live, archived or in Trash, which its state says. An archived note is left out of listings unless includeArchived is true, and is read and changed as any other. A note in Trash is listed only by list_trash, can be read, and can't be changed until restore_note brings it back.";
 const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
 const selected = (item: Record<string, unknown>, required: string[], description: string) => ({
   type: "array",
@@ -137,13 +149,18 @@ export const TOOLS: Tool[] = [
   {
     name: "list_notes",
     description:
-      "The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, or to notes whose text changed since a time.",
-    inputSchema: object({ folderId: folderId("Only notes in this folder, from list_folders"), updatedSince: time("Only notes whose text changed at or after this time") }),
+      `The notes in a workspace that you can see, newest change first: id, title, folder, revision, when it last changed, and access, which is edit or view: what you may do with that note. A note you can't see is never listed, and reads as no such note everywhere. Narrow it to one folder, to notes with a tag, or to notes whose text changed since a time. ${LIFE}`,
+    inputSchema: object({
+      folderId: folderId("Only notes in this folder, from list_folders"),
+      updatedSince: time("Only notes whose text or state changed at or after this time. A note trashed since is in list_trash"),
+      tag: { type: "string", description: "Only notes with this tag, without the #, ignoring case" },
+      includeArchived: archivedToo,
+    }),
     op: "note.list",
   },
   {
     name: "read_note",
-    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title now, or a null title for a note that doesn't exist or that you can't see.",
+    description: "A note's markdown text. Pass revision to read an earlier version. Links in the text are [[id]] or [[id|display text]]: links names each linked note's id with its title and state now, or a null title for a note that doesn't exist, was removed from Trash, or that you can't see. A note in Trash is read as any other, and its state says trashed.",
     inputSchema: object({ id: noteId, revision: { type: "integer", minimum: 0, description: "An earlier revision; default is the latest" } }, ["id"]),
     op: "note.read",
   },
@@ -184,17 +201,20 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "list_todos",
-    description: `The todos in the notes you can see: open ones, or done ones too with includeCompleted. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless sort orders them another way. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 to 3), due, the note's tags, and access. Narrow it by folder, by a tag of the note, by a range of due days, both included, or to those with no due date, and by priority (importance). Due days are calendar dates: pass the days you mean, since the server doesn't know your time zone. While next isn't null, pass it as offset for more.`,
+    description: `The todos in the notes you can see that query finds: with no query, every open one. ${TODOS} Open ones come first, then the soonest due, then the highest priority, unless the query's sort: or sort says otherwise. Each has its note, the revision the note was at, its line counted from 0 and the line's text, which set_todo takes to find it, and its done, importance (its priority, 0 for None to 3 for High), due, the note's tags, and access. Due days are calendar dates. While next isn't null, pass it as offset for more.\n\n${QUERY("todos")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
     inputSchema: object({
-      folderId: { type: "string", description: "Only todos in notes in this folder or in a folder under it, from list_folders" },
-      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case: a tag on the todo's own line, or anywhere else in its note" },
-      dueFrom: day("Only todos due on or after this day"),
-      dueTo: day("Only todos due on or before this day"),
-      noDue: { type: "boolean", description: "True for only todos with no due date" },
-      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these priorities: 0 is None, 1 Low (!), 2 Medium (!!), 3 High (!!!)" },
-      includeCompleted: { type: "boolean", description: "True to list done todos too" },
+      query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'Which todos, such as: due:<today priority:>=medium -tag:someday, or: call folder:"Common Ink" is:open OR is:done' },
+      ...queryDays,
+      folderId: { type: "string", description: "Only todos in notes in this folder or in a folder under it, from list_folders. In the query: folder:" },
+      tag: { type: "string", description: "Only todos in notes with this tag, without the #, ignoring case: a tag on the todo's own line, or anywhere else in its note. In the query: tag:" },
+      dueFrom: day("Only todos due on or after this day. In the query: due:>="),
+      dueTo: day("Only todos due on or before this day. In the query: due:<="),
+      noDue: { type: "boolean", description: "True for only todos with no due date. In the query: no:due" },
+      importance: { type: "array", items: { type: "integer", minimum: 0, maximum: 3 }, minItems: 1, description: "Only these priorities: 0 is None, 1 Low (!), 2 Medium (!!), 3 High (!!!). In the query: priority:" },
+      includeCompleted: { type: "boolean", description: "True to list done todos too. In the query: is:open OR is:done" },
+      includeArchived,
       noteId: { type: "string", description: "Only the todos in this note" },
-      sort: { type: "string", enum: [...TODO_SORTS], description: "The order, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
+      sort: { type: "string", enum: [...TODO_SORTS], description: "The order, when the query has no sort:, the done ones always after the open ones: due (the default) the soonest due, then the highest priority; priority the highest first, then the soonest due; changed those whose note changed last first; note by their note's title; text by their words, A to Z" },
       limit: { type: "integer", minimum: 1, maximum: 200, description: "How many todos; default 100" },
       offset: { type: "integer", minimum: 0, description: "The next of the page before" },
     }),
@@ -203,7 +223,7 @@ export const TOOLS: Tool[] = [
   {
     name: "todo_filters",
     description: "The tags list_todos can be narrowed by: those of the notes that have todos, among the notes you can see. The folders it can be narrowed by are list_folders'.",
-    inputSchema: object({}),
+    inputSchema: object({ includeArchived }),
     op: "todo.filters",
   },
   {
@@ -253,6 +273,54 @@ export const TOOLS: Tool[] = [
     op: "note.move",
   },
   {
+    name: "search",
+    description: `Find the notes you can see with a query: words, each matching the start of a word in the note, ignoring case and accents, and filters. Todos and tags are text like any other, so their words are found too. A query with no word and no filter finds nothing: list_notes lists. Notes whose title matches come first, then the latest changed, unless the query's sort: or else sort asks for another order. Each result has the note as list_notes gives it and the first lines that matched, with marks saying where in each line. Archived notes are left out unless the query says is:archived, and notes in Trash unless it says is:trashed. While next isn't null, pass it as offset for more. While indexing is true, some notes are still being read into the index and may be missing: ask again.\n\n${QUERY("notes")}\n\nThe arguments beside query are from before it could say them, and narrow it further.`,
+    inputSchema: object(
+      {
+        query: { type: "string", maxLength: MAX_SEARCH_LENGTH, description: 'What to find, such as: budget "second quarter" #money -is:archived, or: editor:@me updated:>=7d (has:open-todo OR has:backlink)' },
+        ...queryDays,
+        folderId: folderId("Only notes in this folder, not those of the folders inside it, from list_folders. In the query, folder: takes the folders inside too"),
+        includeArchived: archivedToo,
+        hasTodos: { type: "boolean", description: "True for only the notes with an open todo. In the query: has:open-todo" },
+        sort: { enum: ["match", "recent", "created", "title"], description: "match, the default: title matches first, then the latest changed. recent: the latest changed. created: the latest made. title: by title. The query's sort: wins over it" },
+        limit: { type: "integer", minimum: 1, maximum: 50, description: "How many notes; default 20" },
+        offset: { type: "integer", minimum: 0, description: "The next of the page before" },
+      },
+      ["query"],
+    ),
+    op: "search",
+  },
+  {
+    name: "list_tags",
+    description: "The tags of the notes you can see, each with how many of those notes have it. A #tag anywhere in a note tags the note. list_notes with tag lists the notes under one. While indexing is true, some notes are still being read in: ask again.",
+    inputSchema: object({ includeArchived }),
+    op: "tag.list",
+  },
+  {
+    name: "archive_note",
+    description: "Archive a note, or with archived false bring it back. An archived note keeps its folder, id and links, and is left out of listings, search and todos unless they are asked to include archived notes. Needs edit on the note.",
+    inputSchema: object({ id: noteId, archived: { type: "boolean", description: "True to archive, false to unarchive" } }, ["id", "archived"]),
+    op: "note.archive",
+  },
+  {
+    name: "trash_note",
+    description: "Move a note to Trash. It waits there 30 days, listed by list_trash, and is then removed for good with its history. Until then restore_note brings it back as it was. A link shared on it opens nothing while it is there. Needs edit on the note.",
+    inputSchema: object({ id: noteId }, ["id"]),
+    op: "note.trash",
+  },
+  {
+    name: "restore_note",
+    description: "Bring a note back from Trash to the folder it was in, archived if it was. When that folder was deleted meanwhile it comes back to Unsorted and folderGone is true, which also needs edit on Unsorted. Needs edit on the note.",
+    inputSchema: object({ id: noteId }, ["id"]),
+    op: "note.restore",
+  },
+  {
+    name: "list_trash",
+    description: "The notes in Trash that you can see, latest trashed first: each as list_notes gives it, with who trashed it and when, and purgesAt, the time it is removed for good. An agent can't remove one sooner; a member does that in the app.",
+    inputSchema: object({}),
+    op: "trash.list",
+  },
+  {
     name: "list_folders",
     description: "The folders in a workspace: id, name, the folder each is inside (parentId), and how many notes are directly in it. unsortedId is the folder a note goes to when none is named.",
     inputSchema: object({}),
@@ -272,7 +340,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "delete_folder",
-    description: "Delete a folder that has no notes and no folders in it. Needs the admin role.",
+    description: "Delete a folder that has no notes and no folders in it. Archived notes count, and notes in Trash don't: those are restored to Unsorted afterwards. Needs the admin role.",
     inputSchema: object({ id: folderId("The folder id") }, ["id"]),
     op: "folder.delete",
   },
@@ -370,8 +438,8 @@ export const TOOLS: Tool[] = [
   {
     name: "revert_author",
     description:
-      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. To settle a note's conflicts, preview_revert it with author first and pass resolve; without it the later edits are kept. A note left with no text, such as one the author created, is named in emptied: it stays, since a note can't be deleted yet. Needs the editor or admin role.",
-    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" }, resolve: resolveByNote }, ["author"]),
+      "Revert every change one author made that still stands, in every note or in noteIds, and keep everyone else's. Each note gets one new change under your agent's name. It covers ten notes a call: while the answer's next isn't null, call again with it as after. A note that refuses the change is left as it was and named in failed. To settle a note's conflicts, preview_revert it with author first and pass resolve; without it the later edits are kept. A note left with no text, such as one the author created, is named in emptied, and with trashEmptied it is moved to Trash, where restore_note finds it. Notes in Trash are not reverted. Needs the editor or admin role.",
+    inputSchema: object({ author: { ...author, description: "Whose changes, from history_authors" }, noteIds: noteIds("Only in these notes"), after: { type: "string", description: "The next of the call before" }, resolve: resolveByNote, trashEmptied: { type: "boolean", description: "True to move each note this leaves with no text to Trash" } }, ["author"]),
     op: "history.revertAuthor",
   },
   {

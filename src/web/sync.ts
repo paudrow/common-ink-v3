@@ -2,6 +2,7 @@ import { redo, undo } from "@codemirror/commands";
 import { Annotation, ChangeSet, Transaction, type Text } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { Filed, Note, OpInput, Results, RevertedNotes, Written } from "../core/protocol.ts";
+import { IN_TRASH } from "../core/lifecycle.ts";
 import { changesBetween } from "../core/text.ts";
 import { ApiError, perform, session } from "./api.ts";
 import { today } from "./time.ts";
@@ -9,13 +10,17 @@ import { today } from "./time.ts";
 export const PAUSE_MS = 1000;
 const RETRY_MS = 3000;
 
-export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "signedOut" | "rejected";
+/** `rejected`: the server won't take what was typed. `inTrash`: it won't because the note is in Trash, and will once the note is restored. */
+export type SaveState = "saved" | "unsaved" | "saving" | "failed" | "signedOut" | "rejected" | "inTrash";
 
 /** Asking the same again by itself can succeed only after a network failure, a server fault, or a write that lost to too many others at once. */
 export const worthRetrying = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || err.status === 429 || err.status === 409;
 
 /** The session ended. The same write succeeds once the member has signed in again, and not before. */
 const signedOut = (err: unknown) => err instanceof ApiError && err.status === 401;
+
+/** The server says a refusal is for Trash only in its message, which is the same wherever a trashed note is refused. */
+const refusedForTrash = (err: unknown) => err instanceof ApiError && err.code === "conflict" && err.message === IN_TRASH;
 
 /** Every sync with typing the server may not have, including those whose editor has closed. */
 const unsaved = new Set<NoteSync>();
@@ -104,7 +109,8 @@ const MOVES: ReadonlySet<string> = new Set<HistoryOp["type"]>(["note.revert", "n
 export async function performInSync<T extends OpInput>(workspaceId: string, op: T): Promise<Results[T["type"]]> {
   if (MOVES.has(op.type)) return moveThroughHistory(workspaceId, op as HistoryOp) as Promise<Results[T["type"]]>;
   // A todo's history is asked for by its line, which the server has only once what is typed is saved.
-  if (op.type === "todo.history") await open.get(op.id)?.commit();
+  // A note goes to Trash with what was typed in it, which it wouldn't take afterwards.
+  if (op.type === "todo.history" || op.type === "note.trash") await open.get(op.id)?.commit();
   if (op.type === "history.revert") return revertMany(workspaceId, op.changes) as Promise<Results[T["type"]]>;
   if (op.type === "history.previewRevert") {
     // What is typed and not yet saved would change the note under the preview.
@@ -163,6 +169,8 @@ export class NoteSync {
   private view: EditorView | null = null;
   /** The document once the editor has closed; later merges apply here instead of to the view. */
   private closedDoc: Text | null = null;
+  /** Whether nothing is to be sent, because the server would refuse it: the note is in Trash. What is typed is kept, and counts as unsaved. */
+  private held = false;
 
   constructor(
     private readonly workspaceId: string,
@@ -215,7 +223,7 @@ export class NoteSync {
     clearTimeout(this.timer);
     while (this.inFlight) await this.inFlight;
     const doc = this.doc();
-    if (!doc) return;
+    if (!doc || this.held) return;
     if (!this.unacknowledged) {
       const text = doc.toString();
       if (text === this.savedText) {
@@ -246,7 +254,8 @@ export class NoteSync {
         else unsaved.delete(this);
         this.onState(this.dirty ? "unsaved" : "saved");
       } catch (err) {
-        this.failing = worthRetrying(err) || signedOut(err);
+        // A conflict is asked again, but not one for Trash: the server takes nothing more until the note is restored.
+        this.failing = !refusedForTrash(err) && (worthRetrying(err) || signedOut(err));
         if (signedOut(err)) {
           // Kept to be sent as it is once the member is signed in again, which the session says.
           this.onState("signedOut");
@@ -256,7 +265,7 @@ export class NoteSync {
         } else {
           this.unacknowledged = null;
           this.typedSinceWrite = null;
-          this.onState("rejected");
+          this.onState(refusedForTrash(err) ? "inTrash" : "rejected");
         }
       } finally {
         this.inFlight = null;
@@ -272,6 +281,13 @@ export class NoteSync {
     // Kept out of the editor's undo stack, so the member's undo never takes back someone else's change.
     // Not filtered, so it reaches the editor of a member who can't change the note themselves.
     else this.view?.dispatch({ changes, filter: false, annotations: [fromServer.of(true), Transaction.addToHistory.of(false)] });
+  }
+
+  /** Stops sending while `held`, and sends what was typed meanwhile when it is let go. */
+  hold(held: boolean) {
+    if (this.held === held) return;
+    this.held = held;
+    if (!held) void this.commit();
   }
 
   /** Undoes or redoes in the editor alone. False when the step belongs to the note's history instead. */

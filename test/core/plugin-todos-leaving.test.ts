@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leaving, type Narrowing } from "../../src/web/plugins/todos/leaving.ts";
+import { leaving, narrowingOf, type Narrowing } from "../../src/web/plugins/todos/leaving.ts";
 
 const NOW = "2026-10-15";
 const ANY: Narrowing = { completed: false, due: "any", importance: "", tag: "", folder: null };
@@ -28,5 +28,35 @@ describe("why a changed row leaves the Todos page's list", () => {
     expect(says(todo({ done: true }), { completed: true })).toBeNull();
     expect(says(todo({ due: "2026-10-21" }), { due: "week" })).toBeNull();
     expect(says(todo({ due: "2026-10-14" }), { due: "overdue" })).toBeNull();
+  });
+});
+
+describe("what a todos query narrows to, for those sentences", () => {
+  const by = (query: string) => narrowingOf(query);
+  it("reads a due date, a priority and a tag at the query's top as the filters they are, and keeps the query as the search", () => {
+    expect(by("due:today")).toEqual({ completed: true, due: "today", importance: "", tag: "", folder: null, search: "due:today" });
+    expect(by("due:<today").due).toBe("overdue");
+    expect(by("due:today..+6d").due).toBe("week");
+    expect(by("no:due").due).toBe("none");
+    expect(by("-has:due").due).toBe("none");
+    expect(by("priority:high").importance).toBe("3");
+    expect(by("importance:1").importance).toBe("1");
+    expect(by("call #Health tag:work").tag).toBe("health");
+  });
+
+  it("leaves what it can't say as a filter to the search", () => {
+    expect(by("due:tomorrow")).toMatchObject({ due: "any", search: "due:tomorrow" });
+    expect(by("due:today OR #home")).toMatchObject({ due: "any", tag: "" });
+    expect(by("-#home priority:>=medium")).toMatchObject({ tag: "", importance: "" });
+    expect(by("priority:urgent")).toMatchObject({ importance: "", search: "priority:urgent" });
+  });
+
+  it("says the date and the priority as the filters did, and the rest as the search", () => {
+    expect(leaving(todo({ due: "2026-10-16" }), by("due:today #health"), NOW)?.says).toBe("Moved to tomorrow, so it no longer shows under Today. It leaves when you refresh.");
+    expect(leaving(todo({ importance: 1 }), by("priority:high"), NOW)?.says).toBe("Set to Low, so it no longer shows under Priority: High. It leaves when you refresh.");
+    expect(leaving(todo({ words: "Gym" }), by("#health"), NOW)?.says).toBe("#health was taken off, so it no longer shows under #health. It leaves when you refresh.");
+    expect(leaving(todo(), by("bank due:today..+6d"), NOW)?.says).toBe("Its date was taken off, so it no longer shows under Next 7 days. It leaves when you refresh.");
+    expect(leaving(todo({ due: "2026-10-15" }), by("bank due:today"), NOW)?.says).toBe("Changed, so it no longer matches “bank due:today”. It leaves when you refresh.");
+    expect(leaving(todo(), by(""), NOW)).toBeNull();
   });
 });

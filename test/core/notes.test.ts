@@ -189,6 +189,9 @@ describe("notes", () => {
       openTodos: 1,
       access: "edit",
       private: false,
+      state: "live",
+      purgesAt: null,
+      stateAt: null,
     });
     expect(written).toEqual({
       ...created,

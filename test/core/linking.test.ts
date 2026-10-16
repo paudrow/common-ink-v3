@@ -16,7 +16,7 @@ describe("a link", () => {
     await perform(env.DB, ada, { type: "note.write", id: plan.id, baseRevision: 1, text: "# Plan for spring" });
     const read = await perform(env.DB, ada, { type: "note.read", id: diary.id });
 
-    expect(read.links).toEqual([{ id: plan.id, title: "Plan for spring" }]);
+    expect(read.links).toEqual([{ id: plan.id, title: "Plan for spring", state: "live" }]);
     expect(read.text).toBe(`# Diary\n\nSee [[${plan.id}]] and [[${plan.id}|what we agreed]].`);
     expect(read.revision).toBe(1);
   });
@@ -134,8 +134,8 @@ describe("a link", () => {
     const read = await perform(env.DB, ada, { type: "note.read", id: note.id });
 
     expect(read.links).toEqual([
-      { id: secret.id, title: null },
-      { id: "zzzzzzzzzzzz", title: null },
+      { id: secret.id, title: null, state: null },
+      { id: "zzzzzzzzzzzz", title: null, state: null },
     ]);
     await expect(perform(env.DB, ada, { type: "note.backlinks", id: secret.id })).rejects.toMatchObject({ code: "not_found" });
     expect(await backlinks(grace, secret.id)).toEqual([]);
@@ -148,7 +148,7 @@ describe("a link", () => {
     await perform(env.DB, ada, { type: "note.write", id: diary.id, baseRevision: 1, text: "# Diary" });
 
     expect((await perform(env.DB, ada, { type: "note.read", id: diary.id })).links).toEqual([]);
-    expect((await perform(env.DB, ada, { type: "note.read", id: diary.id, revision: 1 })).links).toEqual([{ id: plan.id, title: "Plan" }]);
+    expect((await perform(env.DB, ada, { type: "note.read", id: diary.id, revision: 1 })).links).toEqual([{ id: plan.id, title: "Plan", state: "live" }]);
   });
 });
 

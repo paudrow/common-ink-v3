@@ -251,7 +251,7 @@ test("a new note stays listed when a listing asked for before it answers after i
 
   // The list of every note is drawn once the listing has answered, which is after the note was made.
   await openAllNotes(page);
-  await expect(page.getByRole("searchbox", { name: "Filter notes" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search notes" })).toBeVisible();
   await expect(listedNote(page, "Plan")).toBeVisible();
   await expect(page.getByRole("tree", { name: "Folders" }).getByRole("treeitem", { name: "Unsorted" })).toHaveAccessibleDescription("1");
 });

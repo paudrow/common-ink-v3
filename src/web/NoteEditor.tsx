@@ -16,9 +16,12 @@ import { openNote } from "./openNotes.ts";
 import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, worthRetrying, type SaveState } from "./sync.ts";
 
+const UNSAVED_IN_TRASH = "Your last changes aren't saved: this note is in Trash. Restore it to save them.";
+
 const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", failed: "Couldn't save. Retrying…",
   signedOut: "Not saved: you're signed out",
   rejected: "Couldn't save this version. Edit the note to try again.",
+  inTrash: UNSAVED_IN_TRASH,
 };
 
 /** Where reading a note has got to. Only a loaded note has text to say anything about, such as that it is saved. */
@@ -67,10 +70,15 @@ interface Props {
    * note: not typing, not an embed, not a plugin's keys.
    */
   access: GrantAccess | undefined;
+  /**
+   * Where the note is in its life, as the workspace knows it, and until then as the note said when
+   * it was read. A note in Trash is read and not changed, as with view.
+   */
+  state: Note["state"] | undefined;
   /** Whether the note has since been hidden from the member, or is gone. Its text is then no longer shown. */
   gone: boolean;
-  /** Called when the server won't take what was typed, which may mean the member's access changed. */
-  onRejected: () => void;
+  /** Called when the server won't take what was typed: `rejected` may mean the member's access changed, and `inTrash` that the note went to Trash without the workspace hearing. */
+  onRejected: (why: "rejected" | "inTrash") => void;
   /** What plugins have registered to draw inside a note. */
   embeds: readonly (Embed | AddressEmbed)[];
   /** The lists plugins offer at the cursor, such as the embed menu. */
@@ -82,9 +90,11 @@ interface Props {
   /** Called for an extension this editor had to leave out, with why. */
   onExtensionRefused: (extension: EditorExtension, error: unknown) => void;
   meta: ReactNode;
+  /** What plugins say of the note above its text, such as that it is in Trash. */
+  above: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta,  }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta, above }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const foot = useRef<HTMLDivElement>(null);
   const syncRef = useRef<NoteSync | null>(null);
@@ -104,10 +114,11 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const mine = useMemo(() => forEditor({ noteId }), [noteId]);
   const { extensions, refused } = useMemo(() => mine(contributed), [mine, contributed]);
   const [locked] = useState(() => new Compartment());
-  const [read, setRead] = useState<GrantAccess | undefined>(undefined);
-  const canEdit = (access ?? read) === "edit";
-  const now = useRef({ focus, onFocused, extensions, access, onRejected });
-  now.current = { focus, onFocused, extensions, access, onRejected };
+  const [read, setRead] = useState<Pick<Note, "access" | "state"> | undefined>(undefined);
+  const trashed = (state ?? read?.state) === "trashed";
+  const canEdit = (access ?? read?.access) === "edit" && !trashed;
+  const now = useRef({ focus, onFocused, extensions, access, state, onRejected });
+  now.current = { focus, onFocused, extensions, access, state, onRejected };
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   /** Counts up to read the note again after a read that failed. */
@@ -128,22 +139,24 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         failures.current = 0;
         setLoad({ kind: "loaded" });
         onLoaded(note);
-        setRead(note.access);
-        const writable = (now.current.access ?? note.access) === "edit";
+        setRead({ access: note.access, state: note.state });
+        const inTrash = (now.current.state ?? note.state) === "trashed";
+        const writable = (now.current.access ?? note.access) === "edit" && !inTrash;
         const fresh = writable && note.text === "";
         const text = fresh ? TITLE_MARK : note.text;
         // The sync is told the mark is what the server has, so an untouched note is never sent: there is nothing of the member's in it.
         sync = syncRef.current = new NoteSync(workspaceId, { ...note, text }, onSaved, (state) => {
           setSaveState(state);
-          if (state === "rejected") now.current.onRejected();
+          if (state === "rejected" || state === "inTrash") now.current.onRejected(state);
         });
+        sync.hold(inTrash);
         view = viewRef.current = new EditorView({
           parent: host.current,
           state: EditorState.create({
             doc: text,
             selection: { anchor: fresh ? text.length : 0 },
             extensions: [
-              locked.of(writable? [] : readOnly),
+              locked.of(writable ? [] : readOnly),
               // Before the editor's own keys, so a plugin's keys are tried first.
               added.of(now.current.extensions),
               // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
@@ -202,6 +215,9 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
     viewRef.current?.dispatch({ effects: locked.reconfigure(canEdit ? [] : readOnly) });
   }, [canEdit, locked]);
 
+  // Nothing is sent for a note in Trash, which the server would refuse. What was typed before the app knew is sent once the note is restored.
+  useEffect(() => syncRef.current?.hold(trashed), [trashed]);
+
   useEffect(() => {
     viewRef.current?.dispatch({ effects: added.reconfigure(extensions) });
   }, [extensions, added]);
@@ -247,9 +263,10 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       <header className="note-bar">
         <div className="note-meta">{meta}</div>
         <div className="save-state" role="status">
-          {notice ?? (load.kind === "loaded" ? SAVE_LABEL[saveState] : load.kind === "failed" ? "Not loaded" : "")}
+          {notice ?? (load.kind === "loaded" ? (trashed && saveState !== "saved" ? UNSAVED_IN_TRASH : SAVE_LABEL[saveState]) : load.kind === "failed" ? "Not loaded" : "")}
         </div>
       </header>
+      {above}
       <div className="note-scroll" onMouseDown={toEnd}>
         {load.kind === "failed" && (
           <div className="notice" role="alert">

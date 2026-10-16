@@ -1,3 +1,5 @@
+import { syntaxText } from "../src/core/query.ts";
+
 // The `ink` command's logic, for an agent working from a shell. It is a thin client of the /mcp endpoint,
 // so it does what the MCP tools do and nothing more. scripts/ink.ts runs it on this machine.
 export interface Io {
@@ -12,7 +14,20 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
 
   workspaces                          the workspaces you can reach
   members                             everyone in a workspace, with their role
-  notes [--folder ID] [--since TIME]  the notes in a workspace, in one folder, or changed since a time
+  notes [--folder ID] [--since TIME] [--tag NAME] [--archived true|only]
+                                      the notes in a workspace, in one folder, with a tag, or changed since a time
+  search QUERY [--today DAY] [--zone ZONE] [--folder ID] [--archived true|only] [--has-todos true]
+        [--sort match|recent|created|title] [--limit N] [--offset N]
+                                      the notes a query finds: words, "a phrase", and filters such as
+                                      folder:Plans, #tag, editor:@me, updated:>=7d, is:archived, has:link,
+                                      with -, OR, NOT and ( ). "ink syntax" lists every one. --today and
+                                      --zone are this machine's unless given
+  tags [--archived true]              the tags of the notes you can see, and how many notes have each
+  archive ID                          archive a note: kept, and left out of listings
+  unarchive ID                        bring an archived note back
+  trash ID                            move a note to Trash, where it waits 30 days
+  restore ID                          bring a note back from Trash, to the folder it was in
+  trashed                             the notes in Trash, and when each is removed for good
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
   create [--text TEXT] [--folder ID] [--link-titles keep]
                                       a new note (text from stdin if --text is left out)
@@ -20,10 +35,13 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       replace a note's text (from stdin if --text is left out)
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
-  todos [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY] [--no-due true] [--importance N,N]
-        [--completed true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
-                                      the todos in the notes you can see, open ones unless --completed
-  todo-filters                        the tags that todos can be narrowed by
+  todos [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY]
+        [--no-due true] [--importance N,N] [--completed true] [--archived true] [--note ID] [--sort due|priority|changed|note|text] [--limit N] [--offset N]
+                                      the todos a query finds, such as "due:<today priority:>=medium", or every
+                                      open one with none; --query QUERY is the same. "ink syntax todos" lists
+                                      what a query can say
+  syntax [todos]                      the query language of search, or of todos
+  todo-filters [--archived true]      the tags that todos can be narrowed by
   todo ID --revision N --line N --text LINE [--done true|false] [--importance N] [--due DAY|none] [--words TEXT]
         [--every RULE|none] [--skip true] [--on DAY]
                                       check a todo off, change it, or skip a repeating todo to its next
@@ -57,9 +75,10 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       lines as they were, or a JSON list with "keep", "back" or {"text": "..."} for each conflict
   revert ID --author KIND:ID --preview [--resolve keep|back|JSON --at N]
                                       what revert-author would do to this one note, with nothing written
-  revert-author KIND:ID [--note ID,ID] [--after ID] [--resolve JSON]
+  revert-author KIND:ID [--note ID,ID] [--after ID] [--resolve JSON] [--trash-emptied true]
                                       revert every change an author made that still stands; --resolve settles the conflicts of the
-                                      notes it names, as {"NOTE ID": {"at": N, "choices": "keep"|"back"|[...]}}
+                                      notes it names, as {"NOTE ID": {"at": N, "choices": "keep"|"back"|[...]}};
+                                      with --trash-emptied the notes that leaves empty go to Trash
   revert-author KIND:ID [--note ID,ID] --preview
                                       what that would do to each note the author changed, with nothing written
   undo ID                             take back your latest change to a note
@@ -202,8 +221,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
       io.out(USAGE);
       return command ? 0 : 1;
     }
-    if (!token) throw new UsageError("Set INK_TOKEN to an agent token from Common Ink");
     const id = positional[0];
+    // What a query can say is the same for everyone, so it is said with no token.
+    if (command === "syntax") {
+      if (id !== undefined && id !== "todos") throw new UsageError("syntax takes nothing, or todos");
+      io.out(syntaxText(id === "todos" ? "todos" : "notes"));
+      return 0;
+    }
+    if (!token) throw new UsageError("Set INK_TOKEN to an agent token from Common Ink");
     const need = (what: string) => id ?? (() => { throw new UsageError(`${command} needs ${what}`); })();
     const needId = () => need("a note id");
     const needFlag = (name: string) => flags.get(name) ?? (() => { throw new UsageError(`${command} needs --${name}`); })();
@@ -213,6 +238,14 @@ export async function run(argv: string[], io: Io): Promise<number> {
     const ids = (_: string, value: string) => value.split(",");
     const author = (_: string, value: string) => authorRef(value);
     const truth = (_: string, value: string) => value !== "false";
+    const archivedToo = (_: string, value: string) => (value === "only" ? "only" : value !== "false");
+
+    /** What a query's days are read by: this machine's day and zone, unless they are given. */
+    const days = () => {
+      const now = new Date();
+      const local = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      return { today: flags.get("today") ?? local, zone: flags.get("zone") ?? Intl.DateTimeFormat().resolvedOptions().timeZone };
+    };
 
     let tool: string;
     let args: Record<string, unknown> = {};
@@ -227,7 +260,28 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "notes":
         tool = "list_notes";
-        args = given({ folderId: ["folder"], updatedSince: ["since", time] });
+        args = given({ folderId: ["folder"], updatedSince: ["since", time], tag: ["tag"], includeArchived: ["archived", archivedToo] });
+        break;
+      case "search":
+        tool = "search";
+        args = { query: need("what to find"), ...days(), ...given({ folderId: ["folder"], includeArchived: ["archived", archivedToo], hasTodos: ["has-todos", truth], sort: ["sort"], limit: ["limit", integer], offset: ["offset", integer] }) };
+        break;
+      case "tags":
+        tool = "list_tags";
+        args = given({ includeArchived: ["archived", truth] });
+        break;
+      case "archive":
+      case "unarchive":
+        tool = "archive_note";
+        args = { id: needId(), archived: command === "archive" };
+        break;
+      case "trash":
+      case "restore":
+        tool = `${command}_note`;
+        args = { id: needId() };
+        break;
+      case "trashed":
+        tool = "list_trash";
         break;
       case "read":
         tool = "read_note";
@@ -251,22 +305,30 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "todos":
         tool = "list_todos";
-        args = given({
-          folderId: ["folder"],
-          tag: ["tag"],
-          dueFrom: ["due-from"],
-          dueTo: ["due-to"],
-          noDue: ["no-due", truth],
-          importance: ["importance", integers],
-          includeCompleted: ["completed", truth],
-          noteId: ["note"],
-          sort: ["sort"],
-          limit: ["limit", integer],
-          offset: ["offset", integer],
-        });
+        if (id !== undefined && flags.has("query")) throw new UsageError("todos takes its query once: after the command, or as --query");
+        args = {
+          ...(id !== undefined && { query: id }),
+          ...days(),
+          ...given({
+            query: ["query"],
+            folderId: ["folder"],
+            tag: ["tag"],
+            dueFrom: ["due-from"],
+            dueTo: ["due-to"],
+            noDue: ["no-due", truth],
+            importance: ["importance", integers],
+            includeCompleted: ["completed", truth],
+            includeArchived: ["archived", truth],
+            noteId: ["note"],
+            sort: ["sort"],
+            limit: ["limit", integer],
+            offset: ["offset", integer],
+          }),
+        };
         break;
       case "todo-filters":
         tool = "todo_filters";
+        args = given({ includeArchived: ["archived", truth] });
         break;
       case "todo":
         if (!flags.has("revision") || !flags.has("line") || !flags.has("text")) throw new UsageError("todo needs --revision, --line and --text, as todos gave them");
@@ -382,7 +444,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
           break;
         }
         tool = "revert_author";
-        args = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids], after: ["after"], resolve: ["resolve", json] }) };
+        args = { author: authorRef(need("an author, as KIND:ID")), ...given({ noteIds: ["note", ids], after: ["after"], resolve: ["resolve", json], trashEmptied: ["trash-emptied", truth] }) };
         break;
       case "undo":
       case "redo":

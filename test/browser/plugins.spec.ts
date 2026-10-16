@@ -126,7 +126,7 @@ test("turning folders off takes the folder tree out of the sidebar and its icon 
   await writes(page, note.id, "written with folders off");
 
   await page.keyboard.press("ControlOrMeta+\\");
-  // With no section left the open sidebar has nothing under its links, so the closed bar has no icon for it.
+  // The closed bar has an icon for each section the open sidebar has, so none for the one turned off.
   const bar = page.getByRole("navigation", { name: "Sidebar bar" });
   await expect(bar.getByRole("link", { name: "Dashboard" })).toBeVisible();
   await expect(bar.getByRole("button", { name: "Folders" })).toHaveCount(0);
@@ -205,11 +205,11 @@ test("turning History off takes its page, its link, and its inspector panel away
   await run(page, "Disable plugin: History");
   await expect.poll(panelIcons(page)).toEqual(["Backlinks", "Info"]);
   await page.getByRole("button", { name: "More" }).click();
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "Plugins"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "Trash", "Plugins"]);
 
   await run(page, "Enable plugin: History");
   await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
-  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
+  await expect(page.getByRole("navigation", { name: "Modes" }).getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Plugins"]);
 });
 
 test("a stopwatch written in a note is drawn in it and runs, and is plain text again with its plugin off", async ({ page }) => {
@@ -348,7 +348,7 @@ test("the Plugins page lists every plugin with its icon, name, description and s
   expect(listed.length).toBeGreaterThan(10);
   expect(listed.filter((row) => !row.name || row.icon !== 1 || !row.described || row.switches !== 1)).toEqual([]);
   expect(listed.filter((row) => row.kind !== "Built-in")).toEqual([]);
-  expect(listed.slice(0, 3).map((row) => row.name)).toEqual(["Sidebar", "Folders", "Note list"]);
+  expect(listed.slice(0, 3).map((row) => row.name)).toEqual(["Sidebar", "Folders", "Tags"]);
   await expect(pluginRow(page, "Tabs and splits")).toContainText("Open notes in tabs, and side by side in splits.");
   await expect(pluginRow(page, "Vim mode").getByRole("checkbox")).not.toBeChecked();
 

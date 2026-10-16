@@ -10,6 +10,8 @@ const FOLDER = /^\/folder\/([a-z0-9-]+)$/;
 
 export interface Place {
   path: string;
+  /** The address's query as the browser has it, such as `?q=plan`, or empty. */
+  query: string;
   /** What `navigate` was handed for this entry of the browser's history. */
   state: unknown;
   route: Route;
@@ -34,13 +36,13 @@ export function routeOf(pathname: string): Route {
 }
 
 export function useRoute(): [Place, Navigate] {
-  const [at, setAt] = useState({ path: location.pathname, state: history.state as unknown });
+  const [at, setAt] = useState({ path: location.pathname, query: location.search, state: history.state as unknown });
   /** Whether the entry the browser is at was written by a move. Back and Forward come to an entry that may not be. */
   const moved = useRef(false);
   useEffect(() => {
     const onPop = () => {
       moved.current = false;
-      setAt({ path: location.pathname, state: history.state });
+      setAt({ path: location.pathname, query: location.search, state: history.state });
     };
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
@@ -50,11 +52,11 @@ export function useRoute(): [Place, Navigate] {
     if (history.state !== null) history.replaceState(null, "", location.href);
   }, [at]);
   const navigate = useCallback<Navigate>((to, { replace, move, state = null } = {}) => {
-    if (to === location.pathname) return;
+    if (to === location.pathname + location.search) return;
     if (replace || (move && moved.current)) history.replaceState(state, "", to);
     else history.pushState(state, "", to);
     if (!replace) moved.current = Boolean(move);
-    setAt({ path: to, state });
+    setAt({ path: location.pathname, query: location.search, state });
   }, []);
   return [{ ...at, route: routeOf(at.path) }, navigate];
 }

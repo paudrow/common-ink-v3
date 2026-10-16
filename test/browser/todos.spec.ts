@@ -19,7 +19,12 @@ const row = (page: Page, text: string | RegExp) => rows(page).filter({ hasText: 
 const popover = (page: Page) => page.locator(".chip-popover");
 /** Picks one of what the open chip's popover offers. */
 const choose = (page: Page, name: string) => popover(page).getByRole("button", { name, exact: true }).click();
-const filter = (page: Page, name: string) => todosPage(page).getByRole("group", { name: "Filters" }).getByLabel(name);
+/** The bar a query is typed in, and the builder Advanced opens under it. */
+const bar = (page: Page) => todosPage(page).getByRole("searchbox", { name: "Filter todos" });
+const advanced = (page: Page) => todosPage(page).getByRole("button", { name: "Advanced" });
+const builder = (page: Page) => todosPage(page).getByRole("group", { name: "Advanced filter" });
+const condition = (page: Page, n: number) => builder(page).getByRole("group", { name: `Condition ${n}` });
+const problem = (page: Page) => todosPage(page).locator(".query-error");
 const words = (page: Page) => rows(page).locator(".todo-words");
 const cursorLine = (page: Page) => page.evaluate(() => getSelection()!.anchorNode?.parentElement?.closest(".cm-line")?.textContent);
 const localDay = (page: Page, days = 0) =>
@@ -305,19 +310,43 @@ const barOpened = async (page: Page) => {
 const laidOut = (page: Page, within: string) =>
   page.evaluate((selector) => [...document.querySelectorAll<HTMLElement>(selector)].map((el) => [el.className || el.tagName, ...(["x", "y", "width", "height"] as const).map((side) => Math.round(el.getBoundingClientRect()[side] * 10) / 10)].join(" ")), within);
 
-test("the Todos page lists open todos from every note, and narrows by folder, tag, due date and priority, and to completed ones too", async ({ page }) => {
+test("the Todos page lists open todos from every note, and its builder narrows by folder, tag, due date and priority, and to completed ones too", async ({ page }) => {
   const { home, work } = await twoNotes(page);
 
   await expect(todosPage(page).getByRole("heading", { level: 1 })).toHaveText("Todos");
   // A +Name is words of the todo: nothing is made of it.
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
   await expect(row(page, "Ship it").locator(".todo-note")).toHaveText("Work");
-  await expect(filter(page, "Project")).toHaveCount(0);
+  // At rest there is the bar and Advanced, and no filter of the page's own.
+  await expect(bar(page)).toHaveValue("");
+  await expect(todosPage(page).getByRole("combobox")).toHaveCount(1);
+  await expect(todosPage(page).getByRole("combobox", { name: "Sort" })).toBeVisible();
+  await expect(todosPage(page).getByRole("group", { name: "Filters" })).toHaveCount(0);
 
-  await filter(page, "Include completed").check();
+  // Done todos too: any of open or done, which the builder writes in the bar.
+  await advanced(page).click();
+  // The first condition is there, ready to fill in. Shared and Private are who can see a todo's note, apart from its state.
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Visibility" });
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "shared", "private"]);
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "open", "done", "archived", "trashed"]);
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption("open");
+  await builder(page).getByRole("button", { name: "Add a condition" }).click();
+  await condition(page, 2).getByRole("combobox", { name: "Field" }).selectOption({ label: "State" });
+  await condition(page, 2).getByRole("combobox", { name: "Value" }).selectOption("done");
+  await expect(bar(page)).toHaveValue("is:open is:done");
+  await expect(todosPage(page)).toContainText("No todos match.");
+  await builder(page).getByRole("radio", { name: "Match any" }).check();
+  await expect(bar(page)).toHaveValue("is:open OR is:done");
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes", "Book flights"]);
   await expect(row(page, "Book flights").getByRole("checkbox")).toBeChecked();
-  await filter(page, "Include completed").uncheck();
+  await condition(page, 2).getByRole("button", { name: "Remove condition 2" }).click();
+  await condition(page, 1).getByRole("button", { name: "Remove condition 1" }).click();
+  await expect(bar(page)).toHaveValue("");
+  // With the last condition gone, an empty one is left to fill in.
+  await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(1);
+  await expect(condition(page, 1).getByRole("textbox", { name: "Value" })).toHaveValue("");
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
 
   // A folder lists its notes' todos and those of the folders under it.
   const house = await perform(page, { type: "folder.create", name: "House" });
@@ -326,41 +355,186 @@ test("the Todos page lists open todos from every note, and narrows by folder, ta
   await perform(page, { type: "note.move", id: home.id, folderId: garden.id });
   await perform(page, { type: "note.move", id: work.id, folderId: office.id });
   await page.reload();
-  await expect(filter(page, "Folder").getByRole("option")).toHaveText(["All folders", "Unsorted", "House", "House / Garden", "Office"]);
-  await filter(page, "Folder").selectOption("House");
+  await advanced(page).click();
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Folder" });
+  const folder = condition(page, 1).getByRole("combobox", { name: "Value" });
+  await expect(folder.getByRole("option")).toHaveText(["Choose…", "House", "House / Garden", "Office", "Unsorted"]);
+  await folder.selectOption({ label: "House" });
+  await expect(bar(page)).toHaveValue("folder:House");
   await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
-  await filter(page, "Folder").selectOption("House / Garden");
+  await folder.selectOption({ label: "House / Garden" });
   await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
-  await filter(page, "Folder").selectOption("Office");
+  await folder.selectOption({ label: "Office" });
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
-  await filter(page, "Folder").selectOption("Unsorted");
+  await condition(page, 1).getByRole("combobox", { name: "Is or is not" }).selectOption("is not");
+  await expect(bar(page)).toHaveValue("-folder:Office");
+  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
+  await condition(page, 1).getByRole("combobox", { name: "Is or is not" }).selectOption("is");
+  await folder.selectOption({ label: "Unsorted" });
   await expect(todosPage(page)).toContainText("No todos match.");
-  await filter(page, "Folder").selectOption("All folders");
 
-  await expect(filter(page, "Tag").getByRole("option")).toHaveText(["All tags", "#office", "#outside"]);
-  await filter(page, "Priority").selectOption("Medium");
+  // Priority and due take a comparison, and a row is no part of the query until it says something.
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Priority" });
+  await expect(bar(page)).toHaveValue("");
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "High", "Medium", "Low", "None"]);
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption({ label: "Medium" });
+  await expect(bar(page)).toHaveValue("priority:medium");
   await expect(words(page)).toHaveText(["Call the bank +Home"]);
-  await filter(page, "Priority").selectOption("None");
+  await condition(page, 1).getByRole("combobox", { name: "Comparison" }).selectOption("at least");
+  await expect(bar(page)).toHaveValue("priority:>=medium");
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home"]);
+  await condition(page, 1).getByRole("combobox", { name: "Comparison" }).selectOption("exactly");
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption({ label: "None" });
   await expect(words(page)).toHaveText(["Write notes"]);
-  await filter(page, "Priority").selectOption("Any");
-  await filter(page, "Due").selectOption("No date");
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Due" });
+  await condition(page, 1).getByRole("combobox", { name: "Comparison" }).selectOption("between");
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).fill("2026-10-13");
+  await expect(bar(page)).toHaveValue("");
+  await condition(page, 1).getByRole("combobox", { name: "To" }).fill("2026-10-31");
+  await expect(bar(page)).toHaveValue("due:2026-10-13..2026-10-31");
+  await expect(words(page)).toHaveText(["Call the bank +Home"]);
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Has" });
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).selectOption("due");
+  await condition(page, 1).getByRole("combobox", { name: "Is or is not" }).selectOption("is not");
+  await expect(bar(page)).toHaveValue("no:due");
   await expect(words(page)).toHaveText(["Water plants", "Write notes"]);
+  await builder(page).getByRole("combobox", { name: "Sort" }).selectOption("title-desc");
+  await expect(bar(page)).toHaveValue("no:due sort:title-desc");
+  await expect(words(page)).toHaveText(["Write notes", "Water plants"]);
 
   // The page opens the way it was left.
   await page.reload();
-  await expect(filter(page, "Due")).toHaveValue("none");
-  await expect(words(page)).toHaveText(["Water plants", "Write notes"]);
+  await expect(bar(page)).toHaveValue("no:due sort:title-desc");
+  await expect(words(page)).toHaveText(["Write notes", "Water plants"]);
 
-  // A folder the list was left narrowed to and that is gone since narrows nothing.
-  await filter(page, "Due").selectOption("Any date");
-  await filter(page, "Folder").selectOption("Office");
+  // A folder the list was left narrowed to and that is gone since is said to be no folder, and taking it out of the bar lists everything again.
+  await bar(page).fill("folder:Office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
   await perform(page, { type: "note.move", id: work.id, folderId: house.id });
   await perform(page, { type: "folder.delete", id: office.id });
   await page.reload();
-  await expect(filter(page, "Folder")).toHaveValue("");
+  await expect(bar(page)).toHaveValue("folder:Office");
+  await expect(problem(page)).toHaveText('No folder named "Office"');
+  await expect(rows(page)).toHaveCount(0);
+  await bar(page).fill("");
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
+  await expect(problem(page)).toHaveCount(0);
   await expect(todosPage(page).getByRole("alert")).toHaveCount(0);
+});
+
+test("the Todos page's bar takes the query language as typed: words of a todo's line, filters, OR and NOT, with what can't be read said under it", async ({ page }) => {
+  await twoNotes(page);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
+  const asked = async (query: string, found: string[]) => {
+    await bar(page).fill(query);
+    await expect(words(page), query).toHaveText(found);
+  };
+  await asked("bank", ["Call the bank +Home"]);
+  await asked("notes OR plants", ["Water plants", "Write notes"]);
+  await asked("-ship -notes", ["Call the bank +Home", "Water plants"]);
+  // Words are the todo's own, and with in:title its note's.
+  await asked("work in:title", ["Ship it", "Write notes"]);
+  await asked("is:done", ["Book flights"]);
+  await asked("priority:>=medium", ["Ship it", "Call the bank +Home"]);
+  await asked("priority:low..medium sort:priority-desc", ["Call the bank +Home", "Water plants"]);
+  // importance: is another name for priority:, and 0 to 3 read as none to high.
+  await asked("importance:>=2", ["Ship it", "Call the bank +Home"]);
+  await asked("importance:1..2 sort:importance-desc", ["Call the bank +Home", "Water plants"]);
+  await asked("has:due sort:due-desc", ["Call the bank +Home", "Ship it"]);
+  await asked("#office no:due", ["Write notes"]);
+  await asked("editor:@me -tag:office", ["Call the bank +Home", "Water plants"]);
+  await asked("due:<2026-10-13 OR no:due", ["Ship it", "Water plants", "Write notes"]);
+
+  // A query that can't be read is said so, with where, and the list stays as it was. One for notes alone says so.
+  await bar(page).fill("priority:urgent");
+  await expect(problem(page)).toContainText('priority: takes high, medium, low or none, and "urgent" isn\'t one');
+  await expect(problem(page).locator("mark")).toHaveText("urgent");
+  await expect(bar(page)).toHaveAttribute("aria-invalid", "true");
+  await expect(words(page)).toHaveText(["Ship it", "Water plants", "Write notes"]);
+  await bar(page).fill("has:todo");
+  await expect(problem(page)).toContainText("has:todo is for notes, and this is a search of todos");
+  await bar(page).fill("priority:high");
+  await expect(problem(page)).toHaveCount(0);
+  await expect(words(page)).toHaveText(["Ship it"]);
+
+  // One the server refuses is said so too, and the list of the query before is not left under it.
+  await bar(page).fill("folder:Nowhere");
+  await expect(problem(page)).toHaveText('No folder named "Nowhere"');
+  await expect(rows(page)).toHaveCount(0);
+  await bar(page).fill("priority:high");
+  await expect(problem(page)).toHaveCount(0);
+  await expect(words(page)).toHaveText(["Ship it"]);
+
+  // The filters of todos are offered as they are typed, and Tab takes one.
+  await bar(page).fill("");
+  await bar(page).pressSequentially("du");
+  await expect(todosPage(page).getByRole("listbox").getByRole("option")).toHaveText([/^due:/]);
+  await page.keyboard.press("Tab");
+  await expect(bar(page)).toHaveValue("due:");
+  await expect(todosPage(page).getByRole("listbox").getByRole("option")).toHaveText(["today", "yesterday", "tomorrow", "7d", "+7d"]);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(bar(page)).toHaveValue("due:tomorrow ");
+  // Tomorrow is the day after the member's own today, whenever this runs.
+  const tomorrow = await perform(page, { type: "todo.list", query: `due:${await localDay(page, 1)}` });
+  await expect(words(page)).toHaveText(tomorrow.todos.map((todo) => todo.words));
+});
+
+test("the Todos page's bar and builder fit a window 380 wide, and nothing in them runs off its side", async ({ page }) => {
+  await twoNotes(page);
+  await page.setViewportSize({ width: 380, height: 800 });
+  // Focus, so the page has the whole window, as a member with a window this narrow would have it.
+  await bar(page).focus();
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeHidden();
+  await bar(page).fill("due:2026-10-01..2026-10-31 OR importance:>=2 OR -tag:office");
+  await advanced(page).click();
+  await builder(page).getByRole("button", { name: "Query syntax" }).click();
+  const help = page.getByRole("dialog", { name: "Query syntax" });
+  await expect(help.getByRole("table", { name: "State" }).getByRole("rowheader")).toHaveText(["is:open", "is:done", "is:archived", "is:trashed"]);
+  await expect(help.getByRole("table", { name: "Visibility" }).getByRole("rowheader")).toHaveText(["is:shared", "is:private"]);
+  const box = (await help.boundingBox())!;
+  expect(box.x >= 0 && box.x + box.width <= 380 && box.y >= 0 && box.y + box.height <= 800).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(help).toHaveCount(0);
+  await expect(builder(page).getByRole("group", { name: /^Condition / })).toHaveCount(3);
+  await builder(page).getByRole("combobox", { name: "Sort" }).selectOption("due-desc");
+  // The builder writes the query back with priority:, the name importance: is another for.
+  await expect(bar(page)).toHaveValue("due:2026-10-01..2026-10-31 OR priority:>=medium OR -tag:office sort:due-desc");
+  const over = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".query-bar, .query-bar *")].filter((el) => el.getClientRects().length && (el.getBoundingClientRect().right > innerWidth + 0.5 || el.getBoundingClientRect().left < -0.5)).map((el) => `${el.tagName}.${el.className}`));
+  expect(over).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("what a browser kept of the Todos page's old filters opens as the query that says the same", async ({ page }) => {
+  await twoNotes(page);
+  await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes"]);
+  await page.evaluate(async () => {
+    const me = (await (await fetch("/api/me")).json()) as { person: { id: string }; workspaces: { id: string }[] };
+    const key = (name: string) => `ink.plugin.todos.${me.workspaces[0]!.id}.${me.person.id}.${name}`;
+    localStorage.removeItem(key("query"));
+    localStorage.setItem(key("filters"), JSON.stringify({ folder: "", tag: "outside", due: "any", importance: "", completed: true, archived: false }));
+  });
+  await page.reload();
+  await expect(bar(page)).toHaveValue("tag:outside (is:open OR is:done)");
+  await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants", "Book flights"]);
+  await expect(todosPage(page).getByRole("alert")).toHaveCount(0);
+  // A link to the page can name its query, which is then what the page is left at.
+  await page.goto("/todos?q=is%3Adone+-tag%3Aoffice");
+  await expect(bar(page)).toHaveValue("is:done -tag:office");
+  await expect(words(page)).toHaveText(["Book flights"]);
+  await page.goto("/todos");
+  await expect(bar(page)).toHaveValue("is:done -tag:office");
+  // Once the bar is changed from a link's query, a reload opens what was left, not the link's.
+  await page.goto("/todos?q=is%3Adone");
+  await expect(words(page)).toHaveText(["Book flights"]);
+  await bar(page).fill("bank");
+  await expect(words(page)).toHaveText(["Call the bank +Home"]);
+  await expect(page).toHaveURL(/\/todos$/);
+  await page.reload();
+  await expect(bar(page)).toHaveValue("bank");
 });
 
 test("a todo has the tags on its own line and its note's: its own are drawn as chips after its words, and its note's name is said alone, narrowed to a tag or not", async ({ page }) => {
@@ -375,24 +549,29 @@ test("a todo has the tags on its own line and its note's: its own are drawn as c
   await expect(row(page, "Water plants").locator(".todo-chips .todo-tag")).toHaveText(["#outside"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
 
-  // Under the tag of one todo's line: both todos of the note are tagged with it, and only the one whose line writes it has its chip.
-  await filter(page, "Tag").selectOption("#outside");
+  // Under the tag of one todo's line: both todos of the note are tagged with it, and only the one whose line writes it has its chip. The builder offers the tags todos have.
+  await advanced(page).click();
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Tag" });
+  await expect.poll(() => condition(page, 1).locator("datalist option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))).toEqual(["office", "outside"]);
+  await condition(page, 1).getByRole("combobox", { name: "Value" }).fill("outside");
+  await expect(bar(page)).toHaveValue("tag:outside");
   await expect(words(page)).toHaveText(["Call the bank +Home", "Water plants"]);
   await expect(rows(page).locator(".todo-tag")).toHaveText(["#outside"]);
   await expect(names()).toHaveText(["Home", "Home"]);
   await expect(row(page, "Call the bank").locator(".todo-note")).toHaveAttribute("title", "Open Home");
 
   // Under a tag only the note's title writes: every todo of the note, and still only the note's name.
-  await filter(page, "Tag").selectOption("#office");
+  await bar(page).fill("#office");
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" })).toHaveValue("office");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
   await expect(names()).toHaveText(["Work", "Work"]);
   await expect(rows(page).locator(".todo-tag")).toHaveCount(0);
 
-  await filter(page, "Tag").selectOption("");
+  await bar(page).fill("");
   await expect(names()).toHaveText(["Work", "Home", "Home", "Work"]);
 });
 
-test("a tag's chip narrows the list to that tag, and pressed again takes that off; a tag inside the words stays in them", async ({ page }) => {
+test("a tag's chip narrows the list through the query: it adds #tag to the bar, pressed again takes it off, and the rest of the query stays; a tag inside the words stays in them", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await perform(page, { type: "note.create", text: "# Home\n\n- [ ] Water plants #outside #garden\n" });
   await perform(page, { type: "note.create", text: "# Fence\n\n- [ ] Ask #bob about the fence\n" });
@@ -406,13 +585,37 @@ test("a tag's chip narrows the list to that tag, and pressed again takes that of
   await expect(row(page, "Ask").locator("button.todo-tag")).toHaveCount(0);
   await expect(row(page, "#someday").locator("button.todo-tag")).toHaveCount(0);
 
-  await row(page, "Water plants").getByRole("button", { name: "#garden", exact: true }).click();
-  await expect(filter(page, "Tag")).toHaveValue("garden");
+  const garden = () => row(page, "Water plants").getByRole("button", { name: "#garden", exact: true });
+  await expect(garden()).toHaveAttribute("aria-pressed", "false");
+  await garden().click();
+  await expect(bar(page)).toHaveValue("#garden");
   await expect(words(page)).toHaveText(["Water plants"]);
-  await expect(row(page, "Water plants").getByRole("button", { name: "#garden", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await row(page, "Water plants").getByRole("button", { name: "#garden", exact: true }).click();
-  await expect(filter(page, "Tag")).toHaveValue("");
+  await expect(garden()).toHaveAttribute("aria-pressed", "true");
+  await garden().click();
+  await expect(bar(page)).toHaveValue("");
   await expect(words(page)).toHaveText(["Ask #bob about the fence", "Water plants", "Write notes", "#someday", "Twice"]);
+
+  // With a query in the bar, the tag is added to it and taken off it, and the rest is left as typed.
+  await bar(page).fill("water OR twice");
+  await expect(words(page)).toHaveText(["Water plants", "Twice"]);
+  await row(page, "Twice").getByRole("button", { name: "#twice", exact: true }).first().click();
+  await expect(bar(page)).toHaveValue("(water OR twice) tag:twice");
+  await expect(words(page)).toHaveText(["Twice"]);
+  await expect(row(page, "Twice").locator("button.todo-tag[aria-pressed=true]")).toHaveCount(2);
+  await row(page, "Twice").getByRole("button", { name: "#twice", exact: true }).first().click();
+  await expect(bar(page)).toHaveValue("(water OR twice)");
+  await expect(words(page)).toHaveText(["Water plants", "Twice"]);
+  // A tag the bar names with tag: is the same tag: its chip reads pressed and takes it off.
+  await bar(page).fill("tag:Outside plants");
+  await expect(row(page, "Water plants").getByRole("button", { name: "#outside", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await row(page, "Water plants").getByRole("button", { name: "#outside", exact: true }).click();
+  await expect(bar(page)).toHaveValue("plants");
+  // The page opens the way the chip left it.
+  await garden().click();
+  await expect(bar(page)).toHaveValue("plants #garden");
+  await page.reload();
+  await expect(bar(page)).toHaveValue("plants #garden");
+  await expect(words(page)).toHaveText(["Water plants"]);
   expect(warned).toEqual([]);
 });
 
@@ -636,17 +839,18 @@ test("checking a todo off on the Todos page says so in a toast, and Undo opens i
   test.setTimeout(60_000);
   const { home } = await twoNotes(page);
   const lineIn = async () => (await read(page, home.id)).split("\n")[2];
-  await filter(page, "Include completed").check();
+  await bar(page).fill("is:open OR is:done");
   await expect(words(page)).toHaveText(["Ship it", "Call the bank +Home", "Water plants", "Write notes", "Book flights"]);
   await page.evaluate(() => document.fonts.ready);
-  const frame = ".todos-page h1, .todo-filters, .todo-filters label, .todo-list";
+  const frame = ".todos-page h1, .query-bar, .query-line, .query-line > *, .todo-list";
   const before = await laidOut(page, frame);
 
   await row(page, "Call the bank").getByRole("checkbox").check();
   await expect.poll(lineIn).toBe("- [x] !! Call the bank due:2026-10-14 +Home");
   // It says just that a task was completed, not which: the member has just pressed it.
   await expect(toast(page)).toHaveText("Task completedUndo");
-  await expect(toast(page)).toHaveAttribute("role", "status");
+  // It is said to a screen reader: the stack it arrives in is a live region.
+  await expect(toast(page).locator("xpath=..")).toHaveAttribute("aria-live", "polite");
   await expect(toast(page).getByRole("button")).toHaveText(["Undo"]);
   // It is laid over the page: nothing that was there has moved for it, and nothing moves when it goes.
   expect(await toast(page).evaluate((el) => getComputedStyle(el.parentElement!).position)).toBe("fixed");
@@ -716,7 +920,8 @@ test("checking a todo off in a note says so in the same toast, and Undo opens it
   await line(page, "Call the bank").getByRole("checkbox").click();
   await expect.poll(lineIn).toBe("- [x] !! Call the bank due:2026-10-14 +Home");
   await expect(toast(page)).toHaveText("Task completedUndo");
-  await expect(toast(page)).toHaveAttribute("role", "status");
+  // It is said to a screen reader: the stack it arrives in is a live region.
+  await expect(toast(page).locator("xpath=..")).toHaveAttribute("aria-live", "polite");
   expect(await toast(page).evaluate((el) => getComputedStyle(el.parentElement!).position)).toBe("fixed");
   expect(await places(page, measured)).toEqual(before);
   // The keyboard is still in the note.
@@ -762,7 +967,8 @@ test("checking a todo off in a note says so in the same toast, and Undo opens it
 
 test("Undo opens a todo again after more was changed on it from the page, and after lines were written above it in a note that was left", async ({ page }) => {
   const { home } = await twoNotes(page);
-  await filter(page, "Include completed").check();
+  await bar(page).fill("is:open OR is:done");
+  await expect(row(page, "Book flights")).toHaveCount(1);
   await row(page, "Call the bank").getByRole("checkbox").check();
   await expect(toast(page)).toContainText("Task completed");
   await chipOf(page, "Call the bank", "Priority").click();
@@ -881,12 +1087,15 @@ test.describe("where the member's day is not the day in UTC", () => {
     await page.goto("/todos");
     await expect(row(page, "The ninth").locator(".todo-due")).toHaveText("Today");
     await expect(row(page, "The tenth").locator(".todo-due")).toHaveText("Tomorrow");
-    await filter(page, "Due").selectOption("Today");
+    // The days a query counts from today are counted from the member's own day, which the page says with every ask.
+    await bar(page).fill("due:today");
     await expect(words(page)).toHaveText(["The ninth"]);
-    await filter(page, "Due").selectOption("Overdue");
+    await bar(page).fill("due:<today");
     await expect(words(page)).toHaveText(["The eighth"]);
-    await filter(page, "Due").selectOption("Next 7 days");
+    await bar(page).fill("due:today..+6d");
     await expect(words(page)).toHaveText(["The ninth", "The tenth"]);
+    await bar(page).fill("due:tomorrow OR due:yesterday");
+    await expect(words(page)).toHaveText(["The eighth", "The tenth"]);
     await expect.poll(() => read(page, note.id)).toContain("due:2026-03-09");
   });
 });
@@ -1113,9 +1322,11 @@ test("a chip of what isn't set opens the same popover as a set one: Priority and
   await expect(notes.locator(".todo-chip")).toHaveText(["Add date", "Repeat", "Medium", "#office", "#desk", "Add tag"]);
   // Each tag's chip still narrows the list, to the todos of the notes with that tag.
   await notes.getByRole("button", { name: "#desk", exact: true }).click();
-  await expect(filter(page, "Tag")).toHaveValue("desk");
+  await expect(bar(page)).toHaveValue("#desk");
   await expect(words(page)).toHaveText(["Ship it", "Write notes"]);
-  await filter(page, "Tag").selectOption("");
+  await expect(notes.getByRole("button", { name: "#desk", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await notes.getByRole("button", { name: "#desk", exact: true }).click();
+  await expect(bar(page)).toHaveValue("");
 
   // A new tag typed whole is written on Enter, and the rest of the line stays as it was.
   await row(page, "Ship it").getByRole("button", { name: "Add tag" }).click();
@@ -1232,6 +1443,21 @@ test("the toast is v1's: in the bottom right corner in the app's colours, Task c
   expect(Date.now() - left).toBeGreaterThan(1500);
 });
 
+test("the todos of a note in Trash are listed as one the member can only view: no box to check, no words to edit, nothing to set", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const note = await perform(page, { type: "note.create", text: "# Old\n\n- [ ] Shred it #paper\n" });
+  await perform(page, { type: "note.trash", id: note.id });
+  await page.goto("/todos?q=is%3Atrashed");
+  await expect(words(page)).toHaveText(["Shred it"]);
+  await expect(row(page, "Shred it").getByRole("checkbox")).toBeDisabled();
+  await expect(row(page, "Shred it").getByRole("button", { name: /^Edit / })).toHaveCount(0);
+  await expect(row(page, "Shred it").locator(".todo-chip[data-unset]")).toHaveCount(0);
+  await menuOf(page, "Shred it");
+  await expect(menu(page).getByRole("menuitem")).toHaveText(["Open note", "Open to the side"]);
+  await page.keyboard.press("Escape");
+  await expect(row(page, "Shred it").getByRole("button", { name: "#paper", exact: true })).toBeVisible();
+});
+
 test("the inspector is about the notes the listed todos are in: Info counts them and History is theirs", async ({ page }) => {
   await twoNotes(page);
   await perform(page, { type: "note.create", text: "# No todos\n\nJust words." });
@@ -1242,7 +1468,7 @@ test("the inspector is about the notes the listed todos are in: Info counts them
   await expect(panel.getByRole("definition").first()).toHaveText("Todos");
   await expect(panel.getByRole("definition").nth(1)).toHaveText("2 notes");
   // Narrowed, it follows the list.
-  await filter(page, "Tag").selectOption("#office");
+  await bar(page).fill("#office");
   await expect(panel.getByRole("definition").nth(1)).toHaveText("1 note");
   await page.getByRole("navigation", { name: "Inspector bar" }).getByRole("button", { name: "History" }).click();
   await expect(panel.getByRole("tree", { name: "Notes that changed" }).locator('[aria-level="1"]')).toHaveText([/Work/]);
@@ -1369,7 +1595,7 @@ test("a link in a todo's words shows what the note shows: its note's title or it
   // A link to no note there is, kept as it is written.
   await perform(page, { type: "note.create", text, linkTitles: "keep" });
   await page.goto("/todos");
-  await filter(page, "Include completed").check();
+  await bar(page).fill("is:open OR is:done");
   await expect(words(page)).toHaveText(["Buy what Groceries lists", "Ask about Unavailable note", `Type \`[[${groceries.id}]]\` to link`, "Done from the list"]);
   await expect(row(page, "Buy what").locator(".todo-link")).toHaveText("Groceries");
   // What the row is called by says the link as it is shown.
@@ -1523,10 +1749,10 @@ test("the list keeps its order while its todos are changed: a row that would sor
   await popover(page).getByLabel("Due on").fill("2026-10-01");
   await expect(row(page, "Write notes").locator(".todo-due")).toHaveText(/Oct 1/);
   await expect(orderBar(page)).toHaveText("The order has changed.Refresh");
-  await expect(todosPage(page).getByRole("status")).toHaveText("The order has changed.Refresh");
+  await expect(todosPage(page).getByRole("status").filter({ has: page.locator(".todo-order") })).toHaveText("The order has changed.Refresh");
   // The bar above the first row moves every row down by its own height, and nothing else moves.
-  const bar = await barOpened(page);
-  expect((await tops()).map((top, i) => Math.abs(top - placed[i]! - bar) <= 1)).toEqual(placed.map(() => true));
+  const opened = await barOpened(page);
+  expect((await tops()).map((top, i) => Math.abs(top - placed[i]! - opened) <= 1)).toEqual(placed.map(() => true));
   await expect(words(page)).toHaveText(order);
   // Another change while it is out of order keeps it so, and the notice stays up.
   await chipOf(page, "Call the bank", "Priority").click();
@@ -1541,9 +1767,9 @@ test("the list keeps its order while its todos are changed: a row that would sor
   await expect(orderBar(page)).toHaveCount(0);
 
   // Narrowed to a priority, a row changed out of it stays where it was, dimmed, until the list is refreshed.
-  await filter(page, "Priority").selectOption("Medium");
+  await bar(page).fill("priority:medium");
   await expect(words(page)).toHaveText(["Water plants"]);
-  await filter(page, "Priority").selectOption("Low");
+  await bar(page).fill("priority:low");
   await expect(words(page)).toHaveText(["Call the bank +Home"]);
   await chipOf(page, "Call the bank", "Priority").click();
   await choose(page, "High");
@@ -1555,7 +1781,7 @@ test("the list keeps its order while its todos are changed: a row that would sor
   await expect(chipOf(page, "Call the bank", "Priority")).toHaveText("High");
   await orderBar(page).getByRole("button", { name: "Refresh" }).click();
   await expect(todosPage(page)).toContainText("No todos match.");
-  await filter(page, "Priority").selectOption("Any");
+  await bar(page).fill("");
 
   // A change left out of order, then the page left and come back to: sorted, and no notice.
   await expect(words(page)).toHaveText(["Write notes", "Ship it", "Call the bank +Home", "Water plants"]);
@@ -1586,7 +1812,10 @@ test("priority is said in words on the Todos page, High, Medium, Low and None, a
   await expect(rows(page).locator(".todo-importance")).toHaveText(["High", "Medium", "Low", "Priority"]);
   await expect(chipOf(page, "Ship it", "Priority")).toHaveAccessibleName("Priority: High");
   await expect(chipOf(page, "Write notes", "Priority")).toHaveAccessibleName("Priority: none");
-  await expect(filter(page, "Priority").getByRole("option")).toHaveText(["Any", "High", "Medium", "Low", "None"]);
+  await advanced(page).click();
+  await condition(page, 1).getByRole("combobox", { name: "Field" }).selectOption({ label: "Priority" });
+  await expect(condition(page, 1).getByRole("combobox", { name: "Value" }).getByRole("option")).toHaveText(["Choose…", "High", "Medium", "Low", "None"]);
+  await advanced(page).click();
   await plainly();
   await chipOf(page, "Call the bank", "Priority").click();
   await expect(popover(page)).toHaveAccessibleName("Priority of Call the bank +Home");
@@ -1663,8 +1892,10 @@ test("a tag's chip shows a cross on hover that takes the tag off the todo's line
   await page.keyboard.press("Backspace");
   await expect.poll(lineOf).toBe("- [ ] Water plants #desk");
   await expect(tagsOf()).toHaveText(["#desk"]);
-  await expect(toast(page)).toHaveText("Removed #gardenUndo");
-  await toast(page).getByRole("button", { name: "Undo" }).click();
+  // Notices stack, so the one for #outside may still be up: this one is for the tag taken off last.
+  const removed = toast(page).filter({ hasText: "Removed #garden" });
+  await expect(removed).toHaveText("Removed #gardenUndo");
+  await removed.getByRole("button", { name: "Undo" }).click();
   await expect.poll(lineOf).toBe("- [ ] Water plants #garden #desk");
   expect(new Set(await authors(page, note.id))).toEqual(new Set(["member Ada Lovelace"]));
 });
@@ -1712,9 +1943,9 @@ test('a row shows its first three tags and then "+N", which lists the rest in a 
   await more.click();
   await popover(page).getByRole("button", { name: "passport", exact: true }).click();
   await expect(popover(page)).toHaveCount(0);
-  await expect(filter(page, "Tag")).toHaveValue("passport");
+  await expect(bar(page)).toHaveValue("#passport");
   await expect(trip.locator(".todo-add-tag")).toBeVisible();
-  await filter(page, "Tag").selectOption("All tags");
+  await bar(page).fill("");
   // Taking off the last tag past three takes "+N" away too, and the keyboard goes to Add tag in its place.
   await more.click();
   await lines.first().focus();
@@ -1772,9 +2003,13 @@ test("a row a change takes out of the list stays, greyed, with a line under it s
   // In notes of their own: a tag anywhere in a todo's note is the todo's tag too.
   await perform(page, { type: "note.create", text: `# Gym\n\n- [ ] !!! Gym due:${today} #health\n` });
   await perform(page, { type: "note.create", text: `# Stretch\n\n- [ ] !!! Stretch due:${today} #health\n` });
+  // One the query leaves out, so a list read for it shows it has been.
+  await perform(page, { type: "note.create", text: "# Books\n\n- [ ] Read a book\n" });
   await page.goto("/todos");
+  await expect(words(page)).toHaveText(["Gym", "Stretch", "Read a book"]);
   const why = (text: string) => row(page, text).locator(".todo-why");
-  await filter(page, "Due").selectOption("Today");
+  // The query's own terms for a date, a priority and a tag are said as the filters they are.
+  await bar(page).fill("due:today");
   await expect(words(page)).toHaveText(["Gym", "Stretch"]);
   await expect(rows(page).locator(".todo-why")).toHaveCount(0);
 
@@ -1789,8 +2024,7 @@ test("a row a change takes out of the list stays, greyed, with a line under it s
   await orderBar(page).getByRole("button", { name: "Refresh" }).click();
   await expect(words(page)).toHaveText(["Stretch"]);
 
-  await filter(page, "Due").selectOption("Any date");
-  await filter(page, "Priority").selectOption("High");
+  await bar(page).fill("priority:high");
   await expect(words(page)).toHaveText(["Stretch", "Gym"]);
   await chipOf(page, "Stretch", "Priority").click();
   await choose(page, "Low");
@@ -1798,8 +2032,7 @@ test("a row a change takes out of the list stays, greyed, with a line under it s
   await orderBar(page).getByRole("button", { name: "Refresh" }).click();
   await expect(words(page)).toHaveText(["Gym"]);
 
-  await filter(page, "Priority").selectOption("Any");
-  await filter(page, "Tag").selectOption("#health");
+  await bar(page).fill("#health");
   await expect(words(page)).toHaveText(["Stretch", "Gym"]);
   await row(page, "Gym").locator("button.todo-tag").focus();
   await page.keyboard.press("Delete");
@@ -1907,6 +2140,26 @@ test("the Sort menu orders the list by due date, priority, recently changed, not
   await page.reload();
   await expect(sort).toHaveValue("text");
   await expect(words(page)).toHaveText(["apples", "Buy hay", "feed the cats", "zebra tickets"]);
+
+  // The menu and the query's sort: are one choice: a pick writes its word in the bar, and a word typed there shows in the menu.
+  await expect(bar(page)).toHaveValue("sort:text-asc");
+  await bar(page).fill("#nothing");
+  await sort.selectOption("Priority");
+  await expect(bar(page)).toHaveValue("#nothing sort:priority-desc");
+  await expect.poll(() => keptSort(page), "a pick is kept with the account").toBe("priority");
+  await bar(page).fill("sort:updated-desc");
+  await expect(sort).toHaveValue("changed");
+  await expect.poll(() => keptSort(page), "and so is a sort: run from the bar").toBe("changed");
+  // attic's note changed last, when zebra tickets was set to High.
+  await expect(words(page)).toHaveText(["zebra tickets", "apples", "feed the cats", "Buy hay"]);
+  await bar(page).fill("sort:due-desc");
+  await expect(sort).toHaveValue("due-desc");
+  await expect(words(page)).toHaveText(["apples", "feed the cats", "zebra tickets", "Buy hay"]);
+  expect(await keptSort(page), "a sort: the menu has no name for leaves the account's as it was").toBe("changed");
+  await sort.selectOption("Due date");
+  await expect(bar(page)).toHaveValue("");
+  await expect(words(page)).toHaveText(["zebra tickets", "feed the cats", "apples", "Buy hay"]);
+  await expect.poll(() => keptSort(page), "Due date is the setting's default, so nothing is kept").toBeUndefined();
 });
 
 /** The member's Sort as their settings on the server hold it, in their first workspace unless one is named. */
@@ -1937,6 +2190,7 @@ test("the Sort is kept with the account: another browser signed in as the same m
   await expect.poll(() => keptSort(elsewhere)).toBe("text");
   await page.reload();
   await expect(sort, "and the first browser follows the account").toHaveValue("text");
+  await expect(bar(page), "its bar too, though it had kept sort:priority-desc").toHaveValue("sort:text-asc");
   await expect(words(page)).toHaveText(["apples", "Buy hay", "feed the cats", "zebra tickets"]);
   await elsewhere.context().close();
 
@@ -1981,6 +2235,37 @@ test("a Sort this browser kept before moves to the account once, even when the s
   await expect(sort).toHaveValue("priority");
   await expect.poll(inBrowser).toBeNull();
   expect(await keptSort(page)).toBe("priority");
+});
+
+test("a link that names its order opens in it and leaves the account's as it was; a link that names none opens in the account's", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  for (const text of SORT_NOTES) await perform(page, { type: "note.create", text });
+  await page.goto("/todos");
+  const sort = todosPage(page).getByLabel("Sort", { exact: true });
+  await sort.selectOption("Priority");
+  await expect.poll(() => keptSort(page)).toBe("priority");
+
+  // The member's settings come after the page has opened the link, as they can on a slow connection.
+  await page.route("**/ops", async (route) => {
+    if (route.request().postData()?.includes('"settings.read"')) await new Promise((done) => setTimeout(done, 1500));
+    await route.fallback();
+  });
+  const settingsRead = () => page.waitForResponse((r) => r.url().endsWith("/ops") && (r.request().postData()?.includes('"settings.read"') ?? false));
+  let read = settingsRead();
+  await page.goto(`/todos?q=${encodeURIComponent("sort:text-asc")}`);
+  await read;
+  await page.waitForTimeout(500);
+  await expect(bar(page)).toHaveValue("sort:text-asc");
+  await expect(sort).toHaveValue("text");
+  await expect(words(page)).toHaveText(["apples", "Buy hay", "feed the cats", "zebra tickets"]);
+  expect(await keptSort(page)).toBe("priority");
+
+  read = settingsRead();
+  await page.goto(`/todos?q=${encodeURIComponent("has:due")}`);
+  await read;
+  await expect(bar(page), "the account's order, once it is read").toHaveValue("has:due sort:priority-desc");
+  await expect(sort).toHaveValue("priority");
+  await expect(words(page)).toHaveText(["apples", "feed the cats", "zebra tickets"]);
 });
 
 test("what isn't set on a todo shows only while its row is pointed at or has the keyboard, and nothing moves when it shows", async ({ page }) => {

@@ -48,8 +48,8 @@ const released = ({ db, workspaceId, personId, now }: Asking, memberId: string) 
     .bind(workspaceId, personId, memberId, now);
 
 const LAST_ADMIN = "A workspace needs an admin. Make someone else an admin first.";
-const ownsPrivate = (notes: number) =>
-  `You have ${notes === 1 ? "a private note" : `${notes} private notes`} here besides your daily notes, which nobody else can reach. Stop ${notes === 1 ? "it" : "them"} being private first, so ${notes === 1 ? "it isn't" : "they aren't"} left with nobody.`;
+const ownsPrivate = (notes: number, trashed: number) =>
+  `You have ${notes === 1 ? "a private note" : `${notes} private notes`} here besides your daily notes, which nobody else can reach. Stop ${notes === 1 ? "it" : "them"} being private first, so ${notes === 1 ? "it isn't" : "they aren't"} left with nobody.${trashed ? " Look in Trash too." : ""}`;
 /** A private note that is not one of its owner's daily notes, which go to the workspace when the owner leaves. */
 const KEPT_PRIVATE = "n.workspace_id = ?1 AND n.private_owner = ?2 AND n.id NOT IN (SELECT d.note_id FROM daily_notes d WHERE d.workspace_id = ?1 AND d.person_id = ?2)";
 
@@ -63,8 +63,8 @@ async function refusal({ db, workspaceId, personId }: Asking, doing: string, mem
   if (!asking) return new OpError("not_found", NO_SUCH_WORKSPACE);
   if (needs === "admin" && asking.role !== "admin") return new OpError("forbidden", `A ${asking.role} can't ${doing}`);
   if (!results.some((r) => r.person_id === memberId)) return new OpError("not_found", "No such member");
-  const kept = needs === "member" ? ((await db.prepare(`SELECT COUNT(*) AS notes FROM notes n WHERE ${KEPT_PRIVATE}`).bind(workspaceId, personId).first<{ notes: number }>())?.notes ?? 0) : 0;
-  if (kept) return new OpError("invalid", ownsPrivate(kept));
+  const kept = needs === "member" ? await db.prepare(`SELECT COUNT(*) AS notes, COALESCE(SUM(n.state = 'trashed'), 0) AS trashed FROM notes n WHERE ${KEPT_PRIVATE}`).bind(workspaceId, personId).first<{ notes: number; trashed: number }>() : null;
+  if (kept?.notes) return new OpError("invalid", ownsPrivate(kept.notes, kept.trashed));
   return new OpError("invalid", LAST_ADMIN);
 }
 

@@ -148,7 +148,7 @@ test("More expands and collapses Contacts, Uploads, and History, and a mode not 
   const less = modes.getByRole("button", { name: "Less" });
   await expect(less).toHaveAttribute("aria-expanded", "true");
   await expect(more).toHaveCount(0);
-  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Plugins"]);
+  await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar", "Contacts", "Uploads", "History", "Trash", "Plugins"]);
   await modes.getByRole("link", { name: "History" }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("History");
@@ -211,20 +211,22 @@ test("a folder's list filters on title and snippet, sorts, and narrows to notes 
   await expect(listedNotes(page)).toHaveText(["Banana", "Cherry"]);
   await page.getByRole("button", { name: "Has todos" }).click();
 
-  await page.getByRole("searchbox", { name: "Filter notes" }).fill("RED");
+  // What is typed is searched for in the folder's notes, by the server, and found in a note's text as in its title.
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("RED");
   await expect(listedNotes(page)).toHaveText(["Apple"]);
-  await page.getByRole("searchbox", { name: "Filter notes" }).fill("cherry");
+  await expect(noteCard(page, "Apple").locator("mark")).toHaveText(["Red"]);
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("cherry");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
-  await page.getByRole("searchbox", { name: "Filter notes" }).fill("kiwi");
-  await expect(page.getByText("No notes match.")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("kiwi");
+  await expect(page.getByText("No notes match “kiwi” in Fruit.")).toBeVisible();
 
   // The list is as it was left when its tab is come back to, and All notes says which folder each note is in.
-  await page.getByRole("searchbox", { name: "Filter notes" }).fill("cherry");
+  await page.getByRole("searchbox", { name: "Search notes" }).fill("cherry");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
   await openAllNotes(page);
   await expect(noteCard(page, "Cherry").locator(".card-details")).toHaveText("FruitAda Lovelacejust now2 open");
   await folder(page, "Fruit").click();
-  await expect(page.getByRole("searchbox", { name: "Filter notes" })).toHaveValue("cherry");
+  await expect(page.getByRole("searchbox", { name: "Search notes" })).toHaveValue("cherry");
   await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveValue("title");
   await expect(listedNotes(page)).toHaveText(["Cherry"]);
 });
@@ -241,15 +243,15 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await expect.poll(panelIcons(page)).toEqual(["History", "Backlinks", "Info"]);
   await pinPanel(page, "Info");
   const panel = inspector.locator(".inspector-body");
-  await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive"]);
+  await expect(panel.getByRole("term")).toHaveText(["Folder", "Sharing", "Tags", "URL", "Archive", "Trash"]);
   await expect(panel.getByRole("definition").first().locator("span")).toHaveText("Projects / Common Ink");
   await expect(panel.getByRole("combobox", { name: "Move to" })).toHaveValue(ink.id);
   await expect(panel.getByRole("definition").nth(1)).toHaveText("Everyone in this workspace · Link offShare");
-  await expect(panel.getByRole("definition").nth(2)).toHaveText("Tags arrive with #21.");
+  await expect(panel.getByRole("definition").nth(2)).toHaveText("No tags. Write #tag in the note to tag it.");
   await expect(panel.getByRole("textbox", { name: "Note URL" })).toHaveValue(new URL(`/note/roadmap-${note.id}`, page.url()).href);
   await panel.getByRole("button", { name: "Copy" }).click();
   await expect(panel.getByRole("button", { name: "Copied" })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Archive" })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Archive" })).toBeEnabled();
 
   await showPanel(page, "History");
   await expect(panel.getByRole("listbox", { name: "Changes" }).getByRole("option")).toContainText("You wrote");

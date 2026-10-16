@@ -231,7 +231,7 @@ describe("the summary of history", () => {
     expect(await summed({ noteIds: [plan], authors: [{ kind: "member", id: claude.ref.id }] })).toEqual([]);
   });
 
-  it("comes a page of notes at a time", async () => {
+  it("comes a page of notes at a time, and leaves out a note in Trash unless it is named", async () => {
     const ada = await newMember();
     const ids: string[] = [];
     for (let i = 0; i < 5; i++) ids.push((await perform(env.DB, ada, { type: "note.create", text: `# Note ${i}` }, T0 + i)).id);
@@ -241,6 +241,10 @@ describe("the summary of history", () => {
     const third = await perform(env.DB, ada, { type: "history.summary", limit: 2, before: second.next! });
     expect([first, second, third].map((page) => page.notes.map((n) => n.noteTitle))).toEqual([["Note 4", "Note 3"], ["Note 2", "Note 1"], ["Note 0"]]);
     expect(third.next).toBeNull();
+
+    await perform(env.DB, ada, { type: "note.trash", id: ids[4]! });
+    expect((await perform(env.DB, ada, { type: "history.summary" })).notes.map((n) => n.noteTitle)).toEqual(["Note 3", "Note 2", "Note 1", "Note 0"]);
+    expect((await perform(env.DB, ada, { type: "history.summary", noteIds: [ids[4]!] })).notes.map((n) => n.noteTitle)).toEqual(["Note 4"]);
   });
 
   it("says the lines each change added and removed in a listing without diffs, and in a note's history", async () => {
@@ -892,7 +896,7 @@ describe("reverting an author", () => {
 
     const { reverted, emptied } = await revertAuthor(ada, claude.ref);
 
-    expect(emptied).toEqual([{ noteId: draft.id, title: "Draft" }]);
+    expect(emptied).toEqual([{ noteId: draft.id, title: "Draft", trashed: false }]);
     expect(reverted.map((r) => r.note.id).sort()).toEqual([id, draft.id, joint.id].sort());
     expect([await read(ada, draft.id), await read(ada, joint.id)]).toEqual(["", "\nAda's line"]);
     expect((await revertAuthor(ada, claude.ref)).emptied).toEqual([]);
@@ -912,7 +916,7 @@ describe("reverting an author", () => {
 
     expect(await run(["revert-author", `agent:${claude.ref.id}`], io)).toBe(0);
 
-    expect(said.map((line) => JSON.parse(line).emptied)).toEqual([[{ noteId: draft.id, title: "Draft" }]]);
+    expect(said.map((line) => JSON.parse(line).emptied)).toEqual([[{ noteId: draft.id, title: "Draft", trashed: false }]]);
   });
 
   it("previews an author's revert from the ink command, in every note they changed or the ones named, and writes nothing", async () => {

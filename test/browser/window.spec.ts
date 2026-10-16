@@ -322,7 +322,7 @@ test("the tab row has its tabs and Focus and no button for either side, whose co
   await expect(sidebar(page)).toHaveCount(0);
   expect(await widthOf(bar)).toBe(44);
   expect(await widthOf(main)).toBe(1280 - 44 - 300);
-  await expect.poll(() => controls(bar)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders"]);
+  await expect.poll(() => controls(bar)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders", "Tags"]);
   expect(await controls(page.locator(".tab-row"))).toEqual(["Focus"]);
   await page.reload();
   await expect(bar).toBeVisible();
@@ -508,6 +508,36 @@ test("Folders on the folded sidebar's bar opens the folder tree over the page, a
   await expect(sidebar(page)).toHaveCount(0);
 });
 
+test("Tags on the folded sidebar's bar shows the tags alone over the page, and a tag opened from it puts it away", async ({ page }) => {
+  await withNote(page);
+  await perform(page, { type: "note.create", text: "# Garden\n\nTomatoes #garden" });
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("Draft");
+  await toggleSidebar(page);
+  const bar = page.getByRole("navigation", { name: "Sidebar bar" });
+  const tags = bar.getByRole("button", { name: "Tags" });
+  const folders = bar.getByRole("button", { name: "Folders" });
+  await expect(tags).toHaveAttribute("aria-expanded", "false");
+  await tags.click();
+  await expect(tags).toHaveAttribute("aria-expanded", "true");
+  await expect(folders).toHaveAttribute("aria-expanded", "false");
+  const shown = page.getByRole("dialog", { name: "Tags" });
+  await expect(shown.getByRole("navigation", { name: "Tags" })).toBeVisible();
+  await expect(shown.getByRole("tree", { name: "Folders" })).toHaveCount(0);
+  await expect(picker(page)).toHaveCount(0);
+
+  // Folders takes its place: one section over the page at a time.
+  await folders.click();
+  await expect(picker(page).getByRole("tree", { name: "Folders" })).toBeVisible();
+  await expect(shown).toHaveCount(0);
+  await tags.click();
+  await expect(picker(page)).toHaveCount(0);
+  await shown.getByRole("link", { name: "#garden" }).click();
+  await expect(page).toHaveURL(/\/tags\/garden$/);
+  await expect(shown).toHaveCount(0);
+  await expect(tags).toHaveAttribute("aria-expanded", "false");
+});
+
 test("a folder dragged out of the bar's folder tree lands in a pane as one dragged from the sidebar does, and the tree goes", async ({ page }) => {
   await withNote(page);
   await perform(page, { type: "folder.create", name: "Plans" });
@@ -577,15 +607,17 @@ async function listedIn(part: Locator, things: string) {
 
 test("a closed sidebar leaves a bar with an icon for each thing the sidebar lists, in the sidebar's own order, and each goes where it says", async ({ page }) => {
   await withNote(page);
+  // The Tags section is drawn once the tags have been asked for.
+  await expect(sidebar(page).locator(".section-head > span")).toHaveText(["Folders", "Tags"]);
   const open = await listedIn(sidebar(page), ".new-note, nav[aria-label=Modes] > *, .section-head > span");
-  expect(open.map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders"]);
+  expect(open.map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders", "Tags"]);
 
   await toggleSidebar(page);
   const bar = page.getByRole("navigation", { name: "Sidebar bar" });
   await expect(bar).toBeVisible();
   expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(open.map((o) => o.name));
-  for (const name of ["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders"]) {
-    const icon = bar.getByRole(["New note", "More", "Folders"].includes(name) ? "button" : "link", { name, exact: true });
+  for (const name of ["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders", "Tags"]) {
+    const icon = bar.getByRole(["New note", "More", "Folders", "Tags"].includes(name) ? "button" : "link", { name, exact: true });
     await expect(icon).toHaveAttribute("title", name === "New note" ? "New note in Unsorted" : name);
     expect(await widthOf(icon)).toBe(28);
   }
@@ -598,7 +630,7 @@ test("a closed sidebar leaves a bar with an icon for each thing the sidebar list
 
   // More lists the rest in the bar as it does in the sidebar, between Calendar and Folders.
   await bar.getByRole("button", { name: "More" }).click();
-  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "Less", "Contacts", "Uploads", "History", "Plugins", "Folders"]);
+  expect((await listedIn(bar, "a, button")).map((o) => o.name)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "Less", "Contacts", "Uploads", "History", "Trash", "Plugins", "Folders", "Tags"]);
   await bar.getByRole("button", { name: "Less" }).click();
 
   // Folders shows the folder tree over the page, and the sidebar stays closed.
@@ -645,8 +677,13 @@ test("the inspector's bar has an icon for each panel whatever is in front, with 
   await bar.getByRole("button", { name: "Info" }).click();
   await expect(inspector(page).getByRole("definition")).toHaveText(["Unsorted", "1 note", "just now by Ada Lovelace"]);
 
+  // The Search page says what it lists; a page that says nothing has nothing to show.
   await page.getByRole("link", { name: "Search" }).click();
   await expect(page.getByRole("heading", { name: "Search" })).toBeVisible();
+  expect(await listedIn(bar, "button")).toEqual(icons);
+  await expect(inspector(page).getByRole("definition")).toHaveText(["Search", "1 note", "just now by Ada Lovelace"]);
+  await page.getByRole("link", { name: "Calendar" }).click();
+  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
   expect(await listedIn(bar, "button")).toEqual(icons);
   await expect(inspector(page).locator(".inspector-body")).toHaveText("Nothing to show for this view");
   await toggleInspector(page);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { folderTitle, type EditorProps, type Opened, type Plugin } from "../../plugin-api.ts";
+import { lifecycle } from "../lib/lifecycle.ts";
 import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
 import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction } from "./editorLayout.ts";
 
@@ -60,19 +61,21 @@ export const tabs: Plugin = {
       if (tab) dispatch(action({ groupId: layout.focusedGroupId, tab }));
     };
 
-    host.commands.register({ id: "tab.keep", title: "Keep tab open", run: onTab((tab) => ({ type: "pin", ...tab })) });
-    for (const { scope, id, title } of CLOSES) host.commands.register({ id, title, run: onTab((tab) => ({ type: "close", scope, ...tab })) });
-    host.commands.register({ id: "editor.splitRight", title: "Split editor right", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) });
-    host.commands.register({ id: "editor.splitDown", title: "Split editor down", run: onTab((tab) => ({ type: "split", side: "down", ...tab })) });
-    host.commands.register({ id: "tab.moveToNextGroup", title: "Move tab to next group", run: onTab((tab) => ({ type: "send", to: "next", ...tab })) });
-    host.commands.register({ id: "tab.moveToPreviousGroup", title: "Move tab to previous group", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) });
-    host.commands.register({ id: "tab.menu", title: "Show tab menu", run: showTabMenu });
+    host.commands.register({ id: "tab.keep", title: "Keep tab open", group: "Navigation", run: onTab((tab) => ({ type: "pin", ...tab })) });
+    for (const { scope, id, title } of CLOSES) host.commands.register({ id, title, group: "Navigation", run: onTab((tab) => ({ type: "close", scope, ...tab })) });
+    host.commands.register({ id: "editor.splitRight", title: "Split editor right", group: "Navigation", run: onTab((tab) => ({ type: "split", side: "right", ...tab })) });
+    host.commands.register({ id: "editor.splitDown", title: "Split editor down", group: "Navigation", run: onTab((tab) => ({ type: "split", side: "down", ...tab })) });
+    host.commands.register({ id: "tab.moveToNextGroup", title: "Move tab to next group", group: "Navigation", run: onTab((tab) => ({ type: "send", to: "next", ...tab })) });
+    host.commands.register({ id: "tab.moveToPreviousGroup", title: "Move tab to previous group", group: "Navigation", run: onTab((tab) => ({ type: "send", to: "previous", ...tab })) });
+    host.commands.register({ id: "tab.menu", title: "Show tab menu", group: "Navigation", run: showTabMenu });
+
+    const { items } = lifecycle(host);
 
     function Editor({ app, renderNote, renderFolder, renderPage, empty }: EditorProps) {
       const shown = useSyncExternalStore(subscribe, () => layout);
       const cursorGroup = useSyncExternalStore(subscribe, () => cursorTo);
-      const titles = useMemo(() => app.notes && new Map(app.notes.map((n) => [n.id, n.title])), [app.notes]);
-      const locked = useMemo(() => new Set((app.notes ?? []).filter((n) => n.private).map((n) => n.id)), [app.notes]);
+      // A tab stays open on a note that was moved to Trash, so those are known by name too.
+      const notes = useMemo(() => app.notes && new Map([...app.notes, ...app.trashed].map((n) => [n.id, n])), [app.notes, app.trashed]);
       const home = app.path === "/";
 
       useEffect(() => {
@@ -85,14 +88,15 @@ export const tabs: Plugin = {
 
       const pages = useMemo(() => new Map(app.pages.map((p) => [p.id, p])), [app.pages]);
       const titleOf = (tab: Opened) =>
-        tab.kind === "page" ? (pages.get(tab.id)?.label ?? "Page") : tab.kind === "folder" ? (app.folders ? (folderTitle(app.folders, tab.id) ?? "Folder") : "") : titles ? titles.get(tab.id) || "Untitled" : "";
+        tab.kind === "page" ? (pages.get(tab.id)?.label ?? "Page") : tab.kind === "folder" ? (app.folders ? (folderTitle(app.folders, tab.id) ?? "Folder") : "") : notes ? notes.get(tab.id)?.title || "Untitled" : "";
 
       return (
         <EditorGroups
           layout={shown}
           titleOf={titleOf}
           iconOf={(tab) => (tab.kind === "folder" ? "folders" : tab.kind === "page" ? pages.get(tab.id)?.icon : undefined)}
-          isPrivate={(tab) => tab.kind === "note" && locked.has(tab.id)}
+          isPrivate={(tab) => (tab.kind === "note" && notes?.get(tab.id)?.private) ?? false}
+          noteItems={(tab) => (tab.kind === "note" ? items(notes?.get(tab.id)) : [])}
           dispatch={dispatch}
           render={(group, tab) =>
             tab.kind === "folder"

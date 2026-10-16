@@ -627,3 +627,20 @@ export function dayIn(timeZone: string): (time: number) => string {
     return `${parts.year}-${parts.month}-${parts.day}`;
   };
 }
+
+/** When a calendar day begins in a zone, in milliseconds. A day that begins with an hour the zone skips begins when its clocks next read. */
+export function dayStartIn(timeZone: string): (day: string) => number {
+  const format = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  /** What the zone's clocks read at `time`, as if they were UTC's. */
+  const read = (time: number) => {
+    const parts = Object.fromEntries(format.formatToParts(time).map((p) => [p.type, Number(p.value)]));
+    return Date.UTC(parts.year!, parts.month! - 1, parts.day, parts.hour, parts.minute, parts.second);
+  };
+  return (day) => {
+    const wanted = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+    let time = wanted;
+    // The zone's offset at the first guess can differ from the one at the answer, across a change of clocks.
+    for (let i = 0; i < 3; i++) time -= read(time) - wanted;
+    return time;
+  };
+}

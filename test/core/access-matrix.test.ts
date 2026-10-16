@@ -2,8 +2,9 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
+import { IN_TRASH, type Covering, type NoteState, type Trashed } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
-import { Op, OpError, type OpInput, type OpType } from "../../src/core/protocol.ts";
+import { Op, OpError, type OpInput, type OpType, type Results } from "../../src/core/protocol.ts";
 import { NOT_FOR_AGENTS } from "../../src/worker/mcp/tools.ts";
 import { addMember, newMember } from "./members.ts";
 
@@ -13,31 +14,38 @@ import { addMember, newMember } from "./members.ts";
  * what it needs of the item it is pointed at, and the test works out from the table whether it is
  * done, refused, or answered as if the item weren't there. An operation with no row here fails the
  * first test, so one added later can't go unasked.
+ *
+ * Where a note is in its life is written out the same way, beside who may see it: one note is
+ * archived and one is in Trash. Each operation on a note says what it does with a note in Trash,
+ * and each listing says which states it covers, so none can leave either unsaid.
  */
 
 type Level = "-" | "V" | "E";
-const NOTES = ["open", "team", "deep", "lone", "secret", "vpriv"] as const;
+const NOTES = ["open", "team", "deep", "lone", "secret", "vpriv", "arch", "bin"] as const;
 const FOLDERS = ["Open", "Team", "Deep"] as const;
 type NoteName = (typeof NOTES)[number];
 type FolderName = (typeof FOLDERS)[number];
-const FOLDER_OF: Record<NoteName, FolderName> = { open: "Open", team: "Team", deep: "Deep", lone: "Open", secret: "Team", vpriv: "Open" };
+const FOLDER_OF: Record<NoteName, FolderName> = { open: "Open", team: "Team", deep: "Deep", lone: "Open", secret: "Team", vpriv: "Open", arch: "Open", bin: "Team" };
+/** `arch` is archived and `bin` is in Trash. Every other note is live. */
+const STATE_OF: Record<NoteName, NoteState> = { open: "live", team: "live", deep: "live", lone: "live", secret: "live", vpriv: "live", arch: "archived", bin: "trashed" };
+const COVERED: Record<Covering, readonly NoteState[]> = { live: ["live"], archived: ["archived"], kept: ["live", "archived"], trashed: ["trashed"], any: ["live", "archived", "trashed"] };
 
 /**
- * Each actor, what they may do with each note (open team deep lone secret vpriv) and each folder (Open Team Deep), and whether they may
+ * Each actor, what they may do with each note (open team deep lone secret vpriv arch bin) and each folder (Open Team Deep), and whether they may
  * share what they can edit. `secret` is private to Eve and `vpriv` to Vera, and an owner shares their own private note whatever their role.
  */
 const OWNER: Partial<Record<NoteName, string>> = { secret: "Eve, an editor who owns the private note", vpriv: "Vera, a viewer who owns a private note" };
 
 const ACTORS = {
-  "Ada, an admin": { notes: "EEEE--", folders: "EEE", shares: true },
-  "Eve, an editor who owns the private note": { notes: "EEEEE-", folders: "EEE", shares: true },
-  "Ed, an editor": { notes: "EEEE--", folders: "EEE", shares: true },
-  "Vera, a viewer who owns a private note": { notes: "VVVV-V", folders: "VVV", shares: false },
-  "Ned, an editor narrowed to view on Team": { notes: "EVVE--", folders: "EVV", shares: true },
-  "Gus, a guest with edit on Team": { notes: "-EE---", folders: "-EE", shares: false },
-  "Vic, a guest with view on Team": { notes: "-VV---", folders: "-VV", shares: false },
-  "Nia, a guest with edit on the note lone": { notes: "---E--", folders: "---", shares: false },
-  "Val, a guest with view on the note lone": { notes: "---V--", folders: "---", shares: false },
+  "Ada, an admin": { notes: "EEEE--EE", folders: "EEE", shares: true },
+  "Eve, an editor who owns the private note": { notes: "EEEEE-EE", folders: "EEE", shares: true },
+  "Ed, an editor": { notes: "EEEE--EE", folders: "EEE", shares: true },
+  "Vera, a viewer who owns a private note": { notes: "VVVV-VVV", folders: "VVV", shares: false },
+  "Ned, an editor narrowed to view on Team": { notes: "EVVE--EV", folders: "EVV", shares: true },
+  "Gus, a guest with edit on Team": { notes: "-EE----E", folders: "-EE", shares: false },
+  "Vic, a guest with view on Team": { notes: "-VV----V", folders: "-VV", shares: false },
+  "Nia, a guest with edit on the note lone": { notes: "---E----", folders: "---", shares: false },
+  "Val, a guest with view on the note lone": { notes: "---V----", folders: "---", shares: false },
 } as const;
 type ActorName = keyof typeof ACTORS;
 
@@ -82,7 +90,9 @@ async function world(): Promise<World> {
   const folders = { Open: open, Team: team, Deep: await folder("Deep", team) };
 
   const note = async (by: Actor, name: NoteName, text = "") => (await perform(env.DB, by, { type: "note.create", folderId: folders[FOLDER_OF[name]], text: textOf(name, text) })).id;
-  const notes = { open: await note(ada, "open"), team: await note(ada, "team"), deep: await note(ada, "deep"), lone: await note(ada, "lone"), secret: "", vpriv: await note(vera, "vpriv") };
+  const notes = { open: await note(ada, "open"), team: await note(ada, "team"), deep: await note(ada, "deep"), lone: await note(ada, "lone"), secret: "", vpriv: await note(vera, "vpriv"), arch: await note(ada, "arch"), bin: await note(ada, "bin") };
+  await perform(env.DB, ada, { type: "note.archive", id: notes.arch, archived: true });
+  await perform(env.DB, ada, { type: "note.trash", id: notes.bin });
   await perform(env.DB, vera, { type: "note.setPrivate", id: notes.vpriv, private: true });
   await perform(env.DB, ada, { type: "member.setRole", memberId: vera.personId, as: "viewer" });
   notes.secret = await note(eve, "secret", `[[${notes.open}]]`);
@@ -132,17 +142,41 @@ async function world(): Promise<World> {
 
 type Args<K extends OpType> = Omit<Extract<OpInput, { type: K }>, "type">;
 
+/** Puts a note back in the state the table gives it, after an operation that moved it. */
+const settle = (w: World, note: NoteName) =>
+  env.DB.prepare("UPDATE notes SET state = ?2, state_at = ?3, state_by = ?4, state_by_kind = ?5, restores_as = ?6, restores_to = ?7, folder_id = ?8 WHERE id = ?1")
+    .bind(
+      w.notes[note],
+      STATE_OF[note],
+      STATE_OF[note] === "live" ? null : Date.now(),
+      STATE_OF[note] === "live" ? null : w.actors["Ada, an admin"].personId,
+      STATE_OF[note] === "live" ? null : "member",
+      STATE_OF[note] === "trashed" ? "live" : null,
+      STATE_OF[note] === "trashed" ? w.folders[FOLDER_OF[note]] : null,
+      w.folders[FOLDER_OF[note]],
+    )
+    .run();
+/** The operations that move a note through its life, each followed by `settle`. */
+const MOVES: readonly OpType[] = ["note.trash", "note.restore"];
+
 /**
  * What an operation is asked about, and what it needs of that. Each is given arguments that change
  * nothing an actor's access depends on, so the same world serves every operation: a write of the
  * text the note already has, a move to the folder it is in, a revert of a change that isn't there.
  */
 type Plan<K extends OpType> =
-  /** Needs `needs` of one note. `share` when it also takes a member who may share it, `members` when a guest is refused whatever they were given. */
-  | { on: "note"; needs: "V" | "E"; share?: true; members?: true; args: (noteId: string, w: World, note: NoteName) => Args<K>; also?: "folder" }
+  /**
+   * Needs `needs` of one note. `share` when it also takes a member who may share it, `members` when a guest is refused whatever they were given,
+   * `maker` when it takes an admin or the member who made the note. `trashed` is what it does with a note in Trash, for someone it would otherwise let through.
+   */
+  | { on: "note"; needs: "V" | "E"; trashed: Exclude<Trashed, "hidden">; share?: true; members?: true; maker?: true; args: (noteId: string, w: World, note: NoteName) => Args<K>; also?: "folder" }
   | { on: "folder"; needs: "V" | "E"; share?: true; args: (folderId: string, w: World) => Args<K> }
-  /** Lists across the workspace: asked by everyone, and checked for anything of what they can't see. */
-  | { on: "everything"; args: (w: World) => Args<K> }
+  /**
+   * Lists across the workspace: asked by everyone, and checked for anything of what they can't see. `covers` is the states of the notes
+   * it lists as asked here, and with `archived` it takes `includeArchived`, which is asked too and covers archived notes as well.
+   * With `only` it also takes `includeArchived: "only"`, which is asked too and covers the archived notes alone.
+   */
+  | { on: "everything"; covers: Covering; archived?: true; only?: true; args: (w: World) => Args<K> }
   /** Decided by who is asking alone. `who` says which roles are let in; a guest never is. */
   | { on: "workspace"; who: readonly ("admin" | "editor" | "viewer" | "guest")[]; args: (w: World) => Args<K> }
   /** For whoever holds a link, and refused to everyone else. */
@@ -157,36 +191,43 @@ const MEMBERS = ["admin", "editor", "viewer"] as const;
 const ADMINS = ["admin"] as const;
 
 const PLANS: { [K in OpType]: Plan<K> } = {
-  "note.list": { on: "everything", args: () => ({}) },
+  "note.list": { on: "everything", covers: "live", archived: true, only: true, args: () => ({}) },
   "note.create": { on: "folder", needs: "E", args: (folderId) => ({ folderId, text: "# Made" }) },
-  "note.read": { on: "note", needs: "V", args: (id) => ({ id }) },
-  "note.write": { on: "note", needs: "E", args: (id, w, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, text: note === "secret" ? textOf("secret", `[[${w.notes.open}]] more`) : textOf(note) }) },
-  "note.backlinks": { on: "note", needs: "V", args: (id) => ({ id }) },
-  "note.history": { on: "note", needs: "V", args: (id) => ({ id }) },
-  "note.diff": { on: "note", needs: "V", args: (id) => ({ id, revision: 1 }) },
-  "note.move": { on: "note", needs: "E", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
-  "note.label": { on: "note", needs: "E", args: (id) => ({ id, revision: 1, name: "Start" }) },
-  "note.revert": { on: "note", needs: "E", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
-  "note.revertChanges": { on: "note", needs: "E", args: (id) => ({ id, revisions: [99] }) },
-  "note.previewRevert": { on: "note", needs: "V", args: (id) => ({ id, revisions: [1] }) },
-  "note.undo": { on: "note", needs: "E", args: (id) => ({ id }) },
-  "note.redo": { on: "note", needs: "E", args: (id) => ({ id }) },
-  "history.summary": { on: "everything", args: () => ({ limit: 100 }) },
-  "history.list": { on: "everything", args: () => ({}) },
-  "history.authors": { on: "everything", args: () => ({}) },
+  "note.read": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
+  "note.write": { on: "note", needs: "E", trashed: "refused", args: (id, w, note) => ({ id, baseRevision: note === "secret" ? 2 : 1, text: note === "secret" ? textOf("secret", `[[${w.notes.open}]] more`) : textOf(note) }) },
+  "note.backlinks": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
+  "note.history": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
+  "note.diff": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, revision: 1 }) },
+  "note.move": { on: "note", needs: "E", trashed: "refused", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
+  // Archiving sets the state the note already has, and trashing and restoring are each followed by `settle`.
+  "note.archive": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, archived: STATE_OF[note] === "archived" }) },
+  "note.trash": { on: "note", needs: "E", trashed: "opens", args: (id) => ({ id }) },
+  "note.restore": { on: "note", needs: "E", trashed: "opens", args: (id) => ({ id }) },
+  "trash.list": { on: "everything", covers: "trashed", args: () => ({}) },
+  "tag.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
+  search: { on: "everything", covers: "live", archived: true, only: true, args: () => ({ query: "body", limit: 50 }) },
+  "note.label": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revision: 1, name: "Start" }) },
+  "note.revert": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1 }) },
+  "note.revertChanges": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id, revisions: [99] }) },
+  "note.previewRevert": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, revisions: [1] }) },
+  "note.undo": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id }) },
+  "note.redo": { on: "note", needs: "E", trashed: "refused", args: (id) => ({ id }) },
+  "history.summary": { on: "everything", covers: "kept", args: () => ({ limit: 100 }) },
+  "history.list": { on: "everything", covers: "kept", args: () => ({}) },
+  "history.authors": { on: "everything", covers: "kept", args: () => ({}) },
   "history.revertAuthor": { on: "workspace", who: ["admin", "editor", "guest"], args: () => ({ author: { kind: "agent", id: "aaaaaaaaaaaa" } }) },
-  "history.diff": { on: "note", needs: "V", args: (noteId) => ({ changes: [{ noteId, revisions: [1] }] }) },
+  "history.diff": { on: "note", needs: "V", trashed: "opens", args: (noteId) => ({ changes: [{ noteId, revisions: [1] }] }) },
   // These two answer note by note, and a note the actor can't see is one of the answers: each is asked of every note at once, and one that was never there.
-  "history.previewRevert": { on: "everything", args: (w) => everyNote(w, 1) },
+  "history.previewRevert": { on: "everything", covers: "any", args: (w) => everyNote(w, 1) },
   "history.revert": { on: "workspace", who: ["admin", "editor", "guest"], args: (w) => everyNote(w, 99) },
   "links.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
-  "todo.list": { on: "everything", args: () => ({ includeCompleted: true }) },
-  "todo.filters": { on: "everything", args: () => ({}) },
-  "todo.set": { on: "note", needs: "E", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note), importance: 0 }) },
-  "todo.history": { on: "note", needs: "V", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note) }) },
+  "todo.list": { on: "everything", covers: "live", archived: true, args: () => ({ includeCompleted: true }) },
+  "todo.filters": { on: "everything", covers: "live", archived: true, args: () => ({}) },
+  "todo.set": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note), importance: 0 }) },
+  "todo.history": { on: "note", needs: "V", trashed: "opens", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note) }) },
   "todos.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
   "daily.open": { on: "workspace", who: ["admin", "editor"], args: () => ({ on: "2026-10-11" }) },
-  "folder.list": { on: "everything", args: () => ({}) },
+  "folder.list": { on: "everything", covers: "live", args: () => ({}) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
   "folder.delete": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },
@@ -199,23 +240,26 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "member.leave": { on: "workspace", who: [], args: () => ({}) },
   "invite.list": { on: "workspace", who: ADMINS, args: () => ({}) },
   "invite.revoke": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },
-  "grant.list": { on: "note", needs: "V", args: (noteId) => ({ noteId }) },
-  "grant.set": { on: "note", needs: "V", share: true, args: (noteId) => ({ noteId, email: address(), access: "view" }) },
+  "grant.list": { on: "note", needs: "V", trashed: "opens", args: (noteId) => ({ noteId }) },
+  "grant.set": { on: "note", needs: "V", trashed: "opens", share: true, args: (noteId) => ({ noteId, email: address(), access: "view" }) },
   "grant.link": { on: "folder", needs: "V", share: true, args: (folderId) => ({ folderId, link: "signed_in" }) },
-  "grant.revoke": { on: "note", needs: "V", share: true, args: (_, w, note) => ({ id: w.spare[note] }) },
-  "note.setPrivate": { on: "note", needs: "V", members: true, args: (id, _, note) => ({ id, private: note === "secret" }) },
+  "grant.revoke": { on: "note", needs: "V", trashed: "opens", share: true, args: (_, w, note) => ({ id: w.spare[note] }) },
+  "note.setPrivate": { on: "note", needs: "V", trashed: "opens", members: true, args: (id, _, note) => ({ id, private: note === "secret" }) },
   "shared.open": { on: "link", args: () => ({}) },
   "shared.read": { on: "link", args: (w) => ({ id: w.notes.open }) },
+  // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
+  "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
 };
 
 /** How an operation ended: done, or refused and how. */
-type Outcome = "done" | "forbidden" | `not_found: ${string}` | `other: ${string}`;
+type Outcome = "done" | "forbidden" | "in trash" | `not_found: ${string}` | `other: ${string}`;
 
 async function ask(actor: Actor | Visitor, op: OpInput): Promise<{ outcome: Outcome; answer?: unknown }> {
   try {
     return { outcome: "done", answer: await perform(env.DB, actor, op) };
   } catch (err) {
     if (!(err instanceof OpError)) throw err;
+    if (err.code === "conflict" && err.message === IN_TRASH) return { outcome: "in trash" };
     // Refused for something other than who is asking, so they were let through to it.
     if (err.code === "invalid" || err.code === "conflict") return { outcome: "done" };
     if (err.code === "forbidden") return { outcome: "forbidden" };
@@ -229,6 +273,9 @@ const personFolderLevelOf = (name: ActorName, folder: FolderName) => ACTORS[name
 const enough = (level: Level, needs: "V" | "E") => level === "E" || (level === "V" && needs === "V");
 /** Whether an actor may share a note: its owner when it is private, and otherwise a member who shares and can edit it. */
 const sharesNote = (name: ActorName, note: NoteName) => OWNER[note] === name || (ACTORS[name].shares && personLevelOf(name, note) === "E");
+/** Who made each note that Ada didn't. An admin, or the member who made a note, may remove it for good. */
+const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor who owns the private note", vpriv: "Vera, a viewer who owns a private note" };
+const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
 const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open"];
@@ -279,10 +326,12 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         const role = roleOf(name);
         // What is told as a number gives a note away as surely as its title: a folder's count, and an author's changes by day.
         const { folders: listed } = await perform(env.DB, actor, { type: "folder.list" });
-        const counted = (folder: FolderName) => NOTES.filter((note) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-").length;
+        const counted = (folder: FolderName) => NOTES.filter((note) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-" && STATE_OF[note] === "live").length;
         expect(Object.fromEntries(listed.map((f) => [f.name, f.noteCount]))).toEqual(Object.fromEntries(FOLDERS.filter((f) => folderLevelOf(name, f) !== "-").map((f) => [`${f}-folder`, counted(f)]).concat(role === "guest" || within ? [] : [["Unsorted", 0]])));
 
         const answers: unknown[] = [];
+        /** What each listing answered, to hold it to the states it covers. */
+        const listings: { key: string; covers: Covering; said: string }[] = [];
         const got: Record<string, Outcome> = {};
         const expected: Record<string, Outcome> = {};
         const run = async (key: string, type: OpType, args: object, expectation: Outcome, letThrough = false) => {
@@ -306,10 +355,13 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
               // Whoever can't even change anything in the workspace is refused before the note is looked for, and told nothing of it.
               if (plan.needs === "E" && (role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")))) expectation = "forbidden";
               if ((plan.share || plan.members) && role === "guest") expectation = "forbidden";
+              if (plan.maker && expectation === "done" && role !== "admin" && !madeBy(name, note)) expectation = "forbidden";
+              if (expectation === "done" && STATE_OF[note] === "trashed" && plan.trashed === "refused") expectation = "in trash";
               if (expectation === "done" && plan.also === "folder" && folderLevelOf(name, FOLDER_OF[note]) === "-") expectation = NO_FOLDER;
               if (expectation === "done" && type === "note.revertChanges") expectation = NO_CHANGE;
               if (type === "grant.revoke" && expectation === NO_NOTE) expectation = NO_GRANT;
               await run(`${type} ${note}`, type, plan.args(w.notes[note], w, note), expectation);
+              if (MOVES.includes(type)) await settle(w, note);
             }
             // The same operation on a note that was never there: what a hidden note has to look like.
             if (type !== "grant.revoke") {
@@ -332,6 +384,15 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             }
           } else if (plan.on === "everything") {
             await run(type, type, plan.args(w), "done");
+            listings.push({ key: type, covers: plan.covers, said: JSON.stringify(answers.at(-1)) });
+            if (plan.archived) {
+              await run(`${type} with archived`, type, { ...plan.args(w), includeArchived: true }, "done");
+              listings.push({ key: `${type} with archived`, covers: "kept", said: JSON.stringify(answers.at(-1)) });
+            }
+            if (plan.only) {
+              const onlyArchived = await run(`${type} with archived only`, type, { ...plan.args(w), includeArchived: "only" }, "done");
+              if (onlyArchived !== undefined) listings.push({ key: `${type} with archived only`, covers: "archived", said: JSON.stringify(onlyArchived) });
+            }
           } else if (plan.on === "workspace") {
             let allowed = (plan.who as readonly string[]).includes(role);
             if ((type === "history.revertAuthor" || type === "history.revert") && role === "guest") allowed = ACTORS[name].notes.includes("E");
@@ -352,33 +413,51 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         for (const [i, { diffs: _, ...args }] of narrowed.entries()) await run(`history.summary narrowed ${i}`, "history.summary", args, "done");
         // A note's line totals and its count of changes are only ever of a note the actor can see.
         const summed = await perform(env.DB, actor, { type: "history.summary", noteIds: every, limit: 100 });
-        expect(summed.notes.map((n) => n.noteId).sort()).toEqual(NOTES.filter((note) => levelOf(name, note) !== "-").map((note) => w.notes[note]).sort());
+        // The admin removed the note in Trash for good above, which only a member can.
+        const there = new Set((await env.DB.prepare("SELECT id FROM notes WHERE workspace_id = ?").bind(actor.workspaceId).all<{ id: string }>()).results.map((r) => r.id));
+        expect(summed.notes.map((n) => n.noteId).sort()).toEqual(NOTES.filter((note) => levelOf(name, note) !== "-").map((note) => w.notes[note]).filter((id) => there.has(id)).sort());
         expect((await perform(env.DB, actor, { type: "history.summary", authors: [{ kind: "agent", id: w.secretAgent.id }] })).notes.map((n) => [n.noteId, n.changes])).toEqual(levelOf(name, "secret") === "-" ? [] : [[w.notes.secret, 1]]);
         await run("history.revertAuthor narrowed", "history.revertAuthor", { author: { kind: "agent", id: "aaaaaaaaaaaa" }, noteIds: every }, role === "viewer" || (role === "guest" && !ACTORS[name].notes.includes("E")) ? "forbidden" : "done");
         await run("note.list in a hidden folder", "note.list", { folderId: w.folders.Open }, "done");
+        // A search narrowed to a folder: one the actor can't see is no such folder, and one they can answers with only what they see in it, in the states asked for.
+        for (const folder of FOLDERS) {
+          const inFolder = (note: NoteName) => FOLDER_OF[note] === folder && levelOf(name, note) !== "-";
+          for (const [words, includeArchived, covers] of [["", false, "live"], [" with archived", true, "kept"], [" with archived only", "only", "archived"]] as const) {
+            const key = `search in ${folder}${words}`;
+            const found = (await run(key, "search", { query: "body", limit: 50, folderId: w.folders[folder], includeArchived }, folderLevelOf(name, folder) === "-" ? NO_FOLDER : "done")) as Results["search"] | undefined;
+            if (found === undefined) continue;
+            listings.push({ key, covers, said: JSON.stringify(found) });
+            expect(found.results.map((r) => r.note.id).sort(), key).toEqual(NOTES.filter((note) => inFolder(note) && COVERED[covers].includes(STATE_OF[note])).map((note) => w.notes[note]).sort());
+            expect(found.next, key).toBeNull();
+          }
+        }
         // The todos of each folder, with the folder inside it: a folder that isn't there for the actor is no folder, as one that never was is, and no note is listed that they can't see.
         for (const folder of FOLDERS) {
           const seen = folderLevelOf(name, folder) !== "-";
           await run(`todo.list in ${folder}`, "todo.list", { folderId: w.folders[folder], includeCompleted: true }, seen ? "done" : NO_FOLDER);
           if (!seen) continue;
           const inside = NOTES.filter((note) => (FOLDER_OF[note] === folder || (folder === "Team" && FOLDER_OF[note] === "Deep")) && levelOf(name, note) !== "-");
-          expect((await perform(env.DB, actor, { type: "todo.list", folderId: w.folders[folder] })).todos.map((t) => t.noteId).sort(), `todo.list in ${folder}`).toEqual(inside.map((note) => w.notes[note]).sort());
+          for (const [includeArchived, covers] of [[false, "live"], [true, "kept"]] as const) {
+            expect((await perform(env.DB, actor, { type: "todo.list", folderId: w.folders[folder], includeArchived })).todos.map((t) => t.noteId).sort(), `todo.list in ${folder}, ${covers}`).toEqual(inside.filter((note) => COVERED[covers].includes(STATE_OF[note])).map((note) => w.notes[note]).sort());
+          }
         }
         await run("todo.list in a folder that never was", "todo.list", { folderId: MISSING }, NO_FOLDER);
         // Several notes at once, each answered for itself: a hidden note is answered word for word as one that was never there, and one the actor may only read is not reverted.
         const asMissing = (answer: object, noteId: string) => ({ ...answer, noteId });
+        const left = new Set((await env.DB.prepare("SELECT id FROM notes").all<{ id: string }>()).results.map((n) => n.id));
+        const nowOf = (note: NoteName): Level => (left.has(w.notes[note]) ? levelOf(name, note) : "-");
         const previews = await perform(env.DB, actor, { type: "history.previewRevert", ...everyNote(w, 1) });
         for (const [i, note] of NOTES.entries()) {
-          if (levelOf(name, note) === "-") expect(previews[i], `history.previewRevert ${note}`).toEqual(asMissing(previews.at(-1)!, w.notes[note]));
+          if (nowOf(note) === "-") expect(previews[i], `history.previewRevert ${note}`).toEqual(asMissing(previews.at(-1)!, w.notes[note]));
           else expect(previews[i], `history.previewRevert ${note}`).toMatchObject({ noteId: w.notes[note], noteTitle: `Title-${note}`, revisions: [1] });
         }
         expect(previews.at(-1)).toMatchObject({ noteTitle: "", refused: "No such note" });
         if (got["history.revert"] === "done") {
           const { reverted, skipped } = await perform(env.DB, actor, { type: "history.revert", ...everyNote(w, 99) });
           expect(reverted).toEqual([]);
-          const told = (note: NoteName) => (levelOf(name, note) === "-" ? "No such note" : levelOf(name, note) === "V" ? "You can read this note, and not change it" : "The note has no change 99");
+          const told = (note: NoteName) => (nowOf(note) === "-" ? "No such note" : nowOf(note) === "V" ? "You can read this note, and not change it" : STATE_OF[note] === "trashed" ? IN_TRASH : "The note has no change 99");
           expect(Object.fromEntries(skipped.map((s) => [s.noteId, s.message]))).toEqual(Object.fromEntries([...NOTES.map((note) => [w.notes[note], told(note)]), [MISSING, "No such note"]]));
-          for (const note of NOTES) if (levelOf(name, note) === "-") expect(skipped.find((s) => s.noteId === w.notes[note])).toEqual(asMissing(skipped.at(-1)!, w.notes[note]));
+          for (const note of NOTES) if (nowOf(note) === "-") expect(skipped.find((s) => s.noteId === w.notes[note])).toEqual(asMissing(skipped.at(-1)!, w.notes[note]));
         }
         // Every grant in the workspace is an admin's to see, and nobody else's.
         await run("grant.list of the workspace", "grant.list", {}, role === "admin" ? "done" : "forbidden");
@@ -393,6 +472,16 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         // And what they can see is there, so the check above isn't passing on an empty answer.
         const seen = NOTES.filter((note) => levelOf(name, note) !== "-");
         expect(seen.filter((note) => !said.includes(`Title-${note}`))).toEqual([]);
+
+        // No listing says anything of a note in a state it doesn't cover, though the actor can see the note: not its title, a tag, a todo, or its id.
+        const beyond = listings.flatMap(({ key, covers, said }) => seen.filter((note) => !COVERED[covers].includes(STATE_OF[note])).flatMap((note) => w.marks[note].filter((mark) => said.includes(mark)).map((mark) => `${key}: ${note}: ${mark}`)));
+        expect(beyond).toEqual([]);
+        // And each one that names notes names every note it covers, so an include that did nothing would fail here.
+        const NAMES: readonly string[] = ["note.list", "todo.list", "todo.filters", "tag.list", "search", "trash.list", "history.summary", "history.list"];
+        const lacking = listings
+          .filter(({ key }) => NAMES.includes(key.replace(/ with archived( only)?$/, "")))
+          .flatMap(({ key, covers, said }) => seen.filter((note) => COVERED[covers].includes(STATE_OF[note]) && !w.marks[note].some((mark) => said.includes(mark))).map((note) => `${key}: ${note}`));
+        expect(lacking).toEqual([]);
       });
     }
   }
@@ -406,7 +495,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         const { outcome, answer } = await ask(w.actors[name], { type: "history.revert", changes: NOTES.map((note) => ({ noteId: w.notes[note], ...of(w, note) })) });
         const after = Object.fromEntries(await Promise.all(NOTES.map(async (note) => [note, (await env.DB.prepare("SELECT revision FROM notes WHERE id = ?").bind(w.notes[note]).first<{ revision: number }>())!.revision] as const)));
         const moved = NOTES.filter((note) => after[note] !== before[note]);
-        const may = NOTES.filter((note) => personLevelOf(name, note) === "E");
+        const may = NOTES.filter((note) => personLevelOf(name, note) === "E" && STATE_OF[note] !== "trashed");
         // By author it is Ada's changes that go: she wrote every note but the two private ones.
         const has = way === "author" ? may.filter((note) => note !== "secret" && note !== "vpriv") : may;
         expect(moved, `${way}: the notes changed`).toEqual(outcome === "forbidden" ? [] : has);
@@ -462,10 +551,10 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
       read[note] = outcome;
       if (answer !== undefined) answers.push(answer);
     }
-    expect(read).toEqual({ open: NO_NOTE, team: "done", deep: "done", lone: NO_NOTE, secret: NO_NOTE, vpriv: NO_NOTE });
+    expect(read).toEqual({ open: NO_NOTE, team: "done", deep: "done", lone: NO_NOTE, secret: NO_NOTE, vpriv: NO_NOTE, arch: NO_NOTE, bin: NO_NOTE });
     expect((await ask(visitor, { type: "shared.read", id: MISSING })).outcome).toBe(NO_NOTE);
     const said = JSON.stringify(answers);
-    expect((["open", "lone", "secret", "vpriv", "Open"] as const).flatMap((item) => w.marks[item].filter((mark) => said.includes(mark)))).toEqual([]);
+    expect((["open", "lone", "secret", "vpriv", "arch", "bin", "Open"] as const).flatMap((item) => w.marks[item].filter((mark) => said.includes(mark)))).toEqual([]);
     expect(said).not.toMatch(/Ada|Eve Editor|Zed-agent/);
   });
 
@@ -503,4 +592,139 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
       expect([...outcomes], who).toEqual(["not_found: No such workspace"]);
     }
   });
+});
+
+/*
+ * Every filter of the query language, asked by every kind of actor. What each filter is true of is
+ * written out below, of the same notes; what an actor is answered is then exactly those of them the
+ * table above lets that actor see, in the states the query covers. A filter with no row fails the
+ * first test.
+ */
+type Truth = readonly NoteName[] | ((who: { name: ActorName; agent: boolean; sees: (note: NoteName) => boolean }) => readonly NoteName[]);
+const LIVE = NOTES.filter((note) => STATE_OF[note] === "live");
+const BY_ADA = NOTES.filter((note) => !MAKER[note]);
+/** A filter that names something: `needs` is what must be there for the actor, and without it the query is refused as one naming nothing is. */
+interface Row {
+  query: string;
+  finds: Truth;
+  needs?: { folder: FolderName } | { note: NoteName } | { anyOf: readonly NoteName[] };
+  /** The same query naming something that was never there. */
+  missing?: string;
+}
+const NOTE_FILTERS: Record<string, Row[]> = {
+  folder: [
+    { query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" },
+    { query: "folder:TEAM-FOLDER is:trashed", finds: ["bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder is:trashed" },
+    { query: "-folder:Open-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Open" }, missing: "-folder:Nope-folder" },
+  ],
+  tag: [{ query: "tag:tag-team", finds: ["team"] }, { query: "#TAG-deep OR #tag-arch OR #tag-bin", finds: ["deep"] }, { query: "-tag:tag-open", finds: NOTES.filter((note) => note !== "open") }],
+  updated: [{ query: "updated:>=2020-01-01", finds: NOTES }, { query: "updated:<2020-01-01", finds: [] }, { query: "updated:today", finds: NOTES }, { query: "-updated:today", finds: [] }],
+  created: [{ query: "created:2020-01-01..*", finds: NOTES }, { query: "created:yesterday", finds: [] }, { query: "created:>=7d", finds: NOTES }],
+  editor: [
+    { query: 'editor:"Zed-agent"', finds: ["secret"], needs: { note: "secret" }, missing: 'editor:"Nobody-agent"' },
+    { query: 'edited-by:"eve editor"', finds: ["secret"], needs: { note: "secret" }, missing: 'edited-by:"nobody editor"' },
+    { query: "editor:@me", finds: ({ name, agent }) => (agent ? [] : name === "Ada, an admin" ? BY_ADA : NOTES.filter((note) => MAKER[note] === name)) },
+  ],
+  author: [
+    { query: 'author:"Vera Viewer"', finds: ["vpriv"], needs: { note: "vpriv" }, missing: 'author:"Nobody Viewer"' },
+    { query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"' },
+    { query: "-author:@me", finds: ({ name, agent }) => (agent ? NOTES : name === "Ada, an admin" ? NOTES.filter((note) => MAKER[note]) : NOTES.filter((note) => MAKER[note] !== name)) },
+  ],
+  is: [
+    { query: "is:open", finds: LIVE },
+    { query: "is:archived", finds: ["arch"] },
+    { query: "is:trashed", finds: ["bin"] },
+    { query: "is:archived OR is:trashed OR is:open", finds: NOTES },
+    { query: "is:private", finds: ["secret", "vpriv"] },
+    // Every note has a grant of its own. Which of them an actor is told are shared is which they may list the grants of.
+    { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
+    { query: "-is:shared", finds: ({ name, agent }) => NOTES.filter((note) => agent || !sharesNote(name, note)) },
+  ],
+  has: [
+    { query: "has:todo", finds: NOTES },
+    { query: "has:task has:open-task", finds: NOTES },
+    { query: "no:open-todo", finds: [] },
+    { query: "has:tag", finds: NOTES },
+    { query: "has:link", finds: ["secret"] },
+    // `open` is linked to from `secret` alone, so it has a backlink only for someone who can see `secret`.
+    { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) },
+    { query: "no:backlink", finds: ({ sees }) => NOTES.filter((note) => note !== "open" || !sees("secret")) },
+  ],
+  in: [{ query: "Title in:title", finds: NOTES }, { query: "body in:title", finds: [] }, { query: "body in:body -Title-team", finds: NOTES.filter((note) => note !== "team") }],
+  sort: [{ query: "body sort:title-desc", finds: NOTES }],
+};
+const TODO_FILTERS: Record<string, Row[]> = {
+  folder: [{ query: "folder:Team-folder", finds: ["team", "deep", "secret", "bin"], needs: { folder: "Team" }, missing: "folder:Nope-folder" }],
+  tag: [{ query: "tag:tag-team OR #tag-lone", finds: ["team", "lone"] }],
+  updated: [{ query: "updated:>=yesterday", finds: NOTES }],
+  created: [{ query: "created:<2020-01-01", finds: [] }],
+  editor: [{ query: 'editor:"Zed-agent"', finds: ["secret"], needs: { note: "secret" }, missing: 'editor:"Nobody-agent"' }],
+  author: [{ query: 'author:"Ada Lovelace"', finds: BY_ADA, needs: { anyOf: BY_ADA }, missing: 'author:"Nobody Lovelace"' }],
+  is: [
+    { query: "is:open", finds: NOTES },
+    { query: "is:done", finds: [] },
+    { query: "is:open OR is:done", finds: NOTES },
+    { query: "is:archived", finds: ["arch"] },
+    { query: "is:trashed", finds: ["bin"] },
+    { query: "is:private", finds: ["secret", "vpriv"] },
+    { query: "is:shared", finds: ({ name, agent }) => (agent ? [] : NOTES.filter((note) => sharesNote(name, note))) },
+  ],
+  has: [{ query: "has:due", finds: [] }, { query: "no:due", finds: NOTES }, { query: "has:repeat", finds: [] }, { query: "no:repeat has:tag", finds: NOTES }, { query: "has:link", finds: ["secret"] }, { query: "has:backlink", finds: ({ sees }) => (sees("secret") ? ["open"] : []) }],
+  due: [{ query: "due:<today", finds: [] }, { query: "-due:<today", finds: NOTES }, { query: "due:2020-01-01..2030-01-01", finds: [] }],
+  priority: [{ query: "priority:none", finds: NOTES }, { query: "priority:>=low", finds: [] }, { query: "importance:0..3", finds: NOTES }],
+  in: [{ query: "todo-team", finds: ["team"] }, { query: "Title-team", finds: [] }, { query: "Title-team in:title", finds: ["team"] }, { query: "body-team in:body", finds: [] }],
+  sort: [{ query: "sort:priority-desc", finds: NOTES }],
+};
+
+describe("every filter, by every actor", { timeout: 30_000 }, () => {
+  it("has a row for every filter of each scope, so one added later can't go unasked", async () => {
+    const { keysFor } = await import("../../src/core/query.ts");
+    expect(Object.keys(NOTE_FILTERS).sort()).toEqual([...keysFor("notes")].sort());
+    expect(Object.keys(TODO_FILTERS).sort()).toEqual([...keysFor("todos")].sort());
+  });
+
+  for (const name of Object.keys(ACTORS) as ActorName[]) {
+    for (const as of ["themself", "their agent", "their agent limited to the folder Team", "their agent limited to the folder Open"] as const) {
+      it(`${name}, as ${as}`, async () => {
+        const w = await world();
+        const person = w.actors[name];
+        const within = as === "themself" ? undefined : LIMITED[as];
+        const actor: Actor = as === "themself" ? person : { kind: "agent", agentId: (await connectAgent(env.DB, person.personId, "Claude")).agent.id, personId: person.personId, workspaceId: person.workspaceId, scope: within && { folderIds: [w.folders[within[0]!]] } };
+        const sees = (note: NoteName) => !(within && !within.includes(FOLDER_OF[note])) && personLevelOf(name, note) !== "-";
+        const seesFolder = (folder: FolderName) => !(within && !within.includes(folder)) && personFolderLevelOf(name, folder) !== "-";
+        const today = new Date().toISOString().slice(0, 10);
+        const covered = (query: string): Covering => (query.includes("is:trashed") ? "any" : query.includes("is:archived") ? "kept" : "live");
+        const said = async (input: OpInput) => perform(env.DB, actor, input).then((answer) => JSON.stringify(answer), (err: unknown) => (err instanceof OpError ? `${err.code}: ${err.message}` : Promise.reject(err)));
+
+        for (const [type, rows] of [["search", NOTE_FILTERS], ["todo.list", TODO_FILTERS]] as const) {
+          for (const row of Object.values(rows).flat()) {
+            const key = `${type} ${row.query}`;
+            const input: OpInput = type === "search" ? { type, query: row.query, today, limit: 50 } : { type, query: row.query, today };
+            const there = !row.needs || ("folder" in row.needs ? seesFolder(row.needs.folder) : "note" in row.needs ? sees(row.needs.note) : row.needs.anyOf.some(sees));
+            if (row.missing) {
+              // Naming what the actor can't see is answered in the words naming what was never there is, with the name alone different.
+              const blank = (text: string) => text.replace(/"[^"]*"/g, '"…"').replace(/of the query: .*\)$/, "");
+              const missing = await said({ ...input, query: row.missing } as OpInput);
+              expect(missing, `${key}: what was never there`).toMatch(/^invalid: (No folder named|Nobody named) "/);
+              if (!there) {
+                expect(blank(await said(input)), `${key}: hidden`).toBe(blank(missing));
+                continue;
+              }
+            }
+            const answer = await perform(env.DB, actor, input);
+            const truth = typeof row.finds === "function" ? row.finds({ name, agent: as !== "themself", sees }) : row.finds;
+            const expected = truth.filter((note) => sees(note) && COVERED[covered(row.query)].includes(STATE_OF[note])).map((note) => w.notes[note]).sort();
+            const found = "results" in answer ? answer.results.map((r) => r.note.id) : answer.todos.map((t) => t.noteId);
+            expect([...found].sort(), key).toEqual(expected);
+            // What it is told beside the notes says no more: nothing left to page to, and nothing still to be read in.
+            expect(answer.next, `${key}: next`).toBeNull();
+            if ("results" in answer) expect(answer.indexing, `${key}: indexing`).toBe(false);
+            const hidden = [...NOTES.filter((note) => !sees(note)), ...FOLDERS.filter((folder) => !seesFolder(folder))];
+            const written = sees("secret") ? [`open: ${w.notes.open}`] : [];
+            expect(hidden.flatMap((item) => w.marks[item].filter((mark) => JSON.stringify(answer).includes(mark)).map((mark) => `${item}: ${mark}`)).filter((mark) => !written.includes(mark)), `${key}: says nothing of what is hidden`).toEqual([]);
+          }
+        }
+      });
+    }
+  }
 });

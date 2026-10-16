@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { arrangement, same, type EditorAction, type EditorLayout, type Group, type Pane, type Side, type Split } from "./editorLayout.ts";
 import { Icon, ResizeHandle, carried, carriesTab, carry, type IconName, type Opened } from "../../plugin-api.ts";
-import { ContextMenu } from "../lib/Menu.tsx";
+import { ContextMenu, type MenuItem } from "../lib/Menu.tsx";
 
 /** Where on a group's body a dragged tab is: near one of its edges, which splits the group that way, or in the middle, which adds the tab to it. */
 export type Zone = Side | "middle";
@@ -40,6 +40,8 @@ interface Props {
   titleOf: (tab: Opened) => string;
   iconOf: (tab: Opened) => IconName | undefined;
   isPrivate: (tab: Opened) => boolean;
+  /** What a tab's menu offers about its note, after what it offers about the tab. */
+  noteItems: (tab: Opened) => MenuItem[];
   dispatch: (action: EditorAction) => void;
   render: (group: Group, tab: Opened) => ReactNode;
   /** What a group with nothing open shows. */
@@ -60,7 +62,7 @@ export function showTabMenu() {
   tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: left, clientY: bottom }));
 }
 
-export function EditorGroups({ layout, titleOf, iconOf, isPrivate, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
+export function EditorGroups({ layout, titleOf, iconOf, isPrivate, noteItems, dispatch, render, empty, cursorTo, onCursorPut, focusMode }: Props) {
   const [drop, setDrop] = useState<Drop | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
   const menuGroup = menu && layout.groups.find((g) => g.id === menu.groupId);
@@ -254,6 +256,7 @@ export function EditorGroups({ layout, titleOf, iconOf, isPrivate, dispatch, ren
             ...(menuGroup.tabs[menuAt]!.preview ? [{ label: "Keep open", action: () => dispatch({ type: "pin", ...menuTab }) }] : []),
             { label: "Split right", disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "right", ...menuTab }) },
             { label: "Split down", disabled: menuGroup.tabs.length < 2, action: () => dispatch({ type: "split", side: "down", ...menuTab }) },
+            ...noteItems(menu.tab),
           ]}
         />
       )}

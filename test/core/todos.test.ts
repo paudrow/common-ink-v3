@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
-import { OpError, type OpInput } from "../../src/core/protocol.ts";
+import { OpError, TODO_SORT_WORDS, type OpInput } from "../../src/core/protocol.ts";
 import { todoIndex } from "../../src/core/todos.ts";
 import { addMember, newMember } from "./members.ts";
 
@@ -84,11 +84,13 @@ describe("the index of todos", () => {
     await perform(env.DB, eve, { type: "note.setPrivate", id: diary.id, private: true });
     for (const note of [...notes, diary]) await unindex(note.id);
 
-    // Whoever lists first mends every note, their own or not, and is told only of what they can see.
+    // Whoever lists first mends every note they can see. One they can't waits for someone who can, so nothing about it shows in what they are told.
     expect((await list(ada)).length).toBe(45);
     expect(await perform(env.DB, ada, { type: "todo.filters" })).toEqual({ tags: ["t"] });
-    for (const note of [...notes, diary]) expect(await indexed(note.id)).toEqual(todoIndex(note.text));
+    for (const note of notes) expect(await indexed(note.id)).toEqual(todoIndex(note.text));
+    expect(await indexed(diary.id)).toEqual({ todos: [], tags: [] });
     expect(await words(eve, { tag: "secret" })).toEqual(["hers alone #secret"]);
+    expect(await indexed(diary.id)).toEqual(todoIndex(diary.text));
   });
 
   it("mends a note on its next write, even one that leaves its todos as they were", async () => {
@@ -98,7 +100,7 @@ describe("the index of todos", () => {
 
     const written = await perform(env.DB, ada, { type: "note.write", id: note.id, baseRevision: 1, text: "# Old, renamed\n\n- [ ] from before +P #t" });
     expect(await indexed(note.id)).toEqual(todoIndex(written.text));
-    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 1 });
+    expect(await env.DB.prepare("SELECT indexed FROM notes WHERE id = ?").bind(note.id).first()).toEqual({ indexed: 4 });
   });
 
   it("is made again from every note's text by an admin, another member's private note included, and the answer says nothing of how many", async () => {
@@ -263,6 +265,11 @@ describe("listing todos", () => {
     expect(await sorted("note")).toEqual(["zebra tickets", "apples", "feed the cats", "Buy hay", "Clean up"]);
     expect(await sorted("text")).toEqual(["apples", "Buy hay", "feed the cats", "zebra tickets", "Clean up"]);
     expect(await codeOf(perform(env.DB, ada, { type: "todo.list", sort: "size" as never }))).toMatch(/^invalid: /);
+    // The query's sort: is the same choice, and wins over sort: each order's word lists as the order does, the done ones last.
+    for (const [order, word] of Object.entries(TODO_SORT_WORDS)) {
+      expect(await words(ada, { includeCompleted: true, query: `sort:${word}`, sort: order === "text" ? "due" : "text" })).toEqual(await sorted(order as Listing["sort"]));
+    }
+    expect(await words(ada, { query: "is:open OR is:done sort:due-desc" })).toEqual(["apples", "feed the cats", "zebra tickets", "Buy hay", "Clean up"]);
   });
 
   it("says nothing of a todo in a note the asker can't see: not the todo, its note's tag, or a count", async () => {

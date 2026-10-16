@@ -1,4 +1,4 @@
-import { bind, chordFor, chordLabel, onPlatform } from "./keybindings.ts";
+import { bind, chordLabel, onPlatform } from "./keybindings.ts";
 import type { AddressEmbed, App, Command, CommandInfo, Completion, Dispose, EditorExtension, Embed, IconName, OpInput, Plugin, PluginHost, Screenshot, Setting, SettingValue, Slots } from "./plugin-api.ts";
 import { KEYBINDING, readSetting, resolve, sameValue, type Declared, type Problem, type SettingsDocument } from "./settings.ts";
 
@@ -117,7 +117,7 @@ interface Owned<T> {
   value: T;
 }
 
-const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay"] as const satisfies readonly (keyof Slots)[];
+const SLOTS = ["column", "section", "editor", "folder", "inspector", "page", "bar", "overlay", "mark", "notice"] as const satisfies readonly (keyof Slots)[];
 
 /** The most a plugin may keep in one remembered setting, in characters of JSON: the member's settings are small, and theirs. */
 const MAX_REMEMBERED = 10_000;
@@ -362,8 +362,10 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
 
   /** The hint is the chord that runs the command now, which another command may have claimed first. */
   const infoOf = (c: Command): CommandInfo => {
-    const chord = chordFor(c.id, contributions().keybindings);
-    return { id: c.id, title: c.title, shortcut: chord === undefined ? undefined : chordLabel(chord, mac) };
+    const { keybindings } = contributions();
+    // Two chords can read the same, as / and Shift with / do.
+    const keys = [...new Set(Object.keys(keybindings).filter((chord) => keybindings[chord] === c.id).map((chord) => chordLabel(chord, mac)))];
+    return { id: c.id, title: c.title, shortcut: keys[0], keys, group: c.group };
   };
 
   function startAll() {
@@ -452,7 +454,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     const mine = <T>(owned: Iterable<Owned<T>>) => inOrder([...owned].filter((o) => o.plugin === place));
     return {
       commands: mine(commands.values()).map(({ id, title }) => ({ id, title })),
-      views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: "label" in view ? view.label : null }))),
+      views: SLOTS.flatMap((slot) => mine(views.get(slot)!.values()).map((view) => ({ slot, id: view.id, label: ("label" in view ? view.label : null) ?? null }))),
       embeds: mine(embeds.values()).map((e) => ("claims" in e ? { name: e.name, title: e.title, block: false, address: true as const } : { name: e.name, title: e.title, block: e.block ?? false })),
       completions: mine(completions.values()).map(({ id, trigger }) => ({ id, trigger })),
       editorExtensions: mine(editorExtensions.values()).map((extension) => extension.id),

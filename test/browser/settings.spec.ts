@@ -724,7 +724,7 @@ test("Enter and Space given to commands leave buttons, links and checkboxes thei
   const recorder = page.getByRole("dialog", { name: "Record a key for Toggle inspector" });
   await expect(recorder.getByRole("group", { name: "Press the keys" })).toBeFocused();
   await page.keyboard.press("Space");
-  await expect(recorder).toContainText("SPACE begins with a key that types, and that presses a button or checkbox in focus. So it runs only where nothing is being typed and focus is on no such control.");
+  await expect(recorder).toContainText("Space begins with a key that types, and that presses a button or checkbox in focus. So it runs only where nothing is being typed and focus is on no such control.");
   await page.keyboard.press("Escape");
 });
 
