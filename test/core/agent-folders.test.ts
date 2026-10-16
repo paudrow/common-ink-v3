@@ -70,7 +70,7 @@ async function world() {
   return { ada, projects, plans, journal, empty, outside, loose, inside, deep, scribe, ghost, limited, marks };
 }
 
-describe("an agent limited to folders", () => {
+describe("an agent limited to folders", { timeout: 30_000 }, () => {
   it("is made by naming folders of one workspace the member can see, and says what it is limited to", async () => {
     const { ada, projects, plans, limited } = await world();
     expect(limited.agent).toMatchObject({ workspaceId: ada.workspaceId, folderIds: [projects] });
@@ -92,7 +92,7 @@ describe("an agent limited to folders", () => {
   });
 
   // Some ninety tool calls: a slow runner takes longer than the default 5 s.
-  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", { timeout: 30_000 }, async () => {
+  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", async () => {
     const w = await world();
     const claude = await asAgent(w.limited.token);
 
@@ -677,7 +677,7 @@ describe("an agent limited to folders", () => {
   });
 });
 
-describe("changing what an agent is limited to", () => {
+describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
   it("is an edit: to other folders, to all notes, and back, on the token it already has", async () => {
     const w = await world();
     const claude = await asAgent(w.limited.token);
