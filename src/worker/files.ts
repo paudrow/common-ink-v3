@@ -7,7 +7,8 @@
 import { authenticateAgent } from "../core/agents.ts";
 import { disposition, fileClass } from "../core/filetypes.ts";
 import { agentActor, perform, type Actor, type Visitor } from "../core/operations.ts";
-import { MAX_UPLOAD_BYTES, OpError, type OpErrorCode, type OpenedUpload } from "../core/protocol.ts";
+import { OpError, PART_BYTES, type OpErrorCode, type OpenedUpload } from "../core/protocol.ts";
+import { passHolder } from "../core/uploads.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { sessionPersonId } from "./auth.ts";
 import { sign, verify } from "./session.ts";
@@ -85,7 +86,7 @@ async function upload(req: Request, env: Env, url: URL, workspaceId: string): Pr
   if (!req.headers.get("Content-Type")?.startsWith("application/octet-stream")) return json({ error: "invalid", message: "Send the file's bytes as application/octet-stream" }, 415);
   const length = req.headers.get("Content-Length");
   if (!length || !/^\d+$/.test(length)) return json({ error: "invalid", message: "Say how many bytes are coming, as Content-Length" }, 411);
-  if (Number(length) > MAX_UPLOAD_BYTES) return json({ error: "invalid", message: `A file can be at most ${MAX_UPLOAD_BYTES / 1024 / 1024} MB` }, 413);
+  if (Number(length) > PART_BYTES) return json({ error: "invalid", message: `A file sent in one request can be at most ${PART_BYTES / 1024 / 1024} MB. Send a larger one in parts: upload.start` }, 413);
   let named: unknown;
   try {
     named = JSON.parse(decodeURIComponent(req.headers.get(UPLOAD_HEADER) ?? ""));
@@ -95,6 +96,32 @@ async function upload(req: Request, env: Env, url: URL, workspaceId: string): Pr
   if (typeof named !== "object" || named === null) return json({ error: "invalid", message: `${UPLOAD_HEADER} isn't an object` }, 400);
   try {
     return json(await perform(env.DB, who.actor, { ...named, type: "upload.create", size: Number(length) } as never, Date.now(), undefined, { bucket: env.FILES, body: req.body }), 201);
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+const PART = /^\/api\/upload-parts\/([A-Za-z0-9_-]{43})\/(\d{1,5})$/;
+
+/**
+ * A part of an upload, `PUT` to the address its start gave. The address is all it takes: no session
+ * or token comes with it, so an agent's own shell sends the bytes with curl and they never pass
+ * through the model. Whoever started the upload is asked again, as they are now, whether they may.
+ */
+async function part(req: Request, env: Env, secret: string, number: number): Promise<Response> {
+  if (req.method !== "PUT") return json({ error: "method_not_allowed" }, 405, { Allow: "PUT" });
+  const holder = await passHolder(env.DB, secret, Date.now());
+  if (!holder) return json({ error: "gone", message: "This address has lapsed or was never one. Ask for a fresh one with upload.resume (resume_upload)" }, 410);
+  const length = req.headers.get("Content-Length");
+  try {
+    return json(
+      await perform(env.DB, holder.actor, { type: "upload.part", id: holder.uploadId, number }, Date.now(), undefined, {
+        bucket: env.FILES,
+        body: req.body,
+        pass: secret,
+        ...(length && /^\d+$/.test(length) ? { declared: Number(length) } : {}),
+      }),
+    );
   } catch (err) {
     return refused(err);
   }
@@ -179,6 +206,8 @@ export function fileSiteResponse(req: Request, env: Env, url: URL): Promise<Resp
 
 /** Answers a request that is for an upload's bytes, in or out. Null for any other. */
 export async function handleFiles(req: Request, env: Env, url: URL): Promise<Response | null> {
+  const sent = PART.exec(url.pathname);
+  if (sent) return part(req, env, sent[1]!, Number(sent[2]));
   const shared = SHARED_UPLOAD.exec(url.pathname);
   if (shared) return reads(req) ? sharedUpload(req, env, url, shared[1]!, shared[2]!) : json({ error: "method_not_allowed" }, 405, UNLISTED);
   const route = UPLOADS.exec(url.pathname);

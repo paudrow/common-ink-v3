@@ -13,6 +13,11 @@ describe("what goes into the Worker's logs", () => {
     expect(redact("access ya29.a0AfB_byC-xyz refresh 1//0gAbCdEfGhIjKlMnOpQrStUv")).toBe("access ya29.… refresh 1//…");
     expect(redact("/api/shared/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefg/notes/abcdefghijkl broke")).toBe("/api/shared/…/notes/abcdefghijkl broke");
     expect(redact("opened /s/AbCdEfGhIjKlMnOpQrStUvWx")).toBe("opened /s/…");
+    // 32 random bytes in base64url, as an upload's part address is made: the route and the part's number stay readable.
+    const part = "q3_Zr-0b7XkLw9TnV2yHcUeJfA5mPdS1oGiRxNtB8Yh";
+    expect(part).toHaveLength(43);
+    expect(redact(`/api/upload-parts/${part}/3`)).toBe("/api/upload-parts/…/3");
+    expect(redact(`PUT https://ink.test/api/upload-parts/${part}/{part} broke`)).toBe("PUT https://ink.test/api/upload-parts/…/{part} broke");
     expect(redact("no person for grace.hopper+notes@example.co.uk")).toBe("no person for …@…");
     expect(redact("/auth/dev?email=ada%40example.com&next=/")).toBe("/auth/dev?email=…@…&next=/");
     expect(redact("/auth/google/callback?code=4/0AeanS0aBcDeFgHiJkLmNoPqRsTuV&state=x")).toBe("/auth/google/callback?code=4/0…&state=x");

@@ -187,6 +187,8 @@ const settle = (w: World, note: NoteName, table: "notes" | "uploads" = "notes") 
       w.folders[FOLDER_OF[note]],
     )
     .run();
+/** The steps of an upload sent in parts after its start, which need edit of something in the workspace. */
+const SENDING: readonly OpType[] = ["upload.resume", "upload.part", "upload.finish", "upload.abort"];
 /** The operations that move a note through its life, each followed by `settle`. */
 const MOVES: readonly OpType[] = ["note.trash", "note.restore", "upload.trash", "upload.restore"];
 
@@ -222,6 +224,8 @@ const everyNote = (w: World, revision: number) => ({ changes: [...Object.values(
 const EVERYONE = ["admin", "editor", "viewer", "guest"] as const;
 const MEMBERS = ["admin", "editor", "viewer"] as const;
 const ADMINS = ["admin"] as const;
+/** Who may change something somewhere in the workspace: a guest only with edit on something. */
+const SENDERS = ["admin", "editor", "guest"] as const;
 
 const PLANS: { [K in OpType]: Plan<K> } = {
   "note.list": { on: "everything", covers: "live", archived: true, only: true, args: () => ({}) },
@@ -294,6 +298,13 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "shared.read": { on: "link", args: (w) => ({ id: w.notes.open }) },
   "shared.upload": { on: "link", args: (w) => ({ id: w.uploads.open }) },
   "upload.create": { on: "folder", needs: "E", args: (folderId) => ({ folderId, name: "made.png", size: PNG.byteLength }) },
+  "upload.start": { on: "folder", needs: "E", args: (folderId) => ({ folderId, name: "made.mp3", size: 3 }) },
+  // An upload being sent is its sender's alone, so these are asked of one that isn't there: whoever is let that far is told there is none, and test/core/upload-parts.test.ts sends them for real.
+  "upload.resume": { on: "workspace", who: SENDERS, args: () => ({ id: "aaaaaaaaaaaa" }) },
+  "upload.part": { on: "workspace", who: SENDERS, args: () => ({ id: "aaaaaaaaaaaa", number: 1 }) },
+  "upload.finish": { on: "workspace", who: SENDERS, args: () => ({ id: "aaaaaaaaaaaa" }) },
+  "upload.abort": { on: "workspace", who: SENDERS, args: () => ({ id: "aaaaaaaaaaaa" }) },
+  "upload.storage": { on: "workspace", who: MEMBERS, args: () => ({}) },
   "upload.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
   "upload.read": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "upload.open": { on: "upload", needs: "V", trashed: "opens", args: (id) => ({ id }) },
@@ -431,7 +442,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
           const { outcome, answer } = await ask(actor, { type, ...args } as OpInput);
           // An operation on the workspace is asked about a member, an invite or a folder that isn't there: finding none, it had let the actor through.
           got[key] = letThrough && outcome.startsWith("not_found") ? "done" : outcome;
-          const changes = readOnly && (CHANGES.includes(type) || ("needs" in PLANS[type] ? PLANS[type].needs === "E" : false));
+          const changes = readOnly && (CHANGES.includes(type) || SENDING.includes(type) || ("needs" in PLANS[type] ? PLANS[type].needs === "E" : false));
           expected[key] = kept || changes ? "forbidden" : expectation;
           // A note that isn't there for the actor is answered with the id they asked by and nothing more, which is checked below against one that was never there.
           const told = () => (type === "history.previewRevert" ? (answer as { refused?: string; noteTitle: string }[]).filter((p) => !(p.refused === "No such note" && p.noteTitle === "")) : type === "history.revert" ? (answer as { skipped: { message: string; noteTitle: string }[] }).skipped.filter((s) => !(s.message === "No such note" && s.noteTitle === "")) : answer);
@@ -498,7 +509,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             }
           } else if (plan.on === "workspace") {
             let allowed = (plan.who as readonly string[]).includes(role);
-            if ((type === "history.revertAuthor" || type === "history.revert") && role === "guest") allowed = ACTORS[name].notes.includes("E");
+            if ((type === "history.revertAuthor" || type === "history.revert" || SENDING.includes(type)) && role === "guest") allowed = ACTORS[name].notes.includes("E");
             // The one admin can't leave, and nobody here asks to: leaving is checked in members.test.ts.
             if (type === "member.leave") continue;
             // Who is in the workspace is told to whoever sees all of it.

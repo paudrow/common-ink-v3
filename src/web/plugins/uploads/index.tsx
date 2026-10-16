@@ -50,10 +50,14 @@ export const uploads: Plugin = {
   activate(host) {
     const sending = sender(host);
     const inserting = inserter(host);
-    const { embeds, stop } = uploadEmbeds(host, [
-      { title: "Upload a file", detail: "a picture, a video, a recording, or any file", run: sending.pickIntoNote },
-      { title: "Insert an upload", detail: "a file already uploaded", run: inserting.ask },
-    ]);
+    const { embeds, stop } = uploadEmbeds(
+      host,
+      [
+        { title: "Upload a file", detail: "a picture, a video, a recording, or any file", run: sending.pickIntoNote },
+        { title: "Insert an upload", detail: "a file already uploaded", run: inserting.ask },
+      ],
+      { of: sending.of, subscribe: sending.subscribe },
+    );
     for (const embed of embeds) host.embeds.register(embed);
     host.editorExtensions.register({ id: "uploads", extension: sending.extension });
     host.editorExtensions.register({ id: "upload-inserting", extension: inserting.extension });

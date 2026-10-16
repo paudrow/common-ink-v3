@@ -113,10 +113,11 @@ describe("what a paste or a drop carries", () => {
     expect(droppedFiles({ types: ["text/plain"], files: [] })).toEqual([]);
   });
 
-  it("refuses a file over 50 MB and an empty one before any of it is sent", () => {
+  it("refuses a file over 25 GB and an empty one before any of it is sent", () => {
     expect(refusal({ name: "film.mov", size: 50 * 1024 * 1024 })).toBeNull();
-    expect(refusal({ name: "film.mov", size: 50 * 1024 * 1024 + 1 })).toBe("film.mov is 50 MB. A file can be at most 50 MB.");
-    expect(refusal({ name: "film.mov", size: 300 * 1024 * 1024 })).toBe("film.mov is 300 MB. A file can be at most 50 MB.");
+    expect(refusal({ name: "film.mov", size: 25 * 1024 ** 3 + 1 })).toBe("film.mov is 25 GB. A file can be at most 25 GB.");
+    expect(refusal({ name: "film.mov", size: 300 * 1024 ** 3 })).toBe("film.mov is 300 GB. A file can be at most 25 GB.");
+    expect(refusal({ name: "episode.wav", size: 3 * 1024 ** 3 })).toBeNull();
     expect(refusal({ name: "nothing.txt", size: 0 })).toBe("nothing.txt is empty, so there is nothing to upload.");
   });
 });

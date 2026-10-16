@@ -83,6 +83,8 @@ describe("CORS on every route", () => {
     const link = await perform(env.DB, ada, { type: "grant.link", folderId: folder.id, link: "public" });
     const { token } = link!.to as { token: string };
     const uploads = `https://ink.test/api/workspaces/${ada.workspaceId}/uploads`;
+    const sending = await perform(env.DB, ada, { type: "upload.start", name: "big.bin", size: 4 }, Date.now(), undefined, { bucket: env.FILES });
+    const partAt = (secret: string) => `https://ink.test/api/upload-parts/${secret}/1`;
     const FILES = "https://files.ink-files.test";
     const EMBEDS = "https://embeds.ink-files.test";
     const sites = { FILE_ORIGIN: FILES, EMBED_ORIGIN: EMBEDS };
@@ -96,6 +98,7 @@ describe("CORS on every route", () => {
     // What each is answered on a plain GET, so a route that answers an error to every request isn't what passes.
     const routes: [string, string, Partial<Env>, number][] = [
       ["uploading", uploads, {}, 405],
+      ["a part's address", `https://ink.test${sending.address.replace("{part}", "1")}`, {}, 405],
       ["an upload's bytes", `${uploads}/${picture.id}`, {}, 200],
       ["an upload that is not there", `${uploads}/aaaaaaaaaaaa`, {}, 404],
       ["a PDF sent to the file site", `${uploads}/${paper.id}?open=tab`, sites, 302],
@@ -113,6 +116,16 @@ describe("CORS on every route", () => {
       const answers = await probe(url, session, more);
       expect(answers.GET!.status, route).toBe(status);
       for (const [method, { cors }] of Object.entries(answers)) if (cors.length) leaks.push(`${route} ${method}: ${cors.join(", ")}`);
+    }
+    // A part goes by PUT, to an address with no token or session: one that takes it and one that lapsed.
+    for (const [route, url, status] of [
+      ["a part sent to its address", `https://ink.test${sending.address.replace("{part}", "1")}`, 200],
+      ["a part sent to an address that is not one", partAt("a".repeat(43)), 410],
+    ] as const) {
+      const res = await worker.fetch(new Request(url, { method: "PUT", headers: { Origin: EVIL, "Content-Type": "application/octet-stream" }, body: new Uint8Array([1, 2, 3, 4]) }) as never, { ...env, SESSION_SECRET: SECRET });
+      await res.arrayBuffer();
+      expect(res.status, route).toBe(status);
+      if (corsHeaders(res).length) leaks.push(`${route} PUT: ${corsHeaders(res).join(", ")}`);
     }
     expect(leaks).toEqual([]);
   });

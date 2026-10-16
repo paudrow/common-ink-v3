@@ -5,10 +5,11 @@ import { authenticateAgent, type ConnectedAgent } from "../../core/agents.ts";
 import type { Sources } from "../../core/sources.ts";
 import { logFault } from "../../core/logs.ts";
 import { BROKE } from "../../core/protocol.ts";
-import { callTool, toolList } from "./tools.ts";
+import { callTool, toolList, type Reached } from "./tools.ts";
 
 const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
-const MAX_BODY = 1_200_000;
+/** Room for upload_file's base64 of a file of MAX_INLINE_UPLOAD_BYTES, and the rest of the message. */
+const MAX_BODY = 6_000_000;
 
 const SERVER = { name: "common-ink", version: "0.1.0" };
 const INSTRUCTIONS =
@@ -57,7 +58,7 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   const out: unknown[] = [];
   for (const message of messages) {
     // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
-    const answer = await handleMessage(env, agent, message, sources).catch((err: unknown) => {
+    const answer = await handleMessage(env, agent, message, sources, { origin: new URL(req.url).origin, bucket: env.FILES }).catch((err: unknown) => {
       logFault("An MCP message", err);
       const id = (message as { id?: unknown } | null)?.id;
       return fail(typeof id === "string" || typeof id === "number" ? id : null, -32603, BROKE);
@@ -68,7 +69,7 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   return json(batch ? out : out[0]);
 }
 
-async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown, sources?: Sources): Promise<unknown | null> {
+async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown, sources: Sources | undefined, reached: Reached): Promise<unknown | null> {
   const m = (typeof message === "object" && message !== null ? message : {}) as Request_;
   const hasId = m.id !== undefined;
   const id: Id = hasId && (typeof m.id === "string" || typeof m.id === "number" || m.id === null) ? m.id : null;
@@ -95,7 +96,7 @@ async function handleMessage(env: Env, agent: ConnectedAgent, message: unknown, 
       if (typeof params.name !== "string") return fail(id, -32602, "Name the tool to call");
       const args = params.arguments ?? {};
       if (typeof args !== "object" || args === null || Array.isArray(args)) return fail(id, -32602, "arguments must be an object");
-      const result = await callTool(env.DB, agent, params.name, args as Record<string, unknown>, sources);
+      const result = await callTool(env.DB, agent, params.name, args as Record<string, unknown>, sources, reached);
       return result ? reply(id, result) : fail(id, -32602, `No such tool: ${params.name}`);
     }
     default:

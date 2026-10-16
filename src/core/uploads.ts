@@ -1,11 +1,13 @@
 import { SEEN, allows, folderLevel, itemLevel, type GrantLevel, type ItemFacts } from "./access.ts";
-import { HEAD_BYTES, cleanName, imageSize, kindOf, typeOf } from "./filetypes.ts";
+import { agentById, hashToken } from "./agents.ts";
+import { HEAD_BYTES, cleanName, imageSize, kindByName, kindOf, typeOf } from "./filetypes.ts";
 import { newId } from "./ids.ts";
 import { purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
-import { OLD, archiving, authorId, authorOf, finding, intoFolder, loadFolder, loadNote, mend, restoring, seenAmong, toSummary, trashing, type Context } from "./operations.ts";
-import { MAX_UPLOAD_BYTES, OpError, WORKSPACE_UPLOAD_BYTES, type AuthorRef, type ListedUpload, type Op, type OpenedUpload, type ReferredUpload, type Results, type TrashedUpload, type Upload } from "./protocol.ts";
+import { OLD, agentActor, archiving, authorId, authorOf, finding, intoFolder, loadFolder, loadNote, mend, restoring, seenAmong, toSummary, trashing, type Actor, type Context } from "./operations.ts";
+import { MAX_UPLOAD_BYTES, OpError, PART_BYTES, type AuthorRef, type ListedUpload, type Op, type OpenedUpload, type ReferredUpload, type Results, type SendingUpload, type TrashedUpload, type Upload, type UploadStorage } from "./protocol.ts";
 import { orderOf } from "./query.ts";
-import { removeUpload } from "./purge.ts";
+import { partSpan, partsLeft, planParts } from "./parts.ts";
+import { finishRemoving, removeUpload } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
 
 /**
@@ -18,8 +20,12 @@ export interface Files {
   bucket: R2Bucket | null;
   /** The bytes of the file being uploaded. */
   body?: ReadableStream<Uint8Array> | null;
+  /** How many bytes the request said its body is, when it said. */
+  declared?: number;
   /** What whoever opens an upload sent to ask for a part of it, or to ask whether their copy is still good. */
   asked?: Headers;
+  /** The secret of the address a part of an upload was sent to: see `upload.part`. */
+  pass?: string;
 }
 
 export const NO_FILES: Files = { bucket: null };
@@ -28,6 +34,7 @@ const NO_SUCH_UPLOAD = "No such upload";
 const NO_BUCKET = "Uploads aren't set up here";
 export const UPLOAD_IN_TRASH = "This upload is in Trash. Restore it to change it.";
 const MB = 1024 * 1024;
+const GB = 1024 * MB;
 
 export interface UploadRow extends ItemFacts {
   name: string;
@@ -88,26 +95,24 @@ export async function loadUpload(ctx: Context, id: string, need: GrantLevel, tra
 
 const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 
-/**
- * The row is made first, as pending, and counts against the workspace's room from that moment. The
- * bytes go to the bucket next, and only then is the upload live. Stopped or refused anywhere before
- * that, what is left is a row that nothing reads, which `clearUploads` removes with whatever reached
- * the bucket.
- */
-export async function createUpload(ctx: Context, op: Extract<Op, { type: "upload.create" }>): Promise<Upload> {
-  const folder = await loadFolder(ctx, op.folderId, "edit");
-  if (op.private && !(ctx.actor.kind === "member" && ctx.role)) throw new OpError("forbidden", "Only a member makes an upload private, and not an agent for them");
-  if (op.size > MAX_UPLOAD_BYTES) throw new OpError("invalid", `A file can be at most ${MAX_UPLOAD_BYTES / MB} MB`);
-  const { bucket, body } = ctx.files;
-  if (!bucket) throw new OpError("unavailable", NO_BUCKET);
-  if (!body) throw new OpError("invalid", "A file's bytes come as the body of the request");
+/** Makes the row of an upload whose bytes are on their way: pending, so no one is told of it. */
+const pend = (ctx: Context, row: UploadRow, multipartId: string | null) =>
+  intoFolder(
+    ctx.db
+      .prepare(
+        `INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, created_at, created_by, uploaded_by, uploaded_by_kind, private_owner, state, multipart_id, touched_at)
+         VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11, ?6)`,
+      )
+      .bind(row.id, ctx.workspaceId, row.folder_id, row.name, row.size, row.created_at, row.created_by, row.uploaded_by, row.uploaded_by_kind, row.private_owner, multipartId)
+      .run(),
+  );
 
-  const id = newId();
-  const name = cleanName(op.name);
-  const row: UploadRow = {
-    id,
-    folder_id: folder.id,
-    name,
+/** An upload as it is when its bytes start on their way. */
+function begun(ctx: Context, op: { name: string; size: number; private: boolean }, folderId: string): UploadRow {
+  return {
+    id: newId(),
+    folder_id: folderId,
+    name: cleanName(op.name),
     type: "",
     size: op.size,
     width: null,
@@ -122,19 +127,31 @@ export async function createUpload(ctx: Context, op: Extract<Op, { type: "upload
     state: "live",
     state_at: null,
   };
-  let room = 0;
-  await intoFolder(
-    ctx.db
-      .prepare(
-        `INSERT INTO uploads (id, workspace_id, folder_id, name, type, size, created_at, created_by, uploaded_by, uploaded_by_kind, private_owner, state)
-         SELECT ?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8, ?9, ?10, 'pending'
-         WHERE (SELECT COALESCE(SUM(size), 0) FROM uploads WHERE workspace_id = ?2 AND state <> 'removing') + ?5 <= ?11`,
-      )
-      .bind(id, ctx.workspaceId, row.folder_id, name, op.size, row.created_at, row.created_by, row.uploaded_by, row.uploaded_by_kind, row.private_owner, WORKSPACE_UPLOAD_BYTES)
-      .run()
-      .then(({ meta }) => void (room = meta.changes)),
-  );
-  if (!room) throw new OpError("conflict", `This workspace's uploads are full: together they can be at most ${WORKSPACE_UPLOAD_BYTES / MB} MB, those in Trash too. Delete some for good from Trash to make room.`);
+}
+
+/** What the type of a file is, and an image's size, read from its first bytes. */
+function read(name: string, head: Uint8Array): Pick<UploadRow, "type" | "width" | "height"> {
+  const type = typeOf(name, head);
+  const size = imageSize(type, head);
+  return { type, width: size?.width ?? null, height: size?.height ?? null };
+}
+
+/**
+ * The row is made first, as pending. The bytes go to the bucket next, and only then is the upload
+ * live. Stopped or refused anywhere before that, what is left is a row that nothing reads, which
+ * `clearUploads` removes with whatever reached the bucket.
+ */
+export async function createUpload(ctx: Context, op: Extract<Op, { type: "upload.create" }>): Promise<Upload> {
+  const folder = await loadFolder(ctx, op.folderId, "edit");
+  if (op.private && !(ctx.actor.kind === "member" && ctx.role)) throw new OpError("forbidden", "Only a member makes an upload private, and not an agent for them");
+  if (op.size > PART_BYTES) throw new OpError("invalid", `A file sent in one request can be at most ${PART_BYTES / MB} MB. Send a larger one in parts, up to ${MAX_UPLOAD_BYTES / GB} GB`);
+  const { bucket, body } = ctx.files;
+  if (!bucket) throw new OpError("unavailable", NO_BUCKET);
+  if (!body) throw new OpError("invalid", "A file's bytes come as the body of the request");
+
+  const row = begun(ctx, op, folder.id);
+  const { id } = row;
+  await pend(ctx, row, null);
 
   const head = new Uint8Array(Math.min(HEAD_BYTES, op.size));
   let headed = 0;
@@ -171,16 +188,228 @@ export async function createUpload(ctx: Context, op: Extract<Op, { type: "upload
     throw new OpError("invalid", `The file isn't the ${op.size} bytes it was said to be`);
   }
 
-  row.type = typeOf(name, head.subarray(0, headed));
-  const size = imageSize(row.type, head.subarray(0, headed));
-  row.width = size?.width ?? null;
-  row.height = size?.height ?? null;
+  Object.assign(row, read(row.name, head.subarray(0, headed)));
   const { meta } = await ctx.db
     .prepare("UPDATE uploads SET state = 'live', type = ?2, hash = ?3, width = ?4, height = ?5 WHERE id = ?1 AND state = 'pending'")
     .bind(id, row.type, await hashed, row.width, row.height)
     .run();
   if (!meta.changes) throw new OpError("conflict", "The upload took too long and was cleared away. Send it again.");
   return toUpload(ctx, row);
+}
+
+/** How long an address for an upload's parts is good for. A part is sent to it once, so a fresh one is asked for when it lapses. */
+export const PASS_MS = 3_600_000;
+/** Where the parts of an upload are sent, with `{part}` for a part's number and the address's secret before it. */
+export const partAddress = (secret: string) => `/api/upload-parts/${secret}/{part}`;
+
+const NOT_STARTED_BY_YOU = NO_SUCH_UPLOAD;
+
+interface SendingRow {
+  id: string;
+  folder_id: string;
+  name: string;
+  size: number;
+  multipart_id: string;
+}
+
+/**
+ * An upload being sent in parts, for whoever started it, while it still may: their access to its
+ * folder is asked again each time, so one who lost it stops. To anyone else it is no upload, as it
+ * is to everyone once it is live or gone.
+ */
+async function loadSending(ctx: Context, id: string): Promise<SendingRow> {
+  const row = await ctx.db
+    .prepare("SELECT id, folder_id, name, size, multipart_id FROM uploads WHERE id = ? AND workspace_id = ? AND state = 'pending' AND multipart_id IS NOT NULL AND uploaded_by = ? AND uploaded_by_kind = ?")
+    .bind(id, ctx.workspaceId, authorId(ctx), ctx.author.kind)
+    .first<SendingRow>();
+  if (!row) throw new OpError("not_found", NOT_STARTED_BY_YOU);
+  await loadFolder(ctx, row.folder_id, "edit");
+  return row;
+}
+
+const randomSecret = () => {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+
+/** What whoever is sending an upload is told of it: how it is cut, which parts are there, and a fresh address for the rest. */
+async function sendingOf(ctx: Context, row: SendingRow, stored: number[]): Promise<SendingUpload> {
+  const secret = randomSecret();
+  const expiresAt = ctx.now + PASS_MS;
+  await ctx.db.prepare("INSERT INTO upload_passes (hash, upload_id, expires_at) VALUES (?, ?, ?)").bind(await hashToken(secret), row.id, expiresAt).run();
+  const plan = planParts(row.size);
+  return { id: row.id, name: row.name, size: row.size, kind: kindByName(row.name), partSize: plan.partSize, partCount: plan.count, stored, address: partAddress(secret), expiresAt };
+}
+
+/**
+ * Begins an upload sent in parts. Its row is pending, so it is in no listing and opens for no one,
+ * and the bucket keeps its parts apart until `finishUpload` puts them together. One nobody sends a
+ * part to for a day is cleared away by `clearUploads`, with its parts.
+ */
+export async function startUpload(ctx: Context, op: Extract<Op, { type: "upload.start" }>): Promise<SendingUpload> {
+  const folder = await loadFolder(ctx, op.folderId, "edit");
+  if (op.private && !(ctx.actor.kind === "member" && ctx.role)) throw new OpError("forbidden", "Only a member makes an upload private, and not an agent for them");
+  if (op.size > MAX_UPLOAD_BYTES) throw new OpError("invalid", `A file can be at most ${MAX_UPLOAD_BYTES / GB} GB`);
+  const { bucket } = ctx.files;
+  if (!bucket) throw new OpError("unavailable", NO_BUCKET);
+  const row = begun(ctx, op, folder.id);
+  const multipart = await bucket.createMultipartUpload(row.id);
+  await pend(ctx, row, multipart.uploadId);
+  return sendingOf(ctx, { ...row, multipart_id: multipart.uploadId }, []);
+}
+
+const storedParts = async (ctx: Context, id: string) =>
+  (await ctx.db.prepare("SELECT number, etag FROM upload_parts WHERE upload_id = ? ORDER BY number").bind(id).all<{ number: number; etag: string }>()).results;
+
+export async function resumeUpload(ctx: Context, id: string): Promise<SendingUpload> {
+  const row = await loadSending(ctx, id);
+  return sendingOf(ctx, row, (await storedParts(ctx, row.id)).map((part) => part.number));
+}
+
+/**
+ * Who sent a part to an address: whoever started the upload it is for, as they are now. Null for an
+ * address that lapsed or never was, an upload no longer being sent, and an agent since disconnected.
+ * Whether they may still send it is then for `putPart` to decide, as them.
+ */
+export async function passHolder(db: D1Database, secret: string, now: number): Promise<{ actor: Actor; uploadId: string } | null> {
+  const row = await db
+    .prepare("SELECT u.id, u.workspace_id, u.uploaded_by, u.uploaded_by_kind FROM upload_passes p JOIN uploads u ON u.id = p.upload_id WHERE p.hash = ? AND p.expires_at > ? AND u.state = 'pending'")
+    .bind(await hashToken(secret), now)
+    .first<{ id: string; workspace_id: string; uploaded_by: string; uploaded_by_kind: AuthorRef["kind"] }>();
+  if (!row) return null;
+  if (row.uploaded_by_kind === "member") return { actor: { kind: "member", personId: row.uploaded_by, workspaceId: row.workspace_id }, uploadId: row.id };
+  const agent = row.uploaded_by_kind === "agent" ? await agentById(db, row.uploaded_by, now) : null;
+  return agent ? { actor: agentActor(agent, row.workspace_id), uploadId: row.id } : null;
+}
+
+const USED = "This address has taken that part once already. Ask for a fresh one with upload.resume (resume_upload) and send the part again";
+
+/**
+ * Stores one part, sent to an address for its upload. The address takes each part once, whether or
+ * not the bytes all arrive, so a part that broke off is sent again to a fresh address. The part must
+ * be exactly as long as the plan says, and the bucket is handed no more than that.
+ */
+export async function putPart(ctx: Context, op: Extract<Op, { type: "upload.part" }>): Promise<Results["upload.part"]> {
+  const { bucket, body, pass, declared } = ctx.files;
+  if (!bucket) throw new OpError("unavailable", NO_BUCKET);
+  const row = await loadSending(ctx, op.id);
+  const hash = pass ? await hashToken(pass) : null;
+  const good = hash && (await ctx.db.prepare("SELECT 1 FROM upload_passes WHERE hash = ? AND upload_id = ? AND expires_at > ?").bind(hash, row.id, ctx.now).first());
+  if (!good) throw new OpError("forbidden", "A part is sent to the address upload.start or upload.resume gave, before it lapses");
+  const plan = planParts(row.size);
+  const span = partSpan(plan, op.number);
+  if (!span) throw new OpError("invalid", `This file is ${plan.count} part${plan.count === 1 ? "" : "s"}, numbered from 1`);
+  if (declared !== undefined && declared !== span.length) throw new OpError("invalid", `Part ${op.number} is ${span.length} bytes, not ${declared}`);
+  if (!body) throw new OpError("invalid", "A part's bytes come as the body of the request");
+  const { meta } = await ctx.db.prepare("INSERT INTO upload_pass_uses (hash, number) VALUES (?, ?) ON CONFLICT DO NOTHING").bind(hash, op.number).run();
+  if (!meta.changes) throw new OpError("conflict", USED);
+
+  let received = 0;
+  const counted = body
+    .pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          received += chunk.byteLength;
+          if (received > span.length) throw new Error("more bytes than the part is");
+          controller.enqueue(chunk);
+        },
+      }),
+    )
+    .pipeThrough(new FixedLengthStream(span.length));
+  let etag: string;
+  try {
+    etag = (await bucket.resumeMultipartUpload(row.id, row.multipart_id).uploadPart(op.number, counted)).etag;
+  } catch {
+    throw new OpError("invalid", `Part ${op.number} isn't the ${span.length} bytes it is. Ask for a fresh address with upload.resume and send it again`);
+  }
+  // Stored only while the upload is still being sent, so a part that lands after it was stopped leaves nothing behind.
+  const [stored] = await ctx.db.batch([
+    ctx.db
+      .prepare("INSERT INTO upload_parts (upload_id, number, etag) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM uploads WHERE id = ?1 AND state = 'pending') ON CONFLICT DO UPDATE SET etag = excluded.etag")
+      .bind(row.id, op.number, etag),
+    ctx.db.prepare("UPDATE uploads SET touched_at = ?2 WHERE id = ?1 AND state = 'pending'").bind(row.id, ctx.now),
+  ]);
+  if (!stored!.meta.changes) throw new OpError("not_found", NO_SUCH_UPLOAD);
+  const count = await ctx.db.prepare("SELECT COUNT(*) AS n FROM upload_parts WHERE upload_id = ?").bind(row.id).first<{ n: number }>();
+  return { id: row.id, number: op.number, stored: count?.n ?? 0 };
+}
+
+/** What is left of an upload once it is live or gone: no part, no address, and nothing in the bucket kept apart. */
+const forgetParts = (db: D1Database, id: string) =>
+  db.batch([
+    db.prepare("DELETE FROM upload_pass_uses WHERE hash IN (SELECT hash FROM upload_passes WHERE upload_id = ?)").bind(id),
+    db.prepare("DELETE FROM upload_passes WHERE upload_id = ?").bind(id),
+    db.prepare("DELETE FROM upload_parts WHERE upload_id = ?").bind(id),
+  ]);
+
+/**
+ * Puts an upload's parts together once all are there, and makes it live. The file is then held to
+ * the size it was said to be, and its type read from its first bytes, as one sent in one request is.
+ * Done again after it went through, or after it stopped half way, it ends where it would have.
+ */
+export async function finishUpload(ctx: Context, id: string): Promise<Upload> {
+  const { bucket } = ctx.files;
+  if (!bucket) throw new OpError("unavailable", NO_BUCKET);
+  const live = await ctx.db.prepare("SELECT 1 FROM uploads WHERE id = ? AND workspace_id = ? AND state IN ('live', 'archived', 'trashed') AND uploaded_by = ? AND uploaded_by_kind = ?").bind(id, ctx.workspaceId, authorId(ctx), ctx.author.kind).first();
+  if (live) return toUpload(ctx, await loadUpload(ctx, id, "view", "opens"));
+  const row = await loadSending(ctx, id);
+  const parts = await storedParts(ctx, row.id);
+  const left = partsLeft(planParts(row.size), parts.map((part) => part.number));
+  if (left.length) throw new OpError("conflict", `Part${left.length === 1 ? "" : "s"} ${left.slice(0, 20).join(", ")}${left.length > 20 ? " and more" : ""} of this file ${left.length === 1 ? "isn't" : "aren't"} there yet`);
+
+  const together = await bucket
+    .resumeMultipartUpload(row.id, row.multipart_id)
+    .complete(parts.map((part) => ({ partNumber: part.number, etag: part.etag })))
+    .then(
+      () => true,
+      () => false,
+    );
+  const object = await bucket.head(row.id);
+  if (!together && !object) {
+    // The bucket has parts other than those noted, as when a part was sent twice at once. Each is to be sent again.
+    await ctx.db.prepare("DELETE FROM upload_parts WHERE upload_id = ?").bind(row.id).run();
+    throw new OpError("conflict", "The parts of this file didn't go together. Ask which are there with upload.resume, and send them again");
+  }
+  if (!object || object.size !== row.size) {
+    await ctx.db.prepare("UPDATE uploads SET state = 'removing' WHERE id = ? AND state = 'pending'").bind(row.id).run();
+    await finishRemoving(ctx.db, bucket, [row.id]).catch(() => {});
+    throw new OpError("invalid", `The file is ${object?.size ?? 0} bytes, not the ${row.size} it was said to be`);
+  }
+
+  const head = await bucket.get(row.id, { range: { offset: 0, length: Math.min(HEAD_BYTES, row.size) } });
+  const facts = read(row.name, new Uint8Array(head ? await head.arrayBuffer() : new ArrayBuffer(0)));
+  const { meta } = await ctx.db
+    .prepare("UPDATE uploads SET state = 'live', type = ?2, width = ?3, height = ?4, multipart_id = NULL WHERE id = ?1 AND state = 'pending'")
+    .bind(row.id, facts.type, facts.width, facts.height)
+    .run();
+  if (!meta.changes) throw new OpError("conflict", "The upload took too long and was cleared away. Send it again.");
+  await forgetParts(ctx.db, row.id);
+  return toUpload(ctx, await loadUpload(ctx, row.id, "view", "opens"));
+}
+
+/** Stops an upload being sent: it is removed as one in Trash is, its parts with it. */
+export async function abortUpload(ctx: Context, id: string): Promise<{ id: string }> {
+  const { bucket } = ctx.files;
+  if (!bucket) throw new OpError("unavailable", NO_BUCKET);
+  const row = await loadSending(ctx, id);
+  await ctx.db.prepare("UPDATE uploads SET state = 'removing' WHERE id = ? AND state = 'pending'").bind(row.id).run();
+  await finishRemoving(ctx.db, bucket, [row.id]);
+  return { id: row.id };
+}
+
+/** How much the workspace's uploads take, every member's, private ones and those in Trash too. */
+export async function uploadStorage(ctx: Context): Promise<UploadStorage> {
+  const row = await ctx.db
+    .prepare(
+      `SELECT COALESCE(SUM(CASE WHEN state IN ('live', 'archived', 'trashed') THEN size END), 0) AS bytes,
+              COUNT(CASE WHEN state IN ('live', 'archived', 'trashed') THEN 1 END) AS files,
+              COALESCE(SUM(CASE WHEN state = 'trashed' THEN size END), 0) AS trashedBytes,
+              COALESCE(SUM(CASE WHEN state = 'pending' THEN size END), 0) AS pendingBytes
+       FROM uploads WHERE workspace_id = ?`,
+    )
+    .bind(ctx.workspaceId)
+    .first<UploadStorage>();
+  return row ?? { bytes: 0, files: 0, trashedBytes: 0, pendingBytes: 0 };
 }
 
 /**

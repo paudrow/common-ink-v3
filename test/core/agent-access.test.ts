@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, and marking changes read are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts and test/core/dashboard.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
-type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, and marking changes read are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts and test/core/dashboard.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts and test/core/upload-parts.test.ts check, and a workspace's storage is for its members. */
+type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -104,6 +104,10 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "upload.trash": { id: "aaaaaaaaaaaa" },
   "upload.restore": { id: "aaaaaaaaaaaa" },
   "upload.trashed": {},
+  "upload.start": { name: "a.txt", size: 3, folderId },
+  "upload.resume": { id: "aaaaaaaaaaaa" },
+  "upload.finish": { id: "aaaaaaaaaaaa" },
+  "upload.abort": { id: "aaaaaaaaaaaa" },
   "record.notes": { sourceId: "google-calendar", id: "none" },
 });
 
@@ -136,6 +140,10 @@ describe("an agent's access is its member's", () => {
       "upload.archive",
       "upload.trash",
       "upload.restore",
+      "upload.start",
+      "upload.resume",
+      "upload.finish",
+      "upload.abort",
       "note.label",
       "note.revert",
       "note.revertChanges",

@@ -229,7 +229,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       id: "plugins",
       name: "Plugins",
       activate(h) {
-        h.views.register("page", { id: "settings", path: "/settings", label: "Settings", nav: "menu", component: ({ app }) => <Settings host={created} store={settings} mac={MAC} path={app.path} go={app.go} account={account} /> });
+        h.views.register("page", { id: "settings", path: "/settings", label: "Settings", nav: "menu", component: ({ app }) => <Settings host={created} store={settings} mac={MAC} path={app.path} go={app.go} storage={() => perform(workspaceId, { type: "upload.storage" })} account={account} /> });
         h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage });
       },
     };
@@ -275,7 +275,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           address: (id) => uploadAddress(workspaceId, id),
           tabAddress: (id) => (me.setup.fileSite ? `${uploadAddress(workspaceId, id)}?open=tab` : null),
           bytes: (id, upTo) => readUpload(uploadAddress(workspaceId, id), upTo),
-          send: (file, as, onProgress) => sendUpload(workspaceId, file, as, onProgress),
+          send: (file, as, onProgress, onStarted) => sendUpload(workspaceId, file, as, onProgress, onStarted),
         },
         storage: {
           // By member too: two people who share a browser and a workspace don't share what a plugin keeps, such as which notes are open.

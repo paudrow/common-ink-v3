@@ -1,7 +1,8 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { timeIn } from "../../core/history.ts";
 import { agentActor, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
-import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } from "../../core/protocol.ts";
+import { MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
+import { writtenUpload } from "../../core/uploadRefs.ts";
 import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
@@ -41,6 +42,8 @@ interface Tool {
   example: Record<string, unknown>;
   /** Keys of this tool's answer that hold a time, besides those that do in every answer. */
   times?: string[];
+  /** What the agent is told of the operation's answer, when that is more than the answer: `origin` is the server's address. */
+  told?: (answer: never, origin: string) => unknown;
 }
 
 /** Each argument's old name, taken for the name it has now: `workspace` for every tool, and the operation's own field for an argument renamed. */
@@ -86,6 +89,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "shared.upload": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the uploads its member can see.",
   "upload.setPrivate": "A private upload is hidden from every other member, admins too, and that is not a change in history. The member who uploaded it decides it, in the app.",
   "visit.mark": "How far a member has read the changes in a workspace moves only when the member has seen them and says so, in the app. An agent that marked them read would hide from the member what they haven't looked at. An agent reads how far that is with last_visit.",
+  "upload.storage": "How much a workspace's uploads take counts every member's files, private ones and those in folders a token may be kept from, so it says something of what an agent can't see. It is for the members, in Settings.",
   "upload.purge": "Removing an upload from Trash for good removes its bytes, and nothing brings them back: not Trash, and no note that showed it. An agent reads notes other people wrote, so one that was talked into it could destroy files past recovery. An agent moves an upload to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
 };
 
@@ -95,8 +99,8 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
  * `ink download` use them.
  */
 export const OVER_HTTP: Partial<Record<OpType, string>> = {
-  "upload.create":
-    "A file's bytes are not text, and a tool call carries only text. POST /api/workspaces/<workspace>/uploads with the token as Authorization: Bearer, the bytes as the body, Content-Type: application/octet-stream, Content-Length, and X-Ink-Upload: encodeURIComponent of the JSON { name, folderId? }. The answer is 201 with the upload.",
+  "upload.create": `A file's bytes are not text, and a tool call carries only text. POST /api/workspaces/<workspace>/uploads with the token as Authorization: Bearer, the bytes as the body, Content-Type: application/octet-stream, Content-Length, and X-Ink-Upload: encodeURIComponent of the JSON { name, folderId? }. The answer is 201 with the upload. One request carries at most ${PART_BYTES / 1024 / 1024} MB. upload_file does the same with base64 for a small file, and start_upload sends any file in parts.`,
+  "upload.part": "A part's bytes are not text, and go from the agent's own shell, never through the model. PUT them to the address start_upload or resume_upload answered, with {part} the part's number: no token goes with it, since the address is the permission, and each address takes each part once.",
   "upload.open": "A file's bytes are not text, and a tool answer carries only text. GET /api/workspaces/<workspace>/uploads/<id> with the token as Authorization: Bearer answers with the bytes. Range and If-None-Match are honoured.",
 };
 
@@ -178,6 +182,8 @@ const includeArchived = { type: "boolean", description: "True to cover archived 
 const archivedToo = { enum: [true, false, "only"], description: 'True to cover archived notes too, which are left out otherwise, or "only" for the archived notes alone' };
 const LIFE = "A note is live, archived or in Trash, which its state says. An archived note is left out of listings unless includeArchived is true, and is read and changed as any other. A note in Trash is listed only by list_trash, can be read, and can't be changed until restore_note brings it back.";
 const uploadId = { type: "string", description: "The upload's id, from list_uploads" };
+/** An upload, with the line a note shows it by. */
+const withLine = (upload: Upload) => ({ ...upload, line: writtenUpload(upload.kind, upload.id, upload.width && upload.height ? { width: upload.width, height: upload.height } : null) });
 const UPLOADS =
   "A note shows an upload with an embed on a line of its own that starts with the upload's id: ::image{<id> WIDTHxHEIGHT} or ::video{<id> WIDTHxHEIGHT}, with the room to keep for it, ::audio{<id>}, or ::file{<id>} for anything else. The upload's name is never in the note. Its bytes are not in any tool's answer: GET /api/workspaces/<workspace>/uploads/<id> with the same bearer token answers with them, and POST /api/workspaces/<workspace>/uploads takes a new file. A token limited to folders reaches only the uploads in them, at those addresses too.";
 const by = { type: "string", enum: ["people", "agents"], description: "Only changes by people, or only by agents" };
@@ -529,6 +535,63 @@ The arguments beside query are from before it could say them, and narrow it furt
     renames: { uploadId: "id" },
     op: "upload.restore",
     example: { uploadId: UPLOAD },
+  },
+  {
+    name: "start_upload",
+    description: `Begin sending a file of size bytes, at most ${MAX_UPLOAD_BYTES / 1024 ** 3} GB, in parts that your own shell sends with curl, so the bytes never pass through you. The answer is id, partSize, partCount, address and expiresAt. Part n is the bytes from (n-1)*partSize, partSize of them (the last part what is left); send it with: dd if=FILE bs=1048576 skip=$(( (n-1)*${PART_BYTES / 1024 / 1024} )) count=${PART_BYTES / 1024 / 1024} status=none | curl -sS --fail-with-body -X PUT -H 'Content-Type: application/octet-stream' --data-binary @- "<address with {part} replaced by n>". Parts may go several at once, in any order. The address needs no token, takes each part once, and lapses at expiresAt (an hour). A part that fails, or an address that lapsed or answers 409, is no loss: resume_upload says which parts are stored and gives a fresh address for the rest. Then finish_upload. Until it is finished the file is seen by no one and listed nowhere; one nothing is sent to for a day is thrown away. Needs edit on the folder.`,
+    inputSchema: object(
+      {
+        name: { type: "string", maxLength: 1000, description: "The file's name, with its ending, such as episode-12.mp3. What it is served as is read from the ending and its first bytes" },
+        size: { type: "integer", minimum: 1, maximum: MAX_UPLOAD_BYTES, description: "How many bytes the file is, exactly: wc -c < FILE. A part of any other length is refused" },
+        folderId: folderId("The folder to put it in, from list_folders. Left out, Unsorted"),
+        private: { type: "boolean", description: "Leave it out: only a member makes an upload private, in the app, and an agent asking is refused" },
+      },
+      ["name", "size"],
+    ),
+    op: "upload.start",
+    example: { name: "episode-12.mp3", size: 52428800, folderId: FOLDER },
+    times: ["expiresAt"],
+    told: (sending: SendingUpload, origin: string) => ({ ...sending, address: `${origin}${sending.address}` }),
+  },
+  {
+    name: "resume_upload",
+    description: "For a file start_upload began and you haven't finished: stored, the numbers of the parts that are there, and a fresh address and expiresAt for the rest, as start_upload answers. Only the one who started it can ask.",
+    inputSchema: object({ uploadId }, ["uploadId"]),
+    renames: { uploadId: "id" },
+    op: "upload.resume",
+    example: { uploadId: UPLOAD },
+    times: ["expiresAt"],
+    told: (sending: SendingUpload, origin: string) => ({ ...sending, address: `${origin}${sending.address}` }),
+  },
+  {
+    name: "finish_upload",
+    description: `Put a file's parts together once every one is stored, and make it an upload others can see, held to the size start_upload was told. The answer is the upload as list_uploads gives it, and line: the embed to write in a note on a line of its own. Asked again, it answers the same. ${UPLOADS}`,
+    inputSchema: object({ uploadId }, ["uploadId"]),
+    renames: { uploadId: "id" },
+    op: "upload.finish",
+    example: { uploadId: UPLOAD },
+    told: withLine,
+  },
+  {
+    name: "abort_upload",
+    description: "Stop sending a file start_upload began, and throw away the parts sent. Only the one who started it can.",
+    inputSchema: object({ uploadId }, ["uploadId"]),
+    renames: { uploadId: "id" },
+    op: "upload.abort",
+    example: { uploadId: UPLOAD },
+  },
+  {
+    name: "upload_file",
+    description: `Upload a small file you hold, of at most ${MAX_INLINE_UPLOAD_BYTES / 1024 / 1024} MB, as base64. A larger one, or one on disk, goes with start_upload, whose bytes never pass through you. The answer is the upload and line, the embed to write in a note. Needs edit on the folder.`,
+    inputSchema: object(
+      {
+        name: { type: "string", maxLength: 1000, description: "The file's name, with its ending" },
+        base64: { type: "string", maxLength: Math.ceil(MAX_INLINE_UPLOAD_BYTES / 3) * 4, description: "The file's bytes, in base64" },
+        folderId: folderId("The folder to put it in, from list_folders. Left out, Unsorted"),
+      },
+      ["name", "base64"],
+    ),
+    example: { name: "notes.txt", base64: "SGVsbG8=", folderId: FOLDER },
   },
   {
     name: "list_trashed_uploads",
@@ -906,8 +969,24 @@ function withTimes(value: unknown, written: (time: number) => string, times: Rea
   );
 }
 
+/** Where a tool call came to: the server's own address, and the bucket a file sent with upload_file goes to. */
+export interface Reached {
+  origin: string;
+  bucket: R2Bucket | null;
+}
+
+/** A small file's bytes from base64, or null for what isn't base64. */
+function fromBase64(given: unknown): Uint8Array | null {
+  if (typeof given !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(given.replace(/\s+/g, ""))) return null;
+  try {
+    return Uint8Array.from(atob(given.replace(/\s+/g, "")), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
 /** Runs a tool as `agent`. Failures the agent can act on come back as an error result, not a protocol error. */
-export async function callTool(db: D1Database, agent: ConnectedAgent, name: string, args: Record<string, unknown>, sources?: Sources): Promise<ToolResult | null> {
+export async function callTool(db: D1Database, agent: ConnectedAgent, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null }): Promise<ToolResult | null> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return null;
   try {
@@ -925,8 +1004,18 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
-    const answer = await perform(db, agentActor(agent, workspaceId), { ...fields, type: tool.op! } as OpInput, Date.now(), sources);
-    return text(withTimes(answer, timeIn((await timeZoneOf(db, workspaceId, agent.personId)) ?? "UTC"), tool.times ? new Set([...TIME_KEYS, ...tool.times]) : TIME_KEYS));
+    const actor = agentActor(agent, workspaceId);
+    const written = async (answer: unknown) => text(withTimes(answer, timeIn((await timeZoneOf(db, workspaceId, agent.personId)) ?? "UTC"), tool.times ? new Set([...TIME_KEYS, ...tool.times]) : TIME_KEYS));
+    if (name === "upload_file") {
+      const { name: fileName, base64, folderId } = fields;
+      const bytes = fromBase64(base64);
+      if (!bytes?.byteLength) throw new OpError("invalid", "base64 isn't a file's bytes in base64");
+      if (bytes.byteLength > MAX_INLINE_UPLOAD_BYTES) throw new OpError("invalid", `upload_file takes at most ${MAX_INLINE_UPLOAD_BYTES / 1024 / 1024} MB. Send a larger file with start_upload`);
+      const upload = await perform(db, actor, { type: "upload.create", name: fileName as string, size: bytes.byteLength, ...(folderId === undefined ? {} : { folderId: folderId as string }) }, Date.now(), sources, { bucket: reached.bucket, body: new Response(bytes).body });
+      return written(withLine(upload));
+    }
+    const answer = await perform(db, actor, { ...fields, type: tool.op! } as OpInput, Date.now(), sources, { bucket: reached.bucket });
+    return written(tool.told ? tool.told(answer as never, reached.origin) : answer);
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${namedAsTold(tool, err.message)}`, true);
     throw err;

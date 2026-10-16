@@ -21,6 +21,34 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return made;
 }
 
+/** A file still on its way, as the uploads plugin's sender says of it. */
+export interface Going {
+  name: string;
+  size: number;
+  sent: number;
+}
+
+/** What says how far the files on their way have got: the one that will be an upload, by its id, and a call each time any of them gets further. */
+export interface OnTheWay {
+  of(uploadId: string): Going | undefined;
+  subscribe(listener: () => void): Dispose;
+}
+
+const percent = ({ sent, size }: Going) => Math.min(100, Math.floor((100 * sent) / size));
+
+/** In the room an upload's line keeps while its file is on its way: its name, how far it has got, and a bar. */
+function onItsWay(going: Going) {
+  const box = el("div", "upload-sending");
+  box.setAttribute("role", "status");
+  box.append(el("span", "upload-sending-words", `Uploading ${going.name} · ${percent(going)}%`));
+  const bar = el("progress", "upload-sending-bar");
+  bar.max = going.size;
+  bar.value = going.sent;
+  bar.setAttribute("aria-label", `${going.name} uploaded`);
+  box.append(bar);
+  return box;
+}
+
 /** In place of an upload that can't be shown. For one the reader can't see it says nothing of the file: not its name, its type or its size. */
 function missing(words: string, name?: string) {
   const box = el("div", "upload-missing");
@@ -48,12 +76,18 @@ const detailsOf = ({ name, kind, width, height, size }: NonNullable<ReferredTo>)
  * of the note, and its bytes come from the address the host gives, so on a link's page they come by the link.
  * `pick` is how a menu sends a file into a note, where one can be sent.
  */
-export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: Embed[]; stop: Dispose } {
+export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"], onTheWay?: OnTheWay): { embeds: Embed[]; stop: Dispose } {
   const drawn = new Set<() => void>();
   const asked = new Set<string>();
-  const stop = host.uploads.onReferred(() => {
+  const everyAgain = () => {
     for (const again of [...drawn]) again();
-  });
+  };
+  const stopReferred = host.uploads.onReferred(everyAgain);
+  const stopGoing = onTheWay?.subscribe(everyAgain);
+  const stop = () => {
+    stopReferred();
+    stopGoing?.();
+  };
 
   /** Whether there is an app here to preview a file over, which a link's page hasn't. */
   const previews = () => typeof host.app().toggleOverlay === "function";
@@ -101,15 +135,24 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
     return info;
   };
 
-  /** Draws with what is known of an upload now, and again each time that is different, and never otherwise. */
-  const live = (id: string, draw: (info: ReferredTo | undefined) => void): Dispose => {
-    let was = said(known(id));
-    draw(host.uploads.referred(id));
+  /**
+   * Draws with what is known of an upload now, and again each time that is different, and never
+   * otherwise. While its file is on its way from this browser, that is how far it has got: the server
+   * is asked nothing of it, since it is no upload to anyone until it is all there.
+   */
+  const live = (id: string, draw: (info: ReferredTo | undefined, going: Going | undefined) => void): Dispose => {
+    const now = () => {
+      const going = onTheWay?.of(id);
+      const info = going ? host.uploads.referred(id) : known(id);
+      return { info, going, said: `${said(info)}\n${going ? percent(going) : ""}` };
+    };
+    let was = now();
+    draw(was.info, was.going);
     const again = () => {
-      const info = host.uploads.referred(id);
-      if (said(info) === was) return;
-      was = said(info);
-      draw(info);
+      const is = now();
+      if (is.said === was.said) return;
+      was = is;
+      draw(is.info, is.going);
     };
     drawn.add(again);
     return () => void drawn.delete(again);
@@ -154,7 +197,8 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
     const start = () => {
       const id = uploadIn(now.config);
       if (!id) return;
-      stop = live(id, (info) => {
+      stop = live(id, (info, going) => {
+        if (going) return void into.replaceChildren(onItsWay(going));
         const nodes = media(embed, id, info);
         if (embed !== "audio" && !now.readOnly && info && info.state !== "trashed" && info.kind === embed) {
           const sized = sizeHandle(into, info.name, () => now, embed);
@@ -202,9 +246,10 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
     const start = () => {
       const id = uploadIn(now.config);
       if (!id) return;
-      stop = live(id, (info) => {
+      stop = live(id, (info, going) => {
         unpreview?.();
         unpreview = undefined;
+        if (going) return void into.replaceChildren(onItsWay(going));
         const head = el("div", "upload-card-head");
         const body = el("div", "upload-card-body upload-preview-body upload-preview-note");
         const shown = info && info.state !== "trashed" ? info : null;
@@ -283,8 +328,9 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
     render(into, embedded) {
       const id = uploadIn(embedded.config);
       if (!id) return void into.append(el("span", "embed-unread", "File: paste or drop a file here, or copy its embed from the Uploads page"));
-      return live(id, (info) => {
-        if (info === undefined) into.replaceChildren(el("span", "file-chip gone", TITLE.file));
+      return live(id, (info, going) => {
+        if (going) into.replaceChildren(el("span", "file-chip gone", `${going.name} · ${percent(going)}%`));
+        else if (info === undefined) into.replaceChildren(el("span", "file-chip gone", TITLE.file));
         else if (info === null) into.replaceChildren(el("span", "file-chip gone", UNAVAILABLE));
         else if (info.state === "trashed") into.replaceChildren(el("span", "file-chip gone", `${info.name} · in Trash`));
         else into.replaceChildren(chip(id, info));

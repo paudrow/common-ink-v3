@@ -75,7 +75,10 @@ function give(page: Page, how: "paste" | "drop", files: { name: string; type: st
     ({ how, files, also }) => {
       const carried = new DataTransfer();
       for (const [type, text] of Object.entries(also)) carried.setData(type, text);
-      for (const file of files) carried.items.add(new File([file.base64 === null ? new Uint8Array(file.size) : Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0))], file.name, { type: file.type }));
+      // A file larger than a test holds is one mebibyte many times over, which the browser keeps once.
+      const mebibyte = new Blob([new Uint8Array(1024 * 1024)]);
+      const empty = (size: number) => (size % (1024 * 1024) === 0 && size > 0 ? Array.from({ length: size / (1024 * 1024) }, () => mebibyte) : [new Uint8Array(size)]);
+      for (const file of files) carried.items.add(new File(file.base64 === null ? empty(file.size) : [Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0))], file.name, { type: file.type }));
       const target = document.querySelector(".cm-content")!;
       const last = [...target.querySelectorAll(".cm-line")].at(-1)!.getBoundingClientRect();
       const event =
@@ -219,7 +222,7 @@ test("a picture pasted into a note is sent to the note's folder and written with
   expect(changes.every((c) => c.author.kind === "member")).toBe(true);
 });
 
-test("a file dropped on a private note is uploaded private, a file that is no picture, video, recording, PDF or text is a card on its own line whose name downloads it, and a file over 50 MB is refused before it is sent", async ({ page }) => {
+test("a file dropped on a private note is uploaded private, a file that is no picture, video, recording, PDF or text is a card on its own line whose name downloads it, and a file over 25 GB is refused before it is sent", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Diary\n\nWords.\n" });
   await perform(page, { type: "note.setPrivate", id: note.id, private: true });
@@ -227,8 +230,8 @@ test("a file dropped on a private note is uploaded private, a file that is no pi
   const sent: string[] = [];
   page.on("request", (request) => request.method() === "POST" && /\/uploads$/.test(new URL(request.url()).pathname) && sent.push(request.url()));
 
-  await give(page, "drop", [{ name: "huge.bin", type: "application/octet-stream", size: 50 * 1024 * 1024 + 1 }]);
-  await expect(toast(page)).toContainText("huge.bin is 50 MB. A file can be at most 50 MB.");
+  await give(page, "drop", [{ name: "huge.bin", type: "application/octet-stream", size: 25 * 1024 ** 3 + 1024 ** 2 }]);
+  await expect(toast(page)).toContainText("huge.bin is 25 GB. A file can be at most 25 GB.");
   expect(sent).toEqual([]);
 
   await give(page, "drop", [{ name: "minutes.bin", type: "application/octet-stream", bytes: Buffer.from("What was said.") }]);

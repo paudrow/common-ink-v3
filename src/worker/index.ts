@@ -48,7 +48,7 @@ async function handleShared(req: Request, env: Env, url: URL, token: string, not
 }
 
 /** Operations whose bytes come or go with the request, each at an address of its own in files.ts. */
-const CARRIES_BYTES: ReadonlySet<unknown> = new Set(["upload.create", "upload.open", "shared.upload"]);
+const CARRIES_BYTES: ReadonlySet<unknown> = new Set(["upload.create", "upload.open", "upload.part", "shared.upload"]);
 
 async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   const files = await handleFiles(req, env, url);
@@ -84,7 +84,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     } catch {
       return json({ error: "invalid", message: "The body isn't JSON" }, 400);
     }
-    if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads" }, 400);
+    if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, and a part of one at the address upload.start gives" }, 400);
     try {
       return json(await perform(env.DB, { kind: "member", personId, workspaceId: opsRoute[1]! }, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
     } catch (err) {

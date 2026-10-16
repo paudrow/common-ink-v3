@@ -112,7 +112,7 @@ async function purgeDue(db: D1Database, now: number, log: (message: string) => v
   return purged;
 }
 
-/** How long an upload may be pending before it is taken for one that will never finish. */
+/** How long an upload may wait with nothing sent to it before it is taken for one that will never finish. */
 export const PENDING_MS = 86_400_000;
 /**
  * Removing an upload takes two stores, and nothing makes a change to both at once. So it goes in
@@ -127,11 +127,21 @@ export const PENDING_MS = 86_400_000;
  * carries on from step 2. So there are never bytes that can be read with no row to decide who may,
  * and never a row that can be read with no bytes behind it.
  */
-async function finishRemoving(db: D1Database, bucket: R2Bucket, ids: readonly string[]): Promise<void> {
+export async function finishRemoving(db: D1Database, bucket: R2Bucket, ids: readonly string[]): Promise<void> {
   if (!ids.length) return;
-  await bucket.delete([...ids]);
   const removing = "(SELECT u.id FROM uploads u WHERE u.state = 'removing' AND u.id IN (SELECT value FROM json_each(?1)))";
-  await db.batch([db.prepare(`DELETE FROM grants WHERE upload_id IN ${removing}`).bind(JSON.stringify(ids)), db.prepare(`DELETE FROM uploads WHERE id IN ${removing}`).bind(JSON.stringify(ids))]);
+  const list = JSON.stringify(ids);
+  // An upload stopped while its parts were arriving has them kept apart in the bucket, which aborting throws away. One the bucket no longer knows is gone already.
+  const { results } = await db.prepare(`SELECT id, multipart_id FROM uploads WHERE multipart_id IS NOT NULL AND id IN ${removing}`).bind(list).all<{ id: string; multipart_id: string }>();
+  await Promise.all(results.map((row) => bucket.resumeMultipartUpload(row.id, row.multipart_id).abort().catch(() => {})));
+  await bucket.delete([...ids]);
+  await db.batch([
+    db.prepare(`DELETE FROM upload_pass_uses WHERE hash IN (SELECT hash FROM upload_passes WHERE upload_id IN ${removing})`).bind(list),
+    db.prepare(`DELETE FROM upload_passes WHERE upload_id IN ${removing}`).bind(list),
+    db.prepare(`DELETE FROM upload_parts WHERE upload_id IN ${removing}`).bind(list),
+    db.prepare(`DELETE FROM grants WHERE upload_id IN ${removing}`).bind(list),
+    db.prepare(`DELETE FROM uploads WHERE id IN ${removing}`).bind(list),
+  ]);
 }
 
 /** Removes one upload in Trash for good. False when it was not in Trash, as one restored a moment before isn't. */
@@ -147,14 +157,17 @@ const CLEAR_UPLOADS = 1000;
 
 /**
  * Removes the uploads that have been in Trash for 30 days as of `now`, in every workspace, and
- * clears away the ones left pending or half removed by a request that never finished. Run twice, or
+ * clears away the ones left pending or half removed by a request that never finished: one sent in
+ * parts is cleared once nothing has been sent to it for a day, its parts aborted in the bucket. Run twice, or
  * again after stopping partway, it removes what is left and nothing else. When it fails, every
  * upload it was removing is left as it is, unread, for the next run.
  */
 export async function clearUploads(db: D1Database, bucket: R2Bucket, now: number, log: (message: string) => void = console.error): Promise<Purged> {
   await db.batch([
     db.prepare("UPDATE uploads SET state = 'removing' WHERE state = 'trashed' AND state_at <= ?").bind(now - TRASH_MS),
-    db.prepare("UPDATE uploads SET state = 'removing' WHERE state = 'pending' AND created_at <= ?").bind(now - PENDING_MS),
+    db.prepare("UPDATE uploads SET state = 'removing' WHERE state = 'pending' AND COALESCE(touched_at, created_at) <= ?").bind(now - PENDING_MS),
+    db.prepare("DELETE FROM upload_pass_uses WHERE hash IN (SELECT hash FROM upload_passes WHERE expires_at <= ?)").bind(now),
+    db.prepare("DELETE FROM upload_passes WHERE expires_at <= ?").bind(now),
   ]);
   const { results } = await db.prepare("SELECT id FROM uploads WHERE state = 'removing' ORDER BY id LIMIT ?").bind(CLEAR_UPLOADS + 1).all<{ id: string }>();
   const ids = results.slice(0, CLEAR_UPLOADS).map((r) => r.id);
