@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CAPABILITIES, MAX_PLUGIN_CODE, readManifest, type Capability, type InstalledPlugin, type Manifest, type PluginRecord } from "../core/plugins.ts";
+import { CAPABILITIES, FULL_TRUST, MAX_PLUGIN_CODE, readManifest, type Capability, type InstalledPlugin, type Manifest, type PluginRecord } from "../core/plugins.ts";
 import { perform } from "./api.ts";
 
 interface Props {
@@ -122,20 +122,26 @@ export function InstallForm({ workspaceId, replacing, onRecord, onDone }: Props)
               <ul className="permissions" aria-label={`What ${review.manifest.name} asks for`}>
                 {review.manifest.capabilities.map((declared) => (
                   <li key={declared.name} className="permission" aria-label={CAPABILITIES[declared.name].title}>
-                    <label className="check">
-                      <input
-                        type="checkbox"
-                        aria-label={`Allow ${CAPABILITIES[declared.name].title}`}
-                        checked={review.allow.has(declared.name)}
-                        onChange={(e) => {
-                          const allow = new Set(review.allow);
-                          if (e.target.checked) allow.add(declared.name);
-                          else allow.delete(declared.name);
-                          setReview({ ...review, allow });
-                        }}
-                      />
+                    {replacing && declared.name === FULL_TRUST ? (
+                      // Full trust for changed code is granted on the plugin's page, where the admin types its name: never by a box ticked on the way.
                       <span className="permission-title">{CAPABILITIES[declared.name].title}</span>
-                    </label>
+                    ) : (
+                      <label className="check">
+                        <input
+                          type="checkbox"
+                          aria-label={`Allow ${CAPABILITIES[declared.name].title}`}
+                          checked={review.allow.has(declared.name)}
+                          onChange={(e) => {
+                            const allow = new Set(review.allow);
+                            if (e.target.checked) allow.add(declared.name);
+                            else allow.delete(declared.name);
+                            setReview({ ...review, allow });
+                          }}
+                        />
+                        <span className="permission-title">{CAPABILITIES[declared.name].title}</span>
+                      </label>
+                    )}
+                    {replacing && declared.name === FULL_TRUST && <p className="permission-detail">Once it is updated, grant the new code on its page, where you type its name to say you mean it.</p>}
                     <p className="permission-detail">{CAPABILITIES[declared.name].detail}</p>
                     <p className="permission-reason">
                       <span className="agent-meta">{review.manifest.name} says: </span>

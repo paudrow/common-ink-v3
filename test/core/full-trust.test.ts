@@ -102,7 +102,7 @@ describe("full trust runs for a member only with an admin's grant of that code a
     expect(await outcome(pluginOf(eve, id), read)).toBe(refused);
   });
 
-  it("is granted and taken back only by an admin, signed in: every other actor is refused, by every way in", async () => {
+  it("is granted and taken back only by an admin, or an agent of theirs in their role: every other actor is refused, by every way in", async () => {
     const { ada, eve, vera, gus, shared } = await team();
     const id = await install(ada, [FULL, READ]);
     const tame = await install(ada, [READ]);
@@ -115,7 +115,14 @@ describe("full trust runs for a member only with an admin's grant of that code a
       expect(await outcome(eve, op)).toBe("forbidden: A editor can't plugin.permit");
       expect(await outcome(vera, op)).toBe("forbidden: A viewer can't plugin.permit");
       expect(await outcome(gus, op)).toBe("forbidden: A guest can't plugin.permit");
-      for (const [kind, { actor }] of Object.entries(await agentsOf(ada))) expect(await outcome(actor, op), `an admin's own: ${kind}`).toBe("forbidden: An agent can't plugin.permit");
+      const AGENT_SAYS: Record<string, string> = {
+        "an agent": "done",
+        "a read-only agent": "forbidden: A read-only token can't plugin.permit",
+        "an agent pinned to the workspace": "done",
+        "an agent limited to a folder": "forbidden: An agent limited to folders can't plugin.permit",
+        "a read-only agent limited to a folder": "forbidden: A read-only token can't plugin.permit",
+      };
+      for (const [kind, { actor }] of Object.entries(await agentsOf(ada))) expect(await outcome(actor, op), `an admin's own: ${kind}`).toBe(AGENT_SAYS[kind]);
       expect(await outcome(pluginOf(ada, tame), op), "a plugin that runs shut off, in an admin's session").toBe("forbidden: Deep Keys isn't permitted to plugin.permit");
       expect(await outcome(pluginOf(eve, tame, true), op), "a member's draft").toBe("forbidden: Deep Keys isn't permitted to plugin.permit");
       expect(await outcome(pluginOf(ada, id), op), "the plugin that asks for it, before it runs").toBe(refused);
@@ -192,7 +199,9 @@ describe("full trust runs for a member only with an admin's grant of that code a
     expect(await outcome(eve, replace)).toBe("forbidden: A editor can't plugin.install");
     expect(await outcome(pluginOf(eve, id), replace)).toBe("forbidden: Deep Keys isn't permitted to plugin.install");
     expect(await outcome(pluginOf(ada, id), replace), "in an admin's session, at the plugin's address").toBe("forbidden: Deep Keys isn't permitted to plugin.install");
-    for (const { actor } of Object.values(await agentsOf(ada))) expect(await outcome(actor, replace)).toBe("forbidden: An agent can't plugin.install");
+    // An admin's agent that sees the whole workspace may update it as its admin may (test/core/agent-plugins.test.ts). One read-only or limited to folders may not.
+    for (const [kind, { actor }] of Object.entries(await agentsOf(ada)))
+      if (kind.includes("read-only") || kind.includes("limited")) expect(await outcome(actor, replace), kind).toMatch(/^forbidden: (A read-only token|An agent limited to folders) can't plugin.install$/);
     await perform(env.DB, eve, { type: "draft.save", id, manifest: manifest([]), code: OTHER, running: true });
     expect(await outcome(pluginOf(eve, id), read), "her draft changed nothing of the plugin").toBe("done");
     expect((await perform(env.DB, eve, { type: "plugin.read", id })).code).toBe(CODE);
@@ -476,7 +485,7 @@ describe("what full trust reaches on the server is what its member reaches, and 
     expect((await perform(env.DB, ada, { type: "plugin.read", id })).code).toBe(CODE);
   });
 
-  it("tells an agent of any kind, and a plugin, nothing of it: not that it is asked for, whether it was granted, or who has it on", async () => {
+  it("tells an agent what its member is told of it, an agent limited to folders and a plugin nothing: not that it is asked for, whether it was granted, or who has it on", async () => {
     const { ada, eve } = await team();
     const id = await install(ada, [FULL, READ]);
     const tame = await install(ada, [READ]);
@@ -489,18 +498,20 @@ describe("what full trust reaches on the server is what its member reaches, and 
       for (const [kind, { actor, agent }] of Object.entries(await agentsOf(member))) {
         if (kind.includes("limited")) {
           expect(await outcome(actor, { type: "plugin.list" }), kind).toBe("forbidden: An agent limited to folders can't plugin.list");
+          const said: string[] = [];
+          for (const tool of TOOLS) {
+            const result = await callTool(env.DB, agent, tool.name, {}).catch(() => null);
+            // A refusal of what was asked can name the capabilities a tool takes, which says nothing of this plugin.
+            if (result && !result.isError) said.push(result.content[0]!.text);
+          }
+          expect(said.join("\n").replaceAll('"fullTrust": null', ""), kind).not.toMatch(/full-trust|fullTrust|turnedOnBy|grantedHash/);
         } else {
           const listed = (await perform(env.DB, actor, { type: "plugin.list" })).plugins.find((p) => p.id === id)!;
-          expect(listed.manifest.capabilities.map((c) => c.name), kind).toEqual(["notes.read"]);
-          expect(listed.fullTrust).toBeNull();
-          expect(listed.permissions.map((p) => p.capability)).toEqual(["notes.read"]);
+          const theirs = (await perform(env.DB, member, { type: "plugin.list" })).plugins.find((p) => p.id === id)!;
+          expect(listed.manifest.capabilities.map((c) => c.name), kind).toEqual(["full-trust", "notes.read"]);
+          expect(listed.fullTrust, kind).toEqual(theirs.fullTrust);
+          expect(listed.fullTrust!.on, kind).toBe(member === eve);
         }
-        const said: string[] = [];
-        for (const tool of TOOLS) {
-          const result = await callTool(env.DB, agent, tool.name, {}).catch(() => null);
-          if (result) said.push(result.content[0]!.text);
-        }
-        expect(said.join("\n").replaceAll('"fullTrust": null', ""), kind).not.toMatch(/full-trust|fullTrust|turnedOnBy|grantedHash/);
       }
     }
     // The full-trust plugin itself, running for Eve, reads the record as a plugin does.

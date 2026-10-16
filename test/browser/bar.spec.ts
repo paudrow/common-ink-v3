@@ -258,3 +258,31 @@ test("in a window too narrow for both ends of the bar, the right end is whole an
   expect(leftX + leftWidth).toBeLessThanOrEqual(wordsX);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(420);
 });
+
+test("with vim on, the bottom bar, vim's bar and a notice each keep their own place: vim's above the bar, the notice above both and saying what it is for", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
+  const note = await perform(page, { type: "note.create", text: "# Feet\n\nSome words to count." });
+  await page.goto(`/note/${note.id}`);
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+  await expect(wordCount(page)).toHaveText(/words/);
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Commands" }).fill("Archive or unarchive note");
+  await page.keyboard.press("Enter");
+  const notice = page.getByRole("group", { name: "Notice" }).last();
+  await expect(notice).toContainText("Archived");
+  await expect(notice.getByRole("button", { name: "Undo" })).toBeVisible();
+  // Each box once the notice has finished arriving.
+  await page.waitForTimeout(400);
+  const [barBox, vimBox, noticeBox] = await Promise.all([boxOf(page, ".bar"), boxOf(page, ".note-foot .cm-vim-panel"), boxOf(page, ".toast-card")]);
+  const bottom = ([, y, , h]: [number, number, number, number]) => y + h;
+  expect(bottom(vimBox), "vim's bar ends where the bottom bar begins").toBeLessThanOrEqual(barBox[1] + 0.5);
+  expect(bottom(noticeBox), "the notice is above vim's bar").toBeLessThanOrEqual(vimBox[1]);
+  // Nothing at the notice's corners but the notice itself.
+  for (const [x, y] of [
+    [noticeBox[0] + 14, noticeBox[1] + 14],
+    [noticeBox[0] + noticeBox[2] - 14, noticeBox[1] + noticeBox[3] - 14],
+  ])
+    expect(await page.evaluate(([px, py]) => !!document.elementFromPoint(px!, py!)?.closest(".toast-card"), [x, y])).toBe(true);
+});

@@ -4,10 +4,11 @@ import { Icon } from "./icons.tsx";
 import { chordFor, chordLabel } from "./keybindings.ts";
 import type { Slots } from "./plugin-api.ts";
 import { INSTALLED_EMBED, type Added, type Contributions, type Host } from "./pluginHost.ts";
+import { MoreMenu } from "./MoreMenu.tsx";
 import { InstallForm } from "./PluginInstall.tsx";
 import { PLUGINS_PATH, asksTrust, kindLabel, within, type Listed } from "./pluginList.ts";
 import { FullTrustLead, FullTrustReason, FullTrustSwitch } from "./PluginTrust.tsx";
-import { PermissionRow, sitesIn, useRecordChanges, type RecordChanges } from "./PluginPermissions.tsx";
+import { byWhom, PermissionRow, sitesIn, useRecordChanges, type RecordChanges } from "./PluginPermissions.tsx";
 import { PluginSource } from "./PluginSource.tsx";
 import { SettingRow } from "./SettingRow.tsx";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
@@ -118,7 +119,8 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
               {theirs ? (
                 <>
                   <span>version {theirs.manifest.version}</span>
-                  {theirs.installedBy && <span>installed by {theirs.installedBy}</span>}
+                  {theirs.installedBy && <span>installed by {byWhom(theirs.installedBy, theirs.installedVia)}</span>}
+                  {theirs.updatedBy && <span>updated by {byWhom(theirs.updatedBy, theirs.updatedVia)}</span>}
                 </>
               ) : (
                 <span>Comes with Common Ink</span>
@@ -126,6 +128,16 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
             </p>
           )}
         </div>
+        {theirs && admin && (
+          <MoreMenu
+            label={`More for ${name}`}
+            title="Update or uninstall it"
+            items={[
+              { label: "Update…", action: () => setUpdating(true) },
+              { label: "Uninstall…", action: () => setRemoving(true), disabled: changes.busy, separated: true },
+            ]}
+          />
+        )}
         {trusting ? (
           <FullTrustSwitch plugin={trusting} host={host} workspaceId={workspaceId} enabled={state?.enabled ?? false} admin={admin} adminElsewhere={adminElsewhere} onRecord={onRecord} />
         ) : (
@@ -146,16 +158,6 @@ export function PluginDetails({ plugin, contributed, host, store, workspaceId, p
         <p role="alert" className="error">
           {changes.error}
         </p>
-      )}
-      {theirs && admin && (
-        <div className="agent-actions">
-          <button type="button" className="button small" aria-label={`Update ${name}`} onClick={() => setUpdating(true)}>
-            Update
-          </button>
-          <button type="button" className="button small danger" aria-label={`Uninstall ${name}`} disabled={changes.busy} onClick={() => setRemoving(true)}>
-            Uninstall
-          </button>
-        </div>
       )}
       {theirs && removing && (
         <span className="confirm" role="group" aria-label={`Uninstall ${name}?`}>

@@ -173,14 +173,16 @@ describe("Common Ink's own plugins that run shut off", () => {
     expect(plugins.filter((p) => p.thirdParty)).toEqual([]);
   });
 
-  it("tell an agent nothing more than its member's notes: an agent has no plugin's address, and one limited to folders learns of no draft", async () => {
+  it("tell an agent what its member may read of their own drafts, a read-only one nothing it can change, and one limited to folders nothing at all", async () => {
     const { eve } = await team();
     await perform(env.DB, eve, { type: "draft.save", id: "word-count", manifest: JSON.stringify(OWN_SANDBOXED["word-count"]), code: "zebra-own-draft", running: true });
     const folder = await perform(env.DB, eve, { type: "folder.create", name: "Only this" });
     for (const options of [{}, { readOnly: true }, { workspaceId: eve.workspaceId, folderIds: [folder.id] }]) {
       const { token } = await connectAgent(env.DB, eve.personId, "Robot", options as never);
       const agent = agentActor((await authenticateAgent(env.DB, token))!, eve.workspaceId);
-      for (const op of [{ type: "draft.list" }, { type: "draft.read", id: "word-count" }, { type: "draft.discard", id: "word-count" }] as OpInput[]) expect(await outcome(agent, op)).toMatch(/^forbidden/);
+      const limited = "folderIds" in options;
+      for (const op of [{ type: "draft.list" }, { type: "draft.read", id: "word-count" }] as OpInput[]) expect(await outcome(agent, op), op.type).toMatch(limited ? /^forbidden/ : /^done$/);
+      if (limited || "readOnly" in options) expect(await outcome(agent, { type: "draft.discard", id: "word-count" })).toMatch(/^forbidden/);
     }
     expect((await perform(env.DB, eve, { type: "draft.read", id: "word-count" })).code).toBe("zebra-own-draft");
   });

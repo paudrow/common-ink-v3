@@ -68,7 +68,7 @@ describe("a draft is its author's own copy", () => {
     expect((await perform(env.DB, ada, { type: "draft.read", id })).code).toBe("ada-draft-code");
   });
 
-  it("is in no listing of notes, no search, no history, and nothing an agent, a plugin or a guest can ask", async () => {
+  it("is in no listing of notes, no search, no history, and nothing a plugin can ask", async () => {
     const { ada, eve } = await team();
     const id = await install(ada, [READ, WRITE, TODOS]);
     for (const capability of ["notes.read", "notes.write", "todos.read"] as const) await grant(ada, id, capability);
@@ -77,10 +77,8 @@ describe("a draft is its author's own copy", () => {
     for (const asker of [eve, ada]) {
       for (const op of everywhere) expect(JSON.stringify(await perform(env.DB, asker, op)), `${op.type}`).not.toContain("zebra-draft-marker");
     }
-    const agent: Actor = { kind: "agent", agentId: (await connectAgent(env.DB, eve.personId, "Claude")).agent.id, personId: eve.personId, workspaceId: eve.workspaceId };
     const drafts: OpInput[] = [{ type: "draft.list" }, { type: "draft.read", id }, { type: "draft.save", id, manifest: "{}", code: "x", running: false }, { type: "draft.discard", id }];
     for (const op of drafts) {
-      expect(await outcome(agent, op), "her own agent").toBe(`forbidden: An agent can't ${op.type}`);
       expect(await outcome(pluginOf(eve, id), op), "a plugin in her session").toBe(`forbidden: Deep Keys isn't permitted to ${op.type}`);
       expect(await outcome(pluginOf(eve, id, true), op), "the draft itself").toBe(`forbidden: Deep Keys isn't permitted to ${op.type}`);
     }
@@ -217,26 +215,33 @@ describe("a draft is its author's own copy", () => {
     await expect(saveDraft({ db: env.DB, workspaceId: ada.workspaceId, personId: vera.personId, now: 1 } as never, { type: "draft.save", id: other, manifest: "{}", code: "", running: false })).rejects.toMatchObject({ code: "not_found" });
   });
 
-  it("is nothing an agent of any kind is told of or can change, by a tool or as an operation", async () => {
+  it("is its author's agent's as it is its author's, read-only if its token is; an agent limited to folders, and anyone else's agent, is told nothing of it", async () => {
     const { ada, eve } = await team();
     const id = await install(ada, [READ]);
     await perform(env.DB, eve, { type: "draft.save", id, manifest: manifest([READ], "zebra-draft-name"), code: "zebra-draft-marker", running: true });
     const folder = (await perform(env.DB, eve, { type: "folder.create", name: "Inside" })).id;
-    const kinds = { unlimited: {}, "read-only": { readOnly: true }, limited: { workspaceId: eve.workspaceId, folderIds: [folder] }, "limited and read-only": { workspaceId: eve.workspaceId, folderIds: [folder], readOnly: true } };
-    expect(TOOLS.map((tool) => tool.name).filter((name) => /draft/i.test(name))).toEqual([]);
-    for (const [kind, options] of Object.entries(kinds)) {
-      const { token } = await connectAgent(env.DB, eve.personId, "Claude", options as never);
-      const agent = (await authenticateAgent(env.DB, token))!;
-      const actor = agentActor(agent, eve.workspaceId);
-      const drafts: OpInput[] = [{ type: "draft.list" }, { type: "draft.read", id }, { type: "draft.save", id, manifest: "{}", code: "x", running: false }, { type: "draft.discard", id }];
-      for (const op of drafts) expect(await outcome(actor, op), `${kind} ${op.type}`).toMatch(/^forbidden: An agent (limited to folders )?can't draft\./);
-      const said: string[] = [];
-      for (const tool of TOOLS) {
-        const result = await callTool(env.DB, agent, tool.name, {}).catch(() => null);
-        if (result) said.push(result.content[0]!.text);
-      }
-      expect(said.join("\n"), kind).not.toMatch(/zebra-draft/);
+    const reads: OpInput[] = [{ type: "draft.list" }, { type: "draft.read", id }];
+    const writes: OpInput[] = [{ type: "draft.save", id, manifest: manifest([READ], "zebra-draft-name"), code: "zebra-draft-marker", running: true }];
+    const kinds = {
+      unlimited: [{}, "done", "done"],
+      "read-only": [{ readOnly: true }, "done", "forbidden: A read-only token can't draft.save"],
+      limited: [{ workspaceId: eve.workspaceId, folderIds: [folder] }, "forbidden: An agent limited to folders can't", "forbidden: An agent limited to folders can't draft.save"],
+      "limited and read-only": [{ workspaceId: eve.workspaceId, folderIds: [folder], readOnly: true }, "forbidden: An agent limited to folders can't", "forbidden: A read-only token can't draft.save"],
+    } as const;
+    for (const [kind, [options, read, write]] of Object.entries(kinds)) {
+      const actor = agentActor((await authenticateAgent(env.DB, (await connectAgent(env.DB, eve.personId, "Claude", options as never)).token))!, eve.workspaceId);
+      for (const op of reads) expect(await outcome(actor, op), `${kind} ${op.type}`).toBe(read === "done" ? "done" : `${read} ${op.type}`);
+      for (const op of writes) expect(await outcome(actor, op), `${kind} ${op.type}`).toBe(write);
     }
+    // Ada's agent, her admin's, reads Ada's drafts: there are none, and no tool of hers says anything of Eve's.
+    const adas = (await authenticateAgent(env.DB, (await connectAgent(env.DB, ada.personId, "Claude")).token))!;
+    const said: string[] = [];
+    for (const tool of TOOLS) {
+      const result = await callTool(env.DB, adas, tool.name, tool.name.includes("draft") ? { id } : {}).catch(() => null);
+      if (result) said.push(result.content[0]!.text);
+    }
+    expect(said.join("\n")).not.toMatch(/zebra-draft/);
+    expect(await outcome(agentActor(adas, ada.workspaceId), { type: "draft.read", id })).toMatch(/^not_found/);
     expect((await perform(env.DB, eve, { type: "draft.read", id })).code).toBe("zebra-draft-marker");
   });
 

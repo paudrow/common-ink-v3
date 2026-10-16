@@ -15,9 +15,12 @@ export const ownRecord = (id: string, manifest: Manifest): InstalledPlugin => ({
   codeHash: null,
   fullTrust: null,
   installedBy: null,
+  installedVia: null,
+  updatedBy: null,
+  updatedVia: null,
   installedAt: null,
   updatedAt: null,
-  permissions: manifest.capabilities.map((c): Permission => ({ capability: c.name, reason: c.reason, origins: c.origins ?? [], state: "allowed", locked: true, decidedBy: null, voided: false, requests: [] })),
+  permissions: manifest.capabilities.map((c): Permission => ({ capability: c.name, reason: c.reason, origins: c.origins ?? [], state: "allowed", locked: true, decidedBy: null, decidedVia: null, voided: false, requests: [] })),
 });
 
 export const OWN_RECORDS: readonly InstalledPlugin[] = OWN_SANDBOXED_IDS.map((id) => ownRecord(id, OWN_SANDBOXED[id]));
@@ -60,7 +63,7 @@ export function decideRun(original: InstalledPlugin, draft: DraftSummary | undef
     if (asksFullTrust(read.manifest)) return { as: "refused", plugin: original, why: DRAFT_FULL_TRUST };
     // Never more than the original is allowed: a capability the draft adds, or one the original has that is off, is off. Full trust is not a reach a frame can have.
     const allowed = (capability: string) => original.permissions.find((p) => p.capability === capability && p.state === "allowed" && capability !== FULL_TRUST);
-    const permissions = read.manifest.capabilities.map((c): Permission => allowed(c.name) ?? { capability: c.name, reason: c.reason, origins: [], state: "off", locked: true, decidedBy: null, voided: false, requests: [] });
+    const permissions = read.manifest.capabilities.map((c): Permission => allowed(c.name) ?? { capability: c.name, reason: c.reason, origins: [], state: "off", locked: true, decidedBy: null, decidedVia: null, voided: false, requests: [] });
     return { as: "draft", codeHash: draft.codeHash, plugin: { ...original, manifest: read.manifest, codeHash: draft.codeHash, fullTrust: null, permissions } };
   }
   if (!asksFullTrust(original.manifest)) return { as: "sandbox", plugin: original };

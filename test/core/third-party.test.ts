@@ -116,7 +116,7 @@ describe("the record of a workspace's plugins", () => {
     const vera = await addMember(ada, "viewer", "Vera Viewer");
     const id = await install(ada);
     const hash = await codeHash(CODE);
-    const off = { state: "off", locked: false, decidedBy: null, voided: false, requests: [] };
+    const off = { state: "off", locked: false, decidedBy: null, decidedVia: null, voided: false, requests: [] };
 
     const record = await perform(env.DB, vera, { type: "plugin.list" });
     expect(record).toEqual({
@@ -129,7 +129,10 @@ describe("the record of a workspace's plugins", () => {
           codeHash: hash,
           fullTrust: null,
           installedBy: "Ada Lovelace",
+          installedVia: null,
           installedAt: expect.any(Number),
+          updatedBy: null,
+          updatedVia: null,
           updatedAt: expect.any(Number),
           permissions: [
             { capability: "notes.read", reason: READ.reason, origins: [], ...off },
@@ -144,7 +147,10 @@ describe("the record of a workspace's plugins", () => {
           codeHash: null,
           fullTrust: null,
           installedBy: null,
+          installedVia: null,
           installedAt: null,
+          updatedBy: null,
+          updatedVia: null,
           updatedAt: null,
           permissions: [{ capability: "network", reason: expect.stringContaining("HTML written in a note"), origins: [], ...off }],
         },
@@ -336,27 +342,29 @@ describe("the record of a workspace's plugins", () => {
     expect(await told(ada, again, "notes.read")).toEqual(OFF);
   });
 
-  it("an agent is refused every plugin.* write, and reads the record", async () => {
+  it("an admin's agent does what its admin does with plugins, but for a frame, which runs in a browser", async () => {
     const ada = await newMember();
     const id = await install(ada);
     const agent: Actor = { kind: "agent", agentId: (await connectAgent(env.DB, ada.personId, "Claude")).agent.id, personId: ada.personId, workspaceId: ada.workspaceId };
     const got: Record<string, string> = {};
     for (const op of pluginOps(id)) got[`${op.type}${"replaces" in op ? " replaces" : ""}`] = await outcome(agent, op);
+    // In order: the plugin is uninstalled before it is permitted, and an admin decides rather than asks.
     expect(got).toEqual({
       "plugin.list": "done",
-      "plugin.read": "forbidden: An agent can't plugin.read",
-      "plugin.install": "forbidden: An agent can't plugin.install",
-      "plugin.install replaces": "forbidden: An agent can't plugin.install",
-      "plugin.uninstall": "forbidden: An agent can't plugin.uninstall",
-      "plugin.permit": "forbidden: An agent can't plugin.permit",
-      "plugin.request": "forbidden: An agent can't plugin.request",
+      "plugin.read": "done",
+      "plugin.install": "done",
+      "plugin.install replaces": "done",
+      "plugin.uninstall": "done",
+      "plugin.permit": "not_found: No such plugin",
+      "plugin.request": "invalid: An admin decides it: plugin.permit",
       "plugin.frame": "forbidden: An agent can't plugin.frame",
     });
-    // An admin's agent decides nothing, and is told so.
     const record = await perform(env.DB, agent, { type: "plugin.list" });
-    expect(record.canManage).toBe(false);
-    expect(record.plugins.map((p) => p.id)).toEqual([id, "html"]);
-    expect(await told(ada, id, "notes.read")).toEqual(OFF);
+    expect(record.canManage).toBe(true);
+    expect(record.plugins.map((p) => [p.manifest.name, p.installedBy, p.installedVia])).toEqual([
+      ["Word Tally", "Ada Lovelace", "Claude"],
+      ["HTML embeds", null, null],
+    ]);
   });
 
   it("a guest is refused", async () => {

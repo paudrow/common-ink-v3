@@ -3,7 +3,7 @@ import type { UploadKind } from "./filetypes.ts";
 import type { NoteState } from "./lifecycle.ts";
 import { readableName } from "./mentions.ts";
 import { OWN_SANDBOXED_IDS } from "./ownPlugins.ts";
-import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Origins, type Draft, type DraftSummary, type PluginRecord } from "./plugins.ts";
+import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Origins, type Draft, type DraftSummary, type PluginRecord, type Validated } from "./plugins.ts";
 import { parseRule } from "./recurrence.ts";
 import { dayIn } from "./history.ts";
 import { MAX_SEARCH_LENGTH, type SortKey } from "./query.ts";
@@ -732,6 +732,10 @@ export const Op = z.discriminatedUnion("type", [
   }),
   /** A member who isn't an admin saying yes: it allows nothing, and waits for an admin. `origins` as for plugin.permit. */
   z.object({ type: z.literal("plugin.request"), id: PluginSubject, capability: CapabilityName, origins: Origins.optional() }),
+  /** A new plugin's two files to start from: a manifest named `name`, and code that runs shut off and does one small thing. Nothing is kept. */
+  z.object({ type: z.literal("plugin.scaffold"), name: z.string().min(1).max(60) }),
+  /** What installing a manifest and code would make of them, without installing or keeping anything: the manifest as it would be kept and what it asks for, or why it would be refused. */
+  z.object({ type: z.literal("plugin.validate"), manifest: z.string().max(MAX_PLUGIN_MANIFEST), code: z.string().max(MAX_PLUGIN_CODE) }),
   /**
    * What a frame of the plugin's, or of an HTML embed, is opened with when its network is allowed:
    * a token, good once and for a minute, for the address that answers with those sites let through.
@@ -1402,6 +1406,8 @@ export interface Results {
   "plugin.uninstall": PluginRecord;
   "plugin.permit": PluginRecord;
   "plugin.request": PluginRecord;
+  "plugin.scaffold": { manifest: string; code: string };
+  "plugin.validate": Validated;
   "plugin.frame": { token: string | null; origins: string[] };
   "plugin.trust": PluginRecord;
   "draft.list": { drafts: DraftSummary[] };

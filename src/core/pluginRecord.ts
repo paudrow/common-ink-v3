@@ -43,7 +43,10 @@ interface InstallRow {
   manifest: string;
   code_hash: string;
   installed_by_name: string | null;
+  installed_via_name: string | null;
   installed_at: number;
+  updated_by_name: string | null;
+  updated_via_name: string | null;
   updated_at: number;
 }
 
@@ -55,6 +58,7 @@ interface PermissionRow {
   approved: string | null;
   origins: string | null;
   decided_by_name: string | null;
+  decided_via_name?: string | null;
 }
 
 interface TrustRow {
@@ -97,6 +101,7 @@ function toPermission(capability: Capability, reason: string, origins: string[],
     state: allowed ? "allowed" : "off",
     locked: row?.locked === 1,
     decidedBy: voided ? null : (row?.decided_by_name ?? null),
+    decidedVia: voided ? null : (row?.decided_via_name ?? null),
     voided,
     requests: requests.map((r) => ({ by: { id: r.requested_by, name: r.name }, at: r.at, origins: originsIn(r.origins) })),
   };
@@ -110,10 +115,12 @@ const HTML_MANIFEST: Manifest = { ...Manifest.parse({ name: "Embeds of HTML" }),
 export async function listPlugins(ctx: Context): Promise<PluginRecord> {
   const [installs, permissions, requests, trusting] = await ctx.db.batch<Record<string, unknown>>([
     ctx.db
-      .prepare(`SELECT i.id, i.manifest, i.code_hash, p.name AS installed_by_name, i.installed_at, i.updated_at FROM plugin_installs i LEFT JOIN people p ON p.id = i.installed_by WHERE i.${INSTALLED} ORDER BY i.installed_at, i.id`)
+      .prepare(`SELECT i.id, i.manifest, i.code_hash, p.name AS installed_by_name, ia.name AS installed_via_name, i.installed_at, u.name AS updated_by_name, ua.name AS updated_via_name, i.updated_at
+         FROM plugin_installs i LEFT JOIN people p ON p.id = i.installed_by LEFT JOIN agents ia ON ia.id = i.installed_via LEFT JOIN people u ON u.id = i.updated_by LEFT JOIN agents ua ON ua.id = i.updated_via
+         WHERE i.${INSTALLED} ORDER BY i.installed_at, i.id`)
       .bind(ctx.workspaceId),
     ctx.db
-      .prepare("SELECT s.subject, s.capability, s.state, s.locked, s.approved, s.origins, p.name AS decided_by_name FROM plugin_permissions s LEFT JOIN people p ON p.id = s.decided_by WHERE s.workspace_id = ?")
+      .prepare("SELECT s.subject, s.capability, s.state, s.locked, s.approved, s.origins, p.name AS decided_by_name, a.name AS decided_via_name FROM plugin_permissions s LEFT JOIN people p ON p.id = s.decided_by LEFT JOIN agents a ON a.id = s.decided_via WHERE s.workspace_id = ?")
       .bind(ctx.workspaceId),
     // Someone who has left the workspace since is waiting on nothing.
     ctx.db
@@ -132,8 +139,8 @@ export async function listPlugins(ctx: Context): Promise<PluginRecord> {
       )
       .bind(ctx.workspaceId),
   ]);
-  // Whether full trust was asked for, whether it was granted and who has it on are told to members, signed in. An agent or a plugin reads a record in which nothing asks for it.
-  const member = ctx.author.kind === "member";
+  // Whether full trust was asked for, whether it was granted and who has it on are told to members and to their agents, who act in their role. A plugin reads a record in which nothing asks for it.
+  const member = ctx.author.kind !== "plugin";
   const canManage = member && ctx.role === "admin";
   const turnedOn = trusting!.results as unknown as TrustRow[];
   const fullTrust = (id: string, hash: string, permission: Permission | undefined): FullTrust | null => {
@@ -164,7 +171,10 @@ export async function listPlugins(ctx: Context): Promise<PluginRecord> {
             permissions.find((p) => p.capability === FULL_TRUST),
           ),
           installedBy: row.installed_by_name,
+          installedVia: row.installed_via_name,
           installedAt: row.installed_at,
+          updatedBy: row.updated_by_name,
+          updatedVia: row.updated_via_name,
           updatedAt: row.updated_at,
           permissions,
         };
@@ -176,7 +186,10 @@ export async function listPlugins(ctx: Context): Promise<PluginRecord> {
         codeHash: null,
         fullTrust: null,
         installedBy: null,
+        installedVia: null,
         installedAt: null,
+        updatedBy: null,
+        updatedVia: null,
         updatedAt: null,
         permissions: [toPermission(HTML.capability, HTML.reason, originsIn(html?.origins ?? null), null, html, asked.get(key(HTML_EMBEDS, HTML.capability)) ?? [])],
       },
@@ -240,6 +253,9 @@ export async function actingPlugin(db: D1Database, workspaceId: string, pluginId
   return on ? { name: manifest.name, allowed: "all" } : { refused: fullTrustOff(manifest.name) };
 }
 
+/** The agent that is asking for its member, kept beside the member on what it changes: null when the member asks themself. */
+const agentOf = (ctx: Context): string | null => (ctx.author.kind === "agent" ? ctx.author.agentId : null);
+
 export async function readPlugin(ctx: Context, id: string): Promise<Results["plugin.read"]> {
   const row = await ctx.db.prepare(`SELECT code, code_hash FROM plugin_installs WHERE id = ? AND ${INSTALLED}`).bind(id, ctx.workspaceId).first<{ code: string; code_hash: string }>();
   if (!row) throw new OpError("not_found", NO_SUCH_PLUGIN);
@@ -265,17 +281,19 @@ export async function installPlugin(ctx: Context, op: Extract<Op, { type: "plugi
         )
         .bind(ctx.workspaceId, id, approval, hash),
       // What else was permitted is left as it is: each allowance says what it was of, and stands or not by that.
-      ctx.db.prepare(`UPDATE plugin_installs SET manifest = ?3, code = ?4, code_hash = ?5, updated_at = ?6 WHERE id = ?1 AND workspace_id = ?2 AND removed_at IS NULL`).bind(id, ctx.workspaceId, manifest, op.code, hash, ctx.now),
+      ctx.db
+        .prepare(`UPDATE plugin_installs SET manifest = ?3, code = ?4, code_hash = ?5, updated_at = ?6, updated_by = ?7, updated_via = ?8 WHERE id = ?1 AND workspace_id = ?2 AND removed_at IS NULL`)
+        .bind(id, ctx.workspaceId, manifest, op.code, hash, ctx.now, ctx.personId, agentOf(ctx)),
     ]);
     if (!updated!.meta.changes) throw new OpError("not_found", NO_SUCH_PLUGIN);
   } else {
     // One statement, so two installs at once can't both take the last place.
     const { meta } = await ctx.db
       .prepare(
-        `INSERT INTO plugin_installs (id, workspace_id, manifest, code, code_hash, installed_by, installed_at, updated_at)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7 WHERE (SELECT COUNT(*) FROM plugin_installs WHERE workspace_id = ?2 AND removed_at IS NULL) < ?8`,
+        `INSERT INTO plugin_installs (id, workspace_id, manifest, code, code_hash, installed_by, installed_at, updated_at, installed_via)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?9 WHERE (SELECT COUNT(*) FROM plugin_installs WHERE workspace_id = ?2 AND removed_at IS NULL) < ?8`,
       )
-      .bind(id, ctx.workspaceId, manifest, op.code, hash, ctx.personId, ctx.now, MAX_PLUGINS)
+      .bind(id, ctx.workspaceId, manifest, op.code, hash, ctx.personId, ctx.now, MAX_PLUGINS, agentOf(ctx))
       .run();
     if (!meta.changes) throw new OpError("invalid", `A workspace holds at most ${MAX_PLUGINS} plugins. Uninstall one first.`);
   }
@@ -347,12 +365,12 @@ export async function permitPlugin(ctx: Context, op: Extract<Op, { type: "plugin
     // A plugin's is written only while the plugin is still there, and an allowance only while its code is still the code named: said in the statement, so a decision that crosses an update or an uninstall decides nothing.
     ctx.db
       .prepare(
-        `INSERT INTO plugin_permissions (workspace_id, subject, capability, state, locked, approved, origins, decided_by, decided_at)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+        `INSERT INTO plugin_permissions (workspace_id, subject, capability, state, locked, approved, origins, decided_by, decided_at, decided_via)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?11
          WHERE ?2 = '${HTML_EMBEDS}' OR EXISTS (SELECT 1 FROM plugin_installs WHERE id = ?2 AND workspace_id = ?1 AND removed_at IS NULL AND (?4 = 'off' OR code_hash = ?10))
-         ON CONFLICT (workspace_id, subject, capability) DO UPDATE SET state = excluded.state, locked = excluded.locked, approved = excluded.approved, origins = excluded.origins, decided_by = excluded.decided_by, decided_at = excluded.decided_at`,
+         ON CONFLICT (workspace_id, subject, capability) DO UPDATE SET state = excluded.state, locked = excluded.locked, approved = excluded.approved, origins = excluded.origins, decided_by = excluded.decided_by, decided_at = excluded.decided_at, decided_via = excluded.decided_via`,
       )
-      .bind(ctx.workspaceId, op.id, op.capability, op.allowed ? "allowed" : "off", (op.locked ?? row?.locked === 1) ? 1 : 0, op.allowed ? approval : null, sites, ctx.personId, ctx.now, op.codeHash ?? null),
+      .bind(ctx.workspaceId, op.id, op.capability, op.allowed ? "allowed" : "off", (op.locked ?? row?.locked === 1) ? 1 : 0, op.allowed ? approval : null, sites, ctx.personId, ctx.now, op.codeHash ?? null, agentOf(ctx)),
     ctx.db.prepare("DELETE FROM plugin_requests WHERE workspace_id = ? AND subject = ? AND capability = ?").bind(ctx.workspaceId, op.id, op.capability),
     // A decision on full trust, either way, starts it from nobody: taking it back turns everyone off, and granting it turns nobody on. Saying again what already stands, as locking it does, decides nothing.
     ...(op.capability === FULL_TRUST && (!op.allowed || !stands(row, approval)) ? [ctx.db.prepare("DELETE FROM plugin_trust WHERE workspace_id = ? AND plugin_id = ?").bind(ctx.workspaceId, op.id)] : []),

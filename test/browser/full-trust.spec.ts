@@ -193,8 +193,22 @@ test("changing a full-trust plugin's code stops it for everyone at once, putting
   }
   expect((await asPlugin(page, workspaceId, id, { type: "note.list" })).status).toBe(403);
 
-  // Granted again, it is still off for each member until they turn it on again.
+  // Granting the changed code asks the admin to type the plugin's name: nothing is granted until it is typed exactly.
   await admin.getByRole("button", { name: "Allow Full trust for Deep Keys" }).click();
+  const retype = admin.getByRole("form", { name: "Grant full trust to the new code of Deep Keys?" });
+  const grantIt = retype.getByRole("button", { name: "Grant it" });
+  await expect(grantIt).toBeDisabled();
+  await retype.getByRole("textbox", { name: "Type Deep Keys to grant it" }).fill("deep keys");
+  await expect(grantIt).toBeDisabled();
+  await retype.getByRole("textbox").press("Enter");
+  expect((await perform(admin, { type: "plugin.list" })).plugins.find((p) => p.id === id)!.fullTrust!.grantedHash).toBeNull();
+  await retype.getByRole("button", { name: "Cancel" }).click();
+  await expect(retype).toHaveCount(0);
+  await admin.getByRole("button", { name: "Allow Full trust for Deep Keys" }).click();
+  await retype.getByRole("textbox", { name: "Type Deep Keys to grant it" }).fill("Deep Keys");
+  await grantIt.click();
+  await expect(retype).toHaveCount(0);
+  // Granted again, it is still off for each member until they turn it on again.
   await expect(reason(admin)).toHaveText("It isn't running for you: an admin granted it full trust, and you haven't turned it on.");
   await relist(page);
   await expect(reason(page)).toHaveText("It isn't running for you: an admin granted it full trust, and you haven't turned it on.");
@@ -390,7 +404,8 @@ test("a full-trust plugin's page has no more controls than any third-party plugi
   };
   const sandboxed = await controls("Tame Keys");
   expect(await controls("Deep Keys")).toBe(sandboxed);
-  expect(sandboxed).toBe(9);
+  // Update and Uninstall are in the page's one "…" menu.
+  expect(sandboxed).toBe(8);
 });
 
 test("code that steps outside the function it is wrapped in runs only once it is started, and turning it off still ends it", async ({ page }) => {
@@ -419,4 +434,20 @@ test("code that steps outside the function it is wrapped in runs only once it is
   await perform(page, { type: "plugin.trust", id, on: false });
   await page.evaluate(() => void window.dispatchEvent(new Event("focus")));
   await expect.poll(brokeOut, { timeout: 15_000 }).toBe(0);
+});
+
+test("updating a full-trust plugin offers no box that grants the new code: it is granted on its page, where the admin types its name", async ({ page }) => {
+  const { admin, id } = await team(page);
+  await admin.getByRole("button", { name: "More for Deep Keys" }).click();
+  await admin.getByRole("menuitem", { name: "Update…" }).click();
+  const update = admin.getByRole("form", { name: "Update Deep Keys" });
+  await update.getByRole("textbox", { name: "Manifest" }).fill(JSON.stringify(DEEP));
+  await update.getByRole("textbox", { name: "Code" }).fill(deepCode("v2"));
+  await update.getByRole("button", { name: "Review" }).click();
+  const review = update.getByRole("group", { name: "Review Deep Keys" });
+  await expect(review.getByRole("listitem", { name: "Full trust" })).toContainText("grant the new code on its page, where you type its name");
+  await expect(review.getByRole("checkbox")).toHaveCount(0);
+  await review.getByRole("button", { name: "Update" }).click();
+  await expect.poll(async () => (await perform(admin, { type: "plugin.list" })).plugins.find((p) => p.id === id)!.fullTrust!.grantedHash).toBeNull();
+  await expect(admin.getByRole("button", { name: "Allow Full trust for Deep Keys" })).toBeVisible();
 });

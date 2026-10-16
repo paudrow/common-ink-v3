@@ -79,7 +79,7 @@ const Words = (max: number) =>
     .trim()
     .min(1)
     .max(max)
-    .regex(/^[^\p{Cc}\p{Cf}]*$/u, "can't contain control or invisible characters");
+    .regex(/^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]*$/u, "can't contain control or invisible characters, or a line or paragraph separator");
 
 /** Letters of Cyrillic and Greek that are drawn as a Latin letter is, each beside that letter. Capitals and small letters are apart, since В looks like B and в does not. */
 const LOOKALIKES: Record<string, string> = Object.fromEntries(
@@ -249,6 +249,48 @@ export async function codeHash(code: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** What installing a manifest and code would make of them, as `plugin.validate` answers. */
+export type Validated = { ok: true; manifest: Manifest; codeHash: string; fullTrust: boolean } | { ok: false; reason: string };
+
+/** The manifest as it would be kept, the name of the code and whether it asks for full trust; or why installing them would be refused. Nothing is kept. */
+export async function validate(manifest: string, code: string): Promise<Validated> {
+  const read = readManifest(manifest);
+  if ("reason" in read) return { ok: false, reason: read.reason };
+  return { ok: true, manifest: read.manifest, codeHash: await codeHash(code), fullTrust: asksFullTrust(read.manifest) };
+}
+
+/** A new plugin's two files: a manifest that asks for nothing, with one command and one view in the inspector, and code that runs shut off and fills both. Or why `name` can't be a plugin's. */
+export function scaffold(name: string): { manifest: string; code: string } | { reason: string } {
+  const manifest = JSON.stringify(
+    {
+      name,
+      version: "1",
+      description: `${name}: say here, in a sentence, what it does.`,
+      capabilities: [],
+      commands: [{ id: "hello", title: "Say hello" }],
+      views: [{ slot: "inspector", id: "main", label: "Hello" }],
+      settings: { greeting: { type: "string", default: "Hello", title: "Greeting" } },
+    },
+    null,
+    2,
+  );
+  const read = readManifest(manifest);
+  if ("reason" in read) return { reason: read.reason };
+  const code = `// ${name}. It runs shut off from the app, in a frame of its own, and reaches the workspace only through
+// ink.perform, with what an admin permitted it. Ask for a capability in the manifest to read or change notes.
+
+ink.onCommand("hello", () => ink.notify(ink.settings.greeting + " from " + ${JSON.stringify(name)}));
+
+if (ink.context.kind === "view") {
+  const said = document.createElement("p");
+  said.textContent = ink.settings.greeting + ". The note in front is shown here once a note is open.";
+  ink.root.append(said);
+  ink.onNote((note) => (said.textContent = note ? ink.settings.greeting + ": " + note.text.split("\\n")[0] : ink.settings.greeting + "."));
+}
+`;
+  return { manifest, code };
+}
+
 /**
  * What an approval was of, as one string: the capability as the manifest declared it, and the code.
  * An approval stands only while this is what the plugin still is, so new code voids every approval
@@ -283,6 +325,8 @@ export interface Permission {
   locked: boolean;
   /** Who decided it last, by name. Null for one nobody has decided, or whose approval the plugin's change voided. */
   decidedBy: string | null;
+  /** The agent that decided it for `decidedBy`, by name. Null when the member decided it themself. */
+  decidedVia: string | null;
   /** True when it was allowed and the plugin has changed since, so it is off again until someone looks. */
   voided: boolean;
   /** Who is waiting on an admin, oldest first. */
@@ -301,7 +345,12 @@ export interface InstalledPlugin {
   /** For a plugin that asks for full trust, what stands between it and running for whoever asked. Null for every other, and for an agent or a plugin that asks, who are told nothing of it. */
   fullTrust: FullTrust | null;
   installedBy: string | null;
+  /** The agent that installed it for `installedBy`, by name. Null when the member did it themself. */
+  installedVia: string | null;
   installedAt: number | null;
+  /** Who last put other code in its place, and the agent that did it for them: null until it is updated, and for the member themself. */
+  updatedBy: string | null;
+  updatedVia: string | null;
   updatedAt: number | null;
   permissions: Permission[];
 }

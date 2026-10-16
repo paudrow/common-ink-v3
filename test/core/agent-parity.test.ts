@@ -16,6 +16,17 @@ const COMMANDS: Record<string, string[][]> = {
   list_workspaces: [["workspaces"]],
   list_members: [["members"]],
   list_plugins: [["plugins"]],
+  scaffold_plugin: [["plugin-new", "Greeter"]],
+  validate_plugin: [["plugin-validate", "--manifest", '{"name":"Greeter"}', "--code", "ink.notify(1)"]],
+  read_plugin: [["plugin", ID]],
+  install_plugin: [["plugin-install", "--manifest", '{"name":"Greeter"}', "--code", "ink.notify(1)", "--replaces", ID]],
+  uninstall_plugin: [["plugin-uninstall", ID]],
+  permit_plugin: [["plugin-permit", ID, "--capability", "notes.read", "--allowed", "true", "--locked", "false", "--origins", "https://a.example", "--code-hash", "a".repeat(64)]],
+  request_plugin_permission: [["plugin-request", "html", "--capability", "network", "--origins", "https://a.example"]],
+  list_drafts: [["drafts"]],
+  read_draft: [["draft", ID]],
+  save_draft: [["draft-save", ID, "--manifest", '{"name":"Greeter"}', "--code", "ink.notify(1)", "--running", "true", "--base-hash", "none"]],
+  discard_draft: [["draft-discard", ID]],
   list_notes: [["notes", "--folder", ID, "--since", "2026-10-01", "--tag", "money", "--archived", "true"]],
   search: [["search", "budget #money", "--today", "2026-10-11", "--zone", "Europe/Paris", "--folder", ID, "--archived", "only", "--has-todos", "true", "--sort", "title", "--limit", "5", "--offset", "5"]],
   list_tags: [["tags", "--archived", "true"]],
@@ -188,6 +199,15 @@ describe("what an agent can do, against what the web app can", () => {
       expect([...sent].sort(), `ink has no way to send every argument of ${tool.name}; add a command and list it in COMMANDS`).toEqual(argumentsOf(tool).sort());
     }
     expect(Object.keys(COMMANDS).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  });
+
+  it("reads a yes or no only as true or false, and asks the server nothing otherwise: a mistyped no must never allow", async () => {
+    for (const argv of [["plugin-permit", "html", "--capability", "network", "--allowed", "no", "--origins", "https://x.example"], ["draft-save", ID, "--manifest", "{}", "--code", "", "--running", "0"], ["plugin-permit", ID, "--capability", "notes.read", "--allowed", "False"]]) {
+      const said: string[] = [];
+      const io = { env: { INK_TOKEN: "cink_x" }, stdin: async () => "", out: (text: string) => void said.push(text), fetch: (async () => expect.unreachable(argv.join(" "))) as unknown as typeof fetch };
+      expect(await run(argv, io), argv.join(" ")).toBe(2);
+      expect(said.join("\n")).toMatch(/is true or false/);
+    }
   });
 
   it("refuses a flag a command doesn't take, and asks the server nothing: a filter dropped unsaid would list everything", async () => {

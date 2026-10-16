@@ -394,6 +394,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   // An admin is let through to be told that an admin decides, and asks nothing.
   "plugin.request": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", capability: "notes.read" }) },
   "plugin.frame": { on: "workspace", who: MEMBERS, args: () => ({ id: "html" }) },
+  "plugin.scaffold": { on: "workspace", who: MEMBERS, args: () => ({ name: "Greeter" }) },
+  "plugin.validate": { on: "workspace", who: MEMBERS, args: () => ({ manifest: "{}", code: "" }) },
   // Turning a full-trust plugin on, and a draft, are each member's own. Each is asked of a plugin that isn't there.
   "plugin.trust": { on: "workspace", who: MEMBERS, args: () => ({ id: "aaaaaaaaaaaa", on: false }) },
   "draft.list": { on: "workspace", who: MEMBERS, args: () => ({}) },
@@ -442,7 +444,9 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer", "pin.set"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer", "pin.set", "plugin.install", "plugin.uninstall", "plugin.permit", "plugin.request", "draft.save", "draft.discard"];
+/** What is the member's, and their agent's in their role, over the workspace's plugins: never a plugin's, whatever it is permitted, and nothing an agent limited to folders sees. */
+const PLUGIN_WORK = (type: OpType) => (type.startsWith("plugin.") && type !== "plugin.list") || type.startsWith("draft.");
 /** What answers from what is the asker's own and in no folder: their data sources, and how far they have read. */
 const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "record.refer", "record.read", "record.notes", "visit.read"];
 const AGENTS = [
@@ -514,7 +518,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         /** A plugin with full trust that runs may ask what its member's agent may, as its member: everything that isn't the member's alone. */
         const full = !!plugin && !!runs && plugin.permitted === FULL && !!plugin.on && !plugin.changed;
         const permitted = plugin && !full && opsAllowedBy(runs && plugin.declares !== FULL ? plugin.permitted.filter((capability) => !plugin.draft || plugin.draft.includes(capability)) : []);
-        const mayAsk = (type: OpType) => (full ? NOT_FOR_AGENTS[type] === undefined : !permitted || permitted.has(type));
+        const mayAsk = (type: OpType) => (full ? NOT_FOR_AGENTS[type] === undefined && !PLUGIN_WORK(type) : !permitted || permitted.has(type));
         // What is told as a number gives a note away as surely as its title: a folder's count, and an author's changes by day.
         if (mayAsk("folder.list")) {
           const { folders: listed } = await perform(env.DB, actor, { type: "folder.list" });
@@ -605,7 +609,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             if (type === "member.leave") continue;
             // Who is in the workspace is told to whoever sees all of it.
             // A daily note is in a folder at the top of the workspace, or makes one there: a member's, and their agent's when it sees all of it.
-            if ((type === "member.list" || type === "plugin.list" || type === "daily.open" || type === "daily.find" || OWN.includes(type)) && within) allowed = false;
+            if ((type === "member.list" || type === "plugin.list" || PLUGIN_WORK(type) || type === "daily.open" || type === "daily.find" || OWN.includes(type)) && within) allowed = false;
             await run(type, type, plan.args(w), allowed ? "done" : "forbidden", true);
           } else {
             await run(type, type, plan.args(w), "forbidden");

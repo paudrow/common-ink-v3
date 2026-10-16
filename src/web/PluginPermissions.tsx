@@ -100,6 +100,11 @@ export function PermissionRow({ subject, permission, admin, personId, changes: {
     const sent = sitesNow();
     if (sent) void change({ type: "plugin.permit", id: subject.id, capability, allowed: true, ...sent, ...read });
   };
+  /** Full trust granted again after the code changed is granted to code nobody has granted: the admin types the plugin's name to say they mean it. */
+  const retype = capability === "full-trust" && permission.voided;
+  /** What the admin has typed of the plugin's name, while they are asked to. */
+  const [typed, setTyped] = useState<string | null>(null);
+  const name = subject.manifest.name;
   return (
     <li className="permission" aria-label={of}>
       <div className="permission-head">
@@ -108,7 +113,7 @@ export function PermissionRow({ subject, permission, admin, personId, changes: {
           {allowed ? "Allowed" : "Off"}
         </span>
         {locked && <span className="badge">Locked</span>}
-        {permission.decidedBy && <span className="agent-meta">decided by {permission.decidedBy}</span>}
+        {permission.decidedBy && <span className="agent-meta">decided by {byWhom(permission.decidedBy, permission.decidedVia)}</span>}
       </div>
       <p className="permission-detail">{detail}</p>
       <p className="permission-reason">
@@ -127,7 +132,7 @@ export function PermissionRow({ subject, permission, admin, personId, changes: {
       {admin ? (
         <div className="agent-actions">
           {(!allowed || listed) && (
-            <button type="button" className="button small" disabled={busy || locked} title={locked ? "Unlock it first" : undefined} aria-label={`Allow ${of}`} onClick={allow}>
+            <button type="button" className="button small" disabled={busy || locked} title={locked ? "Unlock it first" : undefined} aria-label={`Allow ${of}`} onClick={() => (retype ? setTyped("") : allow())}>
               Allow
             </button>
           )}
@@ -162,13 +167,36 @@ export function PermissionRow({ subject, permission, admin, personId, changes: {
           </button>
         </div>
       )}
+      {admin && typed !== null && (
+        <form
+          className="confirm retype"
+          aria-label={`Grant full trust to the new code of ${name}?`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (typed !== name) return;
+            setTyped(null);
+            allow();
+          }}
+        >
+          <span>
+            The code of {name} has changed since it was granted, and none of it has been granted. Read it under Source, then type <strong>{name}</strong> to grant this code.
+          </span>
+          <input type="text" aria-label={`Type ${name} to grant it`} autoFocus spellCheck={false} autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+          <button type="submit" className="button small primary" disabled={busy || typed !== name}>
+            Grant it
+          </button>
+          <button type="button" className="link" onClick={() => setTyped(null)}>
+            Cancel
+          </button>
+        </form>
+      )}
       {admin &&
         permission.requests.map((request) => (
           <div key={request.by.id} className="confirm" role="group" aria-label={`${request.by.name} asked for ${of}`}>
             <span>
               {request.by.name} asked for this{request.origins.length > 0 && `, for ${request.origins.join(", ")}`}.
             </span>
-            <button type="button" className="button small primary" disabled={busy} onClick={() => void change({ type: "plugin.permit", id: subject.id, capability, allowed: true, ...(listed && { origins: request.origins }), ...read })}>
+            <button type="button" className="button small primary" disabled={busy} onClick={() => (retype ? setTyped("") : void change({ type: "plugin.permit", id: subject.id, capability, allowed: true, ...(listed && { origins: request.origins }), ...read }))}>
               Approve
             </button>
             {/* Deciding it as it stands is what takes the request away. */}
@@ -180,3 +208,6 @@ export function PermissionRow({ subject, permission, admin, personId, changes: {
     </li>
   );
 }
+
+/** Who did something, and the agent that did it for them when one did: "Claude for Ada Lovelace". */
+export const byWhom = (member: string, agent: string | null): string => (agent ? `${agent} for ${member}` : member);

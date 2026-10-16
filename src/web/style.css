@@ -4801,15 +4801,19 @@ kbd {
   font-size: 13px;
 }
 
-/* What just happened, in the window's bottom right corner, as v1's toasts. */
+/* What just happened, in the window's bottom right corner, as v1's toasts: above the bottom bar, and above what a note keeps at its foot (vim's mode), never over either. */
 .toasts {
   position: fixed;
   right: 18px;
-  bottom: 44px;
+  bottom: calc(44px + var(--foot-room, 0px));
   z-index: 80;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+body:has(.note-foot .cm-panels) .toasts {
+  --foot-room: 1.75rem;
 }
 
 .toast-card {
@@ -5537,6 +5541,22 @@ button.diff-fold:hover {
   padding: 6px 8px;
   border: 1px solid var(--accent);
   border-radius: 8px;
+}
+
+/* Granting full trust to changed code: the plugin's name typed out, in the app's monospace so each letter is plain. */
+.confirm.retype {
+  margin: 0;
+}
+
+.confirm.retype input {
+  min-width: 12rem;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
 }
 
 .revert-dialog-body > .button {
@@ -10378,6 +10398,19 @@ button.dash-row:hover {
 
 .source-code .tok-invalid {
   color: light-dark(#b3261e, #f28b82);
+}
+
+/* The file picked, and for a draft the switch to what it changes in it, on one row. */
+.source-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.source-compare {
+  font-size: 12px;
 }
 
 .source-file {

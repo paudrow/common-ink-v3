@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { lineDiff } from "../core/diff.ts";
 import type { Draft, DraftSummary, PluginRecord } from "../core/plugins.ts";
 import { changesBetween } from "../core/text.ts";
 import { perform } from "./api.ts";
+import { MoreMenu } from "./MoreMenu.tsx";
 import type { Listed } from "./pluginList.ts";
 import { CODE_FILE, MANIFEST_FILE, editableOf, sourceOf, type Editable, type SourceFile } from "./pluginSource.ts";
 import type { Shown, codeView } from "./pluginSourceView.ts";
@@ -31,8 +32,8 @@ const DRAFT_FILES = [
   { path: MANIFEST_FILE, of: "manifest" },
   { path: CODE_FILE, of: "code" },
 ] as const;
-/** What the list of a draft's files offers after them: what the draft changes, file by file. */
-const CHANGES = "What I changed";
+/** The switch beside a draft's files that shows, for the file picked, what the draft changes in it. */
+const CHANGES = "Show my changes";
 
 const withDraft = (drafts: readonly DraftSummary[], draft: DraftSummary) => [...drafts.filter((d) => d.pluginId !== draft.pluginId), draft];
 const sameDrafts = (a: readonly DraftSummary[], b: readonly DraftSummary[]) => a.length === b.length && a.every((d) => b.some((o) => o.pluginId === d.pluginId && o.updatedAt === d.updatedAt && o.running === d.running));
@@ -170,22 +171,27 @@ interface PickerProps {
   options: readonly string[];
   open: string;
   onOpen: (option: string) => void;
+  /** What else is said of the file picked, at the end of the row: a draft's switch to its changes. */
+  children?: ReactNode;
 }
 
 /** One list of what can be shown, however long it is. */
-function Picker({ label, options, open, onOpen }: PickerProps) {
+function Picker({ label, options, open, onOpen, children }: PickerProps) {
   return (
-    <label className="source-file">
-      <span>File</span>
-      <select aria-label={label} value={open} onChange={(e) => onOpen(e.target.value)}>
-        {options.map((option) => (
-          <option key={option}>{option}</option>
-        ))}
-      </select>
-      <span className="source-count">
-        {options.indexOf(open) + 1} of {options.length}
-      </span>
-    </label>
+    <div className="source-head">
+      <label className="source-file">
+        <span>File</span>
+        <select aria-label={label} value={open} onChange={(e) => onOpen(e.target.value)}>
+          {options.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+        <span className="source-count">
+          {options.indexOf(open) + 1} of {options.length}
+        </span>
+      </label>
+      {children}
+    </div>
   );
 }
 
@@ -218,7 +224,7 @@ function Changes({ path, before, after }: { path: string; before: string; after:
               {hunk.lines.map((line, i) => {
                 const Line = line.kind === "add" ? "ins" : line.kind === "del" ? "del" : "span";
                 return (
-                  <Line key={i} className="diff-line">
+                  <Line key={i} className={`diff-line ${line.kind === "add" ? "add" : line.kind === "del" ? "del" : "same"}`}>
                     {line.text || " "}
                   </Line>
                 );
@@ -248,6 +254,8 @@ function DraftEditor({ plugin, workspaceId, admin, original, summary, drafts, on
   /** What the switch was just set to, shown until the server has answered. */
   const [turning, setTurning] = useState<boolean | null>(null);
   const [open, setOpen] = useState<string>(MANIFEST_FILE);
+  /** Whether the file picked is shown as what the draft changes in it, rather than as the draft. */
+  const [comparing, setComparing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
@@ -348,16 +356,16 @@ function DraftEditor({ plugin, workspaceId, admin, original, summary, drafts, on
           {name} has changed since you made this copy. &ldquo;{CHANGES}&rdquo; compares your draft with {name} as it is now.
         </p>
       )}
-      <Picker label="Draft file" options={[...DRAFT_FILES.map((f) => f.path), CHANGES]} open={open} onOpen={setOpen} />
+      <Picker label="Draft file" options={DRAFT_FILES.map((f) => f.path)} open={open} onOpen={setOpen}>
+        <label className="plugin-switch source-compare">
+          <input type="checkbox" className="switch" checked={comparing} onChange={(e) => setComparing(e.target.checked)} />
+          <span>{CHANGES}</span>
+        </label>
+      </Picker>
       {DRAFT_FILES.map(({ path, of }) => (
-        <Code key={path} codeView={codeView} path={path} text={text[of]} label={`Draft of ${path}`} hidden={path !== open} onChange={(next) => setText((typed.current = { ...typed.current!, [of]: next }))} onSave={() => void during(() => save())} />
+        <Code key={path} codeView={codeView} path={path} text={text[of]} label={`Draft of ${path}`} hidden={comparing || path !== open} onChange={(next) => setText((typed.current = { ...typed.current!, [of]: next }))} onSave={() => void during(() => save())} />
       ))}
-      {open === CHANGES && (
-        <>
-          <Changes path={MANIFEST_FILE} before={original.manifest} after={text.manifest} />
-          <Changes path={CODE_FILE} before={original.code} after={text.code} />
-        </>
-      )}
+      {comparing && DRAFT_FILES.filter((f) => f.path === open).map(({ path, of }) => <Changes key={path} path={path} before={original[of]} after={text[of]} />)}
       <div className="agent-actions">
         <button type="button" className="button small primary" disabled={busy || !changed} onClick={() => void during(() => save())}>
           Save draft
@@ -366,14 +374,14 @@ function DraftEditor({ plugin, workspaceId, admin, original, summary, drafts, on
           <input type="checkbox" className="switch" checked={turning ?? draft.running} disabled={busy} onChange={(e) => (setTurning(e.target.checked), void during(() => save(e.target.checked)).finally(() => setTurning(null)))} />
           <span>Run my draft</span>
         </label>
-        <button type="button" className="button small danger" disabled={busy} onClick={() => setAsking("discard")}>
-          Discard draft
-        </button>
-        {admin && !plugin.own && (
-          <button type="button" className="button small" disabled={busy} onClick={() => setAsking("publish")}>
-            Publish to the workspace
-          </button>
-        )}
+        <MoreMenu
+          label={`More for your draft of ${name}`}
+          title={admin && !plugin.own ? "Publish or discard it" : "Discard it"}
+          items={[
+            ...(admin && !plugin.own ? [{ label: "Publish to the workspace…", action: () => setAsking("publish"), disabled: busy }] : []),
+            { label: "Discard draft…", action: () => setAsking("discard"), disabled: busy, separated: admin && !plugin.own },
+          ]}
+        />
       </div>
       {error && (
         <p role="alert" className="error">

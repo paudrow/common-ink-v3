@@ -1,5 +1,7 @@
 import { whoAmI } from "../../core/accounts.ts";
 import { agentActor, perform } from "../../core/operations.ts";
+import { OWN_SANDBOXED_IDS } from "../../core/ownPlugins.ts";
+import { CAPABILITY_NAMES } from "../../core/plugins.ts";
 import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } from "../../core/protocol.ts";
 import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
@@ -33,8 +35,6 @@ interface Tool {
 const MEMBERS =
   "Who is in a workspace decides who can read and change everything in it, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could invite a stranger as admin or remove the other admins. Only the member, signed in, changes who is in a workspace.";
 
-const PLUGINS =
-  "A plugin is code that runs in every member's browser, and what it is permitted decides what that code may read and change as each of them. Neither is a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could install a plugin of a stranger's and permit it everything. Only an admin, signed in, installs, uninstalls and permits, on the Plugins page.";
 
 const SHARING =
   "Who a note, a folder or an upload is shared with decides who can read it, up to anyone on the internet for a public link, and a change to that is not a change in history: it can't be reverted the way an agent's edits can. An agent reads notes other people wrote, so one that was talked into it could publish a note or hand a folder to a stranger. Only the member, signed in, shares.";
@@ -46,7 +46,6 @@ const SHARING =
 const CONTACTS =
   "A contact is how the member reaches someone: the address their mail goes to, the number their phone calls, in every app that reads their Google contacts. A change to one is not a change in history, so it can't be reverted the way an agent's edits can, and nothing in Common Ink shows it was made. An agent reads notes other people wrote, so one that was talked into it could quietly send the member's mail or calls for a colleague to a stranger. An agent reads the member's contacts, and only the member, signed in, changes or adds one.";
 
-const DRAFTS = "A draft is a member's own copy of a plugin's source, kept beside their settings and run only in their browser. Nobody else reads or writes it, an admin included, and an agent that could write one would be writing code that runs in its member's session.";
 
 export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "settings.read": "Settings shape the member's own app: its theme, keys, and which plugins are on. An agent has no use for them, and they hold only what differs from defaults the app knows and the server doesn't.",
@@ -73,17 +72,8 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "shared.upload": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the uploads its member can see.",
   "upload.setPrivate": "A private upload is hidden from every other member, admins too, and that is not a change in history. The member who uploaded it decides it, in the app.",
   "visit.mark": "How far a member has read the changes in a workspace moves only when the member has seen them and says so, in the app. An agent that marked them read would hide from the member what they haven't looked at. An agent reads how far that is with last_visit.",
-  "plugin.read": "A plugin's code is read by the app, which runs it shut off in the member's own browser. An agent has nothing to run it in. list_plugins says what each plugin declares and is permitted.",
-  "plugin.install": PLUGINS,
-  "plugin.uninstall": PLUGINS,
-  "plugin.permit": PLUGINS,
-  "plugin.request": "A request is a member saying they want a plugin to have a permission, for an admin to decide. An agent that was talked into it could ask in its member's name for what the member never wanted. The member asks themself, on the Plugins page.",
   "plugin.frame": "A frame's token opens, once, the frame the app runs a plugin or an HTML embed in, in the member's own browser. An agent runs neither.",
   "plugin.trust": "Turning a full-trust plugin on runs its code inside the member's own session, with everything the member can see and do. Each member decides that for themself, in the app, after reading what it means. An agent that was talked into it would hand its member's session to whoever wrote the plugin.",
-  "draft.list": DRAFTS,
-  "draft.read": DRAFTS,
-  "draft.save": DRAFTS,
-  "draft.discard": DRAFTS,
   "upload.purge": "Removing an upload from Trash for good removes its bytes, and nothing brings them back: not Trash, and no note that showed it. An agent reads notes other people wrote, so one that was talked into it could destroy files past recovery. An agent moves an upload to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
 };
 
@@ -104,6 +94,17 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
   required,
   additionalProperties: false,
 });
+
+/** What an agent may do with plugins: what its member may, as their role allows. */
+const ROLE =
+  "You act in your member's role: an admin's agent installs, updates, uninstalls and permits plugins, as an admin does; any member's agent makes and checks plugins, keeps that member's own drafts and asks an admin for a permission. A read-only token or one limited to folders does none of what changes anything here, and one limited to folders reads none of it. Turning full trust on is each member's own click in the app: no agent can.";
+const PLUGIN_DOCS = "A manifest is JSON: name, version, description, capabilities (each { name, reason }), commands, views, embeds and settings, as docs/plugins.md says. The code is JavaScript that runs in a frame of its own and reaches the workspace only through ink.perform, with what an admin permitted.";
+const DRAFT_WORDS = "A draft is its author's alone, kept beside their settings: no other member, admin or agent reads it, and it runs for nobody else.";
+const manifest = { type: "string", description: "The manifest, as JSON text" };
+const code = { type: "string", description: "The plugin's code, JavaScript" };
+const pluginId = { type: "string", description: "The plugin's id, from list_plugins" };
+const draftId = { type: "string", description: `The id of the plugin the draft is of: an installed plugin's, or one of ${OWN_SANDBOXED_IDS.join(", ")}` };
+const capability = { type: "string", enum: CAPABILITY_NAMES, description: "The capability, as the plugin's manifest names it" };
 
 const noteId = { type: "string", description: "The note id" };
 const linkTitles = { type: "string", enum: ["resolve", "keep"], description: 'What to do with links written by title, [[Title]]. "resolve", the default, stores each by its note\'s id and refuses the write when no note or more than one has that title. "keep" leaves them as text that links nothing.' };
@@ -692,9 +693,85 @@ The arguments beside query are from before it could say them, and narrow it furt
   {
     name: "list_plugins",
     description:
-      "The workspace's plugins: each third-party plugin an admin installed, with the commands, views, embeds and options its manifest declares, and each capability it asks for with its reason, whether it is allowed, locked, or voided by a change to the plugin, and who is waiting on an admin for it. HTML embeds are listed too, with the sites their network is allowed. A plugin's changes are in history under its id, as author plugin:<id>. An agent can't install, uninstall, permit or request; an admin does that in the app, on the Plugins page.",
+      `The workspace's plugins: each third-party plugin installed, with the commands, views, embeds and options its manifest declares, and each capability it asks for with its reason, whether it is allowed, locked, or voided by a change to the plugin, who decided it, and who is waiting on an admin for it. HTML embeds are listed too, with the sites their network is allowed. A plugin's changes are in history under its id, as author plugin:<id>. ${ROLE}`,
     inputSchema: object({}),
     op: "plugin.list",
+  },
+  {
+    name: "scaffold_plugin",
+    description: `A new plugin's two files to start from, its manifest and its code, named name: it asks for nothing, adds one command and one view in the inspector, and runs shut off from the app. Nothing is kept: change them, check them with validate_plugin, then install_plugin (an admin's agent) or save_draft (anyone's, beside a plugin that is installed). ${PLUGIN_DOCS}`,
+    inputSchema: object({ name: { type: "string", maxLength: 60, description: "The plugin's name, which isn't Common Ink's own or one that reads as one" } }, ["name"]),
+    op: "plugin.scaffold",
+  },
+  {
+    name: "validate_plugin",
+    description: `What installing a manifest and code would make of them, without installing or keeping anything: ok with the manifest as it would be kept, the codeHash permit_plugin takes and whether it asks for full trust, or ok false with why it would be refused. The code is not run or parsed here: it is run shut off, in each member's browser. ${PLUGIN_DOCS}`,
+    inputSchema: object({ manifest, code }, ["manifest", "code"]),
+    op: "plugin.validate",
+  },
+  {
+    name: "read_plugin",
+    description: "An installed plugin's code and its codeHash, to read before permitting it anything or to change it for an update. list_plugins lists what each declares.",
+    inputSchema: object({ id: pluginId }, ["id"]),
+    op: "plugin.read",
+  },
+  {
+    name: "install_plugin",
+    description: `Installs a plugin for the whole workspace from its manifest and code, or with replaces puts them in an installed plugin's place (an update, which voids what it was permitted until it is permitted again). Only an admin's agent may. Nothing is permitted by installing, and the plugin's page says it was installed by you for your member. ${ROLE} ${PLUGIN_DOCS}`,
+    inputSchema: object({ manifest, code, replaces: { ...pluginId, description: "The installed plugin this takes the place of" } }, ["manifest", "code"]),
+    op: "plugin.install",
+  },
+  {
+    name: "uninstall_plugin",
+    description: `Takes a plugin out of the workspace, and with it everything it was permitted, every request for it and every member's draft of it. What it wrote stays in history. Only an admin's agent may. ${ROLE}`,
+    inputSchema: object({ id: pluginId }, ["id"]),
+    op: "plugin.uninstall",
+  },
+  {
+    name: "permit_plugin",
+    description: `An admin's decision on one capability a plugin asks for: allowed or not, and locked or not (a locked one takes no requests). Allowing names the code you read, codeHash from list_plugins or read_plugin, and is refused when the plugin changed since. For HTML embeds (id html, capability network) origins lists the sites they may reach. Granting full-trust is allowed to an admin's agent like any other decision, but it runs nobody's code: each member turns it on for themself in the app, and no agent can. Only an admin's agent may. ${ROLE}`,
+    inputSchema: object(
+      {
+        id: { type: "string", description: "The plugin's id, or html for HTML embeds" },
+        capability,
+        allowed: { type: "boolean" },
+        locked: { type: "boolean" },
+        origins: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 10, description: "For HTML embeds alone: the sites, such as https://example.com" },
+        codeHash: { type: "string", description: "The plugin's code as you read it, from list_plugins or read_plugin. Needed to allow" },
+      },
+      ["id", "capability", "allowed"],
+    ),
+    op: "plugin.permit",
+  },
+  {
+    name: "request_plugin_permission",
+    description: `Your member asking an admin to allow a plugin one capability it asks for. It allows nothing: an admin decides, and sees who asked. Not for an admin, who decides with permit_plugin. ${ROLE}`,
+    inputSchema: object({ id: { type: "string", description: "The plugin's id, or html for HTML embeds" }, capability, origins: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 10, description: "For HTML embeds alone: the sites" } }, ["id", "capability"]),
+    op: "plugin.request",
+  },
+  {
+    name: "list_drafts",
+    description: `Your member's own drafts of plugins: copies of an installed plugin's source (or of one of Common Ink's own that runs shut off), each with its manifest, its codeHash, the original's code when it was copied, and whether it runs for your member in the original's place. Nobody else's. ${DRAFT_WORDS}`,
+    inputSchema: object({}),
+    op: "draft.list",
+  },
+  {
+    name: "read_draft",
+    description: `One of your member's drafts, with its code. ${DRAFT_WORDS}`,
+    inputSchema: object({ id: draftId }, ["id"]),
+    op: "draft.read",
+  },
+  {
+    name: "save_draft",
+    description: `Keeps your member's draft of a plugin as given, making it if there is none. running makes it run in the original's place for your member alone, in their browser, shut off from the app and with what the original is permitted and never more; a draft that asks for full trust never runs. baseHash is the original's codeHash when the copy was made. ${DRAFT_WORDS}`,
+    inputSchema: object({ id: draftId, manifest, code, baseHash: { type: ["string", "null"], description: "The original's codeHash when the copy was made, or null" }, running: { type: "boolean" } }, ["id", "manifest", "code", "running"]),
+    op: "draft.save",
+  },
+  {
+    name: "discard_draft",
+    description: `Removes your member's draft of a plugin for good. The plugin itself stays as it is. ${DRAFT_WORDS}`,
+    inputSchema: object({ id: draftId }, ["id"]),
+    op: "draft.discard",
   },
   {
     name: "list_members",

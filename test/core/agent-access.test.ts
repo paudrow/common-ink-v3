@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, and everything of plugins but reading the record are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts and test/core/third-party.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
-type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "plugin.read" | "plugin.install" | "plugin.uninstall" | "plugin.permit" | "plugin.request" | "plugin.frame" | "plugin.trust" | `draft.${string}`>;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, a plugin's frame and turning full trust on are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts and test/core/third-party.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
+type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "plugin.frame" | "plugin.trust">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -103,6 +103,18 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "upload.trashed": {},
   "record.notes": { sourceId: "google-calendar", id: "none" },
   "plugin.list": {},
+  // Each is asked of a plugin that isn't there, or of a manifest that is no plugin's, so what refuses it is the role and nothing else.
+  "plugin.read": { id: "aaaaaaaaaaaa" },
+  "plugin.install": { manifest: "{}", code: "" },
+  "plugin.uninstall": { id: "aaaaaaaaaaaa" },
+  "plugin.permit": { id: "aaaaaaaaaaaa", capability: "notes.read", allowed: false },
+  "plugin.request": { id: "aaaaaaaaaaaa", capability: "notes.read" },
+  "plugin.scaffold": { name: "Greeter" },
+  "plugin.validate": { manifest: "{}", code: "" },
+  "draft.list": {},
+  "draft.read": { id: "aaaaaaaaaaaa" },
+  "draft.save": { id: "aaaaaaaaaaaa", manifest: "{}", code: "", running: false },
+  "draft.discard": { id: "aaaaaaaaaaaa" },
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {
@@ -117,7 +129,7 @@ const refusedTo = async (run: () => Promise<unknown>) => {
 describe("an agent's access is its member's", () => {
   const REFUSED: Record<Role, ToolOp[]> = {
     admin: [],
-    editor: ["links.rebuild", "todos.rebuild", "folder.delete"],
+    editor: ["links.rebuild", "todos.rebuild", "folder.delete", "plugin.install", "plugin.uninstall", "plugin.permit"],
     viewer: [
       "note.create",
       "note.write",
@@ -144,6 +156,9 @@ describe("an agent's access is its member's", () => {
       "folder.create",
       "folder.rename",
       "folder.delete",
+      "plugin.install",
+      "plugin.uninstall",
+      "plugin.permit",
     ],
   };
 
@@ -240,29 +255,6 @@ describe("an agent's access is its member's", () => {
 
     await perform(env.DB, ada, { type: "member.remove", memberId: member.personId });
     expect(await tool(reader.token, "list_members", { workspace })).toMatchObject({ isError: true, text: "not_found: No such workspace" });
-  });
-
-  it("reads the workspace's plugins, decides nothing of them, and has no tool that changes them", async () => {
-    const { ada, member, token, workspace } = await team("admin");
-    const manifest = JSON.stringify({ name: "Word Tally", capabilities: [{ name: "notes.read", reason: "Counts the words in your notes." }] });
-    const made = await perform(env.DB, ada, { type: "plugin.install", manifest, code: "ink.notify('counted')" });
-    const { id } = made;
-    await perform(env.DB, ada, { type: "plugin.permit", id, capability: "notes.read", allowed: true, codeHash: made.plugins.find((p) => p.id === id)!.codeHash! });
-
-    const record = JSON.parse((await tool(token, "list_plugins", { workspace })).text) as { canManage: boolean; plugins: { id: string; manifest: { name: string }; permissions: { capability: string; reason: string; state: string; decidedBy: string | null }[] }[] };
-    // Its member is an admin, and it is still told it decides nothing.
-    expect(record.canManage).toBe(false);
-    expect(record.plugins.map((p) => [p.id, p.manifest.name])).toEqual([[id, "Word Tally"], ["html", "HTML embeds"]]);
-    expect(record.plugins[0]!.permissions).toMatchObject([{ capability: "notes.read", reason: "Counts the words in your notes.", state: "allowed", decidedBy: "Ada Lovelace" }]);
-    // The record says nothing of the code, which only the app reads.
-    expect(JSON.stringify(record)).not.toContain("ink.notify");
-    expect(TOOLS.filter((t) => /plugin|permit|install|frame/.test(t.name)).map((t) => t.name)).toEqual(["list_plugins"]);
-
-    const agent: Actor = { kind: "agent", agentId: (await connectAgent(env.DB, member.personId, "Second")).agent.id, personId: member.personId, workspaceId: workspace };
-    for (const op of [{ type: "plugin.uninstall", id }, { type: "plugin.permit", id, capability: "notes.read", allowed: false }, { type: "plugin.read", id }, { type: "plugin.frame", id }] satisfies OpInput[]) {
-      await expect(perform(env.DB, agent, op), op.type).rejects.toMatchObject({ code: "forbidden", message: `An agent can't ${op.type}` });
-    }
-    expect((await perform(env.DB, ada, { type: "plugin.list" })).plugins[0]!.permissions[0]!.state).toBe("allowed");
   });
 
   it("is only at /mcp: a token is no session, so it can't perform operations as a member or connect another agent", async () => {

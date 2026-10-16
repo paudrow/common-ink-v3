@@ -70,7 +70,8 @@ test("a member edits a copy, saves it, finds it again after loading the app agai
   let section = await source(page);
 
   await section.getByRole("button", { name: "Edit a copy" }).click();
-  await expect(picker(section).getByRole("option")).toHaveText(["manifest.json", "plugin.js", "What I changed"]);
+  await expect(picker(section).getByRole("option")).toHaveText(["manifest.json", "plugin.js"]);
+  await expect(section.getByRole("checkbox", { name: "Show my changes" })).not.toBeChecked();
   await expect(section.getByRole("textbox", { name: "Draft of manifest.json" })).toContainText('"name": "Greeter"');
   await expect.poll(() => draftsOf(page)).toMatchObject([{ pluginId: id, running: false, baseHash: await codeHashOf(page, id) }]);
   await expect(section.getByRole("button", { name: "Save draft" })).toBeDisabled();
@@ -104,19 +105,30 @@ test("a member edits a copy, saves it, finds it again after loading the app agai
   await expect(section.getByRole("textbox", { name: "Draft of plugin.js" })).toContainText("// mine");
   await expect(section.getByRole("button", { name: "Edit a copy" })).toHaveCount(0);
 
-  await picker(section).selectOption("What I changed");
-  await expect(section.getByRole("group", { name: "Changes to manifest.json" })).toContainText("No changes");
+  // The switch shows what the draft changes in the file picked, in place of the file, and only that file.
+  const compare = section.getByRole("checkbox", { name: "Show my changes" });
+  await compare.check();
   const changes = section.getByRole("group", { name: "Changes to plugin.js" });
   await expect(changes.locator("ins.diff-line")).toHaveText(/\/\/ mine/);
   await expect(changes.locator("del.diff-line")).toHaveCount(0);
+  // Drawn as History draws a change: what was added on the colour of an addition.
+  await expect(changes.locator("ins.diff-line")).toHaveClass(/\badd\b/);
+  await expect(section.getByRole("textbox", { name: "Draft of plugin.js" })).toBeHidden();
+  await expect(section.getByRole("group", { name: "Changes to manifest.json" })).toHaveCount(0);
   await picker(section).selectOption("manifest.json");
   await expect(changes).toHaveCount(0);
+  await expect(section.getByRole("group", { name: "Changes to manifest.json" })).toContainText("No changes");
+  await compare.uncheck();
+  await expect(section.getByRole("group", { name: "Changes to manifest.json" })).toHaveCount(0);
+  await expect(section.getByRole("textbox", { name: "Draft of manifest.json" })).toBeVisible();
 
-  await section.getByRole("button", { name: "Discard draft" }).click();
+  await section.getByRole("button", { name: "More for your draft of Greeter" }).click();
+  await section.getByRole("menuitem", { name: "Discard draft…" }).click();
   const confirm = section.getByRole("group", { name: "Discard your draft of Greeter?" });
   await confirm.getByRole("button", { name: "Cancel" }).click();
   await expect(confirm).toHaveCount(0);
-  await section.getByRole("button", { name: "Discard draft" }).click();
+  await section.getByRole("button", { name: "More for your draft of Greeter" }).click();
+  await section.getByRole("menuitem", { name: "Discard draft…" }).click();
   await confirm.getByRole("button", { name: "Discard it" }).click();
   await expect(section.getByRole("button", { name: "Edit a copy" })).toBeVisible();
   await expect(section.getByRole("textbox", { name: "Source of manifest.json" })).toBeVisible();
@@ -251,7 +263,10 @@ test("nobody else sees a member's draft, an admin included, and a member who isn
   await section.getByRole("button", { name: "Edit a copy" }).click();
   await expect(section.getByRole("textbox", { name: "Draft of manifest.json" })).toBeVisible();
   await expect.poll(async () => (await draftsOf(page, workspaceId)).map((d) => d.pluginId)).toEqual([id]);
-  await expect(section.getByRole("button", { name: "Publish to the workspace" })).toHaveCount(0);
+  await section.getByRole("button", { name: "More for your draft of Greeter" }).click();
+  await expect(section.getByRole("menuitem", { name: "Publish to the workspace…" })).toHaveCount(0);
+  await expect(section.getByRole("menuitem", { name: "Discard draft…" })).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(section.getByText("Only an admin installs a plugin for the workspace. To share this, show an admin your draft or send them its two files.")).toBeVisible();
   const mine = await perform(page, { type: "draft.read", id }, workspaceId);
   await expect(perform(page, { type: "plugin.install", manifest: mine.manifest, code: "// mel's", replaces: id }, workspaceId)).rejects.toThrow("can't plugin.install");
@@ -278,7 +293,8 @@ test("an admin publishes their draft in the plugin's place, which voids what it 
   await section.getByRole("textbox", { name: "Draft of plugin.js" }).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("// published");
-  await section.getByRole("button", { name: "Publish to the workspace" }).click();
+  await section.getByRole("button", { name: "More for your draft of Greeter" }).click();
+  await section.getByRole("menuitem", { name: "Publish to the workspace…" }).click();
   const confirm = section.getByRole("group", { name: "Publish your draft of Greeter?" });
   await expect(confirm).toContainText("Everything it was permitted has to be approved again for the new code.");
   await confirm.getByRole("button", { name: "Publish it" }).click();
@@ -290,7 +306,8 @@ test("an admin publishes their draft in the plugin's place, which voids what it 
   expect(now.permissions.map((p) => p.state)).not.toContain("allowed");
   await expect.poll(async () => (await draftsOf(page))[0]?.baseHash).toBe(now.codeHash);
   await expect(section.getByText("has changed since you made this copy")).toHaveCount(0);
-  await picker(section).selectOption("What I changed");
+  await picker(section).selectOption("plugin.js");
+  await section.getByRole("checkbox", { name: "Show my changes" }).check();
   await expect(section.getByRole("group", { name: "Changes to plugin.js" })).toContainText("No changes");
 });
 
@@ -304,6 +321,7 @@ test("a draft is told when the plugin it copies has been replaced since", async 
   const section = await source(page);
 
   await expect(section.getByText("Greeter has changed since you made this copy.")).toBeVisible();
-  await picker(section).selectOption("What I changed");
+  await picker(section).selectOption("plugin.js");
+  await section.getByRole("checkbox", { name: "Show my changes" }).check();
   await expect(section.getByRole("group", { name: "Changes to plugin.js" }).locator("del.diff-line")).toHaveText("// newer");
 });

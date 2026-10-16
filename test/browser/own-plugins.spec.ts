@@ -265,7 +265,9 @@ test("a member's copy of one of the app's own runs in its place for them alone, 
   await expect(source).toContainText("The manifest and the code of Word count, as they were built into this version of Common Ink.");
   await source.getByRole("button", { name: "Edit a copy" }).click();
   await expect(source.getByRole("textbox", { name: "Draft of manifest.json" })).toContainText('"name": "Word count"');
-  await expect(source.getByRole("button", { name: "Publish to the workspace" })).toHaveCount(0);
+  await source.getByRole("button", { name: "More for your draft of Word count" }).click();
+  await expect(source.getByRole("menuitem", { name: "Publish to the workspace…" })).toHaveCount(0);
+  await mel.keyboard.press("Escape");
   await expect(source).toContainText("a copy of it is never published over it");
 
   // Her copy asks for more than Word count declares, and tries it.

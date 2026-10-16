@@ -4,7 +4,7 @@ import { CHANGED_SINCE_GRANT, DRAFT_FULL_TRUST, NOT_GRANTED, NOT_TURNED_ON, OWN_
 
 const HASH = "a".repeat(64);
 const OTHER = "b".repeat(64);
-const permission = (capability: Permission["capability"], state: Permission["state"], origins: string[] = []): Permission => ({ capability, reason: "Because", origins, state, locked: false, decidedBy: null, voided: false, requests: [] });
+const permission = (capability: Permission["capability"], state: Permission["state"], origins: string[] = []): Permission => ({ capability, reason: "Because", origins, state, locked: false, decidedBy: null, decidedVia: null, voided: false, requests: [] });
 const plugin = (capabilities: Permission[], fullTrust: FullTrust | null = null): InstalledPlugin => ({
   id: "plugin000001",
   thirdParty: true,
@@ -12,6 +12,9 @@ const plugin = (capabilities: Permission[], fullTrust: FullTrust | null = null):
   codeHash: HASH,
   fullTrust,
   installedBy: "Ada",
+  installedVia: null,
+  updatedBy: null,
+  updatedVia: null,
   installedAt: 1,
   updatedAt: 1,
   permissions: capabilities,

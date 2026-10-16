@@ -126,7 +126,9 @@ test("an admin installs a plugin through the form, is shown each capability with
 
   // Other code under the same name is the same plugin, and nothing it was allowed carries over to it.
   const [before] = (await perform(page, { type: "plugin.list" })).plugins.filter((p) => p.thirdParty);
-  await details.getByRole("button", { name: "Update Word counter" }).click();
+  // The page's one primary action is the switch; updating is in its "…" menu.
+  await details.getByRole("button", { name: "More for Word counter" }).click();
+  await page.getByRole("menu", { name: "More for Word counter" }).getByRole("menuitem", { name: "Update…" }).click();
   const update = page.getByRole("form", { name: "Update Word counter" });
   await expect(update.getByRole("heading", { name: "Update Word counter" })).toBeVisible();
   await update.getByRole("textbox", { name: "Manifest" }).fill(JSON.stringify(COUNTER));
@@ -143,6 +145,14 @@ test("an admin installs a plugin through the form, is shown each capability with
   await expect(form.getByRole("heading", { name: "Install a plugin" })).toBeVisible();
 });
 
+/** Puts the cursor on the note's line `n`, counted from 0. */
+async function onLine(page: Page, n: number) {
+  // Focused, not clicked: the middle of the note can be under a frame's shield.
+  await editor(page).focus();
+  await page.keyboard.press("ControlOrMeta+Home");
+  for (let i = 0; i < n; i++) await page.keyboard.press("ArrowDown");
+}
+
 test("a command reads notes and tells the member, a view and a page are drawn in frames of the plugin's, and an embed below its line", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const id = await install(page, COUNTER, COUNTER_CODE, ["notes.read"]);
@@ -158,7 +168,8 @@ test("a command reads notes and tells the member, a view and a page are drawn in
   await expect.poll(() => background.evaluate(() => self.origin)).toBe("null");
   await expect(page.locator(".plugin-background:not([data-own])")).toBeHidden();
 
-  // The embed: its title in the line as text, and below it the plugin's frame in the room the manifest named.
+  // The embed: its title in the line as text, and below it the plugin's frame in the room the manifest named. A line with the embed alone on it is out of sight until the cursor is on it (#50).
+  await onLine(page, 4);
   await expect(editor(page).locator(".media-name")).toHaveText("Word counter plugin: Word count");
   const below = page.locator('.embed-below[data-embed="x-wordcount"]');
   await expect(below).toBeVisible();
@@ -205,7 +216,8 @@ test("a plugin's embed is written ::x-name{}, so one named as a built-in's is ne
   await page.goto(`/note/${note.id}`);
   const embed = await frameFor(page, "embed", "timer");
   await expect(embed.locator("body")).toContainText("Clock drew timer of 9m");
-  // The one line that is the plugin's says whose it is. The built-in's line is left as it was written.
+  // The one line that is the plugin's says whose it is, with the cursor on it. The built-in's line is left as it was written.
+  await onLine(page, 4);
   await expect(editor(page).locator(".media-name")).toHaveText(["Clock plugin: Timer"]);
   await expect(page.locator(".embed-below")).toHaveCount(1);
   await expect(page.locator('.embed-below[data-embed="x-timer"] iframe')).toHaveCount(1);
@@ -336,7 +348,8 @@ test("a plugin uninstalled while another page has it running is refused by the s
 
   await admin.goto("/plugins");
   await openDetails(admin, "Word counter");
-  await admin.getByRole("button", { name: "Uninstall Word counter" }).click();
+  await admin.getByRole("button", { name: "More for Word counter" }).click();
+  await admin.getByRole("menuitem", { name: "Uninstall…" }).click();
   await admin.getByRole("group", { name: "Uninstall Word counter?" }).getByRole("button", { name: "Uninstall it" }).click();
   await expect(admin).toHaveURL(/\/plugins$/);
   await expect(admin.getByRole("list", { name: "Plugins" }).getByRole("checkbox", { name: "History" })).toBeVisible();

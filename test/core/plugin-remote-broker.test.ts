@@ -5,7 +5,7 @@ import { MAX_STORED, MAX_STORED_KEYS, MAX_STORED_TOTAL, STORED_INDEX, WATCHED, r
 
 const NOTE = "abcdefghijkl";
 
-const permission = (capability: Capability, state: Permission["state"], more: Partial<Permission> = {}): Permission => ({ capability, reason: "Because", origins: [], state, locked: false, decidedBy: null, voided: false, requests: [], ...more });
+const permission = (capability: Capability, state: Permission["state"], more: Partial<Permission> = {}): Permission => ({ capability, reason: "Because", origins: [], state, locked: false, decidedBy: null, decidedVia: null, voided: false, requests: [], ...more });
 
 function installed(allowed: Capability[], off: Capability[] = []): InstalledPlugin {
   return {
@@ -15,6 +15,9 @@ function installed(allowed: Capability[], off: Capability[] = []): InstalledPlug
     codeHash: "0".repeat(64),
     fullTrust: null,
     installedBy: "Ada",
+    installedVia: null,
+    updatedBy: null,
+    updatedVia: null,
     installedAt: 1,
     updatedAt: 1,
     permissions: [...allowed.map((c) => permission(c, "allowed")), ...off.map((c) => permission(c, "off"))],

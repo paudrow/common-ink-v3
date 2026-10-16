@@ -21,6 +21,23 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   workspaces                          the workspaces you can reach
   members                             everyone in a workspace, with their role
   plugins                             the plugins installed in a workspace, and what each is permitted
+  plugin-new NAME [--out DIR]         a new plugin's manifest and code to start from, written to
+                                      DIR/manifest.json and DIR/plugin.js when --out is given
+  plugin-validate --manifest TEXT --code TEXT
+                                      what installing them would make of them, or why it would be refused
+  plugin ID                           an installed plugin's code and its codeHash
+  plugin-install --manifest TEXT --code TEXT [--replaces ID]
+                                      install a plugin, or update one (an admin's agent only)
+  plugin-uninstall ID                 take a plugin out of the workspace (an admin's agent only)
+  plugin-permit ID --capability NAME --allowed true|false [--locked true|false] [--origins SITE,SITE]
+        [--code-hash HASH]            decide one capability (an admin's agent only); allowing names the code
+  plugin-request ID --capability NAME [--origins SITE,SITE]
+                                      ask an admin to allow a plugin one capability
+  drafts                              your member's own drafts of plugins
+  draft ID                            one of them, with its code
+  draft-save ID --manifest TEXT --code TEXT --running true|false [--base-hash HASH|none]
+                                      keep your member's draft; running runs it for them alone
+  draft-discard ID                    remove your member's draft for good
   notes [--folder ID] [--since TIME] [--tag NAME] [--archived true|only]
                                       the notes in a workspace, in one folder, with a tag, or changed since a time
   search QUERY [--today DAY] [--zone ZONE] [--folder ID] [--archived true|only] [--has-todos true]
@@ -131,7 +148,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   record REF                          the event or contact a reference stands for, as it is now
   notes-about SOURCE RECORD           the notes that reference a record, by your member's reference or a teammate's to the same event, and who sees each
 
-A flag a command doesn't take is refused, and nothing is sent.
+A flag a command doesn't take is refused, and nothing is sent. A --manifest or --code that starts
+with @ is read from the file it names, such as --code @plugin.js.
 
 TIME is anything a date parses, such as 2026-10-09 or 2026-10-09T14:00:00Z. KIND:ID is an author
 from authors, such as agent:abc123def456. NEXT is the next of the page before, as JSON.
@@ -307,7 +325,22 @@ export async function run(argv: string[], io: Io): Promise<number> {
       Object.fromEntries(Object.entries(as).flatMap(([arg, [flag, read]]) => (flags.has(flag) ? [[arg, read ? read(`--${flag}`, flags.get(flag)!) : flags.get(flag)!]] : [])));
     const ids = (_: string, value: string) => value.split(",");
     const author = (_: string, value: string) => authorRef(value);
-    const truth = (_: string, value: string) => value !== "false";
+    const truth = (name: string, value: string) => {
+      if (value !== "true" && value !== "false") throw new UsageError(`${name} is true or false`);
+      return value === "true";
+    };
+    /** A flag's text, or with @ the text of the file it names. */
+    const text = async (flag: string) => {
+      const value = needFlag(flag);
+      if (!value.startsWith("@")) return value;
+      if (!io.readFile) throw new UsageError(`--${flag} @FILE needs files, which this ink has none of`);
+      const path = value.slice(1);
+      return new TextDecoder().decode(
+        await io.readFile(path).catch(() => {
+          throw new UsageError(`Can't read ${path}`);
+        }),
+      );
+    };
     const archivedToo = (_: string, value: string) => (value === "only" ? "only" : value !== "false");
 
     /** When an event is: --days makes it all-day, first and last day, and --start with --end two times. Undefined when neither is given. */
@@ -406,6 +439,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
     let tool: string;
     let args: Record<string, unknown> = {};
     /** Set by a command that only looks: the author whose revert is previewed, in `noteIds` or in every note they changed. */
+    /** Where plugin-new writes its two files, when it is told. */
+    let writeTo: string | undefined;
     let previewOf: { author: { kind: string; id: string }; noteIds?: string[] } | undefined;
     switch (command) {
       case "workspaces":
@@ -416,6 +451,47 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "plugins":
         tool = "list_plugins";
+        break;
+      case "plugin-new":
+        tool = "scaffold_plugin";
+        args = { name: need("a name") };
+        writeTo = flags.get("out");
+        break;
+      case "plugin-validate":
+        tool = "validate_plugin";
+        args = { manifest: await text("manifest"), code: await text("code") };
+        break;
+      case "plugin":
+        tool = "read_plugin";
+        args = { id: need("a plugin id") };
+        break;
+      case "plugin-install":
+        tool = "install_plugin";
+        args = { manifest: await text("manifest"), code: await text("code"), ...given({ replaces: ["replaces"] }) };
+        break;
+      case "plugin-uninstall":
+        tool = "uninstall_plugin";
+        args = { id: need("a plugin id") };
+        break;
+      case "plugin-permit":
+        tool = "permit_plugin";
+        args = { id: need("a plugin id, or html"), capability: needFlag("capability"), allowed: truth("--allowed", needFlag("allowed")), ...given({ locked: ["locked", truth], origins: ["origins", ids], codeHash: ["code-hash"] }) };
+        break;
+      case "plugin-request":
+        tool = "request_plugin_permission";
+        args = { id: need("a plugin id, or html"), capability: needFlag("capability"), ...given({ origins: ["origins", ids] }) };
+        break;
+      case "drafts":
+        tool = "list_drafts";
+        break;
+      case "draft":
+      case "draft-discard":
+        tool = command === "draft" ? "read_draft" : "discard_draft";
+        args = { id: need("a plugin id") };
+        break;
+      case "draft-save":
+        tool = "save_draft";
+        args = { id: need("a plugin id"), manifest: await text("manifest"), code: await text("code"), running: truth("--running", needFlag("running")), ...given({ baseHash: ["base-hash", (_, value) => (value === "none" ? null : value)] }) };
         break;
       case "notes":
         tool = "list_notes";
@@ -729,6 +805,19 @@ export async function run(argv: string[], io: Io): Promise<number> {
         previews.push(...(json("A preview", answer) as unknown[]));
       }
       io.out(JSON.stringify(previews));
+      return 0;
+    }
+
+    if (writeTo !== undefined) {
+      const dir = writeTo.replace(/\/+$/, "") || ".";
+      if (!io.writeFile) throw new UsageError("plugin-new --out needs files, which this ink has none of");
+      const { answer, failed } = await call(tool, args);
+      if (failed) return (io.out(answer), 1);
+      const made = json("The new plugin", answer) as { manifest: string; code: string };
+      for (const [name, body] of [["manifest.json", made.manifest], ["plugin.js", made.code]] as const) {
+        if (!(await io.writeFile(`${dir}/${name}`, new TextEncoder().encode(body), false))) throw new UsageError(`${dir}/${name} is already there: nothing more was written`);
+        io.out(`Wrote ${dir}/${name}`);
+      }
       return 0;
     }
 

@@ -51,7 +51,7 @@ import {
   type Written,
 } from "./protocol.ts";
 import { ownSandboxed } from "./ownPlugins.ts";
-import { codeHash } from "./plugins.ts";
+import { codeHash, scaffold, validate } from "./plugins.ts";
 import { actingPlugin, discardDraft, framePlugin, installPlugin, listDrafts, listPlugins, permitPlugin, readDraft, readPlugin, requestPlugin, saveDraft, trustPlugin, uninstallPlugin } from "./pluginRecord.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
@@ -150,9 +150,10 @@ type Handler<K extends OpType> = {
   needs: Access;
   /**
    * Who alone may ask. `member`: the person themself, signed in, and not an agent acting for them.
+   * `owner`: the person, or an agent of theirs acting in their role, and never a plugin.
    * `visitor`: whoever holds a link, who may ask nothing else.
    */
-  by?: "member" | "visitor";
+  by?: "member" | "owner" | "visitor";
   /** Set when only a member of the workspace may ask, and one who sees all of it: not a guest, and not an agent limited to folders. */
   members?: true;
   /** Set when it changes something though it needs no more than `view` of the workspace, so a read-only token is refused it. */
@@ -185,7 +186,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
     if (!plugin) throw new OpError("forbidden", `A ${standing.as} runs no plugins: they are for the workspace's members`);
     if ("refused" in plugin) throw new OpError("forbidden", plugin.refused);
     // What is the member's alone is no plugin's, full trust or not: it is asked in the member's own name, where their role is what is checked.
-    if (handler.by === "member" || (plugin.allowed !== "all" && !plugin.allowed.has(op.type))) throw new OpError("forbidden", `${plugin.name} isn't permitted to ${op.type}`);
+    if (handler.by === "member" || handler.by === "owner" || (plugin.allowed !== "all" && !plugin.allowed.has(op.type))) throw new OpError("forbidden", `${plugin.name} isn't permitted to ${op.type}`);
   }
   if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
 
@@ -2742,19 +2743,30 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   },
 
   "plugin.list": { needs: "view", members: true, run: (ctx) => listPlugins(ctx) },
-  // Installing a plugin and deciding what it may do is deciding what runs in every member's browser, and running one happens there. Only the member does either: see NOT_FOR_AGENTS.
-  "plugin.read": { needs: "view", by: "member", members: true, run: (ctx, op) => readPlugin(ctx, op.id) },
-  "plugin.install": { needs: "manage", by: "member", run: (ctx, op) => installPlugin(ctx, op) },
-  "plugin.uninstall": { needs: "manage", by: "member", run: (ctx, op) => uninstallPlugin(ctx, op.id) },
-  "plugin.permit": { needs: "manage", by: "member", run: (ctx, op) => permitPlugin(ctx, op) },
+  // Making, installing and permitting plugins is the member's, and their agent's as it acts in their role: an admin's agent does what an admin does, and a member's what the member may. No plugin does any of it, and an agent limited to folders or to reading does none of what changes it.
+  "plugin.read": { needs: "view", by: "owner", members: true, run: (ctx, op) => readPlugin(ctx, op.id) },
+  "plugin.install": { needs: "manage", by: "owner", members: true, run: (ctx, op) => installPlugin(ctx, op) },
+  "plugin.uninstall": { needs: "manage", by: "owner", members: true, run: (ctx, op) => uninstallPlugin(ctx, op.id) },
+  "plugin.permit": { needs: "manage", by: "owner", members: true, run: (ctx, op) => permitPlugin(ctx, op) },
   // A viewer asks too, so this needs no more than belonging to the workspace.
-  "plugin.request": { needs: "view", by: "member", members: true, run: (ctx, op) => requestPlugin(ctx, op) },
+  "plugin.request": { needs: "view", by: "owner", members: true, changes: true, run: (ctx, op) => requestPlugin(ctx, op) },
+  "plugin.scaffold": {
+    needs: "view",
+    by: "owner",
+    members: true,
+    run: async (_, op) => {
+      const made = scaffold(op.name);
+      if ("reason" in made) throw new OpError("invalid", made.reason);
+      return made;
+    },
+  },
+  "plugin.validate": { needs: "view", by: "owner", members: true, run: (_, op) => validate(op.manifest, op.code) },
   "plugin.frame": { needs: "view", by: "member", members: true, run: (ctx, op) => framePlugin(ctx, op.id) },
   // Running a plugin inside the app is each member's own decision, for their own session. Nobody makes it for them: not an admin, an agent, or a plugin.
   "plugin.trust": { needs: "view", by: "member", members: true, run: (ctx, op) => trustPlugin(ctx, op) },
-  // A draft is its author's alone, beside their settings, and what it holds is code that runs in their browser. Only the member, signed in, reads or writes one: see NOT_FOR_AGENTS.
-  "draft.list": { needs: "view", by: "member", members: true, run: (ctx) => listDrafts(ctx) },
-  "draft.read": { needs: "view", by: "member", members: true, run: (ctx, op) => readDraft(ctx, op.id) },
-  "draft.save": { needs: "view", by: "member", members: true, run: (ctx, op) => saveDraft(ctx, op) },
-  "draft.discard": { needs: "view", by: "member", members: true, run: (ctx, op) => discardDraft(ctx, op.id) },
+  // A draft is its author's alone, beside their settings, and what it holds is code that runs in their browser, for them alone. The member and their agent read and write it; no plugin does.
+  "draft.list": { needs: "view", by: "owner", members: true, run: (ctx) => listDrafts(ctx) },
+  "draft.read": { needs: "view", by: "owner", members: true, run: (ctx, op) => readDraft(ctx, op.id) },
+  "draft.save": { needs: "view", by: "owner", members: true, changes: true, run: (ctx, op) => saveDraft(ctx, op) },
+  "draft.discard": { needs: "view", by: "owner", members: true, changes: true, run: (ctx, op) => discardDraft(ctx, op.id) },
 };
