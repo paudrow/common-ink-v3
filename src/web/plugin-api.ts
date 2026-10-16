@@ -145,8 +145,8 @@ export type Setting = {
   title: string;
   description?: string;
   /**
-   * Set for an option the plugin remembers from what the member does in its own views, such as the
-   * order the Todos page is sorted in, so it is kept on the server with the member's settings and not in one browser. The
+   * Set for an option the plugin remembers from what the member does in its own views, such as which
+   * calendars the Calendar shows or the order the Todos page is sorted in, so it is kept on the server with the member's settings and not in one browser. The
    * plugin may change it with `host.settings.set`; it can change no other, and the member can reset it.
    */
   remembered?: true;
@@ -161,6 +161,8 @@ export type Setting = {
   | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
   /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
   | { type: "chords"; default: readonly string[] }
+  /** Words, each at most `maxLength` characters, at most `maxItems` of them. */
+  | { type: "list"; default: readonly string[]; maxItems: number; maxLength: number }
 );
 
 export type SettingValue = boolean | string | number | readonly string[];
@@ -615,6 +617,8 @@ export interface AddressEmbed {
 /** What an embed is handed about one place a note writes it. */
 export interface Embedded {
   config: string;
+  /** The note the embed is written in. */
+  noteId: string;
   /** A block embed's body: the note's lines between its opening and closing lines, each with its line break. Empty for an inline embed. */
   body: string;
   /** Whether the member can't change the note. `update` then does nothing, so an embed draws what it shows without the controls that would call it. */
@@ -660,14 +664,25 @@ export interface Completion {
   prose?: boolean;
   /** What to offer for what has been typed after the trigger, best first. Nothing closes the list. */
   items(typed: string): readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
+  /**
+   * Where its items go in the list among those of the other completions that fit: lower first, 0 when
+   * not said, and in the order of their plugins where it is the same. The calendar's events come after
+   * the notes `[[` offers this way.
+   */
+  order?: number;
 }
 
 export interface CompletionItem {
   label: string;
   /** Said after the label, more quietly. */
   detail?: string;
-  /** What takes the place of the trigger and what was typed after it. */
-  insert: string;
+  /**
+   * What takes the place of the trigger and what was typed after it. A function is asked only when
+   * the item is picked, for text that is made then, as a reference to an event is: what it answers is
+   * written once it does, where the trigger and what was typed still are. Null, a failure, or a change
+   * to them meanwhile writes nothing.
+   */
+  insert: string | (() => Promise<string | null>);
   /** The part of `insert` left selected, as offsets into it, such as a value to type over. Without it the cursor goes after. */
   select?: readonly [from: number, to: number];
   /** Whether `insert` goes on lines of its own, as a block embed must. The cursor goes to the line after. */

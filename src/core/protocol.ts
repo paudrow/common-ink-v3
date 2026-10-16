@@ -124,6 +124,20 @@ const Archived = z.union([z.boolean(), z.literal("only")]).default(false);
 /** The orders a search answers in. `match` is notes whose title matches first, then the latest changed. */
 export const SEARCH_SORTS = ["match", "recent", "created", "title"] as const;
 export type SearchSort = (typeof SEARCH_SORTS)[number];
+/** A data source's id, such as `google-calendar`. */
+const SourceId = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, "not a data source's id");
+/** A record's id as its data source gave it. It is passed back to that data source and read as nothing else. */
+const RecordId = z.string().min(1).max(1024);
+/**
+ * When an event is. An all-day event is on calendar dates, `from` its first day and `to` its last,
+ * with no time and no zone. Any other is between two instants.
+ */
+/** An event's instant: up to the last a Date can hold, so a data source can always write it as a date. */
+const EventTime = Time.max(8_640_000_000_000_000);
+const EventWhen = z
+  .union([z.object({ allDay: z.literal(true), from: Day, to: Day }), z.object({ allDay: z.literal(false), from: EventTime, to: EventTime })])
+  .refine((when) => when.from <= when.to, "an event can't end before it starts");
+export type EventWhen = z.output<typeof EventWhen>;
 
 export const Op = z.discriminatedUnion("type", [
   /**
@@ -442,6 +456,70 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("shared.open") }),
   /** One note the visitor's link covers. */
   z.object({ type: z.literal("shared.read"), id: Id }),
+  /**
+   * The data sources of whoever asks, each with whether it is connected and whether it takes changes.
+   * A data source is a person's own. Every operation on one answers for the person asking and nobody
+   * else, whatever their role in the workspace it was asked in.
+   */
+  z.object({ type: z.literal("source.list") }),
+  /**
+   * Connects a data source. `redirect`, when there is one, is where the member's browser goes to
+   * agree to it, and `back` is the path in Common Ink it returns to.
+   */
+  z.object({ type: z.literal("source.connect"), id: SourceId, back: z.string().max(1000).default("/") }),
+  /** Disconnects a data source, and every other one that came through the same account: they were agreed to as one. */
+  z.object({ type: z.literal("source.disconnect"), id: SourceId }),
+  /**
+   * The asker's events in a span of time, soonest first, each occurrence of a recurring event on its
+   * own. An all-day event is in the span when one of its days is one of the days the span covers in
+   * `timeZone`, the asker's.
+   */
+  z.object({ type: z.literal("event.list"), from: Time, to: Time, timeZone: z.string().min(1).max(64) }),
+  /**
+   * Changes an event where it is kept, as the member whose it is. `etag` is the event's as it was
+   * read: the change is refused when the event has changed there since. A read-only data source
+   * refuses, and so does an event in a calendar the member can only read. Only the fields given change.
+   */
+  z.object({
+    type: z.literal("event.update"),
+    sourceId: SourceId,
+    id: RecordId,
+    etag: z.string().min(1).max(200),
+    title: z.string().max(1000).optional(),
+    location: z.string().max(1000).optional(),
+    description: z.string().max(8000).optional(),
+    when: EventWhen.optional(),
+  }),
+  /**
+   * Adds an event to one of the asker's calendars where it is kept, as the member whose it is.
+   * `calendarId` is one of the `calendars` `event.list` answers. A read-only data source refuses, and
+   * so does a calendar the member can only read.
+   */
+  z.object({
+    type: z.literal("event.create"),
+    sourceId: SourceId,
+    calendarId: RecordId,
+    title: z.string().max(1000),
+    when: EventWhen,
+    location: z.string().max(1000).optional(),
+    description: z.string().max(8000).optional(),
+  }),
+  /** The asker's contacts by name. `query` keeps those with every word of it at the start of a word of their name, email or organization. */
+  z.object({ type: z.literal("contact.list"), query: z.string().max(100).optional() }),
+  /**
+   * What a note writes to reference an event or a contact: `ref`, an id that says nothing of the
+   * record, and `text`, the embed that carries it. Asked again of the same record it answers the same.
+   */
+  z.object({ type: z.literal("record.refer"), sourceId: SourceId, id: RecordId }),
+  /** The event or contact a reference stands for, as it is now. A reference someone else made reads as none at all. */
+  z.object({ type: z.literal("record.read"), ref: Id }),
+  /**
+   * The notes that reference one of the asker's records with the asker's own reference, and for an
+   * event their calendar has now, another member's reference to the same event, among the notes they
+   * can see and not in Trash, latest change first. A note they can't see is left out, title and all.
+   * Each says who sees it: only its owner, the people it is shared with, or the workspace.
+   */
+  z.object({ type: z.literal("record.notes"), sourceId: SourceId, id: RecordId }),
 ]);
 export type Op = z.output<typeof Op>;
 export type OpInput = z.input<typeof Op>;
@@ -960,6 +1038,109 @@ export interface Results {
   "note.setPrivate": { id: string; private: boolean; removed: number };
   "shared.open": Shared;
   "shared.read": SharedNote & { text: string; revision: number; links: LinkedNote[] };
+  "source.list": { sources: Source[] };
+  /** `redirect` is where the member's browser goes to agree, or null when the data source is connected already. */
+  "source.connect": { sources: Source[]; redirect: string | null };
+  "source.disconnect": { sources: Source[] };
+  /**
+   * `sources` is every calendar data source the asker has, so one that needs reconnecting is said and
+   * not just missing. `calendars` is every calendar in the connected ones, with or without events in the span.
+   */
+  "event.list": { events: CalendarEvent[]; sources: Source[]; calendars: Calendar[] };
+  "event.update": CalendarEvent;
+  "event.create": CalendarEvent;
+  /** `more` when a data source has more contacts than it lists. */
+  "contact.list": { contacts: Contact[]; sources: Source[]; more: boolean };
+  "record.refer": Reference;
+  "record.read": SourceRecord;
+  "record.notes": { notes: NoteAbout[] };
+}
+
+export type SourceKind = "calendar" | "contacts";
+/** `needs_reconnect` when it was connected and where it comes from stopped answering for the member. */
+export type SourceState = "connected" | "needs_reconnect" | "not_connected";
+
+/** A data source as its owner sees it. Nobody else is told it exists. */
+export interface Source {
+  id: string;
+  kind: SourceKind;
+  name: string;
+  /** Where it comes from, such as "Google". Data sources that share one are connected and disconnected together. */
+  provider: string;
+  state: SourceState;
+  /** False for a read-only data source, which refuses every change. */
+  writable: boolean;
+  /** The account it is connected to, or null when it isn't. */
+  account: string | null;
+}
+
+/** One calendar in a calendar data source, such as a member's work calendar in their Google account. */
+export interface Calendar {
+  sourceId: string;
+  /** Unique within its data source. */
+  id: string;
+  name: string;
+  /** As `#rrggbb`, or null when its data source says none. */
+  color: string | null;
+  /** Whether the member may add events to it and change its own. */
+  writable: boolean;
+}
+
+export interface CalendarEvent {
+  sourceId: string;
+  id: string;
+  /** The calendar it is in, by its id in the data source. */
+  calendarId: string;
+  /** The name of the calendar it is in, and that calendar's color as `#rrggbb`. */
+  calendar: string;
+  color: string | null;
+  title: string;
+  when: EventWhen;
+  /** The zone the event was made in, when it says. */
+  timeZone: string | null;
+  location: string | null;
+  description: string | null;
+  /** True for one occurrence of an event that recurs. Changing it changes that occurrence alone. */
+  recurring: boolean;
+  /** False when the member can only read the calendar it is in, or the data source is read-only. */
+  editable: boolean;
+  /** Sent back with a change, which is refused when the event has changed since. */
+  etag: string;
+  /** Its page where it is kept. */
+  url: string | null;
+}
+
+export interface Contact {
+  sourceId: string;
+  id: string;
+  name: string;
+  emails: string[];
+  phones: string[];
+  organization: string | null;
+  url: string | null;
+}
+
+export type SourceRecord = { kind: "event"; ref: string; event: CalendarEvent } | { kind: "contact"; ref: string; contact: Contact };
+
+/**
+ * Who sees a note: `private`, a private note nobody else is let in to; `shared`, a private note its
+ * owner shared with some people or by a link; `workspace`, a note every member of the workspace sees.
+ */
+export type Audience = "private" | "shared" | "workspace";
+
+/** A note that references a record, as `record.notes` lists it. */
+export interface NoteAbout {
+  id: string;
+  title: string;
+  updatedAt: number;
+  audience: Audience;
+}
+
+export interface Reference {
+  ref: string;
+  kind: SourceRecord["kind"];
+  /** The embed a note writes, such as `::event{k3j5h8d9f0a1 Lunch with Sam}`. */
+  text: string;
 }
 
 export const MAX_AGENT_NAME = 60;
@@ -1050,7 +1231,8 @@ export interface MeHere extends Me {
   setup: Setup;
 }
 
-export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict";
+/** `unavailable` when something outside Common Ink that the operation needs did not answer. */
+export type OpErrorCode = "invalid" | "not_found" | "forbidden" | "conflict" | "unavailable";
 
 /** What a client is told of a fault that is no request's doing. The fault's own words stay in the server's log: they can name tables and rows. */
 export const BROKE = "Common Ink broke while doing that. Nothing says it was done: try again";

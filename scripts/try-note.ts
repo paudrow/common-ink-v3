@@ -9,10 +9,17 @@
 // there is none, so the links are drawn in any workspace the note is written to. Titles are matched
 // as the server matches them, whatever their case. A target of twelve lowercase letters and digits
 // is an id, as it is everywhere, and is left as written: that is how a link to a note that is gone is shown.
+//
+// A reference to an event or a contact is written by its record's name, ::event{Lunch with Sam} or
+// ::contact{Sam Okafor}, and is stored as the reference of the sample record of that name, which is
+// made for the dev user as the Calendar page makes one. The sample calendar and contacts are connected
+// for that first. Only the sample data is read: no calendar or contacts that anyone connected is.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { isNoteId, linksIn, retargeted } from "../src/core/links.ts";
+import type { CalendarEvent, Contact, Reference, Source } from "../src/core/protocol.ts";
+import { namedReferences } from "../src/core/references.ts";
 
 const TITLE = "# Try in this PR";
 
@@ -51,7 +58,31 @@ for (const title of new Set(linksIn(text).map((link) => link.target).filter((tar
   if (!titled.length && title.toLowerCase() === "try in this pr") continue;
   idOf.set(title, (titled[0] ?? (await op<Summary>({ type: "note.create", text: `# ${title}\n\nA sample note, here so that Try in this PR has a note to link to.` }))).id);
 }
-const stored = retargeted(text, (target) => idOf.get(target));
+const linked = retargeted(text, (target) => idOf.get(target));
+
+/** The text with each record it names written as that sample record's reference. A name no sample record has is left as written. */
+async function referring(written: string): Promise<string> {
+  const named = namedReferences(written);
+  if (!named.length) return written;
+  const sample = (source: { id: string }) => source.id.startsWith("sample-");
+  const { sources } = await op<{ sources: Source[] }>({ type: "source.list" });
+  for (const source of sources.filter((s) => sample(s) && s.state === "not_connected")) await op({ type: "source.connect", id: source.id });
+  const DAY = 86_400_000;
+  const from = Math.floor(Date.now() / DAY) * DAY;
+  const { events } = await op<{ events: CalendarEvent[] }>({ type: "event.list", from, to: from + 7 * DAY, timeZone: "UTC" });
+  const { contacts } = await op<{ contacts: Contact[] }>({ type: "contact.list" });
+  const records = { event: events.filter((e) => sample({ id: e.sourceId })).map((e) => ({ ...e, name: e.title })), contact: contacts.filter((c) => sample({ id: c.sourceId })) };
+  let out = "";
+  let at = 0;
+  for (const { kind, name, from: start, to } of named) {
+    const record = records[kind].find((r) => r.name.toLowerCase() === name.toLowerCase());
+    if (!record) continue;
+    out += written.slice(at, start) + (await op<Reference>({ type: "record.refer", sourceId: record.sourceId, id: record.id })).text;
+    at = to;
+  }
+  return out + written.slice(at);
+}
+const stored = await referring(linked);
 
 // The links are by id already, and where the walkthrough shows how one is typed, in code, that is text: nothing is left for the server to resolve or refuse.
 const existing = notes.find((n) => n.title === "Try in this PR");

@@ -22,6 +22,8 @@
   --warn: #c7811b;
   --warn-ink: #895913;
   --chip-ink: color-mix(in srgb, var(--muted) 70%, var(--ink));
+  /* How much of a calendar's colour an event card is tinted with: more on a dark surface, where the same share reads fainter. */
+  --cal-tint: 16%;
   --shadow: 0 18px 48px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
   --shadow-lg: 0 24px 60px -12px rgb(30 24 12 / 0.28), 0 0 0 1px rgb(30 24 12 / 0.06);
   --shadow-sm: 0 1px 2px rgb(30 24 12 / 0.05), 0 4px 14px -6px rgb(30 24 12 / 0.1);
@@ -64,6 +66,7 @@
     --shadow-lg: 0 24px 60px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -6px rgb(0 0 0 / 0.4);
     --accent-ink: #a9a9ff;
+    --cal-tint: 26%;
   }
 }
 
@@ -93,6 +96,7 @@
   --shadow-lg: 0 24px 60px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.06);
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 14px -6px rgb(0 0 0 / 0.4);
   --accent-ink: #a9a9ff;
+  --cal-tint: 26%;
 }
 
 html,
@@ -7228,4 +7232,1238 @@ button.todo-tag[aria-pressed="true"] {
 /* An item with nothing to say takes no room. */
 .bar-item:empty {
   display: none;
+}
+
+/* Calendar and Contacts */
+
+.contacts-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 68rem;
+  height: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+  overflow-y: auto;
+}
+
+.contacts-page {
+  max-width: 46rem;
+}
+
+/* v1's frame: the page itself never scrolls; in Week and Day only the hours do, under a header that stays put. */
+.calendar-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 1500px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 16px 24px 0;
+  overflow: hidden;
+}
+
+.calendar-page[data-view="month"],
+.calendar-page[data-view="agenda"] {
+  overflow-y: auto;
+  padding-bottom: 2rem;
+}
+
+.contacts-page h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.cal-head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.cal-head h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.cal-head .cal-zone {
+  flex: 1 1 12em;
+}
+
+.cal-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.cal-choose,
+.cal-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-toolbar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.cal-toolbar h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-notice {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--accent-soft);
+  font-size: 13px;
+}
+
+.cal-nav,
+.cal-views {
+  display: flex;
+  gap: 4px;
+}
+
+.cal-views .button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cal-zone,
+.cal-none,
+.contacts-count {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cal-grid {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+
+.cal-grid[aria-busy="true"],
+.cal-agenda[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+.cal-weekdays,
+.cal-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.cal-weekdays {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-side);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cal-weekdays > span {
+  padding: 4px 6px;
+}
+
+.cal-row + .cal-row {
+  border-top: 1px solid var(--line);
+}
+
+.cal-grid .cal-day {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  min-height: 6.5rem;
+  padding: 4px;
+}
+
+.cal-grid .cal-day + .cal-day {
+  border-left: 1px solid var(--line);
+}
+
+.cal-day[data-outside] {
+  background: var(--bg-side);
+}
+
+.cal-day[data-outside] .cal-date {
+  color: var(--faint);
+}
+
+.cal-date {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cal-weekday {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cal-number {
+  min-width: 20px;
+  border-radius: 999px;
+  padding: 1px 5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.cal-day[data-today] .cal-number {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.cal-all-day,
+.cal-timed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The all-day events keep a row of their own at the top of the day, ruled off from the rest. */
+.cal-all-day {
+  padding-bottom: 3px;
+  border-bottom: 1px dashed var(--line-strong);
+}
+
+.cal-event {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 4px;
+  padding: 2px 4px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cal-event:hover {
+  background: var(--hover);
+}
+
+.cal-event[data-all-day] {
+  background: color-mix(in srgb, var(--c, var(--accent)) 18%, var(--bg-elev));
+  box-shadow: inset 3px 0 0 var(--c, var(--accent));
+}
+
+.cal-event[data-all-day]:hover {
+  filter: brightness(0.95);
+}
+
+.cal-swatch,
+.cal-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c, var(--faint));
+}
+
+.cal-time {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cal-agenda .cal-day {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.cal-agenda h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.cal-agenda .cal-day[data-today] h3 {
+  color: var(--accent);
+}
+
+.cal-agenda .cal-event {
+  font-size: 13px;
+}
+
+.cal-agenda .cal-time {
+  width: 5.5em;
+}
+
+/* Week and Day: v1's time grid, 48px an hour, with the days sliding sideways under a header and hours that stay put. */
+.cal-tg {
+  --gutter: 56px;
+  --nest: min(28px, 22%);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cal-tg-top {
+  flex: none;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.cal-tg-row {
+  display: flex;
+}
+
+.cal-tg-gutter {
+  flex: none;
+  width: var(--gutter);
+}
+
+.cal-tg-clip {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cal-tg-strip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.cal-tg-head {
+  height: 56px;
+}
+
+.cal-tg-day {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: var(--col);
+}
+
+.cal-tg[data-days="1"] .cal-tg-day {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-left: 10px;
+}
+
+.cal-tg-weekday {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.cal-tg-date {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.cal-tg-day[data-today] .cal-tg-weekday {
+  color: var(--accent);
+}
+
+.cal-tg-day[data-today] .cal-tg-date {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.cal-tg-allday {
+  min-height: 30px;
+}
+
+.cal-tg-allday .cal-tg-gutter {
+  padding: 7px 8px 0 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cal-tg-allday .cal-tg-strip {
+  top: 3px;
+}
+
+.cal-bar {
+  position: absolute;
+  height: 20px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 6px 0 9px;
+  background: color-mix(in srgb, var(--c) calc(var(--cal-tint) + 2%), var(--bg-elev));
+  box-shadow: inset 3px 0 0 var(--c);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 20px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cal-bar[data-before] {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.cal-bar[data-after] {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.cal-tg-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cal-tg-body {
+  position: relative;
+  display: flex;
+  height: calc(24 * var(--hour));
+}
+
+.cal-hours {
+  position: relative;
+  flex: none;
+  width: var(--gutter);
+}
+
+.cal-hours > span {
+  position: absolute;
+  right: 8px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+
+.cal-col {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--col);
+  border-left: 1px solid var(--line);
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), var(--line) calc(var(--hour) - 1px) var(--hour));
+}
+
+.cal-tg-clip[data-adding] .cal-col {
+  cursor: cell;
+}
+
+.cal-col[data-today] {
+  background-color: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.calendar-page[data-weekends] .cal-col[data-weekend]:not([data-today]),
+.calendar-page[data-weekends] .cal-day[data-weekend]:not([data-outside]) {
+  background-color: color-mix(in srgb, var(--ink) 3.5%, transparent);
+}
+
+.calendar-page[data-weekends] .cal-tg-day[data-weekend]:not([data-today]) .cal-tg-weekday {
+  color: var(--faint);
+}
+
+.cal-now {
+  position: absolute;
+  right: 0;
+  left: -1px;
+  z-index: 30;
+  height: 2px;
+  background: var(--danger);
+  pointer-events: none;
+}
+
+.cal-now::before {
+  position: absolute;
+  top: -4px;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  content: "";
+}
+
+/* An event: a card tinted with its calendar's colour, a bar of the colour down its left, its title over its time. */
+.cal-ev {
+  position: absolute;
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-sizing: border-box;
+  margin-left: 2px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 6px 3px 9px;
+  background: color-mix(in srgb, var(--c) var(--cal-tint), var(--bg-elev));
+  box-shadow: inset 3px 0 0 var(--c);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cal-ev:hover {
+  background: color-mix(in srgb, var(--c) calc(var(--cal-tint) + 8%), var(--bg-elev));
+  box-shadow: inset 3px 0 0 var(--c), 0 2px 8px -2px color-mix(in srgb, var(--c) 45%, transparent);
+}
+
+.cal-ev:focus-visible,
+.cal-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* One on top of another is ringed in the page's colour, so it reads as a card of its own. */
+.cal-ev.is-nested {
+  box-shadow: inset 3px 0 0 var(--c), 0 0 0 1px var(--bg);
+}
+
+.cal-ev.is-past {
+  background: color-mix(in srgb, var(--c) calc(var(--cal-tint) / 2), var(--bg-elev));
+  color: var(--muted);
+}
+
+.cal-ev-title {
+  display: -webkit-box;
+  flex: none;
+  overflow: hidden;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lines, 1);
+}
+
+.cal-ev-time {
+  flex: none;
+  overflow: hidden;
+  color: color-mix(in srgb, currentcolor 76%, transparent);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-ev-start,
+.cal-ev-compact {
+  display: none;
+}
+
+.cal-ev.is-narrow {
+  padding-right: 2px;
+  padding-left: 6px;
+}
+
+.cal-ev-compact {
+  font-size: 11px;
+}
+
+/* Under an hour: one line, the title then when it starts. */
+.cal-ev.is-short {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.cal-ev.is-short .cal-ev-time {
+  font-size: inherit;
+}
+
+.cal-ev.is-short .cal-ev-title {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-ev.is-short .cal-ev-range {
+  display: none;
+}
+
+.cal-ev.is-short .cal-ev-start {
+  display: inline;
+}
+
+.cal-ev.is-short .cal-ev-compact {
+  display: none;
+}
+
+/* The time goes from the range to its start as a card narrows, and in the narrowest cards comes first, so it is never what is cut off. */
+@container (max-width: 149px) {
+  .cal-ev-range {
+    display: none;
+  }
+
+  .cal-ev-start {
+    display: inline;
+  }
+}
+
+@container (max-width: 129px) {
+  .cal-ev.is-short .cal-ev-time {
+    order: -1;
+  }
+}
+
+@container (max-width: 55px) {
+  .cal-ev-start {
+    display: none;
+  }
+
+  .cal-ev-compact {
+    display: inline;
+  }
+}
+
+.cal-ev-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 7px;
+  cursor: ns-resize;
+}
+
+.cal-ev:hover .cal-ev-grip::after {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 18px;
+  height: 2px;
+  margin-left: -9px;
+  border-radius: 1px;
+  background: var(--c);
+  content: "";
+}
+
+.cal-ghost {
+  position: absolute;
+  right: 3px;
+  left: 2px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-size: 11.5px;
+  pointer-events: none;
+}
+
+.cal-ev.is-draft,
+.cal-ev.is-dragging {
+  right: 3px;
+  left: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.cal-ev.is-draft {
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  box-shadow: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cal-ev.is-dragging {
+  opacity: 0.88;
+  box-shadow: inset 3px 0 0 var(--c), var(--shadow);
+  cursor: grabbing;
+}
+
+/* The Calendars dialog: each calendar data source, and under one that is connected, its calendars to show or not. */
+.cal-sources {
+  width: min(560px, 100%);
+}
+
+.cal-shown {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 0 0 2px;
+  list-style: none;
+}
+
+.cal-shown label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cal-shown .cal-dot {
+  width: 10px;
+  height: 10px;
+}
+
+.event-form.cal-new {
+  padding: 16px;
+  overflow-y: auto;
+  border-top: 0;
+}
+
+.cal-new-title {
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  padding: 4px 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.cal-new-title:focus {
+  border-bottom-color: var(--accent);
+  outline: none;
+}
+
+.cal-new-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cal-new-length {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh 16px 16px;
+  background: rgb(0 0 0 / 0.25);
+}
+
+.event-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  max-height: 80vh;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+}
+
+.event-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.event-head h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.event-body p {
+  margin: 0;
+}
+
+.event-facts,
+.ref-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.event-facts dt,
+.ref-details dt {
+  color: var(--muted);
+}
+
+.event-facts dd,
+.ref-details dd {
+  grid-column: 2;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.event-description {
+  white-space: pre-wrap;
+}
+
+.event-note,
+.event-read-only {
+  color: var(--muted);
+}
+
+.event-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.event-links a,
+.contact-reach a,
+.ref-details a {
+  color: var(--accent);
+}
+
+.event-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.event-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.event-notes h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* The panel's main action, under the notes it adds to. */
+.event-new-note-start {
+  align-self: flex-start;
+}
+
+.event-new-note {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.event-new-note label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.event-new-note select {
+  max-width: 260px;
+}
+
+.event-new-note p {
+  flex-basis: 100%;
+}
+
+.event-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-note-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.event-note-list .link {
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-audience {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.event-audience[data-audience="private"] {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--ink);
+}
+
+.event-audience[data-audience="shared"] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* What an event link in a note opens: the event in brief, then a short list of what to do with it. */
+.event-link {
+  width: 260px;
+  max-width: 100%;
+}
+
+.event-link-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.event-link-head strong {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.event-link .chip-choice[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+}
+
+.event-link .chip-choice svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.event-link-notes {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0;
+  padding: 4px 0;
+  border-block: 1px solid var(--line);
+}
+
+.event-link-notes h3 {
+  margin: 2px 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.event-link-notes .chip-choice {
+  justify-content: space-between;
+}
+
+.event-link-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-link .event-new-note {
+  padding: 4px 8px 8px;
+}
+
+.event-link .event-new-note select {
+  max-width: 100%;
+}
+
+.event-link .event-new-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-link-open {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.event-link-open .event-link-title {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-link-said {
+  margin: 2px 8px 4px;
+}
+
+.event-form label:not(.check) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-form .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.event-form input:not([type="checkbox"]),
+.event-form textarea,
+.contacts-search {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.event-form textarea {
+  resize: vertical;
+}
+
+.event-when {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 8px;
+}
+
+.event-save {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sources {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.sources h2 {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sources p {
+  margin: 0;
+}
+
+.sources-none,
+.source-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.source-what {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 14rem;
+}
+
+.source-list button.link {
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.contact-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contact-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.contact-what {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 12rem;
+}
+
+.contact-name {
+  font-weight: 600;
+}
+
+.contact-organization,
+.contact-reach {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.contact-reach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+/*
+ * A reference to an event or a contact in a note: its label in the embed's card, with a tint behind
+ * it. The card is as tall whatever the label says, so nothing around it moves when the record is read.
+ */
+
+.ref-chip {
+  border-radius: 4px;
+  padding: 0 4px;
+  background: var(--hover);
+  color: var(--muted);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.ref-chip[data-state="live"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.ref-chip[data-state="stale"] {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* Calendar and Contacts: end */
+
+.event-note-start {
+  display: contents;
 }

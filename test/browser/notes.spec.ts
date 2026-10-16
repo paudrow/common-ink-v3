@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { listedNote, listedNotes, me, noteCard, noteIdIn, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
 
 const history = (page: Page, id: string) => perform(page, { type: "note.history", id });
 
@@ -9,11 +9,11 @@ const writeElsewhere = (page: Page, op: { id: string; baseRevision: number; text
 const leaveEditor = (page: Page) => page.getByRole("complementary", { name: "Sidebar" }).getByText("Folders", { exact: true }).click();
 
 test("opens signed in as the dev user, with no login", async ({ page }) => {
+  // A Preview's database outlives each run, and whoever tries the Preview is this same dev user, so nothing here rests on its settings or notes.
   await page.goto("/");
 
-  await expect(page.getByText("Dev's workspace")).toBeVisible();
-  await openAllNotes(page);
-  await expect(page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Editor" })).toBeVisible();
+  expect((await me(page)).person).toMatchObject({ email: "dev@common.ink", name: "Dev User" });
 });
 
 test("a new person signs in, writes a note, and finds it intact after reloading", async ({ page }) => {

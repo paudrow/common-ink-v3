@@ -25,6 +25,7 @@ import {
   type Folder,
   type HistoryEntry,
   type LinkedNote,
+  type NoteAbout,
   type ListedTodo,
   type Note,
   type NoteDiff,
@@ -48,6 +49,8 @@ import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative,
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
+import { NO_SOURCES, createEvent, listContacts, listEvents, listSources, readRecord, referencesTo, refer, updateEvent, type Sources } from "./sources.ts";
+import { referencesIn } from "./references.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
 import { ruleLabel } from "./recurrence.ts";
@@ -89,6 +92,8 @@ export interface Context {
   /** What they can see and do. Every read of a note or a folder is checked against it. */
   sight: Sight;
   now: number;
+  /** Where the asker's data sources come from. */
+  sources: Sources;
 }
 
 type Access = "view" | "edit" | "manage";
@@ -112,11 +117,15 @@ type Handler<K extends OpType> = {
   by?: "member" | "visitor";
   /** Set when only a member of the workspace may ask, and one who sees all of it: not a guest, and not an agent limited to folders. */
   members?: true;
+  /** Set when it changes something though it needs no more than `view` of the workspace, so a read-only token is refused it. */
+  changes?: true;
+  /** Set when it answers from the asker's own data sources, which are in no folder: an agent limited to folders is refused it. */
+  own?: true;
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
 
 /** Every operation on a workspace. The web app, CLI, and MCP server all come through here. */
-export async function perform<T extends OpInput>(db: D1Database, actor: Actor | Visitor, input: T, now = Date.now()): Promise<Results[T["type"]]> {
+export async function perform<T extends OpInput>(db: D1Database, actor: Actor | Visitor, input: T, now = Date.now(), sources: Sources = NO_SOURCES): Promise<Results[T["type"]]> {
   const parsed = Op.safeParse(input);
   if (!parsed.success) throw new OpError("invalid", z.prettifyError(parsed.error));
   const op = parsed.data;
@@ -128,8 +137,8 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
   // Whoever holds a link is let into the operations made for them and no other, whatever is added later.
   if ((actor.kind === "visitor") !== (handler.by === "visitor")) throw new OpError("forbidden", actor.kind === "visitor" ? `A link can't ${op.type}` : `Only a link can ${op.type}`);
   if (actor.kind === "agent" && handler.by === "member") throw new OpError("forbidden", `An agent can't ${op.type}`);
-  if (actor.kind === "agent" && actor.scope?.readOnly && handler.needs !== "view") throw new OpError("forbidden", `A read-only token can't ${op.type}`);
-  if (handler.members && standing.sight.within) throw new OpError("forbidden", `An agent limited to folders can't ${op.type}`);
+  if (actor.kind === "agent" && actor.scope?.readOnly && (handler.needs !== "view" || handler.changes)) throw new OpError("forbidden", `A read-only token can't ${op.type}`);
+  if ((handler.members || handler.own) && standing.sight.within) throw new OpError("forbidden", `An agent limited to folders can't ${op.type}`);
   if ((handler.members && !standing.role) || !ALLOWS[standing.most].has(handler.needs)) throw new OpError("forbidden", `A ${standing.as} can't ${op.type}`);
 
   let author: Author = { kind: "member", personId: standing.personId ?? "", name: standing.name };
@@ -137,7 +146,7 @@ export async function perform<T extends OpInput>(db: D1Database, actor: Actor | 
     const agent = await db.prepare("SELECT name FROM agents WHERE id = ?").bind(actor.agentId).first<{ name: string }>();
     author = { kind: "agent", agentId: actor.agentId, name: agent?.name ?? "An agent", onBehalfOf: actor.personId };
   }
-  const ctx: Context = { db, actor, author, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now };
+  const ctx: Context = { db, actor, author, workspaceId: standing.workspaceId, personId: standing.personId, role: standing.role, sight: standing.sight, now, sources };
   return handler.run(ctx, op as never) as Promise<Results[T["type"]]>;
 }
 
@@ -1134,6 +1143,9 @@ async function trashing(ctx: Context, id: string, only = "state <> 'trashed'"): 
 }
 
 /** Only for an operation that is `by: "member"`, which is always asked by a person. */
+/** Whose data sources an operation reads: the person asking, or the person an agent asks for. Never anyone an operation names. */
+const asker = (ctx: Context) => ({ db: ctx.db, sources: ctx.sources, personId: ctx.personId!, now: ctx.now });
+
 const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now });
 
 /** Every change after `revision`: the note goes back to how it was then. */
@@ -2238,6 +2250,55 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     async run(ctx, op) {
       const row = await loadNote(ctx, op.id, "view", "hidden");
       return { ...toShared(ctx, row, (folderId) => folderId), text: row.text, revision: row.revision, links: await linksOf(ctx, row.text, "kept") };
+    },
+  },
+
+  // A data source is the asker's own, so each of these needs no more than being in the workspace it is asked in, and answers nothing of anyone else.
+  // It is in no folder either: an agent limited to folders reads the labels its notes hold, as any other reader does, and nothing of the records.
+  "source.list": { needs: "view", own: true, run: async (ctx) => ({ sources: await listSources(asker(ctx)) }) },
+  // Agreeing to a data source happens in the member's own browser, and ending it is theirs too: see NOT_FOR_AGENTS.
+  "source.connect": {
+    needs: "view",
+    by: "member",
+    async run(ctx, op) {
+      if (!(await listSources(asker(ctx))).some((s) => s.id === op.id)) throw new OpError("not_found", "No such data source");
+      const { redirect } = await ctx.sources.connect(ctx.personId!, op.id, op.back);
+      return { redirect, sources: await listSources(asker(ctx)) };
+    },
+  },
+  "source.disconnect": {
+    needs: "view",
+    by: "member",
+    async run(ctx, op) {
+      if (!(await listSources(asker(ctx))).some((s) => s.id === op.id)) throw new OpError("not_found", "No such data source");
+      await ctx.sources.disconnect(ctx.personId!, op.id);
+      return { sources: await listSources(asker(ctx)) };
+    },
+  },
+  "event.list": { needs: "view", own: true, run: (ctx, op) => listEvents(asker(ctx), op) },
+  "event.update": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateEvent(asker(ctx), sourceId, id, etag, change) },
+  "event.create": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, calendarId, type: _, ...fields }) => createEvent(asker(ctx), sourceId, calendarId, fields) },
+  "contact.list": { needs: "view", own: true, run: (ctx, op) => listContacts(asker(ctx), op.query) },
+  "record.refer": { needs: "view", own: true, changes: true, run: (ctx, op) => refer(asker(ctx), op.sourceId, op.id) },
+  "record.read": { needs: "view", own: true, run: (ctx, op) => readRecord(asker(ctx), op.ref) },
+  "record.notes": {
+    needs: "view",
+    own: true,
+    async run(ctx, op) {
+      const refs = await referencesTo(asker(ctx), ctx.workspaceId, op.sourceId, op.id);
+      if (!refs.length) return { notes: [] };
+      await mend(ctx);
+      // Search finds the notes with a ref among their words; the note's text says which hold it as a reference, and not in code.
+      const { results } = await ctx.db
+        .prepare(
+          `SELECT n.id, n.title, n.text, n.updated_at, CASE WHEN n.private_owner IS NULL THEN 'workspace' WHEN EXISTS (SELECT 1 FROM grants g WHERE g.note_id = n.id) THEN 'shared' ELSE 'private' END AS audience
+           FROM notes n WHERE n.workspace_id = ?1 AND n.id IN (SELECT r.note_id FROM note_search s JOIN note_search_rows r ON r.id = s.rowid WHERE s.note_search MATCH ?2) AND ${SEEN("n", "?3", "kept")}
+           ORDER BY n.updated_at DESC, n.id`,
+        )
+        .bind(ctx.workspaceId, `workspace : "${ctx.workspaceId.replace(/[^a-z0-9]/g, "")}" AND text : (${refs.map((ref) => `"${ref}"`).join(" OR ")})`, ctx.sight.bind)
+        .all<{ id: string; title: string; text: string; updated_at: number; audience: NoteAbout["audience"] }>();
+      const notes = results.filter((n) => referencesIn(n.text).some((found) => refs.includes(found.ref)));
+      return { notes: notes.map((n): NoteAbout => ({ id: n.id, title: n.title, updatedAt: n.updated_at, audience: n.audience })) };
     },
   },
 };

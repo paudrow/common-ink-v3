@@ -44,7 +44,7 @@ test("the app's pages draw and run under the policy the Worker sends, and it ref
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 
-  for (const path of ["/plugins", "/settings", "/agents", "/history", "/dashboard", "/no/such/place"]) {
+  for (const path of ["/plugins", "/settings", "/agents", "/history", "/dashboard", "/search", "/todos", "/trash", "/calendar", "/contacts", "/no/such/place"]) {
     await page.goto(path);
     await expect(page.locator("#root")).not.toBeEmpty();
   }

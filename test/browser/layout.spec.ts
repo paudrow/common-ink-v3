@@ -157,8 +157,8 @@ test("More expands and collapses Contacts, Uploads, and History, and a mode not 
   await less.click();
   await expect(more).toHaveAttribute("aria-expanded", "false");
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
-  await modes.getByRole("link", { name: "Calendar" }).click();
-  await expect(editorPane(page).locator(".mode-view")).toHaveText("CalendarCalendar arrives with #17.");
+  await modes.getByRole("link", { name: "Dashboard" }).click();
+  await expect(editorPane(page).locator(".mode-view")).toHaveText("DashboardDashboard arrives with #23.");
 });
 
 test("More opens by itself when a mode under it is reached another way, and stays closed once closed by hand until the next time", async ({ page }) => {

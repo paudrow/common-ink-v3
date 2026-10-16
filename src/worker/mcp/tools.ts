@@ -4,6 +4,7 @@ import { NO_SUCH_WORKSPACE, OpError, TODO_SORTS, type OpInput, type OpType } fro
 import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
+import type { Sources } from "../../core/sources.ts";
 
 /** What a tool call comes back with: text for the agent, and whether it failed. */
 export interface ToolResult {
@@ -54,6 +55,8 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "grant.revoke": SHARING,
   "note.setPrivate": "A private note is hidden from every other member, admins too, and that is not a change in history. The member who made the note decides it, in the app.",
   "note.purge": "Removing a note from Trash for good takes its history with it, and nothing brings it back: not a revert, not Trash. An agent reads notes other people wrote, so one that was talked into it could destroy them past recovery. An agent moves a note to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
+  "source.connect": "Connecting a data source is the member agreeing, in their own browser, to let Common Ink into their calendar or contacts. An agent can't agree for them. It reads and changes what the member connected.",
+  "source.disconnect": "Disconnecting ends the member's own agreement and cuts off every reference in their notes until they agree again. The member does that themself, in the app.",
   "shared.open": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
 };
@@ -137,7 +140,15 @@ const reverted = selected(
   [],
   "The notes to revert, each named once: up to 40, each with revisions (its changes to revert), to (the revision to return to) or author (whose changes to revert)",
 );
+const SOURCES = "A data source is your member's own: no other member of the workspace sees its records, whatever their role, and you see no other member's. What you read from one is your member's private data, so put it in a note only where they asked for it there. A token limited to folders is refused every data source tool: the member's calendar and contacts are in no folder.";
 const time = (description: string) => ({ type: "integer", minimum: 0, description: `${description}, in milliseconds since 1970` });
+const when = {
+  description: "When it is: { allDay: true, from, to } with its first and last day as YYYY-MM-DD, or { allDay: false, from, to } with instants in milliseconds since 1970",
+  oneOf: [
+    { type: "object", properties: { allDay: { const: true }, from: { type: "string" }, to: { type: "string" } }, required: ["allDay", "from", "to"], additionalProperties: false },
+    { type: "object", properties: { allDay: { const: false }, from: { type: "integer", minimum: 0 }, to: { type: "integer", minimum: 0 } }, required: ["allDay", "from", "to"], additionalProperties: false },
+  ],
+};
 
 export const TOOLS: Tool[] = [
   {
@@ -462,6 +473,80 @@ export const TOOLS: Tool[] = [
     op: "note.redo",
   },
   {
+    name: "list_sources",
+    description:
+      `Your member's data sources: their calendar and their contacts, each with its id, kind (calendar or contacts), state (connected, needs_reconnect or not_connected) and writable, which is false for a read-only data source. ${SOURCES} You can't connect or disconnect one: the member does that in the app, on the Calendar or Contacts page.`,
+    inputSchema: object({}),
+    op: "source.list",
+  },
+  {
+    name: "list_events",
+    description:
+      `Your member's calendar events in a span of time of at most 400 days, soonest first, each occurrence of a recurring event on its own. An event's when is either two instants in milliseconds since 1970 (allDay false) or its first and last day as YYYY-MM-DD (allDay true), which has no time and no zone. An all-day event is in the span when one of its days is a day the span covers in timeZone. Each event's calendarId is the calendar it is in. sources says whether each calendar data source answered: one in needs_reconnect has no events here until the member reconnects it. calendars is every calendar in the connected ones, with or without events in the span, each with its sourceId, id, name, color and writable; create_event adds to one whose writable is true. ${SOURCES}`,
+    inputSchema: object({ from: time("The start of the span"), to: time("The end of the span"), timeZone: { type: "string", description: 'The IANA zone whose days all-day events are matched by, such as "America/Chicago"' } }, ["from", "to", "timeZone"]),
+    op: "event.list",
+  },
+  {
+    name: "update_event",
+    description:
+      `Change one of your member's events where it is kept, such as in Google Calendar, as your member. Pass the event's sourceId, id and etag from list_events: the change is refused if the event has changed there since, and you read it again. Only the fields you pass change. For one occurrence of a recurring event, only that occurrence changes. An event whose editable is false, and any event in a data source whose writable is false, is refused. This changes the member's real calendar and is not in Common Ink's history, so it can't be reverted from here. ${SOURCES}`,
+    inputSchema: object(
+      {
+        sourceId: { type: "string", description: "The data source the event is in, from list_events" },
+        id: { type: "string", description: "The event's id, from list_events" },
+        etag: { type: "string", description: "The event's etag as you read it" },
+        title: { type: "string", maxLength: 1000 },
+        location: { type: "string", maxLength: 1000 },
+        description: { type: "string", maxLength: 8000 },
+        when,
+      },
+      ["sourceId", "id", "etag"],
+    ),
+    op: "event.update",
+  },
+  {
+    name: "create_event",
+    description:
+      `Add an event to one of your member's calendars where it is kept, such as in Google Calendar, as your member. Pass the calendar's sourceId and id from the calendars list_events answers: one whose writable is false is refused. Answers the event as it was made. This changes the member's real calendar and is not in Common Ink's history, so it can't be reverted from here. ${SOURCES}`,
+    inputSchema: object(
+      {
+        sourceId: { type: "string", description: "The data source the calendar is in, from list_events' calendars" },
+        calendarId: { type: "string", description: "The calendar's id, from list_events' calendars" },
+        title: { type: "string", maxLength: 1000 },
+        when,
+        location: { type: "string", maxLength: 1000 },
+        description: { type: "string", maxLength: 8000 },
+      },
+      ["sourceId", "calendarId", "title", "when"],
+    ),
+    op: "event.create",
+  },
+  {
+    name: "list_contacts",
+    description: `Your member's contacts by name: id, name, emails, phones and organization. query keeps those with every word of it at the start of a word of their name, email or organization. Contacts are read-only. more is true when a data source has more than it lists. ${SOURCES}`,
+    inputSchema: object({ query: { type: "string", maxLength: 100, description: "Words a contact's name, email or organization must have" } }),
+    op: "contact.list",
+  },
+  {
+    name: "refer_record",
+    description:
+      `What a note writes to reference one of your member's events or contacts without copying it: ref, and text, an embed such as ::event{ref Lunch with Sam} or ::contact{ref Sam Okafor} to put in the note. The app draws it for your member with the record's details as they are now. The words after the ref are plain text in the note, which every reader of the note sees, so change or drop them if the title shouldn't be shared; the rest of the record is never in the note. ${SOURCES}`,
+    inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
+    op: "record.refer",
+  },
+  {
+    name: "read_record",
+    description: `The event or contact a reference in a note stands for, as it is now. ref is the first word inside ::event{...} or ::contact{...}. A reference another member made reads as no such record: its details are theirs alone. ${SOURCES}`,
+    inputSchema: object({ ref: { type: "string", description: "The reference, from the note" } }, ["ref"]),
+    op: "record.read",
+  },
+  {
+    name: "notes_about_record",
+    description: `The notes that reference one of your member's events or contacts with your member's own reference (the one refer_record answers), and for an event your member's calendar has now, another member's reference to the same event (a teammate's notes about a meeting on a shared calendar), among the notes your member can see and not in Trash, latest change first: id, title, updatedAt, and audience, who sees the note: private (only its owner), shared (its owner and the people it is shared with) or workspace (every member). ${SOURCES}`,
+    inputSchema: object({ sourceId: { type: "string", description: "The data source the record is in" }, id: { type: "string", description: "The event's or contact's id, from list_events or list_contacts" } }, ["sourceId", "id"]),
+    op: "record.notes",
+  },
+  {
     name: "list_members",
     description: "Everyone in the workspace: person id, name and role (admin, editor or viewer), and no email, which only an admin is shown in the app. Members are the authors history names by person id. An agent can't invite, remove, or change anyone's role; a member does that in the app, on the Members page.",
     inputSchema: object({}),
@@ -472,7 +557,7 @@ export const TOOLS: Tool[] = [
 export const toolList = () => TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
 
 /** Runs a tool as `agent`. Failures the agent can act on come back as an error result, not a protocol error. */
-export async function callTool(db: D1Database, agent: ConnectedAgent, name: string, args: Record<string, unknown>): Promise<ToolResult | null> {
+export async function callTool(db: D1Database, agent: ConnectedAgent, name: string, args: Record<string, unknown>, sources?: Sources): Promise<ToolResult | null> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return null;
   try {
@@ -495,7 +580,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       workspaceId = workspace;
     }
     const actor: Actor = { kind: "agent", agentId: agent.agentId, personId: agent.personId, workspaceId, scope: { pinnedWorkspaceId: agent.workspaceId, readOnly: agent.readOnly, folderIds: agent.folderIds } };
-    return text(await perform(db, actor, { ...rest, type: tool.op! } as OpInput));
+    return text(await perform(db, actor, { ...rest, type: tool.op! } as OpInput, Date.now(), sources));
   } catch (err) {
     if (err instanceof OpError) return text(`${err.code}: ${err.message}`, true);
     throw err;

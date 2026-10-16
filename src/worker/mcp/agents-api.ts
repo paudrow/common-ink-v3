@@ -4,7 +4,7 @@ import { connectAgent, disconnectAgent, editAgent, listAgents } from "../../core
 import { ConnectOptions, OpError, type OpErrorCode } from "../../core/protocol.ts";
 import { sessionPersonId } from "../auth.ts";
 
-const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409 };
+const STATUS: Record<OpErrorCode, number> = { invalid: 400, forbidden: 403, not_found: 404, conflict: 409, unavailable: 503 };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 /** A null for an option in the body means "not given". A key that is no option stays, null or not, to be refused. */

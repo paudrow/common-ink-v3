@@ -10,6 +10,7 @@ import { noteHighlighting } from "./highlight.ts";
 import type { App, Plugin } from "./plugin-api.ts";
 import { createPluginHost } from "./pluginHost.ts";
 import { bullets } from "./plugins/bullets/index.ts";
+import { labelledReferences } from "./plugins/lib/references.tsx";
 import { codeBlocks } from "./plugins/code/index.ts";
 import { gfm } from "./plugins/gfm/index.ts";
 import { html } from "./plugins/html/index.ts";
@@ -32,7 +33,7 @@ export const sharedToken = (pathname: string) => ADDRESS.exec(pathname)?.[1] ?? 
  * The plugins that draw a note's text. None of them needs the server, and the page gives them no way
  * to it.
  */
-const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, tables, math, codeBlocks, bullets];
+const DRAWING: readonly Plugin[] = [timer, stopwatch, kanban, media, html, gfm, todos, links, tables, math, codeBlocks, bullets, labelledReferences];
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const NOT_HERE = () => Promise.reject(new Error("A link's page asks nothing of a workspace"));
@@ -237,7 +238,7 @@ function SharedNoteView({ token, noteId }: { token: string; noteId: string }) {
       parent: el.current,
       state: EditorState.create({
         doc: note.text,
-        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding, embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "Note text" })],
+        extensions: [reading, added, markdown({ base: markdownLanguage }), noteHighlighting, embedding(noteId), embedsAre(embeds), EditorView.lineWrapping, EditorView.contentAttributes.of({ "aria-label": "Note text" })],
       }),
     });
     return () => view.destroy();

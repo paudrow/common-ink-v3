@@ -57,6 +57,20 @@ const COMMANDS: Record<string, string[][]> = {
   revert_author: [["revert-author", AUTHOR, "--note", ID, "--after", ID, "--resolve", `{"${ID}": {"at": 3, "choices": "back"}}`, "--trash-emptied", "true"]],
   undo: [["undo", ID]],
   redo: [["redo", ID]],
+  list_sources: [["sources"]],
+  list_events: [["events", "--from", "2026-10-11", "--to", "2026-10-18", "--timezone", "America/Chicago"]],
+  update_event: [
+    ["event-update", "google-calendar", "ada@example.com lunch", "--etag", '"1"', "--title", "Lunch", "--location", "Cafe", "--description", "Bring it", "--days", "2026-10-14,2026-10-15"],
+    ["event-update", "google-calendar", "ada@example.com lunch", "--etag", '"1"', "--start", "2026-10-14T17:00:00Z", "--end", "2026-10-14T18:00:00Z"],
+  ],
+  create_event: [
+    ["event-new", "google-calendar", "ada@example.com", "--title", "Lunch", "--location", "Cafe", "--description", "Bring it", "--days", "2026-10-14,2026-10-15"],
+    ["event-new", "google-calendar", "ada@example.com", "--title", "Lunch", "--start", "2026-10-14T17:00:00Z", "--end", "2026-10-14T18:00:00Z"],
+  ],
+  list_contacts: [["contacts", "sam"]],
+  refer_record: [["refer", "google-contacts", "people/c1"]],
+  read_record: [["record", ID]],
+  notes_about_record: [["notes-about", "google-calendar", "primary e1"]],
 };
 
 describe("what an agent can do, against what the web app can", () => {

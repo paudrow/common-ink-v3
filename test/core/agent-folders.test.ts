@@ -5,6 +5,7 @@ import { signIn } from "../../src/core/accounts.ts";
 import { authenticateAgent, connectAgent, editAgent, listAgents } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { MAX_AGENT_FOLDERS, type Note } from "../../src/core/protocol.ts";
+import type { Sources } from "../../src/core/sources.ts";
 import { callTool } from "../../src/worker/mcp/tools.ts";
 import { sign } from "../../src/worker/session.ts";
 import { addMember, newMember } from "./members.ts";
@@ -22,11 +23,11 @@ const NO_FOLDER = { isError: true, text: "not_found: No such folder" };
 type Member = Extract<Actor, { kind: "member" }>;
 
 /** Calls a tool as the agent the token belongs to, the way /mcp does: what the token may do is read from the token. */
-async function asAgent(token: string) {
+async function asAgent(token: string, sources?: Sources) {
   const said: string[] = [];
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const agent = await authenticateAgent(env.DB, token);
-    const result = (await callTool(env.DB, agent!, name, args))!;
+    const result = (await callTool(env.DB, agent!, name, args, sources))!;
     const answer = { isError: !!result.isError, text: result.content[0]!.text };
     said.push(answer.text);
     return answer;
@@ -578,6 +579,71 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     // And of its own notes it is told.
     await env.DB.prepare("UPDATE notes SET indexed = 0, folder_id = ?2 WHERE folder_id = ?1").bind(w.journal, w.projects).run();
     expect(await claude.json("list_tags")).toMatchObject({ indexing: true });
+  });
+
+  it("is refused its member's calendar and contacts, which are in no folder, and reads a reference in its notes as its label alone", async () => {
+    const w = await world();
+    const asked: string[] = [];
+    const lunch = { sourceId: "cal", id: "a1", calendarId: "mine", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
+    const mine = { sourceId: "cal", id: "mine", name: "Mine-calendar-outside", color: null, writable: true };
+    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null };
+    const changed: unknown[] = [];
+    const sources: Sources = {
+      async of(personId) {
+        asked.push(personId);
+        const info = (id: string, name: string) => ({ id, name, provider: "Test", state: "connected" as const, account: "ada-account-outside@test" });
+        return [
+          {
+            kind: "calendar",
+            info: info("cal", "Calendar-source-outside"),
+            list: async () => ({ calendars: [mine], events: [lunch] }),
+            get: async (id) => (id === "a1" ? lunch : null),
+            calendar: async (id) => (id === mine.id ? mine : null),
+            update: async (id, change) => (changed.push([id, change]), lunch),
+            create: async (calendarId, fields) => (changed.push([calendarId, fields]), lunch),
+          },
+          { kind: "contacts", info: info("people", "Contacts-source-outside"), list: async () => ({ contacts: [sam], more: false }), get: async (id) => (id === sam.id ? sam : null) },
+        ];
+      },
+      connect: async () => ({ redirect: null }),
+      disconnect: async () => {},
+    };
+    const refer = (sourceId: string, id: string) => perform(env.DB, w.ada, { type: "record.refer", sourceId, id }, Date.now(), sources);
+    const event = await refer("cal", "a1");
+    const contact = await refer("people", "people/c1");
+    // The references are written inside the limit and outside it.
+    await perform(env.DB, w.ada, { type: "note.write", id: w.deep.id, baseRevision: 2, text: `# Q3 plan\n\n${event.text} with ${contact.text}` });
+    await perform(env.DB, w.ada, { type: "note.write", id: w.loose.id, baseRevision: 2, text: `# Loose-outside\n\n${event.text}` });
+    const readOnly = await connectAgent(env.DB, w.ada.personId, "Reader", { workspaceId: w.ada.workspaceId, folderIds: [w.projects], readOnly: true });
+    const before = asked.length;
+
+    for (const token of [w.limited.token, readOnly.token]) {
+      const claude = await asAgent(token, sources);
+      const refused = (op: string) => ({ isError: true, text: `forbidden: An agent limited to folders can't ${op}` });
+      expect(await claude.call("list_sources")).toEqual(refused("source.list"));
+      expect(await claude.call("list_events", { from: 0, to: 10, timeZone: "UTC" })).toEqual(refused("event.list"));
+      expect(await claude.call("list_contacts")).toEqual(refused("contact.list"));
+      expect(await claude.call("list_contacts", { query: "sam" })).toEqual(refused("contact.list"));
+      // A reference in a note it reads, one in a note it can't, and one that was never made are refused alike.
+      for (const ref of [event.ref, contact.ref, MISSING]) expect(await claude.call("read_record", { ref })).toEqual(refused("record.read"));
+      // Which notes reference an event, the one inside the limit or the one outside it, is refused too.
+      expect(await claude.call("notes_about_record", { sourceId: "cal", id: "a1" })).toEqual(refused("record.notes"));
+      const changes = token === readOnly.token ? (op: string) => ({ isError: true, text: `forbidden: A read-only token can't ${op}` }) : refused;
+      expect(await claude.call("refer_record", { sourceId: "cal", id: "a1" })).toEqual(changes("record.refer"));
+      expect(await claude.call("update_event", { sourceId: "cal", id: "a1", etag: "e1", title: "Taken" })).toEqual(changes("event.update"));
+      expect(await claude.call("create_event", { sourceId: "cal", calendarId: "mine", title: "Taken", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } })).toEqual(changes("event.create"));
+      // What its note says of them is what every reader of the note is told: the reference and its label.
+      expect((await claude.json<Note>("read_note", { id: w.deep.id })).text).toBe(`# Q3 plan\n\n::event{${event.ref} Lunch with Sam} with ::contact{${contact.ref} Sam Okafor}`);
+      await claude.json("search", { query: "Lunch" });
+      await claude.json("note_history", { id: w.deep.id });
+      expect(claude.said.join("\n")).not.toMatch(/Cafe-Lula-outside|contract-outside|sam-outside@example\.com|Mine-calendar-outside|ada-account-outside|source-outside|people\/c1/);
+      for (const mark of w.marks) expect(claude.said.join("\n")).not.toContain(mark);
+    }
+    // Refused before anything was asked of a data source, and nothing was changed there.
+    expect(asked).toHaveLength(before);
+    expect(changed).toEqual([]);
+    // Her agent that reaches everything reads the record, as she does.
+    expect((await (await asAgent(w.scribe.token, sources)).json<{ event: { location: string } }>("read_record", { ref: event.ref })).event.location).toBe("Cafe-Lula-outside");
   });
 
   it("isn't told who is in the workspace, some of whom have only written outside its folders", async () => {

@@ -166,7 +166,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
               markdown({ base: markdownLanguage }),
               noteHighlighting,
-              embedding,
+              embedding(noteId),
               embedded.of(embedsAre(embedsNow.current)),
               completed.of(offeredNow.current),
               EditorView.lineWrapping,

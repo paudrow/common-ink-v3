@@ -131,6 +131,8 @@ jobs:
       ALLOWED_EMAILS: ${{ vars.ALLOWED_EMAILS }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      # Seals each person's Google tokens. Without it none is kept, and Calendar and Contacts aren't offered.
+      TOKEN_KEY: ${{ secrets.TOKEN_KEY }}
     steps:
       - name: Skip without a production domain
         if: env.PRODUCTION_DOMAIN == ''
@@ -147,7 +149,7 @@ jobs:
       - name: Deploy
         if: env.PRODUCTION_DOMAIN != ''
         run: |
-          jq -n --arg g "$GOOGLE_CLIENT_SECRET" --arg s "$SESSION_SECRET" '{GOOGLE_CLIENT_SECRET: $g, SESSION_SECRET: $s} | with_entries(select(.value != ""))' > "$RUNNER_TEMP/secrets.json"
+          jq -n --arg g "$GOOGLE_CLIENT_SECRET" --arg s "$SESSION_SECRET" --arg t "$TOKEN_KEY" '{GOOGLE_CLIENT_SECRET: $g, SESSION_SECRET: $s, TOKEN_KEY: $t} | with_entries(select(.value != ""))' > "$RUNNER_TEMP/secrets.json"
           npm run deploy -- --domain "$PRODUCTION_DOMAIN" --secrets-file "$RUNNER_TEMP/secrets.json" \
             --var "GOOGLE_CLIENT_ID:$GOOGLE_CLIENT_ID" --var "ALLOWED_EMAILS:$ALLOWED_EMAILS"
           rm "$RUNNER_TEMP/secrets.json"
