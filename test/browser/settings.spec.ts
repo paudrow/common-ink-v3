@@ -586,7 +586,8 @@ test("a plugin that asks to change settings is refused and nothing is written, w
               const read = await outcome(host.perform({ type: "settings.read" }));
               const listed = await outcome(host.perform({ type: "note.list" }));
               const set = await outcome(Promise.resolve().then(() => host.settings.set("shout", true)));
-              (window as unknown as { __GREEDY__: unknown }).__GREEDY__ = { wrote, read, listed, set };
+              const sort = await outcome(Promise.resolve().then(() => host.settings.set("todos.sort", "text")));
+              (window as unknown as { __GREEDY__: unknown }).__GREEDY__ = { wrote, read, listed, set, sort };
             },
           });
         },
@@ -606,6 +607,7 @@ test("a plugin that asks to change settings is refused and nothing is written, w
     read: "Greedy can't settings.read: a plugin can't read or change the member's settings",
     listed: "done",
     set: "Greedy can't change shout: a plugin changes only a setting it declares remembered",
+    sort: "Greedy can't change todos.sort: a plugin changes only a setting it declares remembered",
   });
   await expect.poll(() => stored(page)).toEqual({});
   await expect.poll(() => theme(page)).toBeNull();

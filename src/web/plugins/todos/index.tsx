@@ -6,7 +6,7 @@ import { tickedIn, todoChips, untick } from "./chips.ts";
 import { CHANGED, completed, refused, takeBack } from "./completed.ts";
 import { dueOffers, today } from "./dates.ts";
 import { everyOffers } from "./recurrence.ts";
-import { TodosPage } from "./Todos.tsx";
+import { SORTS, TodosPage } from "./Todos.tsx";
 
 const MINUTE_MS = 60_000;
 
@@ -22,6 +22,14 @@ export const todos: Plugin = {
   icon: "todos",
   screenshots: [{ src: "/plugin-shots/todos-light.png", dark: "/plugin-shots/todos-dark.png", alt: "The Todos page: every open todo with its priority, its due date and the note it is in." }],
   settings: {
+    sort: {
+      type: "string",
+      default: "due",
+      enum: Object.keys(SORTS),
+      remembered: true,
+      title: "Order of the Todos page",
+      description: "What the Todos page is sorted by, chosen with its Sort menu. It is kept with your account, so every browser you sign in on shows the same order.",
+    },
     sayWhyLeaving: {
       type: "boolean",
       default: true,

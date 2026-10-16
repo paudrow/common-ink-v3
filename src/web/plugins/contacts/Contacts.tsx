@@ -74,7 +74,7 @@ export function ContactsPage({ host, app }: ViewProps & { host: PluginHost }) {
                     {contact.organization && <span className="contact-organization">{contact.organization}</span>}
                     {(contact.emails.length > 0 || contact.phones.length > 0) && (
                       <span className="contact-reach">
-                        {[...contact.emails, ...contact.phones].map((said) => (
+                        {[...contact.emails, ...contact.phones].map(({ value: said }) => (
                           <span key={said}>{said}</span>
                         ))}
                       </span>

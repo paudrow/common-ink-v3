@@ -114,7 +114,7 @@ export function PersonPage({ host, app, who, openAt }: Props) {
   const addToContacts = async (sourceId: string) => {
     if (!person) return;
     try {
-      await host.perform({ type: "contact.create", sourceId, name: person.name, ...(person.member?.email && { emails: [person.member.email] }) });
+      await host.perform({ type: "contact.create", sourceId, name: person.name, ...(person.member?.email && { emails: [{ value: person.member.email, type: null }] }) });
       setChanged((n) => n + 1);
     } catch (err) {
       setProblem(err instanceof Error ? err.message : "The contact couldn't be added.");

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { DEFAULT_EXPIRY_DAYS, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, ago, useNow, type Agent, type AgentEdit, type ExpiresIn, type Folders, type PluginHost, type WorkspaceSummary } from "../../plugin-api.ts";
 import { Copyable } from "../lib/Copyable.tsx";
 import { asksOfAuthor, useReverts } from "../lib/RevertDialog.tsx";
+import { byHand, connectPrompt, type Reach } from "./prompt.ts";
 
 const DAY_MS = 86_400_000;
 const EXPIRIES = [30, DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS];
@@ -156,26 +157,47 @@ interface Props {
   onReverted: () => void;
 }
 
-/** A new agent's token, shown this once, with what to paste to use it. */
-function NewToken({ agent, token, onDone }: { agent: Agent; token: string; onDone: () => void }) {
-  const url = `${location.origin}/mcp`;
+/**
+ * How to connect an agent: a prompt to paste into it, which has it add the connection to itself, and what to paste
+ * to set it up by hand. `token` is there only right after the agent is connected, the one time it is shown.
+ */
+function Setup({ agent, reach, token, onDone }: { agent: Agent; reach: Reach; token: string | null; onDone: () => void }) {
+  const connection = { origin: location.origin, agent: reach, token };
+  const hand = byHand(connection);
+  const shown = useRef<HTMLElement>(null);
+  // Shown again from its row, it takes the focus from the control that showed it, which gets it back on Close.
+  useEffect(() => {
+    if (!token) shown.current?.focus();
+  }, [token]);
   return (
-    <section className="new-token" aria-label="New token">
-      <p>
-        <strong>{agent.name} is connected.</strong> Copy its token now. It isn't shown again.
-      </p>
-      <Copyable label="Token" value={token} />
-      <Copyable label="ink command" value={`export INK_URL=${location.origin}\nexport INK_TOKEN=${token}\nnpm run ink -- notes`} />
-      <p className="hint">
-        The ink command runs from a checkout of Common Ink and reads the token from INK_TOKEN, so the token is in no command but the export. That line stays in your shell's history unless you
-        take it out.
-      </p>
-      <Copyable label="Claude Code" value={`claude mcp add --transport http common-ink ${url} --header "Authorization: Bearer $INK_TOKEN"`} />
-      <p className="hint">Run it in the shell where INK_TOKEN is exported. Claude Code then keeps the token, unencrypted, in its settings file in your home folder (~/.claude.json).</p>
-      <Copyable label="MCP config" value={JSON.stringify({ mcpServers: { "common-ink": { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } })} />
-      <p className="hint">For any other MCP client. The token is stored wherever that client keeps this config, so keep that file to yourself.</p>
+    <section ref={shown} tabIndex={-1} className="new-token" aria-label={token ? "New token" : `Set up ${agent.name}`}>
+      {token ? (
+        <p>
+          <strong>{agent.name} is connected.</strong> Paste this prompt into it, and it adds the connection to itself and checks that it works. The token in it isn't shown again.
+        </p>
+      ) : (
+        <p>
+          <strong>Set up {agent.name} again.</strong> Its token was shown once, when it was connected, so this prompt has no token in it and asks for the one you kept.
+          Without it, connect a new agent.
+        </p>
+      )}
+      <Copyable label="Prompt" value={connectPrompt(connection)} prose />
+      {token && <p className="hint">The token goes into that conversation with the prompt. If it ends up anywhere it shouldn't, disconnect {agent.name} and its token stops at once.</p>}
+      <details className="by-hand">
+        <summary>Set it up by hand</summary>
+        {token && <Copyable label="Token" value={token} />}
+        <Copyable label="ink command" value={hand.ink} />
+        <p className="hint">
+          The ink command runs from a checkout of Common Ink and reads the token from INK_TOKEN, so the token is in no command but the export. That line stays in your shell's history unless you
+          take it out.
+        </p>
+        <Copyable label="Claude Code" value={hand.claudeCode} />
+        <p className="hint">Run it in the shell where INK_TOKEN is exported. Claude Code then keeps the token, unencrypted, in its settings file in your home folder (~/.claude.json).</p>
+        <Copyable label="MCP config" value={hand.config} />
+        <p className="hint">For any other MCP client. The token is stored wherever that client keeps this config, so keep that file to yourself.</p>
+      </details>
       <button type="button" className="button small" onClick={onDone}>
-        Done
+        {token ? "Done" : "Close"}
       </button>
     </section>
   );
@@ -193,6 +215,9 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
   const [fresh, setFresh] = useState<{ agent: Agent; token: string } | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  /** The agent whose setup is shown again, without its token. */
+  const [settingUp, setSettingUp] = useState<string | null>(null);
+  const setUpAgain = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState<string | null>(null);
   const canEdit = workspace.role !== "viewer";
   /** The agent whose changes are being read for a revert. */
@@ -311,6 +336,12 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
     const days = Math.round((agent.expiresAt - now) / DAY_MS);
     return days < 1 ? "expires today" : `expires in ${days} ${days === 1 ? "day" : "days"}`;
   };
+  const reachOf = (agent: Agent): Reach => ({
+    name: agent.name,
+    readOnly: agent.readOnly,
+    workspace: agent.workspaceId === null ? null : (workspaces.find((w) => w.id === agent.workspaceId)?.name ?? "a workspace I have left"),
+    folders: agent.folderIds === null ? null : agent.workspaceId === workspace.id && folders ? shownFolders(agent, here).map((id) => folders.pathName(id)) : [],
+  });
   const connected = (agent: Agent) => agent.revokedAt === null && (agent.expiresAt === null || agent.expiresAt > now);
 
   const row = (agent: Agent) => (
@@ -368,7 +399,29 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
               Disconnect
             </button>
           ))}
+        {connected(agent) && (
+          <button
+            type="button"
+            ref={settingUp === agent.id ? setUpAgain : undefined}
+            className="link set-up-again"
+            aria-expanded={settingUp === agent.id}
+            onClick={() => setSettingUp((was) => (was === agent.id ? null : agent.id))}
+          >
+            Set up again
+          </button>
+        )}
       </div>
+      {settingUp === agent.id && connected(agent) && (
+        <Setup
+          agent={agent}
+          reach={reachOf(agent)}
+          token={null}
+          onDone={() => {
+            setUpAgain.current?.focus();
+            setSettingUp(null);
+          }}
+        />
+      )}
       {editing === agent.id && (
         <form className="connect agent-edit" aria-label={`Edit ${agent.name}`} onSubmit={(e) => edit(e, agent)}>
           <Permissions workspaces={workspaces} here={here} agent={agent} ends={ends(agent)} />
@@ -412,7 +465,7 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
           {error}
         </p>
       )}
-      {fresh && <NewToken agent={fresh.agent} token={fresh.token} onDone={() => setFresh(null)} />}
+      {fresh && <Setup agent={fresh.agent} reach={reachOf(fresh.agent)} token={fresh.token} onDone={() => setFresh(null)} />}
 
       <h2>Connected</h2>
       {agents && !live.length && <p className="empty">No agent is connected.</p>}

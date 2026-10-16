@@ -39,6 +39,9 @@ export interface Sent {
   body: string;
 }
 
+/** People's fields whose entries have a `type`, and the words People answers in `formattedType` for each type it knows, in English. */
+const LABELLED = new Set(["emailAddresses", "phoneNumbers", "addresses", "urls"]);
+const GOOGLE_WORDS: Record<string, string> = { home: "Home", work: "Work", other: "Other", mobile: "Mobile", main: "Main", homeFax: "Home Fax", workFax: "Work Fax", otherFax: "Other Fax", pager: "Pager", workMobile: "Work Mobile", workPager: "Work Pager", googleVoice: "Google Voice", homePage: "Home Page", blog: "Blog", profile: "Profile" };
 const HOSTS = new Set(["https://oauth2.googleapis.com", "https://www.googleapis.com", "https://people.googleapis.com"]);
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const refusal = (status: number, reason: string) => json({ error: { code: status, message: reason, errors: [{ domain: "global", reason, message: reason }] } }, status);
@@ -180,8 +183,12 @@ export class FakeGoogle {
     const missing = () => json({ error: { code: 404, message: "Requested entity was not found.", status: "NOT_FOUND" } }, 404);
     if (method !== "GET" && !this.contactWriters.has(token)) return INSUFFICIENT.people();
     type Person = Record<string, unknown> & { resourceName: string; etag: string };
-    // People works out a name's displayName from what is written.
-    const named = (given: Record<string, unknown>) => (Array.isArray(given.names) ? { ...given, names: (given.names as { unstructuredName?: string }[]).map((n) => ({ displayName: n.unstructuredName, ...n })) } : given);
+    // People works out a name's displayName from what is written, and each label's formattedType: its own words for a type it knows, and any other as written.
+    const labelled = (entries: unknown) => (Array.isArray(entries) ? (entries as { type?: string }[]).map((e) => (e.type ? { ...e, formattedType: GOOGLE_WORDS[e.type] ?? e.type } : e)) : entries);
+    const named = (given: Record<string, unknown>) => {
+      const typed = Object.fromEntries(Object.entries(given).map(([field, value]) => [field, LABELLED.has(field) ? labelled(value) : value]));
+      return Array.isArray(given.names) ? { ...typed, names: (given.names as { unstructuredName?: string }[]).map((n) => ({ displayName: n.unstructuredName, ...n })) } : typed;
+    };
     const etag = () => `%E${this.sent.length}`;
     if (url.pathname === "/v1/people:createContact") {
       if (method !== "POST") return refusal(405, "methodNotAllowed");

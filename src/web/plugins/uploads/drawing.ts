@@ -1,7 +1,9 @@
 import { uploadIn, type BelowDrawn, type BelowEmbedded, type Dispose, type Embed, type PluginHost, type ReferredTo, type Upload, type UploadEmbed } from "../../plugin-api.ts";
 import { sizeHandle } from "./handle.ts";
-import { filePath, openingOf, openUpload } from "./opening.ts";
-import { boxFor, formatBytes, KIND_LABEL } from "./sizing.ts";
+import { filePath, openingOf, openUpload, previewUpload } from "./opening.ts";
+import { previewOf } from "./previewing.ts";
+import { drawPreview } from "./previews.ts";
+import { boxFor, cardHeight, formatBytes, KIND_LABEL } from "./sizing.ts";
 
 export const UNAVAILABLE = "This file isn't available";
 export const IN_TRASH = "This file is in Trash";
@@ -53,22 +55,18 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
     for (const again of [...drawn]) again();
   });
 
+  /** Whether there is an app here to preview a file over, which a link's page hasn't. */
+  const previews = () => typeof host.app().toggleOverlay === "function";
+
   /**
-   * A file as a chip: its name and its size. A press opens it as its kind of file opens: a PDF in a
-   * tab where there is a site kept for files and otherwise saved, text in the app and a picture, video or recording in a preview where there is an app to show
-   * them in, and anything else is saved under its name.
+   * A link that opens a file as its kind of file opens: text in the app, and a picture, a video, a
+   * recording or a PDF in a preview, where there is an app to show them in, and anything else is
+   * saved under its name.
    */
-  const chip = (id: string, info: NonNullable<ReferredTo>) => {
-    const link = el("a", "file-chip");
+  const opener = (link: HTMLAnchorElement, id: string, info: NonNullable<ReferredTo>) => {
     const address = host.uploads.address(id);
-    const tab = host.uploads.tabAddress(id);
-    const how = openingOf(info, tab !== null);
-    if (how === "tab") {
-      link.href = tab!;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.title = `Open ${info.name} in a new tab`;
-    } else if ((how === "app" && typeof host.app().go === "function") || (how === "preview" && typeof host.app().toggleOverlay === "function")) {
+    const how = openingOf(info);
+    if ((how === "app" && typeof host.app().go === "function") || (how === "preview" && previews())) {
       link.href = how === "app" ? filePath(id) : address;
       link.title = `Open ${info.name}`;
       link.addEventListener("click", (e) => {
@@ -81,6 +79,12 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
       link.download = info.name;
       link.title = `Download ${info.name}`;
     }
+    return link;
+  };
+
+  /** A file as a chip among words: its name and its size, which opens it. */
+  const chip = (id: string, info: NonNullable<ReferredTo>) => {
+    const link = opener(el("a", "file-chip"), id, info);
     link.append(paperclip(), el("span", "file-chip-name", info.name), el("span", "file-chip-size", formatBytes(info.size)));
     return link;
   };
@@ -186,12 +190,96 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
     },
   });
 
+  /**
+   * A file on a line of its own: a card below the line, with a head of its name, what it is and
+   * Download, over a preview of it, which shows it larger over the app when pressed. The card is as
+   * tall as its preview, known from what the note was told of the file before any of it is read.
+   */
+  function card(into: HTMLElement, first: BelowEmbedded): BelowDrawn {
+    let now = first;
+    let stop: Dispose | undefined;
+    let unpreview: Dispose | undefined;
+    const start = () => {
+      const id = uploadIn(now.config);
+      if (!id) return;
+      stop = live(id, (info) => {
+        unpreview?.();
+        unpreview = undefined;
+        const head = el("div", "upload-card-head");
+        const body = el("div", "upload-card-body upload-preview-body upload-preview-note");
+        const shown = info && info.state !== "trashed" ? info : null;
+        if (info === undefined) head.append(el("span", "upload-card-said", TITLE.file));
+        else if (!shown) head.append(el("span", "upload-card-said", info === null ? UNAVAILABLE : IN_TRASH), ...(info ? [el("span", "upload-card-meta", info.name)] : []));
+        else {
+          const meta = el("span", "upload-card-meta", formatBytes(shown.size));
+          const name = opener(el("a", "upload-card-name"), id, shown);
+          name.append(paperclip(), el("span", "", shown.name));
+          const save = el("a", "upload-card-download");
+          save.href = host.uploads.address(id);
+          save.download = shown.name;
+          save.title = `Download ${shown.name}`;
+          save.setAttribute("aria-label", save.title);
+          head.append(name, meta, save);
+          const preview = previewOf(shown);
+          body.style.height = `${cardHeight(preview) - cardHeight(null)}px`;
+          const upload = { id, name: shown.name, type: shown.type, size: shown.size };
+          // A file with nothing to preview is its head alone in a note: its icon is for the Uploads page.
+          if (preview.shows !== "icon") unpreview = drawPreview(body, host, upload, "note", {
+            said: (words) => (meta.textContent = words ? `${formatBytes(shown.size)} · ${words}` : formatBytes(shown.size)),
+          });
+          // A player is pressed to play: the card's name opens it larger.
+          if (preview.shows !== "player" && preview.shows !== "icon" && previews()) {
+            body.classList.add("upload-card-opens");
+            body.tabIndex = 0;
+            body.setAttribute("role", "button");
+            body.setAttribute("aria-label", `Preview ${shown.name}`);
+            const open = () => previewUpload(host, upload);
+            body.addEventListener("click", open);
+            body.addEventListener("keydown", (e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              open();
+            });
+          }
+        }
+        into.replaceChildren(head, body);
+        const height = cardHeight(shown ? previewOf(shown) : null);
+        if (info !== undefined && height !== boxOfFile(now.config)?.height) now.resize(height);
+      });
+    };
+    start();
+    return {
+      update(next) {
+        const was = uploadIn(now.config);
+        now = next;
+        if (uploadIn(next.config) === was) return;
+        unpreview?.();
+        stop?.();
+        into.replaceChildren();
+        start();
+      },
+      stop: () => {
+        unpreview?.();
+        stop?.();
+      },
+    };
+  }
+
+  /** The room a file's card keeps below its line, from what the note was told of the file. */
+  const boxOfFile = (config: string): { height: number } | null => {
+    const id = uploadIn(config);
+    if (!id) return null;
+    const info = host.uploads.referred(id);
+    return { height: cardHeight(info && info.state !== "trashed" ? previewOf(info) : null) };
+  };
+
   const file: Embed = {
     name: "file",
     title: TITLE.file,
     // Offered in a menu only where a file can be sent, as the way to send one.
     menu: !!pick,
     pick,
+    below: { alone: true, box: ({ config }) => boxOfFile(config), render: (into, handed) => card(into, handed) },
     render(into, embedded) {
       const id = uploadIn(embedded.config);
       if (!id) return void into.append(el("span", "embed-unread", "File: paste or drop a file here, or copy its embed from the Uploads page"));

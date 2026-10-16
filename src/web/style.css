@@ -2109,7 +2109,7 @@ button.link:hover {
   visibility: hidden;
 }
 
-/* An embed that is all below its line, as written, where it is written: its line is as tall with it as with nothing. A line with nothing else on it is as tall as that text. */
+/* An embed that is all below its line, as written, where it is written: its line is as tall with it as with nothing. A line with nothing else on it, shown only with the cursor on it, is as tall as that text. */
 .embed-written {
   color: var(--accent);
   font-family: var(--mono);
@@ -2393,6 +2393,11 @@ button.link:hover {
 
 .embed-below-room-joined > div {
   max-width: none;
+}
+
+/* As far below the block's card as the card's frame keeps above it. */
+.embed-below-room-joined {
+  padding-bottom: 0.8em;
 }
 
 /* The line of an address shown as media, with the cursor on it (out of sight it is out of the note): above the media, as v1 drew it. */
@@ -5395,6 +5400,49 @@ button.diff-fold:hover {
   align-self: flex-start;
 }
 
+.copyable.prose .copyable-row {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.copyable.prose textarea {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.by-hand summary {
+  width: max-content;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.by-hand > .copyable {
+  margin-top: 10px;
+}
+
+.new-token .by-hand .hint {
+  margin-top: 4px;
+}
+
+.agent .set-up-again {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.agent:hover .set-up-again,
+.agent:focus-within .set-up-again {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .agent .set-up-again {
+    opacity: 1;
+  }
+}
+
 .copyable-row {
   display: flex;
   gap: 6px;
@@ -8193,6 +8241,95 @@ button.todo-tag[aria-pressed="true"] {
   color: var(--accent-ink);
 }
 
+/* What an event link in a note opens: the event in brief, then a short list of what to do with it. */
+.event-link {
+  width: 260px;
+  max-width: 100%;
+}
+
+.event-link-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.event-link-head strong {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.event-link .chip-choice[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+}
+
+.event-link .chip-choice svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.event-link-notes {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0;
+  padding: 4px 0;
+  border-block: 1px solid var(--line);
+}
+
+.event-link-notes h3 {
+  margin: 2px 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.event-link-notes .chip-choice {
+  justify-content: space-between;
+}
+
+.event-link-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-link .event-new-note {
+  padding: 4px 8px 8px;
+}
+
+.event-link .event-new-note select {
+  max-width: 100%;
+}
+
+.event-link .event-new-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-link-open {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.event-link-open .event-link-title {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event-link-said {
+  margin: 2px 8px 4px;
+}
+
 .event-form label:not(.check) {
   display: flex;
   flex-direction: column;
@@ -8498,6 +8635,304 @@ button.todo-tag[aria-pressed="true"] {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * A file on a line of its own: a card below the line, its head the file's name, what it is and a
+ * quiet Download, over a preview of it. The card is the box the note keeps, and is as tall as it.
+ */
+.embed-below:has(> .embed-below-drawn > .upload-card-head) {
+  background: var(--bg-elev);
+}
+
+.upload-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--line);
+  font: 13px/1.3 var(--prose);
+}
+
+.upload-card-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.upload-card-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upload-card-name svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.upload-card-name:hover > span {
+  text-decoration: underline;
+}
+
+.upload-card-meta,
+.upload-card-said {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Seen on hover or focus, as the size handle of a picture is. */
+.upload-card-download {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border-radius: 7px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.upload-card-download::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4v11M7 10l5 5 5-5M5 20h14'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4v11M7 10l5 5 5-5M5 20h14'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.embed-below:hover .upload-card-download,
+.upload-card-download:focus-visible {
+  opacity: 1;
+}
+
+.upload-card-download:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.upload-card-body {
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.upload-card-opens {
+  cursor: zoom-in;
+}
+
+.upload-card-opens:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* A preview of a file, the same in a note, in the Uploads page's panel and over the app. */
+.upload-preview-body {
+  position: relative;
+  min-width: 0;
+}
+
+.upload-pages {
+  display: flex;
+  gap: 12px;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 12px;
+  overflow: hidden;
+  background: var(--bg-side);
+}
+
+.upload-page {
+  flex: none;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+}
+
+.upload-preview-picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--bg-side);
+}
+
+.upload-preview-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.upload-preview-audio {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 4px 8px;
+}
+
+.upload-preview-lines {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--ink);
+  font: 12.5px/20px var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.upload-preview-rows {
+  margin: 8px 6px;
+  border-collapse: collapse;
+  color: var(--ink);
+  font: 12.5px/1 var(--prose);
+}
+
+.upload-preview-rows :is(th, td) {
+  box-sizing: border-box;
+  max-width: 16rem;
+  height: 26px;
+  padding: 0 10px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-preview-rows th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.upload-type-icon {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 120px;
+  color: var(--faint);
+}
+
+.upload-type-icon > * {
+  grid-area: 1 / 1;
+}
+
+.upload-type-icon svg {
+  width: 56px;
+  height: 70px;
+}
+
+.upload-type-ending {
+  margin-top: 26px;
+  color: var(--muted);
+  font: 650 11px/1 var(--prose);
+  letter-spacing: 0.06em;
+}
+
+.upload-preview-said {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+h2 > .upload-preview-said {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* In the Uploads page's panel: framed, and no taller than about half the panel. */
+.upload-preview-panel {
+  max-height: 22rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-side);
+}
+
+.upload-preview-panel .upload-pages {
+  justify-content: center;
+}
+
+.upload-preview-panel .upload-page {
+  max-width: 100%;
+  height: auto !important;
+}
+
+.upload-preview-panel[data-shows="picture"] .upload-preview-picture {
+  max-height: 14rem;
+}
+
+.upload-preview-panel :is(.upload-preview-lines, .upload-preview-rows) {
+  background: var(--bg-elev);
+}
+
+.upload-preview-panel .upload-preview-rows {
+  width: 100%;
+  margin: 0;
+}
+
+/* Over the app: pages one under another, as wide as the preview, and everything scrolls in it. */
+.upload-preview-overlay {
+  width: min(52rem, 84vw);
+  min-height: 0;
+  max-height: 78vh;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg-side);
+}
+
+.upload-preview-overlay .upload-pages {
+  flex-direction: column;
+  align-items: center;
+  height: auto;
+  overflow: visible;
+}
+
+/* A page as wide as the preview, at its own shape, but never taller than a few screens nor thinner than a line: what is drawn is fit inside. */
+.upload-preview-overlay .upload-page {
+  width: min(100%, 300vh * var(--page-ratio)) !important;
+  height: auto !important;
+  aspect-ratio: var(--page-ratio);
+  min-width: 1rem;
+  min-height: 1rem;
+  max-height: 300vh;
+  object-fit: contain;
+}
+
+.upload-preview-overlay:is([data-shows="picture"], [data-shows="player"]) {
+  width: auto;
+  background: none;
+}
+
+.upload-preview-overlay:is([data-shows="rows"], [data-shows="lines"]) {
+  background: var(--bg-elev);
+}
+
+.upload-preview-overlay .upload-preview-rows {
+  width: 100%;
+  margin: 0;
+}
+
+.upload-preview-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
 }
 
 /* A file in its line: words of the line's own size with a tint behind them, so the line is as tall with it as without. */
@@ -9191,9 +9626,37 @@ a.file-chip:hover .file-chip-name {
 
 .contact-form-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   width: 100%;
+}
+
+/* Where a line is too narrow for its label and value side by side, the value and its remove button go under the label. */
+.contact-form-value {
+  display: flex;
+  flex: 1 1 12rem;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* A line's label: a quiet menu before it, framed only while pointed at or in use. */
+.contact-form .contact-form-type {
+  flex: none;
+  width: 8.5rem;
+  padding-inline: 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.contact-form .contact-form-type:hover,
+.contact-form .contact-form-type:focus,
+.contact-form input.contact-form-type {
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 .contact-form-birthday {
@@ -9309,6 +9772,10 @@ a.file-chip:hover .file-chip-name {
 .person-page a {
   color: var(--accent);
   text-underline-offset: 2px;
+}
+
+.event-note-start {
+  display: contents;
 }
 
 /* Dashboard */

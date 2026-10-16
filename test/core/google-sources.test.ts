@@ -475,9 +475,9 @@ describe("Google Contacts", () => {
     expect(sources).toEqual([{ id: "google-contacts", kind: "contacts", name: "Google Contacts", provider: "Google", state: "connected", writable: false, reconnectToWrite: true, account: "ada@example.com" }]);
     expect(more).toBe(false);
     expect(contacts).toEqual([
-      { sourceId: "google-contacts", id: "people/c3", name: "nameless@example.com", emails: ["nameless@example.com"], phones: [], organization: null, url: "https://contacts.google.com/person/c3" },
-      { sourceId: "google-contacts", id: "people/c1", name: "Sam Okafor", emails: [], phones: ["+1 555 0142"], organization: "Okafor Plumbing", url: "https://contacts.google.com/person/c1" },
-      { sourceId: "google-contacts", id: "people/c2", name: "Zoë Álvarez", emails: ["zoe@example.com", "z@example.org"], phones: [], organization: null, url: "https://contacts.google.com/person/c2" },
+      { sourceId: "google-contacts", id: "people/c3", name: "nameless@example.com", emails: [{ value: "nameless@example.com", type: null }], phones: [], organization: null, url: "https://contacts.google.com/person/c3" },
+      { sourceId: "google-contacts", id: "people/c1", name: "Sam Okafor", emails: [], phones: [{ value: "+1 555 0142", type: "mobile" }], organization: "Okafor Plumbing", url: "https://contacts.google.com/person/c1" },
+      { sourceId: "google-contacts", id: "people/c2", name: "Zoë Álvarez", emails: [{ value: "zoe@example.com", type: null }, { value: "z@example.org", type: null }], phones: [], organization: null, url: "https://contacts.google.com/person/c2" },
     ]);
     const pages = google.asked("GET", /connections$/);
     expect(pages.map((s) => s.url.searchParams.get("pageToken"))).toEqual([null, "3"]);
@@ -512,7 +512,7 @@ describe("editing a Google contact", () => {
 
   it("changes only the fields named, as People's updateContact takes them, keeping each label and the organization's department, and answers the card Google holds", async () => {
     const { google, ask } = await editing();
-    const card = await ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c1", etag: "%Eg", name: "Samuel Okafor", phones: ["+1 555 0142", "+1 555 0199"], emails: ["sam@okafor.example"], title: null, birthday: "--04-21", notes: "Text first" });
+    const card = await ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c1", etag: "%Eg", name: "Samuel Okafor", phones: [{ value: "+1 555 0142", type: "mobile" }, { value: "+1 555 0199", type: null }], emails: [{ value: "sam@okafor.example", type: null }], title: null, birthday: "--04-21", notes: "Text first" });
     const [patch] = google.asked("PATCH", /^\/v1\/people\/c1:updateContact$/);
     expect(patch!.url.searchParams.get("updatePersonFields")).toBe("names,emailAddresses,phoneNumbers,organizations,birthdays,biographies");
     expect(JSON.parse(patch!.body)).toEqual({
@@ -524,11 +524,26 @@ describe("editing a Google contact", () => {
       birthdays: [{ date: { month: 4, day: 21 } }],
       biographies: [{ value: "Text first", contentType: "TEXT_PLAIN" }],
     });
-    expect(card).toMatchObject({ id: "people/c1", name: "Samuel Okafor", phones: ["+1 555 0142", "+1 555 0199"], emails: ["sam@okafor.example"], organization: "Okafor Plumbing", title: null, birthday: "--04-21", notes: "Text first" });
+    expect(card).toMatchObject({ id: "people/c1", name: "Samuel Okafor", phones: [{ value: "+1 555 0142", type: "mobile" }, { value: "+1 555 0199", type: null }], emails: [{ value: "sam@okafor.example", type: null }], organization: "Okafor Plumbing", title: null, birthday: "--04-21", notes: "Text first" });
     expect(card.etag).not.toBe("%Eg");
     // Read back, it is as Google now holds it.
     const { ref } = await ask({ type: "record.refer", sourceId: "google-contacts", id: "people/c1" });
     expect(await ask({ type: "record.read", ref })).toMatchObject({ contact: { name: "Samuel Okafor", etag: card.etag } });
+  });
+
+  it("writes each label with its value through updateContact, and a label the member wrote comes back from Google as its formattedType", async () => {
+    const { google, ask } = await editing();
+    const card = await ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c2", etag: "%Eg", emails: [{ value: "zoe@example.com", type: "work" }, { value: "z@example.org", type: "Book club" }], urls: [{ value: "https://zoe.example", type: "blog" }] });
+    const [patch] = google.asked("PATCH", /^\/v1\/people\/c2:updateContact$/);
+    expect(patch!.url.searchParams.get("updatePersonFields")).toBe("emailAddresses,urls");
+    expect(JSON.parse(patch!.body)).toEqual({ etag: "%Eg", emailAddresses: [{ value: "zoe@example.com", type: "work" }, { value: "z@example.org", type: "Book club" }], urls: [{ value: "https://zoe.example", type: "blog" }] });
+    expect((google.people[1] as { emailAddresses: unknown }).emailAddresses).toEqual([{ value: "zoe@example.com", type: "work", formattedType: "Work" }, { value: "z@example.org", type: "Book club", formattedType: "Book club" }]);
+    expect(card).toMatchObject({ emails: [{ value: "zoe@example.com", type: "work" }, { value: "z@example.org", type: "Book club" }], urls: [{ value: "https://zoe.example", type: "blog" }] });
+    const { ref } = await ask({ type: "record.refer", sourceId: "google-contacts", id: "people/c2" });
+    expect(await ask({ type: "record.read", ref })).toMatchObject({ contact: { emails: [{ value: "zoe@example.com", type: "work" }, { value: "z@example.org", type: "Book club" }] } });
+    // Taken off, a label is sent as no type at all.
+    await ask({ type: "contact.update", sourceId: "google-contacts", id: "people/c2", etag: card.etag, emails: [{ value: "zoe@example.com", type: null }] });
+    expect(JSON.parse(google.asked("PATCH", /^\/v1\/people\/c2:updateContact$/)[1]!.body)).toMatchObject({ emailAddresses: [{ value: "zoe@example.com" }] });
   });
 
   it("refuses a change made from a stale reading, says so, and Google keeps what it had", async () => {
@@ -554,16 +569,16 @@ describe("editing a Google contact", () => {
 
   it("adds a contact with createContact, and lists it after", async () => {
     const { google, ask } = await editing();
-    const made = await ask({ type: "contact.create", sourceId: "google-contacts", name: "Grace Hopper", emails: ["grace@example.com"] });
+    const made = await ask({ type: "contact.create", sourceId: "google-contacts", name: "Grace Hopper", emails: [{ value: "grace@example.com", type: null }] });
     expect(sentBody(google, "POST", /^\/v1\/people:createContact$/)).toEqual([{ names: [{ unstructuredName: "Grace Hopper" }], emailAddresses: [{ value: "grace@example.com" }] }]);
-    expect(made).toMatchObject({ name: "Grace Hopper", emails: ["grace@example.com"], phones: [] });
+    expect(made).toMatchObject({ name: "Grace Hopper", emails: [{ value: "grace@example.com", type: null }], phones: [] });
     expect((await ask({ type: "contact.list", query: "grace" })).contacts.map((c) => c.id)).toEqual([made.id]);
   });
 
   it("writes a change as a whole for each field, an organization and title both cleared as none, and no field it wasn't given", () => {
     expect(personOf({ organization: null, title: null }, { organizations: [{ name: "A", title: "B" }, { name: "Second" }] })).toEqual({ person: { organizations: [{ name: "Second" }] }, fields: ["organizations"] });
     expect(personOf({ birthday: "1990-01-02", addresses: [] })).toEqual({ person: { birthdays: [{ date: { year: 1990, month: 1, day: 2 } }], addresses: [] }, fields: ["birthdays", "addresses"] });
-    expect(personOf({ birthday: null, notes: null, urls: ["https://a.example"] })).toEqual({ person: { birthdays: [], biographies: [], urls: [{ value: "https://a.example" }] }, fields: ["birthdays", "biographies", "urls"] });
+    expect(personOf({ birthday: null, notes: null, urls: [{ value: "https://a.example", type: null }] })).toEqual({ person: { birthdays: [], biographies: [], urls: [{ value: "https://a.example" }] }, fields: ["birthdays", "biographies", "urls"] });
   });
 });
 
@@ -764,6 +779,51 @@ describe("signing in and connecting with Google", () => {
   });
 });
 
+describe("a Google contact's labels", () => {
+  it("are written as Google's own type when a label names one in any case, as its key or its words, whatever the browser's language", () => {
+    const change = { emails: [{ value: "a@example.com", type: "WORK" }, { value: "b@example.com", type: "home email" }, { value: "c@example.com", type: "Workshop" }], phones: [{ value: "+1 555 0100", type: "MOBILE" }] };
+    expect(personOf(change, {}).person).toMatchObject({
+      emailAddresses: [{ value: "a@example.com", type: "work" }, { value: "b@example.com", type: "home" }, { value: "c@example.com", type: "Workshop" }],
+      phoneNumbers: [{ value: "+1 555 0100", type: "mobile" }],
+    });
+  });
+
+  it("are read as People's own type, and for a type Common Ink has no words for, as Google shows it in formattedType", () => {
+    const card = toCard({
+      resourceName: "people/c42",
+      names: [{ displayName: "Grace Hopper" }],
+      emailAddresses: [{ value: "grace@example.com", type: "work", formattedType: "Work" }, { value: "hopper@navy.example", type: "Navy", formattedType: "Navy" }, { value: "g@example.org", type: "", formattedType: "" }],
+      phoneNumbers: [{ value: "+1 555 0100", type: "mobile", formattedType: "Mobile" }, { value: "+1 555 0101", type: "workMobile", formattedType: "Work Mobile" }, { value: "+1 555 0102" }],
+      addresses: [{ formattedValue: "1 Yard Lane", type: "home", formattedType: "Home" }],
+      urls: [{ value: "https://grace.example", type: "blog", formattedType: "Blog" }],
+    });
+    expect(card).toMatchObject({
+      emails: [{ value: "grace@example.com", type: "work" }, { value: "hopper@navy.example", type: "Navy" }, { value: "g@example.org", type: null }],
+      phones: [{ value: "+1 555 0100", type: "mobile" }, { value: "+1 555 0101", type: "Work Mobile" }, { value: "+1 555 0102", type: null }],
+      addresses: [{ value: "1 Yard Lane", type: "home" }],
+      urls: [{ value: "https://grace.example", type: "blog" }],
+    });
+  });
+
+  it("are written as People's type with each value: a line with the same value and label as Google had it, and a label read from formattedType as Google's own type again", () => {
+    const was = {
+      phoneNumbers: [{ value: "+1 555 0101", type: "workMobile", formattedType: "Work Mobile", canonicalForm: "+15550101", metadata: { primary: true } }],
+      emailAddresses: [{ value: "grace@example.com", type: "work", formattedType: "Work", metadata: { primary: true } }],
+    };
+    const change = {
+      phones: [{ value: "+1 555 0101", type: "Work Mobile" }, { value: "+1 555 0199", type: "Work Mobile" }, { value: "+1 555 0100", type: null }],
+      emails: [{ value: "grace@example.com", type: "home" }, { value: "hopper@navy.example", type: "Navy" }],
+    };
+    expect(personOf(change, was)).toEqual({
+      person: {
+        phoneNumbers: [{ value: "+1 555 0101", type: "workMobile" }, { value: "+1 555 0199", type: "workMobile" }, { value: "+1 555 0100" }],
+        emailAddresses: [{ value: "grace@example.com", type: "home" }, { value: "hopper@navy.example", type: "Navy" }],
+      },
+      fields: ["phoneNumbers", "emailAddresses"],
+    });
+  });
+});
+
 describe("a Google contact's card", () => {
   it("holds all a page shows: title, addresses, a birthday with or without its year, notes, and only https pictures and pages", () => {
     const person = {
@@ -783,16 +843,16 @@ describe("a Google contact's card", () => {
       sourceId: "google-contacts",
       id: "people/c42",
       name: "Sam Okafor",
-      emails: ["sam@example.com"],
-      phones: ["+1 555 0142"],
+      emails: [{ value: "sam@example.com", type: null }],
+      phones: [{ value: "+1 555 0142", type: null }],
       organization: "Okafor Plumbing",
       url: "https://contacts.google.com/person/c42",
       title: "Owner",
-      addresses: ["12 Water Lane"],
+      addresses: [{ value: "12 Water Lane", type: null }],
       birthday: "--04-21",
       notes: "Prefers a text",
       photo: "https://lh3.googleusercontent.com/sam",
-      urls: ["https://okafor.example"],
+      urls: [{ value: "https://okafor.example", type: null }],
       etag: "%EgM",
     });
     expect(toCard({ ...person, birthdays: [{ date: { year: 1990, month: 4, day: 21 } }], photos: [{ url: "http://lh3.googleusercontent.com/sam" }] })).toMatchObject({ birthday: "1990-04-21", photo: null });

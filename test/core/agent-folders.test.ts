@@ -72,7 +72,7 @@ async function world() {
   return { ada, projects, plans, journal, empty, outside, loose, inside, deep, scribe, ghost, limited, marks };
 }
 
-describe("an agent limited to folders", () => {
+describe("an agent limited to folders", { timeout: 30_000 }, () => {
   it("is made by naming folders of one workspace the member can see, and says what it is limited to", async () => {
     const { ada, projects, plans, limited } = await world();
     expect(limited.agent).toMatchObject({ workspaceId: ada.workspaceId, folderIds: [projects] });
@@ -94,7 +94,7 @@ describe("an agent limited to folders", () => {
   });
 
   // Some ninety tool calls: a slow runner takes longer than the default 5 s.
-  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", { timeout: 30_000 }, async () => {
+  it("reads the notes in its folders and the folders under them, and is told of nothing else by any tool", async () => {
     const w = await world();
     const claude = await asAgent(w.limited.token);
 
@@ -587,7 +587,7 @@ describe("an agent limited to folders", () => {
     const asked: string[] = [];
     const lunch = { sourceId: "cal", id: "a1", calendarId: "mine", calendar: "Mine-calendar-outside", color: null, title: "Lunch with Sam", when: { allDay: false, from: 1, to: 2 }, timeZone: null, location: "Cafe-Lula-outside", description: "contract-outside", recurring: false, editable: true, etag: "e1", url: null } as const;
     const mine = { sourceId: "cal", id: "mine", name: "Mine-calendar-outside", color: null, writable: true };
-    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: ["sam-outside@example.com"], phones: [], organization: null, url: null, title: "Plumber-outside", addresses: ["Lane-outside"], birthday: null, notes: "notes-outside", photo: null, urls: [], etag: "e1" };
+    const sam = { sourceId: "people", id: "people/c1", name: "Sam Okafor", emails: [{ value: "sam-outside@example.com", type: null }], phones: [], organization: null, url: null, title: "Plumber-outside", addresses: [{ value: "Lane-outside", type: null }], birthday: null, notes: "notes-outside", photo: null, urls: [], etag: "e1" };
     const changed: unknown[] = [];
     const sources: Sources = {
       async of(personId) {
@@ -777,7 +777,7 @@ describe("an agent limited to folders", () => {
   });
 });
 
-describe("changing what an agent is limited to", () => {
+describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
   it("is an edit: to other folders, to all notes, and back, on the token it already has", async () => {
     const w = await world();
     const claude = await asAgent(w.limited.token);

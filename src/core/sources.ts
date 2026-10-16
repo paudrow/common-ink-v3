@@ -216,7 +216,7 @@ const words = (text: string) =>
 
 /** Whether every word asked for starts a word of the contact's name, emails or organization. */
 export function contactMatches(contact: Contact, query: string): boolean {
-  const has = words([contact.name, ...contact.emails, contact.organization ?? ""].join(" "));
+  const has = words([contact.name, ...contact.emails.map((e) => e.value), contact.organization ?? ""].join(" "));
   return words(query).every((word) => has.some((w) => w.startsWith(word)));
 }
 
