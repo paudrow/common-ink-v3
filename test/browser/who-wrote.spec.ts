@@ -287,6 +287,8 @@ test("the next and previous change commands move the cursor run by run and open 
     baseRevision: 0,
   });
   await page.reload();
+  // The command steps through the column, which is drawn once the note's blame has been read again.
+  await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent"]);
   await page.locator(".cm-line", { hasText: "Ed's step" }).click();
   await page.keyboard.press("ControlOrMeta+Shift+J");
   await expect(page.getByRole("complementary", { name: "Inspector" }).locator(".hist-row.selected")).toContainText("Claude edited");
