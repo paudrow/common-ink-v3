@@ -13,7 +13,7 @@ import { newId } from "./ids.ts";
 import { isNoteId, linkedIds, linksIn, retargeted } from "./links.ts";
 import { summarize } from "./markdown.ts";
 import { isPersonId, mentionIndex, mentionKey, mentionName, mentionsIn, mentionsOn, personKey, rementioned, writtenMention, type WrittenMention } from "./mentions.ts";
-import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, type Asking } from "./membership.ts";
+import { invite, leave, listInvites, listMembers, removeMember, revokeInvite, setRole, signOut, type Asking } from "./membership.ts";
 import {
   NO_SUCH_WORKSPACE,
   MAX_NOTE_LENGTH,
@@ -2688,6 +2688,15 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "member.remove": { needs: "manage", by: "member", run: (ctx, op) => removeMember(asking(ctx), op.memberId) },
   // A viewer can leave too, so this needs no more than belonging to the workspace.
   "member.leave": { needs: "view", by: "member", members: true, run: (ctx) => leave(asking(ctx)) },
+  // Anyone signs themself out everywhere, a guest too. Only an admin signs out someone else, and only a member.
+  "member.signOut": {
+    needs: "view",
+    by: "member",
+    run(ctx, op) {
+      if (op.memberId !== ctx.personId && ctx.role !== "admin") throw new OpError("forbidden", "Only an admin signs out someone else");
+      return signOut(asking(ctx), op.memberId);
+    },
+  },
   "invite.list": { needs: "manage", by: "member", run: (ctx) => listInvites(ctx.db, ctx.workspaceId) },
   "invite.revoke": { needs: "manage", by: "member", run: (ctx, op) => revokeInvite(asking(ctx), op.id) },
 

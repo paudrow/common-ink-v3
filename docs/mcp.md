@@ -17,6 +17,7 @@ A member connects an agent in the web app, on the Agents page (`/agents`, from t
 - Disconnecting an agent stops its token at once. Only a SHA-256 hash of a token is stored; the token is shown once, when the agent is connected.
 - A token works only in an `Authorization: Bearer` header. It is not a cookie, so a web page can't use it.
 
+- An agent can't sign anyone out, its own member included. Signing out everywhere is for the member, signed in, from Settings, and for an admin from the Members page. It ends sessions, not tokens: an agent stays connected when its member signs out everywhere.
 - An agent can archive a note, move it to Trash and restore it, with edit on the note, since each can be taken back. It can't remove a note from Trash for good: that takes the note's history with it and nothing brings it back, so it is for the member, signed in, on the Trash page.
 
 - An agent can find uploads with the query language, read one's details and where it is used, upload a file, download one, put one in a note, move, archive, trash and restore one, with the same access its member has. It can't remove an upload from Trash for good or make one private: both are for the member, signed in. A token limited to folders is given the uploads in those folders and no others, by every tool and by the address that serves the bytes, and it uploads only into them: it names the folder, since Unsorted isn't one of them.

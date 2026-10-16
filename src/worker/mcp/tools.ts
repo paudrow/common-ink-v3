@@ -67,6 +67,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "member.setRole": MEMBERS,
   "member.remove": MEMBERS,
   "member.leave": "Leaving ends the member's own access and their agents' with it, and only an admin can undo it. The member does that themself.",
+  "member.signOut": "Signing someone out of every browser locks them out until they sign in again with Google, which an agent can't do for them. An agent that was talked into it could keep its own member, or as an admin's agent anyone in the workspace, signed out. Only the member, signed in, does it.",
   "invite.list": "Invites name people who are not in the workspace yet, by email, and are only of use for managing them, which an agent can't do.",
   "invite.revoke": MEMBERS,
   "grant.list": "How a note, a folder or an upload is shared names people outside the workspace by email, and is only of use for sharing it, which an agent can't do. What the agent itself may do with a note or an upload is in every listing of it, as access.",

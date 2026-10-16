@@ -11,7 +11,7 @@ import { SettingRow } from "./SettingRow.tsx";
 import type { Host, MemberSettings } from "./pluginHost.ts";
 import { readOnly } from "./readOnly.ts";
 import { documentOf, type Problem } from "./settings.ts";
-import { KEYBOARD, UNKNOWN, filterLayout, layoutOf } from "./settingsLayout.ts";
+import { ACCOUNT, KEYBOARD, UNKNOWN, filterLayout, layoutOf } from "./settingsLayout.ts";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
 
 const NOT_JSON = "Settings are one JSON object, such as {}.";
@@ -23,6 +23,13 @@ interface Props {
   /** The address the app is at: `/settings`, or under it a category, such as `/settings/keyboard`, or `/settings/json`. */
   path: string;
   go: (path: string, options?: { replace?: boolean }) => void;
+  account: Account;
+}
+
+/** The person signed in, and ending every session they have. */
+export interface Account {
+  email: string;
+  signOutEverywhere: () => Promise<void>;
 }
 
 const ROOT = "/settings";
@@ -33,7 +40,7 @@ const JSON_VIEW = "json";
  * of keyboard shortcuts, or as the JSON itself. All of it shows the one document. It belongs to the
  * app, so it is here whatever is turned off.
  */
-export function Settings({ host, store, mac, path, go }: Props) {
+export function Settings({ host, store, mac, path, go, account }: Props) {
   const { settings } = useSyncExternalStore(host.subscribe, host.contributions);
   const text = useSyncExternalStore(store.subscribe, store.text);
   const status = useSyncExternalStore(store.subscribe, store.status);
@@ -77,7 +84,7 @@ export function Settings({ host, store, mac, path, go }: Props) {
       {asJson ? (
         <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} locked={unread} onChange={typed} />
       ) : (
-        <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} />
+        <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} account={account} />
       )}
       {!asJson && problemList}
     </section>
@@ -93,6 +100,7 @@ interface OptionsProps {
   picked: string;
   go: Props["go"];
   onSet: Host["setSetting"];
+  account: Account;
 }
 
 /** One entry of the list of categories: where it goes, and how much of what is searched for it holds. */
@@ -103,7 +111,7 @@ interface Entry {
   found: number | null;
 }
 
-function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
+function Options({ settings, locked, mac, picked, go, onSet, account }: OptionsProps) {
   const [typed, setTyped] = useState("");
   const [modified, setModified] = useState(false);
   /** Whether the member picked one category out of what a search found. Searching again shows them all. */
@@ -117,7 +125,8 @@ function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
   const count = (id: string) => (id === KEYBOARD.id ? found.shortcuts.length : (found.categories.find((c) => c.id === id)?.rows.length ?? 0));
   const entry = ({ id, name }: { id: string; name: string }): Entry => ({ id, name, found: filtering ? count(id) : null });
   const listed = (plugins: boolean) => found.categories.filter((c) => (c.pluginId !== null) === plugins).map(entry);
-  const own = [...listed(false), ...(found.shortcuts.length > 0 ? [entry(KEYBOARD)] : [])];
+  // Account holds no setting, so a search never finds it.
+  const own = [...listed(false), ...(found.shortcuts.length > 0 ? [entry(KEYBOARD)] : []), ...(filtering ? [] : [entry(ACCOUNT)])];
   const plugins = listed(true);
   const rest = unknown.length > 0 ? [entry(UNKNOWN)] : [];
   const entries = [...own, ...plugins, ...rest];
@@ -201,68 +210,126 @@ function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
           {plugins.length > 0 && <optgroup label="Plugins">{plugins.map(option)}</optgroup>}
           {rest.map(option)}
         </select>
-        <fieldset disabled={locked !== null} className="settings-pane" data-list>
-          {filtering && total === 0 && <p className="soon">{modified && !needle ? "You haven't changed anything from its default." : "No setting or keyboard shortcut matches."}</p>}
-          {found.categories
-            .filter((c) => shown(c.id))
-            .map((category) => (
-              <section key={category.id} aria-label={category.name} className="settings-group">
-                <h2>
-                  {category.name}
-                  {category.pluginId !== null && (
-                    <a
-                      href={`/plugins/${category.pluginId}`}
-                      className="settings-about-plugin"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        go(`/plugins/${category.pluginId}`);
-                      }}
-                    >
-                      About this plugin
-                    </a>
-                  )}
-                </h2>
-                {category.rows.some((d) => !d.active) && <p className="soon">{category.name} is off, so its options change nothing until it is turned on on the Plugins page.</p>}
-                {category.rows.map((d) => (
-                  <SettingRow
-                    key={d.key}
-                    declared={d}
-                    value={settings.values[d.key]!}
-                    modified={Object.hasOwn(settings.document, d.key)}
-                    problems={settings.problems.filter((p) => p.key === d.key)}
-                    mac={mac}
-                    onSet={(value) => onSet(d.key, value)}
-                  />
+        {current?.id === ACCOUNT.id ? (
+          <div className="settings-pane">
+            <AccountSection account={account} />
+          </div>
+        ) : (
+          <fieldset disabled={locked !== null} className="settings-pane" data-list>
+            {filtering && total === 0 && <p className="soon">{modified && !needle ? "You haven't changed anything from its default." : "No setting or keyboard shortcut matches."}</p>}
+            {found.categories
+              .filter((c) => shown(c.id))
+              .map((category) => (
+                <section key={category.id} aria-label={category.name} className="settings-group">
+                  <h2>
+                    {category.name}
+                    {category.pluginId !== null && (
+                      <a
+                        href={`/plugins/${category.pluginId}`}
+                        className="settings-about-plugin"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          go(`/plugins/${category.pluginId}`);
+                        }}
+                      >
+                        About this plugin
+                      </a>
+                    )}
+                  </h2>
+                  {category.rows.some((d) => !d.active) && <p className="soon">{category.name} is off, so its options change nothing until it is turned on on the Plugins page.</p>}
+                  {category.rows.map((d) => (
+                    <SettingRow
+                      key={d.key}
+                      declared={d}
+                      value={settings.values[d.key]!}
+                      modified={Object.hasOwn(settings.document, d.key)}
+                      problems={settings.problems.filter((p) => p.key === d.key)}
+                      mac={mac}
+                      onSet={(value) => onSet(d.key, value)}
+                    />
+                  ))}
+                </section>
+              ))}
+            {shown(KEYBOARD.id) && found.shortcuts.length > 0 && (
+              <section aria-label={KEYBOARD.name} className="settings-group">
+                <h2>{KEYBOARD.name}</h2>
+                <p className="soon">Record a key for a command by pressing it. A key you choose is taken from a command that only had it by default.</p>
+                <KeyboardShortcuts shortcuts={found.shortcuts} all={whole.shortcuts} mac={mac} onSet={onSet} />
+              </section>
+            )}
+            {shown(UNKNOWN.id) && unknown.length > 0 && (
+              <section aria-label={UNKNOWN.name} className="settings-group">
+                <h2>{UNKNOWN.name}</h2>
+                <p className="soon">These are in your JSON and do nothing. They are kept until you remove them.</p>
+                {unknown.map((p) => (
+                  <div key={p.key} className="setting" data-row>
+                    <div className="setting-head">
+                      <code>{p.key}</code>
+                      <button type="button" className="button small" aria-label={`Remove ${p.key}`} onClick={() => onSet(p.key, undefined)}>
+                        Remove
+                      </button>
+                    </div>
+                    <p className="error">{p.reason}</p>
+                  </div>
                 ))}
               </section>
-            ))}
-          {shown(KEYBOARD.id) && found.shortcuts.length > 0 && (
-            <section aria-label={KEYBOARD.name} className="settings-group">
-              <h2>{KEYBOARD.name}</h2>
-              <p className="soon">Record a key for a command by pressing it. A key you choose is taken from a command that only had it by default.</p>
-              <KeyboardShortcuts shortcuts={found.shortcuts} all={whole.shortcuts} mac={mac} onSet={onSet} />
-            </section>
-          )}
-          {shown(UNKNOWN.id) && unknown.length > 0 && (
-            <section aria-label={UNKNOWN.name} className="settings-group">
-              <h2>{UNKNOWN.name}</h2>
-              <p className="soon">These are in your JSON and do nothing. They are kept until you remove them.</p>
-              {unknown.map((p) => (
-                <div key={p.key} className="setting" data-row>
-                  <div className="setting-head">
-                    <code>{p.key}</code>
-                    <button type="button" className="button small" aria-label={`Remove ${p.key}`} onClick={() => onSet(p.key, undefined)}>
-                      Remove
-                    </button>
-                  </div>
-                  <p className="error">{p.reason}</p>
-                </div>
-              ))}
-            </section>
-          )}
-        </fieldset>
+            )}
+          </fieldset>
+        )}
       </div>
     </>
+  );
+}
+
+/** Kept apart from the settings, so JSON that can't be read never stands between a person and signing out everywhere. */
+function AccountSection({ account }: { account: Account }) {
+  const [asked, ask] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const signOut = async () => {
+    setError(null);
+    try {
+      await account.signOutEverywhere();
+    } catch (err) {
+      ask(false);
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <section aria-label={ACCOUNT.name} className="settings-group">
+      <h2>{ACCOUNT.name}</h2>
+      <p className="soon">Signed in as {account.email}, with Google.</p>
+      <div className="setting" data-row>
+        <div className="setting-head">
+          <span>Sign out everywhere</span>
+        </div>
+        <p className="setting-about">
+          Signs you out of Common Ink in every browser you are signed in on, this one too, in every workspace. Use it after signing in on a computer that isn't yours, or losing one. Your agents keep
+          their tokens: disconnect any you no longer trust on the Agents page.
+        </p>
+        <div className="setting-control">
+          {asked ? (
+            <span className="confirm" role="group" aria-label="Sign out everywhere">
+              <span>Every browser, this one too, is signed out at once.</span>
+              <button type="button" className="button small primary" autoFocus onClick={() => void signOut()}>
+                Sign out everywhere
+              </button>
+              <button type="button" className="link" onClick={() => ask(false)}>
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button type="button" className="button small" onClick={() => ask(true)}>
+              Sign out everywhere…
+            </button>
+          )}
+        </div>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 

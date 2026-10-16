@@ -14,9 +14,9 @@ const LAST_ADMIN = "A workspace needs an admin. Make someone else an admin first
 const inviteLink = (invite: Invite) => `${location.origin}/invite/${invite.id}`;
 
 /** Something to be sure of before it is done, asked in the row it is about. */
-type Asked = { kind: "remove"; member: Member } | { kind: "leave" } | { kind: "revoke"; invite: Invite } | null;
+type Asked = { kind: "remove"; member: Member } | { kind: "signOut"; member: Member } | { kind: "leave" } | { kind: "revoke"; invite: Invite } | null;
 
-/** Who is in the workspace. Anyone in it can look, and leave. An admin invites people, sets their roles, and removes them. */
+/** Who is in the workspace. Anyone in it can look, and leave. An admin invites people, sets their roles, signs them out, and removes them. */
 export function Members({ host, app }: { host: PluginHost; app: App }) {
   const now = useNow();
   const { workspace, me } = app;
@@ -84,6 +84,12 @@ export function Members({ host, app }: { host: PluginHost; app: App }) {
       return `${member.name} is no longer in ${workspace.name}.`;
     });
 
+  const signOut = (member: Member) =>
+    change(async () => {
+      await host.members.signOut(member.personId);
+      return `${member.name} is signed out everywhere.`;
+    });
+
   const leave = () =>
     change(
       async () => {
@@ -130,9 +136,14 @@ export function Members({ host, app }: { host: PluginHost; app: App }) {
               </button>
             ) : (
               admin && (
-                <button type="button" className="button small" aria-label={`Remove ${member.name}`} onClick={() => ask({ kind: "remove", member })}>
-                  Remove
-                </button>
+                <>
+                  <button type="button" className="button small" aria-label={`Sign out ${member.name}`} onClick={() => ask({ kind: "signOut", member })}>
+                    Sign out
+                  </button>
+                  <button type="button" className="button small" aria-label={`Remove ${member.name}`} onClick={() => ask({ kind: "remove", member })}>
+                    Remove
+                  </button>
+                </>
               )
             )}
           </span>
@@ -145,6 +156,20 @@ export function Members({ host, app }: { host: PluginHost; app: App }) {
             </span>
             <button type="button" className="button small primary" autoFocus onClick={() => void remove(member)}>
               Remove
+            </button>
+            <button type="button" className="link" onClick={() => ask(null)}>
+              Cancel
+            </button>
+          </span>
+        )}
+        {asked?.kind === "signOut" && asked.member.personId === member.personId && (
+          <span className="confirm" role="group" aria-label={`Sign out ${member.name}`}>
+            <span>
+              {member.name} is signed out of Common Ink in every browser at once, here and in every other workspace. They stay in {workspace.name} and can sign in again. Their agents keep their
+              tokens, which only removing them from {workspace.name} takes from here.
+            </span>
+            <button type="button" className="button small primary" autoFocus onClick={() => void signOut(member)}>
+              Sign out everywhere
             </button>
             <button type="button" className="link" onClick={() => ask(null)}>
               Cancel

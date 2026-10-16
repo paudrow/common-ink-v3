@@ -8,3 +8,8 @@ declare module "*.md?raw" {
   const text: string;
   export default text;
 }
+
+declare module "*/_headers?raw" {
+  const text: string;
+  export default text;
+}

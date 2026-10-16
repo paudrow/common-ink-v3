@@ -1,6 +1,7 @@
 import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
 import { perform, type Visitor } from "../core/operations.ts";
 import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../core/protocol.ts";
+import { logFault } from "../core/logs.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
@@ -100,7 +101,7 @@ async function answered(what: string, answer: () => Promise<Response>, broke: ()
   try {
     return await answer();
   } catch (err) {
-    console.error(`${what} broke`, err);
+    logFault(what, err);
     return broke();
   }
 }
@@ -130,11 +131,19 @@ const unlistedPage = (page: Response) => {
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    return secured(await route(req, env, url), url, env);
+    // Whatever breaks is logged redacted here, and not by the runtime as it was thrown.
+    const answer = await answered(url.pathname, async () => route(req, env, url), () => new Response("Common Ink broke. Try again in a moment.", { status: 500 }));
+    return secured(answer, url, env);
   },
   // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, and uploads that never finished. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env) {
-    const { removed, failed, more } = await purgeTrash(env.DB, controller.scheduledTime);
+    let purged;
+    try {
+      purged = await purgeTrash(env.DB, controller.scheduledTime);
+    } catch (err) {
+      return logFault("Removing notes from Trash", err);
+    }
+    const { removed, failed, more } = purged;
     if (removed || failed.length) console.log(`Removed ${removed} notes from Trash${failed.length ? `, and couldn't remove ${failed.length}` : ""}${more ? ", with more waiting" : ""}`);
     const uploads = await clearUploads(env.DB, env.FILES, controller.scheduledTime);
     if (uploads.removed || uploads.failed.length) console.log(`Removed ${uploads.removed} uploads${uploads.failed.length ? `, and couldn't remove ${uploads.failed.length}` : ""}${uploads.more ? ", with more waiting" : ""}`);
