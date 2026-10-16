@@ -86,7 +86,7 @@ async function createFirstWorkspace(db: D1Database, adminId: string, name: strin
     db
       .prepare("INSERT INTO workspaces (id, name, unsorted_folder_id, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM members WHERE person_id = ?)")
       .bind(workspaceId, name, unsortedId, now, adminId),
-    db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) SELECT ?, id, NULL, 'Unsorted' FROM workspaces WHERE id = ?").bind(unsortedId, workspaceId),
+    db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) SELECT ?, id, NULL, 'Unsorted', 'unsorted' FROM workspaces WHERE id = ?").bind(unsortedId, workspaceId),
     db.prepare("INSERT INTO members (workspace_id, person_id, role, joined_at) SELECT id, ?, 'admin', ? FROM workspaces WHERE id = ?").bind(adminId, now, workspaceId),
   ]);
 }

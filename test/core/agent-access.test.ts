@@ -76,6 +76,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "history.previewRevert": { changes: [{ noteId, revisions: [2] }] },
   "history.revert": { changes: [{ noteId, revisions: [2] }] },
   "folder.list": {},
+  "folder.find": { path: "plans" },
   "folder.create": { name: "Made by a test" },
   "folder.rename": { id: folderId, name: "Renamed" },
   "folder.move": { id: folderId, parentId: null },

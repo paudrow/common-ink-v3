@@ -92,6 +92,8 @@ test("the archive command and its key archive the open note and bring it back", 
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await create(page, "# Keyed");
   await openNote(page, note);
+  // The editor reads its note by itself; the commands know the open note once the workspace's notes are listed, which its tab waits for.
+  await expect(tab(page, "Keyed")).toBeVisible();
 
   await page.keyboard.press("ControlOrMeta+Shift+E");
   await expect.poll(() => stateOf(page, note.id)).toBe("archived");

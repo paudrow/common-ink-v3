@@ -9,8 +9,12 @@ The only container a person signs into. It holds notes, folders, and uploads. A 
 _Avoid_: Space, vault, project
 
 **Folder**:
-A named location in a workspace. A note or upload has exactly one parent folder. An editor can create, rename and move a folder they can edit, into one they can edit or to the top of the workspace, and never into itself or a folder inside it; what is in it goes with it. A guest, or an agent limited to folders, moves only the folders inside one they were given, and into one they were given. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty: no notes, uploads or folders in it.
+A named location in a workspace. A note or upload has exactly one parent folder. An editor can create, rename and move a folder they can edit, into one they can edit or to the top of the workspace, and never into itself or a folder inside it; what is in it goes with it. A guest, or an agent limited to folders, moves only the folders inside one they were given, and into one they were given. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty: no notes, uploads or folders in it. No two folders in one parent have names that differ only in case.
 _Avoid_: Directory, space
+
+**Folder path**:
+A folder's name after the names of the folders it is in, separated by `/`: `Projects/Skills`. It starts at the top of what the one asking can see. An agent finds a folder by its path, ignoring case and then accents.
+_Avoid_: Breadcrumb, folder address
 
 **Unsorted**:
 The default folder. A note created with no folder in front is placed here.

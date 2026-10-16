@@ -1,7 +1,15 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { newId } from "../../src/core/ids.ts";
 import { perform } from "../../src/core/operations.ts";
 import { addMember, newMember } from "./members.ts";
+
+/** A folder made as folders were before names had keys, as the folders a workspace already has may be. */
+async function keyless(workspaceId: string, name: string): Promise<string> {
+  const id = newId();
+  await env.DB.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) VALUES (?, ?, NULL, ?)").bind(id, workspaceId, name).run();
+  return id;
+}
 
 describe("folders", () => {
   it("nest under a parent, alongside Unsorted at the top level", async () => {
@@ -12,9 +20,9 @@ describe("folders", () => {
     const { unsortedId, folders } = await perform(env.DB, ada, { type: "folder.list" });
 
     expect(folders).toEqual([
-      { id: projects.id, name: "projects", parentId: work.id, noteCount: 0, uploadCount: 0, access: "edit" },
-      { id: unsortedId, name: "Unsorted", parentId: null, noteCount: 0, uploadCount: 0, access: "edit" },
-      { id: work.id, name: "Work", parentId: null, noteCount: 0, uploadCount: 0, access: "edit" },
+      { id: projects.id, name: "projects", parentId: work.id, noteCount: 0, uploadCount: 0, access: "edit", path: "Work/projects" },
+      { id: unsortedId, name: "Unsorted", parentId: null, noteCount: 0, uploadCount: 0, access: "edit", path: "Unsorted" },
+      { id: work.id, name: "Work", parentId: null, noteCount: 0, uploadCount: 0, access: "edit", path: "Work" },
     ]);
   });
 
@@ -73,11 +81,11 @@ describe("folders", () => {
 
     await expect(perform(env.DB, ada, { type: "folder.create", name: "WORK" })).rejects.toMatchObject({
       code: "invalid",
-      message: `There's already a folder named "WORK" here`,
+      message: `There's already a folder named "Work" here`,
     });
     await expect(perform(env.DB, ada, { type: "folder.rename", id: home.id, name: "work" })).rejects.toMatchObject({
       code: "invalid",
-      message: `There's already a folder named "work" here`,
+      message: `There's already a folder named "Work" here`,
     });
     expect(await perform(env.DB, ada, { type: "folder.create", name: "Work", parentId: home.id })).toMatchObject({ name: "Work", parentId: home.id });
     expect(await perform(env.DB, ada, { type: "folder.rename", id: work.id, name: "WORK" })).toEqual({ id: work.id, name: "WORK", parentId: null });
@@ -190,5 +198,83 @@ describe("folders", () => {
     }
 
     expect([...outcomes].filter((o) => o !== "ok/invalid" && o !== "not_found/ok")).toEqual([]);
+  });
+
+  it("are found by path, matched as written, then ignoring case, then ignoring accents", async () => {
+    const ada = await newMember();
+    const make = async (name: string, parentId?: string) => (await perform(env.DB, ada, { type: "folder.create", name, parentId })).id;
+    const projects = await make("Projects");
+    const skills = await make("Skills", projects);
+    const cafe = await make("Café", projects);
+    const ecoles = await make("Écoles", projects);
+    const find = (path: string) => perform(env.DB, ada, { type: "folder.find", path });
+
+    expect(await find("Projects/Skills")).toEqual({ id: skills, name: "Skills", parentId: projects, noteCount: 0, uploadCount: 0, access: "edit", path: "Projects/Skills" });
+    for (const path of ["projects/skills", " /PROJECTS / skills/ ", "Projects//Skills"]) expect((await find(path)).id, path).toBe(skills);
+    expect((await find("projects/cafe")).id).toBe(cafe);
+    expect((await find("projects/écoles")).id).toBe(ecoles);
+    expect((await find("projects/ECOLES")).id).toBe(ecoles);
+    expect((await find("Projects")).id).toBe(projects);
+
+    // An accent is set aside only when nothing matches with it, so "Cafe" beside "Café" is found as written.
+    const plain = await make("Cafe", projects);
+    expect((await find("projects/cafe")).id).toBe(plain);
+    expect((await find("projects/CAFÉ")).id).toBe(cafe);
+
+    await expect(find("Projects/Nowhere")).rejects.toMatchObject({ code: "not_found", message: "No such folder" });
+    await expect(find("Skills")).rejects.toMatchObject({ code: "not_found", message: "No such folder" });
+    await expect(find(" / ")).rejects.toMatchObject({ code: "not_found", message: "No such folder" });
+  });
+
+  it("found by a path two folders have, ignoring case, are named and not chosen between", async () => {
+    const ada = await newMember();
+    const work = await perform(env.DB, ada, { type: "folder.create", name: "Work" });
+    const [upper, lower] = [await keyless(ada.workspaceId, "WÖRK"), await keyless(ada.workspaceId, "wörk")];
+
+    expect((await perform(env.DB, ada, { type: "folder.find", path: "work" })).id).toBe(work.id);
+    const said = await perform(env.DB, ada, { type: "folder.find", path: "Wörk" }).catch((err: Error) => err.message);
+    expect(said).toBe(`2 folders are at "Wörk": ${upper} (WÖRK), ${lower} (wörk)`);
+  });
+
+  it("are made only when missing with ifExists return, which answers with the folder that is there", async () => {
+    const ada = await newMember();
+    const made = await perform(env.DB, ada, { type: "folder.create", name: "Écoles" });
+    expect(made).toMatchObject({ name: "Écoles", parentId: null, created: true });
+
+    for (const name of ["Écoles", "écoles", "ÉCOLES", " écoles "]) {
+      expect(await perform(env.DB, ada, { type: "folder.create", name, ifExists: "return" }), name).toEqual({ id: made.id, name: "Écoles", parentId: null, created: false });
+      await expect(perform(env.DB, ada, { type: "folder.create", name }), name).rejects.toMatchObject({ code: "invalid", message: `There's already a folder named "Écoles" here` });
+    }
+    // Accents make another name: only case is set aside.
+    expect(await perform(env.DB, ada, { type: "folder.create", name: "Ecoles", ifExists: "return" })).toMatchObject({ name: "Ecoles", created: true });
+    expect((await perform(env.DB, ada, { type: "folder.list" })).folders.map((f) => f.name).sort()).toEqual(["Ecoles", "Unsorted", "Écoles"]);
+  });
+
+  it("can't be made twice by two asking at once, in any script", async () => {
+    const ada = await newMember();
+    for (const [first, second] of [["Skills", "skills"], ["Écoles", "écoles"], ["Ωmega", "ωmega"]] as const) {
+      const both = await Promise.all([first, second].map((name) => perform(env.DB, ada, { type: "folder.create", name, ifExists: "return" })));
+      expect(both.map((f) => f.created).sort(), first).toEqual([false, true]);
+      expect(both[0]!.id, first).toBe(both[1]!.id);
+
+      const parent = both[0]!.id;
+      const refused = await Promise.allSettled([first, second].map((name) => perform(env.DB, ada, { type: "folder.create", name, parentId: parent })));
+      expect(refused.map((r) => r.status).sort(), first).toEqual(["fulfilled", "rejected"]);
+    }
+    const names = (await perform(env.DB, ada, { type: "folder.list" })).folders.filter((f) => f.parentId === null).map((f) => f.name);
+    expect(names.length).toBe(4);
+  });
+
+  it("aren't renamed to a name beside them that differs only in case, in any script, including a folder made before names had keys", async () => {
+    const ada = await newMember();
+    const ecoles = await perform(env.DB, ada, { type: "folder.create", name: "Écoles" });
+    const other = await perform(env.DB, ada, { type: "folder.create", name: "Other" });
+    const old = await keyless(ada.workspaceId, "Ärger");
+
+    await expect(perform(env.DB, ada, { type: "folder.rename", id: other.id, name: "écoles" })).rejects.toMatchObject({ code: "invalid", message: `There's already a folder named "Écoles" here` });
+    await expect(perform(env.DB, ada, { type: "folder.rename", id: other.id, name: "ärger" })).rejects.toMatchObject({ code: "invalid", message: `There's already a folder named "Ärger" here` });
+    await expect(perform(env.DB, ada, { type: "folder.create", name: "ÄRGER" })).rejects.toMatchObject({ code: "invalid", message: `There's already a folder named "Ärger" here` });
+    expect(await perform(env.DB, ada, { type: "folder.create", name: "ärger", ifExists: "return" })).toMatchObject({ id: old, created: false });
+    expect(await perform(env.DB, ada, { type: "folder.rename", id: ecoles.id, name: "ÉCOLES" })).toEqual({ id: ecoles.id, name: "ÉCOLES", parentId: null });
   });
 });

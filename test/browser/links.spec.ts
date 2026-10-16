@@ -119,7 +119,8 @@ test("an agent writes a link by title, it is stored by id, and reads back with t
 
   const made = await agent.tool<{ id: string; text: string }>("create_note", { text: "# From the agent\n\nSee [[Plan]] and [[plan|the same]]." });
   expect(made.text).toBe(`# From the agent\n\nSee [[${plan.id}]] and [[${plan.id}|the same]].`);
-  await expect(agent.tool("create_note", { text: "[[No such note]]" })).rejects.toThrow(/No note is titled "No such note"/);
+  expect(await agent.tool("create_note", { text: "# Kept\n\n[[No such note]]" })).toMatchObject({ text: "# Kept\n\n[[No such note]]", unresolved: [{ target: "No such note", matches: [] }] });
+  await expect(agent.tool("create_note", { text: "[[No such note]]", linkTitles: "resolve-strict" })).rejects.toThrow(/No note is titled "No such note"/);
   await expect.poll(async () => (await agent.tool<{ links: unknown }>("read_note", { id: made.id })).links).toEqual([{ id: plan.id, title: "Plan", state: "live" }]);
   await expect.poll(async () => (await agent.tool<{ title: string }[]>("backlinks", { id: plan.id })).map((n) => n.title)).toEqual(["From the agent"]);
 

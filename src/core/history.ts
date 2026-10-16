@@ -619,6 +619,28 @@ export function redoTarget(mine: readonly Step[], reverted: ReadonlyMap<number, 
   return editedSince ? null : undo.revision;
 }
 
+/** A time in a zone as ISO 8601 with that zone's offset then, such as 2026-10-15T09:30:00.000-07:00. Throws a RangeError for a zone that doesn't exist. */
+export function timeIn(timeZone: string): (time: number) => string {
+  const format = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+    timeZoneName: "longOffset",
+  });
+  return (time) => {
+    const parts = Object.fromEntries(format.formatToParts(time).map((p) => [p.type, p.value]));
+    // GMT alone is no offset; otherwise it is GMT+05:30 and the like.
+    const offset = parts.timeZoneName === "GMT" ? "+00:00" : parts.timeZoneName!.slice(3);
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${parts.fractionalSecond}${offset}`;
+  };
+}
+
 /** The calendar day a time falls on in a zone, as YYYY-MM-DD. Throws a RangeError for a zone that doesn't exist. */
 export function dayIn(timeZone: string): (time: number) => string {
   const format = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });

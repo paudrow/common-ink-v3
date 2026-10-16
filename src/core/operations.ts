@@ -5,6 +5,7 @@ import type { ConnectedAgent } from "./agents.ts";
 import { SEEN, SEEN_FOLDER, allows, canShare, folderLevel, itemAsked, itemLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { dailySettings, dailyText, dayFor, filedOn, type DailySettings } from "./daily.ts";
 import { lineDiff, textDiff } from "./diff.ts";
+import { atPath, nameKey as folderKey, pathsOf } from "./folder-names.ts";
 import { following as lineFollowing } from "./follow.ts";
 import { dayIn, dayStartIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
 import { IN_TRASH, listing, purgesAt, type Covering, type NoteState, type Trashed } from "./lifecycle.ts";
@@ -27,7 +28,10 @@ import {
   type DiffRun,
   type Folder,
   type HistoryEntry,
+  type Linked,
   type LinkedNote,
+  type LinkTitles,
+  type ListedFolder,
   type NoteAbout,
   type ListedTodo,
   type Mentioned,
@@ -48,6 +52,7 @@ import {
   type SharedNote,
   type TrashedNote,
   type TodoSort,
+  type UnresolvedLink,
   type Visit,
   type Written,
 } from "./protocol.ts";
@@ -343,6 +348,34 @@ export async function loadFolder(ctx: Context, id: string | undefined, need: Gra
   return row;
 }
 
+/** The folders the asker can see, each with its path, and which they may change. */
+async function listFolders(ctx: Context): Promise<{ unsortedId: string | null; folders: ListedFolder[] }> {
+  const { results } = await ctx.db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND ${SEEN("n", "?2", "live")}) AS note_count,
+         (SELECT COUNT(*) FROM uploads u WHERE u.folder_id = f.id AND ${SEEN("u", "?2", "live")}) AS upload_count, ${FOLDER_COLUMNS}
+       WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`,
+    )
+    .bind(ctx.workspaceId, ctx.sight.bind)
+    .all<FolderRow & { note_count: number; upload_count: number }>();
+  const folders = results.map((row) => toFolder(ctx, row));
+  const paths = pathsOf(folders);
+  return {
+    unsortedId: results.find((row) => row.unsorted)?.id ?? null,
+    folders: results.map((row, i) => ({ ...folders[i]!, noteCount: row.note_count, uploadCount: row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view", path: paths.get(row.id)! })),
+  };
+}
+
+/**
+ * Every folder in `parentId`, or at the top of the workspace when it is null, whether or not the
+ * asker can see it: a name is taken by a folder they can't see too. Folders made before names had
+ * keys have none, so the names are compared here and the index on keys only settles a race.
+ */
+async function siblings(ctx: Context, parentId: string | null): Promise<{ id: string; name: string }[]> {
+  const { results } = await ctx.db.prepare("SELECT id, name FROM folders WHERE workspace_id = ? AND parent_id IS ?").bind(ctx.workspaceId, parentId).all<{ id: string; name: string }>();
+  return results;
+}
+
 /** A write naming a folder or putting something in one, whose folder may have been deleted since it was loaded. */
 export async function intoFolder<T>(write: Promise<T>, name?: string): Promise<T> {
   try {
@@ -350,7 +383,7 @@ export async function intoFolder<T>(write: Promise<T>, name?: string): Promise<T
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
     if (/FOREIGN KEY constraint failed/.test(message)) throw new OpError("not_found", NO_SUCH_FOLDER);
-    if (/UNIQUE constraint failed: index 'folders_by_name'/.test(message)) throw new OpError("invalid", `There's already a folder named "${name}" here`);
+    if (/UNIQUE constraint failed: index 'folders_by_(name|key)'/.test(message)) throw new OpError("invalid", `There's already a folder named "${name}" here`);
     throw err;
   }
 }
@@ -387,12 +420,14 @@ const quoted = (title: string) => JSON.stringify(title);
  * an id and as a title: a note with that id is the one meant, and otherwise the one note so titled.
  * A note in Trash is never the one meant. An archived note is, by its id, and by its title when no
  * live note has that title.
+ * A target that is neither is left as written and named in `unresolved`, or refused when `how` is
+ * `resolve-strict`.
  */
-async function linkedById(ctx: Context, text: string, base: string, how: "resolve" | "keep"): Promise<string> {
-  if (how === "keep") return text;
+async function linkedById(ctx: Context, text: string, base: string, how: LinkTitles): Promise<{ text: string; unresolved: UnresolvedLink[] }> {
+  if (how === "keep") return { text, unresolved: [] };
   const had = new Set(linksIn(base).map((link) => link.target));
   const introduced = [...new Set(linksIn(text).map((link) => link.target))].filter((target) => !had.has(target));
-  if (!introduced.length) return text;
+  if (!introduced.length) return { text, unresolved: [] };
   // A title is looked up as it is made now, for a note last written under an older rule too.
   await mend(ctx);
   // Each title as written and in lower case: the database folds case for unaccented letters only.
@@ -405,17 +440,22 @@ async function linkedById(ctx: Context, text: string, base: string, how: "resolv
   );
   const ids = new Set(found.map((row) => row.id));
   const byTitle = Map.groupBy(found, (row) => row.title.toLowerCase());
+  const unresolved = new Map<string, UnresolvedLink>();
   const stored = retargeted(text, (target) => {
     if (had.has(target) || ids.has(target)) return undefined;
     const titled = byTitle.get(target.toLowerCase()) ?? [];
     const live = titled.filter((n) => n.state === "live");
     const notes = live.length ? live : titled;
+    if (notes.length === 1) return notes[0]!.id;
+    if (how === "resolve") {
+      unresolved.set(target, { target, matches: notes.map((n) => n.id) });
+      return undefined;
+    }
     if (notes.length > 1) throw new OpError("invalid", `${notes.length} notes are titled ${quoted(target)}: ${notes.map((n) => n.id).join(", ")}. Link the one you mean as [[id]].`);
-    if (!notes.length) throw new OpError("invalid", `No note ${isNoteId(target) ? "has the id or the title" : "is titled"} ${quoted(target)}. Link a note by its title or as [[id]], with ids from note.list, or pass linkTitles "keep" to leave [[${target}]] as text.`);
-    return notes[0]!.id;
+    throw new OpError("invalid", `No note ${isNoteId(target) ? "has the id or the title" : "is titled"} ${quoted(target)}. Link a note by its title or as [[id]], with ids from the list of notes, or leave out linkTitles "resolve-strict" to keep [[${target}]] as written.`);
   });
   if (stored.length > MAX_NOTE_LENGTH) throw new OpError("invalid", `With its links stored by id, the note would be over ${MAX_NOTE_LENGTH} characters`);
-  return stored;
+  return { text: stored, unresolved: [...unresolved.values()] };
 }
 
 type Member = { id: string; name: string };
@@ -491,8 +531,13 @@ async function mentionedById(ctx: Context, text: string, base: string, how: "res
 }
 
 /** The text a write stores: what was written, with the links and mentions it introduces stored by id. */
-const storedAs = async (ctx: Context, text: string, base: string, op: { linkTitles: "resolve" | "keep"; mentionNames: "resolve" | "keep" }) =>
-  mentionedById(ctx, await linkedById(ctx, text, base, op.linkTitles), base, op.mentionNames);
+const storedAs = async (ctx: Context, text: string, base: string, op: { linkTitles: LinkTitles; mentionNames: "resolve" | "keep" }) => {
+  const resolved = await linkedById(ctx, text, base, op.linkTitles);
+  return { text: await mentionedById(ctx, resolved.text, base, op.mentionNames), unresolved: resolved.unresolved };
+};
+
+/** The answer to a write, naming the links by title it left as written when there are any. */
+const linked = <T extends object>(result: T, unresolved: UnresolvedLink[]): Linked<T> => Object.assign({}, result, unresolved.length ? { unresolved } : {});
 
 /**
  * The statements that make the record of a note's links what `text` says, or none when `was` says
@@ -683,7 +728,7 @@ const MEND_NOTES = 15;
 /** As many batches as one request makes, so a workspace of any size is mended over a few. */
 const MEND_BATCHES = 20;
 /** A write that lost to another: its revision of a note, a member's daily note for a day, or a folder's name was taken first. */
-const isTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: (?:changes\.|daily_notes\.|index 'folders_by_name')/.test(err.message);
+const isTaken = (err: unknown) => err instanceof Error && /UNIQUE constraint failed: (?:changes\.|daily_notes\.|index 'folders_by_(?:name|key)')/.test(err.message);
 
 /** What a change records beyond its diff. */
 interface Recording {
@@ -802,12 +847,17 @@ interface Completing {
   day: string;
 }
 
+const memberSettings = async (db: D1Database, workspaceId: string, personId: string | null) =>
+  dailySettings((await db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(workspaceId, personId).first<{ text: string }>())?.text);
+
 /** `on` is the day as the one asking said it. With none, it is today where their settings say they are. */
 async function completing(ctx: Context, on: string | undefined): Promise<Completing> {
-  const row = await ctx.db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(ctx.workspaceId, ctx.personId).first<{ text: string }>();
-  const settings = dailySettings(row?.text);
+  const settings = await memberSettings(ctx.db, ctx.workspaceId, ctx.personId);
   return { settings, day: on ?? dayFor(settings, ctx.now) };
 }
+
+/** The time zone a member's settings name in a workspace, which their agent is told times in, or null for UTC. */
+export const timeZoneOf = async (db: D1Database, workspaceId: string, personId: string) => (await memberSettings(db, workspaceId, personId)).timeZone;
 
 const NOTE_BY_ID = `SELECT n.text, n.created_by, n.indexed, ${SUMMARY_COLUMNS} WHERE n.id = ?`;
 
@@ -826,8 +876,7 @@ async function usableDaily(ctx: Context, day: string): Promise<{ note: NoteRow |
 }
 
 /** The folder at the top of the workspace that the member's settings name for daily notes, ignoring case, when there is one. */
-const dailyFolder = (ctx: Context, settings: DailySettings) =>
-  ctx.db.prepare("SELECT id FROM folders WHERE workspace_id = ? AND parent_id IS NULL AND name = ? COLLATE NOCASE").bind(ctx.workspaceId, settings.folder).first<{ id: string }>();
+const dailyFolder = async (ctx: Context, settings: DailySettings) => (await siblings(ctx, null)).find((f) => folderKey(f.name) === folderKey(settings.folder)) ?? null;
 
 /**
  * A new daily note for `day` holding `text`, and the statements that make it, in `folder` or in a
@@ -844,7 +893,7 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
   return {
     row,
     statements: [
-      ...(folder ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) VALUES (?, ?, NULL, ?)").bind(folderId, ctx.workspaceId, settings.folder)]),
+      ...(folder ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, NULL, ?, ?)").bind(folderId, ctx.workspaceId, settings.folder, folderKey(settings.folder))]),
       ctx.db
         .prepare(
           `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, private_owner, indexed)
@@ -1609,7 +1658,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const folder = await loadFolder(ctx, op.folderId, "edit");
       const id = newId();
       const revision = op.text ? 1 : 0;
-      const text = await storedAs(ctx, op.text, "", op);
+      const { text, unresolved } = await storedAs(ctx, op.text, "", op);
       const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
@@ -1618,7 +1667,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         )
         .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, row.indexed);
       await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text)), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
-      return toNote(ctx, row);
+      return linked(toNote(ctx, row), unresolved);
     },
   },
 
@@ -1863,8 +1912,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
 
   "note.write": {
     needs: "edit",
-    run: (ctx, op) =>
-      settle(async (): Promise<Written | null> => {
+    run: async (ctx, op) => {
+      let unresolved: UnresolvedLink[] = [];
+      const written = await settle(async (): Promise<Written | null> => {
         const row = await loadNote(ctx, op.id, "edit", "refused");
         if (op.writeId) {
           const recorded = await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(row.id, op.writeId).first();
@@ -1872,7 +1922,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         }
         if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
         const base = op.baseRevision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, op.baseRevision, row.revision);
-        const stored = await storedAs(ctx, op.text, base.text, op);
+        const resolved = await storedAs(ctx, op.text, base.text, op);
+        const stored = resolved.text;
+        unresolved = resolved.unresolved;
         const changes = base.since ? rebased(base.text, stored, base.since) : changesBetween(base.text, stored);
         if (changes.empty) return toNote(ctx, row);
         // A write that checks a recurring todo's box completes it, as todo.set does, whoever wrote it and however.
@@ -1892,7 +1944,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         }
         const next = await record(ctx, row, changes, op.baseRevision, { writeId: op.writeId });
         return next && toNote(ctx, next);
-      }),
+      });
+      return linked(written, unresolved);
+    },
   },
 
   "note.history": {
@@ -2457,16 +2511,16 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
 
   "folder.list": {
     needs: "view",
-    async run(ctx) {
-      const { results } = await ctx.db
-        .prepare(
-          `SELECT (SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id AND ${SEEN("n", "?2", "live")}) AS note_count,
-             (SELECT COUNT(*) FROM uploads u WHERE u.folder_id = f.id AND ${SEEN("u", "?2", "live")}) AS upload_count, ${FOLDER_COLUMNS}
-           WHERE f.workspace_id = ?1 AND ${SEEN_FOLDER("f", "?2")} ORDER BY f.name COLLATE NOCASE, f.id`,
-        )
-        .bind(ctx.workspaceId, ctx.sight.bind)
-        .all<FolderRow & { note_count: number; upload_count: number }>();
-      return { unsortedId: results.find((row) => row.unsorted)?.id ?? null, folders: results.map((row) => ({ ...toFolder(ctx, row), noteCount: row.note_count, uploadCount: row.upload_count, access: folderLevel(ctx.sight, row.id) === "edit" ? "edit" : "view" })) };
+    run: listFolders,
+  },
+
+  "folder.find": {
+    needs: "view",
+    async run(ctx, op) {
+      const found = atPath((await listFolders(ctx)).folders, op.path);
+      if (found.length > 1) throw new OpError("invalid", `${found.length} folders are at ${quoted(op.path)}: ${found.map((f) => `${f.id} (${f.path})`).join(", ")}`);
+      if (!found.length) throw new OpError("not_found", NO_SUCH_FOLDER);
+      return found[0]!;
     },
   },
 
@@ -2476,8 +2530,22 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       if (op.parentId) await loadFolder(ctx, op.parentId, "edit");
       else if (!seesEveryFolder(ctx.sight)) throw new OpError("forbidden", ctx.sight.within ? "An agent limited to folders can make a folder only inside one of them" : "A guest can make a folder only inside one shared with them");
       const folder: Folder = { id: newId(), name: op.name, parentId: op.parentId ?? null };
-      await intoFolder(ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name) VALUES (?, ?, ?, ?)").bind(folder.id, ctx.workspaceId, folder.parentId, folder.name).run(), folder.name);
-      return folder;
+      // Every folder beside it is one the asker can see: they see all of the top, or the parent and everything in it.
+      const existing = async () => (await siblings(ctx, folder.parentId)).find((f) => folderKey(f.name) === folderKey(op.name));
+      const there = await existing();
+      if (!there) {
+        try {
+          await intoFolder(ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, ?, ?, ?)").bind(folder.id, ctx.workspaceId, folder.parentId, folder.name, folderKey(folder.name)).run(), folder.name);
+          return { ...folder, created: true };
+        } catch (err) {
+          // Made by someone else since it was looked for.
+          if (!(err instanceof OpError) || err.code !== "invalid" || op.ifExists !== "return") throw err;
+        }
+      }
+      const found = there ?? (await existing());
+      if (!found) throw new OpError("conflict", "The folder was being made and changed too fast to tell what is there. Nothing was made: send it again");
+      if (op.ifExists === "error") throw new OpError("invalid", `There's already a folder named "${found.name}" here${ctx.actor.kind === "agent" ? ` (${found.id}). Pass ifExists "return" to be answered with it` : ""}`);
+      return { id: found.id, name: found.name, parentId: folder.parentId, created: false };
     },
   },
 
@@ -2489,7 +2557,9 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       // Beside a folder shared with a guest, or one an agent is limited to, are folders they can't see, and a name refused for being taken would name one.
       if (!seesEveryFolder(ctx.sight) && !(folder.parent_id && allows(folderLevel(ctx.sight, folder.parent_id), "view")))
         throw new OpError("forbidden", ctx.sight.within ? "An agent limited to folders can rename only the folders inside one of them" : "A guest can rename only the folders inside one shared with them");
-      await intoFolder(ctx.db.prepare("UPDATE folders SET name = ? WHERE id = ?").bind(op.name, folder.id).run(), op.name);
+      const taken = (await siblings(ctx, folder.parent_id)).find((f) => f.id !== folder.id && folderKey(f.name) === folderKey(op.name));
+      if (taken) throw new OpError("invalid", `There's already a folder named "${taken.name}" here`);
+      await intoFolder(ctx.db.prepare("UPDATE folders SET name = ?, name_key = ? WHERE id = ?").bind(op.name, folderKey(op.name), folder.id).run(), op.name);
       return toFolder(ctx, { ...folder, name: op.name });
     },
   },

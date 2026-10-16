@@ -22,7 +22,7 @@ export const agents: Plugin = {
           workspaces={app.workspaces}
           folders={app.folders}
           version={(app.notes ?? []).reduce((sum, n) => sum + n.revision, 0)}
-          canChange={(noteId) => app.notes?.find((n) => n.id === noteId)?.access === "edit"}
+          canChange={app.notes && ((noteId) => app.notes!.find((n) => n.id === noteId)?.access === "edit")}
           onShowChanges={app.pages.some((p) => p.path === HISTORY) ? (agent) => app.go(HISTORY, { state: { label: `By ${agent.name}`, author: { kind: "agent", id: agent.id } } }) : undefined}
           onReverted={app.refresh}
         />
