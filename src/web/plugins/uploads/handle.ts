@@ -18,8 +18,12 @@ export function sizeHandle(into: HTMLElement, name: string, now: () => BelowEmbe
   handle.setAttribute("aria-label", `Size of ${name}`);
   handle.setAttribute("aria-valuemin", "0");
   handle.setAttribute("aria-valuemax", String(SIZE_WORDS.length - 1));
+  // The width last asked for, until the note says it: a press that comes before is a step from it, and is written once the note has the one before.
+  let asked: SizeWord | null = null;
   const said = () => {
     const word = sizeWordIn(now().config);
+    if (asked === word) asked = null;
+    else if (asked) return void now().update({ config: withSizeWord(now().config, asked) });
     handle.setAttribute("aria-valuenow", String(SIZE_WORDS.indexOf(word)));
     handle.setAttribute("aria-valuetext", SAID[word]);
     handle.title = `${SAID[word]}: drag to resize`;
@@ -31,7 +35,10 @@ export function sizeHandle(into: HTMLElement, name: string, now: () => BelowEmbe
   const widths = () => widthsIn(now().column(), shape().maxWidth);
   const set = (word: SizeWord) => {
     const { config, update } = now();
-    if (word !== sizeWordIn(config)) update({ config: withSizeWord(config, word) });
+    if (asked) return void (asked = word);
+    if (word === sizeWordIn(config)) return;
+    asked = word;
+    update({ config: withSizeWord(config, word) });
   };
 
   let ghost: HTMLElement | null = null;
@@ -66,7 +73,7 @@ export function sizeHandle(into: HTMLElement, name: string, now: () => BelowEmbe
   handle.addEventListener("lostpointercapture", letGo);
 
   handle.addEventListener("keydown", (event) => {
-    const word = sizeWordIn(now().config);
+    const word = asked ?? sizeWordIn(now().config);
     const to =
       event.key === "ArrowRight" || event.key === "ArrowUp"
         ? stepped(widths(), word, 1)

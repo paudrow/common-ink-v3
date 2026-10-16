@@ -27,10 +27,9 @@ function typeIcon(name: string): HTMLElement {
   return box;
 }
 
-/** What a preview tells whoever drew it: what it says of the file beside it, such as how many pages it has, or nothing once it has nothing to say; and that text has been drawn, at its own height. */
+/** What a preview tells whoever drew it: what it says of the file beside it, such as how many pages it has, or nothing once it has nothing to say. */
 export interface Told {
   said?(words: string): void;
-  drawn?(): void;
 }
 
 /**
@@ -103,7 +102,6 @@ export function drawPreview(into: HTMLElement, host: PluginHost, upload: Pick<Up
           into.replaceChildren(el("pre", "upload-preview-lines", lines.join("\n")));
           if (more || read.cut) told.said?.(`the first ${lines.length} lines`);
         }
-        told.drawn?.();
       }, unread);
       break;
     }

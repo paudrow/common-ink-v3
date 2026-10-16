@@ -1,5 +1,6 @@
 import { ChangeSet, MapMode } from "@codemirror/state";
 import { z } from "zod";
+import { blame, runsOfLines } from "./blame.ts";
 import type { ConnectedAgent } from "./agents.ts";
 import { SEEN, SEEN_FOLDER, allows, canShare, folderLevel, itemAsked, itemLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { dailySettings, dailyText, dayFor, filedOn, type DailySettings } from "./daily.ts";
@@ -342,9 +343,9 @@ export async function loadFolder(ctx: Context, id: string | undefined, need: Gra
 }
 
 /** A write naming a folder or putting something in one, whose folder may have been deleted since it was loaded. */
-export async function intoFolder(write: Promise<unknown>, name?: string): Promise<void> {
+export async function intoFolder<T>(write: Promise<T>, name?: string): Promise<T> {
   try {
-    await write;
+    return await write;
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
     if (/FOREIGN KEY constraint failed/.test(message)) throw new OpError("not_found", NO_SUCH_FOLDER);
@@ -1848,6 +1849,28 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     },
   },
 
+  "note.blame": {
+    needs: "view",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "view", "opens");
+      await countLines(ctx, [row.id]);
+      const { results } = await ctx.db.prepare(`SELECT c.diff, ${CHANGE_COLUMNS} WHERE c.note_id = ? AND c.revision <= ? ORDER BY c.revision`).bind(row.id, row.revision).all<ChangeRow & { diff: string }>();
+      const lines = runsOfLines(blame(results.map((r) => ({ changes: ChangeSet.fromJSON(JSON.parse(r.diff)), reverts: revertsOf(r.reverts) }))));
+      const named = new Set(lines.map((run) => run.revision));
+      const standing = standingOf(results.map(stepOf));
+      const changes = results.filter((r) => named.has(r.revision)).map((r) => toEntry(r, standing));
+      const owners = [...new Set(changes.flatMap((c) => (c.author.kind === "agent" ? [c.author.onBehalfOf] : [])))];
+      // Who an agent is for is who is in the workspace, which only someone who may list its members is told.
+      const { results: members } = owners.length && ctx.role && !ctx.sight.within
+        ? await ctx.db
+            .prepare("SELECT p.id, p.name FROM members m JOIN people p ON p.id = m.person_id WHERE m.workspace_id = ? AND p.id IN (SELECT value FROM json_each(?))")
+            .bind(ctx.workspaceId, JSON.stringify(owners))
+            .all<{ id: string; name: string }>()
+        : { results: [] };
+      return { revision: row.revision, text: row.text, lines, changes, owners: Object.fromEntries(members.map((p) => [p.id, p.name])) };
+    },
+  },
+
   "note.label": {
     needs: "edit",
     async run(ctx, op) {
@@ -2399,6 +2422,39 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
         throw new OpError("forbidden", ctx.sight.within ? "An agent limited to folders can rename only the folders inside one of them" : "A guest can rename only the folders inside one shared with them");
       await intoFolder(ctx.db.prepare("UPDATE folders SET name = ? WHERE id = ?").bind(op.name, folder.id).run(), op.name);
       return toFolder(ctx, { ...folder, name: op.name });
+    },
+  },
+
+  "folder.move": {
+    needs: "edit",
+    async run(ctx, op) {
+      const folder = await loadFolder(ctx, op.id, "edit");
+      if (folder.unsorted) throw new OpError("invalid", "Unsorted can't be moved");
+      const guest = !ctx.sight.within;
+      // As with a rename: beside a folder shared with a guest, or one an agent is limited to, are folders they can't see.
+      if (!seesEveryFolder(ctx.sight) && !(folder.parent_id && allows(folderLevel(ctx.sight, folder.parent_id), "view")))
+        throw new OpError("forbidden", guest ? "A guest can move only the folders inside one shared with them" : "An agent limited to folders can move only the folders inside one of them");
+      // Taking a folder out changes the one it leaves, and Undo has to be able to put it back.
+      if (folder.parent_id && !allows(folderLevel(ctx.sight, folder.parent_id), "edit")) throw new OpError("forbidden", "You can read the folder it is in, and not change it");
+      if (op.parentId) await loadFolder(ctx, op.parentId, "edit");
+      else if (!seesEveryFolder(ctx.sight)) throw new OpError("forbidden", guest ? "A guest can move a folder only into one shared with them" : "An agent limited to folders can move a folder only into one of them");
+      // One statement, so two folders moved into each other at once can't both go: the second finds itself above where it would go.
+      const moved = await intoFolder(
+        ctx.db
+          .prepare(
+            `UPDATE folders SET parent_id = ?1 WHERE id = ?2 AND workspace_id = ?3 AND NOT EXISTS (
+               WITH RECURSIVE above(id) AS (SELECT ?1 UNION SELECT f.parent_id FROM folders f JOIN above ON f.id = above.id WHERE f.parent_id IS NOT NULL)
+               SELECT 1 FROM above WHERE id = ?2)`,
+          )
+          .bind(op.parentId, folder.id, ctx.workspaceId)
+          .run(),
+        folder.name,
+      );
+      if (!moved.meta.changes) {
+        await loadFolder(ctx, op.id, "edit");
+        throw new OpError("invalid", "A folder can't go inside itself, or inside a folder in it");
+      }
+      return toFolder(ctx, { ...folder, parent_id: op.parentId });
     },
   },
 

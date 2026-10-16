@@ -226,15 +226,6 @@ export function uploadEmbeds(host: PluginHost, pick?: Embed["pick"]): { embeds: 
           // A file with nothing to preview is its head alone in a note: its icon is for the Uploads page.
           if (preview.shows !== "icon") unpreview = drawPreview(body, host, upload, "note", {
             said: (words) => (meta.textContent = words ? `${formatBytes(shown.size)} · ${words}` : formatBytes(shown.size)),
-            // Text shorter than its room makes the card as short as it is.
-            drawn: () => {
-              const inner = body.firstElementChild as HTMLElement | null;
-              if (!inner) return;
-              body.style.height = "";
-              const height = Math.ceil(cardHeight(null) + body.getBoundingClientRect().height);
-              if (height < cardHeight(preview)) now.resize(height);
-              else body.style.height = `${cardHeight(preview) - cardHeight(null)}px`;
-            },
           });
           // A player is pressed to play: the card's name opens it larger.
           if (preview.shows !== "player" && preview.shows !== "icon" && previews()) {

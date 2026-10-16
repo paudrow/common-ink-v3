@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Icon, MAX_NOTES_AT_ONCE, useNow, type AuthorRef, type DiffRun, type HistoryEntry, type HistoryPage, type NoteDiff, type NoteRevertPreview, type OpInput, type PluginHost, type RevertConflict } from "../../plugin-api.ts";
 import { Avatar, DiffView, Stat, type Marked } from "../lib/HistoryDiff.tsx";
 import { MOST_OF_A_NOTE, NOTHING, asked, byDay, clock, count, dayLabel, did, groupSaves, kept, keyOf, lists, notesOf, only, picked, pieces, sameSelection, sizeOf, titleOf, who as whoOf, within, withRows, type Narrowing, type NoteOfDay, type Row, type Selection } from "../lib/historyView.ts";
@@ -472,6 +472,11 @@ interface Props {
   onTicked?: (noteIds: string[]) => void;
   /** What was ticked here when it was last left, for as long as the app is open. */
   left: Left;
+  /** A change to show as if its row had been clicked, reading older changes until it is listed. `onPicked` is called once it is shown, or once there is none. */
+  pick?: number | null;
+  onPicked?: () => void;
+  /** Controls of the panel's own, beside its link to the page. */
+  tools?: ReactNode;
 }
 
 /** What History keeps of one place it is shown at, between leaving it and coming back: the ticks, and how far the list was read. */
@@ -501,7 +506,7 @@ const WHO: readonly [Who, string][] = [
  * the list or under it, note by note, and at the list's foot is what to do with it: clear it, or
  * revert it.
  */
-export function History({ host, me, canEdit, scope, layout, version, empty, onScope, onOpenHistory, onOpenNote, onChanged, onLoaded, onTicked, left }: Props) {
+export function History({ host, me, canEdit, scope, layout, version, empty, onScope, onOpenHistory, onOpenNote, onChanged, onLoaded, onTicked, left, pick, onPicked, tools }: Props) {
   const ids = useId();
   const now = useNow();
   const [keptView, setView] = useKept<View>(host.storage, layout === "page" ? "view" : "view.panel", isView, layout === "page" ? "time" : "note");
@@ -642,6 +647,25 @@ export function History({ host, me, canEdit, scope, layout, version, empty, onSc
     setDetail(true);
   };
 
+  // A change asked for from elsewhere, such as a line's bar in Who wrote this: shown as a click on its row shows it, once the list has been read as far back as it.
+  const shownPick = useRef(onPicked);
+  shownPick.current = onPicked;
+  const olderFor = useRef<HistoryPage["next"]>(null);
+  useEffect(() => {
+    if (pick == null || !ready) return;
+    const item = items.find((i) => i.kind === "row" && i.row.revisions.includes(pick));
+    if (item) {
+      showOnly(item);
+      setDetail(true);
+      requestAnimationFrame(() => document.getElementById(item.id)?.scrollIntoView({ block: "nearest" }));
+    } else if (data.next) {
+      if (olderFor.current !== data.next) void data.older();
+      olderFor.current = data.next;
+      return;
+    }
+    shownPick.current?.();
+  }, [pick, items, ready, data.next]);
+
   const onKey = (e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey || !items.length) return;
     // A day's tick is pressed with its own keys. Every other key is the list's from there too.
@@ -747,6 +771,7 @@ export function History({ host, me, canEdit, scope, layout, version, empty, onSc
     ) : (
       <div className="hist-filters">
         {switcher}
+        {tools}
         <button type="button" className="link hist-open-page" onClick={onOpenHistory}>
           Open in History
         </button>

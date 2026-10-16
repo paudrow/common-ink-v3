@@ -286,6 +286,12 @@ test("the size handle is seen on hover or focus, snaps a drag to small, medium, 
   await expect.poll(() => noteText(page, note.id)).toBe(text(" small"));
   await page.keyboard.press("ArrowUp");
   await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
+  // Presses come faster than the note redraws, as a key held down: each one is a step.
+  const twice = (key: string) => handle.evaluate((el, key) => [0, 1].forEach(() => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))), key);
+  await twice("ArrowRight");
+  await expect.poll(() => noteText(page, note.id)).toBe(text());
+  await twice("ArrowLeft");
+  await expect.poll(() => noteText(page, note.id)).toBe(text(" medium"));
   expect(await pictures(page).evaluate((img) => (img as HTMLImageElement & { marked?: boolean }).marked), "the same picture, never drawn again").toBe(true);
 
   // A drag shows where it will snap, and writes that on release.

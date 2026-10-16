@@ -103,9 +103,6 @@ test("a CSV shows its first rows, text and markdown their first lines, a file wi
   const zip = card(page, "archive.zip");
   await expect(zip.locator(".upload-card-body")).toBeEmpty();
   await expect(zip.getByRole("link", { name: "Download archive.zip" })).toHaveAttribute("download", "archive.zip");
-  // A short file's card is as tall as its text, and no taller.
-  const [readmeCard, readmeText] = [(await card(page, "readme.md").boundingBox())!, (await card(page, "readme.md").locator("pre").boundingBox())!];
-  expect(readmeCard.y + readmeCard.height - (readmeText.y + readmeText.height)).toBeLessThanOrEqual(2);
   await expect(editor(page).locator(".file-chip", { hasText: "cities.csv" })).toHaveCount(1);
 
   await card(page, "cities.csv").getByRole("button", { name: "Preview cities.csv" }).click();
@@ -115,6 +112,29 @@ test("a CSV shows its first rows, text and markdown their first lines, a file wi
   await expect(overlay(page, "minutes.txt").locator("pre")).toHaveText(MINUTES);
   await overlay(page, "minutes.txt").getByRole("button", { name: "Open", exact: true }).click();
   await expect(page).toHaveURL(`/file/${minutes.id}`);
+});
+
+test("a file's card keeps the room it had before its preview came, short or long, so nothing below it moves when the preview arrives", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const files = [await send(page, "cities.csv", Buffer.from(CITIES)), await send(page, "pair.csv", Buffer.from("city,country\nLisbon,Portugal\n")), await send(page, "minutes.txt", Buffer.from(MINUTES)), await send(page, "said.txt", Buffer.from("What was said.\n"))];
+  const held: (() => void)[] = [];
+  await page.route(/\/api\/workspaces\/[^/]+\/uploads\/[^/?]+$/, async (route) => {
+    if (route.request().method() === "GET") await new Promise<void>((go) => held.push(go));
+    await route.fallback();
+  });
+  await page.setViewportSize({ width: 1280, height: 1600 });
+  await noteWith(page, `# Files\n\n${files.map((f) => `::file{${f.id}}`).join("\n\n")}\n\nafter\n`);
+  await expect(page.locator(".upload-card-name")).toHaveCount(4);
+  await expect.poll(() => held.length).toBe(4);
+  const where = () => page.evaluate(() => ({ cards: [...document.querySelectorAll('.embed-below[data-embed="file"]')].map((c) => c.getBoundingClientRect().height), after: [...document.querySelectorAll(".cm-line")].find((l) => l.textContent === "after")!.getBoundingClientRect().top }));
+  const before = await where();
+
+  for (const go of held) go();
+  await expect(page.locator(".upload-preview-rows")).toHaveCount(2);
+  await expect(page.locator(".upload-preview-lines")).toHaveCount(2);
+  await expect(card(page, "pair.csv").locator("tbody tr")).toHaveCount(1);
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  expect(await where()).toEqual(before);
 });
 
 test("pdf.js is loaded only once a PDF is shown, and only from the app's own address", async ({ page, baseURL }) => {
