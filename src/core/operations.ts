@@ -1,5 +1,6 @@
 import { ChangeSet, MapMode } from "@codemirror/state";
 import { z } from "zod";
+import { blame, runsOfLines } from "./blame.ts";
 import { SEEN, SEEN_FOLDER, allows, canShare, folderLevel, noteAsked, noteLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { dailySettings, dailyText, dayFor, filedOn, type DailySettings } from "./daily.ts";
 import { lineDiff, textDiff } from "./diff.ts";
@@ -1755,6 +1756,28 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       if (op.revision > row.revision) throw new OpError("not_found", `The note has no change ${op.revision}`);
       const { text, since } = await replay(ctx, row.id, op.revision - 1, op.revision);
       return lineDiff(text, since[0]!);
+    },
+  },
+
+  "note.blame": {
+    needs: "view",
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "view", "opens");
+      await countLines(ctx, [row.id]);
+      const { results } = await ctx.db.prepare(`SELECT c.diff, ${CHANGE_COLUMNS} WHERE c.note_id = ? AND c.revision <= ? ORDER BY c.revision`).bind(row.id, row.revision).all<ChangeRow & { diff: string }>();
+      const lines = runsOfLines(blame(results.map((r) => ({ changes: ChangeSet.fromJSON(JSON.parse(r.diff)), reverts: revertsOf(r.reverts) }))));
+      const named = new Set(lines.map((run) => run.revision));
+      const standing = standingOf(results.map(stepOf));
+      const changes = results.filter((r) => named.has(r.revision)).map((r) => toEntry(r, standing));
+      const owners = [...new Set(changes.flatMap((c) => (c.author.kind === "agent" ? [c.author.onBehalfOf] : [])))];
+      // Who an agent is for is who is in the workspace, which only someone who may list its members is told.
+      const { results: members } = owners.length && ctx.role && !ctx.sight.within
+        ? await ctx.db
+            .prepare("SELECT p.id, p.name FROM members m JOIN people p ON p.id = m.person_id WHERE m.workspace_id = ? AND p.id IN (SELECT value FROM json_each(?))")
+            .bind(ctx.workspaceId, JSON.stringify(owners))
+            .all<{ id: string; name: string }>()
+        : { results: [] };
+      return { revision: row.revision, text: row.text, lines, changes, owners: Object.fromEntries(members.map((p) => [p.id, p.name])) };
     },
   },
 

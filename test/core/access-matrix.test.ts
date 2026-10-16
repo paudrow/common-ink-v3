@@ -201,6 +201,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.backlinks": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.history": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.diff": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, revision: 1 }) },
+  "note.blame": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.move": { on: "note", needs: "E", trashed: "refused", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
   // Archiving sets the state the note already has, and trashing and restoring are each followed by `settle`.
   "note.archive": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, archived: STATE_OF[note] === "archived" }) },

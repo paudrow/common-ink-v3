@@ -320,6 +320,10 @@ Reverting the author's own latest change to a note that still stands. Redo rever
 **Unseen change**:
 A change to a note by anyone but the member, their own agent included, made since the member last looked at that note's history.
 
+**Who wrote this**:
+A note's lines marked by who last changed each, in a column left of the text as a blame view has. Lines next to each other that one change last wrote are a run, and the column names, on each run's first line, who wrote it and when, with the change's label or what its revert did; the member's (one family of colours), the agent's (another, with whose agent it is), or the member's own ("You", grey). A strip at the column's edge is stronger the newer the change. A line is changed by an edit inside it and by being written; lines put in or taken out around it leave it as it was, and a line a revert, undo or redo brings back is still its writer's, while a line it writes anew (a conflict settled by hand) is the reverter's; the revert itself shows in History. Pressing a run opens that change in History, and two commands move to the next or previous run and open its change. The member turns it on for one note at a time, from the command or the note's History panel, and the note keeps it on for them in that browser. Agents ask the same of `note_blame`, named as git names it.
+_Avoid_: Annotate
+
 **Label**:
 A name attached to one revision in history. A revision has at most one, and a note uses a name once.
 

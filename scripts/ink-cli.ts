@@ -60,6 +60,7 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   folder-delete ID                    delete an empty folder
   history ID                          a note's changes and who made them
   diff ID --change N                  what one change did to its note, as a line diff
+  blame ID                            who wrote each line of a note: the change that last wrote or edited it
   changed [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
                                       the notes that changed, latest first, with the lines added and removed in each
   changes [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT] [--diffs false]
@@ -414,6 +415,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "history":
         tool = "note_history";
+        args = { id: needId() };
+        break;
+      case "blame":
+        tool = "note_blame";
         args = { id: needId() };
         break;
       case "diff":

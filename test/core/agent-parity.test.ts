@@ -41,6 +41,7 @@ const COMMANDS: Record<string, string[][]> = {
   delete_folder: [["folder-delete", ID]],
   note_history: [["history", ID]],
   change_diff: [["diff", ID, "--change", "2"]],
+  note_blame: [["blame", ID]],
   history_summary: [["changed", "--note", ID, "--author", AUTHOR, "--by", "agents", "--from", "2026-10-01", "--to", "2026-10-02", "--limit", "5", "--before", `{"lastAt":1,"noteId":"${ID}"}`]],
   history: [["changes", "--note", ID, "--author", AUTHOR, "--by", "people", "--from", "2026-10-01", "--to", "2026-10-02", "--limit", "5", "--before", `{"createdAt":1,"noteId":"${ID}","revision":1}`, "--diffs", "false"]],
   history_authors: [["authors"]],

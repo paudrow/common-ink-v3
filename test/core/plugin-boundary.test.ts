@@ -28,9 +28,9 @@ describe("the plugin boundary", () => {
     expect(reaching).toEqual([]);
   });
 
-  it("builds the plugin API from the operations protocol, how a link, a mention, a todo, a tag, a recurrence and a query are written and which lines are code, the daily note settings, one function of the text module, eleven small helpers and the help overlay, so widening it is a choice", () => {
+  it("builds the plugin API from the operations protocol, how a link, a mention, a todo, a tag, a recurrence and a query are written and which lines are code, the daily note settings, one function each of the text and blame modules, eleven small helpers and the help overlay, so widening it is a choice", () => {
     const api = files.find((f) => f.path === API)!;
 
-    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/daily.ts", "../core/lines.ts", "../core/links.ts", "../core/mentions.ts", "../core/protocol.ts", "../core/query.ts", "../core/recurrence.ts", "../core/text.ts", "../core/todos.ts", "./HelpOverlay.tsx", "./dismiss.ts", "./dragged.ts", "./htmlFrame.ts", "./icons.tsx", "./inspected.ts", "./openNotes.ts", "./otherSites.ts", "./readOnly.ts", "./resize.tsx", "./theme.ts", "./time.ts", "./titleMark.ts", "react"]);
+    expect([...new Set(imported(api.source))].sort()).toEqual(["../core/blame.ts", "../core/daily.ts", "../core/lines.ts", "../core/links.ts", "../core/mentions.ts", "../core/protocol.ts", "../core/query.ts", "../core/recurrence.ts", "../core/text.ts", "../core/todos.ts", "./HelpOverlay.tsx", "./dismiss.ts", "./dragged.ts", "./htmlFrame.ts", "./icons.tsx", "./inspected.ts", "./openNotes.ts", "./otherSites.ts", "./readOnly.ts", "./resize.tsx", "./theme.ts", "./time.ts", "./titleMark.ts", "react"]);
   });
 });
