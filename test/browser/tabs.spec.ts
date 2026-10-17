@@ -1,16 +1,16 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { listedNote, noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { editOf, listedNote, noteCard, openAllNotes, openKept, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
-/** Opens a note from the list of every note as a preview, which is what a click on its title does. */
+/** Opens a note from the list of every note as a preview, which is what a click on its Edit does. */
 async function preview(page: Page, title: string) {
   await openAllNotes(page);
-  await listedNote(page, title).click();
+  await editOf(page, title).click();
 }
 
-/** Opens a note from the list of every note in a tab that is kept, which is what its pencil does. */
+/** Opens a note from the list of every note in a tab that is kept: its Edit with a modifier opens it behind the list, and its tab is then come to. */
 async function keep(page: Page, title: string) {
   await openAllNotes(page);
-  await noteCard(page, title).getByRole("button", { name: `Edit ${title}` }).click();
+  await openKept(page, title);
 }
 
 const tabBar = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group);
@@ -42,7 +42,7 @@ test("a single click opens a note in an italic preview tab, and the next single 
   await expect(page).toHaveURL(/\/note\/beta-[a-z0-9]{12}$/);
 });
 
-test("a note's pencil keeps it in its own tab, and so does double-clicking its tab or typing in it", async ({ page }) => {
+test("a note opened behind the list is kept in its own tab, and so is one by double-clicking its tab or typing in it", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta", "Gamma");
 
   await keep(page, "Alpha");
@@ -76,7 +76,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
 
   const { width } = (await group(1).boundingBox())!;
   await openAllNotes(page);
-  await noteCard(page, "Beta").dragTo(group(1), { targetPosition: { x: width * 0.8, y: 130 } });
+  await noteCard(page, "Beta").locator(".card-head").dragTo(group(1), { targetPosition: { x: width * 0.8, y: 130 } });
   await expect(tabs(page, 0)).toHaveText(["All notes", "Alpha"]);
   await expect(tabs(page, 1)).toHaveText(["Beta"]);
   await expect.poll(() => italic(page, 1)).toEqual([false]);
@@ -99,7 +99,7 @@ test("dragging a note onto the editor splits it, and onto a tab bar adds or move
   expect(await page.evaluate(() => history.length)).toBe(visited);
 
   await tab(page, "All notes").click();
-  await noteCard(page, "Gamma").dragTo(tabBar(page, 1));
+  await noteCard(page, "Gamma").locator(".card-head").dragTo(tabBar(page, 1));
   await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
   await expect.poll(() => italic(page, 1)).toEqual([false, false]);
   await expect(group(2).locator(".cm-line").first()).toHaveText("# Gamma");

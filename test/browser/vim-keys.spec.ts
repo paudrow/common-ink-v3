@@ -104,6 +104,8 @@ test("a folder's notes move with j, k, gg, G and half pages; / goes to the searc
   await signIn(page);
   const titles = Array.from({ length: 30 }, (_, n) => `Note ${String(n).padStart(2, "0")}`);
   await createNotes(page, titles.map((title) => `# ${title}\n\nplum`));
+  // Tall enough that half a page is several cards.
+  await page.setViewportSize({ width: 1280, height: 1800 });
   await open(page, "/folder/all");
   const cards = page.locator(".cards > li");
   await expect(cards).toHaveCount(30);
@@ -714,23 +716,30 @@ test("a letter typed in a note right after a sequence was given up elsewhere arr
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plum\n\nwordsxa");
 });
 
-test("za expands and collapses the selected row: a note's card in a folder's list, and a folder in the tree", async ({ page }) => {
+test("za shows the whole of the selected row and then less of it: a long note's card in a folder's list, and a folder in the tree", async ({ page }) => {
   await signIn(page);
   const work = await perform(page, { type: "folder.create", name: "Work" });
   await perform(page, { type: "folder.create", name: "Plans", parentId: work.id });
-  await perform(page, { type: "note.create", text: "# Plum\n\nwords of the plum" });
+  await perform(page, { type: "note.create", text: `# Plum\n\nwords of the plum\n\n${Array.from({ length: 40 }, (_, n) => `Paragraph ${n + 1} about plums.\n`).join("\n")}` });
   await open(page, "/folder/all");
   const cards = page.locator(".cards > li");
   await expect(cards).toHaveCount(1);
-  const chevron = cards.getByRole("button", { name: /^(Expand|Collapse) Plum$/ });
+  const more = cards.getByRole("button", { name: /^Show (whole note|less)$/ });
+  await expect(cards.nth(0).locator(".cm-content")).toContainText("words of the plum");
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  const cut = (await cards.nth(0).boundingBox())!.height;
   await page.keyboard.press("j");
   await expectSelected(cards.nth(0), "the card");
   await keys(page, "z", "a");
-  await expect(chevron).toHaveAttribute("aria-expanded", "true");
-  await expect(cards.nth(0).locator(".cm-content")).toContainText("words of the plum");
-  await expectSelected(cards.nth(0), "the card, expanded");
+  await expect(more).toHaveAttribute("aria-expanded", "true");
+  await expect(more).toHaveText("Show less");
+  await expect.poll(async () => (await cards.nth(0).boundingBox())!.height).toBeGreaterThan(cut + 500);
+  // The whole note is taller than the window, so the card is selected without all of it being on screen.
+  await expect.poll(() => cards.nth(0).evaluate((el) => el.contains(document.activeElement) && "vimAt" in el.dataset)).toBe(true);
   await keys(page, "z", "a");
-  await expect(chevron).toHaveAttribute("aria-expanded", "false");
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(async () => (await cards.nth(0).boundingBox())!.height).toBe(cut);
+  await expectSelected(cards.nth(0), "the card, cut again");
   await expect(page).toHaveURL(/\/folder\/all$/);
 
   const item = (name: string) => page.getByRole("tree").getByRole("treeitem", { name, exact: true });

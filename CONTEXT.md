@@ -20,11 +20,11 @@ _Avoid_: Breadcrumb, folder address
 The default folder. A note created with no folder in front is placed here.
 
 **Folder's list**:
-The notes in one folder, shown in the editor area as cards: each a title, a line of details, and the note's first lines. A folder's list is of the folder's own notes, not those of the folders inside it.
+The notes in one folder, shown in the editor area as cards: each a title, the first part of the note drawn to be read, and a line of details. A folder's list is of the folder's own notes, not those of the folders inside it.
 _Avoid_: List column, feed
 
 **Search bar**:
-What heads every folder's list, and the Search page, which is the same list of every note: a field that takes a query, with the folder it searches shown in it and Advanced beside it. A folder's list also has the choice of Open, Archived or All, Has todos, and the order; on the Search page the query says all three (`is:archived`, `has:todo`, `sort:`), and the bar and Advanced are its only controls. With nothing typed the list is the folder's notes. With a query typed it is what the server's search finds among them, each card with the lines that matched. The Todos page is headed by the same field and Advanced, for todos.
+What heads every folder's list, and the Search page, which is the same list of every note: a field that takes a query, with the folder it searches shown in it and Advanced beside it. Which notes, whether they have todos and their order are said in the query (`is:archived`, `has:todo`, `sort:`), on a folder's list as on the Search page, and the bar and Advanced are its only controls. With nothing typed the list is the folder's notes. With a query typed it is what the server's search finds among them, each card with the lines that matched. The Todos page is headed by the same field and Advanced, for todos.
 _Avoid_: Filter box
 
 **Query**:
@@ -40,14 +40,14 @@ The panel Advanced opens under a search bar: the bar's query as a row for each c
 _Avoid_: Filter panel, advanced search form
 
 **Open, Archived, All**:
-Which notes a folder's list or its search is of, by where each is in its life: the live ones, the archived ones alone, or both. Never one in Trash. The Search page says it in its query: `is:archived`, `is:open OR is:archived`.
+Which notes a folder's list or its search is of, by where each is in its life: the live ones, the archived ones alone, or both. Never one in Trash. A list says it in its query: open unless it says `is:archived`, or `is:open OR is:archived` for both. An archived note is out of a folder's list and the Todos page until asked for, and found by a search that asks.
 _Avoid_: Show archived, include archived (for a list of notes)
 
 **All notes**:
 The list of every note the member can see, whatever folder it is in. It is the first row of the folder tree.
 
 **Card**:
-One note in a folder's list. It expands in place to the note drawn to be read, first as an excerpt and then whole. A note is changed in its own tab, never in its card.
+One note in a folder's list, drawn one way everywhere a list is: the first part of the note drawn to be read, fading out where it is cut, with no title row above it (the note's own heading is its title), then Edit, Show whole note for a note longer than the cut, and a line of details (the folder where the list spans folders, when it was edited, everyone who edited it). Show whole note grows the card in place. In its top right corner are Archive, which is one click and says "Archived" with Undo (Unarchive, with an icon of its own, on an archived note), and a menu that holds everything else that can be done with the note, each item with an icon. A note is changed in its own tab, never in its card: Edit is the way in.
 _Avoid_: Row
 
 **Note**:
@@ -168,7 +168,7 @@ A tab that holds a page. It is one tab wherever under the page's address it is, 
 A tab that holds a folder's list. It lives at `/folder/<id>`, and All notes at `/folder/all`.
 
 **Preview tab**:
-The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, and it is where the next thing opened with a single click goes, whatever either is of and whichever editor group is focused: so no group is closed by opening something in another. With none, it opens in the focused group. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, a card's pencil, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
+The tab a single click opens, shown in italics. Also called a temporary tab, and a kept tab a permanent one. The window has at most one, and it is where the next thing opened with a single click goes, whatever either is of and whichever editor group is focused: so no group is closed by opening something in another. With none, it opens in the focused group. A note opened from a previewed folder's list takes the list's place too, and Back returns to the list. A preview never becomes a kept tab by itself: turning to it, changing tabs or groups, splitting it off from its menu and reloading leave it a preview. Only the member keeps it: double-clicking a folder or a tab, Keep open on the tab's menu, ⌘-click, Open in a split, dragging it or dropping something in, or editing the note.
 
 **Editor group**:
 A part of the editor with its own tabs, one of them showing. Groups sit side by side or one above another, in any nesting of the two, and one is focused. The URL and the inspector follow the focused group's showing tab. A mode's link or a folder's row dragged from the sidebar onto a group lands as a dragged tab does: the middle adds a kept tab, an edge splits.
@@ -219,7 +219,7 @@ _Avoid_: Cheat sheet, help menu (for the sheet)
 Help shown over the page in a dialog with a title and a close button, the one look for help in the app: the query syntax and the keyboard shortcuts sheet are drawn in it.
 
 **Vim mode**:
-A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
+A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as a card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it (on a card, to show the whole note or cut it back), and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
 
 **Selected row**:
 The row of a list that vim's keys are on. It has focus, is marked, and is kept in view.
@@ -276,6 +276,9 @@ A note hidden from every other member, admins too. Only the member who made a no
 **State**:
 Where a note or upload is in its life: live, archived, or trashed. It is decided apart from access, and is the same for every member. A note removed from Trash has no state: it is gone.
 _Avoid_: Status, deleted flag
+
+**Breadcrumbs**:
+The line above an open note's text: the workspace, each folder down to the note's own, and the note, as VS Code's. A crumb that is a folder opens a list of that folder's subfolders and notes, searchable and moved through by the keyboard, with Go to folder at its top. It lists only what the member can already see. A note shared with a guest, which is in no folder, is under Shared with me. In focus they are hidden.
 
 **Archive**:
 A state of a note or upload, stored outside the file, that keeps it and its links and leaves it out of folder listings, search, the dashboard, and the todos view unless archived notes are included. It keeps its folder and id. A link still opens it, and it is edited as any note. Archive and unarchive are actions on the open note and require edit. It applies to every member.

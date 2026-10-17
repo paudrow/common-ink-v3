@@ -259,29 +259,31 @@ test("a pin leaves the dashboard when its note goes to Trash or out of the membe
   await expect(what(pinned(grace))).toHaveText(["Diary", "Plan", "Keep"], { timeout: 25_000 });
 });
 
-test("an archived note keeps its pin and says so: its bar shows it pinned after a reload, and it is on the dashboard again once unarchived", async ({ page }) => {
+test("an archived note is not offered a pin but keeps the one it has, and it is on the dashboard again once unarchived", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   await settled(page);
   const old = await perform(page, { type: "note.create", text: "# Old plan" });
-  await perform(page, { type: "note.archive", id: old.id, archived: true });
 
   await page.goto(`/note/${old.id}`);
   await expect(editor(page)).toContainText("Old plan");
-  const pin = page.getByRole("button", { name: "Pin to dashboard" });
-  await expect(pin).toHaveAccessibleDescription("Pin to dashboard. An archived note is on your dashboard once it is unarchived.");
-  await pin.click();
+  await page.getByRole("button", { name: "Pin to dashboard" }).click();
   await expect.poll(async () => (await perform(page, { type: "pin.list", includeArchived: true })).map((n) => n.title)).toEqual(["Old plan"]);
+  await page.locator(".tab-row").getByRole("button", { name: "Archive", exact: true }).click();
 
+  // Archived, the note's top right has Unarchive and no pin of either kind.
+  await expect(page.locator(".tab-row").getByRole("button", { name: "Unarchive", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /dashboard/ })).toHaveCount(0);
   await page.reload();
   await expect(editor(page)).toContainText("Old plan");
-  const unpin = page.getByRole("button", { name: "Unpin from dashboard" });
-  await expect(unpin).toHaveAttribute("aria-pressed", "true");
-  await expect(unpin).toHaveAccessibleDescription("Pinned. It is on your dashboard again once this note is unarchived.");
+  await expect(page.locator(".tab-row").getByRole("button", { name: "Unarchive", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /dashboard/ })).toHaveCount(0);
 
   await openDashboard(page);
   await expect(pinned(page)).toContainText("Nothing is pinned.");
   await perform(page, { type: "note.archive", id: old.id, archived: false });
   await expect(what(pinned(page))).toHaveText(["Old plan"]);
+  await page.goto(`/note/${old.id}`);
+  await expect(page.getByRole("button", { name: "Unpin from dashboard" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("the summary lists what others and agents changed since the member marked it read, and only marking it read moves that", async ({ page }) => {

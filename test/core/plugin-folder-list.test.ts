@@ -63,22 +63,14 @@ describe("how the list is set", () => {
 });
 
 describe("a card", () => {
-  const expand = { type: "expandOrCollapse", noteId: "a" } as const;
-  const whole = { type: "wholeOrExcerpt", noteId: "a" } as const;
+  const whole = { type: "wholeOrLess", noteId: "a" } as const;
 
-  it("expands to an excerpt, then to the whole note and back, and collapses from either", () => {
-    const excerpt = listReducer(INITIAL_VIEW, expand);
-    expect(excerpt.expanded).toEqual({ a: "excerpt" });
-    expect(listReducer(excerpt, whole).expanded).toEqual({ a: "whole" });
-    expect(listReducer(listReducer(excerpt, whole), whole).expanded).toEqual({ a: "excerpt" });
-    expect(listReducer(listReducer(excerpt, whole), expand).expanded).toEqual({});
-    expect(listReducer(excerpt, { type: "collapse", noteId: "a" }).expanded).toEqual({});
-  });
-
-  it("is expanded apart from the others, and a collapsed one is left as it is by what only an expanded one takes", () => {
-    const two = listReducer(listReducer(INITIAL_VIEW, expand), { type: "expandOrCollapse", noteId: "b" });
-    expect(listReducer(two, whole).expanded).toEqual({ a: "whole", b: "excerpt" });
-    expect(listReducer(INITIAL_VIEW, whole)).toBe(INITIAL_VIEW);
-    expect(listReducer(INITIAL_VIEW, { type: "collapse", noteId: "a" })).toBe(INITIAL_VIEW);
+  it("grows to the whole of its note and is cut back again, apart from the others", () => {
+    expect(INITIAL_VIEW.whole).toEqual({});
+    expect(listReducer(INITIAL_VIEW, whole).whole).toEqual({ a: true });
+    expect(listReducer(listReducer(INITIAL_VIEW, whole), whole).whole).toEqual({});
+    const two = listReducer(listReducer(INITIAL_VIEW, whole), { type: "wholeOrLess", noteId: "b" });
+    expect(two.whole).toEqual({ a: true, b: true });
+    expect(listReducer(two, whole).whole).toEqual({ b: true });
   });
 });

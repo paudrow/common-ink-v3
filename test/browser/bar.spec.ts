@@ -166,7 +166,10 @@ test("with Word count turned off, and the clocks that share the bar, nothing is 
   await page.goBack();
   await page.goBack();
   await expect(editor(page)).toBeVisible();
-  expect((await boxOf(page, "main"))[3]).toBeGreaterThan(withBar[3]);
+  // With a note in front the bar stays, to say whether it is saved.
+  await expect(bar(page).locator(SAYING)).toHaveCount(0);
+  await expect(bar(page).getByRole("status")).toHaveText("Saved");
+  expect((await boxOf(page, "main"))[3]).toBe(withBar[3]);
 
   await page.goto("/plugins");
   await pluginRow(page, "Word count").getByRole("checkbox").check();

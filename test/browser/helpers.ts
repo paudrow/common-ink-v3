@@ -107,14 +107,27 @@ export const folderRow = (page: Page, name: string) => page.getByRole("tree", { 
 /** Opens the list of every note in a tab, which is where a note is found by its title. A second call comes back to it from a note opened since. */
 export const openAllNotes = (page: Page) => folderRow(page, "All notes").click();
 
-/** The titles in the folder's list that is showing, in order. Clicking one opens its note. */
-export const listedNotes = (page: Page) => page.getByRole("navigation", { name: "Notes" }).getByRole("link");
+/** The names of the cards in the folder's list that is showing, in order. A card has no title row; its name is there for a screen reader, and `editOf` is the way in. */
+export const listedNotes = (page: Page) => page.getByRole("navigation", { name: "Notes" }).locator(".card-title");
 
 /** A note's title in the folder's list that is showing. */
 export const listedNote = (page: Page, title: string) => listedNotes(page).filter({ hasText: new RegExp(`^${title}$`) });
 
-/** A note's card in the folder's list that is showing: its title, its details, and its text once expanded. */
+/** A note's card in the folder's list that is showing: its title, its note drawn to be read, and its buttons. */
 export const noteCard = (page: Page, title: string) => page.getByRole("navigation", { name: "Notes" }).getByRole("article", { name: title, exact: true });
+
+/** The Edit link of a note's card, which opens the note as a click on its title once did. */
+export const editOf = (page: Page, title: string) => noteCard(page, title).getByRole("link", { name: "Edit" });
+
+/**
+ * Opens a note from the folder's list that is showing in a tab of its own that is kept, and comes to it,
+ * leaving the list's tab where it is: Edit with a modifier opens the note behind the list, and a click on its tab brings it in front.
+ */
+export async function openKept(page: Page, title: string) {
+  const card = noteCard(page, title);
+  await card.getByRole("link", { name: "Edit" }).click({ modifiers: ["ControlOrMeta"] });
+  await card.locator("xpath=ancestor::section[@data-region][1]").getByRole("tab", { name: title, exact: true }).click();
+}
 
 /** Whether a frame is one of Common Ink's own plugins', which run shut off as a workspace's do and are no part of what a test installs. */
 export const ownFrame = (frame: Frame) => [frame, frame.parentFrame()].some((f) => f?.name() === "ink-own-plugin");

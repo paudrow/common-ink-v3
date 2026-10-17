@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Me, Note, OpInput } from "../../src/core/protocol.ts";
-import { anotherPerson, asViewerOfNote, connectAgent, join, listedNote, openAllNotes, panelIcon, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector } from "./helpers.ts";
+import { anotherPerson, asViewerOfNote, connectAgent, editOf, join, listedNote, openAllNotes, panelIcon, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector } from "./helpers.ts";
 
 const UNSEEN = "Changes you haven't seen";
 const inspector = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -928,7 +928,7 @@ test("undo and redo move through the note's history, across a closed tab and a r
   await expect(editorLines(page)).toHaveText(["# one two"]);
 
   await openAllNotes(page);
-  await listedNote(page, "Other").click();
+  await editOf(page, "Other").click();
   await expect(editorLines(page).first()).toHaveText("# Other");
   await page.getByRole("tab", { name: "one two" }).click();
   await expect(editorLines(page)).toHaveText(["# one two"]);
@@ -969,8 +969,10 @@ test("undo takes back what was typed a moment ago without a word to the server, 
   const sent: string[] = [];
   page.on("request", (request) => /"note\.(write|undo)"/.test(request.postData() ?? "") && sent.push(request.postData()!));
   await page.keyboard.type(" typed");
+  await expect(editor(page).locator(".cm-line")).toHaveText(["kept typed"]);
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(editorLines(page)).toHaveText(["kept"]);
+  // The list beside the note draws it too, in its card: it is the editor's own lines that are asked after.
+  await expect(editor(page).locator(".cm-line")).toHaveText(["kept"]);
   await page.waitForTimeout(1500);
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(sent).toEqual([]);
@@ -978,7 +980,7 @@ test("undo takes back what was typed a moment ago without a word to the server, 
   const filter = page.getByRole("searchbox", { name: "Search notes" });
   await filter.fill("ke");
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(editorLines(page)).toHaveText(["kept"]);
+  await expect(editor(page).locator(".cm-line")).toHaveText(["kept"]);
   await page.waitForTimeout(500);
   await expect.poll(async () => (await perform(page, { type: "note.history", id: note.id })).map((c) => c.reverts?.how ?? "edit")).toEqual(["edit"]);
 
@@ -986,7 +988,7 @@ test("undo takes back what was typed a moment ago without a word to the server, 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("redo");
   await page.keyboard.press("Enter");
-  await expect(editorLines(page)).toHaveText(["kept typed"]);
+  await expect(editor(page).locator(".cm-line")).toHaveText(["kept typed"]);
 });
 
 const offline = (page: Page) => page.route("**/ops", (route) => route.abort());

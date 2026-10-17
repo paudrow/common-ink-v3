@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, listedNotes, me, newEmail, noteCard, openAllNotes, ownPlugin, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, listedNotes, me, newEmail, openAllNotes, openKept, ownPlugin, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
 const membersPage = (page: Page) => page.getByRole("region", { name: "Members" });
@@ -262,7 +262,7 @@ test("switching workspaces changes everything shown: the notes, the open tabs, q
   await expect(workspaceButton(page)).toHaveText("Grace's workspaceAdmin");
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Diary"]);
-  await noteCard(page, "Diary").getByRole("button", { name: "Edit Diary" }).click();
+  await openKept(page, "Diary");
   await expect(tabs(page)).toHaveText(["All notes", "Diary"]);
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("Start a quick timer");
@@ -430,7 +430,7 @@ test("two people who share a browser and a workspace don't share the tabs they h
   await perform(page, { type: "note.create", text: "# Plan" });
   await page.goto("/");
   await openAllNotes(page);
-  await noteCard(page, "Plan").getByRole("button", { name: "Edit Plan" }).click();
+  await openKept(page, "Plan");
   await expect(tabs(page)).toHaveText(["All notes", "Plan"]);
 
   await signInAs(page, graceEmail, "Grace Hopper");

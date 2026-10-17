@@ -372,6 +372,23 @@ button.link:hover {
   cursor: pointer;
 }
 
+.menu > button .menu-label {
+  flex: 1;
+}
+
+.menu > button .menu-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.menu > button:disabled .menu-icon {
+  color: inherit;
+}
+
 .menu > button:hover,
 .menu > button:focus-visible {
   background: var(--hover);
@@ -1068,24 +1085,9 @@ button.link:hover {
   height: 11px;
 }
 
-/* Where the query is the list's one control, as on the Search page, the list is as far under the bar as under the tools a folder's list has. */
-.folder-list .query-bar:not(:has(+ .finder-tools)) {
+/* The query is a list's one control, and the list starts a little under it. */
+.folder-list .query-bar {
   margin-bottom: 16px;
-}
-
-.finder-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-  margin: 10px 0 16px;
-  color: var(--muted);
-  font-size: 12.5px;
-}
-
-.finder-tools .chip {
-  padding: 2px 11px;
-  font-size: 12.5px;
 }
 
 /* One choice of a few, as a row of words with the chosen one raised. */
@@ -1126,22 +1128,6 @@ button.link:hover {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
-.finder-sort {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-}
-
-.finder-sort select {
-  padding: 2px 4px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--ink);
-  font: inherit;
-}
-
 .folder-column > .search-status {
   margin: 0 0 12px;
 }
@@ -1165,20 +1151,14 @@ button.link:hover {
 
 .card {
   min-width: 0;
-  padding: 12px 12px 14px 16px;
+  padding: 12px 12px 12px 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--bg-elev);
-  cursor: pointer;
 }
 
-.card:hover,
-.card[data-expanded] {
+.card:hover {
   border-color: var(--line-strong);
-}
-
-.card[data-expanded] {
-  cursor: default;
 }
 
 .card:focus-visible {
@@ -1187,101 +1167,114 @@ button.link:hover {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* A card is its note. What is said about it besides (private, archived) and what can be done at once (archive, the menu) sit in its top right corner and the note's text runs beside them. A card is picked up by this corner. */
 .card-head {
-  cursor: pointer;
-}
-
-/* The head is the same height whatever the card shows under it, so a title never moves when its card expands or collapses. */
-.card-top {
   display: flex;
+  float: right;
   align-items: center;
   gap: 4px;
   height: 28px;
+  margin: -2px -2px 4px 12px;
+  cursor: grab;
 }
 
+/* The card's name for a screen reader, which the note under it already says. */
 .card-title {
-  min-width: 0;
-  margin-right: auto;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
   overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.card {
+  position: relative;
+}
+
+/* A card with no note drawn in it says whose it is in its head, in the size a title had, and its corner stays at the right. */
+.card.titled .card-head {
+  float: none;
+  margin-left: 0;
+}
+
+.card.titled .card-title {
+  position: static;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  margin: 0 auto 0 0;
+  overflow: hidden;
+  clip-path: none;
   color: var(--ink);
   font-size: 15.5px;
   font-weight: 650;
   letter-spacing: -0.01em;
-  text-decoration: none;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.card-title:hover {
-  text-decoration: underline;
-  text-decoration-color: var(--line-strong);
-  text-underline-offset: 3px;
-}
-
-.card-title .private-mark {
-  margin-right: 4px;
-  vertical-align: -1px;
-}
-
-.card[data-state="archived"] .card-title,
-.card[data-state="archived"] .card-preview {
+.card.titled[data-state="archived"] .card-title {
   color: var(--faint);
 }
 
-/* What can be done with a card is drawn where it will be from the start, and only shown later, so nothing beside it moves when it is. */
-.card-archive,
-.card-edit {
-  opacity: 0;
+.card-head .private-mark {
+  margin-right: 2px;
 }
 
-.card:hover :is(.card-archive, .card-edit),
-.card:focus-visible :is(.card-archive, .card-edit),
-.card:focus-within :is(.card-archive, .card-edit),
-.card[data-expanded] :is(.card-archive, .card-edit) {
-  opacity: 1;
+.card-head .state-label {
+  flex: none;
 }
 
-.card-chevron svg {
-  transition: transform 0.12s;
-}
-
-.card[data-expanded] .card-chevron svg {
-  transform: rotate(90deg);
-}
-
+/* Where a card is, when it was edited and by whom: one line, always at the foot beside the buttons. */
 .card-details {
   display: flex;
+  flex: 1 1 12em;
+  justify-content: flex-end;
   align-items: center;
-  height: 18px;
+  min-width: 0;
+  height: 26px;
   overflow: hidden;
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
 }
 
+.card-details > * {
+  flex: none;
+}
+
+/* A long path gives way first, so who edited the note is always named. */
+.card-details > .card-folder {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-details > .card-editors {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* In a narrow list the details are a row of their own under the buttons, on every card alike. */
+.cards {
+  container-type: inline-size;
+}
+
+@container (max-width: 560px) {
+  .card-details {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+}
+
 .card-details > * + *::before {
   margin: 0 8px;
   color: var(--faint);
   content: "·";
-}
-
-.card-details .state-label {
-  margin-left: 8px;
-}
-
-.card-details .state-label::before {
-  content: none;
-}
-
-.card-preview {
-  display: -webkit-box;
-  margin: 7px 0 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 13.5px;
-  line-height: 1.55;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .card-matches {
@@ -1293,16 +1286,12 @@ button.link:hover {
 
 .card-body {
   box-sizing: content-box;
-  margin-top: 10px;
-  padding-top: 12px;
   overflow: hidden;
-  border-top: 1px solid var(--line);
-  cursor: auto;
 }
 
 .card-body[data-cut] {
-  -webkit-mask-image: linear-gradient(#000 78%, transparent);
-  mask-image: linear-gradient(#000 78%, transparent);
+  -webkit-mask-image: linear-gradient(#000 70%, transparent);
+  mask-image: linear-gradient(#000 70%, transparent);
 }
 
 /* A note drawn to be read where it is listed: as wide as what it is in, and as tall as its text. */
@@ -1322,21 +1311,34 @@ button.link:hover {
 
 .card-foot {
   display: flex;
+  clear: both;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
 }
 
 .card-foot .button {
   gap: 6px;
   font-weight: 600;
+  text-decoration: none;
 }
 
 .card-foot .button svg {
   width: 13px;
   height: 13px;
+}
+
+.card-info {
+  width: min(380px, calc(100% - 32px));
+}
+
+.card-info-editors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 /* A folder's notes by title, when no plugin lists them. */
@@ -1610,8 +1612,22 @@ button.link:hover {
   margin: 0 6px 0 auto;
 }
 
-.group:not([data-front]) .focus-button {
+.group:not([data-front]) :is(.focus-button, .note-tools) {
   opacity: 0.45;
+}
+
+/* An open note's own buttons, at its top right just before Focus. */
+.note-tools {
+  display: flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.note-tools + .focus-button {
+  margin-left: 2px;
 }
 
 /* Focus: the focused group lies over the whole window, with no tab row. Everything else keeps its place and size underneath, unseen, so leaving puts it all back, scrolled as it was. */
@@ -1639,11 +1655,6 @@ button.link:hover {
 
 .groups[data-focus-mode] .group[data-front] .tab-row > :not(.focus-button) {
   display: none;
-}
-
-/* A note's bar ends short of the way out, so its save state is not under it. */
-.groups[data-focus-mode] .note-bar {
-  padding-right: 40px;
 }
 
 .groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
@@ -1791,76 +1802,30 @@ button.link:hover {
   container: note / size;
 }
 
-.note-bar {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 10px;
-  height: 38px;
-  padding: 0 8px 0 16px;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.note-meta {
-  display: flex;
-  flex: 1;
-  gap: 10px;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.note-meta > * {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* In a narrow window or a narrow half of a split, what is in a note's bar goes onto as many lines as it needs, and none of it is cut off. The folder has a line and the last edit has the next, each there before it has anything to say, so the bar is as tall while they load as after. */
-@container note (max-width: 520px) {
-  .note-bar {
-    flex-wrap: wrap;
-    row-gap: 2px;
-    height: auto;
-    min-height: 38px;
-    padding-block: 6px;
-  }
-
-  .note-meta {
-    flex-direction: column;
-    gap: 2px;
-    overflow: visible;
-    white-space: normal;
-  }
-
-  .note-meta > * {
-    max-width: 100%;
-    min-height: 1lh;
-    overflow: visible;
-    overflow-wrap: anywhere;
-  }
-
-  /* The folder's path arrives after the note and is as long as its folders' names: it has its one line and is cut short at the end of it. */
-  .note-meta > .crumbs {
-    overflow: hidden;
-    white-space: nowrap;
-  }
-}
-
-.crumbs {
-  color: var(--ink);
-}
-
 .save-state {
   flex: none;
   white-space: nowrap;
 }
 
-.note[data-save-state="failed"] .save-state,
-.note[data-save-state="rejected"] .save-state,
-.note[data-save-state="inTrash"] .save-state {
+/* The bottom bar says whether the note in front is saved, as VS Code's does, so nothing in the note moves as it saves. */
+.bar .save-state[data-failed] {
   color: var(--danger);
+}
+
+/* What plugins say of a note in a quiet line under its title, such as that it is archived. It takes no room with nothing in it. */
+.note-marks {
+  display: flex;
+  gap: 12px;
+  /* A line's own inset, so the words start under the title's. */
+  padding: 0 2px 8px 6px;
+  color: var(--muted);
+  font-family: var(--prose);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.note-marks:empty {
+  display: none;
 }
 
 .note-scroll {
@@ -10869,4 +10834,129 @@ button.dash-row:hover {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* Breadcrumbs above an open note: the workspace, its folders and the note, one line that gives way at the front. */
+.crumbs {
+  flex: none;
+  min-width: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+
+.crumbs {
+  min-height: 29px;
+  box-sizing: border-box;
+}
+
+.crumbs ol {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.crumbs li {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.crumbs li + li::before {
+  flex: none;
+  color: var(--faint);
+  content: "›";
+}
+
+.crumbs li:last-child {
+  flex-shrink: 1000;
+}
+
+.crumb {
+  max-width: 16em;
+  min-width: 0;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.crumb {
+  cursor: pointer;
+}
+
+button.crumb:hover,
+button.crumb[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.crumb-note {
+  color: var(--ink);
+}
+
+.groups[data-focus-mode] .crumbs {
+  display: none;
+}
+
+.crumb-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 14rem;
+}
+
+.crumb-list input {
+  padding: 6px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.crumb-list ul {
+  margin: 0;
+  padding: 4px 0 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.crumb-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.crumb-list li svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.crumb-list li[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.crumb-list li[data-go] {
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 6px 6px 0 0;
+  font-weight: 600;
+}
+
+.crumb-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
