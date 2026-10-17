@@ -5,6 +5,7 @@ import { showing, targetOf, type Target } from "./leads.ts";
 import { useRoute, type Place } from "./router.ts";
 import { createSettingsStore, type SettingsStore } from "./settingsStore.ts";
 import { isString, useStored } from "./stored.ts";
+import { Connect } from "./Connect.tsx";
 import { Workspace } from "./Workspace.tsx";
 
 type Session = { kind: "loading" } | { kind: "signed-out" } | { kind: "signed-in"; me: MeHere } | { kind: "error"; message: string };
@@ -50,12 +51,13 @@ export function App() {
     case "signed-out":
       return <SignIn />;
     case "signed-in":
+      if (location.pathname === "/connect") return <Connect me={session.me} />;
       return session.me.workspaces.length ? <SignedIn me={session.me} reload={load} /> : <p className="notice">You aren't in a workspace.</p>;
   }
 }
 
 function SignIn() {
-  const next = encodeURIComponent(location.pathname);
+  const next = encodeURIComponent(location.pathname + location.search);
   return (
     <main className="sign-in">
       <img src="/favicon.svg" alt="" width={56} height={56} />

@@ -24,6 +24,23 @@ describe("what goes into the Worker's logs", () => {
     expect(redact("at run (node_modules/zod@4.6.5/index.js:1:1)")).toBe("at run (node_modules/zod@4.6.5/index.js:1:1)");
   });
 
+  it("keeps out OAuth's codes, tokens and what an app sends: the verifier, the request a member answers, and what it registered", () => {
+    const token = "cink_at_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
+    expect(redact(`code cink_ac_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE, access ${token}, refresh cink_rt_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE`)).toBe("code cink_…, access cink_…, refresh cink_…");
+    expect(redact(`Authorization: Bearer ${token}`)).toBe("Authorization: Bearer …");
+    expect(redact("POST /oauth/token grant_type=authorization_code&code=cink_ac_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789&client_id=abcDEF123_-&redirect_uri=https%3A%2F%2Fchat.example%2Fcb&code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")).toBe(
+      "POST /oauth/token grant_type=authorization_code&code=cink_…&client_id=…&redirect_uri=https%3A%2F%2Fchat.example%2Fcb&code_verifier=…",
+    );
+    expect(redact("refresh_token=cink_rt_AbCdEf123&client_id=x access_token=abc")).toBe("refresh_token=…&client_id=… access_token=…");
+    expect(redact("/connect?request=Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4&x=1")).toBe("/connect?request=…&x=1");
+    expect(redact("/oauth/authorize?response_type=code&client_id=abc123&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&state=xyz")).toBe("/oauth/authorize?response_type=code&client_id=…&code_challenge=…&state=xyz");
+    expect(redact('{"refresh_token":"cink_rt_abc","code_verifier":"dBjftJeZ4CVP","grant_type":"refresh_token"}')).toBe('{"…":"…","…":"…","…":"…"}');
+    expect(redact('{"client_id":"abc123","client_name":"Claude","redirect_uris":["https://chat.example/cb"]}')).toBe('{"…":"…","…":"…","…":["…"]}');
+    expect(redact("/auth/google?next=%2Fconnect%3Frequest%3DZm9vYmFyYmF6cXV4_-&x=1")).toBe("/auth/google?next=%2Fconnect%3Frequest%3D…&x=1");
+    expect(redact("next=/connect%3frequest%3dZm9vYmFy")).toBe("next=/connect%3frequest%3d…");
+    expect(redact("a repeated parameter on /oauth/token broke")).toBe("a repeated parameter on /oauth/token broke");
+  });
+
   it("keeps out what an error quotes of its input, where note text would be, and keeps the words around it", () => {
     expect(redact(`SyntaxError: Unexpected token 'D', "Dear diary, my secret" is not valid JSON`)).toBe(`SyntaxError: Unexpected token '…', "…" is not valid JSON`);
     expect(redact("D1_TYPE_ERROR: Type 'object' not supported for value '[object Object]'")).toBe("D1_TYPE_ERROR: Type '…' not supported for value '…'");

@@ -302,6 +302,56 @@ button.link:hover {
   width: 100%;
 }
 
+.connect {
+  max-width: 28rem;
+  margin: 12vh auto 0;
+  padding: 0 1.5rem 3rem;
+}
+
+.connect h1 {
+  margin: 0 0 0.5rem;
+  font-size: calc(1.4rem * var(--text-scale));
+}
+
+.connect p,
+.connect label,
+.connect fieldset {
+  display: block;
+  margin: 0 0 1rem;
+}
+
+.connect label span,
+.connect legend {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.connect input[type="text"],
+.connect input:not([type]),
+.connect select {
+  width: 100%;
+}
+
+.connect .check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.connect .check input {
+  width: auto;
+  margin-top: 0.2rem;
+}
+
+.connect-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.connect .error {
+  color: var(--danger, #a33);
+}
+
 .app {
   position: relative;
   display: flex;
