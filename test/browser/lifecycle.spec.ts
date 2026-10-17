@@ -304,7 +304,7 @@ test("three notices with long titles still fit a small window, each cut to its c
 });
 
 for (const width of [1280, 420]) {
-  test(`every notice is one card in the bottom right: they stack, the newest at the foot, three at most, and none covers another, at ${width}px`, async ({ page }) => {
+  test(`every notice is one card at the foot of the pane, centred under it: they stack, the newest at the foot, three at most, and none covers another, at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await signInAsNewPerson(page, "Ada Lovelace");
     const titles = ["First", "Second", "Third", "Fourth"];
@@ -324,11 +324,15 @@ for (const width of [1280, 420]) {
     const boxes = async () => Promise.all((await notice(page).all()).map(async (card) => (await card.boundingBox())!));
     const laidOut = async () => {
       const shown = await boxes();
+      // Centred under the pane in front, or as near it as keeps the stack 8px inside the window.
+      const pane = (await page.locator(".group[data-front]").boundingBox())!;
+      const stack = (await page.locator(".toasts").boundingBox())!;
+      const centre = Math.min(Math.max(pane.x + pane.width / 2, stack.width / 2 + 8), width - stack.width / 2 - 8);
+      expect(Math.abs(stack.x + stack.width / 2 - centre)).toBeLessThanOrEqual(1);
       for (const box of shown) {
         expect(box.x).toBeGreaterThanOrEqual(0);
-        expect(box.x + box.width).toBeLessThanOrEqual(width - 12);
-        expect(box.x + box.width).toBeGreaterThan(width - 40);
-        expect(box.y + box.height).toBeLessThanOrEqual(800);
+        expect(box.x + box.width).toBeLessThanOrEqual(width);
+        expect(box.y + box.height).toBeLessThanOrEqual(pane.y + pane.height);
       }
       // Each below the one before, with a gap: none covers another.
       for (let i = 1; i < shown.length; i++) expect(shown[i]!.y).toBeGreaterThanOrEqual(shown[i - 1]!.y + shown[i - 1]!.height + 4);

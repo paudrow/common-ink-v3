@@ -222,7 +222,8 @@ test("⌘P finds notes by title, best match first, and opens the one chosen in i
   await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
 
   await page.keyboard.press("ControlOrMeta+P");
-  await expect(palette.getByRole("option")).toHaveCount(3);
+  // The Dashboard's tab first, as the tab open, then every note.
+  await expect(palette.getByRole("option")).toHaveCount(4);
   await page.keyboard.type("pl");
   await expect(palette.getByRole("option")).toHaveText([/^Plan/, /^Trip planning/]);
   await expect(palette.getByRole("option").first()).toHaveAttribute("aria-selected", "true");

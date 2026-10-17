@@ -147,6 +147,7 @@ export const tabs: Plugin = {
       open: (tab, { preview, background }) => dispatch({ type: "open", tab, preview, background }),
       returnsTo: () => focused(layout),
       split: (tab, side) => dispatch({ type: "split", groupId: layout.focusedGroupId, side, tab, keep: true }),
+      tabs: () => layout.groups.flatMap((g, i) => g.tabs.map(({ preview: _, ...opened }) => ({ opened, pane: i + 1 }))),
     });
   },
 };

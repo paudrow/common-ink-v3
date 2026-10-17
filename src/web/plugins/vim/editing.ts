@@ -1,7 +1,7 @@
 import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { EditorView, RectangleMarker, ViewPlugin, drawSelection, layer } from "@codemirror/view";
 import { Vim, getCM, vim } from "@replit/codemirror-vim";
-import { TITLE_MARK, dismissing } from "../../plugin-api.ts";
+import { TITLE_MARK, dismissing, noteJump } from "../../plugin-api.ts";
 
 let run: (commandId: string) => boolean = () => false;
 
@@ -24,6 +24,17 @@ Vim.defineAction("nothing", () => {});
 for (const context of ["insert", "visual"]) Vim.mapCommand("<C-r>", "action", "nothing", {}, { context });
 Vim.defineEx("undo", "u", () => void run("history.undo"));
 Vim.defineEx("redo", "red", () => void run("history.redo"));
+
+// Each jump vim makes in a note, with G, a search, % and the like, is a stop in the app's history, which ctrl+o and ctrl+i walk.
+// It is said once the move is made, so the stop is where the cursor went. The list is reached through the library's testing hook,
+// and `add` is called unbound, so wrapping it in place is all it takes: test/browser/getting-around.spec.ts walks G and a search.
+const jumps = Vim.getVimGlobalState_().jumpList;
+const added = jumps.add;
+jumps.add = (cm, from, to) => {
+  added(cm, from, to);
+  const jump = { from: cm.indexFromPos(from), to: cm.indexFromPos(to) };
+  queueMicrotask(() => cm.cm6.dispatch({ effects: noteJump.of(jump) }));
+};
 
 // Ctrl+I is Tab to vim, and the editor's own answer to it is another key's off a Mac.
 Vim.defineAction("typeTab", (cm) => cm.replaceSelection("\t"));

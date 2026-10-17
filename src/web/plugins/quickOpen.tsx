@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CalendarEvent, Plugin, PluginHost, Upload, ViewProps } from "../plugin-api.ts";
+import { folderTitle, type App, type CalendarEvent, type Opened, type Plugin, type PluginHost, type Upload, type ViewProps } from "../plugin-api.ts";
 import { eventsToFind, finding, listedAs } from "./calendar/finding.ts";
 import { eventAddress } from "./calendar/linking.ts";
 import { listable } from "./lib/listable.ts";
@@ -23,8 +23,58 @@ function useEvents(host: PluginHost, calendar: boolean, timeZone: string): reado
   return calendar ? events : null;
 }
 
+/** How many places visited lately are offered at most, after the tabs open. */
+const MOST_RECENT = 12;
+
+const sameTab = (a: Opened, b: Opened) => a.kind === b.kind && a.id === b.id;
+
 /**
- * Notes by title, uploads by file name while the Uploads page is there to open one on, and with the
+ * What is offered first before anything is typed: the tabs open, each with its pane where there are
+ * several, the one visited last first and the one in front last; then the notes, lists and pages
+ * visited lately that aren't open, the latest first. Every other note follows them.
+ */
+function placesFor(app: App): { item: { id: string; label: string; hint: string }; opened: Opened; tab: boolean }[] {
+  const recent = app.recent();
+  const tabs = app.openTabs();
+  const panes = new Set(tabs.map((t) => t.pane)).size;
+  const rank = (opened: Opened) => {
+    const at = recent.findIndex((r) => sameTab(r, opened));
+    return app.opened && sameTab(app.opened, opened) ? Infinity : at < 0 ? recent.length : at;
+  };
+  const note = (id: string) => app.notes?.find((n) => n.id === id);
+  const page = (id: string) => app.pages.find((p) => p.id === id);
+  const named = (opened: Opened) =>
+    opened.kind === "note"
+      ? (note(opened.id)?.title || "Untitled")
+      : opened.kind === "folder"
+        ? ((app.folders && folderTitle(app.folders, opened.id)) ?? "Folder")
+        : (page(opened.id)?.label ?? "Page");
+  const kindOf = (opened: Opened) => {
+    if (opened.kind === "note") return app.folders?.pathName(note(opened.id)?.folderId ?? null) ?? "";
+    if (opened.kind === "folder") return "Folder";
+    const at = opened.path.split("?")[0];
+    // The home page at `/` is at its own place, as a page at its own path is. Under it, the rest of the path says which.
+    if (at === "/" || at === page(opened.id)?.path) return "Page";
+    try {
+      return `Page · ${decodeURIComponent(at!)}`;
+    } catch {
+      return `Page · ${at}`;
+    }
+  };
+  const there = (opened: Opened) => (opened.kind === "note" ? !!note(opened.id) : opened.kind === "folder" ? !app.folders || folderTitle(app.folders, opened.id) !== null : !!page(opened.id));
+  const open = tabs
+    .filter((t) => there(t.opened))
+    .toSorted((a, b) => rank(a.opened) - rank(b.opened))
+    .map(({ opened, pane }, i) => ({ item: { id: `tab ${i}`, label: named(opened), hint: [panes > 1 ? `Open in pane ${pane}` : "Open", kindOf(opened)].filter(Boolean).join(" · ") }, opened, tab: true }));
+  const lately = recent
+    .filter((r) => there(r) && !tabs.some((t) => sameTab(t.opened, r)))
+    .slice(0, MOST_RECENT)
+    .map((opened, i) => ({ item: { id: `recent ${i}`, label: named(opened), hint: ["Recent", kindOf(opened)].filter(Boolean).join(" · ") }, opened, tab: false }));
+  return [...open, ...lately];
+}
+
+/**
+ * Before anything is typed, the tabs open and the places visited lately, then every other note. Typed: notes by title, uploads by file name while the Uploads page is there to open one on, and with the
  * Calendar on, the member's events by their title and a day typed, from a month back to three months
  * ahead, the nearest first, each opened on the Calendar. Archived notes and uploads are left out until
  * they are asked for, and one in Trash is never offered.
@@ -60,6 +110,13 @@ function QuickOpen({ host, app, close }: ViewProps & { host: PluginHost; close: 
         return { id: idOf(event), label, hint: `Event · ${detail}` };
       });
   const open = (event: CalendarEvent) => app.go(eventAddress(event, timeZone));
+  const [places] = useState(() => placesFor(app));
+  const toPlace = ({ opened, tab }: (typeof places)[number]) => {
+    // A tab is put in front where it is, kept or a preview as it was.
+    if (opened.kind === "note") app.openNote(opened.id, { preview: tab });
+    else if (opened.kind === "folder") app.openFolder(opened.id);
+    else app.go(opened.path);
+  };
   return (
     <Palette
       label="Go to note"
@@ -68,7 +125,10 @@ function QuickOpen({ host, app, close }: ViewProps & { host: PluginHost; close: 
       items={openable(noteItems, hasUploads ? uploads : [], (u) => ["Upload", u.state === "archived" && "Archived"].filter(Boolean).join(" · "))}
       toggle={{ label: "Include archived", on: archived, set: setArchived }}
       found={calendar ? found : undefined}
+      idle={places.length ? [...places.map((p) => p.item), ...noteItems.filter((n) => !places.some((p) => p.opened.kind === "note" && p.opened.id === n.id))] : undefined}
       onPick={(id) => {
+        const place = places.find((p) => p.item.id === id);
+        if (place) return toPlace(place);
         const event = events?.find((e) => idOf(e) === id);
         const upload = uploadItem(id);
         if (event) open(event);
@@ -83,7 +143,7 @@ function QuickOpen({ host, app, close }: ViewProps & { host: PluginHost; close: 
 export const quickOpen: Plugin = {
   id: "quick-open",
   name: "Quick open",
-  description: "Go to a note by typing part of its title, or to an event on the Calendar by its title and day.",
+  description: "Go to a tab open or a place visited lately, a note by typing part of its title, or an event on the Calendar by its title and day.",
   icon: "search",
   activate(host) {
     host.commands.register({ id: "notes.quickOpen", title: "Go to note…", keys: ["mod+p"], group: "Navigation", run: () => host.app().toggleOverlay("notes") });

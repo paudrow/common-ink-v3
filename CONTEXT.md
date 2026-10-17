@@ -154,7 +154,7 @@ _Avoid_: Label, project
 A search of the text of notes a member can see, including todo lines, and tags. Every word typed must be in the note, each matching the start of a word, ignoring case and accents. Words in double quotes match as a phrase, and `#name` narrows to notes with that tag. Notes whose title matches come first, then the latest changed. Archived notes are excluded unless included, and trashed notes always.
 
 **Quick open**:
-A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included.
+A list of notes and uploads a member can see, matched on title or filename. Archived and trashed items are excluded unless included. With nothing typed it lists the open tabs, each with its pane, then the places visited lately.
 
 ## Editor
 
@@ -207,6 +207,14 @@ _Avoid_: Action
 **Keybinding**:
 The chords that run a command. In a chord, `mod` is ⌘ on a Mac and Ctrl elsewhere, and `ctrl` is the Control key on both. A keybinding is tried before the editor sees the key. A command comes with its default chords, and a member changes them in settings, under the command's id: other chords, or none. The Settings page lists every command's keybinding as a keyboard shortcut, and records a new one from its keys as they are pressed. A chord the member gives to one command is taken from a command that only had it by default, and is flagged while two commands have it. A keybinding may be one chord, with or without mod, ctrl, or alt in it, or a sequence of chords pressed one after another, such as `g g`. Keys that would type, which begin with no mod, ctrl, or alt and with neither Escape nor an F key, run a command only where nothing is being typed, unless the command says for itself when it runs. Keys a member gives a command that are the first keys of another's sequence, or go on from another's keys, are flagged too.
 _Avoid_: Shortcut, hotkey
+
+**Place**:
+A note (with where its cursor was), a folder's list, or a page at its own path, as the member was at it. Settings is not one.
+_Avoid_: page (for a place that is a note)
+
+**Back and forward**:
+Going through the places the member has been to, and the jumps within a note, in the order they were made: Go back and Go forward, and vim's ctrl+o and ctrl+i. Not the History of a note's changes, and not the browser's Back.
+_Avoid_: history (that is a note's changes), jump list (for the whole)
 
 **Command palette**:
 The list of commands, narrowed by typing.

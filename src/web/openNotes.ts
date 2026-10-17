@@ -1,5 +1,5 @@
-import type { EditorState, Text } from "@codemirror/state";
-import { ViewPlugin, type EditorView } from "@codemirror/view";
+import { StateEffect, type ChangeDesc, type EditorState, type Text } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { useSyncExternalStore } from "react";
 
 /** A note as its editor holds it now: typing not yet saved included. */
@@ -25,15 +25,64 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 
-/** The editor extension that keeps a note's editor where {@link useOpenNote} reads it. */
+/**
+ * A move of the cursor within a note that is a jump, as vim's G or a search is: going back comes back
+ * to `from`. An editor extension puts it on a transaction of its own after the move.
+ */
+export const noteJump = StateEffect.define<{ from: number; to: number }>();
+
+/** Where the cursor last was in each note's editor, kept once the editor has gone. */
+const cursors = new Map<string, number>();
+/** Where the next editor of a note is to put the cursor, for a note being opened, and until when: one that never opened puts nothing later. */
+const putting = new Map<string, { at: number; until: number }>();
+const PUTTING_MS = 10_000;
+type Heard = { jumped: (noteId: string, jump: { from: number; to: number }) => void; changed: (noteId: string, changes: ChangeDesc) => void };
+const nobody: Heard = { jumped: () => {}, changed: () => {} };
+let heard = nobody;
+
+/** Where the cursor is in a note's editor, or last was. Null for a note no editor has had open. */
+export const cursorIn = (noteId: string): number | null => cursors.get(noteId) ?? null;
+
+/** Puts the cursor at `at` in the note's editor and scrolls to it, or in the next one when it has none yet. */
+export function putCursor(noteId: string, at: number) {
+  const view = editors.get(noteId)?.at(-1);
+  if (view) place(view, at);
+  else putting.set(noteId, { at, until: Date.now() + PUTTING_MS });
+}
+
+const place = (view: EditorView, at: number) => {
+  const anchor = Math.min(at, view.state.doc.length);
+  view.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: "center" }) });
+};
+
+/** Hears each {@link noteJump}, and each change to a note's text, in whichever note's editor: what keeps places in a note where they were. */
+export function onNoteMoves(listener: Heard) {
+  heard = listener;
+  return () => {
+    if (heard === listener) heard = nobody;
+  };
+}
+
+/** The editor extension that keeps a note's editor where {@link useOpenNote} reads it, and its cursor where {@link cursorIn} does. */
 export const openNote = (noteId: string) =>
   ViewPlugin.define((view) => {
     const others = () => (editors.get(noteId) ?? []).filter((other) => other !== view);
     editors.set(noteId, view.hasFocus ? [...others(), view] : [view, ...others()]);
+    const asked = putting.get(noteId);
+    putting.delete(noteId);
+    const put = asked && asked.until > Date.now() ? asked.at : undefined;
+    if (put === undefined) cursors.set(noteId, view.state.selection.main.head);
+    else {
+      cursors.set(noteId, put);
+      queueMicrotask(() => place(view, put));
+    }
     queueMicrotask(changed);
     return {
       update(update) {
         if (update.focusChanged && view.hasFocus) editors.set(noteId, [...others(), view]);
+        if (update.selectionSet) cursors.set(noteId, update.state.selection.main.head);
+        if (update.docChanged) heard.changed(noteId, update.changes);
+        for (const tr of update.transactions) for (const e of tr.effects) if (e.is(noteJump)) heard.jumped(noteId, e.value);
         if (update.docChanged || update.selectionSet || update.focusChanged) changed();
       },
       destroy() {
