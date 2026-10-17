@@ -60,6 +60,9 @@ export function typeOf(name: string, head: Uint8Array): string {
 
 export const kindOf = (type: string): UploadKind => BY_TYPE.get(type)?.kind ?? "file";
 
+/** The kind a file's name says it is, before its bytes are there to say so. */
+export const kindByName = (name: string): UploadKind => KNOWN.find((known) => known.endings.includes(endingOf(name)))?.kind ?? "file";
+
 /** Whether bytes of this type are shown in place. Everything else is only ever downloaded. */
 export const showsInline = (type: string): boolean => BY_TYPE.get(type)?.inline ?? false;
 

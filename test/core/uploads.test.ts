@@ -4,7 +4,7 @@ import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { TRASH_MS } from "../../src/core/lifecycle.ts";
 import { perform, type Actor, type Visitor } from "../../src/core/operations.ts";
-import { MAX_UPLOAD_BYTES, OpError, WORKSPACE_UPLOAD_BYTES } from "../../src/core/protocol.ts";
+import { OpError, PART_BYTES } from "../../src/core/protocol.ts";
 import { PENDING_MS, clearUploads } from "../../src/core/purge.ts";
 import worker from "../../src/worker/index.ts";
 import { addMember, newMember } from "./members.ts";
@@ -81,7 +81,7 @@ describe("uploading a file", () => {
     const sent = (size: number, bytes: Uint8Array) => perform(env.DB, ada, { type: "upload.create", name: "a.png", size }, T0, undefined, carrying(bytes));
     await expect(sent(PNG.byteLength + 1, PNG)).rejects.toMatchObject({ code: "invalid" });
     await expect(sent(PNG.byteLength - 1, PNG)).rejects.toMatchObject({ code: "invalid" });
-    await expect(sent(MAX_UPLOAD_BYTES + 1, PNG)).rejects.toMatchObject({ code: "invalid", message: "A file can be at most 50 MB" });
+    await expect(sent(PART_BYTES + 1, PNG)).rejects.toMatchObject({ code: "invalid", message: "A file sent in one request can be at most 80 MB. Send a larger one in parts, up to 25 GB" });
     await expect(perform(env.DB, ada, { type: "upload.create", name: "a.png", size: 0 }, T0, undefined, carrying(new Uint8Array()))).rejects.toMatchObject({ code: "invalid" });
     await expect(perform(env.DB, ada, { type: "upload.create", name: "a.png", size: 4 })).rejects.toMatchObject({ code: "unavailable" });
     expect(await perform(env.DB, ada, { type: "upload.list", includeArchived: true })).toEqual([]);
@@ -90,18 +90,6 @@ describe("uploading a file", () => {
     expect(left.map((row) => row.state)).toEqual(["removing", "removing"]);
     expect(await clearUploads(env.DB, env.FILES, T0)).toMatchObject({ removed: 2, failed: [] });
     expect([await env.DB.prepare("SELECT COUNT(*) AS n FROM uploads WHERE workspace_id = ?").bind(ada.workspaceId).first(), await inBucket(left[0]!.id), await inBucket(left[1]!.id)]).toEqual([{ n: 0 }, false, false]);
-  });
-
-  it("refuses a file once the workspace's uploads are full, those in Trash counted", async () => {
-    const ada = await newMember();
-    const big = await upload(ada, "big.png");
-    await env.DB.prepare("UPDATE uploads SET size = ? WHERE id = ?").bind(WORKSPACE_UPLOAD_BYTES - PNG.byteLength, big.id).run();
-    const last = await upload(ada, "last.png");
-    await expect(upload(ada, "over.png")).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("uploads are full") });
-    await perform(env.DB, ada, { type: "upload.trash", id: last.id });
-    await expect(upload(ada, "over.png")).rejects.toMatchObject({ code: "conflict" });
-    await perform(env.DB, ada, { type: "upload.purge", id: last.id }, T0, undefined, FILES);
-    expect((await upload(ada, "fits.png")).name).toBe("fits.png");
   });
 
   it("is for someone who can change the folder: not a viewer, not a read-only token, and an agent makes nothing private", async () => {

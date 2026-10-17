@@ -2,7 +2,6 @@ import { syntaxText } from "../src/core/query.ts";
 
 // The `ink` command's logic, for an agent working from a shell. It is a thin client of the /mcp endpoint,
 // so it does what the MCP tools do and nothing more. scripts/ink.ts runs it on this machine.
-import { writtenUpload, type UploadEmbed } from "../src/core/uploadRefs.ts";
 
 export interface Io {
   fetch: typeof fetch;
@@ -10,8 +9,12 @@ export interface Io {
   /** The text piped in, when there is any. */
   stdin: () => Promise<string>;
   out: (line: string) => void;
-  /** The bytes of a file on this machine, for upload. */
-  readFile?: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+  /** How many bytes a file on this machine is, for upload. */
+  sizeOf?: (path: string) => Promise<number>;
+  /** `length` bytes of a file on this machine from `offset`, for upload. A file is read a part at a time, so it is never all in memory. */
+  readPart?: (path: string, offset: number, length: number) => Promise<Uint8Array<ArrayBuffer>>;
+  /** Waits before a part that didn't get through is sent again. */
+  wait?: (ms: number) => Promise<void>;
   /** Writes a file on this machine, for download. Answers false, and writes nothing, when there is one at `path` and `replace` is false. */
   writeFile?: (path: string, bytes: Uint8Array, replace: boolean) => Promise<boolean>;
 }
@@ -69,7 +72,16 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       with how many notes show it, or every live one with none; --query
                                       QUERY is the same. "ink syntax uploads" lists what a query can say
   upload FILE [--folder ID] [--name NAME]
-                                      put a file in a folder, or in Unsorted, and say how a note shows it
+                                      put a file of up to 25 GB in a folder, or in Unsorted, and say how a
+                                      note shows it. It goes in parts, several at once, and a part that
+                                      fails is sent again; stopped, upload-resume ID says what is left
+  upload-start NAME --size N [--folder ID] [--private true]
+                                      begin a file sent in parts: the address each part is PUT to
+  upload-resume ID                    the parts of a file being sent that are stored, and a fresh address
+  upload-finish ID                    put a file's parts together once all are sent, and make it an upload
+  upload-abort ID                     stop sending a file, and throw away its parts
+  upload-inline NAME --base64 DATA [--folder ID]
+                                      put a small file (4 MB at most), given as base64, in a folder
   download ID [--out PATH] [--force true]
                                       save an upload's bytes under its name here, or at PATH
   upload-info ID                      one upload, and the notes that refer to it
@@ -169,7 +181,7 @@ events and contacts, quoted when they have a space. A reference is your member's
 who reads the note can follow it.
 
 A note shows an upload with a line of its own: ::image{ID WIDTHxHEIGHT}, ::video{ID WIDTHxHEIGHT},
-::audio{ID} or ::file{ID}. upload prints the line for the file it sent. A file can be at most 50 MB,
+::audio{ID} or ::file{ID}. upload prints the line for the file it sent. A file can be at most 25 GB,
 and download never replaces a file that is there unless --force true.
 
 Set INK_URL (default https://commonink.app) and INK_TOKEN (an agent token from Common Ink).`;
@@ -282,11 +294,42 @@ const read = (answer: string): { next?: string | null; done?: boolean } => {
 /** What is left of a name after its folders, so a name can never say where on this machine a file goes. */
 const lastPart = (name: string) => name.split(/[/\\]/).at(-1) ?? "";
 
-interface Sent {
+/** A file being sent in parts, as start_upload and resume_upload answer. */
+interface Sending {
   id: string;
-  kind: UploadEmbed;
-  width: number | null;
-  height: number | null;
+  name: string;
+  size: number;
+  partSize: number;
+  partCount: number;
+  stored: number[];
+  address: string;
+}
+
+/** How many parts go at once, and how many times in a row a round may store nothing before upload gives up. */
+const AT_ONCE = 4;
+const RETRIES = 5;
+const RETRY_MS = 500;
+
+/** Sends the parts of `path` not yet stored, several at once, each read from disk only when it goes. The numbers of those that didn't get through. */
+async function sendParts(io: Io, path: string, sending: Sending): Promise<number[]> {
+  const left = Array.from({ length: sending.partCount }, (_, i) => i + 1).filter((number) => !sending.stored.includes(number));
+  const failed: number[] = [];
+  const next = async (): Promise<void> => {
+    const number = left.shift();
+    if (number === undefined) return;
+    const offset = (number - 1) * sending.partSize;
+    const bytes = await io.readPart!(path, offset, Math.min(sending.partSize, sending.size - offset));
+    const res = await io.fetch(sending.address.replace("{part}", String(number)), { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: bytes }).catch(() => null);
+    if (res?.ok) io.out(`Sent part ${number} of ${sending.partCount}`);
+    else {
+      failed.push(number);
+      const told = res ? ((await res.json().catch(() => null)) as { message?: string } | null) : null;
+      io.out(`Part ${number} didn't get through${told?.message ? `: ${told.message}` : res ? ` (${res.status})` : ""}`);
+    }
+    return next();
+  };
+  await Promise.all(Array.from({ length: AT_ONCE }, next));
+  return failed.sort((a, b) => a - b);
 }
 
 /** Runs one command. Returns the process exit code. */
@@ -355,10 +398,47 @@ export async function run(argv: string[], io: Io): Promise<number> {
       return { answer: (body.result?.content ?? []).map((c) => c.text).join("\n"), failed: body.result?.isError === true };
     };
 
-    // A file's bytes go over HTTP and not through a tool, at an address that names the workspace.
-    if (command === "upload" || command === "download") {
-      const { readFile, writeFile } = io;
-      if (!readFile || !writeFile) throw new UsageError(`${command} needs files, which this ink has none of`);
+    /** A tool's answer as JSON, or a failure said as the server said it. */
+    const answered = async <T>(name: string, given: Record<string, unknown>): Promise<T> => {
+      const { answer, failed } = await call(name, given);
+      if (failed) throw new Failed(answer);
+      return json(`${name}'s answer`, answer) as T;
+    };
+
+    // A file goes in parts, each from this machine's disk straight to its address: start_upload, a PUT for each part, finish_upload.
+    if (command === "upload") {
+      const { sizeOf, readPart } = io;
+      if (!sizeOf || !readPart) throw new UsageError("upload needs files, which this ink has none of");
+      const path = need("a file");
+      const size = await sizeOf(path).catch(() => {
+        throw new UsageError(`Can't read ${path}`);
+      });
+      if (size === 0) throw new UsageError(`${path} is empty, so there is nothing to upload`);
+      const start = { name: flags.get("name") ?? lastPart(path), size, ...given({ folderId: ["folder"] }) };
+      const unread = flags.unread();
+      if (unread.length) throw new UsageError(`upload doesn't take ${unread.map((name) => `--${name}`).join(" or ")}: nothing was sent`);
+      let sending = await answered<Sending>("start_upload", start);
+      io.out(`Sending ${sending.name} (${size} bytes) as ${sending.id}, in ${sending.partCount} part${sending.partCount === 1 ? "" : "s"}`);
+      for (let tries = 0, left = sending.partCount - sending.stored.length; ; ) {
+        const failed = await sendParts(io, path, sending);
+        if (!failed.length) break;
+        sending = await answered<Sending>("resume_upload", { uploadId: sending.id });
+        const now = sending.partCount - sending.stored.length;
+        tries = now < left ? 0 : tries + 1;
+        left = now;
+        if (tries >= RETRIES) throw new Failed(`Parts ${failed.join(", ")} didn't get through. Nothing sent is lost: ink upload-resume ${sending.id} says what is left, and upload-abort throws it away`);
+        await (io.wait ?? ((ms) => new Promise((done) => setTimeout(done, ms))))(RETRY_MS * 2 ** tries);
+      }
+      const upload = await answered<{ line: string }>("finish_upload", { uploadId: sending.id });
+      io.out(JSON.stringify(upload, null, 2));
+      io.out(`In a note: ${upload.line}`);
+      return 0;
+    }
+
+    // A file's bytes come over HTTP and not through a tool, at an address that names the workspace.
+    if (command === "download") {
+      const { writeFile } = io;
+      if (!writeFile) throw new UsageError(`${command} needs files, which this ink has none of`);
       let workspaceId = flags.get("workspace");
       if (workspaceId === undefined) {
         const listed = await call("list_workspaces", {});
@@ -373,24 +453,6 @@ export async function run(argv: string[], io: Io): Promise<number> {
         io.out(told?.error ? `${told.error}: ${told.message ?? ""}`.trim() : `Common Ink answered ${res.status}`);
         return 1;
       };
-
-      if (command === "upload") {
-        const path = need("a file");
-        const name = flags.get("name") ?? lastPart(path);
-        const bytes = await readFile(path).catch(() => {
-          throw new UsageError(`Can't read ${path}`);
-        });
-        const res = await io.fetch(uploads, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name, ...given({ folderId: ["folder"] }) })) },
-          body: bytes,
-        });
-        if (res.status !== 201) return refusal(res);
-        const sent = (await res.json()) as Sent;
-        io.out(JSON.stringify(sent, null, 2));
-        io.out(`In a note: ${writtenUpload(sent.kind, sent.id, sent.width && sent.height ? { width: sent.width, height: sent.height } : null)}`);
-        return 0;
-      }
 
       const uploadId = need("an upload id");
       const info = await call("read_upload", { uploadId, workspaceId });
@@ -550,6 +612,20 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "upload-info":
         tool = "read_upload";
         args = { uploadId: need("an upload id") };
+        break;
+      case "upload-start":
+        tool = "start_upload";
+        args = { name: need("the file's name"), size: integer("--size", needFlag("size")), ...given({ folderId: ["folder"], private: ["private", truth] }) };
+        break;
+      case "upload-resume":
+      case "upload-finish":
+      case "upload-abort":
+        tool = `${command.slice("upload-".length)}_upload`;
+        args = { uploadId: need("an upload id") };
+        break;
+      case "upload-inline":
+        tool = "upload_file";
+        args = { name: need("the file's name"), base64: needFlag("base64"), ...given({ folderId: ["folder"] }) };
         break;
       case "upload-move":
         tool = "move_upload";

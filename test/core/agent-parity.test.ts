@@ -47,6 +47,11 @@ const COMMANDS: Record<string, string[][]> = {
   trash_upload: [["upload-trash", ID]],
   restore_upload: [["upload-restore", ID]],
   list_trashed_uploads: [["uploads-trashed"]],
+  start_upload: [["upload-start", "episode.mp3", "--size", "123", "--folder", ID, "--private", "false"]],
+  resume_upload: [["upload-resume", ID]],
+  finish_upload: [["upload-finish", ID]],
+  abort_upload: [["upload-abort", ID]],
+  upload_file: [["upload-inline", "dot.png", "--base64", "iVBORw0K", "--folder", ID]],
   list_folders: [["folders"]],
   find_folder: [["folder-find", "Projects/Skills"]],
   create_folder: [["folder-create", "Plans", "--parent", ID, "--if-exists", "error"]],
@@ -103,20 +108,31 @@ describe("what an agent can do, against what the web app can", () => {
     expect(Object.keys(OVER_HTTP).filter((type) => type in NOT_FOR_AGENTS), "an operation is kept from agents or done over HTTP, not both").toEqual([]);
   });
 
-  it("has an ink command for every operation done over HTTP, which sends the token to the operation's address", async () => {
-    expect(Object.keys(OVER_HTTP).sort()).toEqual(["upload.create", "upload.open"]);
+  it("has an ink command for every operation done over HTTP: upload sends a file's parts to their address from disk, and download sends the token to the bytes' address", async () => {
+    expect(Object.keys(OVER_HTTP).sort()).toEqual(["upload.create", "upload.open", "upload.part"]);
     const WS = "wwwwwwwwwwww";
-    const PNG_BYTES = Uint8Array.of(0x89, 0x50, 0x4e, 0x47);
+    const PNG_BYTES = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d);
     const requests: { method: string; url: string; headers: Record<string, string>; body: unknown }[] = [];
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
     const written: { path: string; bytes: number[]; replace: boolean }[] = [];
     const out: string[] = [];
-    const uploaded = { id: ID, name: "cat.png", type: "image/png", kind: "image", size: 4, width: 640, height: 480 };
-    const tools: Record<string, unknown> = { list_workspaces: { workspaces: [{ id: WS }] }, read_upload: { ...uploaded, name: "../../etc/cat.png" } };
+    const uploaded = { id: ID, name: "cat.png", type: "image/png", kind: "image", size: 5, width: 640, height: 480 };
+    const sending = { id: ID, name: "cat.png", size: 5, kind: "image", partSize: 2, partCount: 3, stored: [] as number[], address: "https://ink.test/api/upload-parts/first/{part}", expiresAt: 1 };
+    let failOnce = new Set<string>();
+    const tools: Record<string, unknown> = {
+      list_workspaces: { workspaces: [{ id: WS }] },
+      read_upload: { ...uploaded, name: "../../etc/cat.png" },
+      start_upload: sending,
+      resume_upload: { ...sending, stored: [1, 3], address: "https://ink.test/api/upload-parts/fresh/{part}" },
+      finish_upload: { ...uploaded, line: `::image{${ID} 640x480}` },
+    };
     const io: Io = {
       env: { INK_TOKEN: "cink_x", INK_URL: "https://ink.test" },
       stdin: async () => "",
       out: (line) => out.push(line),
-      readFile: async (path) => (path === "pictures/cat.png" ? PNG_BYTES : Promise.reject(new Error("no such file"))),
+      wait: async () => {},
+      sizeOf: async (path) => (path === "pictures/cat.png" ? PNG_BYTES.byteLength : Promise.reject(new Error("no such file"))),
+      readPart: async (path, offset, length) => (path === "pictures/cat.png" ? PNG_BYTES.slice(offset, offset + length) : Promise.reject(new Error("no such file"))),
       writeFile: async (path, bytes, replace) => {
         if (path === "taken.png" && !replace) return false;
         written.push({ path, bytes: [...bytes], replace });
@@ -125,38 +141,56 @@ describe("what an agent can do, against what the web app can", () => {
       fetch: (async (url: string, init: RequestInit = {}) => {
         const headers = init.headers as Record<string, string>;
         if (url === "https://ink.test/mcp") {
-          const { name } = JSON.parse(init.body as string).params;
+          const { name, arguments: args } = JSON.parse(init.body as string).params;
+          calls.push({ name, args });
           return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify(tools[name]) }] } });
         }
-        requests.push({ method: init.method ?? "GET", url, headers, body: init.body });
-        return init.method === "POST" ? Response.json(uploaded, { status: 201 }) : new Response(PNG_BYTES, { headers: { "Content-Type": "image/png" } });
+        requests.push({ method: init.method ?? "GET", url, headers, body: init.body instanceof Uint8Array ? [...init.body] : init.body });
+        if (failOnce.delete(url)) return Response.json({ error: "invalid", message: "the connection dropped" }, { status: 400 });
+        return init.method === "PUT" ? Response.json({ id: ID }) : new Response(PNG_BYTES, { headers: { "Content-Type": "image/png" } });
       }) as unknown as typeof fetch,
     };
 
     expect(await run(["upload", "pictures/cat.png", "--folder", ID], io)).toBe(0);
-    expect(requests).toEqual([
-      {
-        method: "POST",
-        url: `https://ink.test/api/workspaces/${WS}/uploads`,
-        headers: { Authorization: "Bearer cink_x", "Content-Type": "application/octet-stream", "X-Ink-Upload": encodeURIComponent(JSON.stringify({ name: "cat.png", folderId: ID })) },
-        body: PNG_BYTES,
-      },
+    expect(calls.map((c) => [c.name, c.args])).toEqual([
+      ["start_upload", { name: "cat.png", size: 5, folderId: ID }],
+      ["finish_upload", { uploadId: ID }],
     ]);
+    // No token goes to a part's address: the address is the permission.
+    expect(requests.sort((a, b) => a.url.localeCompare(b.url))).toEqual(
+      [1, 2, 3].map((n) => ({ method: "PUT", url: `https://ink.test/api/upload-parts/first/${n}`, headers: { "Content-Type": "application/octet-stream" }, body: [...PNG_BYTES.slice((n - 1) * 2, n * 2)] })),
+    );
     expect(out.at(-1)).toBe(`In a note: ::image{${ID} 640x480}`);
 
-    requests.length = 0;
+    // A part that doesn't get through is sent again, to a fresh address, and only the parts not stored are.
+    requests.length = calls.length = 0;
+    failOnce = new Set(["https://ink.test/api/upload-parts/first/2"]);
     expect(await run(["upload", "pictures/cat.png", "--name", "Tabby.png", "--workspace", "vvvvvvvvvvvv"], io)).toBe(0);
-    expect(requests.map((r) => [r.url, JSON.parse(decodeURIComponent(r.headers["X-Ink-Upload"]!))])).toEqual([["https://ink.test/api/workspaces/vvvvvvvvvvvv/uploads", { name: "Tabby.png" }]]);
+    expect(calls.map((c) => c.name)).toEqual(["start_upload", "resume_upload", "finish_upload"]);
+    expect(calls[0]!.args).toEqual({ name: "Tabby.png", size: 5, workspaceId: "vvvvvvvvvvvv" });
+    expect(requests.map((r) => r.url).sort()).toEqual(["https://ink.test/api/upload-parts/first/1", "https://ink.test/api/upload-parts/first/2", "https://ink.test/api/upload-parts/first/3", "https://ink.test/api/upload-parts/fresh/2"]);
+    expect(out).toContain("Part 2 didn't get through: the connection dropped");
+
+    // One that never gets through stops, and says how to go on.
+    requests.length = calls.length = 0;
+    tools.resume_upload = { ...sending, stored: [1, 3], address: "https://ink.test/api/upload-parts/dead/{part}" };
+    const dead = { has: (url: string) => url.endsWith("/2"), delete: (url: string) => url.endsWith("/2") } as unknown as Set<string>;
+    failOnce = dead;
+    expect(await run(["upload", "pictures/cat.png"], io)).toBe(1);
+    expect(out.at(-1)).toBe(`ink: Parts 2 didn't get through. Nothing sent is lost: ink upload-resume ${ID} says what is left, and upload-abort throws it away`);
+    expect(calls.map((c) => c.name).filter((name) => name === "finish_upload")).toEqual([]);
+    expect(await run(["upload", "pictures/missing.png"], io)).toBe(2);
+    expect(await run(["upload", "pictures/cat.png", "--color", "red"], io), "a flag it doesn't take, before anything is sent").toBe(2);
 
     requests.length = 0;
     expect(await run(["download", ID], io)).toBe(0);
     expect(requests).toEqual([{ method: "GET", url: `https://ink.test/api/workspaces/${WS}/uploads/${ID}`, headers: { Authorization: "Bearer cink_x" }, body: undefined }]);
-    expect(written, "only the last part of an upload's name says where it is saved").toEqual([{ path: "cat.png", bytes: [0x89, 0x50, 0x4e, 0x47], replace: false }]);
+    expect(written, "only the last part of an upload's name says where it is saved").toEqual([{ path: "cat.png", bytes: [...PNG_BYTES], replace: false }]);
 
     expect(await run(["download", ID, "--out", "taken.png"], io)).toBe(2);
     expect(out.at(-1)).toBe("ink: taken.png is already there. Pass --force true to replace it, or --out for another place");
     expect(await run(["download", ID, "--out", "taken.png", "--force", "true"], io)).toBe(0);
-    expect(written.at(-1)).toEqual({ path: "taken.png", bytes: [0x89, 0x50, 0x4e, 0x47], replace: true });
+    expect(written.at(-1)).toEqual({ path: "taken.png", bytes: [...PNG_BYTES], replace: true });
 
     tools.list_workspaces = { workspaces: [{ id: WS }, { id: "vvvvvvvvvvvv" }] };
     expect(await run(["download", ID], io)).toBe(2);
@@ -273,7 +307,7 @@ describe("what each argument is called", () => {
         expect(opArguments(tool, { [field]: ID }).fields).toEqual(opArguments(tool, { [name]: ID }).fields);
       }
     }
-    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(28);
+    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(31);
   });
 
   it("ends every description with an example call the tool takes as it stands", () => {

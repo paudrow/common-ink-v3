@@ -55,13 +55,17 @@ export async function writtenNow(host: PluginHost, upload: Pick<Upload, "id" | "
   return writtenFor(upload, seen);
 }
 
-/** One file on its way. */
+/** One file on its way. `uploadId` is there once the server has given it one: from the start for a file sent in parts. */
 export interface Sending {
   id: number;
   name: string;
   size: number;
   sent: number;
+  uploadId?: string;
 }
+
+/** Where a file's line is to be written in a note: its id and kind, and the size this browser read of a picture or a video. */
+type Placed = { upload: Pick<Upload, "id" | "kind" | "width" | "height">; size: Size | null };
 
 /** Where in a note the files being sent are to be written, kept through whatever is typed meanwhile. */
 const placing = StateEffect.define<{ key: number; pos: number | null }>();
@@ -96,8 +100,14 @@ export function sender(host: PluginHost) {
   };
   const editors = new Set<{ view: EditorView; noteId: string }>();
 
-  /** Sends one file. Null when it was refused, which the member has been told. */
-  async function send(file: File, to: { folderId?: string; private?: boolean }): Promise<{ upload: Upload; size: Size | null } | null> {
+  const update = (id: number, change: Partial<Sending>) => set(sending.map((s) => (s.id === id ? { ...s, ...change } : s)));
+
+  /**
+   * Sends one file. Null when it was refused, which the member has been told. A file sent in parts
+   * has an id long before it is there, and `started` is told it then, so its line can be written and
+   * show how far it has got.
+   */
+  async function send(file: File, to: { folderId?: string; private?: boolean }, started?: (placed: Placed) => void): Promise<Placed & { upload: Upload } | null> {
     const no = refusal(file);
     if (no) {
       host.app().notify({ message: no });
@@ -107,7 +117,15 @@ export function sender(host: PluginHost) {
     set([...sending, one]);
     try {
       const size = await measured(file);
-      const upload = await host.uploads.send(file, { name: file.name, ...to }, (sent) => set(sending.map((s) => (s.id === one.id ? { ...s, sent } : s))));
+      const upload = await host.uploads.send(
+        file,
+        { name: file.name, ...to },
+        (sent) => update(one.id, { sent }),
+        (begun) => {
+          update(one.id, { uploadId: begun.id });
+          started?.({ upload: { id: begun.id, kind: begun.kind, width: null, height: null }, size });
+        },
+      );
       host.uploads.learn([{ id: upload.id, upload: toldOf(upload) }]);
       return { upload, size };
     } catch (err) {
@@ -139,21 +157,25 @@ export function sender(host: PluginHost) {
     const key = ++ids;
     view.dispatch({ effects: placing.of({ key, pos: at }) });
     const there = () => [...editors].some((e) => e.view === view);
-    for (const file of files) {
-      const sent = await send(file, { folderId: note?.folderId ?? undefined, private: note?.private || undefined });
-      if (!sent) continue;
+    /** Writes a file's line where the files are being put. False when the note has closed or can't be changed now. */
+    const place = ({ upload, size }: Placed): boolean => {
       const pos = there() ? view.state.field(places, false)?.get(key) : undefined;
-      if (pos === undefined || !writable(view.state)) {
-        const { upload } = sent;
-        host.app().notify({ message: `${upload.name} was uploaded, and its note has closed.`, action: { label: "Show it", run: () => host.app().go(uploadPath(upload.id)) } });
-        continue;
-      }
+      if (pos === undefined || !writable(view.state)) return false;
       const line = view.state.doc.lineAt(pos);
-      const { from, to, insert, end, after } = onItsOwnLine(writtenFor(sent.upload, sent.size), { from: line.from, text: line.text, last: line.number === view.state.doc.lines });
+      const { from, to, insert, end, after } = onItsOwnLine(writtenFor(upload, size), { from: line.from, text: line.text, last: line.number === view.state.doc.lines });
       const { head } = view.state.selection.main;
       // A cursor still where the file was put goes to the line under it, to go on writing.
       const follow = view.state.selection.main.empty && head >= line.from && head <= line.to;
       view.dispatch({ changes: { from, to, insert }, effects: placing.of({ key, pos: end }), ...(follow && { selection: { anchor: after } }), userEvent, scrollIntoView: follow });
+      return true;
+    };
+    for (const file of files) {
+      // A file sent in parts is written as soon as it has an id, and its line shows how far it has got until it is there.
+      let placed = false;
+      const sent = await send(file, { folderId: note?.folderId ?? undefined, private: note?.private || undefined }, (begun) => void (placed = place(begun)));
+      if (!sent || placed || place(sent)) continue;
+      const { upload } = sent;
+      host.app().notify({ message: `${upload.name} was uploaded, and its note has closed.`, action: { label: "Show it", run: () => host.app().go(uploadPath(upload.id)) } });
     }
     if (there()) view.dispatch({ effects: placing.of({ key, pos: null }) });
   }
@@ -217,6 +239,8 @@ export function sender(host: PluginHost) {
       });
     },
     sending: () => sending,
+    /** The file on its way that will be the upload `uploadId`, if it is one. */
+    of: (uploadId: string) => sending.find((s) => s.uploadId === uploadId),
     subscribe(listener: () => void): Dispose {
       listeners.add(listener);
       return () => void listeners.delete(listener);

@@ -27,7 +27,9 @@
   // Uploads' bytes. No object in it is public: each is read by the Worker, for someone it has checked.
   // The bucket must exist before the first deploy: `npx wrangler r2 bucket create common-ink-v3-uploads`.
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "common-ink-v3-uploads" }],
-  // Every hour, the Worker removes the notes and uploads whose 30 days in Trash are up: `scheduled` in src/worker/index.ts.
+  // Every hour, the Worker removes the notes and uploads whose 30 days in Trash are up, and aborts a file sent in parts that
+  // no part has reached for a day, its parts with it: `scheduled` in src/worker/index.ts. The bucket's own rule "abort
+  // incomplete multipart uploads after 3 days" is the backstop for parts no row names (docs/adr/0009-…).
   // A Preview has no timer, so nothing is removed from one's Trash on its own.
   "triggers": { "crons": ["17 * * * *"] },
   // Workers Logs keeps what the Worker writes (already redacted by src/core/logs.ts) but no invocation

@@ -1,4 +1,5 @@
-import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type Shared, type Upload } from "../core/protocol.ts";
+import { partSpan, partsLeft, planParts } from "../core/parts.ts";
+import { NO_SUCH_WORKSPACE, type Agent, type AgentEdit, type ConnectOptions, type MeHere, type OpErrorCode, type OpInput, type Results, type SendingUpload, type Shared, type Upload } from "../core/protocol.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -89,11 +90,107 @@ export const uploadAddress = (workspaceId: string, id: string) => `/api/workspac
 /** Where they are asked for by whoever holds a link, which decides in place of a session. */
 export const sharedUploadAddress = (token: string, id: string) => `/api/shared/${token}/uploads/${id}`;
 
+/** A file larger than this goes in parts, which say how far they have got and pick up where they stopped. A smaller one goes in one request. */
+export const IN_PARTS_FROM = 8 * 1024 * 1024;
+/** How many parts go at once. */
+const AT_ONCE = 3;
+/** How many rounds in a row may store no part before the file is given up on, and how long the first wait between them is. */
+const ROUNDS = 6;
+const FIRST_WAIT_MS = 1000;
+const UNREACHED = "The file didn't reach Common Ink. Check your connection and try again.";
+
+type SendAs = { name: string; folderId?: string; private?: boolean };
+
 /**
- * Sends a file's bytes to a workspace, as the body of one request that says how far it has got.
- * The file is named in a header, and the type is never the browser's guess: the server reads it from the bytes.
+ * Sends a file's bytes to a workspace and says how far they have got: in one request, or, for a file
+ * over {@link IN_PARTS_FROM}, in parts. `onStarted` is told of a file sent in parts as soon as it has
+ * an id, long before it is there to be seen. The type is never the browser's guess: the server reads it from the bytes.
  */
-export function sendUpload(workspaceId: string, file: Blob, as: { name: string; folderId?: string; private?: boolean }, onProgress?: (sent: number) => void): Promise<Upload> {
+export function sendUpload(workspaceId: string, file: Blob, as: SendAs, onProgress?: (sent: number) => void, onStarted?: (sending: SendingUpload) => void): Promise<Upload> {
+  return file.size > IN_PARTS_FROM ? sendInParts(workspaceId, file, as, onProgress, onStarted) : sendWhole(workspaceId, file, as, onProgress);
+}
+
+/** One part, to the address it goes to. The address is all the permission it needs. */
+function putPart(address: string, part: Blob, onProgress: (sent: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", address);
+    xhr.responseType = "json";
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (event) => onProgress(event.loaded);
+    xhr.onerror = xhr.onabort = () => reject(new ApiError(0, "unknown", UNREACHED));
+    xhr.onload = () => {
+      const body = (xhr.response ?? {}) as { error?: string; message?: string };
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new ApiError(xhr.status, (body.error as ApiError["code"]) ?? "unknown", body.message ?? UNREACHED));
+    };
+    xhr.send(part);
+  });
+}
+
+/** Waits `ms`, and for as long as the browser is offline, so a laptop closed half way carries on once it is open and connected again. */
+const waitToRetry = (ms: number) =>
+  new Promise<void>((done) => {
+    const ready = () => (navigator.onLine ? done() : window.addEventListener("online", () => done(), { once: true }));
+    setTimeout(ready, ms);
+  });
+
+/**
+ * Sends a file in parts, several at once. A part that fails is sent again to a fresh address, and the
+ * parts already stored are never sent twice, so a dropped connection picks up where it stopped. A
+ * round in which nothing was stored waits longer each time, and after {@link ROUNDS} of them the file
+ * is given up on and what was sent of it thrown away. A refusal that no retry changes stops it at once.
+ */
+async function sendInParts(workspaceId: string, file: Blob, as: SendAs, onProgress?: (sent: number) => void, onStarted?: (sending: SendingUpload) => void): Promise<Upload> {
+  let sending = await perform(workspaceId, { type: "upload.start", name: as.name, size: file.size, ...(as.folderId ? { folderId: as.folderId } : {}), private: as.private ?? false });
+  onStarted?.(sending);
+  const plan = planParts(sending.size, sending.partSize);
+  const going = new Map<number, number>();
+  const tell = (stored: ReadonlySet<number>) => onProgress?.([...stored].reduce((sum, n) => sum + partSpan(plan, n)!.length, 0) + [...going.values()].reduce((sum, n) => sum + n, 0));
+  try {
+    for (let quiet = 0; ; ) {
+      const stored = new Set(sending.stored);
+      const left = partsLeft(plan, stored);
+      const before = stored.size;
+      let failed: unknown = null;
+      const next = async (): Promise<void> => {
+        const number = left.shift();
+        if (number === undefined) return;
+        const { offset, length } = partSpan(plan, number)!;
+        try {
+          await putPart(sending.address.replace("{part}", String(number)), file.slice(offset, offset + length), (sent) => {
+            going.set(number, sent);
+            tell(stored);
+          });
+          stored.add(number);
+        } catch (err) {
+          failed = err;
+          // Refused for who is asking, or for an upload or folder no longer there: no retry changes that.
+          if (final(err)) throw err;
+        } finally {
+          going.delete(number);
+          tell(stored);
+        }
+        return next();
+      };
+      await Promise.all(Array.from({ length: AT_ONCE }, next));
+      if (stored.size === plan.count) break;
+      quiet = stored.size > before ? 0 : quiet + 1;
+      if (quiet >= ROUNDS) throw failed ?? new ApiError(0, "unknown", UNREACHED);
+      await waitToRetry(FIRST_WAIT_MS * 2 ** quiet);
+      sending = await perform(workspaceId, { type: "upload.resume", id: sending.id });
+    }
+    return await perform(workspaceId, { type: "upload.finish", id: sending.id });
+  } catch (err) {
+    void perform(workspaceId, { type: "upload.abort", id: sending.id }).catch(() => {});
+    throw err;
+  }
+}
+
+/** A part refused for good: for who is asking (403), or for an upload or a folder that is gone (404). A lapsed or spent address (410, 409), a broken connection and a fault are retried. */
+const final = (err: unknown) => err instanceof ApiError && (err.status === 403 || err.status === 404);
+
+function sendWhole(workspaceId: string, file: Blob, as: SendAs, onProgress?: (sent: number) => void): Promise<Upload> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/workspaces/${workspaceId}/uploads`);
@@ -101,7 +198,7 @@ export function sendUpload(workspaceId: string, file: Blob, as: { name: string; 
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
     xhr.setRequestHeader("X-Ink-Upload", encodeURIComponent(JSON.stringify(as)));
     xhr.upload.onprogress = (event) => onProgress?.(event.loaded);
-    xhr.onerror = xhr.onabort = () => reject(new ApiError(0, "unknown", "The file didn't reach Common Ink. Check your connection and try again."));
+    xhr.onerror = xhr.onabort = () => reject(new ApiError(0, "unknown", UNREACHED));
     xhr.onload = () => {
       const body = (xhr.response ?? {}) as { error?: string; message?: string };
       if (xhr.status >= 200 && xhr.status < 300) resolve(body as Upload);

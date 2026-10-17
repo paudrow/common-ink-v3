@@ -156,7 +156,7 @@ function keptFromPerform(type: string): string | null {
   if (type.startsWith("invite.") || (type.startsWith("member.") && type !== "member.list")) return "who is in a workspace is changed through host.members, by a plugin that is given it";
   if (type.startsWith("grant.") || type === "note.setPrivate") return "who a note or folder is shared with is read and changed through host.sharing, by a plugin that is given it";
   if (type === "upload.setPrivate") return "who an upload is shared with is read and changed through host.sharing, by a plugin that is given it";
-  if (type === "upload.create" || type === "upload.open") return "an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it";
+  if (["upload.create", "upload.open", "upload.start", "upload.resume", "upload.part", "upload.finish", "upload.abort"].includes(type)) return "an upload's bytes are sent and asked for through host.uploads, by a plugin that is given it";
   if (type.startsWith("shared.")) return "only whoever holds a link asks what it opens";
   return null;
 }

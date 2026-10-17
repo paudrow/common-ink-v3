@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
-import type { Upload } from "../../src/core/protocol.ts";
+import { PART_BYTES, type Upload } from "../../src/core/protocol.ts";
 import worker from "../../src/worker/index.ts";
 import { sign } from "../../src/worker/session.ts";
 import { addMember, newMember } from "./members.ts";
@@ -233,10 +233,10 @@ describe("an upload's bytes over HTTP, with an agent's token", () => {
     expect((await listed(ada)).map((u) => u.name)).toEqual(["dot.png"]);
   });
 
-  it("refuses a file said to be over 50 MB before reading it, and one that doesn't say how long it is", async () => {
+  it("refuses a file said to be over what one request carries before reading it, and one that doesn't say how long it is", async () => {
     const { ada, token, workspace } = await connected();
 
-    const tooBig = await post(workspace, token, "huge.png", PNG, { declared: 50 * 1024 * 1024 + 1 });
+    const tooBig = await post(workspace, token, "huge.png", PNG, { declared: PART_BYTES + 1 });
     expect([tooBig.status, await errorIn(tooBig)]).toEqual([413, "invalid"]);
     const unsaid = await post(workspace, token, "unsaid.png", PNG, { headers: { "Content-Length": "" } });
     expect([unsaid.status, await errorIn(unsaid)]).toEqual([411, "invalid"]);

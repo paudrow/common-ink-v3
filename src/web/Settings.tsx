@@ -34,6 +34,8 @@ import {
   layoutOf,
 } from "./settingsLayout.ts";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
+import type { UploadStorage } from "../core/protocol.ts";
+import { formatBytes } from "./plugins/uploads/sizing.ts";
 
 const NOT_JSON = "Settings are one JSON object, such as {}.";
 
@@ -44,6 +46,8 @@ interface Props {
   /** The address the app is at: `/settings`, or under it a category, such as `/settings/keyboard`, or `/settings/json`. */
   path: string;
   go: (path: string, options?: { replace?: boolean }) => void;
+  /** How much the workspace's uploads take, asked each time the page opens. */
+  storage: () => Promise<UploadStorage>;
   account: Account;
 }
 
@@ -61,7 +65,7 @@ const JSON_VIEW = "json";
  * of keyboard shortcuts, or as the JSON itself. All of it shows the one document. It belongs to the
  * app, so it is here whatever is turned off.
  */
-export function Settings({ host, store, mac, path, go, account }: Props) {
+export function Settings({ host, store, mac, path, go, storage, account }: Props) {
   const { settings } = useSyncExternalStore(host.subscribe, host.contributions);
   const text = useSyncExternalStore(store.subscribe, store.text);
   const status = useSyncExternalStore(store.subscribe, store.status);
@@ -136,6 +140,32 @@ export function Settings({ host, store, mac, path, go, account }: Props) {
         />
       )}
       {!asJson && problemList}
+      <Storage storage={storage} />
+    </section>
+  );
+}
+
+/** How much the workspace's files take, every member's, those in Trash among them. There is no limit to it: storage is paid by the gigabyte. */
+function Storage({ storage }: Pick<Props, "storage">) {
+  const [told, setTold] = useState<UploadStorage | "failed" | null>(null);
+  useEffect(() => {
+    let current = true;
+    storage().then(
+      (got) => current && setTold(got),
+      () => current && setTold("failed"),
+    );
+    return () => void (current = false);
+  }, []);
+  return (
+    <section aria-label="Storage" className="settings-group settings-storage">
+      <h2>Storage</h2>
+      <p>
+        {told === null
+          ? "Counting this workspace's files…"
+          : told === "failed"
+            ? "How much this workspace's files take couldn't be read just now."
+            : `This workspace's files take ${formatBytes(told.bytes)}, ${told.files} file${told.files === 1 ? "" : "s"} from every member${told.trashedBytes ? `, ${formatBytes(told.trashedBytes)} of it in Trash` : ""}.${told.pendingBytes ? ` ${formatBytes(told.pendingBytes)} more is on its way.` : ""} There is no limit: a file can be up to 25 GB.`}
+      </p>
     </section>
   );
 }

@@ -120,7 +120,7 @@ export function UploadsPage({ host, app, sender }: Props) {
           )}
         </header>
         <p className="uploads-lede">
-          Files a note can show: a picture, a video, a recording, or anything to download. {app.canEdit ? "Drop files here to upload them, or paste or drop one into a note. " : ""}A file sent from here is yours alone until you put it in a note, and then whoever reads the note sees it. A file can be up to 50 MB.
+          Files a note can show: a picture, a video, a recording, or anything to download. {app.canEdit ? "Drop files here to upload them, or paste or drop one into a note. " : ""}A file sent from here is yours alone until you put it in a note, and then whoever reads the note sees it. A file can be up to 25 GB: a large one goes in parts, and picks up where it stopped if the connection drops.
         </p>
         <div className="uploads-tools">
           <div className="uploads-whose" role="group" aria-label="Whose uploads">

@@ -72,10 +72,9 @@ const LinkKind = z.enum(["public", "signed_in"]);
 /** What a grant is on: one note, one folder or one upload, so exactly one of the three. The operation checks that. */
 const On = { noteId: Id.optional(), folderId: Id.optional(), uploadId: Id.optional() };
 
-/** The most bytes one upload may be. */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
-/** The most bytes a workspace's uploads may be together, those in Trash among them. */
-export const WORKSPACE_UPLOAD_BYTES = 1024 * 1024 * 1024;
+export { MAX_UPLOAD_BYTES, PART_BYTES } from "./parts.ts";
+/** The most bytes `upload_file` takes from an agent as base64 in one tool call. A larger file goes in parts. */
+export const MAX_INLINE_UPLOAD_BYTES = 4 * 1024 * 1024;
 /** A file's name as it was given. What is kept of it is its last part, cleaned: see `cleanName`. */
 const FileName = z.string().min(1).max(1000);
 
@@ -580,13 +579,33 @@ export const Op = z.discriminatedUnion("type", [
   /** The bytes of one upload the visitor's link covers: one in the folder the link is on, or in a folder inside it. A link on a note covers no upload. */
   z.object({ type: z.literal("shared.upload"), id: Id }),
   /**
-   * Puts a file in a folder, or in Unsorted. The bytes come with the request and not in the
-   * operation: over HTTP as the body of `POST /api/workspaces/<id>/uploads`, which docs/mcp.md
-   * describes. `size` is how many bytes are coming, at most MAX_UPLOAD_BYTES, and a body of any
-   * other length is refused. What the file is served as is decided from its name's ending and its
-   * first bytes. `private` makes it private to the member who uploads it, as a private note is.
+   * Puts a file in a folder, or in Unsorted, in one request. The bytes come with the request and not
+   * in the operation: over HTTP as the body of `POST /api/workspaces/<id>/uploads`, which docs/mcp.md
+   * describes. `size` is how many bytes are coming, at most PART_BYTES, which is as much as one
+   * request carries, and a body of any other length is refused. A larger file is sent in parts:
+   * `upload.start`. What the file is served as is decided from its name's ending and its first bytes.
+   * `private` makes it private to the member who uploads it, as a private note is.
    */
   z.object({ type: z.literal("upload.create"), name: FileName, size: z.number().int().min(1), folderId: Id.optional(), private: z.boolean().default(false) }),
+  /**
+   * Begins a file of `size` bytes, at most MAX_UPLOAD_BYTES, sent in parts of PART_BYTES. The upload
+   * is pending, and no one sees it, until `upload.finish`. The answer says how the file is cut and
+   * gives an address each part is sent to, once, over HTTP (`upload.part`), which lapses in an hour.
+   */
+  z.object({ type: z.literal("upload.start"), name: FileName, size: z.number().int().min(1), folderId: Id.optional(), private: z.boolean().default(false) }),
+  /** Which parts of an upload being sent are stored, and a fresh address for the rest. Only whoever started it can ask. */
+  z.object({ type: z.literal("upload.resume"), id: Id }),
+  /**
+   * Stores one part of an upload being sent. Its bytes are the body of `PUT` at the address
+   * `upload.start` or `upload.resume` gave, and the address says which upload; it is refused without one.
+   */
+  z.object({ type: z.literal("upload.part"), id: Id, number: z.number().int().min(1) }),
+  /** Puts the parts of an upload together once every one is stored, checks it is the size it was said to be, and makes it live. Done again, it answers the upload. */
+  z.object({ type: z.literal("upload.finish"), id: Id }),
+  /** Stops an upload being sent and throws away the parts it has. */
+  z.object({ type: z.literal("upload.abort"), id: Id }),
+  /** How many bytes the workspace's uploads take, for its members. There is no limit to it. */
+  z.object({ type: z.literal("upload.storage") }),
   /**
    * The uploads the asker can see that `query` finds, in the query language (docs/search.md), latest
    * first: with no query, every live one. `folderId` narrows to one folder's own uploads and
@@ -924,6 +943,32 @@ export interface ReferredUpload {
   id: string;
   /** Null when there is no such upload or the one asking can't see it. Nothing tells the two apart, and nothing else is told of it. */
   upload: Pick<Upload, "name" | "type" | "kind" | "size" | "width" | "height" | "state"> | null;
+}
+
+/**
+ * An upload being sent in parts, as whoever started it is told: how the file is cut, which parts are
+ * stored, and where the rest go. `address` is a path on the server with `{part}` where a part's number
+ * goes; it takes each part once, and lapses at `expiresAt`.
+ */
+export interface SendingUpload {
+  id: string;
+  name: string;
+  size: number;
+  /** What a note that shows it is to write it as, judged from its name until its bytes are read. */
+  kind: UploadKind;
+  partSize: number;
+  partCount: number;
+  stored: number[];
+  address: string;
+  expiresAt: number;
+}
+
+/** How much the uploads of a workspace take. Pending ones are those still being sent. */
+export interface UploadStorage {
+  bytes: number;
+  files: number;
+  trashedBytes: number;
+  pendingBytes: number;
 }
 
 /** An upload's bytes as they were read from the bucket: all of them, the part that was asked for, or none when the asker already has them. */
@@ -1338,6 +1383,12 @@ export interface Results {
   "shared.read": SharedNote & { text: string; revision: number; links: LinkedNote[]; uploads: ReferredUpload[] };
   "shared.upload": OpenedUpload;
   "upload.create": Upload;
+  "upload.start": SendingUpload;
+  "upload.resume": SendingUpload;
+  "upload.part": { id: string; number: number; stored: number };
+  "upload.finish": Upload;
+  "upload.abort": { id: string };
+  "upload.storage": UploadStorage;
   "upload.list": ListedUpload[];
   "upload.read": Upload & { usedIn: NoteSummary[] };
   "upload.open": OpenedUpload;

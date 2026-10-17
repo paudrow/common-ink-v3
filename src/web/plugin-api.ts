@@ -13,10 +13,11 @@ import type { ComponentType, ReactNode } from "react";
 import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, ReferredUpload, Results, Role, Sharing, Upload, WorkspaceSummary, Written } from "../core/protocol.ts";
 import type { IconName } from "./icons.tsx";
 import type { Showing } from "./inspected.ts";
+import type { UploadKind } from "../core/filetypes.ts";
 
 /** The workspace operations and what they answer with: the same ones an agent has. */
 export type * from "../core/protocol.ts";
-export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, WORKSPACE_UPLOAD_BYTES } from "../core/protocol.ts";
+export { CONTACT_LABELS, DEFAULT_EXPIRY_DAYS, labelType, MAX_AGENT_NAME, MAX_EXPIRY_DAYS, MAX_NOTE_LENGTH, MAX_NOTES_AT_ONCE, MAX_SEARCH_LENGTH, MAX_UPLOAD_BYTES, TODO_SORT_WORDS, PART_BYTES } from "../core/protocol.ts";
 /**
  * The query language notes and todos are found by, as the server reads it: what is typed to a query
  * and back, every filter there is with what it takes and means, and what is being typed at the
@@ -201,6 +202,11 @@ export type KeptFromPerform =
   | "upload.setPrivate"
   | "upload.create"
   | "upload.open"
+  | "upload.start"
+  | "upload.resume"
+  | "upload.part"
+  | "upload.finish"
+  | "upload.abort"
   | `shared.${string}`;
 
 /**
@@ -372,8 +378,14 @@ export interface PluginHost {
      * `not_found` for one that isn't there or that they can't see.
      */
     bytes(id: string, upTo: number): Promise<Uint8Array>;
-    /** Sends a file to the workspace as the member. `folderId` left out puts it in Unsorted. `onProgress` is told how many bytes have gone. The server's refusal, such as that the workspace is full, is what it throws. */
-    send(file: Blob, as: { name: string; folderId?: string; private?: boolean }, onProgress?: (sent: number) => void): Promise<Upload>;
+    /**
+     * Sends a file to the workspace as the member, up to 25 GB. `folderId` left out puts it in
+     * Unsorted. `onProgress` is told how many bytes have gone. A file over 8 MB goes in parts, which
+     * pick up where they stopped when the connection drops, and `onStarted` is told its id and the kind
+     * its name says it is as soon as it has them, while it is still on its way and seen by no one. The
+     * server's refusal is what it throws.
+     */
+    send(file: Blob, as: { name: string; folderId?: string; private?: boolean }, onProgress?: (sent: number) => void, onStarted?: (sending: { id: string; kind: UploadKind }) => void): Promise<Upload>;
   };
   /** JSON this plugin keeps in this browser for this workspace and this member. Other plugins can't see it. */
   readonly storage: {

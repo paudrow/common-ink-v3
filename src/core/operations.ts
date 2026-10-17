@@ -58,7 +58,7 @@ import {
 } from "./protocol.ts";
 import { removing, forgetRemoved } from "./purge.ts";
 import { uploadIds } from "./uploadRefs.ts";
-import { NO_FILES, archiveUpload, createUpload, listUploads, moveUpload, openUpload, placeUpload, purgeUpload, readUpload, referred, restoreUpload, trashUpload, trashedUploads, type Files } from "./uploads.ts";
+import { NO_FILES, abortUpload, archiveUpload, createUpload, finishUpload, listUploads, moveUpload, openUpload, placeUpload, purgeUpload, putPart, readUpload, referred, restoreUpload, resumeUpload, startUpload, trashUpload, trashedUploads, uploadStorage, type Files } from "./uploads.ts";
 import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative, matchOf, names, orderOf, parse, shift, soughtIn, topTerms, walk, written as writtenValue, type Bound, type Compiling, type Filter, type Node, type Query, type Scope } from "./query.ts";
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
@@ -2745,6 +2745,14 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   "shared.upload": { needs: "view", by: "visitor", run: (ctx, op) => openUpload(ctx, op.id, "hidden") },
 
   "upload.create": { needs: "edit", run: (ctx, op) => createUpload(ctx, op) },
+  // An upload sent in parts is whoever started it's alone until it is live: each step asks again whether they may still put it in its folder.
+  "upload.start": { needs: "edit", run: (ctx, op) => startUpload(ctx, op) },
+  "upload.resume": { needs: "edit", run: (ctx, op) => resumeUpload(ctx, op.id) },
+  "upload.part": { needs: "edit", run: (ctx, op) => putPart(ctx, op) },
+  "upload.finish": { needs: "edit", run: (ctx, op) => finishUpload(ctx, op.id) },
+  "upload.abort": { needs: "edit", run: (ctx, op) => abortUpload(ctx, op.id) },
+  // A total of every member's files, private ones among them, and of nothing else: for the members, and for no agent, which may see only some folders.
+  "upload.storage": { needs: "view", by: "member", members: true, run: (ctx) => uploadStorage(ctx) },
   "upload.list": { needs: "view", run: (ctx, op) => listUploads(ctx, op) },
   "upload.read": { needs: "view", run: (ctx, op) => readUpload(ctx, op.id) },
   "upload.open": { needs: "view", run: (ctx, op) => openUpload(ctx, op.id, "opens") },

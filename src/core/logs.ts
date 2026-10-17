@@ -13,6 +13,8 @@ const RULES: readonly [RegExp, string][] = [
   [/\b4\/0[A-Za-z0-9_-]{20,}/g, "4/0…"],
   [/(__Host-ink_\w+)=[^;\s]*/g, "$1=…"],
   [/\/(s|api\/shared)\/[A-Za-z0-9_-]{20,64}/g, "/$1/…"],
+  // The address a part of an upload is sent to is a key to that upload for an hour: 256 random bits in base64url, 43 characters. The part's number after it stays.
+  [/\/(api\/upload-parts)\/[A-Za-z0-9_-]{20,}/g, "/$1/…"],
   // A domain has letters at its end, so a package in a stack, foo@1.2.3/index.js, is kept.
   [/[^\s@"'`<>()/:?=&]+(?:@|%40)[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "…@…"],
   // A quotation, not an apostrophe: the mark is neither after nor before a letter. It may run over lines, as text quoted from a note does.

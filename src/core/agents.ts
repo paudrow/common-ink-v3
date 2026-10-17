@@ -173,16 +173,25 @@ export async function disconnectAgent(db: D1Database, personId: string, agentId:
   await db.prepare("UPDATE agents SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now, agentId).run();
 }
 
+type ActiveRow = { id: string; person_id: string; name: string; last_used_at: number | null; workspace_id: string | null; read_only: number; folder_ids: string | null };
+const connected = (row: ActiveRow): ConnectedAgent => ({ agentId: row.id, personId: row.person_id, name: row.name, workspaceId: row.workspace_id, readOnly: row.read_only === 1, folderIds: foldersOf(row) });
+
+/** An agent by its id, as its token would name it now: null once it is expired or disconnected. */
+export async function agentById(db: D1Database, id: string, now = Date.now()): Promise<ConnectedAgent | null> {
+  const row = await db.prepare(`SELECT id, person_id, name, last_used_at, workspace_id, read_only, folder_ids FROM agents WHERE id = ? AND ${ACTIVE}`).bind(id, now).first<ActiveRow>();
+  return row ? connected(row) : null;
+}
+
 /** The agent a token belongs to, or null if it is unknown, malformed, expired, or disconnected. */
 export async function authenticateAgent(db: D1Database, token: string, now = Date.now()): Promise<ConnectedAgent | null> {
   if (!token.startsWith(TOKEN_PREFIX) || token.length > 200) return null;
   const row = await db
     .prepare(`SELECT id, person_id, name, last_used_at, workspace_id, read_only, folder_ids FROM agents WHERE token_hash = ? AND ${ACTIVE}`)
     .bind(await hashToken(token), now)
-    .first<{ id: string; person_id: string; name: string; last_used_at: number | null; workspace_id: string | null; read_only: number; folder_ids: string | null }>();
+    .first<ActiveRow>();
   if (!row) return null;
   if (row.last_used_at === null || now - row.last_used_at > LAST_USED_EVERY) {
     await db.prepare("UPDATE agents SET last_used_at = ? WHERE id = ?").bind(now, row.id).run();
   }
-  return { agentId: row.id, personId: row.person_id, name: row.name, workspaceId: row.workspace_id, readOnly: row.read_only === 1, folderIds: foldersOf(row) };
+  return connected(row);
 }

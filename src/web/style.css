@@ -3450,6 +3450,16 @@ kbd {
   margin-top: 0;
 }
 
+/* What the workspace's files take, under the settings: not a setting, so outside their panes. */
+.settings-storage {
+  margin-top: 28px;
+  color: var(--muted);
+}
+
+.settings-storage p {
+  margin: 0;
+}
+
 .settings-group h2 {
   display: flex;
   gap: 10px;
@@ -8931,6 +8941,36 @@ button.todo-tag[aria-pressed="true"] {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A file still on its way, in the room its line keeps: its name, how far it has got, and a bar. */
+.upload-sending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 4px 12px;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--prose);
+  font-size: 13px;
+}
+
+.upload-sending-words {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-sending-bar {
+  width: min(320px, 80%);
+  height: 4px;
+  accent-color: var(--accent);
 }
 
 /*
