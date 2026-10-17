@@ -103,7 +103,7 @@ test("editing the JSON changes the options and the app, and editing the options 
 
 test("a plugin's options are listed under it with their schema and apply without a reload, and its switch is on the Plugins page and not among them", async ({ page }) => {
   await openSettings(page);
-  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list", "HTML embeds", "Calendar", "Todos", "Daily notes", "Mentions", "Vim mode"]);
+  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link")).toHaveText(["Editor", "Appearance", "Keyboard shortcuts", "Note list", "Dashboard", "HTML embeds", "Calendar", "Todos", "Daily notes", "Mentions", "Vim mode"]);
   const noteList = await category(page, "Note list");
 
   await expect(noteList.getByRole("checkbox")).toHaveCount(1);
@@ -449,7 +449,7 @@ test("settings follow the member to another browser, and plugins turned off are 
   const other = await context.newPage();
   other.on("pageerror", (err) => errors.push(err.message));
   await signIn(other);
-  await expect(other.getByText("Pick a note, or start a new one.")).toBeVisible();
+  await expect(other.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
   await expect(other.getByRole("complementary", { name: "Sidebar" })).toHaveCount(0);
   await expect.poll(() => theme(other)).toBe("dark");
 

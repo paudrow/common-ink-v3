@@ -237,7 +237,8 @@ test(":w saves what is typed now, ⌘S does too, and :q closes the tab", async (
   await page.keyboard.press(":");
   await page.keyboard.type("q");
   await page.keyboard.press("Enter");
-  await expect(tabs(page)).toHaveCount(0);
+  // The note's tab is gone, and with none left the app is at `/` with the Dashboard.
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
   await expect(page).toHaveURL(/\/$/);
 });
 
@@ -270,7 +271,7 @@ test("ctrl+o and ctrl+i go back and forward through the notes visited, into a cl
   await expect(page).toHaveURL(/\/note\/gamma-/);
 
   await run(page, "Close all tabs");
-  await expect(tabs(page)).toHaveCount(0);
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
   await page.keyboard.press("Control+o");
   await expect(page).toHaveURL(/\/note\/gamma-/);
   await expect(tabs(page)).toHaveText(["Gamma"]);

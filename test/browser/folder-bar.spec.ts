@@ -285,8 +285,8 @@ test("one Sort control orders a list and a search, which is by best match until 
 test("New note in the left column makes a note in the folder being looked at, with the cursor in it", async ({ page }) => {
   await withFolders(page);
 
-  // With no folder in front it goes in Unsorted.
-  await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
+  // With no folder in front, as at the Dashboard, it goes in Unsorted.
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
   await expect(newInSidebar(page)).toHaveCount(1);
   await expect(newInSidebar(page)).toHaveAttribute("title", "New note in Unsorted");
   await newInSidebar(page).click();

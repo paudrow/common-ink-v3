@@ -163,7 +163,13 @@ function keptFromPerform(type: string): string | null {
 
 /** Why a plugin that isn't Common Ink's own is refused an operation, or null when it isn't. The type `OwnOnly` says the same. */
 const ownOnly = (type: string): string | null =>
-  /^(source|event|contact|record)\./.test(type) ? "a member's data sources are theirs, and are read only by Common Ink's own plugins" : type.startsWith("upload.") ? "a workspace's uploads are read and changed only by Common Ink's own plugins" : null;
+  /^(source|event|contact|record)\./.test(type)
+    ? "a member's data sources are theirs, and are read only by Common Ink's own plugins"
+    : type.startsWith("upload.")
+      ? "a workspace's uploads are read and changed only by Common Ink's own plugins"
+      : /^(pin|visit)\./.test(type)
+        ? "a member's pins and how far they have read the changes are theirs, and are read and changed only by Common Ink's own plugins"
+        : null;
 
 export function createPluginHost({ plugins: given, required = [], trusted = [], builtIn = [], settings, write, mac, embedSite = false, provide }: HostOptions): Host {
   const plugins = given.filter((plugin, index) => given.findIndex((p) => p.id === plugin.id) === index);

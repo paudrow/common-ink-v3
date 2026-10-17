@@ -561,6 +561,20 @@ describe("plugin host", () => {
     expect(new TextDecoder().decode(await own!.uploads.bytes("aaaaaaaaaaaa", 100))).toBe("aaaaaaaaaaaa:100");
   });
 
+  it("gives a plugin that isn't Common Ink's own neither the member's pins nor how far they have read the changes", async () => {
+    let greedy: PluginHost | null = null;
+    let own: PluginHost | null = null;
+    const dashboard: Plugin = { id: "dashboard", name: "Dashboard", activate: (h) => void (own = h) };
+    const { performed } = hostWith([dashboard, { id: "greedy", name: "Greedy", activate: (h) => void (greedy = h) }], { trusted: [dashboard] });
+    const kept: OpInput[] = [{ type: "pin.list" }, { type: "pin.set", id: "aaaaaaaaaaaa", pinned: true }, { type: "visit.read" }, { type: "visit.mark", until: 1 }];
+
+    for (const op of kept) await expect((greedy!.perform as (op: OpInput) => Promise<unknown>)(op), op.type).rejects.toThrow(`Greedy can't ${op.type}: a member's pins and how far they have read the changes are theirs, and are read and changed only by Common Ink's own plugins`);
+    expect(performed).toEqual([]);
+
+    await own!.perform({ type: "visit.mark", until: 1 });
+    expect(performed).toEqual([["dashboard", "visit.mark"]]);
+  });
+
   it("refuses every plugin an upload's bytes and its privacy as operations, which go through host.uploads and host.sharing", async () => {
     let own: PluginHost | null = null;
     const uploads: Plugin = { id: "uploads", name: "Uploads", activate: (h) => void (own = h) };

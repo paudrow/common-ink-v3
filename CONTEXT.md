@@ -121,14 +121,22 @@ A member writes a reference to an event as they link a note: `[[` offers their e
 _Avoid_: Link (that is to a note), mention (that is `@`)
 
 **Dashboard**:
-A view for one member, not a stored object. It shows that member's events still ahead today, including all-day events; open todos they can see that are due today or earlier; their daily note for today and other notes they can see that were created or edited today; their pinned notes; and a summary of changes they can see since their last visit.
+A view for one member, not a stored object, and what the app opens to when no note is addressed and no tab is open to return to. It shows that member's events still ahead today, including all-day events; open todos they can see that are due today or earlier; their daily note for today and other notes they can see that were created or edited today; their pinned notes; and a summary of changes they can see since their last visit. Today is the member's day: the date where they are, from its midnight to the next. Opening it changes nothing: it makes no daily note. A guest has one too, of what they were granted. Which panels it shows, in what order and how big, is the member's own, kept with their settings: see Panel. See `docs/adr/0009-the-dashboard-is-a-view-and-keeps-two-things.md`.
 _Avoid_: Home
 
-**Visit**:
-The previous time a member opened a workspace.
+**Panel**:
+One part of a member's dashboard, such as today's events or pinned notes, picked from the few there are. A member chooses which their dashboard shows, in what order, and at what size: small, wide, tall or large. That arrangement is theirs, the same in every browser, and changed by no agent.
+_Avoid_: Widget (that is in a note), card, section
+
+**Last visit**:
+How far a member has read the changes in a workspace: the moment up to which they marked the dashboard's summary read. It is theirs, kept for them in that workspace, and the same in every browser. It moves only when they press Mark as read, to the moment the summary they were shown was made, so opening the dashboard, reloading it, or having it open twice moves nothing, and a change made since is still there next time. An agent can read it and can't move it. It is not an unseen change, which is about one note in one browser.
+_Avoid_: Visit on its own, last seen
+
+**Summary of changes**:
+The changes made since a member's last visit by anyone but the member, their own agents included, in notes the member can see now, summed up by note and by author. Until a member first marks it read it covers the last 7 days. It counts the latest hundred changes, and says so when there are more.
 
 **Pin**:
-A note a member has chosen to show on their own dashboard. It is not written into the note.
+A note a member has chosen to show on their own dashboard. It is theirs alone, kept for them in that workspace and the same in every browser, and is not written into the note: pinning is not a change. A pinned note that is archived or in Trash is left off the dashboard and returns with the note. A pin on a note the member can no longer see is left off too, says nothing of the note, and returns if the note does. A member's agent can pin for them.
 
 **Contact**:
 A person from a member's data source, with or without a Common Ink account. On a note they appear gray. The name is stored on the note, so anyone who can read the note sees it. Mentioning or assigning them does not give them access, and does not share the owner's contact list. Each email, phone, address and website a contact has carries a **label**: one of Google's own for that kind of line (Home email, Work email, Mobile, Work phone, Home address, Blog, and the rest), one the member wrote, or none. It is shown in plain words beside the line, and written back with it. The member edits a contact from its person page, every field as a contacts app does, and the change is written back where the contact is kept: Google's contacts through the People API, once the member has agreed to changes as well as reading ("Connect again to edit contacts"). A person who isn't one of the member's contacts can be added to them from their page. Only the member changes or adds a contact: not another member, whatever their role, and not an agent.
@@ -318,7 +326,7 @@ A place in a note where an overlap edited lines a revert changes. The person rev
 Reverting the author's own latest change to a note that still stands. Redo reverts their latest undo, until they edit again. Another author's changes are kept.
 
 **Unseen change**:
-A change to a note by anyone but the member, their own agent included, made since the member last looked at that note's history.
+A change to a note by anyone but the member, their own agent included, made since the member last looked at that note's history. It is kept in the browser the member looked in, and has nothing to do with their last visit: marking the dashboard's summary read doesn't show them a note's history, and looking at a note's history doesn't take it out of the summary.
 
 **Who wrote this**:
 A note's lines marked by who last changed each, in a column left of the text as a blame view has. Lines next to each other that one change last wrote are a run, and the column names, on each run's first line, who wrote it and when, with the change's label or what its revert did; the member's (one family of colours), the agent's (another, with whose agent it is), or the member's own ("You", grey). A strip at the column's edge is stronger the newer the change. A line is changed by an edit inside it and by being written; lines put in or taken out around it leave it as it was, and a line a revert, undo or redo brings back is still its writer's, while a line it writes anew (a conflict settled by hand) is the reverter's; the revert itself shows in History. Pressing a run opens that change in History, and two commands move to the next or previous run and open its change. The member turns it on for one note at a time, from the command or the note's History panel, and the note keeps it on for them in that browser. Agents ask the same of `note_blame`, named as git names it.

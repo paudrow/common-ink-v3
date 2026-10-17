@@ -151,9 +151,22 @@ test("a tab's menu closes the others, those to its left, those to its right, or 
   await page.getByRole("dialog", { name: "Go to note" }).getByRole("option", { name: /Delta/ }).click();
   await expect(tabs(page)).toHaveText(["Gamma", "Delta"]);
   await choose("Gamma", "Close all");
-  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(0);
-  await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
+  // With no tab left the app is at `/`, where the Dashboard opens in a tab of its own in place of an editor with nothing to show.
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
+  await expect.poll(() => italic(page)).toEqual([true]);
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+
+  // Closing that one leaves the editor area empty, and the next thing opened and closed brings the Dashboard back.
+  await choose("Dashboard", "Close");
+  await expect(page.getByRole("tablist", { name: "Open notes" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+P");
+  await page.getByRole("dialog", { name: "Go to note" }).getByRole("option", { name: /Delta/ }).click();
+  await expect(tabs(page)).toHaveText(["Delta"]);
+  await choose("Delta", "Close");
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
 });
 
 test("⇧⌘P lists the commands, narrows them as you type, and runs the one chosen", async ({ page }) => {
@@ -206,7 +219,7 @@ test("⇧⌘P lists the commands, narrows them as you type, and runs the one cho
 test("⌘P finds notes by title, best match first, and opens the one chosen in its own tab", async ({ page }) => {
   await withNotes(page, "Meeting notes", "Trip planning", "Plan");
   const palette = page.getByRole("dialog", { name: "Go to note" });
-  await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
 
   await page.keyboard.press("ControlOrMeta+P");
   await expect(palette.getByRole("option")).toHaveCount(3);
@@ -217,8 +230,9 @@ test("⌘P finds notes by title, best match first, and opens the one chosen in i
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await expect(palette).toHaveCount(0);
-  await expect(tabs(page)).toHaveText(["Trip planning"]);
-  await expect.poll(() => italic(page)).toEqual([false]);
+  // The Dashboard the app opened to is a preview tab, and a note opened to keep goes beside it.
+  await expect(tabs(page)).toHaveText(["Dashboard", "Trip planning"]);
+  await expect.poll(() => italic(page)).toEqual([true, false]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Trip planning");
   await expect(page).toHaveURL(/\/note\/trip-planning-[a-z0-9]{12}$/);
 
@@ -226,7 +240,7 @@ test("⌘P finds notes by title, best match first, and opens the one chosen in i
   await page.keyboard.press("ControlOrMeta+P");
   await page.keyboard.type("meet");
   await palette.getByRole("option", { name: /Meeting notes/ }).click();
-  await expect(tabs(page)).toHaveText(["Trip planning", "Meeting notes"]);
+  await expect(tabs(page)).toHaveText(["Dashboard", "Trip planning", "Meeting notes"]);
   await expect(page.locator(".cm-line").first()).toHaveText("# Meeting notes");
 });
 
@@ -247,7 +261,7 @@ test("a new note stays listed when a listing asked for before it answers after i
   await page.getByRole("dialog", { name: "Commands" }).getByRole("option", { name: "New note" }).click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toBeFocused();
   await page.keyboard.type("# Plan");
-  await expect(tabs(page)).toHaveText(["Plan"]);
+  await expect(tabs(page)).toHaveText(["Dashboard", "Plan"]);
 
   // The list of every note is drawn once the listing has answered, which is after the note was made.
   await openAllNotes(page);
@@ -500,7 +514,7 @@ const PAGES = [
 
 test("every page opens in a tab at its own address, and is drawn there", async ({ page }) => {
   await withNotes(page, "Alpha");
-  await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
   for (const [path, label] of PAGES) {
     await page.keyboard.press("ControlOrMeta+Shift+P");
     await page.keyboard.type(`Go to ${label}`);
@@ -519,6 +533,12 @@ test("every page opens in a tab at its own address, and is drawn there", async (
 test("a page's tab is a preview until it is kept, is focused and not opened twice, sits in a split, and comes back after a reload", async ({ page }) => {
   await withNotes(page, "Alpha");
   const nav = page.getByRole("navigation", { name: "Modes" });
+
+  // With nothing open the app opens the Dashboard, in a tab like any page's.
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
+  await expect.poll(() => italic(page)).toEqual([true]);
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
 
   await nav.getByRole("link", { name: "Search" }).click();
   await expect(tabs(page)).toHaveText(["Search"]);
@@ -786,6 +806,49 @@ test("a key sequence begun and given up takes no key from a note: a press elsewh
   await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toBe("# Plum\n\nwordsxay");
 });
 
+test("a tab on a page that is no longer there keeps its place in the tab row under the page's name, says so, comes back after a reload, and closes", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.goto("/history");
+  await tab(page, "History").dblclick();
+  await page.goto("/plugins");
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  await page.getByRole("checkbox", { name: "History", exact: true }).setChecked(false);
+  await tab(page, "Plugins").dblclick();
+
+  const main = page.getByRole("main");
+  const gone = async () => {
+    await expect(page).toHaveURL(/\/history$/);
+    await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+    await expect(tab(page, "History")).toHaveAttribute("aria-selected", "true");
+    await expect(main.getByText("There's nothing at this address.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();
+  };
+  await tab(page, "History").click();
+  await gone();
+  await page.reload();
+  await gone();
+  await page.goto("/");
+  await gone();
+
+  await tab(page, "History").getByRole("button", { name: "Close History" }).click();
+  await expect(tabs(page)).toHaveText(["Plugins"]);
+  await expect(page).toHaveURL(/\/plugins$/);
+});
+
+test("a tab kept on a page whose name was never kept is named by its address", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await page.goto("/history");
+  await tab(page, "History").dblclick();
+  await page.goto("/plugins");
+  await page.getByRole("checkbox", { name: "History", exact: true }).setChecked(false);
+  await expect(tabs(page)).toHaveText(["History", "Plugins"]);
+  // As a browser has it that kept its tabs before page names were kept with them.
+  await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) if (key.endsWith(".pageNames")) localStorage.removeItem(key);
+  });
+  await page.reload();
+  await expect(tabs(page)).toHaveText(["/history", "Plugins"]);
+});
 
 test("a page whose plugin is turned off while it is in front leaves the other tabs where they were", async ({ page }) => {
   await withNotes(page, "Alpha", "Beta");
@@ -802,7 +865,7 @@ test("a page whose plugin is turned off while it is in front leaves the other ta
   // It used to take the whole editor area: no tab row, and the open notes out of sight.
   await expect(page.getByRole("main", { name: "Editor" }).getByText("There's nothing at this address.")).toBeVisible();
   await expect(tabs(page)).toHaveCount(3);
-  await expect(tab(page, "Page")).toHaveAttribute("aria-selected", "true");
+  await expect(tab(page, "History")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();
   await tab(page, "Alpha").click();
   await expect(page.locator(".cm-line").first()).toHaveText("# Alpha");

@@ -695,6 +695,8 @@ test("the inspector's bar has an icon for each panel whatever is in front, with 
 
 test("with nothing open Focus and both edges are still there", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
+  // The app opens to the Dashboard, in a tab. With that closed nothing is open.
+  await page.getByRole("button", { name: "Close Dashboard" }).click();
   await expect(page.getByRole("tab")).toHaveCount(0);
   await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Focus" })).toBeVisible();

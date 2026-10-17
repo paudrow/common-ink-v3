@@ -528,6 +528,65 @@ function Row({ todo, now, narrowedTo, tags, app, titleOf, people, picked, comple
   );
 }
 
+/**
+ * A todo's row as {@link Row} draws it, to be read where todos are listed but not changed, as on the
+ * Dashboard: its box, its words, its note's name, and what is set on it, in the same two lines and
+ * the same chips. The whole row is one button, which opens the todo at its line.
+ */
+export function TodoGlance({ todo, now, titleOf, onOpen }: { todo: ListedTodo; now: string; titleOf: TitleOf; onOpen: (todo: ListedTodo) => void }) {
+  const { lead, trailing } = splitTags(todo.words);
+  const due = todo.due && dueLabel(todo.due, now);
+  const repeat = todo.every && (todo.recurs ?? todo.every);
+  const level = todo.importance ? PRIORITY[todo.importance] : null;
+  const title = splitTags(todo.noteTitle).lead || "Untitled";
+  return (
+    <li className="todo-glance">
+      <button type="button" className="todo-row" data-done={todo.done || undefined} title={`Open ${title} at this todo`} onClick={() => onOpen(todo)}>
+        <span className="todo-box" data-checked={todo.done || undefined} aria-hidden="true" />
+        <span className="todo-text">
+          <span className="todo-words">
+            <Words words={lead || todo.words || "Nothing written"} titleOf={titleOf} />
+          </span>
+        </span>
+        <span className="todo-chips">
+          {due && (
+            <span className="todo-chip todo-due" data-due={dueState(todo.due!, now)}>
+              <Icon name="calendar" />
+              {due}
+            </span>
+          )}
+          {repeat && (
+            <span className="todo-chip todo-every" title={everyName(todo.every!)}>
+              <Icon name="repeat" />
+              {repeat}
+            </span>
+          )}
+          {todo.lastDone && <span className="todo-chip todo-done">{doneLabel(todo.lastDone, now)}</span>}
+          {level && (
+            <span className="todo-chip todo-importance" data-level={todo.importance}>
+              <Icon name="flag" />
+              {level}
+            </span>
+          )}
+          {todo.assignees.map((person) => (
+            <span key={whoOf(person)} className="todo-chip todo-assignee" data-member={person.member || undefined}>
+              @{person.name}
+            </span>
+          ))}
+          {trailing.map((name, i) => (
+            <span key={`${i} ${name}`} className="todo-chip todo-tag">
+              #{name}
+            </span>
+          ))}
+        </span>
+        <span className="todo-note">
+          <span className="todo-note-title">{title}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
 interface Props {
   host: PluginHost;
   app: App;

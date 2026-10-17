@@ -67,6 +67,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "shared.read": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the notes its member can see.",
   "shared.upload": "A link is opened by whoever holds it, in a browser, with no token. An agent reads the uploads its member can see.",
   "upload.setPrivate": "A private upload is hidden from every other member, admins too, and that is not a change in history. The member who uploaded it decides it, in the app.",
+  "visit.mark": "How far a member has read the changes in a workspace moves only when the member has seen them and says so, in the app. An agent that marked them read would hide from the member what they haven't looked at. An agent reads how far that is with last_visit.",
   "upload.purge": "Removing an upload from Trash for good removes its bytes, and nothing brings them back: not Trash, and no note that showed it. An agent reads notes other people wrote, so one that was talked into it could destroy files past recovery. An agent moves an upload to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
 };
 
@@ -309,6 +310,30 @@ ${RULE_GRAMMAR}` },
     op: "daily.open",
   },
   {
+    name: "find_daily_note",
+    description: "Your member's daily note for a day, as list_notes gives it, when there is one: nothing is made. The answer's note is null when they have none for that day.",
+    inputSchema: object({ on: day("The day. Left out, it is today in the time zone your member's settings name, or in UTC") }),
+    op: "daily.find",
+  },
+  {
+    name: "list_pins",
+    description: "The notes your member pinned to their dashboard, earliest pinned first, each as list_notes gives it: the ones they can see now that are live, and the archived ones too with includeArchived, which stay pinned and are off the dashboard until unarchived. A pin on a note in Trash, or on one your member can't see now, is not listed and is back when the note is. A pin is the member's alone, and is not written in the note.",
+    inputSchema: object({ includeArchived }),
+    op: "pin.list",
+  },
+  {
+    name: "pin_note",
+    description: "Pin a note to your member's dashboard, or with pinned false take the pin away. Nobody else is told and the note doesn't change, so it isn't a change in history. Made twice, it changes nothing more. Needs only that your member can see the note. A read-only token is refused.",
+    inputSchema: object({ id: noteId, pinned: { type: "boolean", description: "True pins it, false takes the pin away" } }, ["id", "pinned"]),
+    op: "pin.set",
+  },
+  {
+    name: "last_visit",
+    description: "How far your member has read the changes in the workspace: readUntil is the time up to which they marked the changes on their dashboard read, or null when they never have, and now is the server's time. For what they haven't read, call history with from set to readUntil and notAuthors naming your member. Only the member marks changes read.",
+    inputSchema: object({}),
+    op: "visit.read",
+  },
+  {
     name: "rebuild_todos",
     description: "The same as rebuild_links: makes the index behind list_todos and the record behind backlinks again from the notes' text, for every note in the workspace. Notes written before there was an index are indexed without it, the first time todos are listed. While the answer's done is false, call again. Needs the admin role.",
     inputSchema: object({}),
@@ -494,10 +519,11 @@ The arguments beside query are from before it could say them, and narrow it furt
   {
     name: "history",
     description:
-      "Changes across the workspace, newest first, each with its note, author, the lines it added and removed, and a line diff. Narrow it by noteIds (one note, several, or all when left out), authors (from history_authors) and a time range. Pass the answer's next as before for the page after.",
+      "Changes across the workspace, newest first, each with its note, author, the lines it added and removed, and a line diff. Narrow it by noteIds (one note, several, or all when left out), authors (from history_authors), notAuthors to leave some out, and a time range. Pass the answer's next as before for the page after.",
     inputSchema: object({
       noteIds: noteIds("Only these notes"),
       authors: { type: "array", items: author, minItems: 1, description: "Only changes by these members or agents" },
+      notAuthors: { type: "array", items: author, minItems: 1, description: "Leave out changes by these members or agents" },
       by,
       from: time("Changes made at or after this time"),
       to: time("Changes made before this time"),

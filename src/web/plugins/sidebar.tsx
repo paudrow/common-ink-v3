@@ -171,7 +171,7 @@ function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelle
       <a
         href={page.path}
         className="mode"
-        aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) ? "page" : undefined}
+        aria-current={page.path === app.path || app.path.startsWith(`${page.path}/`) || (page.home && app.path === "/") ? "page" : undefined}
         aria-label={labelled ? undefined : page.label}
         title={labelled ? undefined : page.label}
         draggable

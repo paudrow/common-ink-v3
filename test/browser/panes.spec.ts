@@ -76,9 +76,15 @@ test("in a split down, a folder's list, a note and a page are each as tall as th
 
   // A page in the top half, and a short note below.
   await tab(page, "Unsorted").click();
+  // Todos with nothing to do is the short page: the Dashboard is longer than half a window, and scrolls in its pane as the list below does.
+  await modes(page).getByRole("link", { name: "Todos" }).click();
+  await expect(group(page, 1).getByRole("heading", { name: "Todos", level: 1 })).toBeVisible();
+  await expect.poll(() => fit(page, 1)).toEqual(FITS);
   await modes(page).getByRole("link", { name: "Dashboard" }).click();
   await expect(group(page, 1).getByRole("heading", { name: "Dashboard", level: 1 })).toBeVisible();
-  await expect.poll(() => fit(page, 1)).toEqual(FITS);
+  await expect.poll(() => fit(page, 1)).toMatchObject({ below: 0, above: 0, firstLineInside: true });
+  await modes(page).getByRole("link", { name: "Todos" }).click();
+  await expect(group(page, 1).getByRole("heading", { name: "Todos", level: 1 })).toBeVisible();
 
   // The edge dragged down: both still fit, the top one taller than it was.
   const before = (await body(page, 1).boundingBox())!.height;

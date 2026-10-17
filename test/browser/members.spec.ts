@@ -274,13 +274,14 @@ test("switching workspaces changes everything shown: the notes, the open tabs, q
   await switchTo(page, "Ada's workspace");
 
   await expect(workspaceButton(page)).toHaveText("Ada's workspaceEditor");
-  await expect(tabs(page)).toHaveCount(0);
+  // Nothing of the other workspace's is open here: only the Dashboard the app opens to.
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
   await expect(page).toHaveURL(/\/$/);
   await expect(timer).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+P");
   await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option")).toHaveText([/^Team plan/]);
   await page.keyboard.press("Enter");
-  await expect(tabs(page)).toHaveText(["Team plan"]);
+  await expect(tabs(page)).toHaveText(["Dashboard", "Team plan"]);
   await expect(page).toHaveURL(new RegExp(`/note/team-plan-${team.id}$`));
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
@@ -432,7 +433,7 @@ test("two people who share a browser and a workspace don't share the tabs they h
 
   await signInAs(page, graceEmail, "Grace Hopper");
   await expect(workspaceButton(page)).toHaveText("Ada's workspaceEditor");
-  await expect(tabs(page)).toHaveCount(0);
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Plan"]);
 

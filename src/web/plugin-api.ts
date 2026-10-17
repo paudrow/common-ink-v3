@@ -199,10 +199,12 @@ export type KeptFromPerform =
 /**
  * The operations `host.perform` takes only from Common Ink's own plugins: everything of the
  * member's data sources, which are theirs and nobody else's, and everything of the workspace's
- * uploads. A plugin that isn't Common Ink's own is refused them, and so can't copy a member's
- * contacts or calendar into a note or a frame, or list, move or remove a file.
+ * uploads, and what the member keeps for their own dashboard: their pins, and how far they have read
+ * the changes. A plugin that isn't Common Ink's own is refused them, and so can't copy a member's
+ * contacts or calendar into a note or a frame, list, move or remove a file, or mark as read what
+ * the member hasn't seen.
  */
-export type OwnOnly = `source.${string}` | `event.${string}` | `contact.${string}` | `record.${string}` | `upload.${string}`;
+export type OwnOnly = `source.${string}` | `event.${string}` | `contact.${string}` | `record.${string}` | `upload.${string}` | `pin.${string}` | `visit.${string}`;
 
 /** What a grant is on: one note, one folder or one upload. An upload has no link of its own. */
 export type SharedItem = { noteId: string } | { folderId: string } | { uploadId: string };
@@ -434,6 +436,13 @@ export interface Slots {
      */
     open?: (tab: Opened, options: { preview: boolean; background?: boolean }) => void;
     /**
+     * What it has in front whatever the address says, such as the tab that was last in front, or null
+     * with nothing open. The app asks it at an address that names no page, to know a tab kept on a
+     * page that has gone since. At `/` the editor area itself goes to it, and with nothing to go to
+     * opens the `home` page, as the Tabs plugin does in a tab.
+     */
+    returnsTo?: () => Opened | null;
+    /**
      * Asked to open a note, a folder's list or a page in a part of the editor area of its own,
      * right of or under what is in front, and to keep it there. An editor area that has this is
      * what `app.openBeside` goes to, and what makes a page's link and a folder's row in the sidebar
@@ -469,8 +478,9 @@ export interface Slots {
    * it reads the rest from `app.path`. One that is `transient` only leads somewhere else, as Today
    * leads to the day's note with `app.show`: it is never a tab, and is drawn in place of the editor
    * area for the moment it takes to find where to go, with the editor area kept as it is underneath.
+   * One with `home` is where the app goes from `/` when the editor area has nothing to return to: it is opened as any page is, a tab where there are tabs.
    */
-  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; component: View };
+  page: { id: string; path: `/${string}`; label: string; icon?: IconName; nav?: "primary" | "more" | "menu"; order?: number; transient?: boolean; home?: boolean; component: View };
   /**
    * An item in the bottom bar: one thin line along the foot of the window for small things to
    * glance at, such as a count of the open note's words. `side` is the end it sits at, the left
@@ -846,7 +856,7 @@ export interface Notice {
   stays?: boolean;
 }
 
-export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav">;
+export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav" | "home">;
 
 /** The app at one moment: what is open, and what can be done about it. */
 export interface App {

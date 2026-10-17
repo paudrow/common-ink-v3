@@ -294,8 +294,18 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const routePage = route.kind === "page" ? (contributed.views.page.find((p) => p.path === route.path) ?? contributed.views.page.find((p) => route.path.startsWith(`${p.path}/`))) : undefined;
   /** A page that only leads somewhere else is no tab: it has the editor area's place while it finds where to go. */
   const passing = routePage?.transient ? routePage : undefined;
-  const routePageId = passing ? undefined : routePage?.id;
   const address = place.path + place.query;
+  const editorArea = contributed.views.editor.at(-1);
+  /**
+   * The tab the editor area has in front at an address that names no page: one kept on a page that
+   * has gone since, as when its plugin was turned off. It is still that tab, so it is drawn in its
+   * row under that page's name and can be closed there.
+   */
+  const lostPageId = () => {
+    const kept = route.kind === "page" ? editorArea?.returnsTo?.() : null;
+    return kept?.kind === "page" && kept.path === address ? kept.id : undefined;
+  };
+  const routePageId = passing ? undefined : (routePage?.id ?? lostPageId());
   /** An address no page is at is opened like one, under its own path as the id no page has, so it says so in a tab beside the ones that are open and never in their place. */
   const nowhere = route.kind === "page" && !routePage && keepsATab(place.path);
   const opened = useMemo<Opened | null>(
@@ -759,7 +769,6 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   };
   appNow.current = app;
   const page = route.kind === "page" ? contributed.views.page.find((p) => p.path === route.path) : undefined;
-  const editorArea = contributed.views.editor.at(-1);
   /** The bottom bar's items, lowest order first. Sorting keeps those of one order as the plugins added them. */
   const bar = useMemo(() => [...contributed.views.bar].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.bar]);
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay?.id);
@@ -877,6 +886,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       </div>
     );
   };
+  const home = contributed.views.page.find((p) => p.home);
   const empty = <p className="notice">Pick a note, or start a new one.</p>;
   /**
    * What the address names alone, for when no plugin fills the editor area or the one that does
@@ -891,7 +901,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           </button>
         </div>
         <div className="group-body">
-          {routeNoteId ? renderNote(routeNoteId) : routeFolderId ? renderFolder(routeFolderId) : opened?.kind === "page" ? renderPage(opened.id, opened.path) : renderFolder(ALL_NOTES)}
+          {routeNoteId ? renderNote(routeNoteId) : routeFolderId ? renderFolder(routeFolderId) : opened?.kind === "page" ? renderPage(opened.id, opened.path) : home ? renderPage(home.id, "/") : renderFolder(ALL_NOTES)}
         </div>
       </section>
     </div>

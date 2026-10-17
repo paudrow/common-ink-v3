@@ -27,6 +27,7 @@ export const REMOVALS = [
   // A todo completed elsewhere and filed on this note stays completed, filed nowhere.
   `UPDATE completions SET daily_note_id = NULL, daily_revision = NULL, daily_at = NULL WHERE daily_note_id = ?1 AND ${DUE}`,
   `DELETE FROM daily_notes WHERE note_id = ?1 AND ${DUE}`,
+  `DELETE FROM pins WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM grants WHERE note_id = ?1 AND ${DUE}`,
   `DELETE FROM changes WHERE note_id = ?1 AND ${DUE}`,
   "DELETE FROM notes WHERE id = ?1 AND state = 'trashed' AND (?2 IS NULL OR state_at <= ?2)",

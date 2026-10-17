@@ -144,6 +144,10 @@ async function world(more = ""): Promise<World> {
   for (const name of FOLDERS) marks[name] = [folders[name], `${name}-folder`];
   marks.secret.push(zed.agent.id, "Zed-agent");
 
+  // A pin of everyone's on every note, written straight into the record: as one made while they could see the note, and left since.
+  const everyone = [ada, eve, ed, vera, ned, gus!.actor, vic!.actor, nia!.actor, val!.actor];
+  await env.DB.batch(everyone.flatMap((who) => NOTES.map((name) => env.DB.prepare("INSERT INTO pins (workspace_id, person_id, note_id, pinned_at) VALUES (?, ?, ?, 0)").bind(ada.workspaceId, who.personId, notes[name]))));
+
   return {
     actors: {
       "Ada, an admin": ada,
@@ -257,6 +261,12 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "todo.history": { on: "note", needs: "V", trashed: "opens", args: (id, _, note) => ({ id, revision: note === "secret" ? 2 : 1, line: 3, text: todoOf(note) }) },
   "todos.rebuild": { on: "workspace", who: ADMINS, args: () => ({}) },
   "daily.open": { on: "workspace", who: ["admin", "editor"], args: () => ({ on: "2026-10-11" }) },
+  "daily.find": { on: "workspace", who: MEMBERS, args: () => ({ on: "2026-10-11" }) },
+  // Everyone here has a pin on every note, the ones they can't see too: see `world`.
+  "pin.list": { on: "everything", covers: "live", archived: true, args: () => ({}) },
+  "pin.set": { on: "note", needs: "V", trashed: "refused", args: (id) => ({ id, pinned: true }) },
+  "visit.read": { on: "workspace", who: EVERYONE, args: () => ({}) },
+  "visit.mark": { on: "workspace", who: EVERYONE, args: () => ({ until: 1 }) },
   "folder.list": { on: "everything", covers: "live", args: () => ({}) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
@@ -352,9 +362,9 @@ const MAKER: Partial<Record<NoteName, ActorName>> = { secret: "Eve, an editor wh
 const madeBy = (name: ActorName, note: NoteName) => (MAKER[note] ?? "Ada, an admin") === name;
 const sharesFolder = (name: ActorName, folder: FolderName) => ACTORS[name].shares && personFolderLevelOf(name, folder) === "E";
 /** What a read-only token is refused whoever its person is, beyond what needs edit of a note or folder. */
-const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer"];
-/** What answers from the asker's own data sources, which are in no folder. */
-const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "record.refer", "record.read", "record.notes"];
+const CHANGES: readonly OpType[] = ["history.revertAuthor", "history.revert", "links.rebuild", "todos.rebuild", "folder.delete", "daily.open", "event.update", "event.create", "contact.update", "contact.photo", "contact.create", "record.refer", "pin.set"];
+/** What answers from what is the asker's own and in no folder: their data sources, and how far they have read. */
+const OWN: readonly OpType[] = ["source.list", "event.list", "event.update", "event.create", "contact.list", "contact.update", "contact.photo", "contact.create", "record.refer", "record.read", "record.notes", "visit.read"];
 const AGENTS = [
   "their agent",
   "their read-only agent",
@@ -489,7 +499,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
             if (type === "member.leave") continue;
             // Who is in the workspace is told to whoever sees all of it.
             // A daily note is in a folder at the top of the workspace, or makes one there: a member's, and their agent's when it sees all of it.
-            if ((type === "member.list" || type === "daily.open" || OWN.includes(type)) && within) allowed = false;
+            if ((type === "member.list" || type === "daily.open" || type === "daily.find" || OWN.includes(type)) && within) allowed = false;
             await run(type, type, plan.args(w), allowed ? "done" : "forbidden", true);
           } else {
             await run(type, type, plan.args(w), "forbidden");
@@ -497,7 +507,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         }
         // The listings again, each narrowed the ways it can be: by note, by author, by time. A filter that names a hidden note finds nothing of it.
         const every = Object.values(w.notes);
-        const narrowed: Args<"history.list">[] = [{ noteIds: every }, { noteIds: [w.notes.secret, w.notes.vpriv] }, { authors: [{ kind: "agent", id: w.secretAgent.id }] }, { from: 0, to: Date.now() + 86_400_000, limit: 100 }, { noteIds: every, diffs: false, limit: 1 }];
+        const narrowed: Args<"history.list">[] = [{ noteIds: every }, { noteIds: [w.notes.secret, w.notes.vpriv] }, { authors: [{ kind: "agent", id: w.secretAgent.id }] }, { from: 0, to: Date.now() + 86_400_000, limit: 100 }, { noteIds: every, diffs: false, limit: 1 }, { notAuthors: [{ kind: "member", id: MISSING }], limit: 100 }];
         for (const [i, args] of narrowed.entries()) await run(`history.list narrowed ${i}`, "history.list", args, "done");
         for (const [i, { diffs: _, ...args }] of narrowed.entries()) await run(`history.summary narrowed ${i}`, "history.summary", args, "done");
         // A note's line totals and its count of changes are only ever of a note the actor can see.
@@ -566,7 +576,7 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
         const beyond = listings.flatMap(({ key, covers, said }) => seen.filter((note) => !COVERED[covers].includes(STATE_OF[note])).flatMap((note) => w.marks[note].filter((mark) => said.includes(mark)).map((mark) => `${key}: ${note}: ${mark}`)));
         expect(beyond).toEqual([]);
         // And each one that names notes names every note it covers, so an include that did nothing would fail here.
-        const NAMES: readonly string[] = ["note.list", "todo.list", "todo.filters", "tag.list", "search", "trash.list", "history.summary", "history.list", "upload.list", "upload.trashed"];
+        const NAMES: readonly string[] = ["note.list", "todo.list", "todo.filters", "tag.list", "search", "trash.list", "history.summary", "history.list", "upload.list", "upload.trashed", "pin.list"];
         const lacking = listings
           .filter(({ key }) => NAMES.includes(key.replace(/ with archived( only)?$/, "")))
           .flatMap(({ key, covers, said }) => seen.filter((note) => COVERED[covers].includes(STATE_OF[note]) && !w.marks[note].some((mark) => said.includes(mark))).map((note) => `${key}: ${note}`));

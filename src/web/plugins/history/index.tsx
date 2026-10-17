@@ -130,6 +130,9 @@ function Panel({ host, app, about, places, toggles, asked }: ViewProps & { host:
   );
 }
 
+/** The day another page asked History to start from, as the dashboard does for the changes since a member's last visit. */
+const fromOf = (state: unknown) => (typeof state === "object" && state !== null && "from" in state && typeof state.from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(state.from) ? state.from : null);
+
 export const history: Plugin = {
   id: "history",
   name: "History",

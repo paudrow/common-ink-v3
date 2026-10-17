@@ -975,4 +975,42 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
     const said = claude.said.join("\n") + neverSaid + refusals[0]![1];
     expect(marks.filter((mark) => said.includes(mark))).toEqual([]);
   });
+
+  it("is shown its member's dashboard only as far as its folders go: pins inside, changes inside, and nothing of the day or of what they have read", async () => {
+    const w = await world();
+    for (const id of [w.inside.id, w.outside.id, w.loose.id]) await perform(env.DB, w.ada, { type: "pin.set", id, pinned: true });
+    await perform(env.DB, w.ada, { type: "visit.mark", until: Date.now() });
+    const pinned = async () => idsOf(await perform(env.DB, w.ada, { type: "pin.list" }));
+    const all = await pinned();
+    expect(all).toHaveLength(3);
+
+    const claude = await asAgent(w.limited.token);
+    expect(idsOf(await claude.json<Note[]>("list_pins", { includeArchived: true }))).toEqual([w.inside.id]);
+    // A pin on a note outside is neither made nor taken away, and both answer as for a note that never was.
+    for (const id of [w.outside.id, w.loose.id]) expect(await claude.call("pin_note", { id, pinned: true })).toEqual(NO_NOTE);
+    expect(await claude.call("pin_note", { id: MISSING, pinned: true })).toEqual(NO_NOTE);
+    const unpinned = (id: string) => claude.call("pin_note", { id, pinned: false });
+    expect((await unpinned(w.outside.id)).text.replaceAll(w.outside.id, MISSING)).toBe((await unpinned(MISSING)).text);
+    await unpinned(w.loose.id);
+    expect(await pinned(), "the member's pins outside the agent's folders are as they were").toEqual(all);
+    // Inside, it pins and unpins for its member as an agent that sees everything does.
+    await unpinned(w.inside.id);
+    expect(await pinned()).toEqual(all.filter((id) => id !== w.inside.id));
+    await claude.json("pin_note", { id: w.deep.id, pinned: true });
+    expect(idsOf(await claude.json<Note[]>("list_pins"))).toEqual([w.deep.id]);
+
+    // How far the member has read, and their daily note, are theirs and in no folder.
+    expect(await claude.call("last_visit")).toEqual({ isError: true, text: "forbidden: An agent limited to folders can't visit.read" });
+    expect(await claude.call("find_daily_note")).toEqual({ isError: true, text: "forbidden: An agent limited to folders can't daily.find" });
+    // The summary's own question, changes by anyone but the member, answers with the notes inside alone.
+    const others = await claude.json<{ changes: { noteId: string }[] }>("history", { notAuthors: [{ kind: "member", id: w.ada.personId }], diffs: false });
+    expect([...new Set(others.changes.map((c) => c.noteId))]).toEqual([w.deep.id]);
+    // The agent that reaches everything is the control: all of it was there to be told.
+    const scribe = await asAgent(w.scribe.token);
+    expect(await scribe.json<Note[]>("list_pins")).toHaveLength(3);
+    expect(await scribe.json<{ readUntil: number }>("last_visit")).toMatchObject({ readUntil: expect.any(Number) });
+
+    const said = claude.said.join("\n");
+    expect(w.marks.filter((mark) => said.includes(mark))).toEqual([]);
+  });
 });

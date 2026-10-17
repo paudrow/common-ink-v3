@@ -48,6 +48,7 @@ import {
   type SharedNote,
   type TrashedNote,
   type TodoSort,
+  type Visit,
   type Written,
 } from "./protocol.ts";
 import { removing, forgetRemoved } from "./purge.ts";
@@ -141,7 +142,7 @@ type Handler<K extends OpType> = {
   members?: true;
   /** Set when it changes something though it needs no more than `view` of the workspace, so a read-only token is refused it. */
   changes?: true;
-  /** Set when it answers from the asker's own data sources, which are in no folder: an agent limited to folders is refused it. */
+  /** Set when it answers from what is the asker's own and in no folder, as their data sources are and how far they have read: an agent limited to folders is refused it. */
   own?: true;
   run: (ctx: Context, op: Extract<Op, { type: K }>) => Promise<Results[K]>;
 };
@@ -1305,6 +1306,12 @@ const asker = (ctx: Context) => ({ db: ctx.db, sources: ctx.sources, personId: c
 
 const asking = (ctx: Context): Asking => ({ db: ctx.db, workspaceId: ctx.workspaceId, personId: ctx.personId!, now: ctx.now });
 
+/** How far the person asking has read the changes in the workspace. */
+async function visit(ctx: Context): Promise<Visit> {
+  const row = await ctx.db.prepare("SELECT read_until FROM visits WHERE workspace_id = ? AND person_id = ?").bind(ctx.workspaceId, ctx.personId).first<{ read_until: number }>();
+  return { readUntil: row?.read_until ?? null, now: ctx.now };
+}
+
 /** Every change after `revision`: the note goes back to how it was then. */
 const revertBy =
   (author: AuthorRef): Choose =>
@@ -1792,6 +1799,66 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       }),
   },
 
+  "daily.find": {
+    needs: "view",
+    members: true,
+    async run(ctx, op) {
+      const { note } = await usableDaily(ctx, (await completing(ctx, op.on)).day);
+      return { note: note && itemLevel(ctx.sight, note) !== "none" ? toSummary(ctx, note) : null };
+    },
+  },
+
+  // A read, and only that: what the asker can't see now is left out here and kept, so a pin is there again when the note is.
+  "pin.list": {
+    needs: "view",
+    async run(ctx, op) {
+      const { results } = await ctx.db
+        .prepare(`SELECT ${SUMMARY_COLUMNS} JOIN pins k ON k.note_id = n.id AND k.person_id = ?2 WHERE n.workspace_id = ?1 AND ${SEEN("n", "?3", listing(op.includeArchived))} ORDER BY k.pinned_at, n.id`)
+        .bind(ctx.workspaceId, ctx.personId, ctx.sight.bind)
+        .all<SummaryRow>();
+      return results.map((row) => toSummary(ctx, row));
+    },
+  },
+
+  "pin.set": {
+    needs: "view",
+    changes: true,
+    async run(ctx, op) {
+      if (op.pinned) {
+        const note = await loadNote(ctx, op.id, "view", "refused");
+        await ctx.db.prepare("INSERT INTO pins (workspace_id, person_id, note_id, pinned_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING").bind(ctx.workspaceId, ctx.personId, note.id, ctx.now).run();
+      } else {
+        // Asked of a note they can't see, or of none, it answers the same: there was no pin of theirs to take.
+        // And only a note they can see: an agent limited to folders takes no pin of its member's from a note outside them.
+        await ctx.db
+          .prepare(`DELETE FROM pins WHERE workspace_id = ?1 AND person_id = ?2 AND note_id = ?3 AND EXISTS (SELECT 1 FROM notes n WHERE n.id = ?3 AND ${SEEN("n", "?4", "any")})`)
+          .bind(ctx.workspaceId, ctx.personId, op.id, ctx.sight.bind)
+          .run();
+      }
+      return { id: op.id, pinned: op.pinned };
+    },
+  },
+
+  // It is the member's own and in no folder, so an agent limited to folders isn't told it.
+  "visit.read": {
+    needs: "view",
+    own: true,
+    run: (ctx) => visit(ctx),
+  },
+
+  // Only the member says what they have read, so an agent can't move it for them: see NOT_FOR_AGENTS.
+  "visit.mark": {
+    needs: "view",
+    by: "member",
+    async run(ctx, op) {
+      await ctx.db
+        .prepare("INSERT INTO visits (workspace_id, person_id, read_until) VALUES (?1, ?2, ?3) ON CONFLICT (workspace_id, person_id) DO UPDATE SET read_until = MAX(read_until, excluded.read_until)")
+        .bind(ctx.workspaceId, ctx.personId, Math.min(op.until, ctx.now))
+        .run();
+      return visit(ctx);
+    },
+  },
+
   "todos.rebuild": rebuild,
 
   "note.write": {
@@ -2020,6 +2087,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
              WHERE n.workspace_id = ?1 AND ${SEEN("n", "?10", op.noteIds ? "any" : "kept")}
                AND (?2 IS NULL OR c.note_id IN (SELECT value FROM json_each(?2)))
                AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
+               AND (?12 IS NULL OR NOT EXISTS (SELECT 1 FROM json_each(?12) j WHERE json_extract(j.value, '$.kind') = c.author_kind AND json_extract(j.value, '$.id') = c.author_id))
                AND (?4 IS NULL OR c.created_at >= ?4)
                AND (?5 IS NULL OR c.created_at < ?5)
                AND (?6 IS NULL OR (c.created_at, c.note_id, c.revision) < (?6, ?7, ?8))
@@ -2039,6 +2107,7 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
             op.limit + 1,
             ctx.sight.bind,
             kindOf(op.by),
+            op.notAuthors ? JSON.stringify(op.notAuthors) : null,
           )
           .all<ChangeRow & { title: string }>();
       let { results } = await read();

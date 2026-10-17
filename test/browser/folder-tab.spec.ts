@@ -413,8 +413,8 @@ test("showing less of a long note or collapsing it from its foot brings the card
 test("a new note goes in the folder whose list is in front, or the open note's folder, or Unsorted", async ({ page }) => {
   await withFolders(page);
 
-  // With nothing in front it goes in Unsorted.
-  await expect(page.getByText("Pick a note, or start a new one.")).toBeVisible();
+  // With nothing in front, as at the Dashboard, it goes in Unsorted.
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
   await run(page, "New note");
   await expect(editor(page)).toBeFocused();
   await expect(folderRow(page, "Unsorted")).toHaveAccessibleDescription("1");

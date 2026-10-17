@@ -1,6 +1,7 @@
 import { EditorView, ViewPlugin } from "@codemirror/view";
-import { locateTodo, type ListedTodo, type Plugin } from "../../plugin-api.ts";
+import type { Plugin } from "../../plugin-api.ts";
 import { editorKey, redraw } from "../lib/live.ts";
+import { todoOpener } from "../lib/openTodo.ts";
 import { tickedIn, todoChips, untick } from "./chips.ts";
 import { CHANGED, completed, refused, takeBack } from "./completed.ts";
 import { dueOffers, today } from "./dates.ts";
@@ -40,33 +41,11 @@ export const todos: Plugin = {
     const editors = new Map<string, EditorView>();
     /** The editors there are now, a reading of a note among them. */
     const alive = new Set<EditorView>();
-    /** The todo to put the cursor on once its note's editor is there. */
-    let going: Pick<ListedTodo, "noteId" | "line" | "text"> | null = null;
-
     const redrawAll = () => {
       for (const view of editors.values()) view.dispatch({ effects: redraw.of(null) });
     };
 
-    const arrive = (view: EditorView) => {
-      const at = going;
-      going = null;
-      if (!at) return;
-      const { doc } = view.state;
-      // The line it was listed on, when the note has since been written another way.
-      const line = locateTodo(doc.toString(), at)?.line ?? Math.min(at.line, doc.lines - 1);
-      const { from, to } = doc.line(line + 1);
-      view.dispatch({ selection: { anchor: to }, effects: EditorView.scrollIntoView(from, { y: "center" }) });
-    };
-
-    /** Opens a todo's note with the cursor on its line: in front, or in a split beside it, whose editor arrives there once it is made. */
-    const open = (todo: ListedTodo, beside?: boolean) => {
-      going = { noteId: todo.noteId, line: todo.line, text: todo.text };
-      const app = host.app();
-      if (beside && app.openBeside) return app.openBeside({ kind: "note", id: todo.noteId }, "right");
-      app.openNote(todo.noteId, { focus: true });
-      const view = editors.get(todo.noteId);
-      if (view) arrive(view);
-    };
+    const open = todoOpener(host);
 
     host.views.register("page", { id: "todos", path: "/todos", label: "Todos", icon: "todos", nav: "primary", order: 30, component: ({ app }) => <TodosPage host={host} app={app} onOpen={open} /> });
 
@@ -97,8 +76,6 @@ export const todos: Plugin = {
           const key = editorKey(editor);
           editors.set(key, view);
           alive.add(view);
-          // After the editor has been given the cursor, which a note that is opened is.
-          if (!editor.reading && going?.noteId === editor.noteId) setTimeout(() => going?.noteId === editor.noteId && editors.get(editor.noteId) === view && arrive(view));
           return {
             destroy() {
               alive.delete(view);

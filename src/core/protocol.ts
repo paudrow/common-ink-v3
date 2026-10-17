@@ -323,6 +323,8 @@ export const Op = z.discriminatedUnion("type", [
     /** One note, several, or every note in the workspace when left out. */
     noteIds: z.array(Id).min(1).max(200).optional(),
     authors: z.array(AuthorRef).min(1).max(50).optional(),
+    /** Leaves out the changes by these authors, such as the asker's own. */
+    notAuthors: z.array(AuthorRef).min(1).max(50).optional(),
     by: By.optional(),
     /** Changes made at or after this time, and before `to`. */
     from: Time.optional(),
@@ -443,6 +445,38 @@ export const Op = z.discriminatedUnion("type", [
    * isn't there. Left out, `on` is today in the time zone their settings name, or in UTC.
    */
   z.object({ type: z.literal("daily.open"), on: Day.optional() }),
+  /**
+   * The daily note for the day `on` of whoever asks, or of the member an agent acts for, when there
+   * is one: nothing is made. `on` is read as daily.open reads it.
+   */
+  z.object({ type: z.literal("daily.find"), on: Day.optional() }),
+  /**
+   * The notes whoever asks has pinned to their dashboard, or the member an agent acts for, earliest
+   * pinned first: those they can see now that are live, and with `includeArchived` the archived ones
+   * too, which are pinned still and off the dashboard until unarchived. A pin on a note they can't
+   * see, or one in Trash, is not listed and is there again when the note is. A pin is theirs alone
+   * and is not in the note.
+   */
+  z.object({ type: z.literal("pin.list"), includeArchived: IncludeArchived }),
+  /**
+   * Pins a note to the dashboard of whoever asks, or of the member an agent acts for, or with
+   * `pinned` false takes the pin away. Nobody else is told, and the note doesn't change. Done twice,
+   * it changes nothing more.
+   */
+  z.object({ type: z.literal("pin.set"), id: Id, pinned: z.boolean() }),
+  /**
+   * How far whoever asks has read the changes their dashboard sums up, or the member an agent acts
+   * for. `readUntil` is the time they last marked them read up to, or null when they never have.
+   * `now` is the server's time, which is what visit.mark is handed. The changes since are
+   * history.list's, from `readUntil`.
+   */
+  z.object({ type: z.literal("visit.read") }),
+  /**
+   * Says the member has read the changes made before `until`, which is the `now` of the visit.read
+   * the summary they were shown was made from. It only moves forward: an earlier time than the one
+   * kept, as from a tab left open, changes nothing, and a time yet to come is read as now.
+   */
+  z.object({ type: z.literal("visit.mark"), until: Time.min(1) }),
   /** The same operation as links.rebuild, under the name of the other record it makes again. */
   z.object({ type: z.literal("todos.rebuild") }),
   /**
@@ -1178,6 +1212,14 @@ export interface AuthorReverted {
   next: string | null;
 }
 
+/** How far one person has read the changes in one workspace. */
+export interface Visit {
+  /** Every change made before this is one they marked read. Null until they first do. */
+  readUntil: number | null;
+  /** The server's time as it answered. */
+  now: number;
+}
+
 /** One member's settings in one workspace, as they wrote them. */
 export interface StoredSettings {
   /** A JSON object holding only what differs from the defaults. `{}` until the member changes something. */
@@ -1210,6 +1252,11 @@ export interface Results {
   "todo.set": Written;
   "todo.history": { completions: Completion[] };
   "daily.open": Note;
+  "daily.find": { note: NoteSummary | null };
+  "pin.list": NoteSummary[];
+  "pin.set": { id: string; pinned: boolean };
+  "visit.read": Visit;
+  "visit.mark": Visit;
   "todos.rebuild": Rebuilt;
   "note.history": ChangeEntry[];
   "note.move": Note;

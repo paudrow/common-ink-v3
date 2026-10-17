@@ -137,7 +137,7 @@ test("a folder is renamed in place", async ({ page }) => {
   await expect(tree(page).getByRole("treeitem")).toHaveText([/^All notes/, /^Unsorted/, /^Work/]);
 });
 
-test("More expands and collapses Contacts, Uploads, and History, and a mode not built yet names what builds it", async ({ page }) => {
+test("More expands and collapses Contacts, Uploads, and History, and each mode is a page", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const modes = page.getByRole("navigation", { name: "Modes" });
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
@@ -158,7 +158,8 @@ test("More expands and collapses Contacts, Uploads, and History, and a mode not 
   await expect(more).toHaveAttribute("aria-expanded", "false");
   await expect(modes.getByRole("link")).toHaveText(["Dashboard", "Search", "Todos", "Today", "Calendar"]);
   await modes.getByRole("link", { name: "Dashboard" }).click();
-  await expect(editorPane(page).locator(".mode-view")).toHaveText("DashboardDashboard arrives with #23.");
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(editorPane(page).getByRole("heading", { level: 1 })).toHaveText("Dashboard");
 });
 
 test("More opens by itself when a mode under it is reached another way, and stays closed once closed by hand until the next time", async ({ page }) => {

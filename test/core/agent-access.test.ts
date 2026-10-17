@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, and removing a note for good are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
-type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "contact.update" | "contact.photo" | "contact.create">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, and marking changes read are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts and test/core/dashboard.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts checks. */
+type ToolOp = Exclude<OpType, "note.purge" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -54,6 +54,10 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "todo.history": { id: noteId, revision: 2, line: 0, text: "- [ ] not there" },
   "todos.rebuild": {},
   "daily.open": {},
+  "daily.find": {},
+  "pin.list": {},
+  "pin.set": { id: noteId, pinned: true },
+  "visit.read": {},
   "note.history": { id: noteId },
   "note.move": { id: noteId, folderId },
   "note.label": { id: noteId, revision: 1, name: "Start" },
@@ -197,7 +201,7 @@ describe("an agent's access is its member's", () => {
     const herFolder = await perform(env.DB, grace, { type: "folder.create", name: "Hers" });
     const ops = everyOp(hers.id, herFolder.id);
 
-    for (const type of ["note.read", "note.write", "note.history", "note.move", "note.label", "note.revert", "note.revertChanges", "note.diff", "note.undo", "note.redo", "folder.rename"] as const) {
+    for (const type of ["note.read", "note.write", "note.history", "note.move", "note.label", "note.revert", "note.revertChanges", "note.diff", "note.undo", "note.redo", "folder.rename", "pin.set"] as const) {
       const name = TOOLS.find((t) => t.op === type)!.name;
       expect((await tool(token, name, { workspace, ...ops[type] })).text, name).toMatch(/^not_found: No such (note|folder)$/);
       expect((await tool(token, name, { workspace: grace.workspaceId, ...ops[type] })).text, name).toBe("not_found: No such workspace");

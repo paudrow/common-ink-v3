@@ -57,6 +57,11 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   todo-history ID --revision N --line N --text LINE
                                       each time a repeating todo was checked off, and by whom
   daily [--on DAY]                    your daily note for a day, made if it isn't there
+  daily-find [--on DAY]               your daily note for a day when there is one; nothing is made
+  pins [--archived true]              the notes pinned to your member's dashboard
+  pin ID                              pin a note to your member's dashboard
+  unpin ID                            take the pin away
+  visit                               how far your member has read the changes in the workspace
   todos-rebuild                       the same as links-rebuild
   move ID --folder ID                 put a note in another folder
   uploads [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--archived true]
@@ -86,7 +91,8 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   blame ID                            who wrote each line of a note: the change that last wrote or edited it
   changed [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT]
                                       the notes that changed, latest first, with the lines added and removed in each
-  changes [--note ID,ID] [--author KIND:ID] [--by people|agents] [--from TIME] [--to TIME] [--limit N] [--before NEXT] [--diffs false]
+  changes [--note ID,ID] [--author KIND:ID] [--not-author KIND:ID] [--by people|agents] [--from TIME] [--to TIME]
+          [--limit N] [--before NEXT] [--diffs false]
                                       changes across the workspace, newest first, with diffs
   authors                             everyone who has changed a note
   diffs ID:N,N [ID:N,N ...]           what a selection of changes did, note by note: changes that follow one another as one diff
@@ -503,6 +509,22 @@ export async function run(argv: string[], io: Io): Promise<number> {
         tool = "daily_note";
         args = given({ on: ["on"] });
         break;
+      case "daily-find":
+        tool = "find_daily_note";
+        args = given({ on: ["on"] });
+        break;
+      case "pins":
+        tool = "list_pins";
+        args = given({ includeArchived: ["archived", truth] });
+        break;
+      case "pin":
+      case "unpin":
+        tool = "pin_note";
+        args = { id: needId(), pinned: command === "pin" };
+        break;
+      case "visit":
+        tool = "last_visit";
+        break;
       case "todos-rebuild":
         tool = "rebuild_todos";
         break;
@@ -581,6 +603,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         args = given({
           noteIds: ["note", ids],
           authors: ["author", (_, value) => [authorRef(value)]],
+          notAuthors: ["not-author", (_, value) => [authorRef(value)]],
           by: ["by"],
           from: ["from", time],
           to: ["to", time],
