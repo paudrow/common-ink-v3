@@ -419,6 +419,10 @@ A list a plugin offers at the cursor while the member types after a trigger. The
 Something a plugin adds to the editor of every note, such as keys or a status line. It applies to notes already open, and not to the settings JSON.
 _Avoid_: Extension on its own, which reads as plugin
 
+**Night shift**:
+A built-in plugin, off until a member turns it on, that draws the whole app in red light on black instead of the light or dark theme, which it sits on top of: turning it off brings back whichever the member had. Its colors have no blue, and green only as far as its strength lets in, from deep red to warm amber. It is turned on and off by hand with the command Toggle night shift and its key. It can also tint pictures, videos and embeds red, off unless the member asks for it.
+_Avoid_: Dark mode, red mode
+
 **Plugin permission**:
 The capabilities a plugin has in a workspace. One set per plugin applies to every member. An admin sets them and can lock them. A non-admin's yes becomes a request, and the capability stays off until an admin approves. This is not settings.
 _Avoid_: Setting

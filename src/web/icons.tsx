@@ -162,6 +162,7 @@ const PATHS = {
     </>
   ),
   text: <path d="M3 4.5h10M3 8h10M3 11.5h6" />,
+  moon: <path d="M13.25 9.6A5.75 5.75 0 0 1 6.4 2.75a5.75 5.75 0 1 0 6.85 6.85Z" />,
   numbers: <path d="M3 4.5 4 4v4M6.5 4h7M6.5 8h7M6.5 12h7M3 10.5h1.25v1.5H3" />,
   play: (
     <>
