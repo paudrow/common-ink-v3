@@ -298,6 +298,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "note.backlinks": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.history": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.diff": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id, revision: 1 }) },
+  "note.blame": { on: "note", needs: "V", trashed: "opens", args: (id) => ({ id }) },
   "note.move": { on: "note", needs: "E", trashed: "refused", also: "folder", args: (id, w, note) => ({ id, folderId: w.folders[FOLDER_OF[note]] }) },
   // Archiving sets the state the note already has, and trashing and restoring are each followed by `settle`.
   "note.archive": { on: "note", needs: "E", trashed: "refused", args: (id, _, note) => ({ id, archived: STATE_OF[note] === "archived" }) },
@@ -336,6 +337,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "folder.list": { on: "everything", covers: "live", args: () => ({}) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
+  "folder.move": { on: "folder", needs: "E", args: (id, w) => ({ id, parentId: id === w.folders.Deep ? w.folders.Team : null }) },
   "folder.delete": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },
   "settings.read": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "settings.write": { on: "workspace", who: EVERYONE, args: () => ({ text: "{}", baseRevision: 99 }) },
@@ -588,6 +590,8 @@ describe("every operation, by every actor", { timeout: 30_000 }, () => {
               if (type === "folder.rename" && role === "guest" && expectation === "done" && folder === "Team") expectation = "forbidden";
               // As an agent does only inside what it is limited to: the folder it is limited to has folders beside it that it can't see.
               if (type === "folder.rename" && within && expectation === "done" && folder === within[0]) expectation = "forbidden";
+              // A folder is moved to where it is, and the same holds: Open and Team are at the top, among folders a guest or a limited agent can't see.
+              if (type === "folder.move" && (role === "guest" || within) && expectation === "done" && folder !== "Deep") expectation = "forbidden";
               await run(`${type} ${folder}`, type, plan.args(w.folders[folder], w), expectation);
             }
           } else if (plan.on === "everything") {

@@ -60,6 +60,8 @@ export {
 } from "../core/query.ts";
 /** Where two lists of lines differ, for a view that marks what changed inside a line. */
 export { lineHunks } from "../core/text.ts";
+/** Who wrote each line, moved over an edit as the note's history moves it: for a view that marks lines by the change that last wrote them, as `note.blame` answers. */
+export { reline } from "../core/blame.ts";
 
 /** How a note writes a link to another note, which is the same for a plugin as for an agent. */
 export { isNoteId, linksIn, linksOn, writtenLink, type WrittenLink } from "../core/links.ts";
