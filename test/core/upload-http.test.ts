@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { whoAmI } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
@@ -344,6 +344,14 @@ describe("a PDF opened in a tab, from the site kept for files", () => {
   });
 
   it("must be an https address", async () => {
-    await expect(at("https://ink.test/", {}, { FILE_ORIGIN: "http://files.ink-files.test" })).rejects.toThrow("FILE_ORIGIN must be an https address");
+    // The Worker answers every fault with a 500 and logs it, rather than letting the runtime log the throw as it was.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const answer = await at("https://ink.test/", {}, { FILE_ORIGIN: "http://files.ink-files.test" });
+      expect(answer.status).toBe(500);
+      expect(logged.mock.calls.join("\n")).toContain("FILE_ORIGIN must be an https address");
+    } finally {
+      logged.mockRestore();
+    }
   });
 });

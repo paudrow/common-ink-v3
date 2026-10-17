@@ -70,23 +70,60 @@ if (values.delete) {
 }
 
 needBucket();
-let db = findDatabase();
-if (!db) {
+const createDatabase = () => {
   wrangler(["d1", "create", database]);
-  db = findDatabase();
-  if (!db) throw new Error(`created ${database}, but it isn't listed`);
-}
-const binding = { ...config.d1_databases[0], database_name: database, database_id: db.uuid };
+  const created = findDatabase();
+  if (!created) throw new Error(`created ${database}, but it isn't listed`);
+  return created;
+};
+
+let db = findDatabase();
+const existed = db !== undefined;
+db ??= createDatabase();
 
 const files = [{ ...config.r2_buckets[0], bucket_name: bucket }];
-const previews = { d1_databases: [binding], r2_buckets: files, vars: { DEV_SIGN_IN: "1" } };
 // A Preview is a version, and a timer belongs to the deployed Worker, so the generated config carries none.
 const { triggers: _, ...untimed } = config;
-writeFileSync(GENERATED, JSON.stringify({ ...untimed, d1_databases: [binding], r2_buckets: files, previews }, null, 2));
+const writeConfig = (uuid: string) => {
+  const binding = { ...config.d1_databases[0], database_name: database, database_id: uuid };
+  const previews = { d1_databases: [binding], r2_buckets: files, vars: { DEV_SIGN_IN: "1" } };
+  writeFileSync(GENERATED, JSON.stringify({ ...untimed, d1_databases: [binding], r2_buckets: files, previews }, null, 2));
+};
+writeConfig(db.uuid);
+
+/**
+ * What applying a migration says when what it adds is already there, as when the Preview applied the file
+ * under another number: a migration is renumbered when another pull request takes its number. A table is
+ * made only if it is missing (0017_data_sources.sql does), but SQLite has nothing like that for a column,
+ * so an `ALTER TABLE ... ADD COLUMN` can't be written to run twice.
+ */
+const REAPPLIED = /duplicate column name|already exists/i;
+
+/**
+ * Applies the migrations. A Preview whose database has what a renumbered migration adds is started over:
+ * the database is deleted, with its uploaded files, and made again from the first migration. It holds only
+ * what the pull request's tests and its author wrote into it. Any other failure, and any on a database
+ * made just now, stops the Preview as it did.
+ */
+function migrate() {
+  const apply = () => wrangler(["d1", "migrations", "apply", database, "--remote", "-c", GENERATED], { quiet: true });
+  try {
+    return apply();
+  } catch (err) {
+    const said = `${(err as { stdout?: string }).stdout ?? ""}${(err as { stderr?: string }).stderr ?? ""}`;
+    process.stderr.write(said);
+    if (!existed || !REAPPLIED.test(said)) throw err;
+    console.log(`${database} has what a migration adds, which it applied under another number. Making the database again.`);
+    deleteObjects();
+    wrangler(["d1", "delete", database, "--skip-confirmation"]);
+    writeConfig(createDatabase().uuid);
+    return apply();
+  }
+}
 const secrets = path.join(tmpdir(), `ink-preview-${process.pid}.json`);
 writeFileSync(secrets, JSON.stringify({ SESSION_SECRET: randomBytes(32).toString("hex") }), { mode: 0o600 });
 try {
-  wrangler(["d1", "migrations", "apply", database, "--remote", "-c", GENERATED]);
+  process.stdout.write(migrate());
   execFileSync("npx", ["vite", "build"], { stdio: "inherit" });
   const out = wrangler(["preview", "-c", GENERATED, "--name", name, "--secrets-file", secrets, "--json", ...(values.message ? ["--message", values.message] : [])]);
   const result = JSON.parse(out.slice(out.indexOf("{"))) as { preview: { urls: Record<string, string> }; deployment: { urls: Record<string, string> } };

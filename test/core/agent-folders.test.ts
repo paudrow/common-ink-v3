@@ -103,8 +103,8 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     expect(await claude.json("list_folders")).toEqual({
       unsortedId: null,
       folders: [
-        { id: w.plans, name: "Plans", parentId: w.projects, noteCount: 1, uploadCount: 0, access: "edit" },
-        { id: w.projects, name: "Projects", parentId: null, noteCount: 1, uploadCount: 0, access: "edit" },
+        { id: w.plans, name: "Plans", parentId: w.projects, noteCount: 1, uploadCount: 0, access: "edit", path: "Projects/Plans" },
+        { id: w.projects, name: "Projects", parentId: null, noteCount: 1, uploadCount: 0, access: "edit", path: "Projects" },
       ],
     });
 
@@ -186,11 +186,13 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     expect(await claude.call("move_note", { id: w.outside.id, folderId: w.projects })).toEqual(NO_NOTE);
 
     // A link by title is looked up among the notes it can see, so a title outside is as good as no title.
-    const byTitle = await claude.call("write_note", { id: w.deep.id, baseRevision: 2, text: "# Q3 plan\n\n[[Diary-outside]]" });
-    expect(byTitle).toEqual(await claude.call("write_note", { id: w.deep.id, baseRevision: 2, text: "# Q3 plan\n\n[[Diary-nowhere]]" }).then((a) => ({ ...a, text: a.text.replaceAll("Diary-nowhere", "Diary-outside") })));
+    const byTitle = await claude.call("write_note", { id: w.deep.id, baseRevision: 2, text: "# Q3 plan\n\n[[Diary-outside]]", linkTitles: "resolve-strict" });
+    expect(byTitle).toEqual(await claude.call("write_note", { id: w.deep.id, baseRevision: 2, text: "# Q3 plan\n\n[[Diary-nowhere]]", linkTitles: "resolve-strict" }).then((a) => ({ ...a, text: a.text.replaceAll("Diary-nowhere", "Diary-outside") })));
     expect(byTitle.isError).toBe(true);
+    // Kept as written, it is named in unresolved as a title no note has.
+    expect(await claude.json("write_note", { id: w.deep.id, baseRevision: 2, text: "# Q3 plan\n\n[[Diary-outside]]" })).toMatchObject({ unresolved: [{ target: "Diary-outside", matches: [] }] });
     // And by id: a note outside, and an id that was never a note's, are refused in the same words.
-    const byId = (id: string) => claude.call("write_note", { id: w.deep.id, baseRevision: 2, text: `# Q3 plan\n\n[[${id}]]` }).then((a) => ({ ...a, text: a.text.replaceAll(id, "ID") }));
+    const byId = (id: string) => claude.call("write_note", { id: w.deep.id, baseRevision: 2, text: `# Q3 plan\n\n[[${id}]]`, linkTitles: "resolve-strict" }).then((a) => ({ ...a, text: a.text.replaceAll(id, "ID") }));
     expect(await byId(w.outside.id)).toEqual(await byId(MISSING));
     expect((await byId(w.outside.id)).isError).toBe(true);
 
@@ -692,11 +694,11 @@ describe("an agent limited to folders", { timeout: 30_000 }, () => {
     const w = await world();
     const { unsortedId } = await perform(env.DB, w.ada, { type: "folder.list" });
     const inner = await asAgent((await connectAgent(env.DB, w.ada.personId, "Inner", { workspaceId: w.ada.workspaceId, folderIds: [w.plans] })).token);
-    expect(await inner.json("list_folders")).toEqual({ unsortedId: null, folders: [{ id: w.plans, name: "Plans", parentId: null, noteCount: 1, uploadCount: 0, access: "edit" }] });
+    expect(await inner.json("list_folders")).toEqual({ unsortedId: null, folders: [{ id: w.plans, name: "Plans", parentId: null, noteCount: 1, uploadCount: 0, access: "edit", path: "Plans" }] });
     expect(inner.said.join("\n")).not.toContain(w.projects);
 
     const loose = await asAgent((await connectAgent(env.DB, w.ada.personId, "Loose", { workspaceId: w.ada.workspaceId, folderIds: [unsortedId!] })).token);
-    expect(await loose.json("list_folders")).toEqual({ unsortedId, folders: [{ id: unsortedId, name: "Unsorted", parentId: null, noteCount: 1, uploadCount: 0, access: "edit" }] });
+    expect(await loose.json("list_folders")).toEqual({ unsortedId, folders: [{ id: unsortedId, name: "Unsorted", parentId: null, noteCount: 1, uploadCount: 0, access: "edit", path: "Unsorted" }] });
     expect((await loose.json<Note>("create_note", { text: "# No folder named" })).folderId).toBe(unsortedId);
     expect((await loose.call("create_folder", { name: "Mine" })).text).toBe("forbidden: An agent limited to folders can make a folder only inside one of them");
     expect((await loose.call("rename_folder", { id: unsortedId, name: "Mine" })).isError).toBe(true);
@@ -1008,7 +1010,7 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
     // The agent that reaches everything is the control: all of it was there to be told.
     const scribe = await asAgent(w.scribe.token);
     expect(await scribe.json<Note[]>("list_pins")).toHaveLength(3);
-    expect(await scribe.json<{ readUntil: number }>("last_visit")).toMatchObject({ readUntil: expect.any(Number) });
+    expect(await scribe.json<{ readUntil: string }>("last_visit")).toMatchObject({ readUntil: expect.any(String) });
 
     const said = claude.said.join("\n");
     expect(w.marks.filter((mark) => said.includes(mark))).toEqual([]);

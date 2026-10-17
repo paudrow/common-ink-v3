@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { run, type Io } from "../../scripts/ink-cli.ts";
-import { Op, type OpType } from "../../src/core/protocol.ts";
-import { NOT_FOR_AGENTS, OVER_HTTP, TOOLS } from "../../src/worker/mcp/tools.ts";
+import { z } from "zod";
+import { Id, Op, type OpInput, type OpType } from "../../src/core/protocol.ts";
+import { NOT_FOR_AGENTS, OVER_HTTP, opArguments, toolList, TOOLS } from "../../src/worker/mcp/tools.ts";
 
 const ID = "aaaaaaaaaaaa";
 const AUTHOR = `agent:${ID}`;
@@ -9,7 +10,7 @@ const AUTHOR = `agent:${ID}`;
 /** Each operation and the fields it takes, read from the schema the web app's requests are checked against. */
 const OPS = new Map(Op.options.map((option) => [option.shape.type.value as OpType, Object.keys(option.shape).filter((key) => key !== "type")]));
 
-const argumentsOf = (tool: (typeof TOOLS)[number]) => Object.keys((tool.inputSchema as { properties: object }).properties).filter((key) => key !== "workspace");
+const argumentsOf = (tool: (typeof TOOLS)[number]) => Object.keys((tool.inputSchema as { properties: object }).properties).filter((key) => key !== "workspaceId");
 
 /** For each tool, `ink` commands that between them set every argument the tool takes. */
 const COMMANDS: Record<string, string[][]> = {
@@ -59,7 +60,8 @@ const COMMANDS: Record<string, string[][]> = {
   restore_upload: [["upload-restore", ID]],
   list_trashed_uploads: [["uploads-trashed"]],
   list_folders: [["folders"]],
-  create_folder: [["folder-create", "Plans", "--parent", ID]],
+  find_folder: [["folder-find", "Projects/Skills"]],
+  create_folder: [["folder-create", "Plans", "--parent", ID, "--if-exists", "error"]],
   rename_folder: [["folder-rename", ID, "--name", "Plans"]],
   move_folder: [["folder-move", ID, "--parent", ID]],
   delete_folder: [["folder-delete", ID]],
@@ -178,7 +180,7 @@ describe("what an agent can do, against what the web app can", () => {
   });
 
   it("gives each tool every field its operation takes, and no other", () => {
-    for (const tool of TOOLS.filter((t) => t.op)) expect(argumentsOf(tool).sort(), tool.name).toEqual([...OPS.get(tool.op!)!].sort());
+    for (const tool of TOOLS.filter((t) => t.op)) expect(argumentsOf(tool).map((name) => tool.renames?.[name] ?? name).sort(), tool.name).toEqual([...OPS.get(tool.op!)!].sort());
   });
 
   it("has an ink command for every tool, with a flag for every argument", async () => {
@@ -253,5 +255,71 @@ describe("what an agent can do, against what the web app can", () => {
       expect(await run(argv, io), argv.join(" ")).toBe(0);
       expect(said.join("\n")).toMatch(/^Usage: ink/);
     }
+  });
+});
+
+/** The schema under optional, nullable and default: what the value itself must be. */
+function bare(schema: z.ZodType): z.ZodType {
+  let inner = schema;
+  while (inner instanceof z.ZodOptional || inner instanceof z.ZodNullable || inner instanceof z.ZodDefault) inner = inner.unwrap() as z.ZodType;
+  return inner;
+}
+const holdsIds = (schema: z.ZodType) => {
+  const inner = bare(schema);
+  return inner === Id || (inner instanceof z.ZodArray && bare(inner.element as z.ZodType) === Id);
+};
+/** What a tool's argument holding ids is called: for what they are the ids of. `after` is a page's next, passed back as given, and `ref` a note's reference to a record. */
+const ID_NAMES = ["noteId", "noteIds", "folderId", "parentId", "workspaceId", "after", "ref", "uploadId", "pluginId"];
+
+describe("what each argument is called", () => {
+  it("names every argument that holds ids for what they are the ids of, the same in every tool", () => {
+    const named = new Set<string>();
+    for (const tool of TOOLS.filter((t) => t.op)) {
+      const shape = Op.options.find((o) => o.shape.type.value === tool.op)!.shape as Record<string, z.ZodType>;
+      for (const name of argumentsOf(tool)) if (holdsIds(shape[tool.renames?.[name] ?? name]!)) named.add(name);
+      expect(Object.keys((tool.inputSchema as { properties: object }).properties), tool.name).toContain("workspaceId");
+    }
+    expect([...named].filter((name) => !ID_NAMES.includes(name)), "an id argument named otherwise").toEqual([]);
+    expect(named).toEqual(new Set(["noteId", "noteIds", "folderId", "parentId", "after", "ref", "uploadId", "pluginId"]));
+  });
+
+  it("still takes each argument's old name, shown in the schema as deprecated", () => {
+    const listed = toolList();
+    for (const tool of TOOLS.filter((t) => t.op)) {
+      const { properties, required } = listed.find((t) => t.name === tool.name)!.inputSchema as { properties: Record<string, { deprecated?: boolean }>; required: string[] };
+      expect(properties.workspace, tool.name).toMatchObject({ deprecated: true });
+      expect(required.filter((name) => properties[name]?.deprecated), tool.name).toEqual([]);
+      for (const [name, field] of Object.entries(tool.renames ?? {})) {
+        expect(properties[field], `${tool.name} ${field}`).toMatchObject({ deprecated: true, description: `The old name of ${name}, still taken. Use ${name}` });
+        expect(opArguments(tool, { [field]: ID }).fields).toEqual(opArguments(tool, { [name]: ID }).fields);
+      }
+    }
+    expect(TOOLS.filter((t) => t.renames).map((t) => t.name)).toHaveLength(36);
+  });
+
+  it("ends every description with an example call the tool takes as it stands", () => {
+    for (const tool of toolList()) expect(tool.description, tool.name).toMatch(/\n\nExample: \{.*\}$/);
+    for (const tool of TOOLS.filter((t) => t.op)) {
+      const { fields } = opArguments(tool, tool.example);
+      const parsed = Op.safeParse({ ...fields, type: tool.op } as OpInput);
+      expect(parsed.success ? "" : z.prettifyError(parsed.error), tool.name).toBe("");
+    }
+  });
+
+  it("refuses an argument it doesn't take by name, with the ones it does and a guess at the one meant", () => {
+    const tool = TOOLS.find((t) => t.name === "list_folders")!;
+    expect(() => opArguments(tool, { workspace_id: ID })).toThrow('list_folders takes no "workspace_id": did you mean "workspaceId"? It takes workspaceId.');
+    expect(() => opArguments(TOOLS.find((t) => t.name === "read_note")!, { noteId: ID, rev: 2 })).toThrow('read_note takes no "rev". It takes workspaceId, noteId, revision.');
+    expect(() => opArguments(TOOLS.find((t) => t.name === "read_note")!, { noteId: ID, id: "bbbbbbbbbbbb" })).toThrow('Pass noteId once: "id" is its old name, and they differ');
+    expect(opArguments(TOOLS.find((t) => t.name === "read_note")!, { noteId: ID, id: ID, workspace: "w" })).toEqual({ workspaceId: "w", fields: { id: ID } });
+  });
+
+  it("takes a time as ISO 8601 or as milliseconds, and gives create_folder's ifExists its default", () => {
+    const notes = TOOLS.find((t) => t.name === "list_notes")!;
+    expect(opArguments(notes, { updatedSince: "2026-10-15T09:30:00-07:00" }).fields).toEqual({ updatedSince: Date.UTC(2026, 9, 15, 16, 30) });
+    expect(opArguments(notes, { updatedSince: 5 }).fields).toEqual({ updatedSince: 5 });
+    expect(() => opArguments(notes, { updatedSince: "last tuesday" })).toThrow("updatedSince must be a time");
+    expect(opArguments(TOOLS.find((t) => t.name === "create_folder")!, { name: "Skills" }).fields).toEqual({ name: "Skills", ifExists: "return" });
+    expect(opArguments(TOOLS.find((t) => t.name === "create_folder")!, { name: "Skills", ifExists: "error" }).fields).toEqual({ name: "Skills", ifExists: "error" });
   });
 });

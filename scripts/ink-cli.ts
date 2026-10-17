@@ -53,9 +53,9 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   restore ID                          bring a note back from Trash, to the folder it was in
   trashed                             the notes in Trash, and when each is removed for good
   read ID [--revision N]              a note's markdown, and the titles of the notes it links to
-  create [--text TEXT] [--folder ID] [--link-titles keep] [--mention-names keep]
+  create [--text TEXT] [--folder ID] [--link-titles resolve|resolve-strict|keep] [--mention-names keep]
                                       a new note (text from stdin if --text is left out)
-  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles keep] [--mention-names keep] [--on DAY]
+  write ID --base N [--text TEXT] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--on DAY]
                                       replace a note's text (from stdin if --text is left out)
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
@@ -99,8 +99,11 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
   upload-trash ID                     move an upload to Trash, where it waits 30 days
   upload-restore ID                   bring an upload back from Trash, to the folder it was in
   uploads-trashed                     the uploads in Trash, and when each is removed for good
-  folders                             the folders in a workspace
-  folder-create NAME [--parent ID]    a new folder
+  folders                             the folders in a workspace, each with its path
+  folder-find PATH                    the folder at a path such as Projects/Skills, ignoring case and accents
+  folder-create NAME [--parent ID] [--if-exists return|error]
+                                      a new folder; with one of that name there already, ignoring case,
+                                      prints that one with "created": false, or refuses with --if-exists error
   folder-rename ID --name NAME        give a folder another name
   folder-move ID [--parent ID]        put a folder inside another, or at the top level without --parent
   folder-delete ID                    delete an empty folder
@@ -157,8 +160,11 @@ TIME is anything a date parses, such as 2026-10-09 or 2026-10-09T14:00:00Z. KIND
 from authors, such as agent:abc123def456. NEXT is the next of the page before, as JSON.
 
 A link to a note is [[ID]] or [[ID|display text]]. Write [[Title]] and create and write store it by
-the id of the one note with that title, or refuse when none or several have it. --link-titles keep
-leaves such text as it is.
+the id of the one note with that title. When none or several have it, the link stays as written and
+the answer lists it in "unresolved"; --link-titles resolve-strict refuses instead, and keep leaves
+every link as written.
+
+Times in answers are ISO 8601 with your member's time zone offset, such as 2026-10-15T09:30:00.000-07:00.
 
 A mention of a person is @[[ID|Name]] for a member, with ids from members, or @[[Name]] for anyone
 else. Write @[[Name]] for a member and create and write store it by their id, or refuse when several
@@ -265,7 +271,7 @@ function selected(value: string, resolve?: string): Record<string, unknown> {
 }
 
 const time = (name: string, value: string): number => {
-  const parsed = Date.parse(value);
+  const parsed = /^\d+$/.test(value) ? Number(value) : Date.parse(value);
   if (Number.isNaN(parsed)) throw new UsageError(`${name} must be a date or a time`);
   return parsed;
 };
@@ -360,7 +366,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     };
 
     const UNKNOWN_TOKEN = "Common Ink doesn't know that token: it was mistyped or the agent was disconnected";
-    const workspace = flags.has("workspace") ? { workspace: flags.get("workspace") } : {};
+    const workspace = flags.has("workspace") ? { workspaceId: flags.get("workspace") } : {};
     const base = (io.env.INK_URL ?? "https://commonink.app").replace(/\/+$/, "");
     const call = async (name: string, given: Record<string, unknown>): Promise<{ answer: string; failed: boolean }> => {
       const res = await io
@@ -421,7 +427,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       }
 
       const uploadId = need("an upload id");
-      const info = await call("read_upload", { id: uploadId, workspace: workspaceId });
+      const info = await call("read_upload", { uploadId, workspaceId });
       if (info.failed) {
         io.out(info.answer);
         return 1;
@@ -465,23 +471,23 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "plugin":
         tool = "read_plugin";
-        args = { id: need("a plugin id") };
+        args = { pluginId: need("a plugin id") };
         break;
       case "plugin-install":
         tool = "install_plugin";
-        args = { manifest: await text("manifest"), code: await text("code"), ...given({ replaces: ["replaces"] }) };
+        args = { manifest: await text("manifest"), code: await text("code"), ...given({ pluginId: ["replaces"] }) };
         break;
       case "plugin-uninstall":
         tool = "uninstall_plugin";
-        args = { id: need("a plugin id") };
+        args = { pluginId: need("a plugin id") };
         break;
       case "plugin-permit":
         tool = "permit_plugin";
-        args = { id: need("a plugin id, or html"), capability: needFlag("capability"), allowed: truth("--allowed", needFlag("allowed")), ...given({ locked: ["locked", truth], origins: ["origins", ids], codeHash: ["code-hash"] }) };
+        args = { pluginId: need("a plugin id, or html"), capability: needFlag("capability"), allowed: truth("--allowed", needFlag("allowed")), ...given({ locked: ["locked", truth], origins: ["origins", ids], codeHash: ["code-hash"] }) };
         break;
       case "plugin-request":
         tool = "request_plugin_permission";
-        args = { id: need("a plugin id, or html"), capability: needFlag("capability"), ...given({ origins: ["origins", ids] }) };
+        args = { pluginId: need("a plugin id, or html"), capability: needFlag("capability"), ...given({ origins: ["origins", ids] }) };
         break;
       case "drafts":
         tool = "list_drafts";
@@ -489,11 +495,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "draft":
       case "draft-discard":
         tool = command === "draft" ? "read_draft" : "discard_draft";
-        args = { id: need("a plugin id") };
+        args = { pluginId: need("a plugin id") };
         break;
       case "draft-save":
         tool = "save_draft";
-        args = { id: need("a plugin id"), manifest: await text("manifest"), code: await text("code"), running: truth("--running", needFlag("running")), ...given({ baseHash: ["base-hash", (_, value) => (value === "none" ? null : value)] }) };
+        args = { pluginId: need("a plugin id"), manifest: await text("manifest"), code: await text("code"), running: truth("--running", needFlag("running")), ...given({ baseHash: ["base-hash", (_, value) => (value === "none" ? null : value)] }) };
         break;
       case "notes":
         tool = "list_notes";
@@ -510,19 +516,19 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "archive":
       case "unarchive":
         tool = "archive_note";
-        args = { id: needId(), archived: command === "archive" };
+        args = { noteId: needId(), archived: command === "archive" };
         break;
       case "trash":
       case "restore":
         tool = `${command}_note`;
-        args = { id: needId() };
+        args = { noteId: needId() };
         break;
       case "trashed":
         tool = "list_trash";
         break;
       case "read":
         tool = "read_note";
-        args = { id: needId(), ...(flags.has("revision") ? { revision: integer("--revision", flags.get("revision")!) } : {}) };
+        args = { noteId: needId(), ...(flags.has("revision") ? { revision: integer("--revision", flags.get("revision")!) } : {}) };
         break;
       case "create":
         tool = "create_note";
@@ -531,11 +537,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "write":
         if (!flags.has("base")) throw new UsageError("write needs --base, the revision you read");
         tool = "write_note";
-        args = { id: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], on: ["on"] }) };
+        args = { noteId: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], on: ["on"] }) };
         break;
       case "backlinks":
         tool = "backlinks";
-        args = { id: needId() };
+        args = { noteId: needId() };
         break;
       case "links-rebuild":
         tool = "rebuild_links";
@@ -573,7 +579,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         if (!flags.has("revision") || !flags.has("line") || !flags.has("text")) throw new UsageError("todo needs --revision, --line and --text, as todos gave them");
         tool = "set_todo";
         args = {
-          id: needId(),
+          noteId: needId(),
           revision: integer("--revision", flags.get("revision")!),
           line: integer("--line", flags.get("line")!),
           text: flags.get("text")!,
@@ -583,7 +589,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "todo-history":
         if (!flags.has("revision") || !flags.has("line") || !flags.has("text")) throw new UsageError("todo-history needs --revision, --line and --text, as todos gave them");
         tool = "todo_history";
-        args = { id: needId(), revision: integer("--revision", flags.get("revision")!), line: integer("--line", flags.get("line")!), text: flags.get("text")! };
+        args = { noteId: needId(), revision: integer("--revision", flags.get("revision")!), line: integer("--line", flags.get("line")!), text: flags.get("text")! };
         break;
       case "daily":
         tool = "daily_note";
@@ -600,7 +606,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "pin":
       case "unpin":
         tool = "pin_note";
-        args = { id: needId(), pinned: command === "pin" };
+        args = { noteId: needId(), pinned: command === "pin" };
         break;
       case "visit":
         tool = "last_visit";
@@ -610,7 +616,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "move":
         tool = "move_note";
-        args = { id: needId(), folderId: needFlag("folder") };
+        args = { noteId: needId(), folderId: needFlag("folder") };
         break;
       case "uploads":
         tool = "list_uploads";
@@ -619,25 +625,25 @@ export async function run(argv: string[], io: Io): Promise<number> {
         break;
       case "upload-place":
         tool = "place_upload";
-        args = { id: need("an upload id"), noteId: needFlag("note") };
+        args = { uploadId: need("an upload id"), noteId: needFlag("note") };
         break;
       case "upload-info":
         tool = "read_upload";
-        args = { id: need("an upload id") };
+        args = { uploadId: need("an upload id") };
         break;
       case "upload-move":
         tool = "move_upload";
-        args = { id: need("an upload id"), folderId: needFlag("folder") };
+        args = { uploadId: need("an upload id"), folderId: needFlag("folder") };
         break;
       case "upload-archive":
       case "upload-unarchive":
         tool = "archive_upload";
-        args = { id: need("an upload id"), archived: command === "upload-archive" };
+        args = { uploadId: need("an upload id"), archived: command === "upload-archive" };
         break;
       case "upload-trash":
       case "upload-restore":
         tool = `${command.slice("upload-".length)}_upload`;
-        args = { id: need("an upload id") };
+        args = { uploadId: need("an upload id") };
         break;
       case "uploads-trashed":
         tool = "list_trashed_uploads";
@@ -645,34 +651,38 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "folders":
         tool = "list_folders";
         break;
+      case "folder-find":
+        tool = "find_folder";
+        args = { path: need("a path, such as Projects/Skills") };
+        break;
       case "folder-create":
         tool = "create_folder";
-        args = { name: need("a name"), ...given({ parentId: ["parent"] }) };
+        args = { name: need("a name"), ...given({ parentId: ["parent"], ifExists: ["if-exists"] }) };
         break;
       case "folder-rename":
         tool = "rename_folder";
-        args = { id: need("a folder id"), name: needFlag("name") };
+        args = { folderId: need("a folder id"), name: needFlag("name") };
         break;
       case "folder-move":
         tool = "move_folder";
-        args = { id: need("a folder id"), parentId: flags.get("parent") ?? null };
+        args = { folderId: need("a folder id"), parentId: flags.get("parent") ?? null };
         break;
       case "folder-delete":
         tool = "delete_folder";
-        args = { id: need("a folder id") };
+        args = { folderId: need("a folder id") };
         break;
       case "history":
         tool = "note_history";
-        args = { id: needId() };
+        args = { noteId: needId() };
         break;
       case "blame":
         tool = "note_blame";
-        args = { id: needId() };
+        args = { noteId: needId() };
         break;
       case "diff":
         if (!flags.has("change")) throw new UsageError("diff needs --change");
         tool = "change_diff";
-        args = { id: needId(), revision: integer("--change", flags.get("change")!) };
+        args = { noteId: needId(), revision: integer("--change", flags.get("change")!) };
         break;
       case "changed":
         tool = "history_summary";
@@ -754,7 +764,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "label":
         if (!flags.has("revision")) throw new UsageError("label needs --revision");
         tool = "label_revision";
-        args = { id: needId(), revision: integer("--revision", flags.get("revision")!), name: flags.get("name") ?? null };
+        args = { noteId: needId(), revision: integer("--revision", flags.get("revision")!), name: flags.get("name") ?? null };
         break;
       case "revert":
         if (flags.has("author")) {
@@ -763,13 +773,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
         if (flags.has("resolve") !== flags.has("at")) throw new UsageError("revert needs --resolve and --at together: how to settle the conflicts, and the revision the preview was of");
         if (flags.has("author")) {
           tool = "preview_revert";
-          args = { id: needId(), author: authorRef(flags.get("author")!) };
+          args = { noteId: needId(), author: authorRef(flags.get("author")!) };
         } else if (flags.has("preview")) {
           tool = "preview_revert";
-          args = flags.has("revision") ? { id: needId(), to: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+          args = flags.has("revision") ? { noteId: needId(), to: integer("--revision", flags.get("revision")!) } : { noteId: needId(), revisions: integers("--changes", flags.get("changes")!) };
         } else {
           tool = flags.has("revision") ? "revert_note" : "revert_changes";
-          args = flags.has("revision") ? { id: needId(), revision: integer("--revision", flags.get("revision")!) } : { id: needId(), revisions: integers("--changes", flags.get("changes")!) };
+          args = flags.has("revision") ? { noteId: needId(), revision: integer("--revision", flags.get("revision")!) } : { noteId: needId(), revisions: integers("--changes", flags.get("changes")!) };
         }
         if (flags.has("resolve")) args.resolve = { at: integer("--at", flags.get("at")!), choices: choices(flags.get("resolve")!) };
         break;
@@ -786,7 +796,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "undo":
       case "redo":
         tool = command;
-        args = { id: needId() };
+        args = { noteId: needId() };
         break;
       default:
         throw new UsageError(`No such command: ${command}`);

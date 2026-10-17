@@ -9,8 +9,12 @@ The only container a person signs into. It holds notes, folders, and uploads. A 
 _Avoid_: Space, vault, project
 
 **Folder**:
-A named location in a workspace. A note or upload has exactly one parent folder. An editor can create, rename and move a folder they can edit, into one they can edit or to the top of the workspace, and never into itself or a folder inside it; what is in it goes with it. A guest, or an agent limited to folders, moves only the folders inside one they were given, and into one they were given. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty: no notes, uploads or folders in it.
+A named location in a workspace. A note or upload has exactly one parent folder. An editor can create, rename and move a folder they can edit, into one they can edit or to the top of the workspace, and never into itself or a folder inside it; what is in it goes with it. A guest, or an agent limited to folders, moves only the folders inside one they were given, and into one they were given. An admin can move or delete any folder. A viewer cannot change folders. A folder can be deleted only when it is empty: no notes, uploads or folders in it. No two folders in one parent have names that differ only in case.
 _Avoid_: Directory, space
+
+**Folder path**:
+A folder's name after the names of the folders it is in, separated by `/`: `Projects/Skills`. It starts at the top of what the one asking can see. An agent finds a folder by its path, ignoring case and then accents.
+_Avoid_: Breadcrumb, folder address
 
 **Unsorted**:
 The default folder. A note created with no folder in front is placed here.
@@ -245,6 +249,10 @@ _Avoid_: History, which is the record of changes
 
 **Member**:
 A person in a workspace, with the role admin, editor, or viewer. A viewer reads. An editor also changes notes and folders. An admin can do what an editor can, and also manages members, plugins, and grants. A private note is hidden from admins too. Any member can see who the members are, and can leave. A workspace always has an admin, so its only admin can't leave, be removed, or be given another role. A member who is removed or leaves reaches nothing in the workspace from then on, and neither do their agents: the grants that named them go with them. What they wrote stays, under their name.
+
+**Session**:
+One browser signed in as a person, after Google says who they are. It lasts 30 days, or until they sign out there. **Signing out everywhere** ends every session the person has at once, in every browser and every workspace, the one they did it from too. A person does it from Settings, under Account, and an admin does it to a member from Members, who stays a member and can sign in again. An admin can do it to a person once a day, so no one workspace's admin keeps them signed out of the others. Agents have tokens, not sessions, so it disconnects them separately: unless the person unticks it, it disconnects all of their own agents, or, done by an admin, the member's agents that reach that workspace. An admin can disconnect a member's agents only this way. An agent can't sign anyone out.
+_Avoid_: Login, device
 
 **Invite**:
 An admin's offer of a role in a workspace to an email. Whoever signs in with that email is a member from then on, and from the next time they open Common Ink if they were signed in already. Until then the admin can revoke it. A workspace has one invite for an email, and inviting it again changes the role offered. The email is matched as the person's sign-in gives it, ignoring case and nothing else. The admin is given a link to send, since Common Ink sends no email. The link lets in only the invited email, so it is safe wherever it ends up. An invite does not let anyone sign in who otherwise couldn't.

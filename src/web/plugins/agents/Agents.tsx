@@ -149,8 +149,8 @@ interface Props {
   folders: Folders | null;
   /** Changes when the workspace's notes do, so which agents have changed one is read again. */
   version: number;
-  /** Whether the member may change a note, which each note says of itself. */
-  canChange: (noteId: string) => boolean;
+  /** Whether the member may change a note, which each note says of itself. Null until the notes are read, when a revert can't tell which of an agent's notes are theirs to change. */
+  canChange: ((noteId: string) => boolean) | null;
   /** Left out when there is nowhere to show them. */
   onShowChanges?: (agent: Agent) => void;
   /** Called once an agent's changes were reverted, or that was undone, so the notes are read again. */
@@ -289,7 +289,7 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
 
   const revert = async (agent: Agent) => {
     // Not `disabled` meanwhile, so the button keeps the focus the dialog gives back when it closes.
-    if (reading !== null) return;
+    if (reading !== null || !canChange) return;
     setError(null);
     setReading(agent.id);
     try {
@@ -363,7 +363,7 @@ export function Agents({ host, workspace, workspaces, folders, version, canChang
               </button>
             )}
             {canEdit && (
-              <button type="button" className="button small" aria-disabled={reading !== null} onClick={() => void revert(agent)}>
+              <button type="button" className="button small" aria-disabled={reading !== null || !canChange} onClick={() => void revert(agent)}>
                 Revert {agent.name}'s changes…
               </button>
             )}

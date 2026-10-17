@@ -1,6 +1,7 @@
 // What a browser may do with each response the Worker answers: the Content-Security-Policy for its
 // kind of route, and nosniff and a referrer rule for all. Sent by the Worker, so a Preview runs under
-// the same policy as the app. Files under /assets/ are served without the Worker and get neither.
+// the same policy as the app. Files under /assets/ are served without the Worker: public/_headers
+// gives them nosniff, the referrer rule and DATA, and test/core/headers.test.ts holds the two in step.
 // HSTS is the zone's, not the Worker's.
 
 import { EMBED_FRAME_PATH } from "../core/frames.ts";

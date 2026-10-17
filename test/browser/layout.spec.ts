@@ -50,7 +50,7 @@ test("a folder name already used beside it is refused with the server's reason, 
   await page.getByRole("button", { name: "New folder" }).click();
   await page.getByRole("textbox", { name: "Folder name" }).fill("projects");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("alert")).toHaveText(`There's already a folder named "projects" here`);
+  await expect(page.getByRole("alert")).toHaveText(`There's already a folder named "Projects" here`);
   await page.keyboard.press("Escape");
 
   await expect(page.getByRole("textbox", { name: "Folder name" })).toHaveCount(0);

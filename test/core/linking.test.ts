@@ -4,6 +4,8 @@ import { perform, type Actor } from "../../src/core/operations.ts";
 import { addMember, newMember } from "./members.ts";
 
 const create = (actor: Actor, text: string) => perform(env.DB, actor, { type: "note.create", text });
+/** As a write was before a link no note matched was kept as written: refused, with nothing written. */
+const strict = (actor: Actor, text: string) => perform(env.DB, actor, { type: "note.create", text, linkTitles: "resolve-strict" });
 const backlinks = async (actor: Actor, id: string) => (await perform(env.DB, actor, { type: "note.backlinks", id })).map((n) => n.title);
 const recorded = async (sourceId: string) => (await env.DB.prepare("SELECT target_id FROM links WHERE source_id = ? ORDER BY target_id").bind(sourceId).all<{ target_id: string }>()).results.map((r) => r.target_id);
 
@@ -44,20 +46,61 @@ describe("a link", () => {
     expect([exact.text, other.text]).toEqual([`[[${school.id}]]`, `[[${school.id}]]`]);
   });
 
-  it("written by a title no note has, or that several have, is refused with what to do, and nothing is written", async () => {
+  it("written by a title no note has, or that several have, is refused with what to do when the writer asks to be strict, and nothing is written", async () => {
     const ada = await newMember();
     const first = await create(ada, "# Plan");
     const second = await create(ada, "# plan");
     const diary = await create(ada, "# Diary");
-    const write = (text: string) => perform(env.DB, ada, { type: "note.write", id: diary.id, baseRevision: 1, text });
+    const write = (text: string) => perform(env.DB, ada, { type: "note.write", id: diary.id, baseRevision: 1, text, linkTitles: "resolve-strict" });
 
     await expect(write("[[Nowhere]]")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('No note is titled "Nowhere"') });
     const several = await write("[[Plan]]").catch((err: Error) => err.message);
     expect(several).toContain('2 notes are titled "Plan"');
     expect(several).toContain(first.id);
     expect(several).toContain(second.id);
-    await expect(create(ada, "[[Nowhere]]")).rejects.toMatchObject({ code: "invalid" });
+    await expect(strict(ada, "[[Nowhere]]")).rejects.toMatchObject({ code: "invalid" });
     expect((await perform(env.DB, ada, { type: "note.read", id: diary.id })).revision).toBe(1);
+  });
+
+  it("written by a title no note has, or that several have, is kept as written and named in the answer, and the write is made", async () => {
+    const ada = await newMember();
+    const first = await create(ada, "# Plan");
+    const second = await create(ada, "# plan");
+    const trip = await create(ada, "# Trip");
+
+    const made = await create(ada, "# Diary\n\n[[Nowhere]], [[Plan]], [[trip|the trip]] and [[Nowhere|again]]");
+    expect(made.text).toBe(`# Diary\n\n[[Nowhere]], [[Plan]], [[${trip.id}|the trip]] and [[Nowhere|again]]`);
+    expect(made.unresolved).toEqual([
+      { target: "Nowhere", matches: [] },
+      { target: "Plan", matches: expect.toSatisfy((ids: string[]) => ids.length === 2 && ids.includes(first.id) && ids.includes(second.id)) },
+    ]);
+    expect((await perform(env.DB, ada, { type: "note.read", id: made.id })).revision).toBe(1);
+
+    const written = await perform(env.DB, ada, { type: "note.write", id: made.id, baseRevision: 1, text: `${made.text}\n\n[[Later]]` });
+    expect(written).toMatchObject({ revision: 2, unresolved: [{ target: "Later", matches: [] }] });
+    // The links it had are the note's own, and not named again.
+    const again = await perform(env.DB, ada, { type: "note.write", id: made.id, baseRevision: 2, text: `${written.text} more` });
+    expect(again.revision).toBe(3);
+    expect(again).not.toHaveProperty("unresolved");
+    expect(await create(ada, "# Clean")).not.toHaveProperty("unresolved");
+  });
+
+  it("to a note the writer can't see is kept as written and named as one no note has", async () => {
+    const ada = await newMember();
+    const grace = await newMember("Grace Hopper");
+    const secret = await create(grace, "# Grace's secret");
+
+    const made = await create(ada, `[[Grace's secret]] [[${secret.id}]] [[zzzzzzzzzzzz]]`);
+
+    expect(made.unresolved).toEqual([
+      { target: "Grace's secret", matches: [] },
+      { target: secret.id, matches: [] },
+      { target: "zzzzzzzzzzzz", matches: [] },
+    ]);
+    expect((await perform(env.DB, ada, { type: "note.read", id: made.id })).links).toEqual([
+      { id: secret.id, title: null, state: null },
+      { id: "zzzzzzzzzzzz", title: null, state: null },
+    ]);
   });
 
   it("that the note already had is left exactly as it is by a later write, which resolves only the links it introduces", async () => {
@@ -65,7 +108,7 @@ describe("a link", () => {
     const plan = await create(ada, "# Plan");
     const kept = "See [[Road map]] someday, and [[zzzzzzzzzzzz]].";
     const diary = await perform(env.DB, ada, { type: "note.create", text: `# Diary\n\n${kept}`, linkTitles: "keep" });
-    const write = (text: string, baseRevision = 1) => perform(env.DB, ada, { type: "note.write", id: diary.id, baseRevision, text });
+    const write = (text: string, baseRevision = 1) => perform(env.DB, ada, { type: "note.write", id: diary.id, baseRevision, text, linkTitles: "resolve-strict" });
 
     const fixed = await write(`# Diary\n\n${kept} Fixed a typo.`);
     expect(fixed.text).toBe(`# Diary\n\n${kept} Fixed a typo.`);
@@ -86,7 +129,7 @@ describe("a link", () => {
     await perform(env.DB, ada, { type: "note.write", id: diary.id, baseRevision: 1, text: "# Diary\n\nfirst [[Road map]]\n\nlast", linkTitles: "keep" });
 
     // Based on revision 1, which had no such link: this writer wrote it, so it is theirs to get right.
-    const same = perform(env.DB, ada, { type: "note.write", id: diary.id, baseRevision: 1, text: "# Diary\n\nfirst\n\nlast [[Road map]]" });
+    const same = perform(env.DB, ada, { type: "note.write", id: diary.id, baseRevision: 1, text: "# Diary\n\nfirst\n\nlast [[Road map]]", linkTitles: "resolve-strict" });
     await expect(same).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('"Road map"') });
 
     // Based on revision 1 and touching no link: merged around the other writer's, which stays as written.
@@ -102,9 +145,9 @@ describe("a link", () => {
     const byTitle = await create(ada, `[[introduction]] [[${plan.id}]]`);
     expect(byTitle.text).toBe(`[[${intro.id}]] [[${plan.id}]]`);
 
-    await expect(create(ada, "We discussed [[architecture]].")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('No note has the id or the title "architecture"') });
+    await expect(strict(ada, "We discussed [[architecture]].")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('No note has the id or the title "architecture"') });
     await create(ada, "# Introduction");
-    const several = await create(ada, "[[introduction]]").catch((err: Error) => err.message);
+    const several = await strict(ada, "[[introduction]]").catch((err: Error) => err.message);
     expect(several).toContain('2 notes are titled "introduction"');
 
     // A note whose id is another's title: the id wins.
@@ -127,9 +170,9 @@ describe("a link", () => {
     const grace = await newMember("Grace Hopper");
     const secret = await create(grace, "# Grace's secret");
 
-    await expect(create(ada, "[[Grace's secret]]")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining("No note is titled") });
-    await expect(create(ada, `[[${secret.id}]]`)).rejects.toMatchObject({ code: "invalid", message: `No note has the id or the title "${secret.id}". Link a note by its title or as [[id]], with ids from note.list, or pass linkTitles "keep" to leave [[${secret.id}]] as text.` });
-    await expect(create(ada, "[[zzzzzzzzzzzz]]")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('No note has the id or the title "zzzzzzzzzzzz"') });
+    await expect(strict(ada, "[[Grace's secret]]")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining("No note is titled") });
+    await expect(strict(ada, `[[${secret.id}]]`)).rejects.toMatchObject({ code: "invalid", message: `No note has the id or the title "${secret.id}". Link a note by its title or as [[id]], with ids from the list of notes, or leave out linkTitles "resolve-strict" to keep [[${secret.id}]] as written.` });
+    await expect(strict(ada, "[[zzzzzzzzzzzz]]")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('No note has the id or the title "zzzzzzzzzzzz"') });
     const note = await perform(env.DB, ada, { type: "note.create", text: `# Mine\n\n[[${secret.id}]] [[zzzzzzzzzzzz]]`, linkTitles: "keep" });
     const read = await perform(env.DB, ada, { type: "note.read", id: note.id });
 

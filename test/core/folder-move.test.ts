@@ -182,8 +182,8 @@ describe("moving a folder", () => {
     expect(await run(["folder-move", "aaaaaaaaaaaa"], io)).toBe(0);
     expect(await run(["folder-move", "aaaaaaaaaaaa", "--parent", "bbbbbbbbbbbb"], io)).toBe(0);
     expect(sent).toEqual([
-      { name: "move_folder", arguments: { id: "aaaaaaaaaaaa", parentId: null } },
-      { name: "move_folder", arguments: { id: "aaaaaaaaaaaa", parentId: "bbbbbbbbbbbb" } },
+      { name: "move_folder", arguments: { folderId: "aaaaaaaaaaaa", parentId: null } },
+      { name: "move_folder", arguments: { folderId: "aaaaaaaaaaaa", parentId: "bbbbbbbbbbbb" } },
     ]);
   });
 

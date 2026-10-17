@@ -198,13 +198,22 @@ describe("removing notes from Trash", () => {
 
   it("leaves no word of a removed note in the search index's own pages, removed by the clock or by a member", async () => {
     const ada = await newMember();
-    const held = async (word: string) => (await env.DB.prepare("SELECT COUNT(*) AS n FROM note_search_data WHERE instr(block, CAST(?1 AS BLOB)) > 0").bind(word).first<{ n: number }>())!.n;
+    // A page keeps each term after the one before it as only the letters they don't share, so a word is looked for
+    // by the letters it shares with no other term in the index: a workspace's id starting with an x hides "xyzzy...".
+    await env.DB.prepare("CREATE VIRTUAL TABLE IF NOT EXISTS note_search_terms USING fts5vocab(note_search, 'row')").run();
+    const held = async (word: string) => {
+      const { results } = await env.DB.prepare("SELECT term FROM note_search_terms WHERE term <> ?1").bind(word).all<{ term: string }>();
+      const shared = Math.max(0, ...results.map(({ term }) => [...word].findIndex((letter, i) => term[i] !== letter)).map((i) => (i < 0 ? word.length : i)));
+      expect(shared, `another term starts as ${word} does`).toBeLessThan(word.length - 4);
+      return (await env.DB.prepare("SELECT COUNT(*) AS n FROM note_search_data WHERE instr(block, CAST(?1 AS BLOB)) > 0").bind(word.slice(shared)).first<{ n: number }>())!.n;
+    };
     const doomed = await perform(env.DB, ada, { type: "note.create", text: "# Doomed\n\nxyzzyplughword" }, 1000);
     const shredded = await perform(env.DB, ada, { type: "note.create", text: "# Shredded\n\nqwertyfrobword" }, 1000);
     await perform(env.DB, ada, { type: "note.create", text: "# Kept\n\nstayingword" }, 1000);
     await perform(env.DB, ada, { type: "note.trash", id: doomed.id }, 2000);
     await perform(env.DB, ada, { type: "note.trash", id: shredded.id }, 2000);
     expect(await held("xyzzyplughword")).toBeGreaterThan(0);
+    expect(await held("qwertyfrobword")).toBeGreaterThan(0);
 
     await perform(env.DB, ada, { type: "note.purge", id: shredded.id }, 3000);
     expect(await held("qwertyfrobword")).toBe(0);

@@ -1,6 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { secured } from "../../src/worker/headers.ts";
+import { DATA as DATA_POLICY, secured, written } from "../../src/worker/headers.ts";
+import STATIC_HEADERS from "../../public/_headers?raw";
 
 const PAGE =
   "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.ytimg.com https://*.googleusercontent.com; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' https:; manifest-src 'self'; frame-src https://commonink.app/embed-frame https://commonink.app/embed-frame/g/ https://www.youtube-nocookie.com https://platform.twitter.com https://embed.bsky.app; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
@@ -44,5 +45,14 @@ describe("what the Worker tells a browser about each response", () => {
     expect(secured(own, url, {}).headers.get("Content-Security-Policy")).toBe("default-src 'none'");
     // A page a link opens sends no referrer, so its address goes to no other site.
     expect(secured(new Response("<p>", { headers: { "Referrer-Policy": "no-referrer" } }), new URL("https://localhost/s/abcdefghijklmnopqrstu"), {}).headers.get("Referrer-Policy")).toBe("no-referrer");
+  });
+
+  it("gives the built files the Worker never sees what it gives everything else, so a script or a picture there is never read as anything else or run as a page", () => {
+    expect(STATIC_HEADERS.split("\n").filter((line) => line && !line.startsWith("#"))).toEqual([
+      "/assets/*",
+      "  X-Content-Type-Options: nosniff",
+      "  Referrer-Policy: strict-origin-when-cross-origin",
+      `  Content-Security-Policy: ${written(DATA_POLICY)}`,
+    ]);
   });
 });

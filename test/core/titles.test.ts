@@ -38,7 +38,7 @@ describe("a note with no # heading", () => {
     expect((await create(ada, "See [[shopping list]]")).text).toBe(`See [[${shopping.id}]]`);
 
     await create(ada, "Shopping list\n\n- nails");
-    await expect(create(ada, "And [[Shopping list]]")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('2 notes are titled "Shopping list"') });
+    expect((await create(ada, "And [[Shopping list]]")).unresolved).toEqual([{ target: "Shopping list", matches: [expect.any(String), expect.any(String)] }]);
   });
 });
 

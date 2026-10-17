@@ -153,6 +153,7 @@ describe("MCP protocol", () => {
       "restore_upload",
       "list_trashed_uploads",
       "list_folders",
+      "find_folder",
       "create_folder",
       "rename_folder",
       "move_folder",
@@ -280,7 +281,8 @@ describe("MCP tools", () => {
     const { token } = await connectAgent(env.DB, ada.personId, "Claude");
     const folder = await perform(env.DB, { kind: "member", ...ada }, { type: "folder.create", name: "Plans" });
 
-    expect(await tool(token, "create_note", { text: "# Hi", folder_id: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder_id". It takes workspace, text, folderId, linkTitles, mentionNames.' });
+    expect(await tool(token, "create_note", { text: "# Hi", folder_id: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder_id": did you mean "folderId"? It takes workspaceId, text, folderId, linkTitles, mentionNames.' });
+    expect(await tool(token, "create_note", { text: "# Hi", folder: folder.id })).toMatchObject({ isError: true, text: 'invalid: create_note takes no "folder". It takes workspaceId, text, folderId, linkTitles, mentionNames.' });
     expect(await tool(token, "list_workspaces", { all: true })).toMatchObject({ isError: true, text: 'invalid: list_workspaces takes no "all". It takes no arguments.' });
     expect((await tool(token, "list_notes")).json()).toEqual([]);
   });
@@ -323,7 +325,7 @@ describe("what an agent can reach", () => {
     await env.DB.prepare("INSERT INTO members (workspace_id, person_id, role) VALUES (?, ?, 'editor')").bind(owner.workspaceId, ada.personId).run();
     const { token } = await connectAgent(env.DB, ada.personId, "Claude");
 
-    expect((await tool(token, "list_notes")).text).toMatch(/^invalid: Pass workspace/);
+    expect((await tool(token, "list_notes")).text).toMatch(/^invalid: Pass workspaceId: you can reach 2/);
     const made = (await tool(token, "create_note", { workspace: owner.workspaceId, text: "# In Owner's" })).json();
     expect((await perform(env.DB, { kind: "member", ...owner }, { type: "note.read", id: made.id })).title).toBe("In Owner's");
   });
@@ -505,10 +507,10 @@ describe("the ink command", () => {
     expect(seen.every((s) => s.url === "https://ink.test/mcp" && s.auth === "Bearer cink_x")).toBe(true);
     expect(seen.map((s) => [s.body.params.name, s.body.params.arguments])).toEqual([
       ["list_notes", {}],
-      ["read_note", { id: "aaaaaaaaaaaa", revision: 2, workspace: "w" }],
-      ["write_note", { id: "aaaaaaaaaaaa", baseRevision: 3, text: "# Piped" }],
+      ["read_note", { noteId: "aaaaaaaaaaaa", revision: 2, workspaceId: "w" }],
+      ["write_note", { noteId: "aaaaaaaaaaaa", baseRevision: 3, text: "# Piped" }],
       ["create_note", { text: "# Hi" }],
-      ["note_history", { id: "aaaaaaaaaaaa" }],
+      ["note_history", { noteId: "aaaaaaaaaaaa" }],
       ["list_workspaces", {}],
     ]);
     expect(lines).toEqual(Array(6).fill("OK"));

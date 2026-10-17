@@ -1,4 +1,4 @@
-import { signIn, whoAmI } from "../core/accounts.ts";
+import { sessionHolds, signIn, whoAmI } from "../core/accounts.ts";
 import { authorizeUrl, covers, exchange, isGoogleSource, REACHING_SCOPES, revoke, SOURCE_SCOPES, type Asking, type GoogleConfig, type GoogleSourceId, type GoogleTokens } from "./google.ts";
 import { connectionOf, keepTokens } from "./sources/connections.ts";
 import { PROVIDER as GOOGLE } from "./sources/google.ts";
@@ -20,10 +20,13 @@ export const devSignIn = (env: Env, url: URL) => env.DEV_SIGN_IN === "1" && DEV_
 
 const DEV_USER = { email: "dev@common.ink", name: "Dev User" };
 
-/** Who a request is from. On this machine and on Previews, nobody signed in is the dev user. */
+/**
+ * Who a request is from. On this machine and on Previews, nobody signed in is the dev user. A session
+ * that was ended, by its person signing out everywhere or by an admin, is nobody's, there too.
+ */
 export async function sessionPersonId(req: Request, env: Env, url: URL): Promise<string | null> {
-  const data = env.SESSION_SECRET ? await verify<{ personId?: string }>(cookie(req, SESSION_COOKIE), env.SESSION_SECRET) : null;
-  if (typeof data?.personId === "string") return data.personId;
+  const data = env.SESSION_SECRET ? await verify<{ personId?: string; ended?: number }>(cookie(req, SESSION_COOKIE), env.SESSION_SECRET) : null;
+  if (typeof data?.personId === "string") return (await sessionHolds(env.DB, data.personId, data.ended ?? 0)) ? data.personId : null;
   return devSignIn(env, url) ? (await signIn(env.DB, DEV_USER)).personId : null;
 }
 
@@ -86,9 +89,9 @@ async function keepGrant(env: Env, personId: string, email: string, tokens: Goog
 }
 
 async function startSession(env: Env, identity: { email: string; name: string }, next: string): Promise<Response> {
-  const { personId } = await signIn(env.DB, identity);
+  const { personId, sessionsEnded } = await signIn(env.DB, identity);
   const headers = new Headers({ Location: safeNext(next) });
-  headers.append("Set-Cookie", setCookie(SESSION_COOKIE, await sign({ personId }, env.SESSION_SECRET, SESSION_SECONDS), SESSION_SECONDS));
+  headers.append("Set-Cookie", setCookie(SESSION_COOKIE, await sign({ personId, ended: sessionsEnded }, env.SESSION_SECRET, SESSION_SECONDS), SESSION_SECONDS));
   headers.append("Set-Cookie", setCookie(STATE_COOKIE, "", 0));
   return new Response(null, { status: 302, headers });
 }

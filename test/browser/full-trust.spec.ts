@@ -149,7 +149,10 @@ test("a plugin that asks for full trust runs for nobody until an admin grants th
   await expect.poll(() => ran(page)).toEqual(["v1"]);
 
   // Turning it off tells the server, and loads the app again, so none of its code is left in the page.
+  // The loading again is waited for, not polled through: a page that is leaving has no context to ask the server from.
+  const loadedAgain = page.waitForEvent("load");
   await theSwitch(page).click();
+  await loadedAgain;
   await expect.poll(async () => (await perform(page, { type: "plugin.list" }, workspaceId)).plugins.find((p) => p.id === id)!.fullTrust!.on).toBe(false);
   await expect.poll(() => ran(page)).toEqual([]);
   await expect(theSwitch(page)).not.toBeChecked();
@@ -305,7 +308,11 @@ test("what code in the page can do with its member's session is said and not hid
   // In an admin's session: inviting, changing a role, and installing and approving a new version of itself. Nobody else is turned on by any of it.
   expect((await withSession(admin, ops, { type: "member.invite", email: "mallory@example.com", as: "admin" })).status).toBe(200);
   expect((await withSession(admin, ops, { type: "member.setRole", memberId: (await me(page)).person.id, as: "viewer" })).status).toBe(200);
+  // The install changes the code that runs in Ada's page, which loads the app again when it next reads the record: asked to now, and waited for, so no later ask is made in a page that is leaving.
+  const loadedAgain = admin.waitForEvent("load");
   expect((await withSession(admin, ops, { type: "plugin.install", manifest: JSON.stringify(DEEP), code: deepCode("v2"), replaces: id })).status).toBe(200);
+  await relist(admin).catch(() => {});
+  await loadedAgain;
   const next = await codeHashOf(admin, id);
   expect((await withSession(admin, ops, { type: "plugin.permit", id, capability: "full-trust", allowed: true, codeHash: next })).status).toBe(200);
   expect((await withSession(admin, ops, { type: "plugin.trust", id, on: true, codeHash: next, personId: (await me(page)).person.id })).status).toBe(200);

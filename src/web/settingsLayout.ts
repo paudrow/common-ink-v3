@@ -40,6 +40,8 @@ export interface Filter {
 
 export const KEYBOARD = { id: "keyboard", name: "Keyboard shortcuts" } as const;
 export const UNKNOWN = { id: "unknown", name: "Not recognized" } as const;
+/** Who is signed in, and signing out everywhere. It is the person's, in every workspace, and no setting. */
+export const ACCOUNT = { id: "account", name: "Account" } as const;
 const GENERAL = { id: "general", name: "General" };
 
 /** The app's own settings, by the category each is listed under. One that is in no row is under General. */

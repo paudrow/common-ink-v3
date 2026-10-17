@@ -335,6 +335,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "visit.read": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "visit.mark": { on: "workspace", who: EVERYONE, args: () => ({ until: 1 }) },
   "folder.list": { on: "everything", covers: "live", args: () => ({}) },
+  "folder.find": { on: "folder", needs: "V", args: (id, w) => ({ path: id === w.folders.Deep ? "team-folder/DEEP-folder" : `${FOLDERS.find((f) => w.folders[f] === id)}-FOLDER` }) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
   "folder.move": { on: "folder", needs: "E", args: (id, w) => ({ id, parentId: id === w.folders.Deep ? w.folders.Team : null }) },
@@ -346,6 +347,9 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "member.setRole": { on: "workspace", who: ADMINS, args: () => ({ memberId: "aaaaaaaaaaaa", as: "viewer" }) },
   "member.remove": { on: "workspace", who: ADMINS, args: () => ({ memberId: "aaaaaaaaaaaa" }) },
   "member.leave": { on: "workspace", who: [], args: () => ({}) },
+  // Asked about a member who isn't there: anyone may sign out themself, which test/core/sessions.test.ts checks, and only an admin anyone else,
+  // which by default disconnects their agents too: the one way an admin reaches a member's agents.
+  "member.signOut": { on: "workspace", who: ADMINS, args: () => ({ memberId: "aaaaaaaaaaaa" }) },
   "invite.list": { on: "workspace", who: ADMINS, args: () => ({}) },
   "invite.revoke": { on: "workspace", who: ADMINS, args: () => ({ id: "aaaaaaaaaaaa" }) },
   "grant.list": { on: "note", needs: "V", trashed: "opens", args: (noteId) => ({ noteId }) },

@@ -3,7 +3,7 @@ import type { ListedFolder } from "../../src/core/protocol.ts";
 import { folderTree } from "../../src/web/folders.ts";
 import { canMove, movable, placesFor } from "../../src/web/plugins/lib/folderMoves.ts";
 
-const folder = (id: string, parentId: string | null, access: "view" | "edit" = "edit"): ListedFolder => ({ id, name: id, parentId, noteCount: 0, uploadCount: 0, access });
+const folder = (id: string, parentId: string | null, access: "view" | "edit" = "edit"): ListedFolder => ({ id, name: id, parentId, noteCount: 0, uploadCount: 0, access, path: id });
 
 /**
  * unsorted

@@ -97,10 +97,15 @@ const FolderName = z
 
 /**
  * What a write does with a link written by title, `[[Title]]`, outside code. `resolve` stores it by
- * the id of the one note with that title, ignoring case, and refuses the write when no note the
- * writer can see has it or several do. `keep` leaves the text as written, where it links nothing.
+ * the id of the one note with that title, ignoring case, and leaves it as written when no note the
+ * writer can see has it or several do: the write names those in `unresolved`. `resolve-strict`
+ * refuses the write for them instead. `keep` leaves every link as written, where it links nothing.
  */
-const LinkTitles = z.enum(["resolve", "keep"]).default("resolve");
+const LinkTitles = z.enum(["resolve", "resolve-strict", "keep"]).default("resolve");
+export type LinkTitles = z.output<typeof LinkTitles>;
+
+/** What folder.create does when the parent has a folder of that name, ignoring case: answer with it, or refuse. */
+const IfExists = z.enum(["return", "error"]).default("error");
 
 /**
  * What a write does with a mention it introduces, `@[[Name]]` or `@[[id]]`, outside code. `resolve`
@@ -501,7 +506,9 @@ export const Op = z.discriminatedUnion("type", [
    */
   z.object({ type: z.literal("history.revert"), changes: ManyNotes(Reverted) }),
   z.object({ type: z.literal("folder.list") }),
-  z.object({ type: z.literal("folder.create"), name: FolderName, parentId: Id.optional() }),
+  z.object({ type: z.literal("folder.create"), name: FolderName, parentId: Id.optional(), ifExists: IfExists }),
+  /** The folder at a path such as `Projects/Skills`, from the top of what the asker can see, ignoring case and then accents. */
+  z.object({ type: z.literal("folder.find"), path: z.string().max(1000) }),
   z.object({ type: z.literal("folder.rename"), id: Id, name: FolderName }),
   /** Puts a folder inside another, or at the top with a null `parentId`. What is in it goes with it. */
   z.object({ type: z.literal("folder.move"), id: Id, parentId: Id.nullable() }),
@@ -536,6 +543,12 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("member.remove"), memberId: Id }),
   /** Takes whoever asks out of the workspace. */
   z.object({ type: z.literal("member.leave") }),
+  /**
+   * Signs `memberId` out of every browser they are signed in on. Anyone may ask it of themself, and an
+   * admin of any member. With `agents`, the default, it disconnects their agents too: every one of
+   * their own, or a member's that reach this workspace.
+   */
+  z.object({ type: z.literal("member.signOut"), memberId: Id, agents: z.boolean().default(true) }),
   /** The invites nobody has taken up yet. */
   z.object({ type: z.literal("invite.list") }),
   /** Takes back an invite nobody has taken up. */
@@ -1068,7 +1081,18 @@ export interface ListedFolder extends Folder {
   uploadCount: number;
   /** What the one asking may do with the folder: with edit, make notes and folders in it. */
   access: GrantAccess;
+  /** Its name after those of the folders it is in, as far up as the one asking can see: `Projects/Skills`. */
+  path: string;
 }
+
+/** A link written by title that a write left as written: no note the writer can see has the title, or several do (`matches`). */
+export interface UnresolvedLink {
+  target: string;
+  matches: string[];
+}
+
+/** A note a write made or changed, with the links by title it left as written, when there were any. */
+export type Linked<T> = T & { unresolved?: UnresolvedLink[] };
 
 export type Author =
   | { kind: "member"; personId: string; name: string }
@@ -1319,9 +1343,9 @@ export interface Rebuilt {
 
 export interface Results {
   "note.list": NoteSummary[];
-  "note.create": Note;
+  "note.create": Linked<Note>;
   "note.read": ReadNote;
-  "note.write": Written;
+  "note.write": Linked<Written>;
   "note.backlinks": NoteSummary[];
   "links.rebuild": Rebuilt;
   /** `next` is the `offset` of the page after, or null on the last. */
@@ -1366,7 +1390,9 @@ export interface Results {
   "history.revert": RevertedNotes;
   /** `unsortedId` is null for a guest, who can't see Unsorted unless it was shared with them. */
   "folder.list": { unsortedId: string | null; folders: ListedFolder[] };
-  "folder.create": Folder;
+  /** `created` is false when the parent already had the folder, which `ifExists: "return"` answers with. */
+  "folder.create": Folder & { created: boolean };
+  "folder.find": ListedFolder;
   "folder.rename": Folder;
   "folder.move": Folder;
   "folder.delete": { id: string };
@@ -1378,6 +1404,7 @@ export interface Results {
   "member.setRole": Member;
   "member.remove": { memberId: string };
   "member.leave": { memberId: string };
+  "member.signOut": { memberId: string };
   "invite.list": Invite[];
   "invite.revoke": { id: string };
   "grant.list": Sharing;
