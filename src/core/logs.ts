@@ -4,7 +4,13 @@
 
 const RULES: readonly [RegExp, string][] = [
   [/\bBearer\s+\S+/gi, "Bearer …"],
+  // An agent's token, and OAuth's: a code (cink_ac_), an access token (cink_at_) and a refresh token (cink_rt_).
   [/\bcink_[A-Za-z0-9_-]+/g, "cink_…"],
+  // What an OAuth app sends, in a form or in an address: a verifier proves it made the request, and the request's id is how a member answers it.
+  [/\b(code_verifier|code_challenge|refresh_token|access_token|client_id)=[^&\s"']*/g, "$1=…"],
+  // (The consent page's address is also met inside another's `next`, percent-encoded.)
+  [/((?:[?&]|%3F|%26)request(?:=|%3D))[A-Za-z0-9_-]*/gi, "$1…"],
+  // As JSON, which an error may quote with its input, they are strings in quotes, which the last rule takes.
   // A session, a sign-in state and an ID token are each JSON in base64url, a dot, and more.
   [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]*/g, "eyJ…"],
   [/\bya29\.[A-Za-z0-9_.-]+/g, "ya29.…"],

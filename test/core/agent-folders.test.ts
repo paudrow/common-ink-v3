@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { signIn } from "../../src/core/accounts.ts";
 import { authenticateAgent, connectAgent, editAgent, listAgents } from "../../src/core/agents.ts";
+import { consent, exchangeCode, registerClient, startRequest } from "../../src/core/oauth.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { MAX_AGENT_FOLDERS, type Note } from "../../src/core/protocol.ts";
 import type { Sources } from "../../src/core/sources.ts";
@@ -1014,5 +1015,40 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
 
     const said = claude.said.join("\n");
     expect(w.marks.filter((mark) => said.includes(mark))).toEqual([]);
+  });
+
+  it("is limited the same when it came by OAuth: the same answers to the same questions as a pasted token limited alike, and nothing of what is outside", async () => {
+    const w = await world();
+    // An app signs in as the member does, and consents to the same folders the pasted token was limited to.
+    const client = await registerClient(env.DB, { client_name: "Chat", redirect_uris: ["https://chat.example/cb"] });
+    const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const requestId = await startRequest(env.DB, { clientId: client.id, redirectUri: client.redirectUris[0]!, state: null, codeChallenge: challenge, resource: null });
+    const granted = await consent(env.DB, w.ada.personId, { requestId, workspaceId: w.ada.workspaceId, folderIds: [w.projects] });
+    const { accessToken } = await exchangeCode(env.DB, { code: granted.code, clientId: client.id, redirectUri: client.redirectUris[0]!, verifier });
+    expect(await authenticateAgent(env.DB, accessToken)).toMatchObject({ folderIds: [w.projects], workspaceId: w.ada.workspaceId, readOnly: false, agentId: granted.agentId });
+
+    const pasted = await asAgent(w.limited.token);
+    const oauth = await asAgent(accessToken);
+    const outsideAsked: [string, Record<string, unknown>][] = [
+      ["list_notes", {}],
+      ["read_note", { id: w.outside.id }],
+      ["read_note", { id: w.inside.id }],
+      ["backlinks", { id: w.inside.id }],
+      ["list_folders", {}],
+      ["find_folder", { path: "Journal" }],
+      ["search", { query: "words-outside" }],
+      ["write_note", { id: w.outside.id, baseRevision: 3, text: "# Taken" }],
+      ["create_note", { folderId: w.journal, text: "# Planted" }],
+      ["note_history", { id: w.loose.id }],
+    ];
+    for (const [name, args] of outsideAsked) {
+      const via = await oauth.call(name, args);
+      const same = await pasted.call(name, args);
+      // Each is named by its own agent, so the ids that tell them apart are the only difference allowed.
+      expect(via.isError, name).toBe(same.isError);
+      expect(via.text.replaceAll(granted.agentId, "AGENT"), name).toBe(same.text.replaceAll(w.limited.agent.id, "AGENT"));
+    }
+    expect(w.marks.filter((mark) => oauth.said.join("\n").includes(mark))).toEqual([]);
   });
 });
