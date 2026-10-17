@@ -1,4 +1,4 @@
-import { useNow, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../../plugin-api.ts";
+import { Icon, useNow, type NoteSummary, type Plugin, type PluginHost, type ViewProps } from "../../plugin-api.ts";
 import { lifecycle, mayPurge } from "../lib/lifecycle.ts";
 import { daysLeft, leftSentence } from "./days.ts";
 import { Purge } from "./Purge.tsx";
@@ -6,20 +6,38 @@ import { TrashPage } from "./TrashPage.tsx";
 
 type NoteView = ViewProps & { host: PluginHost; note: NoteSummary };
 
-/** Said in an archived note's bar, which keeps its height: the note's text doesn't move when it is archived or brought back. */
+/** Said quietly under an archived note's title, with the way back. */
 function ArchivedMark({ host, note }: NoteView) {
   if (note.state !== "archived") return null;
   return (
     <span className="state-mark">
       Archived
       {note.access === "edit" && (
-        <button type="button" className="link" onClick={() => void lifecycle(host).setArchived(note.id, false)}>
-          Unarchive
-        </button>
+        <>
+          <span aria-hidden="true">·</span>
+          <button type="button" className="link" onClick={() => void lifecycle(host).setArchived(note.id, false)}>
+            Unarchive
+          </button>
+        </>
       )}
     </span>
   );
 }
+
+/** The open note's Archive button, beside its "…" and Focus: archiving gets a note out of the way. For an archived note it is Unarchive, with an icon of its own. */
+function ArchiveButton({ host, note }: NoteView) {
+  if (note.access !== "edit" || note.state === "trashed") return null;
+  const archived = note.state === "archived";
+  const label = archived ? "Unarchive" : "Archive";
+  const keys = host.commands.list().find((c) => c.id === ARCHIVE_COMMAND)?.shortcut;
+  return (
+    <button type="button" className="icon-button" aria-label={label} title={keys ? `${label} (${keys})` : label} onClick={() => void lifecycle(host).setArchived(note.id, !archived)}>
+      <Icon name={archived ? "unarchive" : "archive"} />
+    </button>
+  );
+}
+
+const ARCHIVE_COMMAND = "note.toggleArchived";
 
 function TrashBanner({ host, note }: NoteView) {
   const now = useNow();
@@ -58,7 +76,7 @@ export const trash: Plugin = {
     };
 
     host.commands.register({
-      id: "note.toggleArchived",
+      id: ARCHIVE_COMMAND,
       title: "Archive or unarchive note",
       group: "Notes",
       // Free in Chrome and Safari, in the editor's own keys, and in vim mode, which has no Ctrl+Shift keys.
@@ -79,6 +97,7 @@ export const trash: Plugin = {
     });
 
     host.views.register("mark", { id: "archived", component: (props) => <ArchivedMark host={host} {...props} /> });
+    host.views.register("tool", { id: "archive", component: (props) => <ArchiveButton host={host} {...props} /> });
     host.views.register("notice", { id: "trashed", component: (props) => <TrashBanner host={host} {...props} /> });
     // Under More, and with no order so that it comes after the modes there: it is where notes go, not a way to work.
     host.views.register("page", { id: "trash", path: "/trash", label: "Trash", icon: "trash", nav: "more", component: (props) => <TrashPage host={host} {...props} /> });

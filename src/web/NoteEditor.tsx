@@ -1,8 +1,9 @@
 import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { Compartment, EditorState, Transaction } from "@codemirror/state";
-import { EditorView, keymap, panels, placeholder } from "@codemirror/view";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Compartment, EditorState, StateField, Transaction, type Text } from "@codemirror/state";
+import { Decoration, EditorView, WidgetType, keymap, panels, placeholder, type DecorationSet } from "@codemirror/view";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { GrantAccess, Note } from "../core/protocol.ts";
 import { ApiError, perform, session } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
@@ -23,6 +24,38 @@ const SAVE_LABEL: Record<SaveState, string> = { saved: "Saved", unsaved: "Unsave
   rejected: "Couldn't save this version. Edit the note to try again.",
   inTrash: UNSAVED_IN_TRASH,
 };
+
+/** What the bottom bar says of the note in front: whether it is saved, and whether that is bad news. */
+export interface SaveShown {
+  label: string;
+  failed: boolean;
+}
+
+/** The quiet line under a note's title, one element for the life of its editor so what is drawn in it stays. */
+class UnderTitle extends WidgetType {
+  constructor(readonly dom: HTMLElement) {
+    super();
+  }
+  eq(other: UnderTitle) {
+    return other.dom === this.dom;
+  }
+  toDOM() {
+    return this.dom;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+/** Puts `dom` under the note's first line, which is its title. A block widget, so it is given directly and not by a function of the view. */
+function underTitle(dom: HTMLElement) {
+  const at = (doc: Text) => Decoration.set(Decoration.widget({ widget: new UnderTitle(dom), block: true, side: 1 }).range(doc.line(1).to));
+  return StateField.define<DecorationSet>({
+    create: (state) => at(state.doc),
+    update: (marks, tr) => (tr.docChanged ? at(tr.state.doc) : marks),
+    provide: (field) => EditorView.decorations.from(field),
+  });
+}
 
 /** Where reading a note has got to. Only a loaded note has text to say anything about, such as that it is saved. */
 type Load = { kind: "loading" } | { kind: "loaded" } | { kind: "missing" } | { kind: "failed"; message: string };
@@ -72,7 +105,10 @@ interface Props {
   extensions: readonly EditorExtension[];
   /** Called for an extension this editor had to leave out, with why. */
   onExtensionRefused: (extension: EditorExtension, error: unknown) => void;
-  meta: ReactNode;
+  /** What plugins say of the note in a quiet line under its title, such as that it is archived. */
+  marks: ReactNode;
+  /** Told what the bottom bar is to say of this note as that changes, and null as the editor goes. `editor` tells apart two editors of one note. */
+  onSaveShown: (editor: string, shown: SaveShown | null) => void;
   /** What plugins say of the note above its text, such as that it is in Trash. */
   above: ReactNode;
   /** In focus, the live things of the bottom bar, such as a running timer, which are then drawn at the foot of the note with whether it is saved. */
@@ -87,7 +123,7 @@ function textLeftIn(view: EditorView, pane: HTMLElement): number {
   return Math.round(content.getBoundingClientRect().left + padding(content) + padding(line) - pane.getBoundingClientRect().left);
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta, above, live }: Props) {
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, marks, above, onSaveShown, live }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const foot = useRef<HTMLDivElement>(null);
   const footRow = useRef<HTMLDivElement>(null);
@@ -120,6 +156,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
   const [attempt, setAttempt] = useState(0);
   const failures = useRef(0);
   const signedOut = useSyncExternalStore(session.subscribe, session.signedOut);
+  const [under] = useState(() => Object.assign(document.createElement("div"), { className: "note-marks" }));
 
   useEffect(() => {
     if (gone) return;
@@ -153,6 +190,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
               added.of(now.current.extensions),
               // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
               history(),
+              underTitle(under),
               keymap.of(defaultKeymap),
               // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
               markdown({ base: markdownLanguage }),
@@ -193,7 +231,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
       void sync?.close();
       view?.destroy();
     };
-  }, [workspaceId, noteId, gone, onLoaded, onSaved, embedded, completed, added, locked, attempt]);
+  }, [workspaceId, noteId, gone, onLoaded, onSaved, embedded, completed, added, locked, attempt, under]);
 
   // A read refused for want of a session is sent again once there is one.
   const failedNow = useRef(false);
@@ -261,16 +299,20 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
     view.focus();
   };
 
+  const viewOnly = load.kind === "loaded" && !canEdit && !trashed;
+  const label = notice ?? (load.kind === "loaded" ? (trashed && saveState !== "saved" ? UNSAVED_IN_TRASH : viewOnly && saveState === "saved" ? "View only" : SAVE_LABEL[saveState]) : load.kind === "failed" ? "Not loaded" : "");
+  const bad = !!notice || load.kind === "failed" || saveState === "failed" || saveState === "rejected" || saveState === "inTrash" || saveState === "signedOut";
+  const editorId = useId();
+  const told = useRef(onSaveShown);
+  told.current = onSaveShown;
+  useEffect(() => told.current(editorId, label && !gone ? { label, failed: bad } : null), [editorId, label, bad, gone]);
+  useEffect(() => () => told.current(editorId, null), [editorId]);
+
   if (load.kind === "missing" || gone) return <p className="notice">This note doesn't exist, or you can't see it.</p>;
   return (
     <section className="note" data-save-state={load.kind === "loaded" ? saveState : undefined}>
-      <header className="note-bar">
-        <div className="note-meta">{meta}</div>
-        <div className="save-state" role="status">
-          {notice ?? (load.kind === "loaded" ? (trashed && saveState !== "saved" ? UNSAVED_IN_TRASH : SAVE_LABEL[saveState]) : load.kind === "failed" ? "Not loaded" : "")}
-        </div>
-      </header>
       {above}
+      {createPortal(marks, under)}
       <div className="note-scroll" onMouseDown={toEnd}>
         {load.kind === "failed" && (
           <div className="notice" role="alert">

@@ -80,7 +80,15 @@ export const html: Plugin = {
           const why = () => (elsewhere ? `${ELSEWHERE} ${reach(sites)}` : `Written in this note. ${reach(sites)}`);
           const say = () => button?.querySelector(".media-load-from")?.replaceChildren(why());
           saying.add(say);
+          /** Takes away the placeholder an embed that runs by itself holds its room with while the workspace is asked what it may reach. */
+          let holding: (() => void) | null = null;
+          const release = () => {
+            holding?.();
+            holding = null;
+          };
           const start = (grant: string | null) => {
+            // Before the frame's own placeholder, which sets the room busy again.
+            release();
             button?.remove();
             button = null;
             const made = sandboxed(body, {
@@ -116,6 +124,7 @@ export const html: Plugin = {
               begin(sites);
             });
             into.append(button);
+            release();
           };
           /**
            * Runs it with the reach `said`: none, or the sites an admin listed, which need a grant, good once,
@@ -162,6 +171,8 @@ export const html: Plugin = {
           if (elsewhere || asks()) ask();
           else {
             starting = true;
+            // Its room is held with the loading placeholder until the frame is made or the Run button is drawn, so in the meantime it is not an empty box.
+            holding = arriving(into, document.createElement("div")).arrived;
             void known.then(() => {
               starting = false;
               if (!live || halt || button) return;

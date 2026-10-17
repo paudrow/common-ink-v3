@@ -592,7 +592,7 @@ test("a member who can't change the note sees its embeds without their controls,
   await expect.poll(() => board(page)).toEqual({ "To do": ["write"], Done: [] });
   await expect(lines(page).last()).toHaveText("words");
   await expect(menu(page)).toHaveCount(0);
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status")).toHaveText("View only");
   await settled(page);
   expect(writes).toEqual([]);
 

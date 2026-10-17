@@ -54,10 +54,10 @@ export function lifecycle(host: PluginHost) {
   const items = (note: NoteSummary | undefined): MenuItem[] => {
     if (!note) return [];
     const locked = note.access !== "edit";
-    if (note.state === "trashed") return [{ label: "Restore", disabled: locked, action: () => void restore(note.id) }];
+    if (note.state === "trashed") return [{ label: "Restore", icon: "restore", disabled: locked, action: () => void restore(note.id) }];
     return [
-      { label: note.state === "archived" ? "Unarchive" : "Archive", disabled: locked, action: () => void setArchived(note.id, note.state !== "archived") },
-      { label: "Move to Trash", disabled: locked, action: () => void trash(note.id) },
+      { label: note.state === "archived" ? "Unarchive" : "Archive", icon: note.state === "archived" ? "unarchive" : "archive", disabled: locked, action: () => void setArchived(note.id, note.state !== "archived") },
+      { label: "Move to Trash", icon: "trash", disabled: locked, action: () => void trash(note.id) },
     ];
   };
 

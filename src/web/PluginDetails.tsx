@@ -52,7 +52,8 @@ const SLOT_WORDS: Record<keyof Slots, string> = {
   dashboard: "A panel on the Dashboard",
   bar: "The bottom bar",
   overlay: "Something drawn over the app",
-  mark: "A mark in a note's bar",
+  mark: "A mark under a note's title",
+  tool: "A button at a note's top right",
   notice: "A banner above a note's text",
 };
 

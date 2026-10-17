@@ -8,13 +8,13 @@ import { addressOf, queryIn } from "./request.ts";
  * The Search page: the list every folder's tab has, of every note, with the keyboard in its search
  * field, and with the query as its one control: which notes, whether they have todos and the order
  * are said in it, typed or built under Advanced. The address is the search. Typing writes it there
- * after a pause, and a link, a reload, or Back brings one back. Which cards are expanded is the
- * page's own, for as long as it is shown. The inspector is about the notes it lists.
+ * after a pause, and a link, a reload, or Back brings one back. Which cards show their whole notes is
+ * the page's own, for as long as it is shown. The inspector is about the notes it lists.
  */
 export function SearchPage({ host, app }: { host: PluginHost; app: App }) {
-  const [expanded, setExpanded] = useState<ListView["expanded"]>({});
-  const [kept] = useState({ scrollTop: 0 });
-  const view: ListView = { ...INITIAL_VIEW, query: queryIn(app.query), expanded };
+  const [whole, setWhole] = useState<ListView["whole"]>({});
+  const [kept] = useState(() => ({ scrollTop: 0, heights: new Map<string, number>() }));
+  const view: ListView = { ...INITIAL_VIEW, query: queryIn(app.query), whole };
   return (
     <NoteFinder
       app={app}
@@ -25,14 +25,14 @@ export function SearchPage({ host, app }: { host: PluginHost; app: App }) {
       view={view}
       act={(action) => {
         const next = listReducer(view, action);
-        setExpanded(next.expanded);
+        setWhole(next.whole);
         if (next.query !== view.query) app.go(addressOf(next.query), { replace: true });
       }}
       kept={kept}
       heading="Search"
-      queryOnly
       autoFocus
       inspected
+      whichNotes={false}
     />
   );
 }

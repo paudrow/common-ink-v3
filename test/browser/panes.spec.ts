@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, noteCard, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, runCommand, showPanel, shownPanel, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
+import { folderRow, noteCard, openAllNotes, openKept, ownPlugin, panelIcons, perform, pinPanel, runCommand, showPanel, shownPanel, signInAsNewPerson, toggleSidebar } from "./helpers.ts";
 
 const tabBar = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group);
 const tabs = (page: Page, group = 0) => tabBar(page, group).getByRole("tab");
@@ -18,7 +18,7 @@ async function withNotes(page: Page, ...titles: string[]) {
 
 async function keep(page: Page, title: string) {
   await openAllNotes(page);
-  await noteCard(page, title).getByRole("button", { name: `Edit ${title}` }).click();
+  await openKept(page, title);
 }
 
 const menuItem = (page: Page, name: string) => page.getByRole("menuitem", { name, exact: true });
@@ -59,7 +59,7 @@ const FITS = { below: 0, above: 0, hidden: 0, firstLineInside: true };
 
 test("in a split down, a folder's list, a note and a page are each as tall as their pane and scroll only when longer than it", async ({ page }) => {
   // Tall enough that a list of two notes is shorter than half of it.
-  await page.setViewportSize({ width: 1280, height: 1200 });
+  await page.setViewportSize({ width: 1280, height: 1400 });
   await withNotes(page, "Alpha", "Beta");
   await keep(page, "Alpha");
   await folderRow(page, "Unsorted").dblclick();
@@ -190,7 +190,7 @@ test("a mode or a folder dragged from the sidebar lands in a pane as a tab does:
   await expect(folderRow(page, "Plans")).toHaveAttribute("aria-level", "2");
   expect(await page.getByRole("tab").count()).toBe(before);
   await tab(page, "All notes").click();
-  await noteCard(page, "Beta").dragTo(folderRow(page, "Plans"));
+  await noteCard(page, "Beta").locator(".card-head").dragTo(folderRow(page, "Plans"));
   await expect(folderRow(page, "Plans")).toContainText("1");
 });
 
@@ -271,7 +271,7 @@ test("the window has one italic tab, which is where the next thing opens whichev
   // A note opened from an italic folder tab takes the list's place in that tab, and Back returns to the list.
   await folderRow(page, "Unsorted").click();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Unsorted"]);
-  await group(page, 2).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Alpha" }).click();
+  await group(page, 2).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Edit Alpha" }).click();
   // Alpha has a kept tab in the other pane, which the click turns to: nothing opened, so the list is where it was, and italic.
   await expect(group(page, 1)).toHaveAttribute("data-focused", "true");
   await expect(tabs(page, 1)).toHaveText(["Beta", "Unsorted"]);
@@ -281,7 +281,7 @@ test("the window has one italic tab, which is where the next thing opens whichev
   await page.reload();
   await tab(page, "Beta", 1).click();
   await folderRow(page, "Unsorted").click();
-  await group(page, 2).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Gamma" }).click();
+  await group(page, 2).getByRole("navigation", { name: "Notes" }).getByRole("link", { name: "Edit Gamma" }).click();
   await expect(tabs(page, 1)).toHaveText(["Beta", "Gamma"]);
   await expect.poll(() => previews(page)).toEqual(["Gamma"]);
   await expect(group(page, 2).locator(".cm-line").first()).toHaveText("# Gamma");

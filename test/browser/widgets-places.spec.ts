@@ -149,7 +149,9 @@ test("in focus the bottom bar is out of sight and its running clock is at the no
   await expect(wordCount(page)).toHaveText("3 words · 1 min read");
 
   for (const name of ["Note clocks", "Quick timer", "Word count", "Uploads", "Coin"]) await run(page, `Disable plugin: ${name}`);
-  await expect(page.locator(".bar")).toHaveCount(0);
+  // With a note in front the bar stays for its save state alone.
+  await expect(page.locator(".bar [data-bar-item]")).toHaveCount(0);
+  await expect(page.locator(".bar").getByRole("status")).toHaveText("Saved");
   await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveAttribute("aria-pressed", "true");
 });
 

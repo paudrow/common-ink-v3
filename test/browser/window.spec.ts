@@ -308,7 +308,8 @@ test("the tab row has its tabs and Focus and no button for either side, whose co
   await withNote(page);
   await pinPanel(page, "Info");
   const controls = (part: Locator) => part.locator("a, button:not(.tab-close)").evaluateAll((els) => els.filter((el) => el.getClientRects().length).map((el) => el.getAttribute("aria-label") ?? el.textContent));
-  expect(await controls(page.locator(".tab-row"))).toEqual(["Focus"]);
+  // A note in front has its own buttons before Focus: the pin, Archive and its menu.
+  expect(await controls(page.locator(".tab-row"))).toEqual(["Pin to dashboard", "Archive", "Note menu", "Focus"]);
   await expect(page.getByRole("group", { name: "Window" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^(Sidebar|Inspector)$/ })).toHaveCount(0);
   const main = page.getByRole("main", { name: "Editor" });
@@ -323,7 +324,7 @@ test("the tab row has its tabs and Focus and no button for either side, whose co
   expect(await widthOf(bar)).toBe(44);
   expect(await widthOf(main)).toBe(1280 - 44 - 300);
   await expect.poll(() => controls(bar)).toEqual(["New note", "Dashboard", "Search", "Todos", "Today", "Calendar", "More", "Folders", "Tags"]);
-  expect(await controls(page.locator(".tab-row"))).toEqual(["Focus"]);
+  expect(await controls(page.locator(".tab-row"))).toEqual(["Pin to dashboard", "Archive", "Note menu", "Focus"]);
   await page.reload();
   await expect(bar).toBeVisible();
   await page.keyboard.press("ControlOrMeta+\\");
@@ -562,7 +563,7 @@ test("a folder dragged out of the bar's folder tree lands in a pane as one dragg
 });
 
 for (const folder of ["Unsorted", "Meeting notes", "Research and development / Quarterly planning documents / Engineering"]) {
-test(`in a pane 320px wide a note's bar is as tall before the name of its folder, ${folder}, arrives as after, and the note's first line stays where it is`, async ({ page }) => {
+test(`in a pane 320px wide a note's first line stays where it is as the name of its folder, ${folder}, arrives`, async ({ page }) => {
   await page.setViewportSize({ width: 320 + 44 + 44, height: 800 });
   await signInAsNewPerson(page, "Ada Lovelace");
   let folderId: string | undefined;
@@ -573,25 +574,27 @@ test(`in a pane 320px wide a note's bar is as tall before the name of its folder
   });
   let arrive = () => {};
   const held = new Promise<void>((done) => (arrive = done));
+  let listed = false;
+  page.on("requestfinished", (request) => request.postData()?.includes("folder.list") && (listed = true));
   await page.route("**/api/**", async (route) => {
     if (route.request().postData()?.includes("folder.list")) await held;
     await route.fallback();
   });
   await page.goto(`/note/${note.id}`);
   await expect(page.getByRole("textbox", { name: "Note text" })).toContainText("Draft");
-  await expect(page.locator(".note-meta")).toContainText("edited");
-  await expect(page.locator(".crumbs")).toHaveText("");
+  await expect(page.locator(".note-tools")).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   const measured = () =>
     page.evaluate(() => {
       const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
-      return { pane: box(".group-body").width, bar: box(".note-bar").height, firstLine: box(".cm-line").top, edited: box(".note-meta > :last-child").top };
+      return { pane: box(".group-body").width, firstLine: box(".cm-line").top, left: box(".cm-line").left };
     });
   const before = await measured();
   expect(before.pane).toBe(320);
 
   arrive();
-  await expect(page.locator(".crumbs")).toHaveText(folder);
+  await expect.poll(() => listed).toBe(true);
+  await expect(page.locator(".note-tools")).toBeVisible();
   expect(await measured()).toEqual(before);
 });
 }
@@ -710,7 +713,7 @@ for (const width of [900, 700, 480]) {
     const note = await withNote(page, "# Draft with a long title that takes room\n\nWords.");
     await perform(page, { type: "note.setPrivate", id: note.id, private: true });
     await page.reload();
-    await expect(page.locator(".note-bar")).toContainText("Private");
+    await expect(page.getByRole("tab", { name: /Draft/ }).locator(".private-mark")).toBeVisible();
     await pinPanel(page, "Info");
 
     /** Every part named is wholly inside the window: none of it is past the right edge, or the left. */
@@ -723,11 +726,12 @@ for (const width of [900, 700, 480]) {
         expect(box.width, `${part} has room`).toBeGreaterThan(0);
       }
     };
-    /** Nothing in the note's bar is cut off: each thing in it lies inside the bar, and the bar inside the window. */
+    /** Nothing of the note's own buttons at its top right is cut off: each lies inside its tab row, and the row inside the window. */
     const barIsWhole = () =>
-      page.locator(".note-bar").evaluate((bar) => {
+      page.locator(".group[data-front] .tab-row").evaluate((bar) => {
         const edge = bar.getBoundingClientRect();
-        const cut = [...bar.querySelectorAll("button, .save-state, .note-meta > *")].filter((el) => {
+        // In focus the note's own buttons are out of sight with the rest of the tab row, and only Focus is there.
+        const cut = [...bar.querySelectorAll(".note-tools button, .focus-button")].filter((el) => el.checkVisibility()).filter((el) => {
           const box = el.getBoundingClientRect();
           return box.width === 0 || box.left < edge.left - 0.5 || box.right > edge.right + 0.5 || box.top < edge.top - 0.5 || box.bottom > edge.bottom + 0.5 || (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth + 1;
         });
@@ -736,7 +740,7 @@ for (const width of [900, 700, 480]) {
 
     const focusButton = page.getByRole("button", { name: "Focus" });
     await inside(focusButton, sidebar(page), inspector(page), page.getByRole("tab", { name: /Draft/ }), page.locator(".save-state"), edge(page, "Resize sidebar"), edge(page, "Resize inspector"));
-    for (const button of await page.locator(".note-bar").getByRole("button").all()) await inside(button);
+    for (const button of await page.locator(".note-tools").getByRole("button").all()) await inside(button);
     let bar = await barIsWhole();
     expect(bar.cut).toEqual([]);
     expect(bar.right).toBeLessThanOrEqual(bar.wide);

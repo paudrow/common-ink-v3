@@ -211,7 +211,7 @@ test("focus keeps a quiet line at its foot with only what is live: vim's mode, a
   await page.keyboard.press("Escape");
   await run(page, "Toggle focus");
   await expect(page.locator(".group[data-front] .note-live")).toHaveCount(0);
-  await expect(page.locator(".note-bar .save-state")).toHaveText("Saved");
+  await expect(page.locator(".bar .save-state")).toHaveText("Saved");
 });
 
 test("the z commands are no jumps: ctrl+o after them goes back to where the last real jump came from", async ({ page }) => {

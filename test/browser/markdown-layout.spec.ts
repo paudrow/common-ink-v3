@@ -80,7 +80,7 @@ async function open(page: Page, text: string, settings?: Record<string, unknown>
   await expect(editor(page)).toContainText(text.split("\n")[0]!.replace(/^# /, ""));
   // The folder's name arrives in the note's bar after the note does, and in a narrow column, with a wide
   // face, it puts the bar on two rows: everything under it is lower from then on. Measure after it.
-  await expect(page.locator(".note-meta .crumbs")).not.toBeEmpty();
+  await expect(page.locator(".note-tools")).toBeVisible();
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+Home");
   return note;

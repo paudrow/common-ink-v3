@@ -230,7 +230,7 @@ test("a video's address takes no room until the cursor is on its line, not when 
   await page.setViewportSize({ width: 1800, height: 1400 });
   await open(page, "# Video\n\nbefore it\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nbetween them\n\nhttps://youtu.be/aaaaaaaaaaa\n\nafter them\n");
   // The folder's name comes after the note and can change the height of the bar above it, and the faces come when they come.
-  await expect(page.locator(".note-meta .crumbs")).not.toHaveText("");
+  await expect(page.locator(".note-tools")).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   const measured = () =>
     page.evaluate(() => {
@@ -950,7 +950,8 @@ test("an HTML embed in a pane is run only once its room is in sight in that pane
   await page.getByRole("menuitem", { name: "Split down", exact: true }).click();
   await expect(page.locator(".note-scroll")).toHaveCount(1);
   await settled(page);
-  const room = page.locator(".embed-below-room > div");
+  // The pane's own: the folder's list beside it draws the note in its card too.
+  const room = page.locator(".note-scroll .embed-below-room > div");
   const clipped = await room.evaluate((el) => el.getBoundingClientRect().top > el.closest(".note-scroll")!.getBoundingClientRect().bottom);
   expect(clipped, "the room is below the pane's edge and inside the window").toBe(true);
   expect(await room.evaluate((el) => el.getBoundingClientRect().top < innerHeight)).toBe(true);

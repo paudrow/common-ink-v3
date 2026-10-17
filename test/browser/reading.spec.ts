@@ -12,7 +12,7 @@ const text = async (page: Page, id: string) => (await perform(page, { type: "not
 
 for (const settings of [{ "vim.enabled": true, "lineNumbers.enabled": true }, {}]) {
   const vim = "vim.enabled" in settings;
-  test(`an expanded card is a reading, not an editor: no cursor, no mode bar, no keys, and its text can still be selected and copied${vim ? " (vim and line numbers on)" : ""}`, async ({ page, context }) => {
+  test(`a card is a reading, not an editor: no cursor, no mode bar, no keys, and its text can still be selected and copied${vim ? " (vim and line numbers on)" : ""}`, async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await signInAsNewPerson(page, "Ada Lovelace");
     await perform(page, { type: "settings.write", text: JSON.stringify(settings), baseRevision: 0 });
@@ -21,7 +21,6 @@ for (const settings of [{ "vim.enabled": true, "lineNumbers.enabled": true }, {}
     await page.reload();
     await openAllNotes(page);
     const card = noteCard(page, "Test");
-    await card.getByRole("button", { name: "Expand Test" }).click();
     const reading = card.locator(".editor.reading");
     await expect(reading.locator(".cm-line").first()).toHaveText("# Test");
     await card.getByRole("button", { name: "Show whole note" }).click();
@@ -41,8 +40,10 @@ for (const settings of [{ "vim.enabled": true, "lineNumbers.enabled": true }, {}
     await expect(reading.locator(".cm-line").filter({ hasText: "What's up" })).toHaveText("What's up with this");
     await expect(page.locator(".cm-vim-panel")).toHaveCount(0);
 
-    // Its text is selected with the mouse, and copied.
-    const line = (await reading.locator(".cm-line").filter({ hasText: "last line" }).boundingBox())!;
+    // Its text is selected with the mouse, and copied. The line sits under the video, so it is brought into view first.
+    const last = reading.locator(".cm-line").filter({ hasText: "last line" });
+    await last.scrollIntoViewIfNeeded();
+    const line = (await last.boundingBox())!;
     await page.mouse.move(line.x + 1, line.y + line.height / 2);
     await page.mouse.down();
     await page.mouse.move(line.x + 200, line.y + line.height / 2, { steps: 5 });

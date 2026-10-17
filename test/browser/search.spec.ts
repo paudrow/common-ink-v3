@@ -14,6 +14,8 @@ const field = (page: Page) => searchPage(page).getByRole("searchbox", { name: "S
 /** A result is a card, as in a folder's list: the Search page is that list, of every note. */
 const results = (page: Page) => searchPage(page).getByRole("navigation", { name: "Notes" }).getByRole("article");
 const titles = (page: Page) => results(page).locator(".card-title");
+/** Each result's Edit, which is the way into its note. */
+const edits = (page: Page) => results(page).getByRole("link", { name: /^Edit / });
 /** How many notes are listed, beside the heading, which is also where a search says it is on its way. */
 const status = (page: Page) => searchPage(page).locator(".folder-count");
 const nothing = (page: Page) => searchPage(page).locator(".empty");
@@ -128,7 +130,10 @@ test("a matched line is shown as the characters it is: HTML and markdown in a no
 
   // The only elements in a result's matched lines are the ones the page makes, and nothing anywhere in the card came out of the note's text.
   await expect.poll(() => results(page).first().locator(".card-matches").evaluate((el) => [...el.querySelectorAll("*")].map((child) => child.tagName.toLowerCase()).sort())).toEqual(["mark", "mark", "span"]);
-  await expect(results(page).first().locator("i, img, script, strong, b")).toHaveCount(0);
+  await expect(results(page).first().locator(".card-head, .card-matches").locator("i, img, script, strong, b")).toHaveCount(0);
+  // The note drawn under them is the editor's reading of it, where its HTML is characters too.
+  await expect(results(page).first().locator(".card-body .cm-line").nth(2)).toContainText("<script>window.pwned = 2</script>");
+  await expect(results(page).first().locator(".card-body").locator("img:not(.cm-widgetBuffer), script, i, b")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (window as { pwned?: number }).pwned)).toBeUndefined();
 });
 
@@ -152,8 +157,8 @@ test("an archived note is found only when the query asks for archived notes, and
 
   await field(page).fill("quokka (is:open OR is:archived)");
   await expect(titles(page)).toHaveText(["Old quokka", "Live quokka"]);
-  await expect(results(page).filter({ hasText: "Old quokka" }).locator(".card-details")).toContainText("Archived");
-  await expect(results(page).filter({ hasText: "Live quokka" }).locator(".card-details")).not.toContainText("Archived");
+  await expect(results(page).filter({ hasText: "Old quokka" }).locator(".state-label")).toHaveText("Archived");
+  await expect(results(page).filter({ hasText: "Live quokka" }).locator(".state-label")).toHaveCount(0);
   // Counted among the notes the query is of, archived ones included.
   await expect(status(page)).toHaveText("2 of 3 notes");
   await expect(page).toHaveURL(/\/search\?q=quokka\+%28is%3Aopen\+OR\+is%3Aarchived%29$/);
@@ -212,7 +217,7 @@ test("the search is in the address: it survives a reload, and Back returns to it
   await expect(field(page)).toBeFocused();
   await expect(titles(page)).toHaveText(["Garden plan"]);
 
-  await titles(page).first().click();
+  await edits(page).first().click();
   await expect(page).toHaveURL(new RegExp(`/note/garden-plan-${garden!.id}$`));
   await expect(editor(page)).toContainText("Plant the tomatoes by the fence.");
 
@@ -226,13 +231,14 @@ test("the search is in the address: it survives a reload, and Back returns to it
   await expect(titles(page)).toHaveText(["Errands"]);
 });
 
-test("a result's title is a link to its note: a click with the modifier opens it in a tab behind and leaves the search where it is", async ({ page }) => {
+test("a result's Edit is a link to its note: a click with the modifier opens it in a tab behind and leaves the search where it is", async ({ page }) => {
   const [garden] = await searching(page, [GARDEN]);
   await field(page).fill("tomatoes");
   await expect(titles(page)).toHaveText(["Garden plan"]);
-  await expect(titles(page)).toHaveAttribute("href", `/note/garden-plan-${garden!.id}`);
+  await expect(edits(page)).toHaveAccessibleName("Edit Garden plan");
+  await expect(edits(page)).toHaveAttribute("href", `/note/garden-plan-${garden!.id}`);
 
-  await titles(page).first().click({ modifiers: ["ControlOrMeta"] });
+  await edits(page).first().click({ modifiers: ["ControlOrMeta"] });
   await expect(page).toHaveURL(/\/search\?q=tomatoes$/);
   await expect(titles(page)).toHaveText(["Garden plan"]);
   await expect(page.getByRole("tablist", { name: "Open notes" }).getByRole("tab")).toHaveText(["Search", "Garden plan"]);
@@ -258,7 +264,7 @@ test("More results appends the next page until there are no more", async ({ page
   expect([...all].sort()).toEqual(Array.from({ length: 23 }, (_, i) => `Kiwi ${String(i + 1).padStart(2, "0")}`));
 });
 
-test("the down arrow goes from the field into the results, where the arrows move and ⌘Enter opens, and Enter in the field opens the first", async ({ page }) => {
+test("the down arrow goes from the field into the results, where the arrows move, ⌘Enter opens one in a tab behind and Enter opens it, and Enter in the field opens the first", async ({ page }) => {
   await searching(page, ["# Lemur one\n\nlemur\n", "# Lemur two\n\nlemur\n", "# Lemur three\n\nlemur\n"]);
   const focused = () => results(page).and(page.locator(":focus")).locator(".card-title");
 
@@ -279,6 +285,10 @@ test("the down arrow goes from the field into the results, where the arrows move
   await expect(field(page)).toHaveValue("lemur");
 
   await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(page.getByRole("tablist", { name: "Open notes" }).getByRole("tab")).toHaveText(["Search", "Lemur two"]);
+  await expect(page).toHaveURL(/\/search\?q=lemur$/);
+  await expect(focused()).toHaveText(["Lemur two"]);
+  await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/note\/lemur-two-[a-z0-9]{12}$/);
   await expect(editor(page)).toContainText("Lemur two");
   await expect(editor(page)).toBeFocused();
@@ -333,7 +343,7 @@ test("Search is reached from the left column and from the command palette, and v
   await expect(field(page)).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ControlOrMeta+Enter");
+  await page.keyboard.press("Enter");
   await expect(editor(page)).toContainText("ibis jackal");
 });
 

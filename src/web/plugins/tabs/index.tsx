@@ -84,7 +84,7 @@ export const tabs: Plugin = {
 
     const { items } = lifecycle(host);
 
-    function Editor({ app, renderNote, renderFolder, renderPage, empty }: EditorProps) {
+    function Editor({ app, renderNote, renderNoteTools, renderFolder, renderPage, empty }: EditorProps) {
       const shown = useSyncExternalStore(subscribe, () => layout);
       const cursorGroup = useSyncExternalStore(subscribe, () => cursorTo);
       // A tab stays open on a note that was moved to Trash, so those are known by name too.
@@ -120,6 +120,7 @@ export const tabs: Plugin = {
           iconOf={(tab) => (tab.kind === "folder" ? "folders" : tab.kind === "page" ? pages.get(tab.id)?.icon : undefined)}
           isPrivate={(tab) => (tab.kind === "note" && notes?.get(tab.id)?.private) ?? false}
           noteItems={(tab) => (tab.kind === "note" ? items(notes?.get(tab.id)) : [])}
+          noteTools={renderNoteTools}
           dispatch={dispatch}
           render={(group, tab) =>
             tab.kind === "folder"
