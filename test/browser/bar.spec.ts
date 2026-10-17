@@ -1,8 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
-import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { ownPlugin, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 import { openDetails, pluginRow } from "./plugins-helpers.ts";
 
 const bar = (page: Page) => page.getByRole("group", { name: "Bottom bar" });
+/** Word count runs shut off from the app, in a frame of its own in the bar: what it says is in that frame, and where it is is the frame's place. */
+const wordCount = (page: Page) => ownPlugin(page, "Word count").getByLabel("Word count");
+const WORDS = ".bar [data-bar-item='word-count']";
+/** The items that have something to say, as the bar lays them out: one whose frame has drawn nothing takes no room. */
+const SAYING = "[data-bar-item]:not(:empty):not(:has(.bar-frame[data-empty]))";
 const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const boxOf = (page: Page, selector: string) =>
   page
@@ -46,13 +51,16 @@ test("the bottom bar is one thin line along the foot of the window, under the si
 
 test("Word count shows the words and reading time of the note in front as it is typed, and nothing with no note in front", async ({ page }) => {
   const note = await open(page, "# Tea\n\nSteep the leaves.\n");
-  const words = bar(page).getByLabel("Word count");
+  const words = wordCount(page);
 
   await expect(words).toHaveText("4 words · 1 min read");
   await expect(words).toBeInViewport({ ratio: 1 });
   // It is at the right end, as an editor's status bar has it.
-  const [x, , width] = await boxOf(page, ".bar [aria-label='Word count']");
+  const [x, , width] = await boxOf(page, WORDS);
   expect(page.viewportSize()!.width - (x + width)).toBeLessThan(24);
+  // Its frame is as wide as what it says, and not the most its manifest lets it be.
+  expect(width).toBeGreaterThan(80);
+  expect(width).toBeLessThan(200);
   const [, , , height] = await boxOf(page, ".bar");
   const main = await boxOf(page, "main");
   await editor(page).focus();
@@ -67,6 +75,9 @@ test("Word count shows the words and reading time of the note in front as it is 
   await expect(page.getByRole("tab", { name: "Calendar" })).toHaveAttribute("aria-selected", "true");
   await expect(bar(page)).toBeVisible();
   await expect(words).toHaveCount(0);
+  // With nothing to say its frame takes no room, as any item with nothing to say.
+  await expect(bar(page).locator(SAYING)).toHaveCount(0);
+  await expect(bar(page).locator(WORDS)).toBeHidden();
   expect((await boxOf(page, ".bar"))[3]).toBe(height);
   expect((await boxOf(page, "main"))[3]).toBe(main[3]);
   await page.goto("/folder/all");
@@ -76,7 +87,7 @@ test("Word count shows the words and reading time of the note in front as it is 
 
 test("Word count says how many of the note's words are selected while some are, and the note's count again once none are", async ({ page }) => {
   await open(page, "# Tea\n\nSteep the leaves.\n");
-  const words = bar(page).getByLabel("Word count");
+  const words = wordCount(page);
   await expect(words).toHaveText("4 words · 1 min read");
 
   await page.locator(".cm-line", { hasText: "Steep the leaves." }).click();
@@ -110,7 +121,7 @@ test("with a note in two editors, Word count reads the one the member is in, and
     ];
   });
   await open(page, "# Tea\n\nSteep the leaves.\n");
-  const words = bar(page).getByLabel("Word count");
+  const words = wordCount(page);
   const line = (name: string) => page.locator(`[data-pane=${name}] .cm-line`, { hasText: "Steep the leaves." });
   /** Draws the panes named: the sidebar's key has the app draw again, and moves the caret nowhere. */
   const show = async (...panes: string[]) => {
@@ -144,7 +155,7 @@ test("with Word count turned off, and the clocks that share the bar, nothing is 
   await open(page, "# Tea\n\nSteep the leaves.\n");
   await perform(page, { type: "settings.write", text: JSON.stringify({ "note-clocks.enabled": false, "quick-timer.enabled": false, "uploads.enabled": false }), baseRevision: 0 });
   await page.reload();
-  await expect(bar(page).getByLabel("Word count")).toBeVisible();
+  await expect(wordCount(page)).toBeVisible();
   const withBar = await boxOf(page, "main");
 
   await page.goto("/plugins");
@@ -186,9 +197,11 @@ test("any plugin puts an item in the bottom bar, at the left or the right end an
   await open(page, "# Tea\n\nSteep the leaves.\n");
 
   // Left to right: the left end by order, those of one order as they were registered, then the right end by order, with what the app's own plugins put there in between.
-  await expect(bar(page).locator("[data-bar-item]:not(:empty)")).toHaveText(["plain", "plain too", "first, on a note", "also first", "second", "near", "4 words · 1 min read", "far"]);
+  await expect(wordCount(page)).toHaveText("4 words · 1 min read");
+  await expect(bar(page).locator(SAYING)).toHaveText(["plain", "plain too", "first, on a note", "also first", "second", "near", "", "far"]);
+  expect(await bar(page).locator(SAYING).evaluateAll((items) => items.map((item) => (item as HTMLElement).dataset.barItem))).toEqual(["plain", "plain-too", "first", "also-first", "second", "near", "word-count", "far"]);
   const places = await bar(page)
-    .locator("[data-bar-item]:not(:empty)")
+    .locator(SAYING)
     .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().x)));
   expect(places).toEqual([...places].sort((a, b) => a - b));
   const [second, near] = [places[4]!, places[5]!];
@@ -219,7 +232,7 @@ test("in focus there is no bottom bar, and it is back, as it was, on leaving", a
   await page.keyboard.press("ControlOrMeta+.");
   await expect(bar(page)).toBeVisible();
   expect(await boxOf(page, ".bar")).toEqual(before);
-  await expect(bar(page).getByLabel("Word count")).toHaveText("4 words · 1 min read");
+  await expect(wordCount(page)).toHaveText("4 words · 1 min read");
 });
 
 test("in a window too narrow for both ends of the bar, the right end is whole and the left end is cut short inside the bar", async ({ page }) => {
@@ -237,11 +250,39 @@ test("in a window too narrow for both ends of the bar, the right end is whole an
   await page.setViewportSize({ width: 420, height: 700 });
   await open(page, "# Tea\n\nSteep the leaves.\n");
 
-  await expect(bar(page).getByLabel("Word count")).toBeInViewport({ ratio: 1 });
+  await expect(wordCount(page)).toBeInViewport({ ratio: 1 });
   const [, , width] = await boxOf(page, ".bar");
   expect(width).toBe(420);
   const [leftX, , leftWidth] = await boxOf(page, ".bar-side[data-side=left]");
-  const [wordsX] = await boxOf(page, ".bar [data-bar-item='word-count']");
+  const [wordsX] = await boxOf(page, WORDS);
   expect(leftX + leftWidth).toBeLessThanOrEqual(wordsX);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(420);
+});
+
+test("with vim on, the bottom bar, vim's bar and a notice each keep their own place: vim's above the bar, the notice above both and saying what it is for", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await perform(page, { type: "settings.write", text: JSON.stringify({ "vim.enabled": true }), baseRevision: 0 });
+  const note = await perform(page, { type: "note.create", text: "# Feet\n\nSome words to count." });
+  await page.goto(`/note/${note.id}`);
+  await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
+  await expect(wordCount(page)).toHaveText(/words/);
+  await editor(page).click();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Commands" }).fill("Archive or unarchive note");
+  await page.keyboard.press("Enter");
+  const notice = page.getByRole("group", { name: "Notice" }).last();
+  await expect(notice).toContainText("Archived");
+  await expect(notice.getByRole("button", { name: "Undo" })).toBeVisible();
+  // Each box once the notice has finished arriving.
+  await page.waitForTimeout(400);
+  const [barBox, vimBox, noticeBox] = await Promise.all([boxOf(page, ".bar"), boxOf(page, ".note-foot .cm-vim-panel"), boxOf(page, ".toast-card")]);
+  const bottom = ([, y, , h]: [number, number, number, number]) => y + h;
+  expect(bottom(vimBox), "vim's bar ends where the bottom bar begins").toBeLessThanOrEqual(barBox[1] + 0.5);
+  expect(bottom(noticeBox), "the notice is above vim's bar").toBeLessThanOrEqual(vimBox[1]);
+  // Nothing at the notice's corners but the notice itself.
+  for (const [x, y] of [
+    [noticeBox[0] + 14, noticeBox[1] + 14],
+    [noticeBox[0] + noticeBox[2] - 14, noticeBox[1] + noticeBox[3] - 14],
+  ])
+    expect(await page.evaluate(([px, py]) => !!document.elementFromPoint(px!, py!)?.closest(".toast-card"), [x, y])).toBe(true);
 });

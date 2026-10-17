@@ -2285,18 +2285,26 @@ button.link:hover {
   text-decoration: none !important;
 }
 
-.embed-options-panel {
+/* As wide as the embed it is under (the width is set where it is placed), with a row for each option: its name, then its field. */
+.chip-popover.embed-options-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 12rem;
+  max-width: calc(100vw - 16px);
+  padding: 12px 14px;
   font-family: var(--prose);
 }
 
 .embed-option {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: minmax(5rem, 110px) minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 12px;
+}
+
+.embed-option-hint {
+  grid-column: 2;
 }
 
 .embed-option-label {
@@ -2597,7 +2605,8 @@ button.link:hover {
   inset: 0;
 }
 
-.embed-below:has(iframe):not(.open) > .frame-shield {
+.embed-below:has(iframe):not(.open) > .frame-shield,
+.plugin-frame:has(iframe):not(.open) > .frame-shield {
   display: block;
 }
 
@@ -2618,7 +2627,8 @@ button.link:hover {
   cursor: pointer;
 }
 
-.embed-below.held > .frame-back {
+.embed-below.held > .frame-back,
+.plugin-frame.held > .frame-back {
   display: block;
 }
 
@@ -2956,15 +2966,55 @@ button.link:hover {
   color: var(--danger);
 }
 
-.quick-timer-how {
+/* What a plugin that runs shut off asks the member, in the dialog the command palette is drawn in. */
+.plugin-prompt-about {
   margin: 0;
   padding: 8px 14px 10px;
   color: var(--muted);
   font-size: calc(12px * var(--text-scale));
 }
 
-.quick-timer input[aria-invalid="true"] {
+.plugin-prompt input[aria-invalid="true"] {
   color: var(--danger);
+}
+
+/* Whose question it is, in the app's words, where a plugin's own can't be taken for them. */
+.plugin-prompt-from {
+  margin: 0;
+  padding: 8px 14px 0;
+  color: var(--muted);
+  font-size: calc(11.5px * var(--text-scale));
+  font-weight: 600;
+}
+
+/* A frame in the bottom bar is as wide as what it draws, which it says once it has drawn. The item's padding is the frame's own. */
+.bar-item:has(> .bar-frame) {
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+
+/* The name of the workspace's plugin whose frame is beside it. */
+.bar-from {
+  padding-left: 8px;
+  color: var(--faint);
+  font-size: calc(11px * var(--text-scale));
+}
+
+.bar-from::after {
+  content: ":";
+}
+
+.plugin-frame.bar-frame {
+  height: 25px;
+  min-height: 0;
+}
+
+/* With nothing drawn it takes no room, as any item with nothing to say. It keeps a size, out of the bar's flow, so what it draws next can be measured. */
+.bar-item:has(> .bar-frame[data-empty]) {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* The list a completion offers at the cursor, such as the embed menu. */
@@ -3985,16 +4035,6 @@ kbd {
   overflow-y: auto;
 }
 
-.backlinks {
-  margin: -14px;
-}
-
-.backlinks ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .info {
   display: flex;
   flex-direction: column;
@@ -4489,7 +4529,7 @@ kbd {
   letter-spacing: -0.02em;
 }
 
-.who-hunk[data-tone^="agent"] .who-avatar {
+.who-hunk:is([data-tone^="agent"], [data-tone^="plugin"]) .who-avatar {
   border-radius: 5px;
 }
 
@@ -4617,6 +4657,22 @@ kbd {
 
 .who-hunk[data-tone="agent-3"] {
   --who: #e2b100;
+}
+
+.who-hunk[data-tone="plugin-0"] {
+  --who: #6e56cf;
+}
+
+.who-hunk[data-tone="plugin-1"] {
+  --who: #3e63dd;
+}
+
+.who-hunk[data-tone="plugin-2"] {
+  --who: #0091ff;
+}
+
+.who-hunk[data-tone="plugin-3"] {
+  --who: #e93d82;
 }
 
 .hist-all {
@@ -5243,8 +5299,7 @@ kbd {
   font-size: calc(13px * var(--text-scale));
 }
 
-/* What just happened, in the window's bottom right corner, as v1's toasts. */
-/* Its place, under the pane the member is working in, is set as it is shown: see Toasts.tsx. */
+/* What just happened, centred under the pane the member is working in. Its place is set as it is shown: see Toasts.tsx. */
 .toasts {
   position: fixed;
   left: 50%;
@@ -5255,6 +5310,10 @@ kbd {
   align-items: center;
   gap: 8px;
   transform: translateX(-50%);
+}
+
+body:has(.note-foot .cm-panels) .toasts {
+  --foot-room: 1.75rem;
 }
 
 .toast-card {
@@ -5982,6 +6041,22 @@ button.diff-fold:hover {
   padding: 6px 8px;
   border: 1px solid var(--accent);
   border-radius: 8px;
+}
+
+/* Granting full trust to changed code: the plugin's name typed out, in the app's monospace so each letter is plain. */
+.confirm.retype {
+  margin: 0;
+}
+
+.confirm.retype input {
+  min-width: 12rem;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
 }
 
 .revert-dialog-body > .button {
@@ -10453,6 +10528,15 @@ a.file-chip:hover .file-chip-name {
   overflow-y: auto;
 }
 
+/* A plugin's panel is the card: the frame fills the body, and the card's padding would letterbox it. */
+.dash-body:has(> .plugin-frame) {
+  padding: 0;
+  overflow: hidden;
+}
+.dash-card .plugin-frame {
+  min-height: 0;
+}
+
 .dash-list {
   margin: 0;
   padding: 0;
@@ -10629,7 +10713,6 @@ button.dash-row:hover {
 }
 
 /* Dashboard: end */
-
 /* The Calendar with nothing connected asks for a calendar first. */
 .cal-connect {
   display: flex;
@@ -10647,3 +10730,399 @@ button.dash-row:hover {
   color: inherit;
   font: inherit;
 }
+
+/* Third-party plugins: the frame one runs in, what it is permitted, and installing one. */
+/* A third-party plugin's frame in a view's place. Whatever the frame draws is cut to this box. */
+.plugin-frame {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  overflow: hidden;
+  contain: paint;
+}
+.plugin-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.panel > .plugin-frame {
+  width: auto;
+  height: calc(100% + 28px);
+  margin: -14px;
+}
+.plugin-frame-stopped {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px;
+  font-size: calc(13px * var(--text-scale));
+}
+/* Where a plugin's commands run. Nothing of it is ever shown. */
+.plugin-background {
+  display: none;
+}
+.permissions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.permission {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-side);
+}
+.permission-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.permission-title {
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 600;
+}
+.permission .badge[data-state="allowed"] {
+  border-color: var(--added);
+  color: var(--added);
+}
+.permission-detail,
+.permission-reason,
+.permission-warning {
+  margin: 0;
+  font-size: calc(12px * var(--text-scale));
+}
+.permission-detail {
+  color: var(--muted);
+}
+.permission-sites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+}
+.permission .agent-actions {
+  margin-top: 4px;
+}
+.permission .confirm {
+  margin-top: 4px;
+  background: var(--bg);
+}
+.permission-warning {
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--ink);
+}
+.sites-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+.connect.install {
+  grid-template-columns: 1fr;
+  margin-top: 18px;
+}
+.connect.install textarea,
+.sites-field textarea {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+  resize: vertical;
+}
+.connect.install .review {
+  border-color: var(--line-strong);
+  background: var(--bg);
+}
+.connect.install .review h2 {
+  margin: 0;
+}
+.connect.install .review .permission {
+  background: var(--bg-side);
+}
+.connect.install .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.change-for {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+.badge[data-kind="third-party"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.badge[data-state="waiting"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Plugin source and drafts */
+
+.plugin-source {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.source-code {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+
+.source-code .cm-editor {
+  max-height: 28rem;
+  font-size: calc(12.5px * var(--text-scale));
+}
+
+.source-code .cm-editor.cm-focused {
+  outline: none;
+}
+
+.source-code .cm-scroller {
+  overflow: auto;
+  font-family: var(--mono);
+  line-height: 1.5;
+}
+
+.source-code .cm-gutters {
+  border-right: 0;
+  background: none;
+  color: var(--faint);
+}
+
+.source-code .tok-keyword,
+.source-code .tok-operatorKeyword,
+.source-code .tok-modifier {
+  color: light-dark(#8b3fc7, #c792ea);
+}
+
+.source-code .tok-string,
+.source-code .tok-string2 {
+  color: light-dark(#3d7a3d, #a5d6a7);
+}
+
+.source-code .tok-comment,
+.source-code .tok-meta {
+  color: light-dark(#8a8580, #7d7870);
+  font-style: italic;
+}
+
+.source-code .tok-number,
+.source-code .tok-bool,
+.source-code .tok-atom,
+.source-code .tok-literal {
+  color: light-dark(#b25d0f, #f0a868);
+}
+
+.source-code .tok-typeName,
+.source-code .tok-className,
+.source-code .tok-namespace {
+  color: light-dark(#0f7a8a, #7fd0dd);
+}
+
+.source-code .tok-propertyName,
+.source-code .tok-variableName.tok-definition {
+  color: light-dark(#2f5fc4, #8fb4ff);
+}
+
+.source-code .tok-invalid {
+  color: light-dark(#b3261e, #f28b82);
+}
+
+/* The file picked, and for a draft the switch to what it changes in it, on one row. */
+.source-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.source-compare {
+  font-size: calc(12px * var(--text-scale));
+}
+
+.source-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.source-file select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.source-count {
+  flex: none;
+  color: var(--faint);
+}
+
+.plugin-source > .button {
+  align-self: flex-start;
+}
+
+.plugin-source .error,
+.plugin-source .said {
+  margin: 0;
+}
+
+.source-code[data-editable] {
+  border-color: var(--line-strong);
+}
+
+.source-code[hidden] {
+  display: none;
+}
+
+.source-code[data-editable] .cm-editor {
+  min-height: 12rem;
+}
+
+.source-code[data-editable]:focus-within {
+  border-color: var(--accent);
+}
+
+.source-behind {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.source-changes h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 600;
+}
+
+.source-changes .diff {
+  position: relative;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.plugin-source .plugin-switch {
+  flex: 0 1 auto;
+}
+
+
+.badge[data-state="draft"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Full trust: the one badge that says a workspace's plugin asks to run inside the app, why it isn't running, and the warning before it is turned on. */
+
+.badge[data-kind="third-party"][data-trust] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.trust-switch {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.trust-switch .error {
+  margin: 0;
+  max-width: 280px;
+  text-align: right;
+}
+
+.trust-reason {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: calc(13px * var(--text-scale));
+}
+
+.trust-dialog {
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 0;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.trust-dialog::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.trust-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.45;
+}
+
+.trust-dialog h2 {
+  margin: 0;
+  font-size: calc(15px * var(--text-scale));
+}
+
+.trust-dialog ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.trust-dialog p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.trust-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+

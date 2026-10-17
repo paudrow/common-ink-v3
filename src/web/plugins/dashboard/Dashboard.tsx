@@ -340,7 +340,7 @@ interface Summary {
   more: boolean;
 }
 
-const names = (authors: readonly { author: Author }[]) => authors.map(({ author }) => (author.kind === "agent" ? `${author.name} (agent)` : author.name)).join(", ");
+const names = (authors: readonly { author: Author }[]) => authors.map(({ author }) => (author.kind !== "member" ? `${author.name} (${author.kind})` : author.name)).join(", ");
 
 const since = (time: number) => new Date(time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).replace(/[\u202f\u00a0]/g, " ");
 
@@ -563,7 +563,22 @@ export function Dashboard({ host, app, pins, onOpenTodo }: Props) {
   const members = useMemo(() => membersStamp(app.notes ?? []), [app.notes]);
 
   const words = useSyncExternalStore(host.settings.subscribe, () => host.settings.get<readonly string[]>("layout"));
-  const layout = useMemo(() => readLayout(words, OWN_SIZES), [words]);
+  const contributed = host.views.in("dashboard").map((view): PanelKind => ({
+    id: view.id,
+    title: view.label,
+    size: "small",
+    draw: ({ app: panelApp }) => {
+      const Panel = view.component;
+      return (
+        <Card reading={false}>
+          <Panel app={panelApp} />
+        </Card>
+      );
+    },
+  }));
+  const kinds = new Map<string, PanelKind>([...KINDS, ...contributed.map((kind) => [kind.id, kind] as const)]);
+  const sizes = new Map<string, Size>([...OWN_SIZES, ...contributed.map((kind) => [kind.id, kind.size] as const)]);
+  const layout = readLayout(words, sizes);
   const [arranging, setArranging] = useState(false);
   /** The layout as it would be were what is being dragged let go now. */
   const [preview, setPreview] = useState<Layout | null>(null);
@@ -731,7 +746,7 @@ export function Dashboard({ host, app, pins, onOpenTodo }: Props) {
     ),
   });
 
-  const missing = PANELS.filter((kind) => !layout.some((p) => p.id === kind.id));
+  const missing = [...PANELS, ...contributed].filter((kind) => !layout.some((p) => p.id === kind.id));
   const drawn: Drawn = { host, app, pins, onOpenTodo, today: day, now, members };
 
   return (
@@ -813,7 +828,7 @@ export function Dashboard({ host, app, pins, onOpenTodo }: Props) {
       {shown.length === 0 && !arranging && <p className="dash-none">Nothing is on your dashboard. Press Edit dashboard to add panels.</p>}
       <div className="dash-grid" ref={grid}>
         {shown.map((place, at) => {
-          const kind = KINDS.get(place.id)!;
+          const kind = kinds.get(place.id)!;
           return (
             <div key={place.id} className="dash-place" data-panel={place.id} data-size={place.size}>
               <SlotContext.Provider value={{ title: kind.title, size: place.size, arranging: arranging ? controls(kind, place, at) : null }}>{kind.draw(drawn)}</SlotContext.Provider>

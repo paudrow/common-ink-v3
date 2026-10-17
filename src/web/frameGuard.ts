@@ -14,6 +14,10 @@ interface Guarded {
   shield: HTMLElement;
   back: HTMLElement;
   taken: () => void;
+  /** Whether its frames may hold the keyboard at all. One that may not gives it back the moment a press on it brings it. */
+  keyboard: boolean;
+  /** Whether what runs in its frames is the app's own code, which never asks for the keyboard: then whatever gave one of them the keyboard was something else, and nothing is stopped for it. */
+  blameless: boolean;
 }
 
 const guarded = new Map<HTMLElement, Guarded>();
@@ -40,13 +44,25 @@ function check() {
   const active = document.activeElement;
   const box = active instanceof HTMLIFrameElement ? boxOf(active) : undefined;
   if (!box) return;
-  if (box === open || performance.now() - tabbed < 100) {
+  const { taken, keyboard, blameless } = guarded.get(box)!;
+  if (keyboard && (box === open || performance.now() - tabbed < 100)) {
     box.classList.add("held");
     return;
   }
-  const { taken } = guarded.get(box)!;
-  taken();
+  // Any frame can hand the keyboard to another, so a frame of the app's own code is given no blame for holding it: the keyboard goes back, and the frame stays.
+  // The member's own press on a frame that holds no keyboard is no taking of it either: what was pressed is still pressed.
+  if ((keyboard || box !== open) && !blameless) taken();
   giveBack();
+  // A press, or a frame handing the keyboard on, goes on giving a frame the keyboard after the window has lost it, and the browser
+  // says nothing more of it. So it is taken back again, by the window first, once that is done and a little after.
+  for (const wait of [0, 60, 250]) {
+    setTimeout(() => {
+      const now = document.activeElement instanceof HTMLIFrameElement ? boxOf(document.activeElement) : undefined;
+      if (now && now === open && guarded.get(now)!.keyboard) return;
+      window.focus();
+      giveBack();
+    }, wait);
+  }
 }
 
 // Watched from the start, so that what had the keyboard before the first frame was drawn is known.
@@ -85,9 +101,11 @@ function check() {
 /**
  * Guards every frame drawn in `box`, now or later. `taken` is called when one of them took the
  * keyboard without the member's doing, after which it should not be running. The two elements this
- * adds to `box` must stay in it: put them back with `kept` after emptying it.
+ * adds to `box` must stay in it: put them back with `kept` after emptying it. With `keyboard` false
+ * the frames are for the pointer alone, as in the bottom bar: a press on one is let through and the
+ * keyboard goes straight back to where it was. `blameless` is for frames of the app's own code.
  */
-export function guardFrames(box: HTMLElement, taken: () => void): { kept: () => void; stop: () => void } {
+export function guardFrames(box: HTMLElement, taken: () => void, { keyboard = true, blameless = false }: { keyboard?: boolean; blameless?: boolean } = {}): { kept: () => void; stop: () => void } {
   const shield = document.createElement("div");
   shield.className = "frame-shield";
   const arrive = () => {
@@ -109,8 +127,9 @@ export function guardFrames(box: HTMLElement, taken: () => void): { kept: () => 
     giveBack();
   });
   back.addEventListener("click", giveBack);
-  guarded.set(box, { shield, back, taken });
-  const kept = () => box.append(shield, back);
+  guarded.set(box, { shield, back, taken, keyboard, blameless });
+  // A frame that never holds the keyboard has nothing to give back, so no button to do it with.
+  const kept = () => box.append(shield, ...(keyboard ? [back] : []));
   kept();
   return {
     kept,

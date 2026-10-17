@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
+import { listedNote, listedNotes, noteCard, noteIdIn, openAllNotes, ownPlugin, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson, toggleInspector, toggleSidebar } from "./helpers.ts";
 
 const tree = (page: Page) => page.getByRole("tree", { name: "Folders" });
 const folder = (page: Page, name: string) => tree(page).getByRole("treeitem", { name, exact: true });
@@ -257,7 +257,7 @@ test("the inspector has History, Backlinks, and Info, and Info shows the folder,
   await showPanel(page, "History");
   await expect(panel.getByRole("listbox", { name: "Changes" }).getByRole("option")).toContainText("You wrote");
   await showPanel(page, "Backlinks");
-  await expect(panel).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
+  await expect(ownPlugin(page, "Backlinks").locator("body")).toHaveText("No notes link here yet. Type [[ in another note to link to this one.");
 
   await showPanel(page, "Info");
   await panel.getByRole("combobox", { name: "Move to" }).selectOption({ label: "Projects" });

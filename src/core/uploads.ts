@@ -557,9 +557,10 @@ export async function purgeUpload(ctx: Context, id: string): Promise<{ id: strin
 export async function trashedUploads(ctx: Context): Promise<TrashedUpload[]> {
   const { results } = await ctx.db
     .prepare(
-      `SELECT u.state_by, u.state_by_kind, COALESCE(tp.name, ta.name) AS state_by_name, ta.person_id AS state_by_owner, ${UPLOAD_COLUMNS}
+      `SELECT u.state_by, u.state_by_kind, COALESCE(tp.name, ta.name, json_extract(tpi.manifest, '$.name')) AS state_by_name, ta.person_id AS state_by_owner, ${UPLOAD_COLUMNS}
        LEFT JOIN people tp ON u.state_by_kind = 'member' AND tp.id = u.state_by
        LEFT JOIN agents ta ON u.state_by_kind = 'agent' AND ta.id = u.state_by
+       LEFT JOIN plugin_installs tpi ON u.state_by_kind = 'plugin' AND tpi.id = u.state_by
        WHERE u.workspace_id = ?1 AND ${SEEN("u", "?2", "trashed")} ORDER BY u.state_at DESC, u.id`,
     )
     .bind(ctx.workspaceId, ctx.sight.bind)

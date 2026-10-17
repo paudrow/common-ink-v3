@@ -1,5 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { perform, signInAsNewPerson } from "./helpers.ts";
+
+/** A built-in plugin that runs in its own frame, as the word count and the quick timer do. */
+const pluginIn = (root: Page | Locator, view: string) => root.locator(`.plugin-frame[aria-label="${view}"] > iframe`).contentFrame().locator("iframe").contentFrame();
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -177,20 +180,21 @@ test("vim's mode begins where the note's text does, and moves with it in a split
 
 test("focus keeps a quiet line at its foot with only what is live: vim's mode, a running timer, and whether the note is saved", async ({ page }) => {
   await withVim(page, "# Plan\n\nWrite it.");
-  await expect(page.getByRole("group", { name: "Bottom bar" })).toContainText("words");
-  await run(page, "Start a quick timer");
+  const bar = page.getByRole("group", { name: "Bottom bar" });
+  await expect(pluginIn(bar, "Word count").getByLabel("Word count")).toContainText("words");
+  await run(page, "Start a quick timer…");
   await page.getByRole("textbox", { name: "How long" }).fill("10m");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("group", { name: "Bottom bar" }).getByRole("button", { name: /Quick timer/ })).toBeVisible();
+  await expect(pluginIn(bar, "Quick timer").getByRole("button", { name: /Quick timer/ })).toBeVisible();
 
   await editor(page).click();
   await run(page, "Toggle focus");
   await expect(page.locator(".app[data-focus-mode]")).toBeVisible();
   const foot = page.locator(".group[data-front] .note-foot");
   await expect(foot.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
-  await expect(foot.getByRole("button", { name: /Quick timer/ })).toBeVisible();
+  await expect(pluginIn(foot, "Quick timer").getByRole("button", { name: /Quick timer/ })).toBeVisible();
   await expect(foot.locator(".note-live-save")).toHaveText("Saved");
-  await expect(foot, "a count is not live").not.toContainText("words");
+  await expect(foot.locator('.plugin-frame[aria-label="Word count"]'), "a count is not live").toHaveCount(0);
   await expect(page.getByRole("group", { name: "Bottom bar" })).toBeHidden();
   await expect(page.locator(".group[data-front] .note-bar")).toBeHidden();
 

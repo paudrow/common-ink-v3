@@ -347,7 +347,13 @@ test("the Plugins page lists every plugin with its icon, name, description and s
   );
   expect(listed.length).toBeGreaterThan(10);
   expect(listed.filter((row) => !row.name || row.icon !== 1 || !row.described || row.switches !== 1)).toEqual([]);
-  expect(listed.filter((row) => row.kind !== "Built-in")).toEqual([]);
+  // Each says where it runs: inside the app with everything the member has, or shut off from it.
+  expect(listed.filter((row) => row.kind !== "Built-in, full access").map((row) => [row.name, row.kind])).toEqual([
+    ["Weather", "Built-in, sandboxed"],
+    ["Backlinks", "Built-in, sandboxed"],
+    ["Quick timer", "Built-in, sandboxed"],
+    ["Word count", "Built-in, sandboxed"],
+  ]);
   expect(listed.slice(0, 3).map((row) => row.name)).toEqual(["Sidebar", "Folders", "Tags"]);
   await expect(pluginRow(page, "Tabs and splits")).toContainText("Open notes in tabs, and side by side in splits.");
   await expect(pluginRow(page, "Vim mode").getByRole("checkbox")).not.toBeChecked();
@@ -439,10 +445,10 @@ test("a built-in plugin's details show what it is, its pictures in the theme the
   await expect(page).toHaveURL(/\/plugins\/kanban$/);
   const details = page.locator(".plugin-details");
   await expect(details.locator(".plugin-head svg")).toHaveCount(1);
-  await expect(details.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
+  await expect(details.locator(".plugin-meta")).toHaveText("Built-in, full accessComes with Common Ink");
   await expect(details).toContainText("A board of columns and cards kept in a note as headings and lists.");
   await expect(section(page, "Permissions")).toContainText("It comes with Common Ink and runs inside the app as you, so it asks for nothing");
-  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Pictures", "Permissions", "What it adds", "Settings"]);
+  expect(await details.getByRole("region").evaluateAll((regions) => regions.map((region) => region.getAttribute("aria-label")))).toEqual(["Pictures", "Permissions", "What it adds", "Settings", "Source"]);
 
   const picture = section(page, "Pictures").locator("img:visible");
   const shown = () => picture.evaluate((img: HTMLImageElement) => [new URL(img.currentSrc || img.src).pathname, img.complete && img.naturalWidth > 600]);
@@ -515,7 +521,8 @@ test("only a plugin that came with the app is called Built-in", async ({ page })
   });
   await withNote(page, "Alpha");
   await page.goto("/plugins");
-  await expect(pluginRow(page, "Backlinks").locator(".badge")).toHaveText("Built-in");
+  await expect(pluginRow(page, "Backlinks").locator(".badge")).toHaveText("Built-in, sandboxed");
+  await expect(pluginRow(page, "Sharing").locator(".badge")).toHaveText("Built-in, full access");
   await expect(pluginRow(page, "Fixture")).toContainText("A plugin a test put on the page.");
   await expect(pluginRow(page, "Fixture").locator(".badge")).toHaveCount(0);
 
@@ -525,7 +532,7 @@ test("only a plugin that came with the app is called Built-in", async ({ page })
   await expect(page.locator(".plugin-meta")).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Permissions" })).toHaveText("PermissionsIt runs inside the app as you, so it asks for nothing: it can do what you can, and no more. What it does with that is what it adds, below.");
   await page.goto("/plugins/backlinks");
-  await expect(page.locator(".plugin-meta")).toHaveText("Built-inComes with Common Ink");
+  await expect(page.locator(".plugin-meta")).toHaveText("Built-in, sandboxedComes with Common Ink");
 });
 
 test("an inspector view a plugin adds is an icon in the bar whatever is in front, is handed what is in front where it says it is for that, and says nothing to show elsewhere", async ({ page }) => {

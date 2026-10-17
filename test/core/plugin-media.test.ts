@@ -106,6 +106,7 @@ describe("an HTML embed's height", () => {
     expect(heightIn("height=480")).toBe(480);
     expect(heightIn("height=5")).toBe(40);
     expect(heightIn("height=99999")).toBe(2000);
+    expect(heightIn("height=480.5")).toBe(320);
     expect(heightIn("height=tall")).toBe(320);
     expect(heightIn("lineheight=480")).toBe(320);
   });

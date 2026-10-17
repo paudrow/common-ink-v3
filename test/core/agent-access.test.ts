@@ -37,8 +37,8 @@ async function team(role: Role) {
   return { ada, member, agent, token, noteId: note.id, folderId: folder.id, workspace: ada.workspaceId };
 }
 
-/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, and marking changes read are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts and test/core/lifecycle.test.ts and test/core/dashboard.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts and test/core/upload-parts.test.ts check, and a workspace's storage is for its members. */
-type ToolOp = Exclude<OpType, "note.purge" | "note.discard" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create">;
+/** The operations an agent has a tool for. Settings, changes to members, sharing, removing a note for good, marking changes read, a plugin's frame and turning full trust on are kept from agents, which test/core/settings.test.ts, test/core/members.test.ts, test/core/grants.test.ts, test/core/lifecycle.test.ts, test/core/dashboard.test.ts and test/core/third-party.test.ts check. An upload's bytes go over HTTP, which test/core/upload-http.test.ts and test/core/upload-parts.test.ts check, and a workspace's storage is for its members. */
+type ToolOp = Exclude<OpType, "note.purge" | "note.discard" | `settings.${string}` | `invite.${string}` | "member.invite" | "member.setRole" | "member.remove" | "member.leave" | "member.signOut" | `grant.${string}` | "note.setPrivate" | `shared.${string}` | "source.connect" | "source.disconnect" | "upload.create" | "upload.open" | "upload.part" | "upload.storage" | "upload.purge" | "upload.setPrivate" | "visit.mark" | "contact.update" | "contact.photo" | "contact.create" | "plugin.frame" | "plugin.trust">;
 
 /** Every one of them with arguments the core accepts, so what refuses it is who is asking. */
 const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extract<OpInput, { type: K }>, "type"> } => ({
@@ -109,6 +109,19 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "upload.finish": { id: "aaaaaaaaaaaa" },
   "upload.abort": { id: "aaaaaaaaaaaa" },
   "record.notes": { sourceId: "google-calendar", id: "none" },
+  "plugin.list": {},
+  // Each is asked of a plugin that isn't there, or of a manifest that is no plugin's, so what refuses it is the role and nothing else.
+  "plugin.read": { id: "aaaaaaaaaaaa" },
+  "plugin.install": { manifest: "{}", code: "" },
+  "plugin.uninstall": { id: "aaaaaaaaaaaa" },
+  "plugin.permit": { id: "aaaaaaaaaaaa", capability: "notes.read", allowed: false },
+  "plugin.request": { id: "aaaaaaaaaaaa", capability: "notes.read" },
+  "plugin.scaffold": { name: "Greeter" },
+  "plugin.validate": { manifest: "{}", code: "" },
+  "draft.list": {},
+  "draft.read": { id: "aaaaaaaaaaaa" },
+  "draft.save": { id: "aaaaaaaaaaaa", manifest: "{}", code: "", running: false },
+  "draft.discard": { id: "aaaaaaaaaaaa" },
 });
 
 const refusedTo = async (run: () => Promise<unknown>) => {
@@ -123,7 +136,7 @@ const refusedTo = async (run: () => Promise<unknown>) => {
 describe("an agent's access is its member's", () => {
   const REFUSED: Record<Role, ToolOp[]> = {
     admin: [],
-    editor: ["links.rebuild", "todos.rebuild", "folder.delete"],
+    editor: ["links.rebuild", "todos.rebuild", "folder.delete", "plugin.install", "plugin.uninstall", "plugin.permit"],
     viewer: [
       "note.create",
       "note.write",
@@ -155,6 +168,9 @@ describe("an agent's access is its member's", () => {
       "folder.rename",
       "folder.move",
       "folder.delete",
+      "plugin.install",
+      "plugin.uninstall",
+      "plugin.permit",
     ],
   };
 

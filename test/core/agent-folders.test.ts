@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import worker from "../../src/worker/index.ts";
 import { signIn } from "../../src/core/accounts.ts";
 import { authenticateAgent, connectAgent, editAgent, listAgents } from "../../src/core/agents.ts";
-import { perform, type Actor } from "../../src/core/operations.ts";
-import { MAX_AGENT_FOLDERS, type Note } from "../../src/core/protocol.ts";
+import { agentActor, perform, type Actor } from "../../src/core/operations.ts";
+import { MAX_AGENT_FOLDERS, type Note, type OpInput } from "../../src/core/protocol.ts";
 import type { Sources } from "../../src/core/sources.ts";
 import { callTool } from "../../src/worker/mcp/tools.ts";
 import { sign } from "../../src/worker/session.ts";
@@ -1014,5 +1014,38 @@ describe("changing what an agent is limited to", { timeout: 30_000 }, () => {
 
     const said = claude.said.join("\n");
     expect(w.marks.filter((mark) => said.includes(mark))).toEqual([]);
+  });
+
+  it("is told nothing of the workspace's plugins, which are in no folder, and of a plugin's changes only the ones inside", async () => {
+    const w = await world();
+    const { id } = await perform(env.DB, w.ada, { type: "plugin.install", manifest: JSON.stringify({ name: "Word Tally", capabilities: [{ name: "notes.write", reason: "Writes a count." }] }), code: "ink.notify('SECRET-CODE')" });
+    const codeHash = (await perform(env.DB, w.ada, { type: "plugin.list" })).plugins.find((p) => p.id === id)!.codeHash!;
+    await perform(env.DB, w.ada, { type: "plugin.permit", id, capability: "notes.write", allowed: true, codeHash });
+    const tally: Actor = { kind: "plugin", pluginId: id, personId: w.ada.personId, workspaceId: w.ada.workspaceId };
+    for (const note of [w.inside, w.outside]) await perform(env.DB, tally, { type: "note.write", id: note.id, baseRevision: (await perform(env.DB, w.ada, { type: "note.read", id: note.id })).revision, text: `${note.text}\n\ntallied` });
+
+    const claude = await asAgent(w.limited.token);
+    expect(await claude.call("list_plugins")).toEqual({ isError: true, text: "forbidden: An agent limited to folders can't plugin.list" });
+    // What a plugin wrote inside the limit is in history as any author's is, and what it wrote outside is not there.
+    const theirs = await claude.json<{ changes: { noteId: string; author: { kind: string; name: string } }[] }>("history", { authors: [{ kind: "plugin", id }], diffs: false });
+    expect(theirs.changes.map((c) => [c.noteId, c.author.kind, c.author.name])).toEqual([[w.inside.id, "plugin", "Word Tally"]]);
+    // No way in for a token acts as a plugin: the address that does takes a member's session alone.
+    const asPlugin = await worker.fetch(new Request(`https://ink.test/api/workspaces/${w.ada.workspaceId}/plugins/${id}/ops`, { method: "POST", headers: { Authorization: `Bearer ${w.limited.token}`, Origin: "https://ink.test", "Content-Type": "application/json" }, body: JSON.stringify({ type: "note.list" }) }), env as never);
+    expect(asPlugin.status).toBe(401);
+    // Nor as a member's draft of one. Ada's draft is hers, in no folder, and nothing an agent of hers is told of or reaches.
+    await perform(env.DB, w.ada, { type: "draft.save", id, manifest: JSON.stringify({ name: "Draft-outside" }), code: "draft-words-outside", running: true });
+    const asDraft = await worker.fetch(new Request(`https://ink.test/api/workspaces/${w.ada.workspaceId}/plugins/${id}/draft/ops`, { method: "POST", headers: { Authorization: `Bearer ${w.limited.token}`, Origin: "https://ink.test", "Content-Type": "application/json" }, body: JSON.stringify({ type: "note.list" }) }), env as never);
+    expect(asDraft.status).toBe(401);
+    const limitedActor = agentActor((await authenticateAgent(env.DB, w.limited.token))!, w.ada.workspaceId);
+    for (const op of [{ type: "draft.list" }, { type: "draft.read", id }, { type: "draft.save", id, manifest: "{}", code: "", running: false }, { type: "draft.discard", id }] satisfies OpInput[]) {
+      await expect(perform(env.DB, limitedActor, op)).rejects.toMatchObject({ code: "forbidden" });
+    }
+    expect((await perform(env.DB, w.ada, { type: "draft.read", id })).code).toBe("draft-words-outside");
+    // The agent that reaches everything is the control: the record was there to be told.
+    const scribe = await asAgent(w.scribe.token);
+    expect((await scribe.json<{ plugins: { id: string }[] }>("list_plugins")).plugins.map((p) => p.id)).toContain(id);
+
+    const said = claude.said.join("\n");
+    expect([...w.marks, "SECRET-CODE", codeHash].filter((mark) => said.includes(mark))).toEqual([]);
   });
 });

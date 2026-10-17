@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, join, listedNotes, me, newEmail, noteCard, openAllNotes, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, join, listedNotes, me, newEmail, noteCard, openAllNotes, ownPlugin, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
 const membersPage = (page: Page) => page.getByRole("region", { name: "Members" });
@@ -267,8 +267,10 @@ test("switching workspaces changes everything shown: the notes, the open tabs, q
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Commands" }).fill("Start a quick timer");
   await page.keyboard.press("Enter");
+  // The quick timer runs shut off from the app, which asks how long on its behalf a moment after the command.
+  await expect(page.getByRole("dialog", { name: "Quick timer" })).toBeVisible();
   await page.keyboard.press("Enter");
-  const timer = page.getByRole("group", { name: "Bottom bar" }).getByRole("button", { name: /^Quick timer/ });
+  const timer = ownPlugin(page, "Quick timer").getByRole("button", { name: /^Quick timer/ });
   await expect(timer).toBeVisible();
 
   await switchTo(page, "Ada's workspace");

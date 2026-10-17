@@ -556,7 +556,7 @@ test("hidden calendars are kept with the account: another browser signed in as t
   await expect(card(elsewhere, week[0]!, "Standup"), "Work, hidden in the other").toHaveCount(0);
   await expect(grid(elsewhere).locator(`.cal-bar[data-first="${week[4]}"]`, { hasText: "Company holiday" }), "Holidays, hidden in neither").toBeVisible();
   await expect.poll(async () => JSON.parse((await perform(elsewhere, { type: "settings.read" })).text)["calendar.hidden"]).toEqual(["sample-calendar work", "sample-calendar personal"]);
-  expect(await elsewhere.evaluate(({ key }) => localStorage.getItem(key), { key: `ink.plugin.calendar.${workspaces[0]!.id}.${person.id}.hidden` }), "moved once, and not again").toBe("null");
+  expect(await elsewhere.evaluate(({ key }) => localStorage.getItem(key), { key: `ink.plugin.calendar.${workspaces[0]!.id}.${person.id}.hidden` }), "moved once, and not again: nothing is left under the key").toBeNull();
 
   await page.reload();
   await expect(grid(page)).toHaveAttribute("aria-busy", "false");
@@ -578,7 +578,7 @@ test("calendars hidden in this browser before move to the server even when the m
   await expect(grid(page)).toHaveAttribute("aria-busy", "false");
   await expect(card(page, week[0]!, "Standup")).toHaveCount(0);
   await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)["calendar.hidden"]).toEqual(["sample-calendar work"]);
-  expect(await page.evaluate(({ key }) => localStorage.getItem(key), { key: `ink.plugin.calendar.${workspaces[0]!.id}.${person.id}.hidden` })).toBe("null");
+  expect(await page.evaluate(({ key }) => localStorage.getItem(key), { key: `ink.plugin.calendar.${workspaces[0]!.id}.${person.id}.hidden` })).toBeNull();
 });
 
 test("New note about this event makes a note in the folder picked, last used first, that references it, and the event lists the notes about it each with who sees them", async ({ page }) => {
