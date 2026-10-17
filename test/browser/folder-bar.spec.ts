@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { anotherPerson, asViewerOfNote, folderRow, listedNotes, me, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { showPanel, anotherPerson, asViewerOfNote, folderRow, listedNotes, me, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -13,12 +13,14 @@ const editor = (page: Page) => page.getByRole("textbox", { name: "Note text" });
 const field = (page: Page) => page.getByRole("searchbox", { name: "Search notes" });
 const scope = (page: Page) => page.locator(".finder-scope");
 const count = (page: Page) => page.locator(".folder-count");
-const show = (page: Page, which: "Open" | "Archived" | "All") => page.getByRole("radio", { name: which, exact: true });
-const sort = (page: Page) => page.getByRole("combobox", { name: "Sort by" });
+/** Which notes a list is of, said in its query as the Search page's is: with `words` before it. */
+const show = (page: Page, which: "Open" | "Archived" | "All", words = "") =>
+  field(page).fill([words, { Open: "", Archived: "is:archived", All: "(is:open OR is:archived)" }[which]].filter(Boolean).join(" "));
 const notice = (page: Page) => page.getByRole("group", { name: "Notice" });
 const sidebar = (page: Page) => page.getByRole("complementary", { name: "Sidebar" });
 const newInSidebar = (page: Page) => sidebar(page).getByRole("button", { name: "New note" });
 const stateOf = async (page: Page, id: string) => (await perform(page, { type: "note.read", id })).state;
+const menuItem = (page: Page, name: string) => page.getByRole("menuitem", { name, exact: true });
 const shownAt = (el: Locator) => el.evaluate((node) => getComputedStyle(node).opacity);
 
 /** Every search the page asks the server for, as it was sent. */
@@ -68,13 +70,13 @@ test("a folder's tab has the app's search bar with that folder selected, and tak
   await field(page).fill('"heron fund"');
   await expect(listedNotes(page)).toHaveText(["Budget"]);
   await field(page).fill("rain");
-  await expect(page.locator(".empty")).toHaveText("No notes match “rain” in Projects. Archived notes are left out: choose All to search them too.");
+  await expect(page.locator(".empty")).toHaveText("No notes match “rain” in Projects. Archived notes are left out: add is:archived to search them.");
   expect(asked.map((a) => [a.query, a.folderId])).toEqual([["heron", projects.id], ["#money", projects.id], ["+studio", projects.id], ['"heron fund"', projects.id], ["rain", projects.id]]);
 
-  // A found card is the list's card: it expands to its note and its title opens it.
+  // A found card is the list's card: its note is drawn under the lines that matched.
   await field(page).fill("heron");
-  await noteCard(page, "Plan").getByRole("button", { name: "Expand Plan" }).click();
-  await expect(noteCard(page, "Plan").locator(".cm-line").first()).toHaveText("# Plan");
+  await expect(noteCard(page, "Plan").locator(".found-line")).toHaveText(["Buy ink for the heron drawings."]);
+  await expect(noteCard(page, "Plan").locator(".card-body .cm-line").first()).toHaveText("# Plan");
 
   await page.getByRole("button", { name: "Search all notes, not only Projects" }).click();
   await expect(tabs(page).filter({ hasText: "All notes" })).toHaveAttribute("aria-selected", "true");
@@ -101,10 +103,6 @@ test("a folder's notes are listed from what the app holds: nothing is searched f
 
   await folderRow(page, "Projects").click();
   await expect(listedNotes(page)).toHaveText(["Budget", "Plan"]);
-  await show(page, "All").check();
-  await sort(page).selectOption("Title");
-  await page.getByRole("button", { name: "Has todos" }).click();
-  await expect(listedNotes(page)).toHaveText(["Plan"]);
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveCount(5);
   expect(asked).toEqual([]);
@@ -117,65 +115,52 @@ test("a folder's notes are listed from what the app holds: nothing is searched f
   expect(asked.map((a) => a.query)).toEqual(["heron"]);
 });
 
-test("Open, Archived and All choose which notes a list and a search are of", async ({ page }) => {
+test("a folder's list leaves archived notes out, and its query lists them, alone or with the rest", async ({ page }) => {
   const { plan } = await withFolders(page);
   await perform(page, { type: "note.archive", id: plan.id, archived: true });
   await page.reload();
-  const asked = searchesOf(page);
 
   await folderRow(page, "Projects").click();
-  await expect(page.getByRole("radiogroup", { name: "Show" }).getByRole("radio")).toHaveCount(3);
-  await expect(show(page, "Open")).toBeChecked();
+  await expect(page.getByRole("radiogroup", { name: "Show" })).toHaveCount(0);
   await expect(listedNotes(page)).toHaveText(["Budget"]);
   await expect(count(page)).toHaveText("1 note");
 
-  await show(page, "Archived").check();
+  await show(page, "Archived");
   await expect(listedNotes(page)).toHaveText(["Plan"]);
-  await expect(noteCard(page, "Plan").locator(".card-details")).toContainText("Archived");
-  await expect(count(page)).toHaveText("1 note");
-  await show(page, "All").check();
-  await expect(listedNotes(page)).toHaveText(["Budget", "Plan"]);
-  await expect(count(page)).toHaveText("2 notes");
-  await expect(page.getByRole("button", { name: "Show archived" })).toHaveCount(0);
+  await expect(noteCard(page, "Plan").locator(".state-label")).toHaveText("Archived");
+  await show(page, "All");
+  await expect.poll(async () => (await listedNotes(page).allTextContents()).sort()).toEqual(["Budget", "Plan"]);
 
-  await field(page).fill("heron");
-  await expect(count(page)).toHaveText("2 of 2 notes");
-  await expect(listedNotes(page)).toHaveText(["Budget", "Plan"]);
-  await show(page, "Archived").check();
+  await show(page, "Archived", "heron");
   await expect(listedNotes(page)).toHaveText(["Plan"]);
-  await expect(count(page)).toHaveText("1 of 1 note");
-  await show(page, "Open").check();
+  await show(page, "Open", "heron");
   await expect(listedNotes(page)).toHaveText(["Budget"]);
-  expect(asked.map((a) => a.includeArchived)).toEqual([true, "only", false]);
+  await expect(page.locator(".empty, .search-status")).toHaveCount(0);
 
-  // An archived folder with none says so, and the choice is the folder's while the app is open.
+  // An archived folder with none says so, and the query is the folder's while the app is open.
   await folderRow(page, "Journal").click();
-  await expect(show(page, "Open")).toBeChecked();
-  await show(page, "Archived").check();
-  await expect(page.locator(".empty")).toHaveText("No archived notes here.");
+  await show(page, "Archived");
+  await expect(page.locator(".empty")).toContainText("No notes match");
   await folderRow(page, "Projects").click();
-  await expect(show(page, "Open")).toBeChecked();
+  await expect(field(page)).toHaveValue("heron");
   await folderRow(page, "Journal").click();
-  await expect(show(page, "Archived")).toBeChecked();
+  await expect(field(page)).toHaveValue("is:archived");
 });
 
-test("a card's Archive is one click or the E key, with Undo, and the card leaves the Open list at once", async ({ page }) => {
+test("a card's Archive is its button beside the menu, an item in the menu, or the E key, with Undo, and the card leaves the Open list at once", async ({ page }) => {
   const { plan, budget } = await withFolders(page);
   await folderRow(page, "Projects").click();
   await expect(listedNotes(page)).toHaveText(["Budget", "Plan"]);
-  const archive = noteCard(page, "Budget").getByRole("button", { name: "Archive Budget", exact: true });
+  const more = noteCard(page, "Budget").getByRole("button", { name: "More for Budget" });
 
-  // It is there on hover and on keyboard focus, and not otherwise.
+  // The menu's button is there whether or not the card is pointed at, and nothing of a card waits for a hover.
   await page.mouse.move(5, 5);
-  await expect.poll(() => shownAt(archive)).toBe("0");
-  await noteCard(page, "Budget").hover();
-  await expect.poll(() => shownAt(archive)).toBe("1");
-  await page.mouse.move(5, 5);
-  await noteCard(page, "Budget").focus();
-  await expect.poll(() => shownAt(archive)).toBe("1");
+  await expect(more).toBeVisible();
+  await expect.poll(() => shownAt(more)).toBe("1");
+  await expect(noteCard(page, "Budget").getByRole("button", { name: "Archive Budget" })).toBeVisible();
 
-  await noteCard(page, "Budget").hover();
-  await archive.click();
+  await more.click();
+  await menuItem(page, "Archive").click();
   await expect(listedNotes(page)).toHaveText(["Plan"]);
   await expect(notice(page)).toContainText("Archived");
   await expect.poll(() => stateOf(page, budget.id)).toBe("archived");
@@ -201,27 +186,31 @@ test("a card's Archive is one click or the E key, with Undo, and the card leaves
   await field(page).fill("");
 
   // An archived card offers the way back, and leaves the Archived list as it is taken.
-  await show(page, "Archived").check();
+  await show(page, "Archived");
   await expect(listedNotes(page)).toHaveText(["Budget", "Plan"]);
-  await expect(noteCard(page, "Plan").getByRole("button", { name: "Archive Plan", exact: true })).toHaveCount(0);
-  await noteCard(page, "Plan").hover();
-  await noteCard(page, "Plan").getByRole("button", { name: "Unarchive Plan" }).click();
+  await noteCard(page, "Plan").getByRole("button", { name: "More for Plan" }).click();
+  await expect(menuItem(page, "Unarchive")).toBeVisible();
+  await expect(menuItem(page, "Archive")).toHaveCount(0);
+  await menuItem(page, "Unarchive").click();
   await expect(listedNotes(page)).toHaveText(["Budget"]);
   await expect.poll(() => stateOf(page, plan.id)).toBe("live");
-  await show(page, "All").check();
+  await show(page, "All");
+  await expect.poll(async () => (await listedNotes(page).allTextContents()).sort()).toEqual(["Budget", "Plan"]);
+  await expect(noteCard(page, "Budget").locator(".state-label")).toHaveText("Archived");
   await noteCard(page, "Budget").focus();
   await page.keyboard.press("e");
-  await expect(noteCard(page, "Budget").locator(".card-details")).not.toContainText("Archived");
+  await expect(noteCard(page, "Budget").locator(".state-label")).toHaveCount(0);
   await expect(noteCard(page, "Budget")).toBeFocused();
 
   // A found note is archived the same way, and leaves the results.
-  await show(page, "Open").check();
-  await field(page).fill("heron");
+  await show(page, "Open", "heron");
   await expect(count(page)).toHaveText("2 of 2 notes");
   await noteCard(page, "Plan").focus();
   await page.keyboard.press("e");
   await expect(listedNotes(page)).toHaveText(["Budget"]);
-  await expect(page.locator(".cm-content")).toHaveCount(0);
+  // Nothing was opened by it: the only notes drawn are the cards' own readings.
+  await expect(editor(page)).toHaveCount(0);
+  await expect(tabs(page)).toHaveText(["Projects"]);
 });
 
 test("a viewer's cards have no Archive, and E does nothing for them", async ({ page }) => {
@@ -230,9 +219,12 @@ test("a viewer's cards have no Archive, and E does nothing for them", async ({ p
   await expect(editor(page)).toContainText("Ada's words.");
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Plan"]);
-  await noteCard(page, "Plan").hover();
-  await expect(noteCard(page, "Plan").getByRole("button", { name: "Edit Plan" })).toBeVisible();
-  await expect(noteCard(page, "Plan").getByRole("button", { name: /archive/i })).toHaveCount(0);
+  await expect(noteCard(page, "Plan").getByRole("link", { name: "Edit Plan" })).toBeVisible();
+  await noteCard(page, "Plan").getByRole("button", { name: "More for Plan" }).click();
+  await expect(menuItem(page, "Copy link")).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /archive|trash|move|share/i })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
 
   await noteCard(page, "Plan").focus();
   await page.keyboard.press("e");
@@ -243,42 +235,39 @@ test("a viewer's cards have no Archive, and E does nothing for them", async ({ p
   await expect(newInSidebar(page)).toHaveCount(0);
 });
 
-test("one Sort control orders a list and a search, which is by best match until another order is picked", async ({ page }) => {
+test("a sort: in a folder's query orders its list and a search, which is by best match until it says another order", async ({ page }) => {
   const { plan } = await withFolders(page);
   await perform(page, { type: "note.write", id: plan.id, baseRevision: 1, text: "# Plan\n\nBuy ink for the heron drawings, soon.\n" });
   await page.reload();
   const asked = searchesOf(page);
   await openAllNotes(page);
 
-  await expect(sort(page).getByRole("option")).toHaveText(["Recent", "Created", "Title"]);
-  await expect(sort(page)).toHaveValue("recent");
+  await expect(page.getByRole("combobox", { name: "Sort by" })).toHaveCount(0);
   await expect(listedNotes(page)).toHaveText(["Plan", "Loose", "Monday", "Inner", "Budget"]);
-  await sort(page).selectOption("Created");
+  await field(page).fill("sort:created-desc");
   await expect(listedNotes(page)).toHaveText(["Loose", "Monday", "Inner", "Budget", "Plan"]);
-  await sort(page).selectOption("Title");
+  await field(page).fill("sort:title-asc");
   await expect(listedNotes(page)).toHaveText(["Budget", "Inner", "Loose", "Monday", "Plan"]);
-  await sort(page).selectOption("Recent");
+  // A sort: alone is the folder's own notes in that order: nothing is searched for.
+  expect(asked).toEqual([]);
 
   await field(page).fill("ink");
   await expect(count(page)).toHaveText("2 of 5 notes");
-  await expect(sort(page).getByRole("option")).toHaveText(["Best match", "Recent", "Created", "Title"]);
-  await expect(sort(page)).toHaveValue("match");
   await field(page).fill("plan heron");
   await expect(listedNotes(page)).toHaveText(["Plan"]);
   await field(page).fill("heron");
   await expect(listedNotes(page)).toHaveText(["Plan", "Loose", "Monday", "Inner", "Budget"]);
-  await sort(page).selectOption("Title");
+  await field(page).fill("heron sort:title-asc");
   await expect(listedNotes(page)).toHaveText(["Budget", "Inner", "Loose", "Monday", "Plan"]);
-  await sort(page).selectOption("Created");
+  await field(page).fill("heron sort:created-desc");
   await expect(listedNotes(page)).toHaveText(["Loose", "Monday", "Inner", "Budget", "Plan"]);
-  expect(asked.map((a) => [a.query, a.sort])).toEqual([["ink", "match"], ["plan heron", "match"], ["heron", "match"], ["heron", "title"], ["heron", "created"]]);
+  expect(asked.map((a) => a.query)).toEqual(["ink", "plan heron", "heron", "heron sort:title-asc", "heron sort:created-desc"]);
 
-  // The order is the folder's while the app is open: another folder has its own, and this one is found as it was left.
+  // The query is the folder's while the app is open: another folder has its own, and this one is found as it was left.
   await folderRow(page, "Projects").click();
-  await expect(sort(page)).toHaveValue("recent");
+  await expect(field(page)).toHaveValue("");
   await openAllNotes(page);
-  await expect(sort(page)).toHaveValue("created");
-  await expect(field(page)).toHaveValue("heron");
+  await expect(field(page)).toHaveValue("heron sort:created-desc");
   await expect(listedNotes(page)).toHaveText(["Loose", "Monday", "Inner", "Budget", "Plan"]);
 });
 
@@ -300,9 +289,10 @@ test("New note in the left column makes a note in the folder being looked at, wi
   await newInSidebar(page).click();
   await expect(editor(page)).toBeFocused();
   await expect(folderRow(page, "Journal")).toHaveAccessibleDescription("2");
-  await expect(page.getByRole("main", { name: "Editor" }).locator(".note-meta").getByText("Journal", { exact: true })).toBeVisible();
   await page.keyboard.type("# Tuesday");
   await expect(tabs(page).filter({ hasText: "Tuesday" })).toHaveCount(1);
+  await showPanel(page, "Info");
+  await expect(page.getByRole("complementary", { name: "Inspector" })).toContainText("Journal");
 
   // With a note in front, it goes beside that note.
   await newInSidebar(page).click();
@@ -359,12 +349,11 @@ test("a folder's search bar takes the query language, with Advanced beside it, a
   await field(page).fill("heron OR has:todo");
   await expect.poll(async () => (await page.locator(".card-title").allTextContents()).sort()).toEqual(["Budget", "Plan"]);
   expect(asked.at(-1)).toMatchObject({ query: "heron OR has:todo", folderId: projects.id });
-  // Open, Archived and All still say which notes are listed, and the query can say it too.
+  // The query says which notes are listed by where they are in their life.
   await perform(page, { type: "note.archive", id: budget.id, archived: true });
   await expect(page.locator(".card-title")).toHaveText(["Plan"]);
-  await show(page, "All").check();
+  await show(page, "All", "heron");
   await expect.poll(async () => (await page.locator(".card-title").allTextContents()).sort()).toEqual(["Budget", "Plan"]);
-  await show(page, "Open").check();
   await field(page).fill("heron is:archived");
   await expect(page.locator(".card-title")).toHaveText(["Budget"]);
 

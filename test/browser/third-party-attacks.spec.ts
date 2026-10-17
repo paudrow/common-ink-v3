@@ -1,6 +1,6 @@
 import { expect, test, type Frame, type Page } from "@playwright/test";
 import type { Capability } from "../../src/core/plugins.ts";
-import { anotherPerson, join, listedNote, me, openAllNotes, panelIcon, perform, pinPanel, showPanel, signInAsNewPerson, ownFrame, THEIR_FRAMES } from "./helpers.ts";
+import { anotherPerson, editOf, join, me, openAllNotes, ownFrame, panelIcon, perform, pinPanel, showPanel, signInAsNewPerson, THEIR_FRAMES } from "./helpers.ts";
 import { asPlugin, codeHashOf, frameFor, install, openPlugins, pluginRow, relist, runCommand, running, toast, turnOn } from "./third-party-helpers.ts";
 import { hostileCode, hostileManifest, VICTIM, VICTIM_CODE } from "./third-party-hostile.ts";
 
@@ -222,7 +222,7 @@ test("a plugin can't read another plugin's frames, hand one a port or a document
   await pinPanel(page, "Victim plugin: Victim");
   const view = await frameFor(page, "view", "panel");
   await openAllNotes(page);
-  await listedNote(page, "Second").click();
+  await editOf(page, "Second").click();
   const embed = await frameFor(page, "embed", "victim");
   const viewAgain = await frameFor(page, "view", "panel");
   await expect(embed.locator("#out")).toContainText(/^Victim embed listed 2 round [3-9]/);

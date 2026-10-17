@@ -7,19 +7,18 @@ import { pinsOf, type Pins } from "./pins.ts";
 import { membersStamp } from "./today.ts";
 
 /**
- * In the bar above a note: whether it is pinned to the member's dashboard, and the button that pins it
+ * At the open note's top right: whether it is pinned to the member's dashboard, and the button that pins it
  * or takes the pin away. It is there from the first, so nothing beside it moves once the pins are
- * known. An archived note keeps its pin and is off the dashboard, which the button says.
+ * known. An archived note is off the dashboard and is not offered a pin; it keeps the one it has, which is back once it is unarchived.
  */
 function PinMark({ pins, note }: { pins: Pins; note: NoteSummary }) {
   const ids = useSyncExternalStore(pins.subscribe, pins.ids);
   useEffect(() => pins.want(), [pins]);
-  if (note.state === "trashed") return null;
+  if (note.state !== "live") return null;
   const pinned = ids?.includes(note.id) ?? false;
   const label = pinned ? "Unpin from dashboard" : "Pin to dashboard";
-  const waits = note.state === "archived" ? (pinned ? "Pinned. It is on your dashboard again once this note is unarchived." : "Pin to dashboard. An archived note is on your dashboard once it is unarchived.") : label;
   return (
-    <button type="button" className="pin-mark" aria-label={label} aria-description={waits === label ? undefined : waits} title={waits} aria-pressed={pinned} disabled={ids === null} onClick={() => pins.set(note.id, !pinned)}>
+    <button type="button" className="pin-mark" aria-label={label} title={label} aria-pressed={pinned} disabled={ids === null} onClick={() => pins.set(note.id, !pinned)}>
       <PinIcon />
     </button>
   );
@@ -50,7 +49,7 @@ export const dashboard: Plugin = {
     const pins = pinsOf(host);
     const openTodo = todoOpener(host);
     host.views.register("page", { id: "dashboard", path: "/dashboard", home: true, label: "Dashboard", icon: "dashboard", nav: "primary", order: 10, component: ({ app }) => <Dashboard host={host} app={app} pins={pins} onOpenTodo={openTodo} /> });
-    host.views.register("mark", { id: "pin", component: ({ note }) => <PinMark pins={pins} note={note} /> });
+    host.views.register("tool", { id: "pin", order: -1, component: ({ note }) => <PinMark pins={pins} note={note} /> });
 
     // A pin is listed while its note is in sight and out of Trash, so the pins are read again when a note comes or goes, and for no edit.
     let members: string | null = null;

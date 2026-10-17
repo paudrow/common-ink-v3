@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
+import { editOf, noteCard, openAllNotes, perform, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -17,7 +17,7 @@ const statusLine = (page: Page, group = 0) => page.locator(".cm-vim-panel").nth(
 /** Opens a note from the list of every note, as a preview with the cursor in it. */
 async function openNote(page: Page, title: string) {
   await openAllNotes(page);
-  await listedNote(page, title).click();
+  await editOf(page, title).click();
 }
 const tabs = (page: Page, group = 0) => page.getByRole("tablist", { name: "Open notes" }).nth(group).getByRole("tab");
 const italic = (page: Page) => tabs(page).evaluateAll((els) => els.map((el) => getComputedStyle(el).fontStyle === "italic"));

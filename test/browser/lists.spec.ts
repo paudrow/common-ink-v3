@@ -72,7 +72,7 @@ async function open(page: Page, width: number) {
   const note = await perform(page, { type: "note.create", text: NOTE });
   await page.goto(`/note/${note.id}`);
   await expect(editor(page)).toContainText("Last words.");
-  await expect(page.locator(".note-meta .crumbs")).not.toBeEmpty();
+  await expect(page.locator(".note-tools")).toBeVisible();
   await expect(editor(page).locator(".embed-card")).toBeVisible();
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+Home");
@@ -138,7 +138,6 @@ test("a note read in a folder's card hangs its list items the same way", async (
   await perform(page, { type: "note.create", text: NOTE });
   await page.goto("/folder/all");
   const card = page.getByRole("article", { name: "Lists" });
-  await card.getByRole("button", { name: "Expand Lists" }).click();
   await card.getByRole("button", { name: "Show whole note" }).click();
   await expect(card.locator(".cm-line").filter({ hasText: "Tabbed" })).toBeVisible();
   // A reading takes no keys, so it is no stop for Tab, though a note a member can only read is.

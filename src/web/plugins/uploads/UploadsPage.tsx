@@ -302,10 +302,10 @@ function Detail({ host, app, id, listed, onChanged }: DetailProps) {
   };
 
   const items: MenuItem[] = [
-    { label: "Download", action: download },
-    ...(canShare && read.access === "edit" ? [{ label: "Share…", action: () => app.toggleOverlay(SHARE_OVERLAY, { uploadId: read.id, name: read.name }) }] : []),
-    { label: "Copy embed", action: () => void copyEmbed() },
-    ...(read.access === "edit" ? [{ label: "Move to folder…", action: () => openMenu("folders"), disabled: busy, separated: true }] : []),
+    { label: "Download", icon: "uploads" as const, action: download },
+    ...(canShare && read.access === "edit" ? [{ label: "Share…", icon: "share" as const, action: () => app.toggleOverlay(SHARE_OVERLAY, { uploadId: read.id, name: read.name }) }] : []),
+    { label: "Copy embed", icon: "copy" as const, action: () => void copyEmbed() },
+    ...(read.access === "edit" ? [{ label: "Move to folder…", icon: "folders" as const, action: () => openMenu("folders"), disabled: busy, separated: true }] : []),
     ...(app.workspace.role !== "guest" && read.access === "edit"
       ? [
           {
@@ -322,8 +322,8 @@ function Detail({ host, app, id, listed, onChanged }: DetailProps) {
           },
         ]
       : []),
-    { label: read.state === "archived" ? "Unarchive" : "Archive", disabled: locked, action: () => void act(() => host.perform({ type: "upload.archive", id, archived: read.state !== "archived" })) },
-    { label: "Move to Trash", disabled: locked, action: () => (uses > 0 ? setAsking(true) : void trash()) },
+    { label: read.state === "archived" ? "Unarchive" : "Archive", icon: read.state === "archived" ? ("unarchive" as const) : ("archive" as const), disabled: locked, action: () => void act(() => host.perform({ type: "upload.archive", id, archived: read.state !== "archived" })) },
+    { label: "Move to Trash", icon: "trash" as const, disabled: locked, action: () => (uses > 0 ? setAsking(true) : void trash()) },
   ];
   const folders = foldersIn(app.folders).map((f) => ({ label: f.id === read.folderId ? `${f.name} (here)` : f.name, disabled: f.id === read.folderId, action: () => void act(() => host.perform({ type: "upload.move", id, folderId: f.id })) }));
 

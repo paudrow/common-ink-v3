@@ -20,9 +20,6 @@ export const ORDERS: Partial<Record<SortKey, (a: NoteSummary, b: NoteSummary) =>
   "title-desc": (a, b) => titleOf(b).localeCompare(titleOf(a)),
 };
 
-/** How much of an expanded card's note is shown: its first part, fading out, or all of it. A card that isn't here is collapsed. */
-export type Expanded = "excerpt" | "whole";
-
 /** Which of a folder's notes a list is of, by where each is in its life. A note in Trash is in none of them. */
 export const SHOWS = [
   { id: "open", label: "Open", includeArchived: false },
@@ -48,23 +45,19 @@ export interface ListView {
   show: Show;
   sort: Sort | null;
   hasTodos: boolean;
-  expanded: Readonly<Record<string, Expanded>>;
+  /** The cards grown to the whole of their notes. Every other card shows its note's first part. */
+  whole: Readonly<Record<string, true>>;
 }
 
-export const INITIAL_VIEW: ListView = { query: "", show: "open", sort: null, hasTodos: false, expanded: {} };
+export const INITIAL_VIEW: ListView = { query: "", show: "open", sort: null, hasTodos: false, whole: {} };
 
 export type ListAction =
   | { type: "query"; text: string }
   | { type: "show"; show: Show }
   | { type: "sort"; sort: Sort | null }
   | { type: "hasTodos" }
-  /** Expands a collapsed card to its excerpt, and collapses an expanded one. */
-  | { type: "expandOrCollapse"; noteId: string }
-  | { type: "collapse"; noteId: string }
-  /** Shows the whole note in an expanded card, or goes back to its excerpt. It does nothing to a collapsed card. */
-  | { type: "wholeOrExcerpt"; noteId: string };
-
-const without = (expanded: ListView["expanded"], noteId: string) => Object.fromEntries(Object.entries(expanded).filter(([id]) => id !== noteId));
+  /** Grows a card to the whole of its note, or cuts it back to the first part. */
+  | { type: "wholeOrLess"; noteId: string };
 
 export function listReducer(view: ListView, action: ListAction): ListView {
   switch (action.type) {
@@ -76,13 +69,9 @@ export function listReducer(view: ListView, action: ListAction): ListView {
       return { ...view, sort: action.sort };
     case "hasTodos":
       return { ...view, hasTodos: !view.hasTodos };
-    case "expandOrCollapse":
-      return { ...view, expanded: view.expanded[action.noteId] ? without(view.expanded, action.noteId) : { ...view.expanded, [action.noteId]: "excerpt" } };
-    case "collapse":
-      return view.expanded[action.noteId] ? { ...view, expanded: without(view.expanded, action.noteId) } : view;
-    case "wholeOrExcerpt": {
-      const now = view.expanded[action.noteId];
-      return now ? { ...view, expanded: { ...view.expanded, [action.noteId]: now === "whole" ? "excerpt" : "whole" } } : view;
+    case "wholeOrLess": {
+      const { [action.noteId]: was, ...rest } = view.whole;
+      return { ...view, whole: was ? rest : { ...rest, [action.noteId]: true } };
     }
   }
 }

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { connectAgent, folderRow, listedNote, noteCard, openAllNotes, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson } from "./helpers.ts";
+import { connectAgent, editOf, folderRow, openAllNotes, openKept, panelIcons, perform, pinPanel, showPanel, shownPanel, signInAsNewPerson } from "./helpers.ts";
 import { openDetails, pluginRow } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });
@@ -22,13 +22,12 @@ test.afterEach(() => expect(errors).toEqual([]));
 /** Opens a note from the list of every note, as a preview. */
 async function openNote(page: Page, title: string) {
   await openAllNotes(page);
-  await listedNote(page, title).click();
+  await editOf(page, title).click();
 }
 /** Opens a note from the list of every note in a tab that is kept. */
 async function keepNote(page: Page, title: string) {
   await openAllNotes(page);
-  await noteCard(page, title).hover();
-  await noteCard(page, title).getByRole("button", { name: `Edit ${title}` }).click();
+  await openKept(page, title);
 }
 const tabs = (page: Page) => page.getByRole("tablist", { name: "Open notes" }).getByRole("tab");
 const palette = (page: Page) => page.getByRole("dialog", { name: "Commands" });
@@ -95,7 +94,7 @@ test("turning the sidebar off takes the workspace menu, the page links, and the 
   await expect(sidebar).toHaveCount(0);
   await expect(page.getByRole("tree", { name: "Folders" })).toHaveCount(0);
   await run(page, "Open All notes");
-  await listedNote(page, "Alpha").click();
+  await editOf(page, "Alpha").click();
   await writes(page, note.id, "written with the sidebar off");
 
   // With no sidebar there is nothing to close to a bar, so it has no edge to drag and its key does nothing here.
@@ -122,7 +121,7 @@ test("turning folders off takes the folder tree out of the sidebar and its icon 
   await expect(page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: "Dashboard" })).toBeVisible();
   await run(page, "Open All notes");
   await expect(page.getByRole("heading", { name: "All notes", level: 1 })).toBeVisible();
-  await listedNote(page, "Alpha").click();
+  await editOf(page, "Alpha").click();
   await writes(page, note.id, "written with folders off");
 
   await page.keyboard.press("ControlOrMeta+\\");

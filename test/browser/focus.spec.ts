@@ -114,7 +114,8 @@ for (const { n, kind, shows } of KINDS) {
     const out = (await page.getByRole("button", { name: "Focus" }).boundingBox())!;
     expect(out.x + out.width).toBe(1280 - 6);
     expect(out.y).toBeLessThan(10);
-    if (kind === "a note") expect((await page.locator(".save-state").filter({ visible: true }).boundingBox())!.x + (await page.locator(".save-state").filter({ visible: true }).boundingBox())!.width).toBeLessThanOrEqual(out.x);
+    // Whether a note is saved is said in the bottom bar, which is out of sight in focus with the note's own buttons.
+    if (kind === "a note") await expect(page.locator(".save-state, .note-tools").filter({ visible: true })).toHaveCount(0);
 
     await page.reload();
     await expect(page.getByRole("button", { name: "Focus" })).toHaveAttribute("aria-pressed", "true");

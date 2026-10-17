@@ -1058,7 +1058,8 @@ test("a member who can't change the note sees it drawn, and no checkbox, cell, o
   await fold(page, "sweep");
   await expect(editor(page)).not.toContainText("under");
   await expect(cell(page, 1, 0)).toHaveText("1");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  // A note the member can't change says so where a note says it is saved.
+  await expect(page.getByRole("status")).toHaveText("View only");
   expect(writes).toEqual([]);
   await expect.poll(() => read(admin, note.id)).toBe(written);
 });

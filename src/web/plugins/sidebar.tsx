@@ -197,8 +197,8 @@ function PageLink({ app, page, labelled }: ViewProps & { page: PageInfo; labelle
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
-            { label: "Open in a split right", action: () => openBeside(tab, "right") },
-            { label: "Open in a split down", action: () => openBeside(tab, "down") },
+            { label: "Open in a split right", icon: "split", action: () => openBeside(tab, "right") },
+            { label: "Open in a split down", icon: "splitDown", action: () => openBeside(tab, "down") },
           ]}
         />
       )}

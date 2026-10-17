@@ -12,7 +12,7 @@ const text = async (page: Page, id: string) => (await perform(page, { type: "not
 
 for (const settings of [{ "vim.enabled": true, "lineNumbers.enabled": true }, {}]) {
   const vim = "vim.enabled" in settings;
-  test(`an expanded card is a reading, not an editor: no cursor, no mode bar, no keys, and its text can still be selected and copied${vim ? " (vim and line numbers on)" : ""}`, async ({ page, context }) => {
+  test(`a card is a reading, not an editor: no cursor, no mode bar, no keys, and its text can still be selected and copied${vim ? " (vim and line numbers on)" : ""}`, async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await signInAsNewPerson(page, "Ada Lovelace");
     await perform(page, { type: "settings.write", text: JSON.stringify(settings), baseRevision: 0 });
@@ -21,7 +21,6 @@ for (const settings of [{ "vim.enabled": true, "lineNumbers.enabled": true }, {}
     await page.reload();
     await openAllNotes(page);
     const card = noteCard(page, "Test");
-    await card.getByRole("button", { name: "Expand Test" }).click();
     const reading = card.locator(".editor.reading");
     await expect(reading.locator(".cm-line").first()).toHaveText("# Test");
     await card.getByRole("button", { name: "Show whole note" }).click();

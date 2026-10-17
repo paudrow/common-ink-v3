@@ -16,7 +16,8 @@ const write = async (page: Page, document: Record<string, unknown>) =>
 
 const problems = (page: Page) => page.getByRole("list", { name: "Problems" }).getByRole("listitem");
 const palette = (page: Page) => page.getByRole("dialog", { name: "Commands" });
-const snippet = (page: Page, title: string) => noteCard(page, title).locator(".card-preview");
+/** The first part of a note as its card draws it, which the "Show snippets" option takes away. */
+const snippet = (page: Page, title: string) => noteCard(page, title).locator(".card-body");
 /** Goes back to the Settings page from the list of notes that was opened over it. */
 async function backToSettings(page: Page) {
   await page.goBack();
@@ -77,7 +78,7 @@ test("a value the options won't take is refused there with the reason, and nothi
 test("editing the JSON changes the options and the app, and editing the options changes the JSON", async ({ page }) => {
   await openSettings(page);
   await openAllNotes(page);
-  await expect(snippet(page, "Alpha")).toHaveText("The first lines of Alpha.");
+  await expect(snippet(page, "Alpha").locator(".cm-line")).toHaveText(["# Alpha", "", "The first lines of Alpha."]);
   await backToSettings(page);
 
   await typeJson(page, '{\n  "note-list.snippets": false,\n  "core.editorTextSize": 120\n}');
@@ -85,6 +86,7 @@ test("editing the JSON changes the options and the app, and editing the options 
   await openAllNotes(page);
   await expect(noteCard(page, "Alpha")).toBeVisible();
   await expect(noteCard(page, "Alpha")).not.toContainText("The first lines of Alpha.");
+  await expect(snippet(page, "Alpha")).toHaveCount(0);
   await expect.poll(() => stored(page)).toEqual({ "note-list.snippets": false, "core.editorTextSize": 120 });
   await backToSettings(page);
 
@@ -95,7 +97,7 @@ test("editing the JSON changes the options and the app, and editing the options 
 
   await noteList.getByRole("checkbox", { name: "Show snippets" }).check();
   await openAllNotes(page);
-  await expect(snippet(page, "Alpha")).toHaveText("The first lines of Alpha.");
+  await expect(snippet(page, "Alpha").locator(".cm-line")).toHaveText(["# Alpha", "", "The first lines of Alpha."]);
   await backToSettings(page);
   await openJson(page);
   await expect(json(page)).toHaveText('{  "core.editorTextSize": 120}');
@@ -109,13 +111,14 @@ test("a plugin's options are listed under it with their schema and apply without
   await expect(noteList.getByRole("checkbox")).toHaveCount(1);
   await expect(noteList.getByRole("checkbox", { name: "Show snippets" })).toBeChecked();
   await expect(noteList).toContainText("note-list.snippets");
-  await expect(noteList).toContainText("Show the first lines of each note under its title.");
+  await expect(noteList).toContainText("Show the first part of each note on its card; with it off, a card shows the note's title.");
   await expect(noteList).toContainText("Default: on");
 
   await noteList.getByRole("checkbox", { name: "Show snippets" }).uncheck();
   await openAllNotes(page);
   await expect(noteCard(page, "Alpha")).toBeVisible();
   await expect(noteCard(page, "Alpha")).not.toContainText("The first lines of Alpha.");
+  await expect(snippet(page, "Alpha")).toHaveCount(0);
   await expect.poll(() => stored(page)).toEqual({ "note-list.snippets": false });
   await backToSettings(page);
 

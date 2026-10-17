@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { listedNote, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { editOf, openAllNotes, perform, showPanel, signInAsNewPerson } from "./helpers.ts";
 import { openPlugins } from "./plugins-helpers.ts";
 
 const text = (page: Page) => page.getByRole("textbox", { name: "Note text" });
@@ -37,7 +37,7 @@ test("a plugin whose views and embed throw is left out, the note keeps its typin
   await expect(text(page)).toContainText("See ::broken{} here.");
   await expect(page.getByRole("tree", { name: "Folders" })).toBeVisible();
   await openAllNotes(page);
-  await listedNote(page, "Alpha").click();
+  await editOf(page, "Alpha").click();
   await text(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("typed beside a broken plugin");

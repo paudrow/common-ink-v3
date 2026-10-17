@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { anotherPerson, connectAgent, folderRow, join, listedNote, listedNotes, me, openAllNotes, ownPlugin, perform, pinPanel, showPanel, signInAsNewPerson, visitor } from "./helpers.ts";
+import { anotherPerson, connectAgent, editOf, folderRow, join, listedNote, listedNotes, me, noteCard, openAllNotes, ownPlugin, perform, pinPanel, showPanel, signInAsNewPerson, visitor } from "./helpers.ts";
 import { standIns } from "./media-helpers.ts";
 
 const workspaceButton = (page: Page) => page.locator(".workspace-button");
@@ -138,7 +138,7 @@ test("a note its maker makes private is hidden from an admin everywhere, and sha
   // Kept, so its tab is still there once a list is opened: a list from the tree takes a preview's place.
   await bob.getByRole("tab", { name: "Diary" }).dblclick();
   await openAllNotes(bob);
-  await expect(listedNote(bob, "Diary").locator(".private-mark")).toBeVisible();
+  await expect(noteCard(bob, "Diary").locator(".private-mark")).toBeVisible();
   await bob.getByRole("tab", { name: "Diary" }).click();
 
   await page.reload();
@@ -148,7 +148,7 @@ test("a note its maker makes private is hidden from an admin everywhere, and sha
   await expect.poll(() => quickOpenTitles(page)).toEqual(["Index", "Target"]);
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Index", "Target"]);
-  await listedNote(page, "Target").click();
+  await editOf(page, "Target").click();
   await showPanel(page, "Backlinks");
   await expect(ownPlugin(page, "Backlinks").locator("body")).toContainText("No notes link here yet.");
   await page.goto(`/note/${diary.id}`);

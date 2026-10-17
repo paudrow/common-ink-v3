@@ -197,6 +197,19 @@ const PATHS = {
       <rect x="8.75" y="2.75" width="5.75" height="10.5" rx="1.25" />
     </>
   ),
+  splitDown: (
+    <>
+      <rect x="2.75" y="1.5" width="10.5" height="5.75" rx="1.25" />
+      <rect x="2.75" y="8.75" width="10.5" height="5.75" rx="1.25" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+      <path d="M10.5 5.5v-1a1 1 0 0 0-1-1h-5a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h1" />
+    </>
+  ),
+  restore: <path d="M2.75 8a5.25 5.25 0 1 1 1.6 3.8M2.5 13.5v-2.25h2.25" />,
   check: <path d="m3.75 8.25 2.75 2.75 5.75-6" />,
 } as const;
 
