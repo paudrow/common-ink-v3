@@ -24,12 +24,14 @@ interface Props {
    * have its letters in order.
    */
   found?: (typed: string) => PaletteItem[];
+  /** What is listed before anything is typed, in place of the items, such as the tabs open and the places visited lately. */
+  idle?: PaletteItem[];
   onPick: (id: string) => void;
   onClose: () => void;
 }
 
 /** A box to type in over a list that narrows to what matches; the command palette and quick open are both one. */
-export function Palette({ label, placeholder, items, most, empty, toggle, found, onPick, onClose }: Props) {
+export function Palette({ label, placeholder, items, most, empty, toggle, found, idle, onPick, onClose }: Props) {
   const ids = useId();
   const ref = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -38,7 +40,7 @@ export function Palette({ label, placeholder, items, most, empty, toggle, found,
   const matched = matching(items, typed, (item) => item.label).slice(0, most);
   const holding = matched.findIndex((item) => !item.label.toLowerCase().includes(typed.trim().toLowerCase()));
   const cut = holding < 0 ? matched.length : holding;
-  const shown = found ? [...matched.slice(0, cut), ...found(typed), ...matched.slice(cut)] : matched;
+  const shown = idle && !typed.trim() ? idle : found ? [...matched.slice(0, cut), ...found(typed), ...matched.slice(cut)] : matched;
   const optionId = (i: number) => `${ids}-option-${i}`;
 
   useDismiss(onClose, ref);

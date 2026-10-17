@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "./icons.tsx";
 import type { Told } from "./notices.ts";
 import type { Notice } from "./plugin-api.ts";
@@ -10,14 +10,49 @@ const AGAIN_MS = 2000;
 /** How long it takes to fade out. */
 const LEAVING_MS = 350;
 
+/** How far the stack stands off the foot of the pane, and the least it keeps from the window's edges. */
+const GAP = 12;
+const EDGE = 8;
+
 /**
- * Every notice of the app, as v1's toasts: cards stacked in the window's bottom right corner, the
+ * Where the stack goes: centred under the pane the member is working in, which the editor area marks
+ * with `data-front` and which is the whole editor area where it marks none, and above what is kept
+ * at the foot of that pane, as vim's bar is, so a card never covers it.
+ */
+function placeUnder(stack: HTMLElement) {
+  const main = document.querySelector<HTMLElement>("main.main");
+  const pane = main?.querySelector<HTMLElement>(".group[data-front]") ?? main;
+  if (!pane) return;
+  const box = pane.getBoundingClientRect();
+  const foot = [...pane.querySelectorAll<HTMLElement>(".note-foot")].find((f) => f.offsetHeight > 0);
+  const bottom = foot ? foot.getBoundingClientRect().top : box.bottom;
+  const half = stack.offsetWidth / 2;
+  const centre = Math.min(Math.max(box.left + box.width / 2, half + EDGE), innerWidth - half - EDGE);
+  stack.style.left = `${Math.round(centre)}px`;
+  stack.style.bottom = `${Math.round(Math.max(innerHeight - bottom + GAP, EDGE))}px`;
+}
+
+/**
+ * Every notice of the app, as cards stacked at the foot of the pane the member is working in, the
  * newest at the foot, each going after a few seconds. They are laid over the app, so nothing moves
- * when one comes or goes. The stack is always there, so a screen reader is told when a card arrives.
+ * when one comes or goes, and they follow the pane while they are shown. The stack is always there,
+ * so a screen reader is told when a card arrives.
  */
 export function Toasts({ told, onGone }: { told: readonly Told[]; onGone: (id: number) => void }) {
+  const stack = useRef<HTMLDivElement>(null);
+  const showing = told.length > 0;
+  useLayoutEffect(() => {
+    if (!showing) return;
+    let frame = 0;
+    const follow = () => {
+      placeUnder(stack.current!);
+      frame = requestAnimationFrame(follow);
+    };
+    follow();
+    return () => cancelAnimationFrame(frame);
+  }, [showing]);
   return (
-    <div className="toasts" aria-live="polite">
+    <div ref={stack} className="toasts" aria-live="polite">
       {told.map(({ id, notice, leaving }) => (
         <Toast key={id} notice={notice} leaving={leaving} onGone={() => onGone(id)} />
       ))}

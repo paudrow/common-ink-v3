@@ -434,6 +434,7 @@ test("in the command palette and quick open, Ctrl-j and Ctrl-k move, Ctrl-n and 
   await page.locator(".cards > li").first().locator(".card").focus();
   await page.keyboard.press("ControlOrMeta+p");
   await expect(page.getByRole("dialog", { name: "Go to note" })).toBeVisible();
+  await page.keyboard.type("plum");
   await page.keyboard.press("Control+j");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/note\//);

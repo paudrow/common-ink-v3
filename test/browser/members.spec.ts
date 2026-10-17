@@ -279,6 +279,8 @@ test("switching workspaces changes everything shown: the notes, the open tabs, q
   await expect(page).toHaveURL(/\/$/);
   await expect(timer).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+P");
+  // With nothing typed it lists what is open here; what is typed finds this workspace's notes only.
+  await page.getByRole("dialog", { name: "Go to note" }).getByRole("combobox").fill("plan");
   await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option")).toHaveText([/^Team plan/]);
   await page.keyboard.press("Enter");
   await expect(tabs(page)).toHaveText(["Dashboard", "Team plan"]);
@@ -299,6 +301,7 @@ test("switching workspaces changes everything shown: the notes, the open tabs, q
   await openAllNotes(page);
   await expect(listedNotes(page)).toHaveText(["Diary"]);
   await page.keyboard.press("ControlOrMeta+P");
+  await page.getByRole("dialog", { name: "Go to note" }).getByRole("combobox").fill("a");
   await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option")).toHaveText([/^Diary/]);
 });
 

@@ -242,11 +242,16 @@ test(":w saves what is typed now, ⌘S does too, and :q closes the tab", async (
   await expect(page).toHaveURL(/\/$/);
 });
 
-test("ctrl+o and ctrl+i go back and forward through the notes visited, into a closed tab and back from a page", async ({ page }) => {
+test("ctrl+o and ctrl+i go back and forward through the places visited, into a closed tab and back from a page", async ({ page }) => {
   await withVim(page, "# Alpha", "# Beta", "# Gamma");
   await page.goto("/");
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
+  // Quick open is no place of its own, so each note opened from it is the stop after the one before.
   for (const title of ["Alpha", "Beta", "Gamma"]) {
-    await openNote(page, title);
+    await page.keyboard.press("ControlOrMeta+p");
+    await page.getByRole("dialog", { name: "Go to note" }).getByRole("combobox").fill(title);
+    await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText(title);
+    await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/note/${title.toLowerCase()}-`));
   }
 
@@ -258,6 +263,10 @@ test("ctrl+o and ctrl+i go back and forward through the notes visited, into a cl
   await page.keyboard.press("Control+o");
   await expect(page).toHaveURL(/\/note\/alpha-/);
   await page.keyboard.press("Control+o");
+  await expect(page).toHaveURL(/\/$/);
+  await page.keyboard.press("Control+o");
+  await expect(page).toHaveURL(/\/$/);
+  await page.keyboard.press("Control+i");
   await expect(page).toHaveURL(/\/note\/alpha-/);
   await page.keyboard.press("Meta+o");
   await page.keyboard.press("Meta+i");
@@ -270,6 +279,7 @@ test("ctrl+o and ctrl+i go back and forward through the notes visited, into a cl
   await page.keyboard.press("Control+i");
   await expect(page).toHaveURL(/\/note\/gamma-/);
 
+  // Closing every tab puts the Dashboard in front, which is a place of its own.
   await run(page, "Close all tabs");
   await expect(tabs(page)).toHaveText(["Dashboard"]);
   await page.keyboard.press("Control+o");
@@ -282,7 +292,10 @@ test("ctrl+o and ctrl+i go back and forward through the notes visited, into a cl
   await expect(page).toHaveURL(/\/history$/);
   await page.keyboard.press("Control+o");
   await expect(page).toHaveURL(/\/note\/beta/);
-  await openNote(page, "Alpha");
+  await page.keyboard.press("ControlOrMeta+p");
+  await page.getByRole("dialog", { name: "Go to note" }).getByRole("combobox").fill("Alpha");
+  await expect(page.getByRole("dialog", { name: "Go to note" }).getByRole("option").first()).toContainText("Alpha");
+  await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/note\/alpha-/);
   await page.keyboard.press("Control+i");
   await expect(page).toHaveURL(/\/note\/alpha-/);
@@ -308,8 +321,11 @@ test("in insert mode ctrl+o runs one normal command and ctrl+i types a tab, and 
   await expect(page).toHaveURL(/\/note\/beta-/);
   await expect.poll(() => page.evaluate(() => document.querySelector(".cm-line")!.textContent)).toBe("Z\tY# Beta");
 
+  // gg was a jump in the note, so back goes first to where it jumped from, then to the list Beta was opened from.
   await keys(page, "Escape", "Control+o");
-  await expect(page).toHaveURL(/\/note\/alpha-/);
+  await expect(page).toHaveURL(/\/note\/z-y-beta-/);
+  await page.keyboard.press("Control+o");
+  await expect(page).toHaveURL(/\/folder\/all$/);
 });
 
 test("moving through a note in a preview tab leaves it a preview, and an edit keeps the tab", async ({ page }) => {
@@ -458,8 +474,9 @@ test("ctrl+o and ctrl+i are left to a field that has focus, vim's own prompt inc
   await page.keyboard.press("Escape");
 
   await expect(editor(page)).toBeFocused();
+  // Back is where the member was before Beta's tab: the list of every note.
   await page.keyboard.press("Control+o");
-  await expect(page).toHaveURL(/\/note\/alpha-/);
+  await expect(page).toHaveURL(/\/folder\/all$/);
 });
 
 test("when vim's editing can't be loaded the Plugins page says so, notes are edited plainly, and its keys aren't bound", async ({ page }) => {

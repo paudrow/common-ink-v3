@@ -5063,14 +5063,17 @@ kbd {
 }
 
 /* What just happened, in the window's bottom right corner, as v1's toasts. */
+/* Its place, under the pane the member is working in, is set as it is shown: see Toasts.tsx. */
 .toasts {
   position: fixed;
-  right: 18px;
+  left: 50%;
   bottom: 44px;
   z-index: 80;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
+  transform: translateX(-50%);
 }
 
 .toast-card {

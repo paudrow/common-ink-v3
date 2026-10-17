@@ -21,13 +21,14 @@ async function openShare(page: Page) {
   await expect(shareDialog(page)).toBeVisible();
 }
 
+/** The notes quick open offers before anything is typed: the pages and lists it also offers there are left out. */
 async function quickOpenTitles(page: Page) {
   await page.keyboard.press("ControlOrMeta+p");
   const palette = page.getByRole("dialog", { name: "Go to note" });
   await expect(palette).toBeVisible();
-  const titles = await palette.getByRole("option").locator(".palette-label").allTextContents();
+  const options = await palette.getByRole("option").evaluateAll((els) => els.map((el) => [el.querySelector(".palette-label")?.textContent ?? "", el.querySelector(".palette-hint")?.textContent ?? ""]));
   await page.keyboard.press("Escape");
-  return titles;
+  return options.filter(([, hint]) => !/(^|· )(Page|Folder)\b/.test(hint!)).map(([title]) => title);
 }
 
 test("a guest given one note to view sees that note and nothing else, and can't change it", async ({ page }) => {

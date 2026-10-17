@@ -57,6 +57,9 @@ function DayEvents({ cell, timeZone, onOpen }: { cell: Cell; timeZone: string; o
   );
 }
 
+/** How long the Calendar stays on a view and a day before its address says them. */
+const SETTLED_MS = 500;
+
 /** An event shown somewhere other than where its calendar has it, until a reading at or after `reading` says where it is. */
 type Placed = { when: EventWhen; reading: number };
 
@@ -68,12 +71,19 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
   const firstDay = Math.max(0, WEEKDAY_NAMES.indexOf(host.settings.get<string>("weekStarts") as (typeof WEEKDAY_NAMES)[number]));
   const weekends = host.settings.get<boolean>("weekends");
   const weekOf = (day: Day) => startOfWeek(day, firstDay);
-  const [view, setView] = useState<View>(() => {
+  const keptView = (): View => {
     const kept = host.storage.get("view");
     return typeof kept === "string" && Object.hasOwn(VIEWS, kept) ? (kept as View) : "week";
-  });
+  };
+  /** The view and day the address names, as a step back through the member's history comes to: `?view=month&day=2026-11-03`. */
+  const named = useMemo(() => {
+    const asked = new URLSearchParams(app.query);
+    const [view, day] = [asked.get("view"), asked.get("day")];
+    return !asked.has("event") && view && Object.hasOwn(VIEWS, view) && day && isDay(day) ? { view: view as View, day } : null;
+  }, [app.query]);
+  const [view, setView] = useState<View>(() => named?.view ?? keptView());
   /** The first day in view in a grid of hours; any day of the month, or the agenda's first day, otherwise. Counted from EPOCH. */
-  const [focus, setFocus] = useState(() => indexOf(view === "week" ? weekOf(today) : today));
+  const [focus, setFocus] = useState(() => indexOf(named ? named.day : view === "week" ? weekOf(today) : today));
   const [goal, setGoal] = useState<Goal | null>(null);
   const [drawnFrom, setDrawnFrom] = useState(focus - SPARE[7]);
   const [reading, setReading] = useState(0);
@@ -156,6 +166,29 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linked]);
   useEffect(() => () => lastOpened(null), []);
+  // Brought back to another view or day, as by a step back, the Calendar shows it.
+  useEffect(() => {
+    if (!named || (named.view === view && named.day === anchor)) return;
+    if (named.view === view && isGrid(view)) return glide({ to: indexOf(named.day) });
+    setGoal(null);
+    setView(named.view);
+    setFocus(indexOf(named.day));
+    // Only when the address names another view or day.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [named]);
+  // Once the member has settled on a view and a day, the address says them, so going back and forward comes to the Calendar as it was.
+  // The view they keep, on show today, is the bare address. It is the app's address only while the Calendar is the page in front.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const front = host.app().opened;
+      if (front?.kind !== "page" || front.id !== "calendar" || new URLSearchParams(app.query).has("event")) return;
+      const query = todayShown && view === keptView() ? "" : `?${new URLSearchParams({ view, day: anchor })}`;
+      if (query !== app.query) app.go(`${app.path}${query}`, { replace: true });
+    }, SETTLED_MS);
+    return () => clearTimeout(timer);
+    // Only when what is on show changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, anchor]);
 
   // A window too narrow for the whole week opens on today rather than on days before it.
   useEffect(() => {

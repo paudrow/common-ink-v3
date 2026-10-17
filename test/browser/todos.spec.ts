@@ -1409,7 +1409,7 @@ test("pressing a todo's words edits them right there, with its chips where they 
   await expect.poll(() => cursorLine(page)).toContain("Call the credit union");
 });
 
-test("the toast is v1's: in the bottom right corner in the app's colours, Task completed and Undo; it waits while pointed at, and the row stays a moment struck through before it leaves the list", async ({ page }) => {
+test("the toast is v1's: at the foot of the pane in the app's colours, Task completed and Undo; it waits while pointed at, and the row stays a moment struck through before it leaves the list", async ({ page }) => {
   test.setTimeout(60_000);
   await twoNotes(page);
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -1421,7 +1421,9 @@ test("the toast is v1's: in the bottom right corner in the app's colours, Task c
   await expect(row(page, "Water plants")).toHaveCount(0, { timeout: 5000 });
 
   const box = (await toast(page).boundingBox())!;
-  expect([Math.round(1280 - box.x - box.width), Math.round(800 - box.y - box.height)]).toEqual([18, 44]);
+  const pane = (await page.locator(".group[data-front]").boundingBox())!;
+  expect(Math.abs(box.x + box.width / 2 - (pane.x + pane.width / 2))).toBeLessThanOrEqual(1);
+  expect(Math.round(pane.y + pane.height - box.y - box.height)).toBe(12);
   expect(box.width).toBeGreaterThanOrEqual(240);
   expect(box.width).toBeLessThanOrEqual(340);
   const looks = await page.evaluate(() => {

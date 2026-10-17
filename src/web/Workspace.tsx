@@ -15,6 +15,7 @@ import { lastChange, relisted, withChanged } from "./knownNotes.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { MarkdownReader } from "./MarkdownReader.tsx";
 import { NoteReader } from "./NoteReader.tsx";
+import { cursorIn, onNoteMoves, putCursor } from "./openNotes.ts";
 import { stacked, type Told } from "./notices.ts";
 import { ALL_NOTES, SHARED_WITH_ME, folderTitle, type App, type Embed, type Folders, type Notice, type Opened, type Plugin } from "./plugin-api.ts";
 import { createPluginHost, type Host } from "./pluginHost.ts";
@@ -30,6 +31,7 @@ import { isBoolean, isString, readStored, useStored, writeStored } from "./store
 import { onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 import { Toasts } from "./Toasts.tsx";
+import { keptTravels, samePlace, stepped, travelled, type Travel, type Travels } from "./travels.ts";
 
 const FOCUS_KEY = "ink.focus";
 const SIDEBAR_KEY = "ink.sidebar";
@@ -188,7 +190,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   /** What each read of a note said of the uploads it refers to, which is what an embed of one is drawn from. */
   const [referred] = useState(referredUploads);
   /** What the app's own commands do, as of the latest render. */
-  const inner = useRef<{ step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
+  const inner = useRef<{ goBy: (by: -1 | 1) => void; step: (type: "note.undo" | "note.redo") => void; save: () => void; toggleFocus: () => void; toggleSidebar: () => void; toggleInspector: () => void }>(null!);
   const panel = useRef<HTMLElement>(null);
   const inspectorBar = useRef<HTMLElement>(null);
   const panelId = useId();
@@ -213,6 +215,10 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           h.commands.register({ id: "note.save", title: "Save now", keys: ["mod+s"], group: "Notes", run: () => inner.current.save() });
           h.commands.register({ id: "history.redo", title: "Redo", keys: ["mod+shift+z", "mod+y"], group: "Editor", leaveToFields: true, run: () => inner.current.step("note.redo") });
         }
+        // A browser's own keys for Back and Forward. On a Mac they take ⌘[ and ⌘] from a note, where they would indent, as Tab and Shift+Tab do;
+        // elsewhere Ctrl+[ is vim's Escape, so they are Alt and the arrows there.
+        h.commands.register({ id: "nav.back", title: "Go back", keys: [MAC ? "mod+[" : "alt+arrowleft"], group: "Navigation", run: () => inner.current.goBy(-1) });
+        h.commands.register({ id: "nav.forward", title: "Go forward", keys: [MAC ? "mod+]" : "alt+arrowright"], group: "Navigation", run: () => inner.current.goBy(1) });
         h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], group: "Navigation", run: () => inner.current.toggleFocus() });
         h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], group: "Navigation", run: () => inner.current.toggleSidebar() });
         h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", group: "Navigation", run: () => inner.current.toggleInspector() });
@@ -547,6 +553,63 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
 
   const openBeside = (tab: Opened, side: "right" | "down") => host.contributions().views.editor.at(-1)?.split?.(tab, side);
 
+  /** Where the member has been, kept in this browser, which Go back and Go forward walk. Settings is a place to change things from and no place in it. */
+  const travelsKey = `ink.travels.${workspaceId}.${me.person.id}`;
+  const travels = useRef<Travels>(null!);
+  travels.current ??= keptTravels(readStored(travelsKey, isAnything));
+  const travel = useCallback(
+    (step: Travel | Travels) => {
+      const next = "type" in step ? travelled(travels.current, step) : step;
+      if (next === travels.current) return;
+      travels.current = next;
+      writeStored(travelsKey, next);
+    },
+    [travelsKey],
+  );
+  /** What is in front: at `/`, the tab the editor area goes to there, or else the home page, which is drawn at that address. */
+  const homeId = contributed.views.page.find((p) => p.home)?.id;
+  const atHome = route.kind === "home" ? (editorArea?.returnsTo?.() ?? (homeId ? { kind: "page", id: homeId, path: "/" } : null)) : null;
+  const homeKey = atHome && `${atHome.kind} ${atHome.id} ${atHome.kind === "page" ? atHome.path : ""}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const inFront = useMemo<Opened | null>(() => opened ?? atHome, [opened, homeKey]);
+  const inHistory = inFront && !(inFront.kind === "page" && inFront.id === "settings") ? inFront : null;
+  useEffect(() => {
+    if (!inHistory) return;
+    const leaving = travels.current.stops[travels.current.at]?.place;
+    travel({ type: "arrive", place: inHistory, left: leaving?.kind === "note" ? cursorIn(leaving.id) : null });
+  }, [inHistory, travel]);
+  useEffect(
+    () =>
+      onNoteMoves({
+        jumped: (noteId, { from, to }) => travel({ type: "jump", noteId, from, to }),
+        changed: (noteId, changes) => travel({ type: "edit", noteId, map: (at) => changes.mapPos(at) }),
+      }),
+    [travel],
+  );
+  const canGo = (place: Opened) =>
+    place.kind === "note"
+      ? (byId.get(place.id)?.state ?? "trashed") !== "trashed"
+      : place.kind === "folder"
+        ? !tree || folderTitle(tree, place.id) !== null
+        : contributed.views.page.some((p) => p.id === place.id);
+  /** Goes back (-1) or forward (1) through where the member has been: to another note, list or page, or to where the cursor was in a note. */
+  const goBy = (by: -1 | 1) => {
+    const here = inFront?.kind === "note" ? cursorIn(inFront.id) : null;
+    const next = stepped(travels.current, by, inFront, here, canGo);
+    if (next === travels.current) return;
+    travel(next);
+    const { place, cursor } = next.stops[next.at]!;
+    if (place.kind === "note") {
+      if (cursor !== null) putCursor(place.id, cursor);
+      if (!samePlace(place, inFront)) openNote(place.id, { preview: true, focus: true });
+    } else if (place.kind === "folder") openFolder(place.id, { preview: true });
+    else {
+      const area = host.contributions().views.editor.at(-1);
+      if (area?.open) area.open(place, { preview: true });
+      else show(place);
+    }
+  };
+
   const createNote = async (folderId?: string) => {
     const note = await perform(workspaceId, { type: "note.create", folderId: (folderId === undefined ? newNoteFolderId : folderForNew(folderId)) ?? undefined });
     void loadFolders();
@@ -654,7 +717,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     return made;
   };
 
-  inner.current = { step, save: () => routeNoteId && void saveNow(routeNoteId), toggleFocus, toggleSidebar, toggleInspector };
+  inner.current = { goBy, step, save: () => routeNoteId && void saveNow(routeNoteId), toggleFocus, toggleSidebar, toggleInspector };
 
   useEffect(() => {
     // A keybinding is the app's before it is anyone else's: a key press that was taken reaches no editor and no row's own handler.
@@ -733,6 +796,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       tell((shown) => stacked(shown, { id, notice: { ...notice } }));
       return () => tell((shown) => shown.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
     },
+    openTabs: () => {
+      const area = host.contributions().views.editor.at(-1);
+      return area?.tabs ? area.tabs() : appNow.current.opened ? [{ opened: appNow.current.opened, pane: 1 }] : [];
+    },
+    recent: () => travels.current.recent,
     toggleSidebar,
     togglePanel,
     inspect: (_: Showing | null) => {},

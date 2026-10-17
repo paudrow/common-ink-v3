@@ -103,6 +103,12 @@ export { HelpOverlay } from "./HelpOverlay.tsx";
 export { ago, dayOf, today, useNow } from "./time.ts";
 /** A note's text and selection as its editor has them now, for a view that says something of the note in front. */
 export { useOpenNote, type OpenNote } from "./openNotes.ts";
+/**
+ * A CodeMirror effect that says the cursor jumped within a note, as vim's G or a search sends it:
+ * `{ from, to }` as offsets. Put on a transaction of its own after the move, it makes a stop in the
+ * app's history, so Go back comes back to `from` before it leaves the note.
+ */
+export { noteJump } from "./openNotes.ts";
 
 /**
  * Dragging to the editor area. `carry` puts a note, a folder's list or a page on a drag, `carried`
@@ -452,6 +458,8 @@ export interface Slots {
      * offer "Open in a split".
      */
     split?: (tab: Opened, side: "right" | "down") => void;
+    /** Every tab open, pane by pane in reading order and each pane's left to right, for `app.openTabs`. */
+    tabs?: () => readonly OpenTab[];
   };
   /**
    * A folder's list of notes, drawn in the editor area where a folder is open. The last one
@@ -859,6 +867,12 @@ export interface Notice {
   stays?: boolean;
 }
 
+/** A tab open in the editor area, and which pane it is in: 1 for the first in reading order. */
+export interface OpenTab {
+  opened: Opened;
+  pane: number;
+}
+
 export type PageInfo = Pick<Slots["page"], "id" | "path" | "label" | "icon" | "nav" | "home">;
 
 /** The app at one moment: what is open, and what can be done about it. */
@@ -982,6 +996,13 @@ export interface App {
   saveNote(noteId: string): Promise<Written | undefined>;
   /** Records that the member was shown a note's changes up to a revision. */
   markSeen(noteId: string, revision: number): void;
+  /** Every tab open in the editor area, pane by pane. Where the editor area has no tabs, what is in front. */
+  openTabs(): readonly OpenTab[];
+  /**
+   * The notes, folders' lists and pages the member has been to in this browser, the latest first and
+   * each once, what is in front among them. A page is at the address it was last at.
+   */
+  recent(): readonly Opened[];
   /** Tells the member something that just happened, such as that a note was moved to Trash. Notices stack, newest at the foot, three at most; one saying what a shown one says takes its place. It answers with what takes the card down, which does nothing once it has gone. */
   notify(notice: Notice): () => void;
   /** Opens an overlay, or closes it when it is the one open. `state` is for the overlay, which is handed it. */

@@ -1,5 +1,4 @@
 import { dismissing, type Plugin } from "../../plugin-api.ts";
-import { EMPTY, jump, visit } from "./jumplist.ts";
 import { KEYS } from "./keys.ts";
 import { surfaces } from "./surfaces.ts";
 
@@ -7,8 +6,8 @@ const isField = (el: Element | null): el is HTMLElement =>
   el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable);
 
 /**
- * Vim keys in every note's editor, ctrl+o and ctrl+i to go back and forward through the notes
- * visited, and vim's keys for the rest of the window: its lists, its regions and its tabs. The
+ * Vim keys in every note's editor, ctrl+o and ctrl+i to go back and forward through where the member
+ * has been, and vim's keys for the rest of the window: its lists, its regions and its tabs. The
  * editing is loaded when the plugin is turned on, so nobody else carries it.
  */
 export const vim: Plugin = {
@@ -26,7 +25,6 @@ export const vim: Plugin = {
     },
   },
   activate(host) {
-    let jumps = EMPTY;
     let stopped = false;
     let ui: ReturnType<typeof surfaces> | undefined;
     /** When a key last opened a row or changed tabs: what that puts in front, soon after, takes focus. And when a note was last given focus for it, which leaves it in normal mode. */
@@ -40,9 +38,8 @@ export const vim: Plugin = {
     };
 
     host.onNavigate(() => {
-      const app = host.app();
-      if (app.noteId) jumps = visit(jumps, app.noteId);
       if (Date.now() - arriving > 3000) return;
+      const app = host.app();
       arriving = 0;
       // A note opened with a key is one to write in. A list put in front keeps the keys on its rows.
       if (app.noteId) {
@@ -50,14 +47,6 @@ export const vim: Plugin = {
         app.openNote(app.noteId, { preview: true, focus: true });
       } else if (app.opened) requestAnimationFrame(() => ui?.settle());
     });
-
-    const go = (by: -1 | 1) => () => {
-      const app = host.app();
-      const next = jump(jumps, by, app.noteId, (id) => !app.notes || app.notes.some((n) => n.id === id));
-      if (next === jumps) return;
-      jumps = next;
-      app.openNote(next.notes[next.at]!, { preview: true, focus: true });
-    };
 
     // The keys come with the editing, so a member is never left with vim's jumps and no vim.
     import("./editing.ts").then(
@@ -69,10 +58,13 @@ export const vim: Plugin = {
         const byRows = () => editing.moveByRows(host.settings.get<boolean>("screenLines"));
         byRows();
         host.settings.subscribe(byRows);
-        /** In a field, these keys are the field's. In a note they are jumps only where vim would take them for jumps. */
+        /**
+         * In a field, these keys are the field's. In a note they are jumps only where vim would take them for jumps. They walk the
+         * app's history, where vim's own jumps in a note are stops between the notes and pages, so one list is walked as vim's is.
+         */
         const when = () => !isField(document.activeElement) || editing.jumpsFrom(document.activeElement);
-        host.commands.register({ id: "vim.back", title: "Go back to the note before", keys: ["ctrl+o"], group: "Vim", when, run: go(-1) });
-        host.commands.register({ id: "vim.forward", title: "Go forward to the note after", keys: ["ctrl+i"], group: "Vim", when, run: go(1) });
+        host.commands.register({ id: "vim.back", title: "Go back with vim's keys", keys: ["ctrl+o"], group: "Vim", when, run: () => void host.commands.run("nav.back") });
+        host.commands.register({ id: "vim.forward", title: "Go forward with vim's keys", keys: ["ctrl+i"], group: "Vim", when, run: () => void host.commands.run("nav.forward") });
 
         const outside = (ui = surfaces({ normal: editing.jumpsFrom, dismissing }));
         calm = editing.toNormal;
