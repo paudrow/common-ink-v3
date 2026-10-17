@@ -9,7 +9,7 @@ export interface Written {
   capabilities?: { name: Capability; reason: string; origins?: string[] }[];
   commands?: { id: string; title: string }[];
   views?: { slot: "inspector" | "page" | "bar"; id: string; label: string; width?: number; end?: boolean }[];
-  embeds?: { name: string; title: string; height?: number }[];
+  embeds?: { name: string; title: string; height?: number; options?: Record<string, unknown>[] }[];
   settings?: Record<string, unknown>;
 }
 

@@ -1,3 +1,4 @@
+import { durationWords, SWATCHES, secondsIn, valueOf } from "./embedOptions.ts";
 import { z } from "zod";
 import type { OpType } from "./protocol.ts";
 
@@ -158,6 +159,27 @@ const Option = z.discriminatedUnion("type", [
   z.strictObject({ type: z.enum(["number", "integer"]), default: z.number(), minimum: z.number().optional(), maximum: z.number().optional(), title: Words(80), description: Words(300).optional() }),
 ]);
 
+/** A value an embed's option writes as one word of its config: no quote, brace or line break. */
+const OptionWord = (max: number) => z.string().max(max).regex(/^[^"{}\r\n]*$/, "no quotes, braces or line breaks");
+
+/** One of an embed's options, as `DeclaredOption` in `embedOptions.ts` reads it. */
+const EmbedOption = z.discriminatedUnion("type", [
+  z
+    .strictObject({ type: z.literal("text"), id: Local, label: Words(60), default: OptionWord(200).default(""), maxLength: z.number().int().min(1).max(200).optional() })
+    .refine((o) => o.default === o.default.trim() && (o.maxLength === undefined || o.default.length <= o.maxLength), "the default is one the option takes"),
+  z
+    .strictObject({ type: z.literal("number"), id: Local, label: Words(60), default: z.number(), min: z.number().optional(), max: z.number().optional(), step: z.number().positive().optional() })
+    .refine((o) => !("refused" in valueOf(o, String(o.default))), "the default is one the option takes"),
+  z.strictObject({ type: z.literal("toggle"), id: Local, label: Words(60), default: z.boolean().default(false) }),
+  z
+    .strictObject({ type: z.literal("choice"), id: Local, label: Words(60), values: z.array(z.string().regex(/^[\w.:/+-]{1,40}$/, "one word of letters, digits and . : / + -")).min(2).max(12), default: z.string().optional() })
+    .refine((o) => new Set(o.values).size === o.values.length, "each value once")
+    .refine((o) => o.default === undefined || o.values.includes(o.default), "the default is one of the values"),
+  z.strictObject({ type: z.literal("colour"), id: Local, label: Words(60), default: z.enum(["", ...SWATCHES]).default("") }),
+  z.strictObject({ type: z.literal("duration"), id: Local, label: Words(60), default: z.string().refine((d) => secondsIn(d) !== null, "a duration like 25m").transform((d) => durationWords(secondsIn(d)!)) }),
+  z.strictObject({ type: z.literal("date"), id: Local, label: Words(60), default: z.string().refine((d) => !("refused" in valueOf({ type: "date", id: "d", label: "d", default: "" }, d)), "a day like 2026-10-16, or empty").default("") }),
+]);
+
 /** The slots the view of a plugin that runs shut off may be in. Each is drawn in a frame of the plugin's own. */
 export const REMOTE_SLOTS = ["inspector", "page", "bar"] as const;
 
@@ -204,7 +226,19 @@ const shape = {
     .refine(...unique<{ id: string }>((v) => v.id, "view"))
     .default([]),
   embeds: z
-    .array(z.strictObject({ name: Local, title: Words(60), height: z.number().int().min(24).max(1200).default(240) }))
+    .array(
+      z.strictObject({
+        name: Local,
+        title: Words(60),
+        height: z.number().int().min(24).max(1200).default(240),
+        /** What a member sets in the embed's config from beneath it, which the app draws and writes. */
+        options: z
+          .array(EmbedOption)
+          .max(12)
+          .refine(...unique<{ id: string }>((o) => o.id, "option"))
+          .optional(),
+      }),
+    )
     .max(10)
     .refine(...unique<{ name: string }>((e) => e.name, "embed"))
     .default([]),
@@ -259,7 +293,11 @@ export async function validate(manifest: string, code: string): Promise<Validate
   return { ok: true, manifest: read.manifest, codeHash: await codeHash(code), fullTrust: asksFullTrust(read.manifest) };
 }
 
-/** A new plugin's two files: a manifest that asks for nothing, with one command and one view in the inspector, and code that runs shut off and fills both. Or why `name` can't be a plugin's. */
+/**
+ * A new plugin's two files: a manifest that asks for nothing, with one command, one view in the
+ * inspector and one embed with options the app draws, and code that runs shut off, fills them and
+ * looks like the app with one line. Or why `name` can't be a plugin's.
+ */
 export function scaffold(name: string): { manifest: string; code: string } | { reason: string } {
   const manifest = JSON.stringify(
     {
@@ -269,6 +307,18 @@ export function scaffold(name: string): { manifest: string; code: string } | { r
       capabilities: [],
       commands: [{ id: "hello", title: "Say hello" }],
       views: [{ slot: "inspector", id: "main", label: "Hello" }],
+      embeds: [
+        {
+          name: "hello",
+          title: "Hello",
+          height: 120,
+          options: [
+            { type: "text", id: "to", label: "To", default: "everyone" },
+            { type: "number", id: "times", label: "Times", default: 1, min: 1, max: 5, step: 1 },
+            { type: "toggle", id: "loud", label: "Loud", default: false },
+          ],
+        },
+      ],
       settings: { greeting: { type: "string", default: "Hello", title: "Greeting" } },
     },
     null,
@@ -279,7 +329,22 @@ export function scaffold(name: string): { manifest: string; code: string } | { r
   const code = `// ${name}. It runs shut off from the app, in a frame of its own, and reaches the workspace only through
 // ink.perform, with what an admin permitted it. Ask for a capability in the manifest to read or change notes.
 
+// The app's look: its buttons, fields and headings, in its colours, following its theme.
+document.body.classList.add("ink-kit");
+
 ink.onCommand("hello", () => ink.notify(ink.settings.greeting + " from " + ${JSON.stringify(name)}));
+
+if (ink.context.kind === "embed") {
+  // A note writes ::x-hello{to=Ada times=2}. The app draws the options beneath it and hands their values here.
+  const { to, times, loud } = ink.context.options;
+  const card = document.createElement("div");
+  card.className = "ink-card ink-stack";
+  const title = card.appendChild(document.createElement("h2"));
+  title.textContent = "Hello";
+  const said = card.appendChild(document.createElement("p"));
+  said.textContent = Array.from({ length: times }, () => ink.settings.greeting + ", " + to + (loud ? "!" : ".")).join(" ");
+  ink.root.append(card);
+}
 
 if (ink.context.kind === "view") {
   const said = document.createElement("p");

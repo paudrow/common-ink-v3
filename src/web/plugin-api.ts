@@ -11,6 +11,7 @@
  */
 import type { ComponentType, ReactNode } from "react";
 import type { Agent, AgentEdit, ConnectOptions, Grant, GrantAccess, Invite, LinkKind, ListedFolder, Member, Note, NoteSummary, OpInput, ReferredUpload, Results, Role, Sharing, Upload, WorkspaceSummary, Written } from "../core/protocol.ts";
+import type { DeclaredOption, Swatch } from "../core/embedOptions.ts";
 import type { IconName } from "./icons.tsx";
 import type { Showing } from "./inspected.ts";
 
@@ -612,8 +613,13 @@ export interface Embed {
    * in the embed's card, and opens beneath the card a field for each of these. An embed that has
    * none, or gives none for what the note says of it now, has no button, and neither has a member
    * who can't change the note.
+   *
+   * Declared as data, a list of {@link DeclaredOption}s, the host reads each from the config as
+   * `id=value` and writes it back there, and draws the field for its type: no code at all. That is
+   * how a third-party plugin's manifest declares them. `fields` and `set` are for options that live
+   * anywhere else in what the note says, as the timer's length and a board's column colours do.
    */
-  options?: EmbedOptions;
+  options?: EmbedOptions | readonly DeclaredOption[];
 }
 
 /**
@@ -637,9 +643,8 @@ export type EmbedField =
   | { id: string; label: string; kind: "text"; value: string; placeholder?: string; hint?: string }
   | { id: string; label: string; kind: "choice"; value: string; choices: readonly { value: string; label: string; swatch?: Swatch | "" }[] };
 
-/** The colours an embed can ask for by name. Each is drawn to suit the theme, light or dark, as `--swatch` on an element with `data-colour`. */
-export const SWATCHES = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "gray"] as const;
-export type Swatch = (typeof SWATCHES)[number];
+/** An embed's options declared as data, which the host reads from and writes into its config as `key=value` words. */
+export { SWATCHES, optionValues, type DeclaredOption, type OptionValue, type Swatch } from "../core/embedOptions.ts";
 
 /** What an embed can give back from `render`. */
 export interface Drawn {

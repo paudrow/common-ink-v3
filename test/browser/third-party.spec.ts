@@ -453,3 +453,61 @@ test("a plugin put on the page through the fixture global runs only where the Wo
   await page.getByRole("combobox", { name: "Commands" }).fill("Planted");
   await expect(page.locator(".palette").getByRole("option")).toHaveCount(0);
 });
+
+test("an embed's options declared in its manifest are drawn by the app beneath it, as wide as its room, written into its line and handed to the frame, and the frame follows the app's theme", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const options = [
+    { type: "text", id: "question", label: "Question", default: "" },
+    { type: "number", id: "votes", label: "Votes each", default: 1, min: 1, max: 5, step: 1 },
+    { type: "toggle", id: "open", label: "Open", default: true },
+    { type: "choice", id: "show", label: "Show", values: ["bars", "dots"] },
+  ];
+  const code = `document.body.classList.add("ink-kit");
+const said = document.createElement("p");
+said.className = "said";
+said.textContent = JSON.stringify(ink.context.options);
+const button = document.createElement("button");
+button.className = "primary";
+button.textContent = "Vote";
+ink.root.append(said, button);`;
+  const id = await install(page, { name: "Poll", embeds: [{ name: "poll", title: "Poll", height: 100, options }] }, code);
+  const note = await perform(page, { type: "note.create", text: "# Lunch\n\n::x-poll{size=big}\n\nend\n" });
+  await perform(page, { type: "settings.write", text: JSON.stringify({ [`${id}.enabled`]: true }), baseRevision: (await perform(page, { type: "settings.read" })).revision });
+  await page.goto(`/note/${note.id}`);
+  const said = async () => (await frameFor(page, "embed", "poll")).locator(".said").textContent();
+  await expect.poll(said).toBe('{"question":"","votes":1,"open":true,"show":"bars"}');
+
+  await onLine(page, 2);
+  await editor(page).getByRole("button", { name: "Options for Poll plugin: Poll" }).click();
+  const panel = page.getByRole("dialog", { name: "Options for Poll plugin: Poll" });
+  await expect(panel.getByRole("textbox", { name: "Votes each" })).toHaveValue("1");
+  // Beneath the frame's room, as wide as it.
+  const [room, box] = [(await page.locator('.embed-below[data-embed="x-poll"]').boundingBox())!, (await panel.boundingBox())!];
+  expect(Math.abs(box.width - room.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(box.x - room.x)).toBeLessThanOrEqual(1);
+  expect(box.y).toBeGreaterThanOrEqual(room.y + room.height);
+
+  await panel.getByRole("textbox", { name: "Votes each" }).fill("9");
+  await page.keyboard.press("Enter");
+  await expect(panel.getByRole("alert")).toHaveText("A whole number from 1 to 5.");
+  await panel.getByRole("textbox", { name: "Votes each" }).fill("3");
+  await page.keyboard.press("Enter");
+  await panel.getByRole("radiogroup", { name: "Open" }).getByRole("radio", { name: "Off" }).click();
+  await panel.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "dots" }).click();
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("::x-poll{size=big votes=3 open=off show=dots}");
+  await expect.poll(said).toBe('{"question":"","votes":3,"open":false,"show":"dots"}');
+  // Back to the default is no word at all.
+  await panel.getByRole("radiogroup", { name: "Show" }).getByRole("radio", { name: "bars" }).click();
+  await expect.poll(async () => (await perform(page, { type: "note.read", id: note.id })).text).toContain("::x-poll{size=big votes=3 open=off}");
+
+  // The kit draws the plugin's button as the app's primary one, and the frame changes theme with the app.
+  const look = async () => (await frameFor(page, "embed", "poll")).evaluate(() => ({ scheme: (window as unknown as { ink: { scheme: string } }).ink.scheme, bg: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(), button: getComputedStyle(document.querySelector("button")!).backgroundColor }));
+  const accent = await page.evaluate(() => getComputedStyle(document.body).getPropertyValue("--accent").trim());
+  const before = await look();
+  expect(before.button).toBe(await page.evaluate((colour) => { const probe = document.body.appendChild(document.createElement("i")); probe.style.color = colour; const seen = getComputedStyle(probe).color; probe.remove(); return seen; }, accent));
+  const other = before.scheme === "dark" ? "light" : "dark";
+  await page.evaluate((theme) => (document.documentElement.dataset.theme = theme), other);
+  const appBg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
+  await expect.poll(look).toMatchObject({ scheme: other, bg: appBg });
+  expect(appBg).not.toBe(before.bg);
+});

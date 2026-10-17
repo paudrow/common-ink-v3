@@ -1,6 +1,6 @@
 import { sandboxed, type Plugin } from "../../plugin-api.ts";
 import { arriving } from "../lib/arriving.ts";
-import { heightIn } from "./config.ts";
+import { HTML_OPTIONS, heightIn } from "./config.ts";
 import { runningIn } from "./running.ts";
 
 const START = `<p>Hello from <b>HTML</b>.</p>
@@ -63,15 +63,7 @@ export const html: Plugin = {
       title: "HTML",
       block: true,
       starts: { body: START },
-      options: {
-        fields: ({ config }) => [{ id: "height", label: "Height", kind: "text", value: String(heightIn(config)), hint: "In pixels, from 40 to 2000." }],
-        set({ config }, _id, value) {
-          const height = Number(value.trim());
-          if (!Number.isInteger(height) || height < 40 || height > 2000) return "Write a whole number of pixels from 40 to 2000.";
-          const rest = config.split(/\s+/).filter((word) => word && !word.startsWith("height="));
-          return { config: [...rest, `height=${height}`].join(" ") };
-        },
-      },
+      options: HTML_OPTIONS,
       // All of it is below: the card the host draws has the name and the options, and the frame is the card's body.
       render() {},
       below: {

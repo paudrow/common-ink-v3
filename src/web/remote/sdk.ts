@@ -18,6 +18,7 @@ export const SDK = `(() => {
   const noteHeard = new Set();
   const itemsHeard = new Set();
   const storageHeard = new Set();
+  const themeHeard = new Set();
   const watch = (heard, what, fn) => {
     heard.add(fn);
     if (heard.size === 1) call({ call: "watch", what }).catch(() => {});
@@ -49,6 +50,8 @@ export const SDK = `(() => {
       for (let i = unheard.length - 1; i >= 0; i--) if (unheard[i] === id) { unheard.splice(i, 1); fn(); }
     },
     onSettings(fn) { settingsHeard.add(fn); },
+    scheme: document.querySelector('meta[name="color-scheme"]').content,
+    onTheme(fn) { themeHeard.add(fn); },
   };
   Object.defineProperty(window, "ink", { value: ink });
   const heard = ({ data }) => {
@@ -83,6 +86,11 @@ export const SDK = `(() => {
       for (const fn of itemsHeard) fn();
     } else if (data.event === "storage") {
       for (const fn of storageHeard) fn(data.key, data.value);
+    } else if (data.event === "look") {
+      document.getElementById("ink-look").textContent = data.styles;
+      document.querySelector('meta[name="color-scheme"]').content = data.scheme;
+      ink.scheme = data.scheme;
+      for (const fn of themeHeard) fn(data.scheme);
     }
   };
   addEventListener("message", function take(event) {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { optionValues } from "../../core/embedOptions.ts";
 import type { InstalledPlugin } from "../../core/plugins.ts";
 import type { Op } from "../../core/protocol.ts";
 import { ApiError } from "../api.ts";
@@ -364,9 +365,11 @@ export function adapt(installed: InstalledPlugin, reach: Reach): Plugin {
               written.edit();
             });
           },
+          // Declared in the manifest, drawn and written by the app: the plugin's code only reads them.
+          options: embed.options,
           below: {
             box: () => ({ height: embed.height }),
-            render: (into, { config, body }) => open(into, { kind: "embed", name: embed.name, config, body, readOnly: true }, title).stop,
+            render: (into, { config, body }) => open(into, { kind: "embed", name: embed.name, config, body, readOnly: true, options: optionValues(embed.options ?? [], config) }, title).stop,
           },
         });
       }

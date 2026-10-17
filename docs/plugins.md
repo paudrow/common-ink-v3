@@ -197,7 +197,34 @@ The cursor counts from the first time it is put somewhere or something is typed.
 
 ### Options
 
-An embed that declares options has one options button in its card, with three sliders on it. An embed with none has no button, and neither has a member who can't change the note. The button opens a small panel beneath the card, from the card's left edge, laid over the app so it moves nothing in the note. A card whose foot is out of the window, as a long board's is, has the panel beneath the button instead. The panel holds a field for each option the embed declares and nothing else.
+An embed that declares options has one options button in its card, with three sliders on it. An embed with none has no button, and neither has a member who can't change the note. The button opens a panel beneath the embed, as wide as its card (or, for an embed whose drawing is below its line, as wide as that room), laid over the app so it moves nothing in the note. A card whose foot is out of the window, as a long board's is, has the panel beneath the button instead. The panel holds a field for each option the embed declares and nothing else.
+
+Most options are declared as data, and then the host does everything: it reads each from the embed's config as an `id=value` word, draws its field, refuses a value the option can't take with a sentence saying what it takes, and writes the value back as a word at the end of the config (the default as no word at all, and every word that is no option's left where it was). The HTML embed's height is declared this way, and so is every option a third-party plugin's manifest gives its embed:
+
+```ts
+host.embeds.register({
+  name: "html",
+  title: "HTML",
+  options: [{ type: "number", id: "height", label: "Height", min: 40, max: 2000, step: 1, default: 320 }],
+  /* render, below */
+});
+```
+
+Each is a `DeclaredOption` (`src/core/embedOptions.ts`) with an `id` (a small letter, then letters, digits and `-`), a `label`, a `default`, and a `type`:
+
+| `type` | Written as | Drawn as | Also takes |
+|---|---|---|---|
+| `text` | `to=Ada`, `to="Ada Lovelace"` | a field | `maxLength`. No quotes, braces or line breaks. |
+| `number` | `times=3` | a field, with what it takes under it | `min`, `max`, `step` |
+| `toggle` | `loud=on`, `loud=off` | On and Off | |
+| `choice` | `show=dots` | one button per value | `values`, one word each; no `default` means the first |
+| `colour` | `tint=green` | a dot for each of `SWATCHES`, and none | |
+| `duration` | `for=1h30m` | a field; `90`, `90m` and `1h30m` are one value | |
+| `date` | `until=2026-10-31` | a field | empty is none |
+
+A number written past either end of its range, as by hand, is read as that end; a number or a duration emptied in its field is its default again. `optionValues(options, config)` from the plugin API reads them all at once, each as its type (a number as a number, a toggle as true or false) or its default, which is what the HTML embed draws its height from. The table and the refusals are tested in `test/core/embed-options.test.ts`.
+
+An option that lives anywhere else in what the note says, as the timer's length (the config's first word) and a board's column colours (its body) do, is given as `fields` and `set` instead:
 
 ```ts
 host.embeds.register({
@@ -729,7 +756,7 @@ if (ink.context.kind === "embed") ink.root.textContent = "Counting: " + ink.cont
 - `capabilities`: each `{ name, reason }`, and for `network` also `origins`, up to ten sites such as `https://api.example.com` (no path, no wildcard). The reason is in the author's words and is shown to whoever decides.
 - `commands`: `{ id, title }`. In the app the command is `<install id>.<id>`, titled `<plugin name> plugin: <title>`, and can be given a keybinding like any other.
 - `views`: `{ slot, id, label }` with `slot` `inspector` (a tab about the open note), `page` (at `/x/<install id>/<id>`, linked under More) or `bar` (one item in the bottom bar, with `width` from 24 to 480 and `end: true` for the right side, and the plugin's name written beside it by the app). All are labelled `<plugin name> plugin: <label>`, so none reads as part of the app. A third-party page is never the home page at `/`: only Common Ink's own plugins register one with `home`.
-- `embeds`: `{ name, title, height }`. A note writes `::x-name{config}`: every third-party embed's name starts with `x-`, which no built-in's does, so a plugin can't take a built-in embed's name, on or off. `<plugin name> plugin: <title>` stands in the line and in the `/` menu, and the plugin's frame is below the line, in a room `height` pixels tall, which comes from the manifest so nothing moves when the frame loads. A name an earlier plugin already has is refused, and the Plugins page says so. `ink.context.name` is the manifest's own name, without the `x-`. **`config` and `body` are written by whoever can edit the note and run in every reader's browser: treat them as untrusted input.** An embed runs with no Run button, as the reader, with everything the plugin is permitted, so a plugin that acts on its config (reads the note it names, writes what it says) lets any editor of a note steer it in another member's session. The install prompt tells the admin so when a manifest declares embeds.
+- `embeds`: `{ name, title, height, options }`. A note writes `::x-name{config}`: every third-party embed's name starts with `x-`, which no built-in's does, so a plugin can't take a built-in embed's name, on or off. `<plugin name> plugin: <title>` stands in the line and in the `/` menu, and the plugin's frame is below the line, in a room `height` pixels tall, which comes from the manifest so nothing moves when the frame loads. A name an earlier plugin already has is refused, and the Plugins page says so. `ink.context.name` is the manifest's own name, without the `x-`. **`config` and `body` are written by whoever can edit the note and run in every reader's browser: treat them as untrusted input.** An embed runs with no Run button, as the reader, with everything the plugin is permitted, so a plugin that acts on its config (reads the note it names, writes what it says) lets any editor of a note steer it in another member's session. The install prompt tells the admin so when a manifest declares embeds. `options` is a list of up to twelve declared options (see [Options](#options-1) under Embeds, with the table of types): the app draws them beneath the embed and writes them into its config, and the frame is handed their values as `ink.context.options`, each as its type or its default, so a plugin reads `ink.context.options.times` and never parses its config. A manifest whose option couldn't be written or read back (a default its own range refuses, a choice value of two words, a text default with a quote) is refused.
 - `settings`: options as built-ins declare them (`boolean`, `string`, `number`, `integer`), kept in each member's settings under `<install id>.<name>`.
 
 ### Capabilities
@@ -770,7 +797,7 @@ A plugin runs in up to three kinds of frame, each with all of its code and an `i
 
 - `{ kind: "background" }`: hidden, started the first time one of the plugin's commands is run, and kept. Commands are heard here.
 - `{ kind: "view", id, slot, noteId }`: in the inspector, on its page, or in the bar. `noteId` is the open note's id for an inspector tab when the plugin has `notes.read`, and null otherwise.
-- `{ kind: "embed", name, config, body, readOnly: true }`: below the line that writes the embed. It runs without a Run button, since the member turned the plugin on. It is made again when the note says something else of the embed.
+- `{ kind: "embed", name, config, body, readOnly: true, options }`: below the line that writes the embed. `options` holds the value of each option its manifest declares. It runs without a Run button, since the member turned the plugin on. It is made again when the note says something else of the embed.
 
 The app and a frame talk over a `MessagePort` the app makes for that frame (`src/web/remote/`). The port is who the frame is: nothing in a message is read as an identity. Every message is parsed against a strict schema (`protocol.ts`): another version, an unknown key, a wrong type, a key naming a prototype, or more than 600,000 characters is dropped. One function decides what a message leads to (`decide` in `broker.ts`), from the record as it is now. Each plugin may send 30 messages at once and 15 a second after that, with 8 operations under way; the rest are answered `rate_limited`, and a plugin that keeps on is stopped, with its frames taken out and the reason on the Plugins page. Nothing a frame sends is run, read as markup, or set as HTML.
 
@@ -781,13 +808,44 @@ What the code is given, as `ink`:
 - `ink.notify(message)`: a notice at the foot of the app, as text, 200 characters at most, starting with `<plugin name> plugin:`.
 - `ink.open(noteId, { background })`: opens a note, with `notes.read`.
 - `ink.onCommand(id, fn)`, `ink.onSettings(fn)`.
+- `ink.scheme` (`"light"` or `"dark"`) and `ink.onTheme(fn)`, called with the new scheme after the frame's look has changed with the app's.
 - `ink.onNote(fn)`, `ink.onItems(fn)`, `ink.storage`, `ink.onStorage(fn)` and `ink.prompt(question)`: see [One interface for a plugin that runs shut off](#one-interface-for-a-plugin-that-runs-shut-off).
 
 Nothing of the member is sent to a frame: no name, no email, no role.
 
 **A plugin's writes are the plugin's.** `note.create` and `note.write` by a plugin are recorded in History with the plugin as author and the member it acted for, are filtered by it, and are reverted as an agent's are ("Revert all by"). An open editor of the note takes the result as it takes another member's change.
 
-The frame's look follows the app's theme as it was when the frame was made, with the app's colours as CSS variables (`--bg`, `--ink`, `--muted`, `--line`, `--accent`, and the rest in `frame.ts`). Each frame is cut to its slot, and the frame focus guard applies to every one, the hidden background frame included: a frame that takes the keyboard without the member's pointer on it is stopped.
+The frame's look is the app's, and follows it from one theme to the other: see [Styling a plugin](#styling-a-plugin). Each frame is cut to its slot, and the frame focus guard applies to every one, the hidden background frame included: a frame that takes the keyboard without the member's pointer on it is stopped.
+
+### Styling a plugin
+
+The app draws a plugin's card, its title, its options and its errors; the plugin draws only what is inside its frame, and the frame starts out looking like the app. Its document is given the app's look as CSS variables on `:root`, and given them again each time the member's theme changes, so nothing a plugin draws with them is left in the other theme:
+
+- Colours: `--bg`, `--bg-elev` (a card's surface), `--bg-side`, `--ink`, `--muted`, `--faint`, `--line`, `--line-strong`, `--hover`, `--accent`, `--accent-soft`, `--accent-ink`, `--on-accent`, `--danger`, `--added`, `--warn`, `--code-bg`.
+- Faces and sizes: `--prose`, `--mono`, `--text-small` (12px), `--text` (14px), `--text-large` (16px).
+- Corners and room: `--radius-small` (6px), `--radius` (10px), `--space-1` to `--space-4` (4, 8, 12 and 16px).
+
+The app's controls come with them as classes, for a plugin to take or leave: `ink-button` (with `primary` for the one main action, or `quiet`), `ink-input`, `ink-chip`, `ink-card`, `ink-title` (the small capitals of a card's title), `ink-muted`, `ink-row` and `ink-stack`. One line takes all of it for the plain elements too:
+
+```js
+document.body.classList.add("ink-kit"); // buttons, fields, lists and headings as the app draws them
+```
+
+Before, a plugin that styles itself carries colours that are right in one theme and wrong in the other:
+
+```js
+ink.root.innerHTML = `<div style="border:1px solid #ddd;padding:12px;background:#fff">
+  <h3 style="color:#333">Votes</h3><button style="background:#5b5bd6;color:white">Vote</button></div>`;
+```
+
+After, the same thing is the app's in both themes and says nothing of colour:
+
+```js
+document.body.classList.add("ink-kit");
+ink.root.innerHTML = `<div class="ink-card ink-stack"><h3>Votes</h3><button class="primary">Vote</button></div>`;
+```
+
+A plugin that draws on a canvas, where CSS variables don't reach, reads them with `getComputedStyle(document.documentElement)` and draws again in `ink.onTheme`. The plugin `ink plugin-new` (and `scaffold_plugin`) makes uses the kit and declares an embed with options, as an example of both. The variables and classes are in `src/web/remote/frame.ts`. A built-in in the page uses the app's stylesheet and the same variables.
 
 ### What a third-party plugin can't do in this version
 

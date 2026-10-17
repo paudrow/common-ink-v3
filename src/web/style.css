@@ -2135,18 +2135,26 @@ button.link:hover {
   text-decoration: none !important;
 }
 
-.embed-options-panel {
+/* As wide as the embed it is under (the width is set where it is placed), with a row for each option: its name, then its field. */
+.chip-popover.embed-options-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 12rem;
+  max-width: calc(100vw - 16px);
+  padding: 12px 14px;
   font-family: var(--prose);
 }
 
 .embed-option {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: minmax(5rem, 110px) minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 12px;
+}
+
+.embed-option-hint {
+  grid-column: 2;
 }
 
 .embed-option-label {

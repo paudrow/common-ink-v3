@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { OptionValue } from "../../core/embedOptions.ts";
 import type { Capability } from "../../core/plugins.ts";
 import type { OpErrorCode } from "../../core/protocol.ts";
 import type { SettingValue } from "../plugin-api.ts";
@@ -51,7 +52,8 @@ export type Context =
   | { kind: "background" }
   /** `noteId` is the open note, for a plugin that may read notes, and null for any other. */
   | { kind: "view"; id: string; slot: "inspector" | "page" | "bar"; noteId: string | null }
-  | { kind: "embed"; name: string; config: string; body: string; readOnly: true };
+  /** `options` is each option the manifest declares for the embed, as its config sets it or as it defaults. */
+  | { kind: "embed"; name: string; config: string; body: string; readOnly: true; options: Record<string, OptionValue> };
 
 export type ErrorCode = OpErrorCode | "rate_limited" | "signed_out" | "unknown";
 
@@ -66,7 +68,9 @@ export type ToPlugin =
   /** The notes the member can see have changed. Sent to a frame that watches `items`. */
   | { v: 1; event: "items" }
   /** Something the plugin keeps was set, by any of its frames. */
-  | { v: 1; event: "storage"; key: string; value: unknown };
+  | { v: 1; event: "storage"; key: string; value: unknown }
+  /** The app changed theme: the frame's scheme and its styles, made again from the app's. */
+  | { v: 1; event: "look"; scheme: "light" | "dark"; styles: string };
 
 /** Whether `value` is plain data small enough to be worth writing out: no more than `MAX_MESSAGE` of strings and nodes, counted without building anything. */
 function small(value: unknown): boolean {

@@ -9,7 +9,8 @@ export function frameDocument({ code, sdk, styles, scheme }: { code: string; sdk
   const held = JSON.stringify(code).replace(/</g, "\\u003c");
   return `<!doctype html>
 <meta charset="utf-8">
-<style>:root { color-scheme: ${scheme}; }
+<meta name="color-scheme" content="${scheme}">
+<style id="ink-look">:root { color-scheme: ${scheme}; }
 ${styles}</style>
 <body><div id="ink-root"></div>
 <script>${sdk}</script>
