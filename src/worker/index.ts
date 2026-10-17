@@ -1,10 +1,11 @@
 import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/accounts.ts";
-import { perform, type Visitor } from "../core/operations.ts";
+import { perform, trustedCode, type Actor, type Visitor } from "../core/operations.ts";
+import { redeemFrame } from "../core/pluginRecord.ts";
 import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../core/protocol.ts";
 import { logFault } from "../core/logs.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
-import { handleAuth, sessionPersonId } from "./auth.ts";
+import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
 import { fileOrigin, fileSiteResponse, handleFiles } from "./files.ts";
@@ -62,7 +63,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === "/api/me" && req.method === "GET") {
     // Opening the app is arriving: an invite made since the person signed in takes effect here.
     await arrive(env.DB, personId);
-    return json({ ...(await whoAmI(env.DB, personId)), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
+    return json({ ...(await whoAmI(env.DB, personId, devSignIn(env, url))), setup: { embedSite: embedOrigin(env) !== null, fileSite: fileOrigin(env) !== null } } satisfies MeHere);
   }
 
   // Where an address leads for this person. Each answers the same for "there is none" and "it isn't yours".
@@ -73,8 +74,23 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     return workspaceId ? json({ workspaceId }) : json({ error: "not_found" }, 404);
   }
 
-  const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})\/ops$/.exec(url.pathname);
+  // A full-trust plugin's code as a module, for the app's page to load under its own policy. It is the body of a function handed `host` and `modules`.
+  const trusted = /^\/api\/workspaces\/([a-z0-9]{12})\/plugins\/([a-z0-9]{12})\/trusted\/([0-9a-f]{64})\.js$/.exec(url.pathname);
+  if (trusted && req.method === "GET") {
+    const [, workspaceId, pluginId, hash] = trusted as unknown as [string, string, string, string];
+    const code = await trustedCode(env.DB, { kind: "member", personId, workspaceId }, pluginId, hash);
+    if (code === null) return json({ error: "not_found" }, 404);
+    return new Response(`export default function (host, modules) {"use strict";\n${code}\n}\n//# sourceURL=ink-plugin-${pluginId}.js\n`, {
+      headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "Cross-Origin-Resource-Policy": "same-origin" },
+    });
+  }
+
+  // A plugin's operations come from the app too, which says in the address which install it made the frame for. Nothing the plugin sent names it.
+  // The id is an install's, or that of one of Common Ink's own plugins that run shut off. `/draft` is the member's own copy of that plugin: whose draft is never said, since it is the session's person's.
+  const opsRoute = /^\/api\/workspaces\/([a-z0-9]{12})(?:\/plugins\/([a-z0-9]{12}|[a-z][a-z-]{0,39})(\/draft)?)?\/ops$/.exec(url.pathname);
   if (opsRoute && req.method === "POST") {
+    const [, workspaceId, pluginId, draft] = opsRoute as unknown as [string, string, string | undefined, string | undefined];
+    const actor: Actor = pluginId ? { kind: "plugin", pluginId, personId, workspaceId, draft: draft !== undefined } : { kind: "member", personId, workspaceId };
     if (req.headers.get("Origin") !== url.origin || !req.headers.get("Content-Type")?.startsWith("application/json")) {
       return json({ error: "forbidden", message: "Operations come as JSON from Common Ink itself" }, 403);
     }
@@ -86,7 +102,7 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     }
     if (CARRIES_BYTES.has((op as { type?: unknown } | null)?.type)) return json({ error: "invalid", message: "A file's bytes come and go at /api/workspaces/<id>/uploads, and a part of one at the address upload.start gives" }, 400);
     try {
-      return json(await perform(env.DB, { kind: "member", personId, workspaceId: opsRoute[1]! }, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
+      return json(await perform(env.DB, actor, op as never, Date.now(), sourcesFor(env, url), { bucket: env.FILES }));
     } catch (err) {
       if (err instanceof OpError) return json({ error: err.code, message: err.message }, STATUS[err.code]);
       throw err;
@@ -106,10 +122,10 @@ async function answered(what: string, answer: () => Promise<Response>, broke: ()
   }
 }
 
-function route(req: Request, env: Env, url: URL): Response | Promise<Response> {
+async function route(req: Request, env: Env, url: URL): Promise<Response> {
   const moved = redirectFor(url);
   if (moved) return new Response(null, { status: moved.status, headers: { Location: moved.location } });
-  const embed = embedResponse(url, env);
+  const embed = await embedResponse(url, env, (token) => redeemFrame(env.DB, token, Date.now()));
   if (embed) return embed;
   const fileSite = fileSiteResponse(req, env, url);
   if (fileSite) return fileSite;

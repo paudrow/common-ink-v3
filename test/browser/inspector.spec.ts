@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, listedNote, openAllNotes, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { folderRow, listedNote, openAllNotes, ownPlugin, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
 import { settingsDialog } from "./settings-helpers.ts";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -43,9 +43,9 @@ const write = async (page: Page, document: Record<string, unknown>) =>
 
 test("a member's first visit has no panel open and none pinned, and the inspector's command opens Info over the page", async ({ page }) => {
   await withNote(page);
-  expect((await drawn(page)).icons.map(([name]) => name)).toEqual(["History", "Backlinks", "Info"]);
+  expect((await drawn(page)).icons.map(([name]) => name)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
   await expect(panel(page)).toHaveCount(0);
-  for (const name of ["History", "Backlinks", "Info"]) await expect(icon(page, name)).toHaveAttribute("aria-expanded", "false");
+  for (const name of ["History", "Backlinks", "Info", "Sample calendar"]) await expect(icon(page, name)).toHaveAttribute("aria-expanded", "false");
   await page.reload();
   await expect(editor(page)).toContainText("Draft");
   await expect(panel(page)).toHaveCount(0);
@@ -83,7 +83,7 @@ test("a panel opened from the bar lies over the page, which is as wide with it a
 
   // Over the page: the page is exactly as wide, and the note's words are where they were.
   const words = await boxOf(editor(page).getByText("Words."));
-  for (const name of ["History", "Backlinks", "Info"]) {
+  for (const name of ["History", "Backlinks", "Info", "Sample calendar"]) {
     await icon(page, name).click();
     await expect(panel(page).getByRole("heading", { name })).toBeVisible();
     await expect(icon(page, name)).toHaveAttribute("aria-expanded", "true");
@@ -109,21 +109,23 @@ test("the bar has the same icons in the same places whatever is in front and how
   const note = await withNote(page);
   await expect(panel(page)).toHaveCount(0);
   const first = await drawn(page);
-  expect(first.icons.map(([name]) => name)).toEqual(["History", "Backlinks", "Info"]);
+  expect(first.icons.map(([name]) => name)).toEqual(["History", "Backlinks", "Info", "Sample calendar"]);
 
   const kinds: [string, () => Promise<unknown>, Record<string, RegExp>][] = [
-    ["a note", () => page.goto(`/note/${note.id}`), { History: /Open in History/, Backlinks: /No notes link here yet/, Info: /Folder.*Unsorted/ }],
-    ["a folder's list", () => folderRow(page, "Unsorted").click(), { History: /Open in History/, Backlinks: /^Nothing to show for this view$/, Info: /FolderUnsortedNotes1 note/ }],
-    ["History", () => page.goto("/history"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/ }],
-    ["an address nothing is at", () => page.goto("/nowhere"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/ }],
+    ["a note", () => page.goto(`/note/${note.id}`), { History: /Open in History/, Backlinks: /No notes link here yet/, Info: /Folder.*Unsorted/, "Sample calendar": /Standup/ }],
+    ["a folder's list", () => folderRow(page, "Unsorted").click(), { History: /Open in History/, Backlinks: /^Nothing to show for this view$/, Info: /FolderUnsortedNotes1 note/, "Sample calendar": /^Nothing to show for this view$/ }],
+    ["History", () => page.goto("/history"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/, "Sample calendar": /^Nothing to show for this view$/ }],
+    ["an address nothing is at", () => page.goto("/nowhere"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/, "Sample calendar": /^Nothing to show for this view$/ }],
   ];
   for (const [kind, go, says] of kinds) {
     await go();
-    await expect(bar(page).getByRole("button"), kind).toHaveCount(3);
+    await expect(bar(page).getByRole("button"), kind).toHaveCount(4);
     expect(await drawn(page), `${kind}, closed`).toEqual(first);
     for (const [name, text] of Object.entries(says)) {
       await icon(page, name).click();
-      await expect(body(page), `${name} for ${kind}`).toHaveText(text);
+      // Backlinks runs shut off, so what it says for a note is in its frame.
+      const framed = (name === "Backlinks" || name === "Sample calendar") && kind === "a note";
+      await expect(framed ? ownPlugin(page, name).locator("body") : body(page), `${name} for ${kind}`).toHaveText(text);
       expect(await drawn(page), `${kind}, ${name} over the page`).toEqual(first);
       await pin(page).click();
       await expect(pin(page)).toHaveAttribute("aria-pressed", "true");

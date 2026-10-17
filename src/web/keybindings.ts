@@ -143,6 +143,53 @@ export function bind(commands: readonly Bindable[]) {
 
 export const chordFor = (commandId: string, bindings: Readonly<Record<string, string>>) => Object.keys(bindings).find((chord) => bindings[chord] === commandId);
 
+/** A command as far as a plugin frame's keyboard is concerned. */
+interface Framed {
+  id: string;
+  /** Set when the command runs only in the editor or a list, which a plugin frame is neither of. */
+  when?: () => boolean;
+  /** Set when the chord leaves a plugin frame, even though `when` says where it runs in the app. */
+  escapesFrames?: boolean;
+  leaveToFields?: boolean;
+}
+
+/** A chord a plugin frame gives back to the app. `field` means a text field in the frame keeps the press. */
+export interface FrameChord {
+  chord: string;
+  field: boolean;
+}
+
+/**
+ * The chords a plugin frame gives back to the app: the ones that run wherever focus is.
+ * A command that says when it runs is about the editor or a list, so its chords stay in the frame.
+ * One that would type, or that leaves its keys to a text field, is marked so a field there keeps the press.
+ */
+export function chordsForFrames(commands: readonly Framed[], keybindings: Readonly<Record<string, string>>): FrameChord[] {
+  return Object.entries(keybindings).flatMap(([chord, id]) => {
+    const command = commands.find((c) => c.id === id);
+    if (!command || (command.when && !command.escapesFrames)) return [];
+    return [{ chord, field: command.leaveToFields === true || typed(chord) }];
+  });
+}
+
+/** The command a chord from a plugin frame runs, or null when that chord is not the app's to take from one. */
+export function frameCommand(chord: string, commands: readonly Framed[], keybindings: Readonly<Record<string, string>>): string | null {
+  const id = keybindings[chord];
+  const command = id === undefined ? undefined : commands.find((c) => c.id === id);
+  return command && (!command.when || command.escapesFrames) ? command.id : null;
+}
+
+/** What the app last worked out for a plugin frame, from the keybindings as they are now. */
+let frameKeysNow: { chords: readonly FrameChord[]; commandId: (chord: string) => string | null } = { chords: [], commandId: () => null };
+
+/** The chords a plugin frame gives back now, and the command one of them runs. */
+export const frameKeys = () => frameKeysNow;
+
+/** Remembered whenever the keybindings are worked out, so a frame can be told without working them out again. */
+export function rememberFrameKeys(next: { chords: readonly FrameChord[]; commandId: (chord: string) => string | null }) {
+  frameKeysNow = next;
+}
+
 const SYMBOLS: Record<string, string> = { mod: "⌘", ctrl: "⌃", alt: "⌥", shift: "⇧" };
 /** Keys with a name, as a person reads them. Any other key is its own letter, sign or name in capitals. */
 const NAMES: Record<string, string> = { arrowup: "↑", arrowdown: "↓", arrowleft: "←", arrowright: "→", enter: "Enter", tab: "Tab", escape: "Esc", space: "Space", backspace: "Backspace", delete: "Delete" };

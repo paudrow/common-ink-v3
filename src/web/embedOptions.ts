@@ -1,5 +1,6 @@
 import { dismissOn } from "./dismiss.ts";
-import type { EmbedField } from "./plugin-api.ts";
+import { defaultOf, numberRule, optionValues, setOption, shownValue, SWATCHES, type DeclaredOption } from "../core/embedOptions.ts";
+import type { EmbedField, EmbedOptions } from "./plugin-api.ts";
 
 /** What an embed's options panel shows, read again each time the note says something else of the embed. */
 export interface Options {
@@ -109,8 +110,8 @@ function fill(panel: HTMLElement, options: Options, read: () => Options | null) 
 }
 
 /**
- * Opens an embed's options beneath `under`, the embed's card, from its left edge, laid over the app
- * so nothing in the note moves, or closes them if they are open from `anchor`, the options button.
+ * Opens an embed's options beneath `under`, the embed's card, as wide as it, laid over the app so
+ * nothing in the note moves, or closes them if they are open from `anchor`, the options button.
  * One is open at a time. It closes on Escape, on a press outside it, and when `read` has nothing to
  * give, as when the embed is gone or has no options left.
  */
@@ -125,9 +126,11 @@ export function toggleOptions(anchor: HTMLElement, under: HTMLElement, read: () 
   panel.setAttribute("role", "dialog");
   const place = () => {
     if (!anchor.isConnected) return close();
+    const [card, button] = [under.getBoundingClientRect(), anchor.getBoundingClientRect()];
+    // As wide as the card it is under, as v1's options were, with a row for each option.
+    panel.style.width = `${Math.min(card.width, innerWidth - 2 * EDGE)}px`;
     const { width, height } = panel.getBoundingClientRect();
     const fits = (top: number) => top >= EDGE && top + height <= innerHeight - EDGE;
-    const [card, button] = [under.getBoundingClientRect(), anchor.getBoundingClientRect()];
     // Beneath the card where that is in the window. A card taller than the window has its foot out of sight, and the options are then beneath their button.
     const [at, top] = fits(card.bottom + GAP) ? [card.left, card.bottom + GAP] : [button.right - width, fits(button.bottom + GAP) ? button.bottom + GAP : button.top - GAP - height];
     panel.style.left = `${Math.max(EDGE, Math.min(at, innerWidth - EDGE - width))}px`;
@@ -166,4 +169,34 @@ export function refreshOptions(anchor: HTMLElement, options: Options | null): vo
 
 export function closeOptions(anchor: HTMLElement): void {
   if (shown?.anchor === anchor) shown.close();
+}
+
+const HINTS: Partial<Record<DeclaredOption["type"], string>> = { duration: "Like 25m, 1h30m or 90s.", date: "A day, like 2026-10-16. Empty for none." };
+
+/** The field the host draws for a declared option, holding `value`. */
+function fieldFor(option: DeclaredOption, value: string): EmbedField {
+  const { id, label } = option;
+  switch (option.type) {
+    case "toggle":
+      return { id, label, kind: "choice", value, choices: [{ value: "on", label: "On" }, { value: "off", label: "Off" }] };
+    case "choice":
+      return { id, label, kind: "choice", value, choices: option.values.map((v) => ({ value: v, label: v })) };
+    case "colour":
+      return { id, label, kind: "choice", value, choices: (["", ...SWATCHES] as const).map((swatch) => ({ value: swatch, label: swatch ? swatch.charAt(0).toUpperCase() + swatch.slice(1) : "No colour", swatch })) };
+    case "number":
+      return { id, label, kind: "text", value, placeholder: String(defaultOf(option)), hint: numberRule(option) };
+    default:
+      return { id, label, kind: "text", value, placeholder: String(defaultOf(option)) || undefined, hint: HINTS[option.type] };
+  }
+}
+
+/** Options declared as data, as the host reads, draws and writes them: each is an `id=value` word of the config. */
+export function declared(options: readonly DeclaredOption[]): EmbedOptions {
+  return {
+    fields({ config }) {
+      const values = optionValues(options, config);
+      return options.map((option) => fieldFor(option, shownValue(option, values[option.id] ?? defaultOf(option))));
+    },
+    set: ({ config }, id, value) => setOption(options, config, id, value),
+  };
 }

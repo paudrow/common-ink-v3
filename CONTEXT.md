@@ -305,7 +305,7 @@ One recorded edit, with its author, a diff, and the revision it was based on. A 
 _Avoid_: Commit, event, op
 
 **Author**:
-Who made a change: a member, a named agent, or a plugin.
+Who made a change: a member, a named agent, or a third-party plugin acting for a member.
 
 **Agent**:
 An author that is not a person. A member connects it. It acts with that member's role and grants, and no further. Removing the member's access removes the agent's. Disconnecting it stops it at once and keeps its changes in history. Each connection is its own author, so two agents with one name are told apart. What an agent may do (read only or not, the workspace it reaches, the folders it is limited to there, when it expires or that it never does) is set when it is connected and can be edited afterwards by the member who connected it, with the same token. An agent's changes can be reverted on their own, which keeps everyone else's.
@@ -357,11 +357,14 @@ A name attached to one revision in history. A revision has at most one, and a no
 ## Configuration
 
 **Plugin**:
-A unit of functionality that adds commands, views, embeds, completions, editor extensions, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves on the Plugins page, which takes out everything it added, and the choice is kept in their settings. A third-party plugin must request each capability and give a reason. A plugin cannot change settings.
+A unit of functionality that adds commands, views, embeds, completions, editor extensions, data sources, or settings through the public plugin API, and reaches the workspace only through the plugin host. A member may author a plugin. An admin chooses which plugins are installed in a workspace, and a plugin is available only after that. A member can turn a plugin off for themselves on the Plugins page, which takes out everything it added, and the choice is kept in their settings. A plugin cannot change settings.
 _Avoid_: Extension, add-on
 
 **Built-in plugin**:
-A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs and splits, and the command palette. It is trusted, and it uses the same plugin API a third-party plugin does. It is on by default unless it says it starts off, as Vim mode does.
+A plugin that comes with Common Ink, such as the sidebar, the folder tree, tabs and splits, and the command palette. One that needs the editor or the app's own layout is compiled into the app and runs inside it with everything the member has: "Built-in, full access". One that needs nothing of the page is a sandboxed plugin, declared in the manifest a third-party plugin is: "Built-in, sandboxed", as Word count, Quick timer, Backlinks, Weather, Coin and Dice are. It is on by default unless it says it starts off, as Vim mode does.
+
+**Sandboxed plugin**:
+A plugin that runs shut off from the app in frames of its own and does only what its capabilities allow, checked by the app and again by the server. Every third-party plugin is one unless it asks for full trust, and so are the built-in plugins that need nothing of the page. Both go through the same broker, port and address on the server.
 
 **Plugin host**:
 The part of the core that turns plugins on and off, hands each one its reach into the workspace, and keeps what each has contributed.
@@ -385,7 +388,7 @@ _Avoid_: Mode, screen
 Content a plugin draws inside a note where the note says `::name{config}`, such as a timer or HTML. It is handed what the note says of it and nothing else: it cannot read other notes, settings, grants, or plugin permissions. Everything it knows is in the note, so it can rewrite its own config and body, which is a change by the member who was using it. A timer or stopwatch keeps when it started there, so it runs the same for everyone reading the note. Network access requires an approved plugin permission. With no plugin for the name, the note shows what is written. An embed is drawn in a card and stays drawn, the element it was, so the cursor never stops or resets it. While the cursor is on it, it is shown as written too, above its drawing: an inline embed's text in rows above its line, a block embed's markdown lines above its card.
 
 **Embed options**:
-What a member adjusts about an embed without reading its config, from the one options button in the embed's card, which opens them beneath the card: a timer's length, a board's column colours. Setting one rewrites the embed in the note, as the member's change. An embed with nothing to adjust has no button.
+What a member adjusts about an embed without reading its config, from the one options button in the embed's card, which opens them beneath the card: a timer's length, a board's column colours. Setting one rewrites the embed in the note, as the member's change. An embed with nothing to adjust has no button. Most are declared: data saying each option's name, type and default (in a third-party plugin's manifest, or a built-in's declaration), which the app reads from the config as `name=value` words, draws, checks and writes back, as the HTML embed's height is.
 
 **Block embed**:
 An embed written on lines of its own: `:::name{config}`, then its body as markdown, then `:::`. A kanban board is one.
@@ -407,7 +410,7 @@ Something from another site shown below the line that names it: a YouTube video,
 The line that holds a media embed's address. While the cursor is elsewhere it takes no room and the media is where it was, a paragraph's gap below the words above. With the cursor on it, the address shows above the media, small, in the code face and the accent's colour, and the media gets an edge of that colour. A step of the arrow keys, or vim's `j` and `k`, from the line next to it stops on it.
 
 **HTML embed**:
-A block embed (`:::html{}`) whose body is HTML, run below the block in a frame with an origin of its own, by itself the first time its room is on screen, or when the member presses Run if they have asked to be asked first. While the cursor is in the block, what was run stays; the HTML as written runs once the cursor leaves. HTML that was running when its page stopped answering asks before it runs again. Until it is drawn its room shows a placeholder its size. It can't read the app, the member's session, or anything the browser or the server keeps, can't fetch or send anything, and can't send its frame anywhere. The one way out it has is a WebRTC connection, which browsers give no way to refuse.
+A block embed (`:::html{}`) whose body is HTML, run below the block in a frame with an origin of its own, by itself the first time its room is on screen, or when the member presses Run if they have asked to be asked first. While the cursor is in the block, what was run stays; the HTML as written runs once the cursor leaves. HTML that was running when its page stopped answering asks before it runs again. Until it is drawn its room shows a placeholder its size. It can't read the app, the member's session, or anything the browser or the server keeps, can't send its frame anywhere, and can't fetch or send anything unless an admin has allowed HTML embeds the network, and then only to the sites listed. The one other way out it has is a WebRTC connection, which browsers give no way to refuse.
 
 **Run HTML embeds**:
 A member's setting (`html.run`): `automatically` or `ask first`, which shows a Run button in place of each HTML embed until it is pressed. It defaults to `ask first` until the server serves HTML embeds from a site of their own (`EMBED_ORIGIN`), as the server says in `/api/me`, and to `automatically` where it does; the member's own choice stands either way. A value that is neither reads as `ask first`, and a change reaches notes already open: what ran by itself stops and asks, what was asking runs. Like every setting it is the member's alone: no plugin, agent or embed can read or change it. A page opened from a share link always asks first. An embed whose HTML has changed runs again, or asks again.
@@ -422,12 +425,31 @@ A list a plugin offers at the cursor while the member types after a trigger. The
 Something a plugin adds to the editor of every note, such as keys or a status line. It applies to notes already open, and not to the settings JSON.
 _Avoid_: Extension on its own, which reads as plugin
 
+**Third-party plugin**:
+A plugin a member wrote and an admin installed in a workspace: a manifest and code, kept in the workspace. It is available once installed, and off for each member until they turn it on. Its code runs in frames shut off from the app and reaches the workspace only through the operations its permissions allow, unless it asks for full trust. It adds commands, views in the inspector, the bottom bar and on pages, embeds drawn below their line, and options. It is known everywhere by the id the workspace gave it when it was installed.
+
+**Full trust**:
+What a third-party plugin's manifest asks for to run inside the app's page instead of sandboxed, with everything its member can see and do. It runs for a member only while an admin's grant of exactly that code stands and that member turned it on for themself after a warning. Any change to its code, or to how it asks for full trust, ends the grant and everyone's turning on for good, and a draft never has it.
+_Avoid_: Trusted plugin (a built-in is not "trusted", it comes with the app), unsandboxed
+
+**Manifest**:
+What a sandboxed plugin says of itself, as JSON: its name, the capabilities it asks for with a reason each, and the commands, views, embeds and options it adds. A third-party plugin's is kept in the workspace, and a sandboxed built-in's is in the app (`src/core/ownPlugins.ts`). The app lists all of it without running the plugin's code.
+
+**Draft**:
+A member's own copy of a sandboxed plugin's source, an installed one's or a built-in's, kept beside their settings. Only its author can read or change it, admins included, and it is gone when they leave the workspace. It can run in the original's place for its author alone, sandboxed, with what the original is allowed and never more. An admin publishes one of a third-party plugin by installing it, which every approval has to follow again. One of a built-in is never published over it.
+
+**Capability**:
+One named thing a plugin can be permitted, which opens a fixed list of operations: read notes, write notes, read todos, read members' names, use the network for listed sites. Full trust is one too, and opens no operation: it is where the code runs. An operation no capability lists is refused to every plugin.
+
+**Plugin record**:
+What a workspace keeps of its plugins: which are installed, what each is permitted, and the requests waiting. Every member reads it and only an admin changes it. It is not settings.
+
 **Plugin permission**:
-The capabilities a plugin has in a workspace. One set per plugin applies to every member. An admin sets them and can lock them. A non-admin's yes becomes a request, and the capability stays off until an admin approves. This is not settings.
+An admin's decision on one capability of one plugin, for every member of the workspace: allowed or off, and locked or not. A locked permission takes no requests and stays as it is until an admin unlocks it. An approval is of the plugin as it was: new code voids every approval, and a capability declared another way voids its own. HTML embeds have one permission in the same record, the network, with the sites an admin lists. This is not settings.
 _Avoid_: Setting
 
 **Request**:
-A non-admin's proposal to give a plugin a capability. An admin approves or denies it.
+A non-admin's yes to a capability. It allows nothing: the capability stays off until an admin approves, and a denial clears it.
 
 **Settings**:
 JSON that configures one member's behavior in one workspace, such as theme, vim, keybindings, the daily-note folder, whether the share prompt appears, which plugins are on, and plugin options that only change that member's layout. It holds only what the member changed from a default, and follows them to any browser. A change made in one window is kept when another window changes a different key, and the later change wins on the same key. The member changes it in Settings, as options or as the JSON itself. Settings opens over whatever the window shows, at an address under `/settings`, and Escape closes it: it is never a tab, so the tabs, splits and focus under it stay as they were. An admin does not set or lock these, a plugin cannot change them except a remembered setting of its own, and an agent can neither read nor change them.
