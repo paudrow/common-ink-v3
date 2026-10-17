@@ -23,9 +23,13 @@ describe("what the Worker tells a browser about each response", () => {
   });
 
   it("gives JSON for the app and for agents a policy that runs and draws nothing, whatever the answer", async () => {
-    for (const [path, init] of [["/api/me"], ["/api/workspaces/aaaaaaaaaaaa/ops", { method: "POST", body: "{}" }], ["/api/agents"], ["/mcp", { method: "POST", body: "{}" }]] as const) {
+    for (const [path, init] of [["/api/me"], ["/api/workspaces/aaaaaaaaaaaa/ops", { method: "POST", body: "{}" }], ["/api/agents"], ["/mcp", { method: "POST", body: "{}" }], ["/.well-known/oauth-protected-resource"], ["/.well-known/oauth-protected-resource/mcp"], ["/.well-known/oauth-authorization-server"], ["/oauth/register", { method: "POST", body: "{}" }], ["/oauth/token", { method: "POST", body: "grant_type=x" }], ["/oauth/revoke", { method: "POST", body: "token=x" }]] as const) {
       expect(await sent(path, init)).toEqual([path, DATA, "nosniff", "strict-origin-when-cross-origin"]);
     }
+  });
+
+  it("gives the one OAuth address that is a page, where an error is shown, the app's policy, and a redirect from it the same", async () => {
+    for (const path of ["/oauth/authorize", "/oauth/authorize?client_id=nobody"]) expect(await sent(path)).toEqual([path, PAGE, "nosniff", "strict-origin-when-cross-origin"]);
   });
 
   it("gives the document an HTML embed runs in a sandbox of its own, and sends no referrer from it", async () => {

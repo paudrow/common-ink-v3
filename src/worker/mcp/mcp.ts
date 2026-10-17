@@ -5,6 +5,7 @@ import { authenticateAgent, type ConnectedAgent } from "../../core/agents.ts";
 import type { Sources } from "../../core/sources.ts";
 import { logFault } from "../../core/logs.ts";
 import { BROKE } from "../../core/protocol.ts";
+import { metadataUrl } from "../oauth.ts";
 import { callTool, toolList, type Reached } from "./tools.ts";
 
 const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -29,14 +30,21 @@ const fail = (id: Id, code: number, message: string) => ({ jsonrpc: "2.0", id, e
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
 
-const unauthorized = () => json({ error: "unauthorized", message: "Send a Common Ink agent token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
+/**
+ * What a request without a good token is told: the realm, and where an OAuth client finds out how to sign in (RFC 9728).
+ * One that sent a token is told it was no good (RFC 6750), which is how an OAuth client knows to refresh or sign in again.
+ */
+const challenge = (url: URL, sent: boolean) => `Bearer realm="Common Ink"${sent ? ', error="invalid_token"' : ""}, resource_metadata="${metadataUrl(url)}"`;
+
+const unauthorized = (url: URL, sent: boolean) =>
+  json({ error: "unauthorized", message: "Send a Common Ink agent token or an OAuth access token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": challenge(url, sent) });
 
 export const bearerToken = (req: Request): string | null => /^Bearer\s+(\S+)$/i.exec(req.headers.get("Authorization") ?? "")?.[1] ?? null;
 
 export async function handleMcp(req: Request, env: Env, sources?: Sources): Promise<Response> {
   const token = bearerToken(req);
   const agent = token ? await authenticateAgent(env.DB, token) : null;
-  if (!agent) return unauthorized();
+  if (!agent) return unauthorized(new URL(req.url), token !== null);
 
   if (req.method !== "POST") return json({ error: "method_not_allowed", message: "POST JSON-RPC messages to /mcp" }, 405, { Allow: "POST" });
   if (!req.headers.get("Content-Type")?.toLowerCase().startsWith("application/json")) return json({ error: "unsupported_media_type", message: "Send application/json" }, 415);

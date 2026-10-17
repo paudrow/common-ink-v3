@@ -2,14 +2,16 @@ import { arrive, whoAmI, workspaceOfInvite, workspaceOfNote } from "../core/acco
 import { perform, type Visitor } from "../core/operations.ts";
 import { BROKE, OpError, type MeHere, type OpErrorCode, type OpInput } from "../core/protocol.ts";
 import { logFault } from "../core/logs.ts";
+import { sweep } from "../core/oauth.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { handleAuth, sessionPersonId } from "./auth.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
+import { handleOAuth } from "./oauth.ts";
 import { fileOrigin, fileSiteResponse, handleFiles } from "./files.ts";
 import { embedOrigin, embedResponse } from "./frames.ts";
-import { secured } from "./headers.ts";
+import { crossOrigin, secured } from "./headers.ts";
 import { redirectFor } from "./hosts.ts";
 import { sourcesFor } from "./sources/index.ts";
 import { SW_PATH, swResponse } from "./sw.ts";
@@ -116,6 +118,9 @@ function route(req: Request, env: Env, url: URL): Response | Promise<Response> {
   if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
   if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
   if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
+  if (url.pathname.startsWith("/oauth/") || url.pathname.startsWith("/.well-known/oauth-")) {
+    return answered(url.pathname, () => handleOAuth(req, env, url), () => json({ error: "server_error", error_description: BROKE }, 500));
+  }
   const broke = () => json({ error: "unknown", message: BROKE }, 500);
   if (url.pathname === "/api/agents" || url.pathname.startsWith("/api/agents/")) return answered(url.pathname, () => handleAgentsApi(req, env, url), broke);
   if (url.pathname.startsWith("/api/")) return answered(url.pathname, () => handleApi(req, env, url), broke);
@@ -133,7 +138,7 @@ export default {
     const url = new URL(req.url);
     // Whatever breaks is logged redacted here, and not by the runtime as it was thrown.
     const answer = await answered(url.pathname, async () => route(req, env, url), () => new Response("Common Ink broke. Try again in a moment.", { status: 500 }));
-    return secured(answer, url, env);
+    return secured(crossOrigin(answer, req, url), url, env);
   },
   // The one job on a timer: removing the notes and uploads whose 30 days in Trash are up, and uploads that never finished. A run that doesn't finish is carried on by the next.
   async scheduled(controller, env) {
@@ -147,5 +152,11 @@ export default {
     if (removed || failed.length) console.log(`Removed ${removed} notes from Trash${failed.length ? `, and couldn't remove ${failed.length}` : ""}${more ? ", with more waiting" : ""}`);
     const uploads = await clearUploads(env.DB, env.FILES, controller.scheduledTime);
     if (uploads.removed || uploads.failed.length) console.log(`Removed ${uploads.removed} uploads${uploads.failed.length ? `, and couldn't remove ${uploads.failed.length}` : ""}${uploads.more ? ", with more waiting" : ""}`);
+    // What OAuth sign-ins left behind that nobody came back to. Also done when someone starts one, so this is for a quiet day.
+    try {
+      await sweep(env.DB, controller.scheduledTime, true);
+    } catch (err) {
+      logFault("Clearing out OAuth sign-ins", err);
+    }
   },
 } satisfies ExportedHandler<Env>;

@@ -32,9 +32,9 @@ export async function sessionPersonId(req: Request, env: Env, url: URL): Promise
 
 const allowedEmails = (value: string | undefined) => new Set((value ?? "").split(/[\s,]+/).map((e) => e.trim().toLowerCase()).filter(Boolean));
 
-const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-function page(title: string, body: string, status: number): Response {
+export function page(title: string, body: string, status: number): Response {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} · Common Ink</title><link rel="icon" href="/favicon.svg">
 <style>:root{color-scheme:light dark;font-family:ui-sans-serif,system-ui,sans-serif}body{max-width:28rem;margin:20vh auto;padding:0 1.5rem;line-height:1.5}a{color:#5b5bd6}</style></head>
 <body><h1 style="font-size:1.25rem">${title}</h1>${body}</body></html>`;

@@ -63,7 +63,7 @@ async function asker(req: Request, env: Env, url: URL, workspaceId: string): Pro
   const token = bearerToken(req);
   if (token) {
     const agent = await authenticateAgent(env.DB, token);
-    if (!agent) return json({ error: "unauthorized", message: "Send a Common Ink agent token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
+    if (!agent) return json({ error: "unauthorized", message: "Send a Common Ink agent token or an OAuth access token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
     return { byToken: true, actor: agentActor(agent, workspaceId) };
   }
   const personId = await sessionPersonId(req, env, url);
