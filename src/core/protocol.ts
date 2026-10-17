@@ -255,6 +255,7 @@ export const Op = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note.restore"), id: Id }),
   /** Removes a note in Trash now, with its history, instead of after its 30 days. Nothing brings it back. */
   z.object({ type: z.literal("note.purge"), id: Id }),
+  z.object({ type: z.literal("note.discard"), id: Id }),
   /** The notes in Trash that the asker can see, latest trashed first. */
   z.object({ type: z.literal("trash.list") }),
   /** The tags of the notes the asker can see, each with how many of those notes have it. */
@@ -676,12 +677,13 @@ export const Op = z.discriminatedUnion("type", [
   /**
    * Adds an event to one of the asker's calendars where it is kept, as the member whose it is.
    * `calendarId` is one of the `calendars` `event.list` answers. A read-only data source refuses, and
-   * so does a calendar the member can only read.
+   * so does a calendar the member can only read. With neither `sourceId` nor `calendarId` it goes in
+   * the member's default calendar, as `defaultCalendar` in sources.ts chooses it.
    */
   z.object({
     type: z.literal("event.create"),
-    sourceId: SourceId,
-    calendarId: RecordId,
+    sourceId: SourceId.optional(),
+    calendarId: RecordId.optional(),
     title: z.string().max(1000),
     when: EventWhen,
     location: z.string().max(1000).optional(),
@@ -1334,6 +1336,7 @@ export interface Results {
   /** `folderGone` when the folder it was in was deleted while it was in Trash, so it came back to Unsorted. */
   "note.restore": Note & { folderGone: boolean };
   "note.purge": { id: string };
+  "note.discard": { id: string };
   "trash.list": TrashedNote[];
   /** `indexing` is true while some notes are still to be read into the index, as after a deploy: the answer may lack them, and asking again reads more. */
   "tag.list": { tags: ListedTag[]; indexing: boolean };

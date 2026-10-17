@@ -1,10 +1,11 @@
 import { EditorSelection, StateEffect, StateField, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, layer, type LayerMarker } from "@codemirror/view";
-import { ago, lineHunks, reline, type Author, type Blame, type ChangeEntry, type Dispose, type PluginHost } from "../../plugin-api.ts";
+import { ago, lineHunks, reline, type Author, type Blame, type ChangeEntry, type PluginHost } from "../../plugin-api.ts";
+import type { BlameToggles, Former } from "../lib/blameLink.ts";
 import { did, initials } from "../lib/historyView.ts";
 
 /*
- * Who wrote this: a column left of the text, as a blame view has. Each run of lines one change last
+ * Blame mode, once called Who wrote this: a column left of the text, as a blame view has. Each run of lines one change last
  * wrote is a hunk, and the hunk's first row names who wrote it and when, with the change's summary
  * where History has one. Members are one family of colours and agents another; the member's own
  * lines are grey. A strip at the column's edge is stronger the newer the change. The column is drawn
@@ -40,27 +41,39 @@ interface Shown extends Read {
 /** The mode for one editor: off, on and waiting for the note's answer, or on and drawn from it. */
 type Column = null | "waiting" | Shown;
 
-/** The member's notes with the column on, the latest turned on last, kept in this browser. */
-export interface WhoWroteToggles {
-  has(noteId: string): boolean;
-  toggle(noteId: string): void;
-  subscribe(listener: () => void): Dispose;
-}
-
 const KEPT = "whoWrote";
 const OWN_PAUSE_MS = 5000;
 /** As many notes' answers as are kept to draw from at once, the latest read last. */
 const MOST_READ = 20;
 const MOST_KEPT = 200;
 
-export function whoWroteToggles(storage: PluginHost["storage"]): WhoWroteToggles {
-  const kept = storage.get(KEPT);
-  let on = Array.isArray(kept) ? kept.filter((id): id is string => typeof id === "string") : [];
+const notesIn = (kept: unknown) => (Array.isArray(kept) ? kept.filter((id): id is string => typeof id === "string") : null);
+
+/**
+ * The member's notes with the column on, the latest turned on last, kept in this browser. Read the
+ * first time they are asked for, once every plugin has started: a member who had the mode on for
+ * notes while it was part of History has it on for them still, moved from History's keeping once.
+ */
+export function blameToggles(storage: PluginHost["storage"], former: () => Former | null): BlameToggles {
+  let on: string[] | null = null;
+  const read = () => {
+    if (on) return on;
+    on = notesIn(storage.get(KEPT));
+    if (on) return on;
+    const was = former();
+    on = notesIn(was?.read()) ?? [];
+    if (was && on.length) {
+      storage.set(KEPT, on);
+      was.forget();
+    }
+    return on;
+  };
   const listeners = new Set<() => void>();
   return {
-    has: (noteId) => on.includes(noteId),
+    has: (noteId) => read().includes(noteId),
     toggle(noteId) {
-      on = on.includes(noteId) ? on.filter((id) => id !== noteId) : [...on, noteId].slice(-MOST_KEPT);
+      const now = read();
+      on = now.includes(noteId) ? now.filter((id) => id !== noteId) : [...now, noteId].slice(-MOST_KEPT);
       storage.set(KEPT, on);
       for (const listener of listeners) listener();
     },
@@ -336,7 +349,7 @@ export function stepHunk(view: EditorView, by: 1 | -1): number | null {
  * note: read for the note's revision, kept true to typing as it happens, and read again each time
  * the note has a newer revision. Pressing a hunk opens its change in History.
  */
-export function whoWrote(host: PluginHost, toggles: WhoWroteToggles, read: Map<string, Blame>, editors: Editors, openAt: (noteId: string, revision: number) => void, noteId: string): Extension {
+export function blameColumn(host: PluginHost, toggles: BlameToggles, read: Map<string, Blame>, editors: Editors, openAt: (noteId: string, revision: number) => void, noteId: string): Extension {
   const loader = ViewPlugin.define((view) => {
     let asking = false;
     let gone = false;

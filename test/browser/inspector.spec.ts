@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { folderRow, listedNote, openAllNotes, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { settingsDialog } from "./settings-helpers.ts";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
 const bar = (page: Page) => page.getByRole("navigation", { name: "Inspector bar" });
@@ -114,7 +115,6 @@ test("the bar has the same icons in the same places whatever is in front and how
     ["a note", () => page.goto(`/note/${note.id}`), { History: /Open in History/, Backlinks: /No notes link here yet/, Info: /Folder.*Unsorted/ }],
     ["a folder's list", () => folderRow(page, "Unsorted").click(), { History: /Open in History/, Backlinks: /^Nothing to show for this view$/, Info: /FolderUnsortedNotes1 note/ }],
     ["History", () => page.goto("/history"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/ }],
-    ["Settings", () => page.goto("/settings"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/ }],
     ["an address nothing is at", () => page.goto("/nowhere"), { History: /^Nothing to show for this view$/, Backlinks: /^Nothing to show for this view$/, Info: /^Nothing to show for this view$/ }],
   ];
   for (const [kind, go, says] of kinds) {
@@ -133,6 +133,22 @@ test("the bar has the same icons in the same places whatever is in front and how
       await expect(panel(page)).toHaveCount(0);
     }
   }
+
+  // Settings is not a view in front: it opens over the window, and the bar and the panel stay as they were under it, on the note.
+  await page.goto(`/note/${note.id}`);
+  await pinned(page, "Info");
+  await expect(body(page)).toHaveText(/Folder.*Unsorted/);
+  const pinnedBar = await drawn(page);
+  await page.goto("/settings");
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(body(page)).toHaveText(/Folder.*Unsorted/);
+  await expect(pin(page)).toHaveAttribute("aria-pressed", "true");
+  expect(await drawn(page), "the bar under Settings").toEqual(pinnedBar);
+  await page.keyboard.press("Escape");
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/note/(.*-)?${note.id}$`));
+  await expect(body(page)).toHaveText(/Folder.*Unsorted/);
+  expect(await drawn(page), "the bar once Settings is closed").toEqual(pinnedBar);
 });
 
 test("a panel over the page goes on a press elsewhere and on Escape, with the cursor back where it was, and a pinned panel stays through both", async ({ page }) => {

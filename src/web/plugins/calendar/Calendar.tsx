@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Icon, today as todayIs, useNow, type Calendar, type CalendarEvent, type EventWhen, type PluginHost, type Source, type ViewProps } from "../../plugin-api.ts";
 import { forgetReferences } from "../lib/references.tsx";
-import { useSources, withFresher } from "../lib/Sources.tsx";
+import { Sources, useSources, withFresher } from "../lib/Sources.tsx";
 import { CalendarsDialog } from "./CalendarsDialog.tsx";
+import { LAST, startOf } from "./choosing.ts";
 import { VIEWS, WEEKDAY_NAMES, cellsOf, dayLabel, daysOf, isDay, isGrid, isWeekend, minutesIn, shiftDay, startOfWeek, step, timeLabel, titleOf, titleOfDays, weekdayLabel, type Cell, type Day, type View, type WhenForm } from "./dates.ts";
 import { EventDetails } from "./EventDetails.tsx";
 import { calendarKey, dayAt, indexOf, keyOf, useListing } from "./listing.ts";
@@ -124,6 +125,8 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
   );
   const connected = (sources ?? []).some((s) => s.kind === "calendar" && s.state === "connected");
   const targets = useMemo(() => listing.calendars.filter((c) => c.writable && !hidden.has(calendarKey(c))), [listing.calendars, hidden]);
+  const chosen = host.settings.get<string>("default");
+  const start = startOf(targets, listing.calendars, chosen, host.storage.get(LAST));
   // One on a calendar the member hid opens all the same when it is asked for by its address.
   const open = opened === null ? undefined : (events.find((e) => keyOf(e) === opened) ?? listing.events.find((e) => keyOf(e) === opened));
 
@@ -233,13 +236,19 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
     if (!host.settings.set("hidden", [...next])) app.notify({ message: "Which calendars are shown couldn't be kept: your settings aren't read yet, or too many calendars are hidden. Try again in a moment." });
   };
 
+  const setDefault = (calendar: Calendar) => {
+    const kept = host.settings.set("default", calendarKey(calendar));
+    if (!kept) app.notify({ message: "The default calendar couldn't be kept: your settings aren't read yet. Try again in a moment." });
+    return kept;
+  };
+
   /** Opens the form for a span the grid asked for, or for the next half hour today, or 9:00 on the first day in view when today isn't. */
   const startAdding = (form?: WhenForm) => {
-    if (!targets.length) return;
+    if (!start) return;
     if (form) return setAdding(form);
     const day = !isGrid(view) || todayShown ? today : anchor;
-    const start = day === today ? Math.min(23 * 60, Math.floor(minutesIn(Date.now(), timeZone) / 30) * 30 + 30) : 9 * 60;
-    setAdding(formFor(day, start, start + 30));
+    const at = day === today ? Math.min(23 * 60, Math.floor(minutesIn(Date.now(), timeZone) / 30) * 30 + 30) : 9 * 60;
+    setAdding(formFor(day, at, at + 30));
   };
 
   /**
@@ -315,39 +324,43 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
           )}
         </span>
       </header>
-      <div className="cal-toolbar">
-        <button type="button" className="button small" onClick={() => go(0)} title="Today (T)">
-          Today
-        </button>
-        <div className="cal-nav" role="group" aria-label="Days on show">
-          <button type="button" className="button small" onClick={() => go(-1)} aria-label="Previous" title="Previous (K)">
-            ‹
+      {(connected || !sources) && (
+        <div className="cal-toolbar">
+          <button type="button" className="button small" onClick={() => go(0)} title="Today (T)">
+            Today
           </button>
-          <button type="button" className="button small" onClick={() => go(1)} aria-label="Next" title="Next (J)">
-            ›
-          </button>
-        </div>
-        <h2 aria-live="polite">{title}</h2>
-        <div className="cal-views" role="group" aria-label="View">
-          {(Object.keys(VIEWS) as View[]).map((each) => (
-            <button key={each} type="button" className="button small" aria-pressed={view === each} onClick={() => show(each)} title={`${VIEWS[each].label} (${VIEWS[each].key.toUpperCase()})`}>
-              {VIEWS[each].label}
+          <div className="cal-nav" role="group" aria-label="Days on show">
+            <button type="button" className="button small" onClick={() => go(-1)} aria-label="Previous" title="Previous (K)">
+              ‹
             </button>
-          ))}
+            <button type="button" className="button small" onClick={() => go(1)} aria-label="Next" title="Next (J)">
+              ›
+            </button>
+          </div>
+          <h2 aria-live="polite">{title}</h2>
+          <div className="cal-views" role="group" aria-label="View">
+            {(Object.keys(VIEWS) as View[]).map((each) => (
+              <button key={each} type="button" className="button small" aria-pressed={view === each} onClick={() => show(each)} title={`${VIEWS[each].label} (${VIEWS[each].key.toUpperCase()})`}>
+                {VIEWS[each].label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
       {problem && (
         <p role="alert" className="said failed">
           {problem}
         </p>
       )}
-      {sources && !connected && (
-        <p className="cal-notice">
-          <span>Connect a calendar to see your events here. Only you see them.</span>
-          <button type="button" className="button small" onClick={() => setChoosing(true)}>
-            Calendars…
-          </button>
-        </p>
+      {/* With nothing connected, connecting is the first thing the page offers, in place of days with nothing in them. The dialog holds the same list, so this steps aside while it is open. */}
+      {sources && !connected && !choosing && (
+        <section className="cal-connect" aria-label="Connect a calendar">
+          <p className="cal-notice">
+            <strong>Connect a calendar to see your events here.</strong>
+            <span>Only you see them, and new events you or your agents add go in it.</span>
+          </p>
+          <Sources host={host} app={app} kind="calendar" sources={sources} heading={false} onChange={(next) => (setSources(next), reread())} />
+        </section>
       )}
       {listing.failed && (
         <p role="alert" className="said failed">
@@ -426,10 +439,13 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
           }}
         />
       )}
-      {adding && (
+      {adding && start && (
         <NewEvent
           host={host}
           calendars={targets}
+          start={start}
+          chosen={chosen}
+          setDefault={setDefault}
           when={adding}
           timeZone={timeZone}
           close={() => setAdding(null)}
@@ -446,6 +462,9 @@ export function CalendarPage({ host, app }: ViewProps & { host: PluginHost }) {
           app={app}
           sources={sources}
           calendars={listing.calendars}
+          start={start}
+          chosen={chosen}
+          setDefault={setDefault}
           hidden={hidden}
           setShown={setShown}
           close={() => setChoosing(false)}

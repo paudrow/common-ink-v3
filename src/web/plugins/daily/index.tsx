@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { DAILY_SETTINGS, today, type App, type Plugin, type PluginHost } from "../../plugin-api.ts";
+import { browserZone, dayTitled, todayIn, toward, type Asked } from "./days.ts";
+import { dayStepper } from "./steps.ts";
 
 const PATH = "/today";
 
@@ -37,6 +39,40 @@ function Today({ host, app }: { host: PluginHost; app: App }) {
       )}
     </section>
   );
+}
+
+/** Whether the note is the member's daily note for `day`, as the server keeps which note that is. A guest has none. */
+const isDaily = (host: PluginHost, noteId: string, day: string): Promise<boolean> =>
+  host.perform({ type: "daily.find", on: day }).then(
+    ({ note }) => note?.id === noteId,
+    () => false,
+  );
+
+/** Opens the member's daily note for the day asked, made as Today makes it when it may be, or says there is none. */
+async function openDay(host: PluginHost, { day, make }: Asked) {
+  try {
+    if (make) {
+      const note = await host.perform({ type: "daily.open", on: day });
+      host.app().noteChanged(note);
+      host.app().refresh();
+      host.app().openNote(note.id, { focus: true });
+      return;
+    }
+    const { note } = await host.perform({ type: "daily.find", on: day });
+    if (note) host.app().openNote(note.id, { focus: true });
+    else host.app().notify({ message: `No note for ${day}` });
+  } catch (err) {
+    host.app().notify({ message: err instanceof Error ? err.message : "Common Ink can't be reached." });
+  }
+}
+
+const todayHere = () => todayIn(Date.now(), browserZone());
+
+/** The day of the daily note in front, or today when the note in front isn't one. */
+async function dayInFront(host: PluginHost): Promise<string> {
+  const note = host.app().note;
+  const day = note && dayTitled(note.title);
+  return day && (await isDaily(host, note.id, day)) ? day : todayHere();
 }
 
 const { folder, private: isPrivate, timeZone } = DAILY_SETTINGS;
@@ -77,5 +113,11 @@ export const daily: Plugin = {
   activate(host) {
     host.views.register("page", { id: "today", path: PATH, label: "Today", icon: "today", nav: "primary", order: 35, transient: true, component: ({ app }) => <Today host={host} app={app} /> });
     host.commands.register({ id: "daily.today", title: "Open today's daily note", group: "Navigation", run: () => host.app().go(PATH) });
+    const step = (from: string, by: number) => void openDay(host, toward(from, by, todayHere()));
+    host.commands.register({ id: "daily.yesterday", title: "Yesterday's note", group: "Navigation", run: () => step(todayHere(), -1) });
+    host.commands.register({ id: "daily.tomorrow", title: "Tomorrow's note", group: "Navigation", run: () => step(todayHere(), 1) });
+    host.commands.register({ id: "daily.previous", title: "Previous day", group: "Navigation", run: () => void dayInFront(host).then((day) => step(day, -1)) });
+    host.commands.register({ id: "daily.next", title: "Next day", group: "Navigation", run: () => void dayInFront(host).then((day) => step(day, 1)) });
+    host.editorExtensions.register({ id: "daily.steps", extension: (editor) => (editor.reading ? [] : dayStepper(editor.noteId, (noteId, day) => isDaily(host, noteId, day), step)) });
   },
 };

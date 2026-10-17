@@ -647,7 +647,7 @@ export function History({ host, me, canEdit, scope, layout, version, empty, onSc
     setDetail(true);
   };
 
-  // A change asked for from elsewhere, such as a line's bar in Who wrote this: shown as a click on its row shows it, once the list has been read as far back as it.
+  // A change asked for from elsewhere, such as a run of lines in Blame mode: shown as a click on its row shows it, once the list has been read as far back as it.
   const shownPick = useRef(onPicked);
   shownPick.current = onPicked;
   const olderFor = useRef<HistoryPage["next"]>(null);

@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { todosIn } from "../../src/core/todos.ts";
 import { anotherPerson, asViewerOfNote, connectAgent, join, me, perform, pinPanel, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { closeSettings, group } from "./settings-helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -2046,8 +2047,8 @@ test("a row a change takes out of the list stays, greyed, with a line under it s
 
   // Off, the row is only greyed.
   await page.goto("/settings/plugins/todos");
-  const own = page.getByRole("region", { name: "Todos", exact: true });
-  await own.getByRole("checkbox", { name: "Say why a changed todo will leave the list" }).uncheck();
+  await group(page, "Todos").getByRole("checkbox", { name: "Say why a changed todo will leave the list" }).uncheck();
+  await closeSettings(page);
   await page.getByRole("navigation", { name: "Modes" }).getByRole("link", { name: "Todos" }).click();
   await expect(words(page)).toHaveText(["Stretch"]);
   await row(page, "Stretch").locator("button.todo-tag").focus();

@@ -79,6 +79,7 @@ export const NOT_FOR_AGENTS: Partial<Record<OpType, string>> = {
   "grant.revoke": SHARING,
   "note.setPrivate": "A private note is hidden from every other member, admins too, and that is not a change in history. The member who made the note decides it, in the app.",
   "note.purge": "Removing a note from Trash for good takes its history with it, and nothing brings it back: not a revert, not Trash. An agent reads notes other people wrote, so one that was talked into it could destroy them past recovery. An agent moves a note to Trash, where it waits 30 days, and only the member, signed in, removes it sooner.",
+  "note.discard": "It removes, outside Trash and with its history, a note its member made and left with nothing in it, and it is the member's own app that does it as they leave the note. An agent's own notes are never discarded, and it has nothing to clean up: a note it makes without text it can move to Trash.",
   "source.connect": "Connecting a data source is the member agreeing, in their own browser, to let Common Ink into their calendar or contacts. An agent can't agree for them. It reads and changes what the member connected.",
   "source.disconnect": "Disconnecting ends the member's own agreement and cuts off every reference in their notes until they agree again. The member does that themself, in the app.",
   "contact.update": CONTACTS,
@@ -845,17 +846,17 @@ The arguments beside query are from before it could say them, and narrow it furt
   {
     name: "create_event",
     description:
-      `Add an event to one of your member's calendars where it is kept, such as in Google Calendar, as your member. Pass the calendar's sourceId and id from the calendars list_events answers: one whose writable is false is refused. Answers the event as it was made. This changes the member's real calendar and is not in Common Ink's history, so it can't be reverted from here. ${SOURCES}`,
+      `Add an event to one of your member's calendars where it is kept, such as in Google Calendar, as your member. Pass the calendar's sourceId and id from the calendars list_events answers: one whose writable is false is refused. Pass neither to add it to your member's default calendar, the one they chose on the Calendar page; when they chose none, or can no longer add to it, it goes in the first calendar they can add to and haven't hidden. Answers the event as it was made, with the calendarId and calendar it went in. This changes the member's real calendar and is not in Common Ink's history, so it can't be reverted from here. ${SOURCES}`,
     inputSchema: object(
       {
-        sourceId: { type: "string", description: "The data source the calendar is in, from list_events' calendars" },
-        calendarId: { type: "string", description: "The calendar's id, from list_events' calendars" },
+        sourceId: { type: "string", description: "The data source the calendar is in, from list_events' calendars. Leave it out, with calendarId, for your member's default calendar" },
+        calendarId: { type: "string", description: "The calendar's id, from list_events' calendars. Leave it out, with sourceId, for your member's default calendar" },
         title: { type: "string", maxLength: 1000 },
         when,
         location: { type: "string", maxLength: 1000 },
         description: { type: "string", maxLength: 8000 },
       },
-      ["sourceId", "calendarId", "title", "when"],
+      ["title", "when"],
     ),
     op: "event.create",
     example: { sourceId: "google", calendarId: "primary", title: "Lunch", when: { allDay: true, from: "2026-10-14", to: "2026-10-14" } },

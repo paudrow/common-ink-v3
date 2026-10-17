@@ -117,7 +117,8 @@ const hanging = drawnInView(
           for (let up = node.node.parent; up; up = up.parent) if (up.name === "ListItem") depth++;
           const indent = /^[ \t]*/.exec(lead)![0];
           const written = widthOf(font, columns(indent));
-          const wide = depth ? Math.max(written, depth * STEP_EM * size) : written;
+          // A level is a step whatever the note's spaces are: three under a number are wider than a step in a monospaced face.
+          const wide = depth ? depth * STEP_EM * size : written;
           // A task's words start a box and a gap after its `[`, whether it is `[ ]`, `[x]` or `[X]`, so ticking it moves nothing. The box is
           // as wide as it is drawn, written or not, so no letter's width is in it, measured or laid out.
           const task = /(\[[ xX]\])([ \t]+)$/.exec(lead);

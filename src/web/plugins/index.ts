@@ -1,6 +1,7 @@
 import type { Plugin } from "../plugin-api.ts";
 import { agents } from "./agents/index.tsx";
 import { backlinks } from "./backlinks.tsx";
+import { blame } from "./blame/index.ts";
 import { bullets } from "./bullets/index.ts";
 import { calendar } from "./calendar/index.tsx";
 import { codeBlocks } from "./code/index.ts";
@@ -40,4 +41,4 @@ import { vim } from "./vim/index.ts";
 import { wordCount } from "./wordCount.tsx";
 
 /** The plugins that come with the app, in the order their contributions are shown. Each is on until a member turns it off, except one that says it starts off. */
-export const BUILT_INS: readonly Plugin[] = [sidebar, folders, tags, noteList, tabs, quickOpen, commandPalette, search, dashboard, uploads, history, agents, members, sharing, backlinks, noteInfo, trash, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, media, html, calendar, contacts, gfm, todos, daily, links, mentions, tables, math, codeBlocks, bullets, lineNumbers, vim, wordCount];
+export const BUILT_INS: readonly Plugin[] = [sidebar, folders, tags, noteList, tabs, quickOpen, commandPalette, search, dashboard, uploads, history, blame, agents, members, sharing, backlinks, noteInfo, trash, embedMenu, timer, stopwatch, kanban, noteClocks, quickTimer, media, html, calendar, contacts, gfm, todos, daily, links, mentions, tables, math, codeBlocks, bullets, lineNumbers, vim, wordCount];

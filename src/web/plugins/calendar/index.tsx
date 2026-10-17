@@ -41,6 +41,15 @@ export const calendar: Plugin = {
       title: "Hidden calendars",
       description: "The calendars unticked in the Calendar's Calendars dialog, whose events the Calendar doesn't show. They are kept on the server with your settings for this workspace, so the Calendar shows the same calendars in every browser you sign in on.",
     },
+    default: {
+      type: "string",
+      default: "",
+      maxLength: 400,
+      remembered: true,
+      title: "Default calendar",
+      description:
+        "The calendar a new event goes in when you don't pick one: New event, a drag on the Calendar's grid, and an agent's create_event that names no calendar. Choose it in the Calendar's Calendars dialog. While it is unset, or can't be added to, the Calendar starts a new event in the calendar you added to last in that browser, and an agent adds to the first calendar you can add to and haven't hidden.",
+    },
   },
   activate(host) {
     // `[[` offers events after notes: one picked is written as its reference, made then, so the event lists the note.

@@ -206,6 +206,70 @@ export async function createEvent(asker: Asker, sourceId: string, calendarId: st
   }
 }
 
+/**
+ * The Calendar plugin's settings the server reads, by their keys in the member's settings: the plugin
+ * declares them, and each names a calendar by `calendarKey`.
+ */
+export const CALENDAR_SETTINGS = { default: "calendar.default", hidden: "calendar.hidden" } as const;
+
+/** How a setting names a calendar: its data source and its id, with a space between. */
+export const calendarKey = (calendar: Pick<Calendar, "sourceId" | "id">) => `${calendar.sourceId} ${calendar.id}`;
+
+export interface CalendarSettings {
+  /** The `calendarKey` of the member's default calendar, or null for none. */
+  default: string | null;
+  /** The `calendarKey`s of the calendars the member hid on the Calendar page. */
+  hidden: ReadonlySet<string>;
+}
+
+/** What a member's settings, as they wrote them, say of their calendars. Anything they got wrong reads as unset. */
+export function calendarSettings(text: string | null | undefined): CalendarSettings {
+  let written: Record<string, unknown> = {};
+  try {
+    const value: unknown = JSON.parse(text ?? "{}");
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) written = value as Record<string, unknown>;
+  } catch {
+    // Settings that can't be read are the defaults, as they are in the app.
+  }
+  const chosen = written[CALENDAR_SETTINGS.default];
+  const hidden = written[CALENDAR_SETTINGS.hidden];
+  return { default: typeof chosen === "string" && chosen ? chosen : null, hidden: new Set(Array.isArray(hidden) ? hidden.filter((k): k is string => typeof k === "string") : []) };
+}
+
+/**
+ * Where a new event goes when nobody names a calendar: the member's default while they may add to it and haven't hidden it, as on the Calendar page;
+ * otherwise the first calendar they may add to that they haven't hidden, and otherwise the first they
+ * may add to. Null when they may add to none. The server keeps no calendar used last, which the
+ * Calendar page falls back to in its browser before the first.
+ */
+export function defaultCalendar(calendars: readonly Calendar[], settings: CalendarSettings): Calendar | null {
+  const writable = calendars.filter((c) => c.writable);
+  return writable.find((c) => calendarKey(c) === settings.default && !settings.hidden.has(calendarKey(c))) ?? writable.find((c) => !settings.hidden.has(calendarKey(c))) ?? writable[0] ?? null;
+}
+
+/**
+ * The calendar `event.create` adds to: the one it names, or with none named, the member's default as
+ * `defaultCalendar` chooses it from the calendars they have now. `settings` is read only then.
+ */
+export async function calendarFor(asker: Asker, named: { sourceId?: string | undefined; calendarId?: string | undefined }, settings: () => Promise<CalendarSettings>): Promise<{ sourceId: string; calendarId: string }> {
+  const { sourceId, calendarId } = named;
+  if (sourceId !== undefined && calendarId !== undefined) return { sourceId, calendarId };
+  if (sourceId !== undefined || calendarId !== undefined) throw new OpError("invalid", "Name the calendar by both sourceId and calendarId, or by neither for the member's default calendar");
+  const { read } = await readEach<CalendarSource, Calendar[]>(asker, "calendar", async (source) => {
+    const { calendars } = await source.list({ from: asker.now, to: asker.now + 1 });
+    return source.create ? calendars : calendars.map((c) => ({ ...c, writable: false }));
+  });
+  const mine = await settings();
+  const calendars = read.flat();
+  // A default whose data source couldn't be read now is not gone: the event waits for it rather than going in another calendar.
+  const defaultSource = mine.default?.slice(0, mine.default.indexOf(" "));
+  if (defaultSource && (await asker.sources.of(asker.personId)).some((s) => s.info.id === defaultSource && s.info.state === "connected") && !calendars.some((c) => c.sourceId === defaultSource))
+    throw new OpError("conflict", "The member's default calendar can't be reached now. Try again, or name the calendar");
+  const chosen = defaultCalendar(calendars, mine);
+  if (!chosen) throw new OpError("conflict", "There is no calendar to add it to: connect a calendar that can be added to on the Calendar page first");
+  return { sourceId: chosen.sourceId, calendarId: chosen.id };
+}
+
 const words = (text: string) =>
   text
     .normalize("NFD")

@@ -1,15 +1,19 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { useDismiss, type Calendar, type CalendarEvent, type PluginHost } from "../../plugin-api.ts";
 import { whenOf, type WhenForm } from "./dates.ts";
+import { LAST, startWords, type Start } from "./choosing.ts";
 import { calendarKey } from "./listing.ts";
-
-/** Where the form remembers the calendar last added to, so the next one starts there. */
-const TARGET = "calendarTarget";
 
 interface Props {
   host: PluginHost;
   /** The calendars the member may add to. */
   calendars: readonly Calendar[];
+  /** The calendar it starts in, and why. */
+  start: NonNullable<Start>;
+  /** The member's default calendar, by `calendarKey`, or "" for none. */
+  chosen: string;
+  /** Makes a calendar the member's default; false when it couldn't be kept. */
+  setDefault: (calendar: Calendar) => boolean;
   /** When the event starts and ends, as the grid or the key asked for it. */
   when: WhenForm;
   timeZone: string;
@@ -22,12 +26,6 @@ interface Fields extends WhenForm {
   target: string;
   location: string;
   description: string;
-}
-
-/** The calendar a new event goes in first: the one last added to, while the member may still add to it, and otherwise the first. */
-export function targetOf(host: PluginHost, calendars: readonly Calendar[]): string {
-  const kept = host.storage.get(TARGET);
-  return calendars.some((c) => calendarKey(c) === kept) ? (kept as string) : calendars[0] ? calendarKey(calendars[0]) : "";
 }
 
 const minutesOf = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
@@ -46,9 +44,10 @@ function lengthWords(form: WhenForm): string {
  * Adds an event. A drag or a click on the grid opens it with the time it covered; nothing is added
  * until Save, and Cancel or Escape leaves the calendar as it was.
  */
-export function NewEvent({ host, calendars, when, timeZone, close, onAdded }: Props) {
+export function NewEvent({ host, calendars, start, chosen, setDefault, when, timeZone, close, onAdded }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const [fields, setFields] = useState<Fields>(() => ({ ...when, title: "", target: targetOf(host, calendars), location: "", description: "" }));
+  const about = useId();
+  const [fields, setFields] = useState<Fields>(() => ({ ...when, title: "", target: calendarKey(start.calendar), location: "", description: "" }));
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   useDismiss(busy ? null : close, ref);
@@ -72,7 +71,7 @@ export function NewEvent({ host, calendars, when, timeZone, close, onAdded }: Pr
     setProblem(null);
     try {
       const made = await host.perform({ type: "event.create", sourceId: calendar.sourceId, calendarId: calendar.id, title: fields.title.trim(), when: at, ...(fields.location && { location: fields.location }), ...(fields.description && { description: fields.description }) });
-      host.storage.set(TARGET, fields.target);
+      host.storage.set(LAST, fields.target);
       onAdded(made);
     } catch (err) {
       setProblem((err as Error).message);
@@ -81,6 +80,9 @@ export function NewEvent({ host, calendars, when, timeZone, close, onAdded }: Pr
   };
 
   const length = lengthWords(fields);
+  const picked = calendars.find((c) => calendarKey(c) === fields.target);
+  // Where it goes is said for the calendar it started in; another one picked is the member's own choice.
+  const said = picked && fields.target === chosen ? startWords({ calendar: picked, by: "default", lost: null }) : fields.target === calendarKey(start.calendar) ? startWords(start) : "";
   return (
     <div className="event-scrim">
       <div ref={ref} className="event-dialog" role="dialog" aria-label="New event">
@@ -118,7 +120,7 @@ export function NewEvent({ host, calendars, when, timeZone, close, onAdded }: Pr
           {calendars.length > 1 && (
             <label>
               <span>Calendar</span>
-              <select value={fields.target} onChange={(e) => set({ target: e.target.value })}>
+              <select value={fields.target} aria-describedby={about} onChange={(e) => set({ target: e.target.value })}>
                 {calendars.map((calendar) => (
                   <option key={calendarKey(calendar)} value={calendarKey(calendar)}>
                     {calendar.name}
@@ -126,6 +128,16 @@ export function NewEvent({ host, calendars, when, timeZone, close, onAdded }: Pr
                 ))}
               </select>
             </label>
+          )}
+          {calendars.length > 1 && (
+            <div className="cal-new-row source-meta">
+              <span id={about}>{said}</span>
+              {picked && fields.target !== chosen && (
+                <button type="button" className="link" onClick={() => setDefault(picked)}>
+                  Make {picked.name} the default
+                </button>
+              )}
+            </div>
           )}
           <label>
             <span>Location</span>

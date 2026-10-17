@@ -390,7 +390,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     const { keybindings } = contributions();
     // Two chords can read the same, as / and Shift with / do.
     const keys = [...new Set(Object.keys(keybindings).filter((chord) => keybindings[chord] === c.id).map((chord) => chordLabel(chord, mac)))];
-    return { id: c.id, title: c.title, shortcut: keys[0], keys, group: c.group };
+    return { id: c.id, title: c.title, shortcut: keys[0], keys, group: c.group, ...(c.aliases && { aliases: c.aliases }) };
   };
 
   function startAll() {
@@ -434,7 +434,7 @@ export function createPluginHost({ plugins: given, required = [], trusted = [], 
     const setting = contributions().settings.declared.find((d) => d.key === key)?.setting;
     const read = setting && value !== undefined ? readSetting(setting, value) : undefined;
     // A value the same as a default that depends on the server is kept: it is the member's choice wherever the app is.
-    const followsServer = setting?.type === "string" && setting.defaultWithoutEmbedSite !== undefined;
+    const followsServer = (setting?.type === "string" && setting.defaultWithoutEmbedSite !== undefined) || ((setting?.type === "number" || setting?.type === "integer") && setting.follows !== undefined);
     const isDefault = !followsServer && read && "value" in read && sameValue(read.value, setting!.default);
     return write(key, isDefault ? undefined : value);
   }

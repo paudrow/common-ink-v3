@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { chordLabel } from "./keybindings.ts";
 import type { Setting, SettingValue } from "./plugin-api.ts";
 import { readSetting, type Declared, type Problem } from "./settings.ts";
@@ -7,7 +7,8 @@ const describe = (setting: Setting, value: SettingValue, mac: boolean) => {
   if (setting.type === "boolean") return value ? "on" : "off";
   if (setting.type === "chords") return (value as readonly string[]).map((chord) => chordLabel(chord, mac)).join(", ") || "no key";
   if (setting.type === "list") return (value as readonly string[]).join(", ") || "none";
-  return String(value);
+  if (setting.type === "string" && setting.remembered && !value) return "none";
+  return value === "" ? "empty" : String(value);
 };
 
 interface RowProps {
@@ -24,6 +25,9 @@ interface RowProps {
 export function SettingRow({ declared: { key, setting, active }, value, modified, problems, mac, onSet }: RowProps) {
   const id = useId();
   const [refused, setRefused] = useState<string | null>(null);
+  // A refusal is of what was typed here: a value set since, here or anywhere else, takes its place.
+  const valueKey = JSON.stringify(value);
+  useEffect(() => setRefused(null), [valueKey]);
   const set = (next: unknown) => {
     const read = readSetting(setting, next);
     setRefused("reason" in read ? read.reason : null);
@@ -47,14 +51,14 @@ export function SettingRow({ declared: { key, setting, active }, value, modified
               <option key={option}>{option}</option>
             ))}
           </select>
-        ) : setting.type === "list" ? (
-          // Words chosen elsewhere, such as calendars unticked on the Calendar page: shown here, and put back with Reset.
+        ) : setting.type === "list" || (setting.type === "string" && setting.remembered) ? (
+          // Words chosen elsewhere, such as calendars unticked or the default calendar picked on the Calendar page: shown here, and put back with Reset.
           <output {...control}>{describe(setting, value, mac)}</output>
         ) : (
           <Typed key={JSON.stringify(value)} control={control} setting={setting} value={value} onSet={set} />
         )}
         <span id={`${id}-about`} className="setting-default">
-          {setting.type === "chords" && `${describe(setting, value, mac)}. `}Default: {describe(setting, setting.default, mac)}
+          {setting.type === "chords" && `${describe(setting, value, mac)}. `}Default: {(setting.type === "number" || setting.type === "integer") && setting.follows ? `your ${setting.follows.title}` : describe(setting, setting.default, mac)}
         </span>
         {modified && (
           <button type="button" className="button small" aria-label={`Reset ${setting.title}`} onClick={() => (setRefused(null), onSet(undefined))}>

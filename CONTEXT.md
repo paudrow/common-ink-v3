@@ -51,7 +51,7 @@ One note in a folder's list. It expands in place to the note drawn to be read, f
 _Avoid_: Row
 
 **Note**:
-A markdown file in a workspace, identified by a stable id. Its title is the words of its first `#` heading, without their markdown. A note with no such heading is titled by its first line of words, cut to a title's length, and a line that is only a web address is passed over for one that says something. A note with no words has no title and is shown as "Untitled". The id does not change when the title or folder changes, and a note's address names it by id, so an address with an old title still opens it. A note a member makes in the app starts as `# `, the mark of its title, with the cursor after it. Until something is typed it is an untitled note with no words.
+A markdown file in a workspace, identified by a stable id. Its title is the words of its first `#` heading, without their markdown. A note with no such heading is titled by its first line of words, cut to a title's length, and a line that is only a web address is passed over for one that says something. A note with no words has no title and is shown as "Untitled". The id does not change when the title or folder changes, and a note's address names it by id, so an address with an old title still opens it. A note a member makes in the app starts empty, with the cursor in it, and its first line of words is its title until it has a `#` heading. A note the member made that has never had anything in it but spaces or a lone `#` is discarded when they leave it, which is when no tab holds it: removed outright, with its history, and not put in Trash. A note that ever had words, or that an agent made, is never discarded.
 _Avoid_: Document, page
 
 **Link**:
@@ -92,7 +92,7 @@ _Avoid_: Recurrence, recur, schedule
 One time a repeating todo was checked off, on a day, by a member or an agent. The todo's line carries the latest day and the count, written `done:2026-10-10x12`, and the record has each one.
 
 **Daily note**:
-A note for one calendar date, belonging to one member. Its heading is that date in that member's timezone, written as a due date is: `# 2026-10-11`. Which member and day it belongs to is stored outside the note, so it stays their daily note when moved or retitled. It is made when first needed, private to its member unless their settings say otherwise, in the folder at the top of the workspace that their settings name, and the default is Daily. Changing that setting leaves daily notes already created where they are. An agent files a completion on the connecting member's daily note. A guest has none.
+A note for one calendar date, belonging to one member. Its heading is that date in that member's timezone, written as a due date is: `# 2026-10-11`. Which member and day it belongs to is stored outside the note, so it stays their daily note when moved or retitled. It is made when first needed, private to its member unless their settings say otherwise, in the folder at the top of the workspace that their settings name, and the default is Daily. Changing that setting leaves daily notes already created where they are. An agent files a completion on the connecting member's daily note. A guest has none. Yesterday's and tomorrow's daily notes are opened by commands, and Previous day and Next day go from a daily note to the day before or after it. Opening today's or tomorrow's makes it when it isn't there. Opening any other day's only finds it, and when there is none the member is told so and nothing is made.
 
 **Kanban board**:
 A block embed whose body is markdown: each heading is a column and each list item under it is a card. Anything else in the body is kept and not shown. A column's colour is written at the end of its heading, `## Doing {.blue}`. The cursor goes into a board's markdown from the lines around it, and the markdown is shown above the board while the cursor is in it. Cards are dragged on the board, and a press on one puts the cursor on its line.
@@ -117,6 +117,9 @@ A calendar entry from a member's data source. It may repeat, and each occurrence
 
 **Calendar**:
 One of the calendars in a calendar data source, such as a member's work calendar in their Google account. Every event is in one. A member may add events to a calendar, and change its own, when its data source is read-write and the calendar lets them; a calendar they can only read, such as a holidays calendar, refuses both. Which calendars the Calendar page shows is the member's, kept on the server with their settings in the workspace. The page shows them by Day, 3 days, Week, Month or Agenda, from the first day of the week the member chose.
+
+**Default calendar**:
+The calendar a member's new events go in when none is named, by them or their agent. It is a remembered setting (`calendar.default`). With none usable, the Calendar uses the one last added to in that browser, and an agent's event goes in the first calendar the member can add to and hasn't hidden. With no calendar connected, the Calendar page asks the member to connect one before anything else.
 
 **Record reference**:
 What a note writes to point at an event or a contact without copying it: an embed, `::event{ref label}` or `::contact{ref label}`. The ref says nothing of the record and leads to it only for the member who made the reference, who is shown the record as it is now. The label is plain text in the note that every reader sees, in gray. Anyone else sees the label and nothing more.
@@ -197,7 +200,7 @@ _Avoid_: Right sidebar, inspector tab
 What the inspector's panels are told is in front: a note, a folder's list, or the notes a page says it is showing. A page says so itself, as the History page does with the notes whose changes are ticked; a page that says nothing is nothing to be about.
 
 **Focus**:
-One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
+One tab filling the window: the tab in front of an editor group, a note, a folder's list or a page, with no sidebar, no inspector, neither bar, no other group and no tab row. A note in focus has no bar above its text either: a quiet line at its foot shows only what is live, its vim mode, a running timer and whether it is saved. Every group has a focus button after its last tab, and ⌘. does the same for the focused group. The button stays at the top right as the way out, and ⌘. leaves too. Leaving puts the window back as it was: the same groups at the same sizes, with the sidebar and the inspector as they were. A reload stays in focus on the same tab.
 _Avoid_: Writing mode, fullscreen
 
 **Command**:
@@ -227,7 +230,7 @@ _Avoid_: Cheat sheet, help menu (for the sheet)
 Help shown over the page in a dialog with a title and a close button, the one look for help in the app: the query syntax and the keyboard shortcuts sheet are drawn in it.
 
 **Vim mode**:
-A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
+A built-in plugin, off until the member turns it on on the Plugins page, that gives every note's editor vim's modes, motions, and operators. Its undo and redo are the app's. Its mode bar is at the foot of the note's pane, one for each side of a split, across or down, and the mode in it begins where the note's text does, wherever the column is. `zz`, `zt` and `zb` put the cursor's line in the middle, at the top or at the foot of the pane, and `z.`, `z<CR>` and `z-` do the same with the cursor on the line's first letter; there is room under a note's last line for `zz` to bring a line near the end to the middle. In focus the pane is the window, so the bar is at the window's foot, and the keys that go from one region to another stay in the one tab that is seen. A reading of a note, such as an expanded card, has no vim. By a setting, `j` and `k` move by the rows on screen as `gj` and `gk` do, which is off by default. Outside a note's text its keys move through the rest of the window: `j`, `k`, `gg`, `G`, `ctrl+d` and `ctrl+u` through the rows of any list, `enter` or `l` to open the selected row, `za` to expand or collapse it, and `h` to collapse it or go to its parent, `/` to the search box and `escape` back to the list, `ctrl+w` then `h`, `j`, `k` or `l` to the region on that side, and `gt` and `gT` through the tabs. None of them is taken while the member is typing.
 
 **Selected row**:
 The row of a list that vim's keys are on. It has focus, is marked, and is kept in view.
@@ -344,9 +347,9 @@ Reverting the author's own latest change to a note that still stands. Redo rever
 **Unseen change**:
 A change to a note by anyone but the member, their own agent included, made since the member last looked at that note's history. It is kept in the browser the member looked in, and has nothing to do with their last visit: marking the dashboard's summary read doesn't show them a note's history, and looking at a note's history doesn't take it out of the summary.
 
-**Who wrote this**:
-A note's lines marked by who last changed each, in a column left of the text as a blame view has. Lines next to each other that one change last wrote are a run, and the column names, on each run's first line, who wrote it and when, with the change's label or what its revert did; the member's (one family of colours), the agent's (another, with whose agent it is), or the member's own ("You", grey). A strip at the column's edge is stronger the newer the change. A line is changed by an edit inside it and by being written; lines put in or taken out around it leave it as it was, and a line a revert, undo or redo brings back is still its writer's, while a line it writes anew (a conflict settled by hand) is the reverter's; the revert itself shows in History. Pressing a run opens that change in History, and two commands move to the next or previous run and open its change. The member turns it on for one note at a time, from the command or the note's History panel, and the note keeps it on for them in that browser. Agents ask the same of `note_blame`, named as git names it.
-_Avoid_: Annotate
+**Blame mode**:
+Once called Who wrote this, which the command palette still finds it by, as it does "who changed what". It comes from the Blame plugin, which a member can turn off. A note's lines marked by who last changed each, in a column left of the text as a blame view has. Lines next to each other that one change last wrote are a run, and the column names, on each run's first line, who wrote it and when, with the change's label or what its revert did; the member's (one family of colours), the agent's (another, with whose agent it is), or the member's own ("You", grey). A strip at the column's edge is stronger the newer the change. A line is changed by an edit inside it and by being written; lines put in or taken out around it leave it as it was, and a line a revert, undo or redo brings back is still its writer's, while a line it writes anew (a conflict settled by hand) is the reverter's; the revert itself shows in History. Pressing a run opens that change in History, and two commands move to the next or previous run and open its change. The member turns it on for one note at a time, with Toggle blame mode or the Blame switch in the note's History panel, and the note keeps it on for them in that browser. Agents ask the same of `note_blame`, named as git names it.
+_Avoid_: Annotate, Who wrote this
 
 **Label**:
 A name attached to one revision in history. A revision has at most one, and a note uses a name once.
@@ -371,7 +374,7 @@ Something a plugin draws in a slot of the app: a column, a section of the sideba
 _Avoid_: Panel
 
 **Bottom bar**:
-The thin line along the foot of the window where plugins put small things to glance at, such as the word count of the note in front, the open note's running timers and stopwatches, and a quick timer. An item sits at its left or its right end. It is there while any plugin has an item in it, is the same height whatever the items say, and is out of sight in focus.
+The thin line along the foot of the window where plugins put small things to glance at, such as the word count of the note in front, the open note's running timers and stopwatches, and a quick timer. An item sits at its left or its right end. It is there while any plugin has an item in it, and is the same height whatever the items say. In focus it is out of sight, and what in it is live, such as a running timer or an upload being sent, is at the foot of the note instead, beside vim's mode and whether the note is saved: a count such as the words is not live.
 _Avoid_: Status bar, footer
 
 **Page**:
@@ -427,8 +430,14 @@ _Avoid_: Setting
 A non-admin's proposal to give a plugin a capability. An admin approves or denies it.
 
 **Settings**:
-JSON that configures one member's behavior in one workspace, such as theme, vim, keybindings, the daily-note folder, whether the share prompt appears, which plugins are on, and plugin options that only change that member's layout. It holds only what the member changed from a default, and follows them to any browser. A change made in one window is kept when another window changes a different key, and the later change wins on the same key. The member changes it as options or as the JSON itself. An admin does not set or lock these, a plugin cannot change them except a remembered setting of its own, and an agent can neither read nor change them.
+JSON that configures one member's behavior in one workspace, such as theme, vim, keybindings, the daily-note folder, whether the share prompt appears, which plugins are on, and plugin options that only change that member's layout. It holds only what the member changed from a default, and follows them to any browser. A change made in one window is kept when another window changes a different key, and the later change wins on the same key. The member changes it in Settings, as options or as the JSON itself. Settings opens over whatever the window shows, at an address under `/settings`, and Escape closes it: it is never a tab, so the tabs, splits and focus under it stay as they were. An admin does not set or lock these, a plugin cannot change them except a remembered setting of its own, and an agent can neither read nor change them.
 _Avoid_: Preferences, config
+
+**Text size**:
+How big the text of the whole app is for a member, as a percentage: menus, Settings, lists, pages and panels. A note's text follows it unless the member sets Editor text size, which is then the note's whatever the Text size. Both are settings.
+
+**Note font**:
+The font a note's text and headings are in, a member's setting: iA Writer Mono by default, IBM Plex Mono, Source Serif or the system's sans, each from the app's own files, or Custom, a CSS font-family list such as a font on the member's device. Code stays in a monospaced font. Line height and Reading width, the most a note's column is across, are settings beside it.
 
 **Setting**:
 One key in a member's settings, with a type, a default, and a description. The core declares some, each plugin declares its options under its own id, each plugin has one that turns it on and off, and each command has one for its keybinding. A value the setting doesn't allow is flagged and its default used. A key no setting has is flagged and does nothing. Neither is taken out of the member's JSON.

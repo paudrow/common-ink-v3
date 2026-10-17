@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { listedNote, noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { settingsDialog } from "./settings-helpers.ts";
 
 /** Opens a note from the list of every note as a preview, which is what a click on its title does. */
 async function preview(page: Page, title: string) {
@@ -506,7 +507,6 @@ const PAGES = [
   ["/history", "History"],
   ["/contacts", "Contacts"],
   ["/uploads", "Uploads"],
-  ["/settings", "Settings"],
   ["/plugins", "Plugins"],
   ["/members", "Members"],
   ["/sharing", "Sharing"],
@@ -529,6 +529,20 @@ test("every page opens in a tab at its own address, and is drawn there", async (
   }
   // Each took the place of the one before, as a preview does: every page looked at left one tab.
   await expect.poll(() => italic(page)).toEqual([true]);
+
+  // Settings is the one that opens in no tab: it is drawn over the window, whose tab stays as it was.
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type("Go to Settings");
+  await page.getByRole("dialog", { name: "Commands" }).getByRole("option", { name: /^Go to Settings/ }).first().click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(settingsDialog(page).getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(tabs(page)).toHaveText(["Agents"]);
+  await expect(tab(page, "Agents")).toHaveAttribute("aria-selected", "true");
+  await expect(group(page, 1).getByRole("heading", { name: "Agents", level: 1 })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect(page).toHaveURL(/\/agents$/);
+  await expect(tabs(page)).toHaveText(["Agents"]);
 });
 
 test("a page's tab is a preview until it is kept, is focused and not opened twice, sits in a split, and comes back after a reload", async ({ page }) => {
@@ -602,32 +616,49 @@ test("a page's tab is a preview until it is kept, is focused and not opened twic
   await expect(group(page, 2).getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
 });
 
-test("Settings and Plugins each keep to one tab through every category and plugin's details, at the address of what is showing, across a reload, Back, and a split", async ({ page }) => {
+test("Settings opens over the window and in no tab through every category, the JSON, a reload, Back and a split, and Plugins keeps to one tab through every plugin's details, at the address of what is showing", async ({ page }) => {
   await withNotes(page, "Alpha");
-  const categories = page.getByRole("navigation", { name: "Categories" });
+  const categories = settingsDialog(page).getByRole("navigation", { name: "Categories" });
   const more = page.getByRole("navigation", { name: "Modes" });
+  const settingsTabs = page.getByRole("tab", { name: /Settings/ });
 
+  // At its address Settings is over what the app opens to, the Dashboard, which keeps its tab.
+  await tab(page, "Dashboard").dblclick();
   await page.goto("/settings");
-  await expect(tabs(page)).toHaveText(["Settings"]);
-  await tab(page, "Settings").dblclick();
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
   for (const [name, path] of [["Keyboard shortcuts", "/settings/keyboard"], ["Appearance", "/settings/appearance"], ["Vim mode", "/settings/plugins/vim"]] as const) {
     await categories.getByRole("link", { name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(categories.getByRole("link", { name, exact: true })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("region", { name, exact: true })).toBeVisible();
-    await expect(tabs(page)).toHaveText(["Settings"]);
+    await expect(settingsDialog(page).getByRole("region", { name, exact: true })).toBeVisible();
+    await expect(tabs(page)).toHaveText(["Dashboard"]);
+    await expect(settingsTabs).toHaveCount(0);
   }
-  await page.getByRole("button", { name: "Open settings (JSON)" }).click();
+  await settingsDialog(page).getByRole("button", { name: "Open settings (JSON)" }).click();
   await expect(page).toHaveURL(/\/settings\/json$/);
-  await expect(tabs(page)).toHaveText(["Settings"]);
-  await page.getByRole("button", { name: "Open settings (UI)" }).click();
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
+  // A category takes the place of the one before in the history, and the JSON is a step of its own, so Back from it is the category.
+  await page.goBack();
+  await expect(page).toHaveURL(/\/settings\/plugins\/vim$/);
+  await expect(settingsDialog(page).getByRole("region", { name: "Vim mode", exact: true })).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(/\/settings\/json$/);
+  await page.reload();
+  await expect(page).toHaveURL(/\/settings\/json$/);
+  await expect(settingsDialog(page).getByRole("textbox", { name: "Settings JSON" })).toBeVisible();
+  await expect(tabs(page)).toHaveText(["Dashboard"]);
+  await expect(settingsTabs).toHaveCount(0);
+  await settingsDialog(page).getByRole("button", { name: "Open settings (UI)" }).click();
   await categories.getByRole("link", { name: "Vim mode", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/plugins\/vim$/);
 
-  // From a plugin's settings to what the plugin is, which is the Plugins page's and opens in its tab.
-  await page.getByRole("link", { name: "About this plugin" }).click();
+  // From a plugin's settings to what the plugin is, which is the Plugins page's and opens in its tab, and closes Settings.
+  await settingsDialog(page).getByRole("link", { name: "About this plugin" }).click();
   await expect(page).toHaveURL(/\/plugins\/vim$/);
-  await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect(tabs(page)).toHaveText(["Dashboard", "Plugins"]);
   await expect(page.getByRole("heading", { name: "Vim mode", level: 1 })).toBeVisible();
   // More opened itself on arriving at a page under it.
   await expect(more.getByRole("button", { name: "Less" })).toBeVisible();
@@ -635,50 +666,57 @@ test("Settings and Plugins each keep to one tab through every category and plugi
   await tab(page, "Plugins").dblclick();
 
   // Each tab is at the address it was left at.
-  await tab(page, "Settings").click();
-  await expect(page).toHaveURL(/\/settings\/plugins\/vim$/);
-  await expect(page.getByRole("region", { name: "Vim mode", exact: true })).toBeVisible();
+  await tab(page, "Dashboard").click();
+  await expect(page.getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
   await tab(page, "Plugins").click();
   await expect(page).toHaveURL(/\/plugins\/vim$/);
 
   // Back from a plugin's details reached from the list is the list, in the same tab.
   await more.getByRole("link", { name: "Plugins" }).click();
   await expect(page).toHaveURL(/\/plugins$/);
-  await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
+  await expect(tabs(page)).toHaveText(["Dashboard", "Plugins"]);
   await page.getByRole("list", { name: "Plugins", exact: true }).getByRole("link", { name: "Tabs and splits" }).click();
   await expect(page).toHaveURL(/\/plugins\/tabs$/);
   await expect(more.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
   await page.goBack();
   await expect(page).toHaveURL(/\/plugins$/);
   await expect(page.getByRole("list", { name: "Plugins", exact: true })).toBeVisible();
-  await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
+  await expect(tabs(page)).toHaveText(["Dashboard", "Plugins"]);
   await page.goForward();
   await expect(page).toHaveURL(/\/plugins\/tabs$/);
   await expect(page.getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
-  await expect(tabs(page)).toHaveText(["Settings", "Plugins"]);
+  await expect(tabs(page)).toHaveText(["Dashboard", "Plugins"]);
 
-  // Side by side, each is still where it was, and a reload brings both back there.
+  // Side by side, each is still where it was. Settings opened over the split leaves both as they are, and so does a reload with it open.
   await tab(page, "Plugins").click({ button: "right" });
   await page.getByRole("menu", { name: "Plugins tab" }).getByRole("menuitem", { name: "Split right" }).click();
-  await expect(tabs(page, 0)).toHaveText(["Settings"]);
+  await expect(tabs(page, 0)).toHaveText(["Dashboard"]);
   await expect(tabs(page, 1)).toHaveText(["Plugins"]);
-  await expect(group(page, 1).getByRole("region", { name: "Vim mode", exact: true })).toBeVisible();
   await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
-  // In half the window the categories are a menu above the settings.
-  await group(page, 1).getByRole("combobox", { name: "Category" }).selectOption({ label: "Appearance" });
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type("Go to Settings");
+  await page.keyboard.press("Enter");
+  await categories.getByRole("link", { name: "Appearance", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/appearance$/);
+  await expect(tabs(page, 0)).toHaveText(["Dashboard"]);
+  await expect(tabs(page, 1)).toHaveText(["Plugins"]);
+  await expect(group(page, 1).getByRole("region", { name: "Dashboard", exact: true })).toBeVisible();
   await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Settings" })).toHaveCount(1);
+  await expect(settingsTabs).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Plugins" })).toHaveCount(1);
 
   await page.reload();
   await expect(page).toHaveURL(/\/settings\/appearance$/);
-  await expect(tabs(page, 0)).toHaveText(["Settings"]);
+  await expect(settingsDialog(page).getByRole("region", { name: "Appearance", exact: true })).toBeVisible();
+  await expect(tabs(page, 0)).toHaveText(["Dashboard"]);
   await expect(tabs(page, 1)).toHaveText(["Plugins"]);
-  await expect(group(page, 1).getByRole("region", { name: "Appearance", exact: true })).toBeVisible();
   await expect(group(page, 2).getByRole("heading", { name: "Tabs and splits", level: 1 })).toBeVisible();
-  await tab(page, "Plugins", 1).click();
+  await expect(settingsTabs).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(settingsDialog(page)).toHaveCount(0);
   await expect(page).toHaveURL(/\/plugins\/tabs$/);
+  await expect(tabs(page, 0)).toHaveText(["Dashboard"]);
+  await expect(tabs(page, 1)).toHaveText(["Plugins"]);
 });
 
 test("a page a plugin adds opens in a tab, with the plugin doing nothing for it", async ({ page }) => {

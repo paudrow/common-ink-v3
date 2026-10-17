@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
+import { settingsDialog } from "./settings-helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -285,7 +286,7 @@ test("History's list of changes keeps its own keys with vim mode on: j goes to t
 test("in Settings, Enter on a setting goes to its field and Escape comes back to the row; / is the search box; and vim's keys are among the keyboard shortcuts while vim mode is on", async ({ page }) => {
   await signIn(page);
   await open(page, "/settings/appearance");
-  const panel = page.getByRole("main");
+  const panel = settingsDialog(page);
   const all = panel.locator("[data-row]");
   await expect(all.first()).toBeVisible();
   await page.keyboard.press("j");
@@ -390,8 +391,8 @@ test("with vim mode off, none of vim's keys do anything and none are listed", as
   await page.goto("/settings/keyboard");
   await expect(page.getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Undo/ })).toBeVisible();
   await page.getByRole("searchbox", { name: "Search settings" }).fill("vim:");
-  await expect(page.getByRole("main")).toContainText("No setting or keyboard shortcut matches.");
-  await expect(page.getByRole("main").locator("[data-row]")).toHaveCount(0);
+  await expect(settingsDialog(page)).toContainText("No setting or keyboard shortcut matches.");
+  await expect(settingsDialog(page).locator("[data-row]")).toHaveCount(0);
 });
 
 test("in the command palette and quick open, Ctrl-j and Ctrl-k move, Ctrl-n and Ctrl-p too where the browser leaves them, and letters are typed", async ({ page }) => {

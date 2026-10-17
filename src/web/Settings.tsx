@@ -20,7 +20,9 @@ import {
 import { Annotation, Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { dismissing } from "./dismiss.ts";
+import { Icon } from "./icons.tsx";
 import { KeyboardShortcuts } from "./KeyboardShortcuts.tsx";
 import { SettingRow } from "./SettingRow.tsx";
 import type { Host, MemberSettings } from "./pluginHost.ts";
@@ -43,11 +45,15 @@ interface Props {
   host: Host;
   store: SettingsStore;
   mac: boolean;
-  /** The address the app is at: `/settings`, or under it a category, such as `/settings/keyboard`, or `/settings/json`. */
+  /** Where in the settings it is: `/settings`, or under it a category, such as `/settings/keyboard`, or `/settings/json`. */
   path: string;
+  /** Goes to an address: one under `/settings` moves the settings, and any other closes them and goes there. */
   go: (path: string, options?: { replace?: boolean }) => void;
   /** How much the workspace's uploads take, asked each time the page opens. */
   storage: () => Promise<UploadStorage>;
+  onClose: () => void;
+  /** What is opened over the settings, such as the command palette: inside their dialog, so it is above it and takes the keys. */
+  children?: ReactNode;
   account: Account;
 }
 
@@ -57,15 +63,16 @@ export interface Account {
   signOutEverywhere: (agents: boolean) => Promise<void>;
 }
 
-const ROOT = "/settings";
-const JSON_VIEW = "json";
+export const ROOT = "/settings";
+export const JSON_VIEW = "json";
 
 /**
  * Where a member changes their settings: by category, as options drawn from the schema and a table
  * of keyboard shortcuts, or as the JSON itself. All of it shows the one document. It belongs to the
- * app, so it is here whatever is turned off.
+ * app, so it is here whatever is turned off. It opens over whatever the member is doing, as a dialog,
+ * and Escape closes it: it is never a tab, so it moves nothing of the window under it.
  */
-export function Settings({ host, store, mac, path, go, storage, account }: Props) {
+export function Settings({ host, store, mac, path, go, storage, onClose, children, account }: Props) {
   const { settings } = useSyncExternalStore(host.subscribe, host.contributions);
   const text = useSyncExternalStore(store.subscribe, store.text);
   const status = useSyncExternalStore(store.subscribe, store.status);
@@ -74,6 +81,24 @@ export function Settings({ host, store, mac, path, go, storage, account }: Props
   const asJson = at === JSON_VIEW;
   /** JSON the member is typing that isn't an object yet. It is kept here, unsaved, until it is one. */
   const [draft, setDraft] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const close = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const focused = document.activeElement;
+    const modal = dialog.current!;
+    modal.showModal();
+    close.current!.focus();
+    return () => {
+      // While it is still open as a modal the rest of the page can't take focus.
+      modal.close();
+      if (focused instanceof HTMLElement && focused.isConnected) {
+        const editor = EditorView.findFromDOM(focused);
+        if (editor) editor.focus();
+        else focused.focus({ preventScroll: true });
+      }
+    };
+  }, []);
 
   const typed = (next: string) => {
     if (documentOf(next) && store.replace(next)) setDraft(null);
@@ -99,49 +124,58 @@ export function Settings({ host, store, mac, path, go, storage, account }: Props
   );
 
   return (
-    <section className="mode-view settings">
-      <div className="settings-head">
-        <h1>Settings</h1>
-        <span role="status" className="save-state">
-          {draft === null || unread
-            ? statusLabel(status)
-            : "Not saved until the JSON is fixed"}
-        </span>
-        <button
-          type="button"
-          className="button small"
-          onClick={() => go(asJson ? ROOT : `${ROOT}/${JSON_VIEW}`)}
-        >
-          {asJson ? "Open settings (UI)" : "Open settings (JSON)"}
-        </button>
-      </div>
-      <p className="soon">
-        Yours alone, in this workspace. Only what you change from a default is
-        kept.
-      </p>
-      {/* Above the JSON, where each is underlined. Under the options, where each is said at its own row too, so one that comes or goes with a change moves nothing above it. */}
-      {asJson && problemList}
-      {asJson ? (
-        <JsonEditor
-          value={draft ?? text}
-          problems={draft === null ? settings.problems : null}
-          locked={unread}
-          onChange={typed}
-        />
-      ) : (
-        <Options
-          settings={settings}
-          locked={unread ? "unread" : draft !== null ? "json" : null}
-          mac={mac}
-          picked={at}
-          go={go}
-          onSet={host.setSetting}
-          account={account}
-        />
-      )}
-      {!asJson && problemList}
-      <Storage storage={storage} />
-    </section>
+    // Its role is said for what looks for a dialog over the window by it, as the inspector and vim's keys do.
+    <dialog
+      ref={dialog}
+      role="dialog"
+      aria-label="Settings"
+      className="settings-overlay"
+      onCancel={(e) => e.preventDefault()}
+      onMouseDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        e.preventDefault();
+        onClose();
+      }}
+      onKeyDown={(e) => {
+        // A menu or the palette open over the settings closes first, on the window's own Escape.
+        if (e.key !== "Escape" || e.defaultPrevented || dismissing()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <section className="settings">
+        <div className="settings-head">
+          <h1>Settings</h1>
+          <span role="status" className="save-state">
+            {draft === null || unread ? statusLabel(status) : "Not saved until the JSON is fixed"}
+          </span>
+          {/* The window's own Try again is under the dialog, where nothing can be pressed. */}
+          {status.kind === "unread" && (
+            <button type="button" className="button small" onClick={() => void store.load()}>
+              Try again
+            </button>
+          )}
+          <button type="button" className="button small" onClick={() => go(asJson ? ROOT : `${ROOT}/${JSON_VIEW}`)}>
+            {asJson ? "Open settings (UI)" : "Open settings (JSON)"}
+          </button>
+          <button ref={close} type="button" className="icon-button" aria-label="Close settings" title="Close (Escape)" onClick={onClose}>
+            <Icon name="close" />
+          </button>
+        </div>
+        <p className="soon">Yours alone, in this workspace. Only what you change from a default is kept.</p>
+        {/* Above the JSON, where each is underlined. Under the options, where each is said at its own row too, so one that comes or goes with a change moves nothing above it. */}
+        {asJson && problemList}
+        {asJson ? (
+          <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} locked={unread} onChange={typed} />
+        ) : (
+          <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} account={account} />
+        )}
+        {!asJson && problemList}
+        <Storage storage={storage} />
+      </section>
+      {children}
+    </dialog>
   );
 }
 

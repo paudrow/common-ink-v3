@@ -104,7 +104,7 @@ test("a quick timer is started from the command palette, runs in the bottom bar 
   await expect(palette(page).getByRole("option")).toHaveText(["Enable plugin: Quick timer"]);
 });
 
-test("in focus the bottom bar and its clocks are out of sight while the clock in the note runs on, and the bar is gone with every plugin that puts something in it off", async ({ page }) => {
+test("in focus the bottom bar is out of sight and its running clock is at the note's foot while the clock in the note runs on, and the bar is gone with every plugin that puts something in it off", async ({ page }) => {
   await open(page, `# Tea\n\nSteep ::timer{5m since=${new Date().toISOString()}} now.\n`);
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:5\d$/]);
 
@@ -115,6 +115,9 @@ test("in focus the bottom bar and its clocks are out of sight while the clock in
   // The note is the window, down to its foot, where the bar was.
   await expect.poll(async () => (await page.locator(".note").boundingBox())!.height).toBe(page.viewportSize()!.height);
   await expect(editor(page).getByRole("button", { name: /^Timer/ })).toHaveText(/4:[45]\d/);
+  // What was live in the bar, the running clock, is on the quiet line at the note's foot; the word count is not.
+  await expect(page.locator(".note-live").getByRole("button", { name: /^Timer/ })).toHaveText(/^Timer 4:[45]\d$/);
+  await expect(page.locator(".note-live")).not.toContainText("words");
   await page.keyboard.press("ControlOrMeta+.");
   await expect(page.locator(".app[data-focus-mode]")).toHaveCount(0);
   await expect(bar(page).getByRole("button")).toHaveText([/^Timer 4:[45]\d$/]);

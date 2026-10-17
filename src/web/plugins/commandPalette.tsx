@@ -1,5 +1,6 @@
-import { HelpOverlay, type Plugin, type PluginHost } from "../plugin-api.ts";
-import { Palette } from "./lib/Palette.tsx";
+import { HelpOverlay, type CommandInfo, type Plugin, type PluginHost } from "../plugin-api.ts";
+import { matching } from "./lib/match.ts";
+import { Palette, type PaletteItem } from "./lib/Palette.tsx";
 import { shortcutGroups } from "./lib/shortcutGroups.ts";
 
 const SHOW = "commands.show";
@@ -64,19 +65,16 @@ export const commandPalette: Plugin = {
     host.commands.register({ id: SHORTCUTS_COMMAND, title: "Keyboard shortcuts", keys: ["shift+?"], group: "Navigation", run: () => host.app().toggleOverlay(SHORTCUTS) });
     host.views.register("overlay", {
       id: "commands",
-      component: ({ close }) => (
-        <Palette
-          label="Commands"
-          placeholder="Run a command"
-          empty="No commands match."
-          items={host.commands
-            .list()
-            .filter((c) => c.id !== SHOW)
-            .map((c) => ({ id: c.id, label: c.title, hint: c.shortcut }))}
-          onPick={(id) => host.commands.run(id)}
-          onClose={close}
-        />
-      ),
+      component: ({ close }) => {
+        const commands = host.commands.list().filter((c) => c.id !== SHOW);
+        const itemOf = (c: CommandInfo): PaletteItem => ({ id: c.id, label: c.title, hint: c.shortcut });
+        // A command is also found by another name it has, such as what it was called before, when its title doesn't match.
+        const byAlias = (typed: string) => {
+          const needle = typed.trim().toLowerCase();
+          return needle ? commands.filter((c) => c.aliases?.some((alias) => alias.toLowerCase().includes(needle)) && !matching([c.title], typed, (t) => t).length).map(itemOf) : [];
+        };
+        return <Palette label="Commands" placeholder="Run a command" empty="No commands match." items={commands.map(itemOf)} found={byAlias} onPick={(id) => host.commands.run(id)} onClose={close} />;
+      },
     });
     host.views.register("overlay", { id: SHORTCUTS, component: ({ close }) => <ShortcutSheet host={host} close={close} /> });
   },

@@ -1024,7 +1024,8 @@ test("undoing typing not yet saved and then pressing undo again takes back one s
   await openAllNotes(page);
   await page.getByRole("main", { name: "Editor" }).getByRole("button", { name: "New note" }).click();
   await expect(editor(page)).toBeFocused();
-  await page.keyboard.type("one");
+  // A new note starts empty, so its heading's mark is typed with it.
+  await page.keyboard.type("# one");
   await expect(page.getByRole("status")).toHaveText("Saved");
   await page.keyboard.type(" two");
   await expect(page.getByRole("status")).toHaveText("Saved");

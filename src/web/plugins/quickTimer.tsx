@@ -80,6 +80,7 @@ export const quickTimer: Plugin = {
 
     host.views.register("bar", {
       id: "quick-timer",
+      live: true,
       component: () => {
         const running = useSyncExternalStore(subscribe, () => now);
         const clock: Clock | null = running && { length: running.length, run: { is: "running", since: running.since } };

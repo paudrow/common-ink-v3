@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { noteCard, openAllNotes, perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
-import { category, group, json, openJson, openOptions, setPlugin, typeJson } from "./settings-helpers.ts";
+import { category, closeSettings, group, json, openJson, openOptions, saveState, setPlugin, settingsDialog, typeJson } from "./settings-helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -17,10 +17,13 @@ const write = async (page: Page, document: Record<string, unknown>) =>
 const problems = (page: Page) => page.getByRole("list", { name: "Problems" }).getByRole("listitem");
 const palette = (page: Page) => page.getByRole("dialog", { name: "Commands" });
 const snippet = (page: Page, title: string) => noteCard(page, title).locator(".card-preview");
-/** Goes back to the Settings page from the list of notes that was opened over it. */
-async function backToSettings(page: Page) {
-  await page.goBack();
-  await expect(page).toHaveURL(/\/settings(\/|$)/);
+/** Opens Settings again over the window from the command palette, at the JSON or at the options. */
+async function backToSettings(page: Page, at: "JSON" | "options" = "options") {
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type(at === "JSON" ? "Open settings JSON" : "Go to Settings");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(at === "JSON" ? /\/settings\/json$/ : /\/settings$/);
+  await expect(at === "JSON" ? json(page) : settingsDialog(page).getByRole("navigation", { name: "Categories" })).toBeVisible();
 }
 const theme = (page: Page) => page.locator("html").getAttribute("data-theme");
 
@@ -28,7 +31,7 @@ async function openSettings(page: Page) {
   await signInAsNewPerson(page, "Ada Lovelace");
   await perform(page, { type: "note.create", text: "# Alpha\n\nThe first lines of Alpha." });
   await page.goto("/settings");
-  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(settingsDialog(page).getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
 }
 
 test("changing a setting in the options writes only that value, keeps the member's other keys, and takes it out again at its default", async ({ page }) => {
@@ -42,7 +45,7 @@ test("changing a setting in the options writes only that value, keeps the member
   await expect.poll(() => theme(page)).toBeNull();
 
   await themeBox.selectOption("dark");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(saveState(page)).toHaveText("Saved");
   await expect.poll(() => theme(page)).toBe("dark");
   await expect.poll(() => stored(page)).toEqual({ "someone.elses": { kept: [1, 2] }, "core.theme": "dark" });
 
@@ -76,17 +79,21 @@ test("a value the options won't take is refused there with the reason, and nothi
 
 test("editing the JSON changes the options and the app, and editing the options changes the JSON", async ({ page }) => {
   await openSettings(page);
+  await closeSettings(page);
   await openAllNotes(page);
   await expect(snippet(page, "Alpha")).toHaveText("The first lines of Alpha.");
-  await backToSettings(page);
+  await backToSettings(page, "JSON");
 
   await typeJson(page, '{\n  "note-list.snippets": false,\n  "core.editorTextSize": 120\n}');
-  await expect(page.getByRole("status")).toHaveText("Saved");
-  await openAllNotes(page);
+  await expect(saveState(page)).toHaveText("Saved");
+  // The list of notes under Settings has it at once, before Settings is closed.
+  await expect(noteCard(page, "Alpha")).not.toContainText("The first lines of Alpha.");
+  await closeSettings(page);
+  await expect(page).toHaveURL(/\/folder\/all$/);
   await expect(noteCard(page, "Alpha")).toBeVisible();
   await expect(noteCard(page, "Alpha")).not.toContainText("The first lines of Alpha.");
   await expect.poll(() => stored(page)).toEqual({ "note-list.snippets": false, "core.editorTextSize": 120 });
-  await backToSettings(page);
+  await backToSettings(page, "JSON");
 
   await openOptions(page);
   await expect(group(page, "Editor").getByRole("spinbutton", { name: "Editor text size" })).toHaveValue("120");
@@ -94,7 +101,7 @@ test("editing the JSON changes the options and the app, and editing the options 
   await expect(noteList.getByRole("checkbox", { name: "Show snippets" })).not.toBeChecked();
 
   await noteList.getByRole("checkbox", { name: "Show snippets" }).check();
-  await openAllNotes(page);
+  await closeSettings(page);
   await expect(snippet(page, "Alpha")).toHaveText("The first lines of Alpha.");
   await backToSettings(page);
   await openJson(page);
@@ -113,11 +120,11 @@ test("a plugin's options are listed under it with their schema and apply without
   await expect(noteList).toContainText("Default: on");
 
   await noteList.getByRole("checkbox", { name: "Show snippets" }).uncheck();
+  await closeSettings(page);
   await openAllNotes(page);
   await expect(noteCard(page, "Alpha")).toBeVisible();
   await expect(noteCard(page, "Alpha")).not.toContainText("The first lines of Alpha.");
   await expect.poll(() => stored(page)).toEqual({ "note-list.snippets": false });
-  await backToSettings(page);
 
   await setPlugin(page, "Note list", false);
   await expect.poll(() => stored(page)).toEqual({ "note-list.snippets": false, "note-list.enabled": false });
@@ -126,6 +133,7 @@ test("a plugin's options are listed under it with their schema and apply without
   await expect(noteList.getByRole("checkbox", { name: "Show snippets" })).not.toBeChecked();
   await noteList.getByRole("link", { name: "About this plugin" }).click();
   await expect(page).toHaveURL(/\/plugins\/note-list$/);
+  await expect(settingsDialog(page), "a link out of Settings closes it").toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: "Note list", exact: true })).not.toBeChecked();
   await openAllNotes(page);
   await expect(page.getByRole("region", { name: "All notes" }).getByRole("link")).toHaveText(["Alpha"]);
@@ -168,27 +176,27 @@ test("a value the schema refuses and a key it doesn't know are flagged in the JS
 test("JSON that can't be read is flagged in both views and isn't saved, and the settings stay as they were", async ({ page }) => {
   await openSettings(page);
   await typeJson(page, '{"core.theme": "dark"}');
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(saveState(page)).toHaveText("Saved");
 
   await typeJson(page, '{"core.theme": "light",');
 
-  await expect(page.getByRole("status")).toHaveText("Not saved until the JSON is fixed");
+  await expect(saveState(page)).toHaveText("Not saved until the JSON is fixed");
   await expect(problems(page)).toHaveText(["The JSON can't be read. Settings are one JSON object, such as {}. Your settings stay as they were until it can."]);
   await expect(page.locator(".settings-json .cm-lintRange-error")).not.toHaveCount(0);
   await expect.poll(() => theme(page)).toBe("dark");
   await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark" });
 
   await openOptions(page);
-  await expect(page.getByRole("alert")).toContainText("The JSON has a mistake in it, so nothing can be changed here until it is fixed.");
+  await expect(settingsDialog(page).getByRole("alert")).toContainText("The JSON has a mistake in it, so nothing can be changed here until it is fixed.");
   await expect((await category(page, "Appearance")).getByRole("combobox", { name: "Theme" })).toBeDisabled();
   await expect((await category(page, "Keyboard shortcuts")).getByRole("button", { name: "Record a key for Undo" })).toBeDisabled();
 
-  await page.getByRole("button", { name: "Show the JSON" }).click();
+  await settingsDialog(page).getByRole("button", { name: "Show the JSON" }).click();
   await expect(json(page)).toHaveText('{"core.theme": "light",');
   await json(page).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.insertText(' "core.editorTextSize": 90}');
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(saveState(page)).toHaveText("Saved");
   await expect.poll(() => theme(page)).toBe("light");
   await expect.poll(() => stored(page)).toEqual({ "core.theme": "light", "core.editorTextSize": 90 });
 });
@@ -244,10 +252,15 @@ test("a keybinding is recorded by pressing it, warned of when another command ha
   await page.keyboard.press("ControlOrMeta+Shift+Y");
   await expect(app).not.toHaveAttribute("data-focus-mode");
 
+  // The palette is the window's, so Settings is closed for it and opened again after.
+  await closeSettings(page);
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.keyboard.type("Toggle focus");
   await expect(palette(page).getByRole("option").first()).toContainText(/Toggle focus.*(⇧⌘Y|Ctrl\+Shift\+Y)/);
   await page.keyboard.press("Escape");
+  await expect(palette(page)).toHaveCount(0);
+  await backToSettings(page);
+  await category(page, "Keyboard shortcuts");
 
   await focusRow.getByRole("button", { name: "Record a key for Toggle focus" }).click();
   await page.keyboard.press("ControlOrMeta+Shift+P");
@@ -292,23 +305,25 @@ test("a keybinding is recorded by pressing it, warned of when another command ha
   await expect.poll(() => stored(page)).toEqual({ "keybindings.view.toggleFocus": ["mod+.", "f8"] });
 });
 
-// The widest is the table as rows of cells under its column names, and the others each command as a card, as the pane has room for: at 560px a card of one column.
-for (const width of [1700, 1280, 900, 560]) {
+// The widest is the table as rows of cells under its column names, and the others each command as a card, as Settings has room for in the window: at 360px a card of one column.
+for (const width of [1700, 900, 560, 360]) {
   test(`recording, adding, removing or resetting a key moves nothing in the table of keyboard shortcuts: every row keeps its box and the page its scroll, at ${width}px`, async ({ page }) => {
     // Keys are named as they are off a Mac, which is longer: Ctrl+Shift+Y for ⇧⌘Y. Off a Mac the modifier is Control whatever machine runs the test.
     await page.addInitScript(() => Object.defineProperty(navigator, "platform", { get: () => "Linux x86_64" }));
     await page.setViewportSize({ width, height: 480 });
     await openSettings(page);
-    await page.goto("/settings/keyboard");
+    // A panel pinned in the window under Settings changes nothing of it.
+    await closeSettings(page);
     await pinPanel(page, "Info");
-    await expect(page.getByRole("status")).toHaveText("Saved");
-    const row = page.getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Toggle inspector/ });
+    await page.goto("/settings/keyboard");
+    await expect(saveState(page)).toHaveText("Saved");
+    const row = settingsDialog(page).getByRole("table", { name: "Keyboard shortcuts" }).getByRole("row", { name: /Toggle inspector/ });
     await row.scrollIntoViewIfNeeded();
-    await page.locator(".page-pane").evaluate((pane) => pane.scrollBy(0, 60));
+    await settingsDialog(page).evaluate((dialog) => dialog.scrollBy(0, 60));
     /** Every row and every cell and button of the table, where it is in the window, and how far down everything that scrolls is. */
     const places = async () => {
       // A change is on its way to the server for a moment, and where things are is read once it is kept.
-      await expect(page.getByRole("status")).toHaveText("Saved");
+      await expect(saveState(page)).toHaveText("Saved");
       return page.evaluate(async () => {
         await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
         const box = (el: Element) => {
@@ -338,7 +353,7 @@ for (const width of [1700, 1280, 900, 560]) {
     expect(before.inside).toBe(true);
     // Which of the three layouts this is: rows of cells under their column names, or a card of two columns or of one.
     const layout = await row.evaluate((tr) => (getComputedStyle(tr).display === "grid" ? `card of ${getComputedStyle(tr).gridTemplateColumns.split(" ").length}` : "cells"));
-    expect(layout).toBe({ 1700: "cells", 1280: "card of 2", 900: "card of 2", 560: "card of 1" }[width]);
+    expect(layout).toBe({ 1700: "cells", 900: "card of 2", 560: "card of 2", 360: "card of 1" }[width]);
     expect(before.rows.length).toBeGreaterThan(8);
 
     await record("Record a key for", "Control+Shift+Y");
@@ -379,12 +394,12 @@ test("one search finds settings in every category and keyboard shortcuts, a cate
   await expect(shown).toHaveText([/^Editor/]);
 
   await search.fill("daily");
-  await expect(categories).toHaveText(["All results5", "Keyboard shortcuts2", "Daily notes3"]);
-  await expect(group(page, "Keyboard shortcuts").getByRole("rowheader")).toHaveText([/daily\.today/, /Disable plugin: Daily notes/]);
+  await expect(categories).toHaveText(["All results9", "Keyboard shortcuts6", "Daily notes3"]);
+  await expect(group(page, "Keyboard shortcuts").getByRole("rowheader")).toHaveText([/daily\.today/, /daily\.yesterday/, /daily\.tomorrow/, /daily\.previous/, /daily\.next/, /Disable plugin: Daily notes/]);
   await expect(categories.first()).toHaveAttribute("aria-current", "page");
   await search.fill("note");
-  // Mentions has a setting about a private note.
-  await expect.poll(names).toEqual(["Editor", "Note list", "Daily notes", "Mentions", "Keyboard shortcuts"]);
+  // Appearance's Text size says what it does to a note's text, and Mentions has a setting about a private note.
+  await expect.poll(names).toEqual(["Editor", "Appearance", "Note list", "Daily notes", "Mentions", "Keyboard shortcuts"]);
   await expect(group(page, "Daily notes").getByRole("textbox", { name: "Daily notes folder" })).toHaveValue("Journal");
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /New note/ })).toBeVisible();
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /Undo/ })).toHaveCount(0);
@@ -393,7 +408,7 @@ test("one search finds settings in every category and keyboard shortcuts, a cate
   await expect.poll(names).toEqual(["Daily notes"]);
   await expect(page).toHaveURL(/\/settings\/plugins\/daily$/);
   await page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: /^All results/ }).click();
-  await expect(shown).toHaveCount(5);
+  await expect(shown).toHaveCount(6);
 
   await search.fill("zzzz");
   await expect(page.locator(".settings-pane")).toHaveText("No setting or keyboard shortcut matches.");
@@ -427,7 +442,7 @@ test("at a narrow width the categories are a menu above the settings, and in the
   await menu.selectOption({ label: "Keyboard shortcuts" });
   await expect(group(page, "Keyboard shortcuts").getByRole("row", { name: /Undo/ })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  const overflowing = await page.evaluate(() => [...document.querySelectorAll(".settings-pane *")].filter((el) => el.getBoundingClientRect().right > document.querySelector(".main")!.getBoundingClientRect().right + 1).length);
+  const overflowing = await page.evaluate(() => [...document.querySelectorAll(".settings-pane *")].filter((el) => el.getBoundingClientRect().right > document.querySelector("dialog.settings-overlay")!.getBoundingClientRect().right + 1).length);
   expect(overflowing).toBe(0);
 });
 
@@ -470,8 +485,8 @@ test("the Settings page is there by its address with every plugin off, and from 
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toHaveCount(0);
 
   await page.goto("/settings");
-  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Keyboard shortcuts" })).toBeVisible();
+  await expect(settingsDialog(page).getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(settingsDialog(page).getByRole("navigation", { name: "Categories" }).getByRole("link", { name: "Keyboard shortcuts" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "On", exact: true })).toHaveCount(0);
   await setPlugin(page, "Sidebar", true);
   await setPlugin(page, "Command palette", true);
@@ -480,6 +495,7 @@ test("the Settings page is there by its address with every plugin off, and from 
   await page.getByRole("complementary", { name: "Sidebar" }).getByRole("button", { name: /Ada/ }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings$/);
+  await expect(settingsDialog(page).getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
 
   await page.goto("/");
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeVisible();
@@ -487,6 +503,7 @@ test("the Settings page is there by its address with every plugin off, and from 
   await page.keyboard.type("Go to Settings");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
+  await expect(settingsDialog(page).getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
 });
 
 test("a plugin's options are changed on its own page, with the controls, the refusals and the reset Settings has, and the two stay in step", async ({ page }) => {
@@ -598,6 +615,8 @@ test("a plugin that asks to change settings is refused and nothing is written, w
   const sidebar = page.getByRole("complementary", { name: "Sidebar" });
   await expect(sidebar).toContainText("greedy says hello");
 
+  // The palette is the window's, so Settings is closed for it.
+  await closeSettings(page);
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.keyboard.type("Greedy: change my settings");
   await page.keyboard.press("Enter");
@@ -613,6 +632,7 @@ test("a plugin that asks to change settings is refused and nothing is written, w
   await expect.poll(() => theme(page)).toBeNull();
   await expect(sidebar).toContainText("greedy says hello");
 
+  await backToSettings(page);
   await (await category(page, "Greedy")).getByRole("checkbox", { name: "Shout" }).check();
   await expect(sidebar).toContainText("GREEDY SAYS HELLO");
   await expect.poll(() => stored(page)).toEqual({ "greedy.shout": true });
@@ -624,9 +644,9 @@ test("Toggle sidebar and the other commands on the window are in the table of ke
   const sidebarBar = page.getByRole("navigation", { name: "Sidebar bar" });
   const inspector = page.getByRole("complementary", { name: "Inspector" });
   const keys = await category(page, "Keyboard shortcuts");
-  // With the sidebar and the inspector both open, every row's buttons are inside the pane.
+  // Every row's buttons are inside Settings.
   await expect(keys.getByRole("row", { name: /Redo/ })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => [...document.querySelectorAll(".settings-pane *")].filter((el) => el.getBoundingClientRect().right > document.querySelector(".main")!.getBoundingClientRect().right + 1).length)).toBe(0);
+  await expect.poll(() => page.evaluate(() => [...document.querySelectorAll(".settings-pane *")].filter((el) => el.getBoundingClientRect().right > document.querySelector("dialog.settings-overlay")!.getBoundingClientRect().right + 1).length)).toBe(0);
   await page.getByRole("searchbox", { name: "Search settings" }).fill("toggle");
   const row = (title: string) => keys.getByRole("row", { name: new RegExp(title) });
   await expect(row("Toggle sidebar").locator("kbd")).toHaveText([/^(⌘\\|Ctrl\+\\)/]);
@@ -738,7 +758,8 @@ test("the key recorder keeps Tab inside it and closes on Escape from any of its 
   const recorder = page.getByRole("dialog", { name: "Record a key for Toggle focus" });
   const box = recorder.getByRole("group", { name: "Press the keys" });
   await expect(box).toBeFocused();
-  const inside = () => page.evaluate(() => document.activeElement?.closest("[role=dialog]") !== null && document.activeElement !== document.body);
+  // Settings is a dialog too, so inside is inside the recorder itself.
+  const inside = () => page.evaluate(() => document.activeElement?.closest("[role=dialog]")?.getAttribute("aria-label") === "Record a key for Toggle focus");
 
   // Tab went on out of the dialog, to the page behind it, where Escape closed nothing.
   for (let i = 0; i < 6; i++) {
@@ -761,4 +782,107 @@ test("the key recorder keeps Tab inside it and closes on Escape from any of its 
   await page.keyboard.press("Escape");
   await expect(recorder).toHaveCount(0);
   expect(await stored(page)).toEqual({});
+});
+
+test("Settings opened from a note in a split in focus mode leaves focus mode, the split and the note's text where they were, and Escape closes it and gives the cursor back", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const other = await perform(page, { type: "note.create", text: "# Other\n\nAnother note." });
+  const draft = await perform(page, { type: "note.create", text: "# Draft\n\nThe first line of the draft.\n\nThe second line." });
+  await page.goto(`/note/${other.id}`);
+  await page.getByRole("tab", { name: "Other" }).dblclick();
+  await page.goto(`/note/${draft.id}`);
+  await page.getByRole("tab", { name: "Draft" }).dblclick();
+  await page.getByRole("tab", { name: "Draft" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Split right" }).click();
+  const groups = page.getByRole("region", { name: /^Editor group/ });
+  await expect(groups).toHaveCount(2);
+  const tabsOf = (n: number) => page.getByRole("region", { name: `Editor group ${n}` }).getByRole("tab");
+  await expect(tabsOf(1)).toHaveText(["Other"]);
+  await expect(tabsOf(2)).toHaveText(["Draft"]);
+  const editor = page.getByRole("region", { name: "Editor group 2" }).getByRole("textbox", { name: "Note text" });
+  await editor.getByText("The first line of the draft.").click();
+  await page.keyboard.press("End");
+  const app = page.locator(".app");
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(app).toHaveAttribute("data-focus-mode", "true");
+  // In focus the note's group fills the window and the other is out of sight.
+  await expect(groups).toHaveCount(1);
+  const firstLine = async () => {
+    const { x, y, width, height } = (await editor.locator(".cm-line").first().boundingBox())!;
+    return [x, y, width, height];
+  };
+  const before = await firstLine();
+
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type("Go to Settings");
+  await page.keyboard.press("Enter");
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(app, "focus mode under Settings").toHaveAttribute("data-focus-mode", "true");
+  await expect(groups).toHaveCount(1);
+  await expect(tabsOf(2).filter({ visible: true })).toHaveCount(0);
+  expect(await firstLine(), "the note's first line under Settings").toEqual(before);
+
+  await page.keyboard.press("Escape");
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/note/(.*-)?${draft.id}$`));
+  await expect(app).toHaveAttribute("data-focus-mode", "true");
+  expect(await firstLine(), "the note's first line once Settings is closed").toEqual(before);
+  await expect(editor).toBeFocused();
+  // The cursor is where it was: at the end of the line it was put on.
+  await page.keyboard.type("!");
+  await expect(editor.locator(".cm-line").filter({ hasText: "The first line" })).toHaveText("The first line of the draft.!");
+
+  await page.keyboard.press("ControlOrMeta+.");
+  await expect(app).not.toHaveAttribute("data-focus-mode");
+  await expect(groups).toHaveCount(2);
+  await expect(tabsOf(1)).toHaveText(["Other"]);
+  await expect(tabsOf(2)).toHaveText(["Draft"]);
+});
+
+test("Open settings JSON in the command palette opens the JSON in Settings, over the window as it was", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await write(page, { "core.theme": "dark" });
+  const note = await perform(page, { type: "note.create", text: "# Alpha\n\nThe first lines of Alpha." });
+  await page.goto(`/note/${note.id}`);
+  const tabs = page.getByRole("tablist", { name: "Open notes" }).getByRole("tab");
+  await expect(tabs).toHaveText(["Alpha"]);
+
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.keyboard.type("settings");
+  const command = palette(page).getByRole("option", { name: /^Open settings JSON/ });
+  await expect(command).toBeVisible();
+  await command.click();
+
+  await expect(page).toHaveURL(/\/settings\/json$/);
+  await expect(palette(page)).toHaveCount(0);
+  await expect(json(page)).toBeVisible();
+  await expect(json(page)).toHaveText('{"core.theme":"dark"}');
+  await expect(settingsDialog(page).getByRole("button", { name: "Open settings (UI)" })).toBeVisible();
+  await expect(tabs).toHaveText(["Alpha"]);
+
+  await page.keyboard.press("Escape");
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/note/(.*-)?${note.id}$`));
+});
+
+test("the command palette opens over Settings and takes the keys there, and Escape closes it before Settings", async ({ page }) => {
+  await openSettings(page);
+  await settingsDialog(page).getByRole("button", { name: "Close settings" }).focus();
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  const input = palette(page).getByRole("combobox", { name: "Commands" });
+  await expect(input).toBeFocused();
+  await page.keyboard.type("settings JSON");
+  await expect(palette(page).getByRole("option").first()).toContainText("Open settings JSON");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/settings\/json$/);
+  await expect(json(page)).toBeVisible();
+
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await expect(input).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(palette(page)).toHaveCount(0);
+  await expect(settingsDialog(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(settingsDialog(page)).toHaveCount(0);
 });

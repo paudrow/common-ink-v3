@@ -23,6 +23,8 @@ interface Measured {
   mark: { left: number; right: number; top: number; bottom: number; painted: boolean; fontSize: number; weight: number } | null;
   fontSize: number;
   weight: number;
+  /** How wide a space is in the face of the line's words. */
+  space: number;
 }
 
 /** Every line of the note, measured. */
@@ -66,7 +68,16 @@ const measure = (page: Page) =>
         mark = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, painted, fontSize: parseFloat(style.fontSize), weight: Number(style.fontWeight) };
       }
       const style = getComputedStyle(words);
-      return { text: line.textContent!, top: box.top, height: box.height, row, x, mark, fontSize: parseFloat(style.fontSize), weight: Number(style.fontWeight) };
+      // A space in the mark's face, which is the heading's whether or not it has words yet, laid out on the line.
+      const space = document.createElement("span");
+      space.style.cssText = "position: absolute; white-space: pre; visibility: hidden";
+      const face = getComputedStyle(hang?.querySelector("span") ?? hang ?? words);
+      Object.assign(space.style, { fontFamily: face.fontFamily, fontSize: face.fontSize, fontWeight: face.fontWeight, fontStyle: face.fontStyle, fontKerning: face.fontKerning });
+      space.textContent = " ";
+      words.append(space);
+      const spaceWidth = space.getBoundingClientRect().width;
+      space.remove();
+      return { text: line.textContent!, top: box.top, height: box.height, row, x, mark, fontSize: parseFloat(style.fontSize), weight: Number(style.fontWeight), space: spaceWidth };
     });
   }) as Promise<Measured[]>;
 
@@ -133,7 +144,8 @@ for (const width of [1280, 760]) {
       expect(on.mark!.bottom - on.mark!.top, `${says}: the mark has a height`).toBeGreaterThan(8);
       // In the margin: it ends where the words start, and it starts inside the page.
       expect(on.mark!.right, `${says}: the mark ends at the words' left edge`).toBeLessThanOrEqual(on.x + 1);
-      expect(on.x - on.mark!.right, `${says}: the mark stands right beside the words`).toBeLessThanOrEqual(12);
+      // As far as the space the note writes after it, which in a monospaced face is wider than 12px.
+      expect(on.x - on.mark!.right, `${says}: the mark stands right beside the words`).toBeLessThanOrEqual(Math.max(12, on.space + 1));
       expect(on.mark!.left, `${says}: the mark is on the page`).toBeGreaterThanOrEqual(0);
       // Clearly there: as heavy as its heading, and not smaller than body text unless six have to fit.
       expect(on.mark!.weight).toBeGreaterThanOrEqual(600);

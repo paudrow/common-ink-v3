@@ -61,7 +61,7 @@ export const uploads: Plugin = {
     for (const embed of embeds) host.embeds.register(embed);
     host.editorExtensions.register({ id: "uploads", extension: sending.extension });
     host.editorExtensions.register({ id: "upload-inserting", extension: inserting.extension });
-    host.views.register("bar", { id: "uploads", component: () => <SendingStatus sender={sending} /> });
+    host.views.register("bar", { id: "uploads", live: true, component: () => <SendingStatus sender={sending} /> });
     host.views.register("page", { id: "uploads", path: UPLOADS_PATH, label: "Uploads", icon: "uploads", nav: "more", component: (props) => <UploadsPage host={host} sender={sending} {...props} /> });
     host.views.register("page", { id: "file", path: FILE_PATH, label: "File", icon: "text", component: (props) => <FilePage key={props.app.path} host={host} {...props} /> });
     host.views.register("overlay", { id: PREVIEW, component: (props) => <Preview host={host} {...props} /> });

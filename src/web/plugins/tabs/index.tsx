@@ -2,7 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { folderTitle, type EditorProps, type Opened, type Plugin } from "../../plugin-api.ts";
 import { lifecycle } from "../lib/lifecycle.ts";
 import { EditorGroups, showTabMenu } from "./EditorGroups.tsx";
-import { editorReducer, focused, keptLayout, same, type CloseScope, type EditorAction } from "./editorLayout.ts";
+import { editorReducer, focused, keptLayout, notesIn, same, type CloseScope, type EditorAction } from "./editorLayout.ts";
 
 /** Whether the tab in front is this one and, for a page, at this address. */
 const inFront = (tab: Opened | null, opened: Opened) => same(tab, opened) && (tab?.kind !== "page" || opened.kind !== "page" || tab.path === opened.path);
@@ -59,7 +59,10 @@ export const tabs: Plugin = {
       if (focused(next)) homeClosed = false;
       else if (action.type === "close" && focused(layout)?.kind === "page" && focused(layout)?.id === homeId()) homeClosed = true;
       if (next !== layout) {
+        const had = notesIn(layout);
+        const has = notesIn(next);
         layout = next;
+        for (const noteId of had) if (!has.has(noteId)) host.app().left(noteId);
         host.storage.set("layout", layout);
         for (const listener of [...listeners]) listener();
       }

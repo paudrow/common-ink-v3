@@ -12,6 +12,7 @@ import type { Showing } from "./inspected.ts";
 import { layoutOf, reduce, restored, showing, type Side, type SideAction } from "./inspectorState.ts";
 import { advance, chordFor, chordLabel, chordOf, isModifier, pressing, typed } from "./keybindings.ts";
 import { lastChange, relisted, withChanged } from "./knownNotes.ts";
+import { LOOK_SETTINGS, lookOf } from "./look.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { MarkdownReader } from "./MarkdownReader.tsx";
 import { NoteReader } from "./NoteReader.tsx";
@@ -23,12 +24,13 @@ import { BUILT_INS } from "./plugins/index.ts";
 import { Plugins } from "./Plugins.tsx";
 import { referredUploads } from "./referredUploads.ts";
 import { ResizeHandle } from "./resize.tsx";
-import { folderPath, keepsATab, type Navigate, type Place } from "./router.ts";
+import { folderPath, keepsATab, routeOf, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
-import { Settings, type Account } from "./Settings.tsx";
+import { JSON_VIEW, ROOT as SETTINGS, Settings, type Account } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
-import { onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
+import { isOpen, openInAnotherTab } from "./openNotes.ts";
+import { commitTyping, onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
 import { ago, useNow } from "./time.ts";
 import { Toasts } from "./Toasts.tsx";
 import { keptTravels, samePlace, stepped, travelled, type Travel, type Travels } from "./travels.ts";
@@ -52,6 +54,25 @@ type Widths = { sidebar?: number; inspector?: number };
 const isWidths = (v: unknown): v is Widths => typeof v === "object" && v !== null && Object.values(v).every((n) => typeof n === "number" && n > 0);
 const within = ({ min, max }: { min: number; max: number }, width: number) => Math.min(max, Math.max(min, width));
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+const inSettings = (path: string) => path === SETTINGS || path.startsWith(`${SETTINGS}/`);
+const placeAt = (address: string): Place => {
+  const cut = address.indexOf("?");
+  const path = cut < 0 ? address : address.slice(0, cut);
+  return { path, query: cut < 0 ? "" : address.slice(cut), state: null, route: routeOf(path) };
+};
+const HOME = placeAt("/");
+
+/** What a tab kept on the Settings page from before they opened over the window shows. */
+function SettingsMoved({ go }: { go: (path: string) => void }) {
+  return (
+    <p className="notice">
+      Settings open over the window now, wherever you are.{" "}
+      <button type="button" className="button small" onClick={() => go(SETTINGS)}>
+        Open settings
+      </button>
+    </p>
+  );
+}
 /** Where a page that gives no order is placed: after every page that gives one. */
 const UNPLACED = Number.MAX_SAFE_INTEGER;
 /** How often the notes changed since the last look are listed, and the ones in Trash, so an agent's or another member's change to a note or to its state shows up. */
@@ -136,7 +157,18 @@ interface Props {
   reloadWorkspaces: () => Promise<void>;
 }
 
-export function Workspace({ me, workspace, settings, place, navigate, onSwitch, noteIsHere, reloadWorkspaces }: Props) {
+export function Workspace({ me, workspace, settings, place: at, navigate, onSwitch, noteIsHere, reloadWorkspaces }: Props) {
+  /** The address under /settings when the settings are open over the window. */
+  const settingsPath = inSettings(at.path) ? at.path : null;
+  /**
+   * What the window shows: the address's, or with the settings open, what was in front when they
+   * opened, which stays as it was under them. What the editor area puts in front meanwhile, as it does
+   * at `/` on a page opened at a settings address, is kept here and not put in the address.
+   */
+  const under = useRef<Place>(settingsPath ? HOME : at);
+  if (!settingsPath) under.current = at;
+  const [, redraw] = useState(0);
+  const place = settingsPath ? under.current : at;
   const { route } = place;
   const workspaceId = workspace.id;
   const { role } = workspace;
@@ -196,8 +228,6 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const panelId = useId();
   const [host] = useState(() => {
     let created: Host;
-    // Every session ends, this one with them, so the page is read again signed out.
-    const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
@@ -205,7 +235,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       name: "Common Ink",
       settings: {
         theme: { type: "string", default: "system", enum: ["system", "light", "dark"], title: "Theme", description: "Light or dark, or system to follow this device." },
-        editorTextSize: { type: "integer", default: 100, minimum: 75, maximum: 200, title: "Editor text size", description: "The size of a note's text, as a percentage." },
+        ...LOOK_SETTINGS,
       },
       activate(h) {
         h.commands.register({ id: "notes.all", title: "Open All notes", group: "Navigation", run: () => h.app().openFolder(ALL_NOTES) });
@@ -222,6 +252,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         h.commands.register({ id: "view.toggleFocus", title: "Toggle focus", keys: ["mod+."], group: "Navigation", run: () => inner.current.toggleFocus() });
         h.commands.register({ id: "view.toggleSidebar", title: "Toggle sidebar", keys: ["mod+\\"], group: "Navigation", run: () => inner.current.toggleSidebar() });
         h.commands.register({ id: "view.toggleInspector", title: "Toggle inspector", group: "Navigation", run: () => inner.current.toggleInspector() });
+        h.commands.register({ id: "settings.openJson", title: "Open settings JSON", group: "Navigation", run: () => h.app().go(`${SETTINGS}/${JSON_VIEW}`) });
       },
     };
     /** Kept apart from the rest so their links and commands come after the plugins', where the others come before. */
@@ -229,7 +260,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       id: "plugins",
       name: "Plugins",
       activate(h) {
-        h.views.register("page", { id: "settings", path: "/settings", label: "Settings", nav: "menu", component: ({ app }) => <Settings host={created} store={settings} mac={MAC} path={app.path} go={app.go} storage={() => perform(workspaceId, { type: "upload.storage" })} account={account} /> });
+        // At an address under /settings they are drawn over the window, and this page is never: see `under`. A tab kept on it from before is told so.
+        h.views.register("page", { id: "settings", path: SETTINGS, label: "Settings", nav: "menu", component: ({ app }) => <SettingsMoved go={app.go} /> });
         h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage });
       },
     };
@@ -349,6 +381,18 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   useEffect(() => {
     for (const [added, err] of refused) host.fail(added, err);
   }, [host, refused]);
+  const memberSettings = contributed.settings;
+  const look = useMemo(
+    () => lookOf(memberSettings.values, (key) => Object.hasOwn(memberSettings.document, key) && !memberSettings.problems.some((p) => p.key === key && p.kind === "invalid")),
+    [memberSettings],
+  );
+  const lookKey = JSON.stringify(look);
+  useLayoutEffect(() => {
+    const root = document.documentElement.style;
+    for (const [name, value] of Object.entries(look)) root.setProperty(name, value);
+    return () => Object.keys(look).forEach((name) => root.removeProperty(name));
+    // Set again only when a value differs, not for every new copy of the settings.
+  }, [lookKey]);
   const theme = contributed.settings.values["core.theme"] as string;
   useEffect(() => {
     if (theme === "system") delete document.documentElement.dataset.theme;
@@ -469,6 +513,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   byIdNow.current = byId;
   const show = useCallback(
     (tab: Opened | null, how: { replace?: boolean; move?: boolean } = {}) => {
+      if (inSettings(location.pathname)) {
+        const path = !tab ? "/" : tab.kind === "folder" ? folderPath(tab.id) : tab.kind === "page" ? tab.path : pathTo(byIdNow.current, tab.id);
+        under.current = placeAt(path);
+        return redraw((n) => n + 1);
+      }
       if (!tab) navigate("/");
       else if (tab.kind === "folder") navigate(folderPath(tab.id), how);
       else if (tab.kind === "page") navigate(tab.path, how);
@@ -594,9 +643,14 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
         : contributed.views.page.some((p) => p.id === place.id);
   /** Goes back (-1) or forward (1) through where the member has been: to another note, list or page, or to where the cursor was in a note. */
   const goBy = (by: -1 | 1) => {
-    const here = inFront?.kind === "note" ? cursorIn(inFront.id) : null;
-    const next = stepped(travels.current, by, inFront, here, canGo);
-    if (next === travels.current) return;
+    // With the settings open the member is away from the place under them, as on any page left out of the history: Back closes them and
+    // returns there, and Forward closes them and goes on.
+    const front = settingsPath ? null : inFront;
+    const here = front?.kind === "note" ? cursorIn(front.id) : null;
+    const was = travels.current.at;
+    const next = stepped(travels.current, by, front, here, canGo);
+    if (settingsPath) navigate(under.current.path + under.current.query, { replace: true });
+    if (next === travels.current || (settingsPath && next.at === was)) return;
     travel(next);
     const { place, cursor } = next.stops[next.at]!;
     if (place.kind === "note") {
@@ -616,6 +670,32 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     remember(note);
     openNote(note.id);
   };
+
+  /** A note no tab holds now. One the member made and never wrote in is removed, once what was typed in it is sent and its editor has gone: the server decides, and refuses any other. */
+  const left = (noteId: string) => {
+    const note = byIdNow.current.get(noteId);
+    if (!note || note.title !== "" || note.access !== "edit" || note.state === "trashed") return;
+    setTimeout(() => {
+      if (isOpen(noteId)) return;
+      void commitTyping([noteId])
+        .then(async () => (isOpen(noteId) || (await openInAnotherTab(noteId)) ? null : perform(workspaceId, { type: "note.discard", id: noteId })))
+        .then(
+          (done) => {
+            if (!done) return;
+            setNotes((all) => all && all.filter((n) => n.id !== noteId));
+            learned.current.delete(noteId);
+          },
+          () => {},
+        );
+    });
+  };
+  /** Without an editor area that says which notes it holds, a note is left when the address goes elsewhere. */
+  const lastRouteNote = useRef(routeNoteId);
+  useEffect(() => {
+    const was = lastRouteNote.current;
+    lastRouteNote.current = routeNoteId;
+    if (!editorArea && was && was !== routeNoteId) actions.left(was);
+  });
 
   const moveNote = useCallback(
     async (id: string, folderId: string) => {
@@ -788,6 +868,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
     moveNote,
     noteChanged: remember,
     refresh,
+    left,
     saveNote: async (noteId: string) => saveNow(noteId),
     markSeen,
     toggleOverlay: (id: string, state?: unknown) => setOverlay((open) => (open?.id === id ? null : { id, state })),
@@ -843,6 +924,9 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   /** The bottom bar's items, lowest order first. Sorting keeps those of one order as the plugins added them. */
   const bar = useMemo(() => [...contributed.views.bar].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [contributed.views.bar]);
   const shownOverlay = contributed.views.overlay.find((o) => o.id === overlay?.id);
+  /** What the app tells the member, drawn inside the settings while they are open, where it is above them. */
+  const toasts = <Toasts told={told} onGone={(id) => tell((shown) => shown.filter((t) => t.id !== id))} />;
+  const overlayDrawn = shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} state={overlay?.state} />;
 
   /** The sections, each told when it opens something if the place they are drawn in wants to know. */
   const sections = (opened?: () => void, only?: string) =>
@@ -920,6 +1004,16 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
             <span>{note && `edited ${ago(note.updatedAt, now)} by ${note.updatedBy.name}`}</span>
           </>
         }
+        live={
+          focusMode &&
+          bar
+            .filter((item) => item.live)
+            .map((item) => (
+              <span key={item.id} className="bar-item" data-bar-item={item.id}>
+                <Drawn host={host} view={item} />
+              </span>
+            ))
+        }
         above={
           note &&
           contributed.views.notice.map((notice) => (
@@ -981,8 +1075,11 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   /** Focus is of a group, and the way out of it is in that group. With none drawn the window stays whole, so nothing is hidden with no way back. */
   const focusable = !!editorArea || !passing;
 
+  // Every session ends, this one with them, so the page is read again signed out.
+  const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
+
   return (
-    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--editor-text-scale": (contributed.settings.values["core.editorTextSize"] as number) / 100, "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
+    <div className="app" data-focus-mode={(focusMode && focusable) || undefined} data-bar={bar.length > 0 || undefined} style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}>
       {contributed.views.column.map((column) => (
         <Drawn key={column.id} host={host} view={column} />
       ))}
@@ -1047,8 +1144,23 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           ))}
         </div>
       )}
-      {shownOverlay && <Drawn key={shownOverlay.id} host={host} view={shownOverlay} close={closeOverlay} state={overlay?.state} />}
-      <Toasts told={told} onGone={(id) => tell((shown) => shown.filter((t) => t.id !== id))} />
+      {settingsPath && (
+        <Settings
+          host={host}
+          store={settings}
+          mac={MAC}
+          path={settingsPath}
+          go={navigate}
+          storage={() => perform(workspaceId, { type: "upload.storage" })}
+          account={account}
+          onClose={() => navigate(under.current.path + under.current.query, { replace: true })}
+        >
+          {overlayDrawn}
+          {toasts}
+        </Settings>
+      )}
+      {!settingsPath && overlayDrawn}
+      {!settingsPath && toasts}
     </div>
   );
 }

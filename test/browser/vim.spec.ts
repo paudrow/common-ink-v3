@@ -80,7 +80,7 @@ test("vim mode is off until it is turned on on the Plugins page, and turning it 
   await run(page, "Go to Settings");
   await page.getByRole("button", { name: "Open settings (JSON)" }).click();
   await expect(page.getByRole("textbox", { name: "Settings JSON" })).toContainText('"vim.enabled": true');
-  // Settings is a tab in one group, and the editor still showing in the other has vim at once.
+  // Settings is over the window, where the Plugins page took the place of one editor, and the editor still showing in the other group has vim at once.
   await expect(editors(page)).toHaveCount(1);
   await expect(statusLine(page)).toHaveText(["--NORMAL--"]);
 
