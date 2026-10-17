@@ -24,7 +24,7 @@ import { referredUploads } from "./referredUploads.ts";
 import { ResizeHandle } from "./resize.tsx";
 import { folderPath, keepsATab, type Navigate, type Place } from "./router.ts";
 import { documentOf } from "./settings.ts";
-import { Settings } from "./Settings.tsx";
+import { Settings, type Account } from "./Settings.tsx";
 import type { SettingsStore } from "./settingsStore.ts";
 import { isBoolean, isString, readStored, useStored, writeStored } from "./stored.ts";
 import { onFiled, performInSync, saveNow, undoOrRedo } from "./sync.ts";
@@ -194,6 +194,8 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
   const panelId = useId();
   const [host] = useState(() => {
     let created: Host;
+    // Every session ends, this one with them, so the page is read again signed out.
+    const account: Account = { email: me.person.email, signOutEverywhere: (agents) => perform(workspaceId, { type: "member.signOut", memberId: me.person.id, agents }).then(() => location.assign("/")) };
     const PluginsPage = ({ app }: { app: App }) => <Plugins host={created} store={settings} mac={MAC} path={app.path} go={app.go} />;
     /** What the app itself adds, through the registry the plugins use. It can't be turned off. */
     const core: Plugin = {
@@ -221,7 +223,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
       id: "plugins",
       name: "Plugins",
       activate(h) {
-        h.views.register("page", { id: "settings", path: "/settings", label: "Settings", nav: "menu", component: ({ app }) => <Settings host={created} store={settings} mac={MAC} path={app.path} go={app.go} /> });
+        h.views.register("page", { id: "settings", path: "/settings", label: "Settings", nav: "menu", component: ({ app }) => <Settings host={created} store={settings} mac={MAC} path={app.path} go={app.go} account={account} /> });
         h.views.register("page", { id: "plugins", path: "/plugins", label: "Plugins", icon: "plugin", nav: "more", component: PluginsPage });
       },
     };
@@ -248,6 +250,7 @@ export function Workspace({ me, workspace, settings, place, navigate, onSwitch, 
           setRole: (memberId, as) => perform(workspaceId, { type: "member.setRole", memberId, as }),
           remove: (memberId) => perform(workspaceId, { type: "member.remove", memberId }).then(() => {}),
           leave: () => perform(workspaceId, { type: "member.leave" }).then(() => {}),
+          signOut: (memberId, agents) => perform(workspaceId, { type: "member.signOut", memberId, agents }).then(() => {}),
           invites: () => perform(workspaceId, { type: "invite.list" }),
           revoke: (inviteId) => perform(workspaceId, { type: "invite.revoke", id: inviteId }).then(() => {}),
         },

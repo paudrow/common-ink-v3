@@ -1,7 +1,22 @@
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+} from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
-import { HighlightStyle, ensureSyntaxTree, syntaxHighlighting, syntaxTree } from "@codemirror/language";
-import { forceLinting, lintGutter, linter, type Diagnostic } from "@codemirror/lint";
+import {
+  HighlightStyle,
+  ensureSyntaxTree,
+  syntaxHighlighting,
+  syntaxTree,
+} from "@codemirror/language";
+import {
+  forceLinting,
+  lintGutter,
+  linter,
+  type Diagnostic,
+} from "@codemirror/lint";
 import { Annotation, Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
@@ -11,7 +26,13 @@ import { SettingRow } from "./SettingRow.tsx";
 import type { Host, MemberSettings } from "./pluginHost.ts";
 import { readOnly } from "./readOnly.ts";
 import { documentOf, type Problem } from "./settings.ts";
-import { KEYBOARD, UNKNOWN, filterLayout, layoutOf } from "./settingsLayout.ts";
+import {
+  ACCOUNT,
+  KEYBOARD,
+  UNKNOWN,
+  filterLayout,
+  layoutOf,
+} from "./settingsLayout.ts";
 import { statusLabel, type SettingsStore } from "./settingsStore.ts";
 
 const NOT_JSON = "Settings are one JSON object, such as {}.";
@@ -23,6 +44,13 @@ interface Props {
   /** The address the app is at: `/settings`, or under it a category, such as `/settings/keyboard`, or `/settings/json`. */
   path: string;
   go: (path: string, options?: { replace?: boolean }) => void;
+  account: Account;
+}
+
+/** The person signed in, and ending every session they have. */
+export interface Account {
+  email: string;
+  signOutEverywhere: (agents: boolean) => Promise<void>;
 }
 
 const ROOT = "/settings";
@@ -33,7 +61,7 @@ const JSON_VIEW = "json";
  * of keyboard shortcuts, or as the JSON itself. All of it shows the one document. It belongs to the
  * app, so it is here whatever is turned off.
  */
-export function Settings({ host, store, mac, path, go }: Props) {
+export function Settings({ host, store, mac, path, go, account }: Props) {
   const { settings } = useSyncExternalStore(host.subscribe, host.contributions);
   const text = useSyncExternalStore(store.subscribe, store.text);
   const status = useSyncExternalStore(store.subscribe, store.status);
@@ -48,9 +76,15 @@ export function Settings({ host, store, mac, path, go }: Props) {
     else setDraft(next);
   };
 
-  const problemList = ((draft !== null && !unread) || settings.problems.length > 0) && (
+  const problemList = ((draft !== null && !unread) ||
+    settings.problems.length > 0) && (
     <ul aria-label="Problems" className="settings-problems">
-      {draft !== null && !unread && <li>The JSON can't be read. {NOT_JSON} Your settings stay as they were until it can.</li>}
+      {draft !== null && !unread && (
+        <li>
+          The JSON can't be read. {NOT_JSON} Your settings stay as they were
+          until it can.
+        </li>
+      )}
       {(draft === null || unread) &&
         settings.problems.map((p, i) => (
           <li key={i} data-kind={p.kind}>
@@ -65,19 +99,41 @@ export function Settings({ host, store, mac, path, go }: Props) {
       <div className="settings-head">
         <h1>Settings</h1>
         <span role="status" className="save-state">
-          {draft === null || unread ? statusLabel(status) : "Not saved until the JSON is fixed"}
+          {draft === null || unread
+            ? statusLabel(status)
+            : "Not saved until the JSON is fixed"}
         </span>
-        <button type="button" className="button small" onClick={() => go(asJson ? ROOT : `${ROOT}/${JSON_VIEW}`)}>
+        <button
+          type="button"
+          className="button small"
+          onClick={() => go(asJson ? ROOT : `${ROOT}/${JSON_VIEW}`)}
+        >
           {asJson ? "Open settings (UI)" : "Open settings (JSON)"}
         </button>
       </div>
-      <p className="soon">Yours alone, in this workspace. Only what you change from a default is kept.</p>
+      <p className="soon">
+        Yours alone, in this workspace. Only what you change from a default is
+        kept.
+      </p>
       {/* Above the JSON, where each is underlined. Under the options, where each is said at its own row too, so one that comes or goes with a change moves nothing above it. */}
       {asJson && problemList}
       {asJson ? (
-        <JsonEditor value={draft ?? text} problems={draft === null ? settings.problems : null} locked={unread} onChange={typed} />
+        <JsonEditor
+          value={draft ?? text}
+          problems={draft === null ? settings.problems : null}
+          locked={unread}
+          onChange={typed}
+        />
       ) : (
-        <Options settings={settings} locked={unread ? "unread" : draft !== null ? "json" : null} mac={mac} picked={at} go={go} onSet={host.setSetting} />
+        <Options
+          settings={settings}
+          locked={unread ? "unread" : draft !== null ? "json" : null}
+          mac={mac}
+          picked={at}
+          go={go}
+          onSet={host.setSetting}
+          account={account}
+        />
       )}
       {!asJson && problemList}
     </section>
@@ -93,6 +149,7 @@ interface OptionsProps {
   picked: string;
   go: Props["go"];
   onSet: Host["setSetting"];
+  account: Account;
 }
 
 /** One entry of the list of categories: where it goes, and how much of what is searched for it holds. */
@@ -103,7 +160,15 @@ interface Entry {
   found: number | null;
 }
 
-function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
+function Options({
+  settings,
+  locked,
+  mac,
+  picked,
+  go,
+  onSet,
+  account,
+}: OptionsProps) {
   const [typed, setTyped] = useState("");
   const [modified, setModified] = useState(false);
   /** Whether the member picked one category out of what a search found. Searching again shows them all. */
@@ -112,19 +177,42 @@ function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
   const filtering = needle !== "" || modified;
 
   const whole = layoutOf(settings);
-  const found = filtering ? filterLayout(whole, { needle, modified }, settings.document, mac) : whole;
-  const unknown = filtering ? [] : settings.problems.filter((p) => p.kind === "unknown");
-  const count = (id: string) => (id === KEYBOARD.id ? found.shortcuts.length : (found.categories.find((c) => c.id === id)?.rows.length ?? 0));
-  const entry = ({ id, name }: { id: string; name: string }): Entry => ({ id, name, found: filtering ? count(id) : null });
-  const listed = (plugins: boolean) => found.categories.filter((c) => (c.pluginId !== null) === plugins).map(entry);
-  const own = [...listed(false), ...(found.shortcuts.length > 0 ? [entry(KEYBOARD)] : [])];
+  const found = filtering
+    ? filterLayout(whole, { needle, modified }, settings.document, mac)
+    : whole;
+  const unknown = filtering
+    ? []
+    : settings.problems.filter((p) => p.kind === "unknown");
+  const count = (id: string) =>
+    id === KEYBOARD.id
+      ? found.shortcuts.length
+      : (found.categories.find((c) => c.id === id)?.rows.length ?? 0);
+  const entry = ({ id, name }: { id: string; name: string }): Entry => ({
+    id,
+    name,
+    found: filtering ? count(id) : null,
+  });
+  const listed = (plugins: boolean) =>
+    found.categories
+      .filter((c) => (c.pluginId !== null) === plugins)
+      .map(entry);
+  // Account holds no setting, so a search never finds it.
+  const own = [
+    ...listed(false),
+    ...(found.shortcuts.length > 0 ? [entry(KEYBOARD)] : []),
+    ...(filtering ? [] : [entry(ACCOUNT)]),
+  ];
   const plugins = listed(true);
   const rest = unknown.length > 0 ? [entry(UNKNOWN)] : [];
   const entries = [...own, ...plugins, ...rest];
   const all = filtering && !narrowed;
-  const current = all ? null : (entries.find((e) => e.id === picked) ?? entries[0] ?? null);
+  const current = all
+    ? null
+    : (entries.find((e) => e.id === picked) ?? entries[0] ?? null);
   const shown = (id: string) => all || current?.id === id;
-  const total = found.categories.reduce((sum, c) => sum + c.rows.length, 0) + found.shortcuts.length;
+  const total =
+    found.categories.reduce((sum, c) => sum + c.rows.length, 0) +
+    found.shortcuts.length;
 
   const pick = (id: string | null) => {
     setNarrowed(id !== null);
@@ -161,15 +249,33 @@ function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
     <>
       {locked === "json" && (
         <p role="alert" className="settings-locked">
-          The JSON has a mistake in it, so nothing can be changed here until it is fixed.{" "}
-          <button type="button" className="button small" onClick={() => go(`${ROOT}/${JSON_VIEW}`)}>
+          The JSON has a mistake in it, so nothing can be changed here until it
+          is fixed.{" "}
+          <button
+            type="button"
+            className="button small"
+            onClick={() => go(`${ROOT}/${JSON_VIEW}`)}
+          >
             Show the JSON
           </button>
         </p>
       )}
       <div className="settings-tools">
-        <input type="search" className="filter" aria-label="Search settings" placeholder="Search settings and keyboard shortcuts" value={typed} onChange={(e) => search({ typed: e.target.value })} />
-        <button type="button" className="button small" aria-pressed={modified} title="Show only what you changed from its default" onClick={() => search({ modified: !modified })}>
+        <input
+          type="search"
+          className="filter"
+          aria-label="Search settings"
+          placeholder="Search settings and keyboard shortcuts"
+          value={typed}
+          onChange={(e) => search({ typed: e.target.value })}
+        />
+        <button
+          type="button"
+          className="button small"
+          aria-pressed={modified}
+          title="Show only what you changed from its default"
+          onClick={() => search({ modified: !modified })}
+        >
           Modified
         </button>
       </div>
@@ -195,74 +301,200 @@ function Options({ settings, locked, mac, picked, go, onSet }: OptionsProps) {
           {rest.map(link)}
         </nav>
         {/* The same list for a window too narrow to keep it beside the settings. Only one of the two is ever shown. */}
-        <select className="settings-pick" aria-label="Category" value={current?.id ?? ""} onChange={(e) => pick(e.target.value || null)}>
+        <select
+          className="settings-pick"
+          aria-label="Category"
+          value={current?.id ?? ""}
+          onChange={(e) => pick(e.target.value || null)}
+        >
           {filtering && <option value="">All results ({total})</option>}
           {own.map(option)}
-          {plugins.length > 0 && <optgroup label="Plugins">{plugins.map(option)}</optgroup>}
+          {plugins.length > 0 && (
+            <optgroup label="Plugins">{plugins.map(option)}</optgroup>
+          )}
           {rest.map(option)}
         </select>
-        <fieldset disabled={locked !== null} className="settings-pane" data-list>
-          {filtering && total === 0 && <p className="soon">{modified && !needle ? "You haven't changed anything from its default." : "No setting or keyboard shortcut matches."}</p>}
-          {found.categories
-            .filter((c) => shown(c.id))
-            .map((category) => (
-              <section key={category.id} aria-label={category.name} className="settings-group">
-                <h2>
-                  {category.name}
-                  {category.pluginId !== null && (
-                    <a
-                      href={`/plugins/${category.pluginId}`}
-                      className="settings-about-plugin"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        go(`/plugins/${category.pluginId}`);
-                      }}
-                    >
-                      About this plugin
-                    </a>
+        {current?.id === ACCOUNT.id ? (
+          <div className="settings-pane">
+            <AccountSection account={account} />
+          </div>
+        ) : (
+          <fieldset
+            disabled={locked !== null}
+            className="settings-pane"
+            data-list
+          >
+            {filtering && total === 0 && (
+              <p className="soon">
+                {modified && !needle
+                  ? "You haven't changed anything from its default."
+                  : "No setting or keyboard shortcut matches."}
+              </p>
+            )}
+            {found.categories
+              .filter((c) => shown(c.id))
+              .map((category) => (
+                <section
+                  key={category.id}
+                  aria-label={category.name}
+                  className="settings-group"
+                >
+                  <h2>
+                    {category.name}
+                    {category.pluginId !== null && (
+                      <a
+                        href={`/plugins/${category.pluginId}`}
+                        className="settings-about-plugin"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          go(`/plugins/${category.pluginId}`);
+                        }}
+                      >
+                        About this plugin
+                      </a>
+                    )}
+                  </h2>
+                  {category.rows.some((d) => !d.active) && (
+                    <p className="soon">
+                      {category.name} is off, so its options change nothing
+                      until it is turned on on the Plugins page.
+                    </p>
                   )}
-                </h2>
-                {category.rows.some((d) => !d.active) && <p className="soon">{category.name} is off, so its options change nothing until it is turned on on the Plugins page.</p>}
-                {category.rows.map((d) => (
-                  <SettingRow
-                    key={d.key}
-                    declared={d}
-                    value={settings.values[d.key]!}
-                    modified={Object.hasOwn(settings.document, d.key)}
-                    problems={settings.problems.filter((p) => p.key === d.key)}
-                    mac={mac}
-                    onSet={(value) => onSet(d.key, value)}
-                  />
+                  {category.rows.map((d) => (
+                    <SettingRow
+                      key={d.key}
+                      declared={d}
+                      value={settings.values[d.key]!}
+                      modified={Object.hasOwn(settings.document, d.key)}
+                      problems={settings.problems.filter(
+                        (p) => p.key === d.key,
+                      )}
+                      mac={mac}
+                      onSet={(value) => onSet(d.key, value)}
+                    />
+                  ))}
+                </section>
+              ))}
+            {shown(KEYBOARD.id) && found.shortcuts.length > 0 && (
+              <section aria-label={KEYBOARD.name} className="settings-group">
+                <h2>{KEYBOARD.name}</h2>
+                <p className="soon">
+                  Record a key for a command by pressing it. A key you choose is
+                  taken from a command that only had it by default.
+                </p>
+                <KeyboardShortcuts
+                  shortcuts={found.shortcuts}
+                  all={whole.shortcuts}
+                  mac={mac}
+                  onSet={onSet}
+                />
+              </section>
+            )}
+            {shown(UNKNOWN.id) && unknown.length > 0 && (
+              <section aria-label={UNKNOWN.name} className="settings-group">
+                <h2>{UNKNOWN.name}</h2>
+                <p className="soon">
+                  These are in your JSON and do nothing. They are kept until you
+                  remove them.
+                </p>
+                {unknown.map((p) => (
+                  <div key={p.key} className="setting" data-row>
+                    <div className="setting-head">
+                      <code>{p.key}</code>
+                      <button
+                        type="button"
+                        className="button small"
+                        aria-label={`Remove ${p.key}`}
+                        onClick={() => onSet(p.key, undefined)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <p className="error">{p.reason}</p>
+                  </div>
                 ))}
               </section>
-            ))}
-          {shown(KEYBOARD.id) && found.shortcuts.length > 0 && (
-            <section aria-label={KEYBOARD.name} className="settings-group">
-              <h2>{KEYBOARD.name}</h2>
-              <p className="soon">Record a key for a command by pressing it. A key you choose is taken from a command that only had it by default.</p>
-              <KeyboardShortcuts shortcuts={found.shortcuts} all={whole.shortcuts} mac={mac} onSet={onSet} />
-            </section>
-          )}
-          {shown(UNKNOWN.id) && unknown.length > 0 && (
-            <section aria-label={UNKNOWN.name} className="settings-group">
-              <h2>{UNKNOWN.name}</h2>
-              <p className="soon">These are in your JSON and do nothing. They are kept until you remove them.</p>
-              {unknown.map((p) => (
-                <div key={p.key} className="setting" data-row>
-                  <div className="setting-head">
-                    <code>{p.key}</code>
-                    <button type="button" className="button small" aria-label={`Remove ${p.key}`} onClick={() => onSet(p.key, undefined)}>
-                      Remove
-                    </button>
-                  </div>
-                  <p className="error">{p.reason}</p>
-                </div>
-              ))}
-            </section>
-          )}
-        </fieldset>
+            )}
+          </fieldset>
+        )}
       </div>
     </>
+  );
+}
+
+/** Kept apart from the settings, so JSON that can't be read never stands between a person and signing out everywhere. */
+function AccountSection({ account }: { account: Account }) {
+  const [asked, ask] = useState(false);
+  const [agents, setAgents] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const signOut = async () => {
+    setError(null);
+    try {
+      await account.signOutEverywhere(agents);
+    } catch (err) {
+      ask(false);
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <section aria-label={ACCOUNT.name} className="settings-group">
+      <h2>{ACCOUNT.name}</h2>
+      <p className="soon">Signed in as {account.email}, with Google.</p>
+      <div className="setting" data-row>
+        <div className="setting-head">
+          <span>Sign out everywhere</span>
+        </div>
+        <p className="setting-about">
+          Signs you out of Common Ink in every browser you are signed in on,
+          this one too, in every workspace. Use it after signing in on a
+          computer that isn't yours, or losing one. It disconnects your agents
+          too, unless you say otherwise: connect again the ones you still trust.
+        </p>
+        <div className="setting-control">
+          {asked ? (
+            <span
+              className="confirm"
+              role="group"
+              aria-label="Sign out everywhere"
+            >
+              <span>Every browser, this one too, is signed out at once.</span>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={agents}
+                  onChange={(e) => setAgents(e.target.checked)}
+                />
+                <span>Also disconnect my agents</span>
+              </label>
+              <button
+                type="button"
+                className="button small primary"
+                autoFocus
+                onClick={() => void signOut()}
+              >
+                Sign out everywhere
+              </button>
+              <button type="button" className="link" onClick={() => ask(false)}>
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="button small"
+              onClick={() => ask(true)}
+            >
+              Sign out everywhere…
+            </button>
+          )}
+        </div>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -277,26 +509,53 @@ const jsonHighlighting = syntaxHighlighting(
 );
 
 /** What to underline in the JSON: where it stops being JSON, or each key the schema has a problem with. */
-function diagnose(state: EditorState, problems: readonly Problem[] | null): Diagnostic[] {
-  const tree = ensureSyntaxTree(state, state.doc.length, 1000) ?? syntaxTree(state);
+function diagnose(
+  state: EditorState,
+  problems: readonly Problem[] | null,
+): Diagnostic[] {
+  const tree =
+    ensureSyntaxTree(state, state.doc.length, 1000) ?? syntaxTree(state);
   if (!problems) {
     const broken: { from: number; to: number }[] = [];
-    tree.iterate({ enter: (node) => void (node.type.isError && broken.push({ from: node.from, to: node.to })) });
+    tree.iterate({
+      enter: (node) =>
+        void (
+          node.type.isError && broken.push({ from: node.from, to: node.to })
+        ),
+    });
     const at = broken[0];
     // A mistake at the very end has no text of its own, so the character before it is marked.
-    const to = at ? Math.min(Math.max(at.to, at.from + 1), state.doc.length) : state.doc.length;
+    const to = at
+      ? Math.min(Math.max(at.to, at.from + 1), state.doc.length)
+      : state.doc.length;
     const from = at ? Math.min(at.from, Math.max(0, to - 1)) : 0;
-    return [{ from, to, severity: "error", message: at ? `This isn't JSON from here. ${NOT_JSON}` : NOT_JSON }];
+    return [
+      {
+        from,
+        to,
+        severity: "error",
+        message: at ? `This isn't JSON from here. ${NOT_JSON}` : NOT_JSON,
+      },
+    ];
   }
   const found: Diagnostic[] = [];
-  for (let property = tree.topNode.firstChild?.firstChild; property; property = property.nextSibling) {
+  for (
+    let property = tree.topNode.firstChild?.firstChild;
+    property;
+    property = property.nextSibling
+  ) {
     const name = property.getChild("PropertyName");
     const value = property.lastChild;
     if (!name || !value) continue;
     const key = JSON.parse(state.sliceDoc(name.from, name.to)) as string;
     for (const p of problems.filter((p) => p.key === key)) {
       const on = p.kind === "unknown" ? name : value;
-      found.push({ from: on.from, to: on.to, severity: p.kind === "invalid" ? "error" : "warning", message: p.reason });
+      found.push({
+        from: on.from,
+        to: on.to,
+        severity: p.kind === "invalid" ? "error" : "warning",
+        message: p.reason,
+      });
     }
   }
   return found;
@@ -333,11 +592,17 @@ function JsonEditor({ value, problems, locked, onChange }: JsonProps) {
           json(),
           jsonHighlighting,
           lintGutter(),
-          linter((v) => diagnose(v.state, now.current.problems), { delay: 100 }),
+          linter((v) => diagnose(v.state, now.current.problems), {
+            delay: 100,
+          }),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ "aria-label": "Settings JSON" }),
           EditorView.updateListener.of((u) => {
-            if (u.docChanged && !u.transactions.some((tr) => tr.annotation(external))) now.current.onChange(u.state.doc.toString());
+            if (
+              u.docChanged &&
+              !u.transactions.some((tr) => tr.annotation(external))
+            )
+              now.current.onChange(u.state.doc.toString());
           }),
         ],
       }),
@@ -352,12 +617,19 @@ function JsonEditor({ value, problems, locked, onChange }: JsonProps) {
     const view = viewRef.current;
     if (!view) return;
     // Not filtered, so the settings as they arrive reach an editor that is still locked.
-    if (view.state.doc.toString() !== value) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, filter: false, annotations: external.of(true) });
+    if (view.state.doc.toString() !== value)
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: value },
+        filter: false,
+        annotations: external.of(true),
+      });
     forceLinting(view);
   }, [value, problems]);
 
   useEffect(() => {
-    viewRef.current?.dispatch({ effects: lock.reconfigure(locked ? readOnly : []) });
+    viewRef.current?.dispatch({
+      effects: lock.reconfigure(locked ? readOnly : []),
+    });
   }, [locked, lock]);
 
   return <div className="settings-json" ref={parent} />;

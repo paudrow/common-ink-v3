@@ -189,6 +189,7 @@ export type KeptFromPerform =
   | "member.setRole"
   | "member.remove"
   | "member.leave"
+  | "member.signOut"
   | `grant.${string}`
   | "note.setPrivate"
   | "upload.setPrivate"
@@ -312,6 +313,8 @@ export interface PluginHost {
     remove(memberId: string): Promise<void>;
     /** Takes the member themself out of the workspace. */
     leave(): Promise<void>;
+    /** Signs a member out of every browser they are signed in on, and the member themself when it is their id. With `agents`, disconnects their agents too. */
+    signOut(memberId: string, agents: boolean): Promise<void>;
     invites(): Promise<Invite[]>;
     revoke(inviteId: string): Promise<void>;
   };

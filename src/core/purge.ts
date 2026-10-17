@@ -1,4 +1,5 @@
 import { TRASH_MS } from "./lifecycle.ts";
+import { logLine } from "./logs.ts";
 
 /**
  * Removing a note from Trash is the one place the record of a note is deleted: the note, its
@@ -79,7 +80,7 @@ async function remove(db: D1Database, ids: readonly string[], due: number): Prom
  */
 export const forgetRemoved = (db: D1Database) => db.prepare("INSERT INTO note_search (note_search) VALUES ('optimize')").run();
 
-export async function purgeTrash(db: D1Database, now: number, log: (message: string) => void = console.error): Promise<Purged> {
+export async function purgeTrash(db: D1Database, now: number, log: (message: string) => void = logLine): Promise<Purged> {
   const purged = await purgeDue(db, now, log);
   if (purged.removed) await forgetRemoved(db).catch((err: unknown) => log(`Couldn't merge the search index after removing notes: ${err instanceof Error ? err.message : String(err)}`));
   return purged;

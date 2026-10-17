@@ -10,17 +10,23 @@ export interface SignInIdentity {
 }
 
 /** The person with this email, created with a workspace of their own the first time they sign in. */
-export async function signIn(db: D1Database, identity: SignInIdentity, now = Date.now()): Promise<{ personId: string }> {
+export async function signIn(db: D1Database, identity: SignInIdentity, now = Date.now()): Promise<{ personId: string; sessionsEnded: number }> {
   const email = identity.email.trim().toLowerCase();
   const name = identity.name.trim() || email;
   await db
     .prepare("INSERT INTO people (id, email, name, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (email) DO NOTHING")
     .bind(newId(), email, name, now)
     .run();
-  const person = await db.prepare("SELECT id FROM people WHERE email = ?").bind(email).first<{ id: string }>();
-  if (!person) throw new Error(`no person for ${email} after sign-in`);
+  const person = await db.prepare("SELECT id, sessions_ended FROM people WHERE email = ?").bind(email).first<{ id: string; sessions_ended: number }>();
+  if (!person) throw new Error("no person for that email after sign-in");
   await arrive(db, person.id, now);
-  return { personId: person.id };
+  return { personId: person.id, sessionsEnded: person.sessions_ended };
+}
+
+/** Whether a session started when the person's sessions had been ended `sessionsEnded` times still holds: none has been ended since. */
+export async function sessionHolds(db: D1Database, personId: string, sessionsEnded: number): Promise<boolean> {
+  const person = await db.prepare("SELECT sessions_ended FROM people WHERE id = ?").bind(personId).first<{ sessions_ended: number }>();
+  return person?.sessions_ended === sessionsEnded;
 }
 
 /** An invite `i` lets someone in only while whoever made it is still an admin of its workspace. Checked as it is taken up. */

@@ -3,6 +3,7 @@
 // never has a session cookie, so a web page can't make it act. See docs/mcp.md.
 import { authenticateAgent, type ConnectedAgent } from "../../core/agents.ts";
 import type { Sources } from "../../core/sources.ts";
+import { logFault } from "../../core/logs.ts";
 import { BROKE } from "../../core/protocol.ts";
 import { callTool, toolList } from "./tools.ts";
 
@@ -57,7 +58,7 @@ export async function handleMcp(req: Request, env: Env, sources?: Sources): Prom
   for (const message of messages) {
     // One message that hits a fault is answered so, under its own id, and the rest of a batch is still answered.
     const answer = await handleMessage(env, agent, message, sources).catch((err: unknown) => {
-      console.error("An MCP message broke", err);
+      logFault("An MCP message", err);
       const id = (message as { id?: unknown } | null)?.id;
       return fail(typeof id === "string" || typeof id === "number" ? id : null, -32603, BROKE);
     });

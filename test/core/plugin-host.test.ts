@@ -27,7 +27,7 @@ function hostWith(plugins: Plugin[], options: Partial<HostOptions> = {}) {
       app: () => ({ go: (path: string) => void went.push(path) }) as App,
       perform: (async (op: { type: string }) => void performed.push([plugin.id, op.type])) as PluginHost["perform"],
       agents: { list: async () => [], connect: async () => ({}) as never, edit: async () => ({}) as never, disconnect: async () => {} },
-      members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, invites: async () => [], revoke: async () => {} },
+      members: { invite: async () => ({}) as never, setRole: async () => ({}) as never, remove: async () => {}, leave: async () => {}, signOut: async () => {}, invites: async () => [], revoke: async () => {} },
       sharing: { of: async () => ({}) as never, grant: async () => ({}) as never, link: async () => null, revoke: async () => {}, setPrivate: async () => ({ removed: 0 }), all: async () => [] },
       uploads: { referred: () => undefined, onReferred: () => () => {}, learn: () => {}, address: (id: string) => `/files/${id}`, tabAddress: () => null, bytes: async (id: string, upTo: number) => new TextEncoder().encode(`${id}:${upTo}`), send: async () => ({ id: "sent" }) as never },
       storage: { get: () => undefined, set: () => {} },
@@ -504,6 +504,7 @@ describe("plugin host", () => {
       { type: "member.setRole", memberId: "aaaaaaaaaaaa", as: "admin" },
       { type: "member.remove", memberId: "aaaaaaaaaaaa" },
       { type: "member.leave" },
+      { type: "member.signOut", memberId: "aaaaaaaaaaaa" },
       { type: "invite.list" },
       { type: "invite.revoke", id: "aaaaaaaaaaaa" },
     ];
@@ -1051,7 +1052,7 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
           app: () => ({}) as App,
           perform: reaching("perform"),
           agents: { list: reaching("agents.list"), connect: reaching("agents.connect"), disconnect: reaching("agents.disconnect") },
-          members: { invite: reaching("members.invite"), setRole: reaching("members.setRole"), remove: reaching("members.remove"), leave: reaching("members.leave"), invites: reaching("members.invites"), revoke: reaching("members.revoke") },
+          members: { invite: reaching("members.invite"), setRole: reaching("members.setRole"), remove: reaching("members.remove"), leave: reaching("members.leave"), signOut: reaching("members.signOut"), invites: reaching("members.invites"), revoke: reaching("members.revoke") },
           sharing: { of: reaching("sharing.of"), grant: reaching("sharing.grant"), link: reaching("sharing.link"), revoke: reaching("sharing.revoke"), setPrivate: reaching("sharing.setPrivate"), all: reaching("sharing.all") },
           storage: { get: () => undefined, set: () => {} },
         }) as never,
@@ -1063,10 +1064,10 @@ describe("what a plugin adds to the editor, and hears of the app", () => {
       for (const [name, call] of every(hosts.get(who)!)) await expect(call(), `${who} ${name}`).rejects.toThrow(`${who} isn't given host.${name}: only Common Ink's own plugins are`);
     }
     expect(reached).toEqual([]);
-    expect(every(hosts.get("Theirs")!).map(([name]) => name)).toHaveLength(15);
+    expect(every(hosts.get("Theirs")!).map(([name]) => name)).toHaveLength(16);
 
     for (const [, call] of every(hosts.get("Sharing")!)) await call();
-    expect(reached).toHaveLength(15);
+    expect(reached).toHaveLength(16);
   });
 });
 

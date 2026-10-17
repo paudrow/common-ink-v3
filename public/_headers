@@ -1,0 +1,7 @@
+# The built files under /assets/ are served without the Worker (run_worker_first in wrangler.jsonc),
+# so they are given here what src/worker/headers.ts gives every other response: nosniff, the referrer
+# rule, and the policy of what runs and draws nothing. test/core/headers.test.ts holds the two in step.
+/assets/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
