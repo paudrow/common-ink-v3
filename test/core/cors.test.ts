@@ -25,8 +25,12 @@ const ROUTES: [string, string][] = [
   ["agents", "/api/agents"],
   ["an agent", "/api/agents/aaaaaaaaaaaa"],
   ["what a link opens", "/api/shared/AbCdEfGhIjKlMnOpQrStUvWx"],
+  ["a plugin's operations", "/api/workspaces/aaaaaaaaaaaa/plugins/bbbbbbbbbbbb/ops"],
+  ["a plugin's draft's operations", "/api/workspaces/aaaaaaaaaaaa/plugins/bbbbbbbbbbbb/draft/ops"],
+  ["a full-trust plugin's code", `/api/workspaces/aaaaaaaaaaaa/plugins/bbbbbbbbbbbb/trusted/${"0".repeat(64)}.js`],
   ["agents' MCP", "/mcp"],
   ["an HTML embed's document", "/embed-frame"],
+  ["an HTML embed's document under a token", "/embed-frame/g/tokentokentoken"],
   ["the retiring service worker", "/sw.js"],
 ];
 

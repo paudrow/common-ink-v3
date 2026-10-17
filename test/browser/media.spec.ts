@@ -1,5 +1,5 @@
-import { expect, test, type Frame, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { expect, test, type Frame, type Page, type Request } from "@playwright/test";
+import { perform, signInAsNewPerson, ownFrame, THEIR_FRAMES } from "./helpers.ts";
 import { PLAYER, standIns } from "./media-helpers.ts";
 
 let errors: string[];
@@ -14,7 +14,7 @@ const line = (page: Page, text: string) => page.locator(".cm-line").filter({ has
 const menu = (page: Page) => page.getByRole("listbox");
 const below = (page: Page, embed: string) => page.locator(`.embed-below[data-embed="${embed}"]`);
 /** The documents HTML embeds are running as, which have no address. */
-const running = (page: Page) => page.frames().filter((f) => f.url() === "about:srcdoc");
+const running = (page: Page) => page.frames().filter((f) => f.url() === "about:srcdoc" && !ownFrame(f));
 const runHtml = (page: Page) => below(page, "html").getByRole("button", { name: "Run HTML" });
 const settled = (page: Page) => page.evaluate(() => new Promise((done) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(done)), 50)));
 
@@ -94,7 +94,7 @@ test("a note that writes `::youtube{}`, `::social{}` or `::link{}` shows them as
   await expect(line(page, "::link")).toHaveText("::link{https://example.com/docs The docs}");
   await expect(editor(page).locator(".embed-frame")).toHaveCount(0);
   await expect(page.locator(".embed-below")).toHaveCount(0);
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("\n\n/", { delay: 20 });
@@ -455,7 +455,7 @@ test("an HTML embed can't reach the app, the member's session, the browser's sto
 
   // Opening the note ran nothing.
   await settled(page);
-  expect(page.frames()).toHaveLength(1);
+  expect(page.frames().filter((f) => !ownFrame(f))).toHaveLength(1);
   const pages = await page.evaluate(() => history.length);
   await runHtml(page).click();
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
@@ -596,7 +596,7 @@ test("an HTML embed can't send its frame, or any frame, anywhere: not to a site 
   // Each has had its try: the ones still standing say so, and the ones that left are gone from their frames.
   await page.waitForTimeout(2500);
 
-  const frames = page.frames().filter((f) => f !== page.mainFrame());
+  const frames = page.frames().filter((f) => f !== page.mainFrame() && !ownFrame(f));
   expect(frames.map((f) => f.url()).filter((url) => !url.startsWith(`${app}/embed-frame`) && url !== "about:srcdoc" && url !== "about:blank" && !url.startsWith("chrome-error:")), "no frame is anywhere but its own document, or an error").toEqual([]);
   expect(frames.filter((f) => f.url().startsWith(`${app}/embed-frame`)).map((f) => f.url()), "the frames the app made are where it put them").toEqual(embeds.map(() => `${app}/embed-frame`));
   expect(reached, "nothing reached a site the app frames, or any other").toEqual([]);
@@ -612,7 +612,7 @@ const read = async (page: Page, id: string) => (await perform(page, { type: "not
 test("an HTML embed that takes the keyboard as it runs on opening the note is stopped before a key reaches it, and what the member types stays in the note", async ({ page }) => {
   const note = await open(page, `# Typing\n\n:::html{height=80}\n${STEALS}\n:::\n\nend line\n`);
   await expect(stopped(page)).toContainText("HTML was stopped: it tried to take the keyboard while you were typing.");
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
   await expect(editor(page)).toBeFocused();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("TYPED-AFTER", { delay: 20 });
@@ -621,7 +621,7 @@ test("an HTML embed that takes the keyboard as it runs on opening the note is st
   // Shown again, it runs again and is stopped again: it can't win by trying often.
   await stopped(page).getByRole("button", { name: "Show it again" }).click();
   await expect(stopped(page)).toBeVisible();
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
 });
 
 test("a frame that waits for the member to be typing elsewhere is stopped too, with every key in the note", async ({ page }) => {
@@ -637,7 +637,7 @@ test("a frame that waits for the member to be typing elsewhere is stopped too, w
   const typed = "abcdefghijklmnopqrstuvwxyz0123456789".repeat(2);
   await page.keyboard.type(typed, { delay: 40 });
   await expect(stopped(page)).toBeVisible();
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
   await expect.poll(() => read(page, note.id)).toContain(`end line${typed}`);
 });
 
@@ -682,7 +682,7 @@ test("another site's frame that takes the keyboard is stopped the same way", asy
   await page.keyboard.press("ControlOrMeta+End");
   await below(page, "video").getByRole("button", { name: /^Play video/ }).click();
   await expect(stopped(page)).toContainText("Video was stopped: it tried to take the keyboard while you were typing.");
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
   await expect(editor(page)).toBeFocused();
   await page.keyboard.type("TYPED", { delay: 20 });
   await expect.poll(() => read(page, note.id)).toContain("TYPED");
@@ -749,6 +749,8 @@ test("a playing video goes on through vim's operators, undo and redo, and plugin
   await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
   await below(page, "video").getByRole("button", { name: /^Play video/ }).click();
   await expect.poll(() => player(page)?.url()).toContain("dQw4w9WgXcQ");
+  // The player's own script has run, so there is a load to tell later ones from.
+  await expect.poll(async () => (await playing(player(page)!)).born).toBeTruthy();
   const { born } = await playing(player(page)!);
   await watch(page, "video");
   let ticks = 0;
@@ -842,7 +844,7 @@ for (const scheme of ["light", "dark"] as const) {
     expect(inside).toEqual(await page.evaluate(colours));
     expect(inside).toEqual(scheme === "dark" ? ["rgb(23, 23, 22)", "rgb(232, 230, 227)"] : ["rgb(251, 250, 248)", "rgb(31, 30, 28)"]);
     // The document around the embed's own has no colour to show through before it, or beside it.
-    await expect.poll(() => page.frames().find((f) => f.url().endsWith("/embed-frame"))!.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+    await expect.poll(() => page.frames().find((f) => f.url().endsWith("/embed-frame") && !ownFrame(f))!.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
   });
 }
 
@@ -857,7 +859,7 @@ test("HTML is not handed to a frame whose document came without what shuts it in
   await open(page, "# Open\n\n:::html{height=80}\n<b>hello</b><script>window.ran = true;</script>\n:::\n\nlast\n");
   await expect(below(page, "html").getByRole("alert")).toHaveText("This browser wouldn't load the frame HTML runs in, so nothing was run.", { timeout: 15_000 });
   expect(running(page)).toEqual([]);
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(THEIR_FRAMES)).toHaveCount(0);
 });
 
 test("HTML asks first where embeds have no site of their own, runs by itself once its room is on screen where they have, and the member's choice wins either way", async ({ page }) => {
@@ -909,10 +911,11 @@ test("HTML asks first where embeds have no site of their own, runs by itself onc
 });
 
 /** Counts each time an HTML embed's shell is asked for, from here on. */
+/** The HTML embeds' documents asked for so far. Common Ink's own plugins that run shut off load the same document, in frames of their own name, which a frame has once it is there. */
 function shells(page: Page) {
-  const asked: string[] = [];
-  page.on("request", (request) => void (new URL(request.url()).pathname === "/embed-frame" && asked.push(request.url())));
-  return asked;
+  const asked: Request[] = [];
+  page.on("request", (request) => void (new URL(request.url()).pathname === "/embed-frame" && asked.push(request)));
+  return () => asked.filter((request) => request.frame().name() !== "ink-own-plugin").map((request) => request.url());
 }
 
 test("an HTML body being written runs nothing at each key: what was written runs once the cursor has left the block", async ({ page }) => {
@@ -921,17 +924,17 @@ test("an HTML body being written runs nothing at each key: what was written runs
   await open(page, "# Writing\n\n:::html{height=80}\n<p>first</p>\n:::\n\nafter\n");
   const framed = page.frameLocator('.embed-below[data-embed="html"] iframe').frameLocator("iframe");
   await expect(framed.getByText("first")).toBeVisible();
-  expect(asked).toHaveLength(1);
+  expect(asked()).toHaveLength(1);
   // Half-written, this would loop for ever: it must not run until the cursor leaves.
   await goTo(page, 4);
   await page.keyboard.type("<script>let i = 0; while (i < 3) { i }</script><p>second</p>");
   await settled(page);
   await page.waitForTimeout(300);
-  expect(asked, "nothing ran while the body was written").toHaveLength(1);
+  expect(asked(), "nothing ran while the body was written").toHaveLength(1);
   await expect(framed.getByText("first")).toBeVisible();
   await page.keyboard.press("ControlOrMeta+Home");
   await expect(page.locator(".cm-line").filter({ hasText: "while (i < 3)" })).toHaveCount(0);
-  await expect.poll(() => asked.length).toBe(2);
+  await expect.poll(() => asked().length).toBe(2);
 });
 
 test("an HTML embed in a pane is run only once its room is in sight in that pane, not because it is inside the window", async ({ page }) => {

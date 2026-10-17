@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { folderRow, listedNote, openAllNotes, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { folderRow, listedNote, openAllNotes, ownPlugin, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
 import { settingsDialog } from "./settings-helpers.ts";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "Inspector" });
@@ -123,7 +123,8 @@ test("the bar has the same icons in the same places whatever is in front and how
     expect(await drawn(page), `${kind}, closed`).toEqual(first);
     for (const [name, text] of Object.entries(says)) {
       await icon(page, name).click();
-      await expect(body(page), `${name} for ${kind}`).toHaveText(text);
+      // Backlinks runs shut off, so what it says for a note is in its frame.
+      await expect(name === "Backlinks" && kind === "a note" ? ownPlugin(page, "Backlinks").locator("body") : body(page), `${name} for ${kind}`).toHaveText(text);
       expect(await drawn(page), `${kind}, ${name} over the page`).toEqual(first);
       await pin(page).click();
       await expect(pin(page)).toHaveAttribute("aria-pressed", "true");

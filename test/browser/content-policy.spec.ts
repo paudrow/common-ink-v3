@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { perform, signInAsNewPerson } from "./helpers.ts";
+import { perform, showPanel, signInAsNewPerson } from "./helpers.ts";
+import { frameFor, install, runCommand, toast, turnOn } from "./third-party-helpers.ts";
 import { standIns } from "./media-helpers.ts";
 import { pdf } from "./pdfs.ts";
 
@@ -137,7 +138,7 @@ test("a video's picture and player, posts and an HTML embed are drawn and run un
   const res = await page.goto(`/note/${note.id}`);
   const policy = res!.headers()["content-security-policy"]!;
   expect(policy.split(",")).toHaveLength(1);
-  expect(policy).toMatch(/frame-src \S+\/embed-frame https:\/\/www\.youtube-nocookie\.com https:\/\/platform\.twitter\.com https:\/\/embed\.bsky\.app;/);
+  expect(policy).toMatch(/frame-src \S+\/embed-frame \S+\/embed-frame\/g\/ https:\/\/www\.youtube-nocookie\.com https:\/\/platform\.twitter\.com https:\/\/embed\.bsky\.app;/);
 
   const below = (embed: string) => page.locator(`.embed-below[data-embed="${embed}"]`);
   // The video's picture and its title, from YouTube, then its player once play is pressed.
@@ -247,4 +248,58 @@ test("an upload's bytes keep their own sealed policy under the page's, in place 
   expect(await headers(`/api/workspaces/${html.workspaceId}/uploads/${html.id}`)).toEqual([200, sealed, "attachment", "nosniff", "same-origin"]);
   const missing = await headers(`/api/workspaces/${pdf.workspaceId}/uploads/zzzzzzzzzzzz`);
   expect(missing.slice(0, 2)).toEqual([404, "default-src 'none'; frame-ancestors 'none'"]);
+});
+
+const SAYS = `
+const say = (text) => { const p = document.createElement("p"); p.className = "said"; p.textContent = text; ink.root.append(p); };
+ink.onCommand("hello", () => ink.notify("Hello from a frame"));
+if (ink.context.kind === "view") say("A " + ink.context.slot + " view");
+if (ink.context.kind === "embed") say("An embed");
+`;
+
+test("a workspace's plugins run under the same policy: shut off in frames, and with full trust in the page, refused nothing", async ({ page }) => {
+  const watch = await watchRefusals(page);
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await install(
+    page,
+    {
+      name: "Framed",
+      description: "Draws in every place a frame goes.",
+      capabilities: [{ name: "notes.read", reason: "To say which note it is in." }],
+      commands: [{ id: "hello", title: "Say hello" }],
+      views: [
+        { slot: "inspector", id: "side", label: "Side" },
+        { slot: "page", id: "whole", label: "Whole" },
+        { slot: "bar", id: "low", label: "Low", width: 120 },
+      ],
+      embeds: [{ name: "boxed", title: "Boxed", height: 60 }],
+    },
+    SAYS,
+    ["notes.read"],
+  );
+  await turnOn(page, "Framed");
+  // Full trust: granted for this code, and turned on by Ada, it runs in the page itself.
+  const code = "window.trustedRan = true; host.commands.register({ id: 'deep.hello', title: 'Deep hello', run: () => host.app().notify({ message: 'Hello from the page' }) });";
+  const { id, plugins } = await perform(page, { type: "plugin.install", manifest: JSON.stringify({ name: "Deep", capabilities: [{ name: "full-trust", reason: "To run in the page." }] }), code });
+  const codeHash = plugins.find((p) => p.id === id)!.codeHash!;
+  await perform(page, { type: "plugin.permit", id, capability: "full-trust", allowed: true, codeHash });
+  await perform(page, { type: "plugin.trust", id, on: true, codeHash });
+  // And on in her settings, as the plugin's own switch leaves it.
+  const settings = await perform(page, { type: "settings.read" });
+  await perform(page, { type: "settings.write", text: JSON.stringify({ ...JSON.parse(settings.text || "{}"), [`${id}.enabled`]: true }), baseRevision: settings.revision });
+
+  const note = await perform(page, { type: "note.create", text: "# Framed\n\n::x-boxed{}\n\nend" });
+  await page.goto(`/note/${note.id}`);
+  await expect((await frameFor(page, "embed", "boxed")).locator(".said")).toHaveText("An embed");
+  await expect((await frameFor(page, "view", "low")).locator(".said")).toHaveText("A bar view");
+  await showPanel(page, "Framed plugin: Side");
+  await expect((await frameFor(page, "view", "side")).locator(".said")).toHaveText("A inspector view");
+  await runCommand(page, "Framed plugin: Say hello");
+  await expect(toast(page)).toContainText("Hello from a frame");
+  await expect.poll(() => page.evaluate(() => (window as unknown as { trustedRan?: boolean }).trustedRan ?? false)).toBe(true);
+  await runCommand(page, "Deep hello");
+  await expect(toast(page)).toContainText("Hello from the page");
+  await page.goto(`/x/${(await perform(page, { type: "plugin.list" })).plugins.find((p) => p.manifest.name === "Framed")!.id}/whole`);
+  await expect((await frameFor(page, "view", "whole")).locator(".said")).toHaveText("A page view");
+  expect(await watch.refused()).toEqual([]);
 });

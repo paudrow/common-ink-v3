@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { UploadKind } from "./filetypes.ts";
 import type { NoteState } from "./lifecycle.ts";
 import { readableName } from "./mentions.ts";
+import { OWN_SANDBOXED_IDS } from "./ownPlugins.ts";
+import { CAPABILITY_NAMES, HTML_EMBEDS, MAX_PLUGIN_CODE, MAX_PLUGIN_MANIFEST, Origins, type Draft, type DraftSummary, type PluginRecord, type Validated } from "./plugins.ts";
 import { parseRule } from "./recurrence.ts";
 import { dayIn } from "./history.ts";
 import { MAX_SEARCH_LENGTH, type SortKey } from "./query.ts";
@@ -77,6 +79,13 @@ export { MAX_UPLOAD_BYTES, PART_BYTES } from "./parts.ts";
 export const MAX_INLINE_UPLOAD_BYTES = 4 * 1024 * 1024;
 /** A file's name as it was given. What is kept of it is its last part, cleaned: see `cleanName`. */
 const FileName = z.string().min(1).max(1000);
+
+/** What a permission is of: a plugin installed in the workspace, or HTML embeds. */
+const PluginSubject = z.union([Id, z.literal(HTML_EMBEDS)]);
+const CapabilityName = z.enum(CAPABILITY_NAMES);
+/** A plugin whose source a member may copy: one installed in the workspace, or one of Common Ink's own that runs shut off. */
+const Drafted = z.union([Id, z.enum(OWN_SANDBOXED_IDS)]);
+const CodeHash = z.string().regex(/^[0-9a-f]{64}$/);
 
 const FolderName = z
   .string()
@@ -724,6 +733,74 @@ export const Op = z.discriminatedUnion("type", [
    * Each says who sees it: only its owner, the people it is shared with, or the workspace.
    */
   z.object({ type: z.literal("record.notes"), sourceId: SourceId, id: RecordId }),
+  /**
+   * The workspace's plugins: each one installed, what it declares, and what it is permitted. Every
+   * member reads it and only an admin changes it. It is no part of anyone's settings.
+   */
+  z.object({ type: z.literal("plugin.list") }),
+  /** An installed plugin's code, which the app runs shut off from itself. */
+  z.object({ type: z.literal("plugin.read"), id: Id }),
+  /**
+   * Installs a plugin from its manifest, as JSON, and its code. Only an admin does. Nothing is
+   * permitted by installing. With `replaces` it takes the place of an installed plugin and keeps its
+   * id: what was permitted stands only where neither the code nor that capability's declaration changed.
+   */
+  z.object({ type: z.literal("plugin.install"), manifest: z.string().min(2).max(MAX_PLUGIN_MANIFEST), code: z.string().max(MAX_PLUGIN_CODE), replaces: Id.optional() }),
+  /** Takes a plugin out of the workspace, and with it everything it was permitted and every request for it. Only an admin does. */
+  z.object({ type: z.literal("plugin.uninstall"), id: Id }),
+  /**
+   * An admin's decision on one permission, for the whole workspace. It answers every request for it.
+   * `locked` keeps it as decided: it takes no requests, and is changed only once an admin has
+   * unlocked it. `origins` are the sites, for HTML embeds' network alone; a plugin's are its manifest's.
+   * `codeHash` is the plugin's code as the admin read it, and allowing a plugin anything needs it:
+   * the decision is refused when the plugin has been replaced since, so nobody allows code they
+   * haven't been shown. HTML embeds have no code, and turning a permission off needs none.
+   */
+  z.object({
+    type: z.literal("plugin.permit"),
+    id: PluginSubject,
+    capability: CapabilityName,
+    allowed: z.boolean(),
+    locked: z.boolean().optional(),
+    origins: Origins.optional(),
+    codeHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+  }),
+  /** A member who isn't an admin saying yes: it allows nothing, and waits for an admin. `origins` as for plugin.permit. */
+  z.object({ type: z.literal("plugin.request"), id: PluginSubject, capability: CapabilityName, origins: Origins.optional() }),
+  /** A new plugin's two files to start from: a manifest named `name`, and code that runs shut off and does one small thing. Nothing is kept. */
+  z.object({ type: z.literal("plugin.scaffold"), name: z.string().min(1).max(60) }),
+  /** What installing a manifest and code would make of them, without installing or keeping anything: the manifest as it would be kept and what it asks for, or why it would be refused. */
+  z.object({ type: z.literal("plugin.validate"), manifest: z.string().max(MAX_PLUGIN_MANIFEST), code: z.string().max(MAX_PLUGIN_CODE) }),
+  /**
+   * What a frame of the plugin's, or of an HTML embed, is opened with when its network is allowed:
+   * a token, good once and for a minute, for the address that answers with those sites let through.
+   * `token` is null when its network isn't allowed.
+   */
+  z.object({ type: z.literal("plugin.frame"), id: PluginSubject }),
+  /**
+   * A member turning a plugin that asks for full trust on for themself, or off. Such a plugin runs
+   * inside the app, in the session of each member who turned it on and nobody else's, and only while
+   * an admin's grant of that exact code stands. `codeHash` is the code the member was shown. Nothing
+   * here names a person: it is for whoever asks, signed in, and for nobody else.
+   */
+  z.object({ type: z.literal("plugin.trust"), id: Id, on: z.boolean(), codeHash: CodeHash.optional() }).refine((op) => !op.on || op.codeHash !== undefined, "Say which code you are turning on: codeHash, as plugin.list answers it"),
+  /**
+   * The asker's own copies of plugins' source. A draft is kept beside its author's settings and is
+   * theirs alone: no operation reads or changes another member's, an admin's included, and none takes
+   * a person. It is no note, so it is in no folder, search or history.
+   */
+  z.object({ type: z.literal("draft.list") }),
+  z.object({ type: z.literal("draft.read"), id: Drafted }),
+  /**
+   * Keeps the asker's draft of a plugin as it is now. `baseHash` is the original's code when the
+   * copy was made. With `running` it runs in the original's place for its author alone, shut off
+   * from the app, with what the original is permitted and never more.
+   */
+  z.object({ type: z.literal("draft.save"), id: Drafted, manifest: z.string().max(MAX_PLUGIN_MANIFEST), code: z.string().max(MAX_PLUGIN_CODE), baseHash: CodeHash.nullable().optional(), running: z.boolean() }),
+  z.object({ type: z.literal("draft.discard"), id: Drafted }),
 ]);
 export type Op = z.output<typeof Op>;
 export type OpInput = z.input<typeof Op>;
@@ -1067,7 +1144,9 @@ export type Linked<T> = T & { unresolved?: UnresolvedLink[] };
 export type Author =
   | { kind: "member"; personId: string; name: string }
   /** A connected agent, named as its member named it; `onBehalfOf` is that member. */
-  | { kind: "agent"; agentId: string; name: string; onBehalfOf: string };
+  | { kind: "agent"; agentId: string; name: string; onBehalfOf: string }
+  /** A plugin installed in the workspace, acting for the member `onBehalfOf` within what it is permitted. */
+  | { kind: "plugin"; pluginId: string; name: string; onBehalfOf: string };
 
 /** The changes a change reverted. `to` is the revision a revert put the note back to. */
 export interface Reverts {
@@ -1424,6 +1503,20 @@ export interface Results {
   "record.refer": Reference;
   "record.read": SourceRecord;
   "record.notes": { notes: NoteAbout[] };
+  "plugin.list": PluginRecord;
+  "plugin.read": { id: string; code: string; codeHash: string };
+  "plugin.install": PluginRecord & { id: string };
+  "plugin.uninstall": PluginRecord;
+  "plugin.permit": PluginRecord;
+  "plugin.request": PluginRecord;
+  "plugin.scaffold": { manifest: string; code: string };
+  "plugin.validate": Validated;
+  "plugin.frame": { token: string | null; origins: string[] };
+  "plugin.trust": PluginRecord;
+  "draft.list": { drafts: DraftSummary[] };
+  "draft.read": Draft;
+  "draft.save": DraftSummary;
+  "draft.discard": { drafts: DraftSummary[] };
 }
 
 export type SourceKind = "calendar" | "contacts";
@@ -1658,6 +1751,8 @@ export interface WorkspaceSummary {
 export interface Me {
   person: { id: string; email: string; name: string };
   workspaces: WorkspaceSummary[];
+  /** True on this machine and in Previews, and never in production: there a test may put plugins on the page itself. */
+  dev: boolean;
 }
 
 /** What an operation answers anyone who isn't in the workspace, whether or not there is one. */

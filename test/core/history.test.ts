@@ -89,7 +89,7 @@ describe("workspace history", () => {
 
     const authors = await perform(env.DB, ada, { type: "history.authors" });
 
-    expect(authors.map((a) => [a.kind, a.name, a.kind === "agent" ? a.agentId : a.personId])).toEqual([
+    expect(authors.map((a) => [a.kind, a.name, a.kind === "agent" ? a.agentId : a.kind === "member" ? a.personId : a.pluginId])).toEqual([
       ["member", "Ada Lovelace", ada.personId],
       ["agent", "Claude", claude.ref.id],
       ["member", "Grace Hopper", expect.any(String)],

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { CalendarEvent, Note } from "../../src/core/protocol.ts";
-import { anotherPerson, connectAgent, join, me, newEmail, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, connectAgent, join, me, newEmail, ownPlugin, perform, signInAs, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -507,7 +507,7 @@ test("the member picks the dashboard's panels, moves and resizes them with the k
   await dashboard(page).getByRole("button", { name: "Move Today's events", exact: true }).focus();
   await page.keyboard.press("ArrowUp");
   await dashboard(page).getByRole("button", { name: "Add panel" }).click();
-  await expect(page.getByRole("menuitem")).toHaveText(["Coming up", "Recently edited"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Coming up", "Recently edited", "Weather"]);
   await expect(page.getByRole("menuitem").first()).toBeFocused();
   // Escape closes the menu and leaves the dashboard being arranged, with the keys back on Add panel.
   await page.keyboard.press("Escape");
@@ -725,7 +725,7 @@ test("a saved layout is drawn as far as it is sound: a panel there isn't is left
   await expect(dashboard(page)).toContainText("Nothing is on your dashboard. Press Edit dashboard to add panels.");
   await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
   await dashboard(page).getByRole("button", { name: "Add panel" }).click();
-  await expect(page.getByRole("menuitem")).toHaveCount(7);
+  await expect(page.getByRole("menuitem")).toHaveCount(8);
   await page.getByRole("menuitem", { name: "Coming up" }).click();
   await expect.poll(() => placed(page)).toEqual(["upcoming small"]);
   await expect(card(page, "Coming up")).toContainText("No calendar is connected.");
@@ -738,4 +738,14 @@ test("a saved layout is drawn as far as it is sound: a panel there isn't is left
   const said = await card(page, "Coming up").locator(".dash-meta").allInnerTexts();
   expect(said.length).toBeGreaterThan(3);
   for (const when of said) expect(when).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) [A-Z][a-z]{2} \d+, (all day|\d)/);
+});
+
+test("Weather is a panel a plugin adds, and it asks for a place", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  await settled(page);
+  await dashboard(page).getByRole("button", { name: "Edit dashboard" }).click();
+  await dashboard(page).getByRole("button", { name: "Add panel" }).click();
+  await page.getByRole("menuitem", { name: "Weather" }).click();
+  await dashboard(page).getByRole("button", { name: "Done" }).click();
+  await expect(ownPlugin(page, "Weather").getByRole("textbox", { name: "Place" })).toBeVisible();
 });
