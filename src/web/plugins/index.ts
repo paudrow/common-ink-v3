@@ -21,6 +21,7 @@ import { math } from "./math/index.ts";
 import { media } from "./media/index.ts";
 import { members } from "./members/index.tsx";
 import { mentions } from "./mentions/index.tsx";
+import { nightShift } from "./nightShift/index.ts";
 import { noteClocks } from "./noteClocks.tsx";
 import { noteInfo } from "./noteInfo.tsx";
 import { noteList } from "./noteList.tsx";
@@ -83,6 +84,7 @@ const AT: readonly (readonly [Plugin, string])[] = [
   [bullets, "bullets/index.ts"],
   [lineNumbers, "lineNumbers.ts"],
   [vim, "vim/index.ts"],
+  [nightShift, "nightShift/index.ts"],
 ];
 
 export const BUILT_INS: readonly Plugin[] = AT.map(([plugin]) => plugin);
