@@ -268,6 +268,7 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "visit.read": { on: "workspace", who: EVERYONE, args: () => ({}) },
   "visit.mark": { on: "workspace", who: EVERYONE, args: () => ({ until: 1 }) },
   "folder.list": { on: "everything", covers: "live", args: () => ({}) },
+  "folder.find": { on: "folder", needs: "V", args: (id, w) => ({ path: id === w.folders.Deep ? "team-folder/DEEP-folder" : `${FOLDERS.find((f) => w.folders[f] === id)}-FOLDER` }) },
   "folder.create": { on: "folder", needs: "E", args: (parentId) => ({ parentId, name: `New-${crypto.randomUUID().slice(0, 8)}` }) },
   "folder.rename": { on: "folder", needs: "E", args: (id, w) => ({ id, name: `${FOLDERS.find((f) => w.folders[f] === id)}-folder` }) },
   "folder.move": { on: "folder", needs: "E", args: (id, w) => ({ id, parentId: id === w.folders.Deep ? w.folders.Team : null }) },

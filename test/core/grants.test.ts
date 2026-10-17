@@ -85,8 +85,8 @@ describe("a guest: someone who isn't a member, named by a grant", () => {
     expect(await perform(env.DB, gus.actor, { type: "folder.list" })).toEqual({
       unsortedId: null,
       folders: [
-        { id: inside.id, name: "Inside", parentId: shared.id, noteCount: 1, uploadCount: 0, access: "edit" },
-        { id: shared.id, name: "Shared", parentId: null, noteCount: 0, uploadCount: 0, access: "edit" },
+        { id: inside.id, name: "Inside", parentId: shared.id, noteCount: 1, uploadCount: 0, access: "edit", path: "Shared/Inside" },
+        { id: shared.id, name: "Shared", parentId: null, noteCount: 0, uploadCount: 0, access: "edit", path: "Shared" },
       ],
     });
     const written = await write(gus.actor, plan.id, 1, "# Plan\n\nfrom Gus");
@@ -324,8 +324,9 @@ describe("a private note", () => {
     const zed = await connectAgent(env.DB, eve.personId, "Zed");
     await perform(env.DB, { kind: "agent", agentId: zed.agent.id, personId: eve.personId, workspaceId: ada.workspaceId }, { type: "note.write", id: secret.id, baseRevision: 1, text: `# Diary\n\nabout [[${open.id}]] and more` });
     // To Ada the private note's id is the id of no note, so a link to it is refused as one to nothing is, and kept only as text.
-    await expect(note(ada, `# Linking\n\nsee [[${secret.id}]]`)).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining(`No note has the id or the title "${secret.id}"`) });
-    const linking = await perform(env.DB, ada, { type: "note.create", text: `# Linking\n\nsee [[${secret.id}]]`, linkTitles: "keep" });
+    await expect(perform(env.DB, ada, { type: "note.create", text: `# Linking\n\nsee [[${secret.id}]]`, linkTitles: "resolve-strict" })).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining(`No note has the id or the title "${secret.id}"`) });
+    const linking = await note(ada, `# Linking\n\nsee [[${secret.id}]]`);
+    expect(linking.unresolved).toEqual([{ target: secret.id, matches: [] }]);
 
     for (const other of [ada, ed]) {
       expect(await titles(other)).toEqual(["Linking", "Open"]);
@@ -336,7 +337,7 @@ describe("a private note", () => {
       expect(await workspaceOfNote(env.DB, other.personId, secret.id)).toBeNull();
       expect(await perform(env.DB, other, { type: "note.backlinks", id: open.id })).toEqual([]);
       expect((await read(other, linking.id)).links).toEqual([{ id: secret.id, title: null, state: null }]);
-      await expect(note(other, "# New\n\n[[Diary]]")).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('No note is titled "Diary"') });
+      await expect(perform(env.DB, other, { type: "note.create", text: "# New\n\n[[Diary]]", linkTitles: "resolve-strict" })).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining('No note is titled "Diary"') });
       expect((await perform(env.DB, other, { type: "history.list" })).changes.map((c) => c.noteTitle)).toEqual(["Linking", "Open"]);
       expect((await perform(env.DB, other, { type: "history.authors" })).map((a) => a.name)).toEqual(["Ada Lovelace"]);
       expect((await perform(env.DB, other, { type: "history.summary", authors: [{ kind: "member", id: eve.personId }] })).notes).toEqual([]);

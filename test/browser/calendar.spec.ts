@@ -512,16 +512,17 @@ test("weekends are shaded unless the member turns Highlight weekends off", async
   await openWithSample(page);
   const week = thisWeek();
   const shade = (day: string) => column(page, day).evaluate((el) => getComputedStyle(el).backgroundColor);
-  const clear = await shade(week.slice(0, 5).find((day) => day !== dayIn(Date.now()))!);
-  expect(await shade(week[5]!), "Saturday").not.toBe(clear);
-  expect(await shade(week[6]!), "Sunday").not.toBe(clear);
+  const today = dayIn(Date.now());
+  // Today's column has its own tint, which the weekend shading yields to, so on a weekend only the other weekend day tells.
+  const weekend = week.slice(5).filter((day) => day !== today);
+  const clear = await shade(week.slice(0, 5).find((day) => day !== today)!);
+  for (const day of weekend) expect(await shade(day), day).not.toBe(clear);
   await page.goto("/settings/plugins/calendar");
   await page.getByLabel("Highlight weekends").uncheck();
   await expect.poll(async () => JSON.parse((await perform(page, { type: "settings.read" })).text)["calendar.weekends"]).toBe(false);
   await page.goto("/calendar");
   await expect(grid(page)).toHaveAttribute("aria-busy", "false");
-  expect(await shade(week[5]!)).toBe(clear);
-  expect(await shade(week[6]!)).toBe(clear);
+  for (const day of weekend) expect(await shade(day), day).toBe(clear);
 });
 
 test("New event in the header opens the form for the next half hour, and adds nothing until Save", async ({ page }) => {

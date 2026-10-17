@@ -170,8 +170,8 @@ describe("Trash", () => {
     const note = await create(ada, `# Mistake\n\n[[${target.id}]]`);
     await perform(env.DB, ada, { type: "note.trash", id: note.id });
 
-    await expect(create(ada, "See [[Mistake]]")).rejects.toMatchObject({ code: "invalid" });
-    await expect(create(ada, `See [[${note.id}]]`)).rejects.toMatchObject({ code: "invalid" });
+    expect((await create(ada, "See [[Mistake]]")).unresolved).toEqual([{ target: "Mistake", matches: [] }]);
+    expect((await create(ada, `See [[${note.id}]]`)).unresolved).toEqual([{ target: note.id, matches: [] }]);
     expect(await perform(env.DB, ada, { type: "note.backlinks", id: target.id })).toEqual([]);
   });
 

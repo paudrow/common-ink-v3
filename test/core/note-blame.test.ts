@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
+import { timeIn } from "../../src/core/history.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import type { Blame } from "../../src/core/protocol.ts";
 import worker from "../../src/worker/index.ts";
@@ -115,6 +116,7 @@ describe("who wrote this", () => {
   it("gives an agent the same answer through its tool as the app gets", async () => {
     const { ada, token, id } = await plan();
     const answer = await mcp(token, { id });
-    expect(JSON.parse(answer.text)).toEqual(await perform(env.DB, ada, { type: "note.blame", id }));
+    const app = await perform(env.DB, ada, { type: "note.blame", id });
+    expect(JSON.parse(answer.text)).toEqual({ ...app, changes: app.changes.map((c) => ({ ...c, createdAt: timeIn("UTC")(c.createdAt) })) });
   });
 });

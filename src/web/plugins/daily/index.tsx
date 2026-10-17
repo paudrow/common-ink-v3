@@ -71,7 +71,7 @@ export const daily: Plugin = {
       default: timeZone.default,
       maxLength: 64,
       title: "Time zone for agents",
-      description: "A time zone by its IANA name, such as America/Chicago. It says what day it is when an agent completes a todo or opens a daily note without saying the day. The app itself always uses this browser's day. Empty is UTC.",
+      description: "A time zone by its IANA name, such as America/Chicago. It says what day it is when an agent completes a todo or opens a daily note without saying the day, and agents are given times in it. The app itself always uses this browser's day. Empty is UTC.",
     },
   },
   activate(host) {
