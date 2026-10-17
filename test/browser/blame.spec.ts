@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { Note } from "../../src/core/protocol.ts";
-import { anotherPerson, connectAgent, join, panelIcon, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
+import { anotherPerson, connectAgent, join, me, panelIcon, perform, runCommand, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
 test.beforeEach(({ page }) => {
@@ -116,7 +116,7 @@ const PLAN_HUNKS = [
 test("the column names who wrote each run of lines and when, the runs are the core's, and members, agents and the member are three colours", async ({ page }) => {
   const { id, ed, workspaceId } = await plan(page);
   await expect(page.locator(".who-hunk")).toHaveCount(0);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => hunks(page)).toEqual(PLAN_HUNKS);
   const blame = await perform(page, { type: "note.blame", id });
   expect((await hunks(page)).map((h) => h.lines)).toEqual(blame.lines.map((run) => `${run.from}-${run.to}`));
@@ -133,7 +133,7 @@ test("the column names who wrote each run of lines and when, the runs are the co
   await perform(ed, { type: "note.label", id, revision: 2, name: "Agenda draft" }, workspaceId);
   await ed.goto(`/note/${id}`);
   await expect(ed.locator(".cm-content")).toContainText("Claude's step");
-  await runCommand(ed, "Who wrote this");
+  await runCommand(ed, "Toggle blame mode");
   await expect
     .poll(() => hunks(ed))
     .toEqual([
@@ -157,7 +157,7 @@ test("turning the column on moves the text over once, by what the margin lacks, 
   for (const width of [1900, 1280]) {
     await page.setViewportSize({ width, height: 720 });
     const before = await layout(page);
-    await runCommand(page, "Who wrote this");
+    await runCommand(page, "Toggle blame mode");
     await expect(page.locator(".who-hunk").first()).toBeVisible();
     const on = await layout(page);
     const [moved] = moves(before, on);
@@ -182,13 +182,13 @@ test("turning the column on moves the text over once, by what the margin lacks, 
     expect((await hunkTops()).slice(0, tops.length)).toEqual(tops.slice(0, (await hunkTops()).length));
     await page.locator(".note-scroll").evaluate((el) => (el.scrollTop = 0));
 
-    await runCommand(page, "Who wrote this");
+    await runCommand(page, "Toggle blame mode");
     await expect(page.locator(".who-hunk")).toHaveCount(0);
     expect(moves(before, await layout(page))).toEqual(["0 0 0 0 0 0 0 0"]);
   }
 
   // Typing on a line of its own leaves every other line where it was.
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent", "8-68 self"]);
   await page.locator(".cm-line", { hasText: "Ada's step" }).click();
   await page.keyboard.press("End");
@@ -209,7 +209,7 @@ test("a long run's label stays at the top of what is in sight while its lines ar
     text: `${text}\n${Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`).join("\n")}`,
   });
   await expect(page.locator(".cm-content")).toContainText("Line 60");
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   const long = page.locator(".who-hunk[data-from='8']");
   await expect(long).toBeVisible();
   const scrollTop = () => page.locator(".note-scroll").evaluate((el) => el.getBoundingClientRect().top);
@@ -226,7 +226,7 @@ test("a run of one line has its change's summary on that line, and how long ago 
   await perform(ed, { type: "note.write", id, baseRevision: 3, text: TEXT.replace("Ed's step", "Ed's better step") }, workspaceId);
   await perform(ed, { type: "note.label", id, revision: 4, name: "Sharper wording for the second step" }, workspaceId);
   await expect(page.locator(".cm-content")).toContainText("Ed's better step", { timeout: 15_000 });
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-4 member", "5-5 member", "6-7 agent"]);
   const one = page.locator(".who-hunk[data-from='5']");
   await expect(one.locator(".who-what")).toHaveText("Sharper wording for the second step");
@@ -242,7 +242,7 @@ test("a run of one line has its change's summary on that line, and how long ago 
 
 test("pressing a run opens its change in the note's History", async ({ page }) => {
   await plan(page);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await hunk(page, 4).click();
   await expect(panelIcon(page, "History")).toHaveAttribute("aria-expanded", "true");
   const inspector = page.getByRole("complementary", { name: "Inspector" });
@@ -257,7 +257,7 @@ test("pressing a run opens its change in the note's History", async ({ page }) =
 
 test("the next and previous change commands move the cursor run by run and open each run's change in History", async ({ page }) => {
   await plan(page);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent"]);
   await page.locator(".cm-line", { hasText: "Ada's step" }).click();
   const inspector = page.getByRole("complementary", { name: "Inspector" });
@@ -268,13 +268,13 @@ test("the next and previous change commands move the cursor run by run and open 
       return [...document.querySelectorAll(".cm-content .cm-line")].indexOf(line!) + 1;
     });
 
-  await runCommand(page, "Next change in Who wrote this");
+  await runCommand(page, "Next change in blame");
   await expect(inspector.locator(".hist-row.selected")).toContainText("Ed Editor edited");
   await expect.poll(cursorLine).toBe(4);
-  await runCommand(page, "Next change in Who wrote this");
+  await runCommand(page, "Next change in blame");
   await expect(inspector.locator(".hist-row.selected")).toContainText("Claude edited");
   await expect.poll(cursorLine).toBe(6);
-  await runCommand(page, "Previous change in Who wrote this");
+  await runCommand(page, "Previous change in blame");
   await expect(inspector.locator(".hist-row.selected")).toContainText("Ed Editor edited");
   await expect.poll(cursorLine).toBe(4);
 
@@ -296,7 +296,7 @@ test("the next and previous change commands move the cursor run by run and open 
 
 test("the column follows typing at once, and takes another member's change when it arrives", async ({ page }) => {
   const { id, ed, workspaceId } = await plan(page);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent"]);
 
   await page.locator(".cm-content").click();
@@ -328,7 +328,7 @@ test("the column follows typing at once, and takes another member's change when 
 
 test("lines a revert brings back keep the run of whoever wrote them, not of who reverted", async ({ page }) => {
   const { id, ed, workspaceId } = await plan(page);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent"]);
 
   await perform(
@@ -355,7 +355,7 @@ test("lines a revert brings back keep the run of whoever wrote them, not of who 
 test("the switch in a note's History panel turns the column on and off, and the note keeps it on for the member after a reload", async ({ page }) => {
   const { id } = await plan(page);
   await panelIcon(page, "History").click();
-  const toggle = page.getByRole("complementary", { name: "Inspector" }).getByRole("switch", { name: "Who wrote this" });
+  const toggle = page.getByRole("complementary", { name: "Inspector" }).getByRole("switch", { name: "Blame" });
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -374,7 +374,7 @@ test("the switch in a note's History panel turns the column on and off, and the 
 
   await page.goto(`/note/${id}`);
   await expect(page.locator(".who-hunk")).toHaveCount(3);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect(page.locator(".who-hunk")).toHaveCount(0);
 });
 
@@ -388,7 +388,7 @@ test("with vim on, the column comes and goes with the text moving as one and fol
   await page.reload();
   await expect(page.locator(".cm-vim-panel")).toBeVisible();
   const before = await layout(page);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent"]);
   expect(moves(before, await layout(page))).toHaveLength(1);
 
@@ -398,7 +398,7 @@ test("with vim on, the column comes and goes with the text moving as one and fol
   await page.keyboard.type("From vim");
   await page.keyboard.press("Escape");
   await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent", "8-8 self"]);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect(page.locator(".who-hunk")).toHaveCount(0);
 });
 
@@ -431,7 +431,7 @@ test("a table drawn in place of its lines is in the run of whoever last changed 
   });
   await page.goto(`/note/${note.id}`);
   await expect(page.locator(".cm-content")).toContainText("2,500");
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => runs(page)).toEqual(["1-2 self", "3-5 agent", "6-7 self"]);
   const [run, table] = [(await page.locator(".who-hunk[data-from='3']").boundingBox())!, (await page.locator(".cm-content table").first().boundingBox())!];
   expect(run.height).toBeGreaterThan(table.height / 2);
@@ -442,7 +442,7 @@ test("in a narrow window each run is its author's mark alone, left of the text",
   await page.setViewportSize({ width: 600, height: 800 });
   await plan(page);
   const before = await layout(page);
-  await runCommand(page, "Who wrote this");
+  await runCommand(page, "Toggle blame mode");
   await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent"]);
   await expect(page.locator(".who-avatar")).toHaveCount(3);
   for (const avatar of await page.locator(".who-avatar").all()) await expect(avatar).toBeVisible();
@@ -457,4 +457,75 @@ test("in a narrow window each run is its author's mark alone, left of the text",
     expect(box.right).toBeLessThan(textLeft);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(600);
+});
+
+/** Types into the command palette and runs what it lists first, which is to be `title`. */
+async function runFound(page: Page, typed: string, title: string) {
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  const palette = page.getByRole("dialog", { name: "Commands" });
+  await palette.getByRole("combobox").fill(typed);
+  await expect(palette.getByRole("option").first()).toHaveText(new RegExp(`^${title}`));
+  await page.keyboard.press("Enter");
+  await expect(palette).toHaveCount(0);
+}
+
+test("the command palette finds Blame mode by its old name and by what it is for", async ({ page }) => {
+  await plan(page);
+  await runFound(page, "who wrote this", "Toggle blame mode");
+  await expect.poll(() => runs(page)).toEqual(["1-3 self", "4-5 member", "6-7 agent"]);
+  await runFound(page, "Who changed what", "Toggle blame mode");
+  await expect(page.locator(".who-hunk")).toHaveCount(0);
+});
+
+test("turning the Blame plugin off on the Plugins page takes away the column, its commands and History's switch, and turning it on brings the note's column back", async ({ page }) => {
+  test.slow();
+  await plan(page);
+  const note = new URL(page.url()).pathname;
+  await runCommand(page, "Toggle blame mode");
+  await expect(page.locator(".who-hunk")).toHaveCount(3);
+
+  await page.goto("/plugins");
+  await page.getByRole("checkbox", { name: "Blame", exact: true }).setChecked(false);
+  await page.goto(note);
+  await expect(page.locator(".cm-content")).toContainText("Claude's step");
+  await expect(page.locator(".who-hunk")).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  const palette = page.getByRole("dialog", { name: "Commands" });
+  for (const typed of ["blame", "who wrote this", "who changed what"]) {
+    await palette.getByRole("combobox").fill(typed);
+    await expect(palette.getByRole("option", { name: /^(Toggle blame mode|Next change in blame|Previous change in blame)/ }), typed).toHaveCount(0);
+  }
+  await palette.getByRole("combobox").fill("blame");
+  await expect(palette.getByRole("option").first(), "the palette lists what matches, the plugin's switch").toHaveText(/^Enable plugin: Blame/);
+  await page.keyboard.press("Escape");
+  await panelIcon(page, "History").click();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await expect(inspector.locator(".hist-row").first()).toBeVisible();
+  await expect(inspector.getByRole("switch", { name: "Blame" })).toHaveCount(0);
+
+  await page.goto("/plugins");
+  await page.getByRole("checkbox", { name: "Blame", exact: true }).setChecked(true);
+  await page.goto(note);
+  await expect(page.locator(".who-hunk")).toHaveCount(3);
+  await panelIcon(page, "History").click();
+  await expect(inspector.getByRole("switch", { name: "Blame" })).toHaveAttribute("aria-checked", "true");
+});
+
+test("a note a member had Who wrote this on for, kept by History before Blame was a plugin of its own, has Blame mode on, moved once", async ({ page }) => {
+  const { id } = await plan(page);
+  const { person, workspaces } = await me(page);
+  const key = (plugin: string) => `ink.plugin.${plugin}.${workspaces[0]!.id}.${person.id}.whoWrote`;
+  const [old, now] = [key("history"), key("blame")];
+  await page.evaluate(({ old, id }) => localStorage.setItem(old, JSON.stringify([id])), { old, id });
+  await page.reload();
+  await expect(page.locator(".who-hunk")).toHaveCount(3);
+  const kept = (key: string) => page.evaluate((key) => localStorage.getItem(key), key);
+  expect(await kept(now)).toBe(JSON.stringify([id]));
+  expect(await kept(old), "moved once, and not again").toBe("null");
+
+  await runCommand(page, "Toggle blame mode");
+  await expect(page.locator(".who-hunk")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".cm-content")).toContainText("Claude's step");
+  await expect(page.locator(".who-hunk")).toHaveCount(0);
 });

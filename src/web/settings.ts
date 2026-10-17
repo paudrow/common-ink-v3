@@ -94,6 +94,11 @@ export function resolve(declared: readonly Declared[], document: SettingsDocumen
       chosen.add(key);
     }
   }
+  // A setting that follows another is that one's value until the member sets it.
+  for (const { key, setting } of declared) {
+    const follows = setting.type === "number" || setting.type === "integer" ? setting.follows : undefined;
+    if (follows && !chosen.has(key) && typeof values[follows.key] === "number") values[key] = values[follows.key]!;
+  }
   for (const key of Object.keys(document)) {
     if (Object.hasOwn(values, key)) continue;
     const reason = key.startsWith(KEYBINDING)

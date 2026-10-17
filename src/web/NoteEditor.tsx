@@ -2,7 +2,7 @@ import { defaultKeymap, history } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView, keymap, panels, placeholder } from "@codemirror/view";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { GrantAccess, Note } from "../core/protocol.ts";
 import { ApiError, perform, session } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
@@ -11,7 +11,7 @@ import { dismissing } from "./dismiss.ts";
 import { embedding, embedsAre } from "./embedding.ts";
 import { noteHighlighting } from "./highlight.ts";
 import { readOnly } from "./readOnly.ts";
-import { TITLE_MARK } from "./titleMark.ts";
+import { fontLoaded } from "./noteFont.ts";
 import { openNote } from "./openNotes.ts";
 import type { Completion, EditorExtension, AddressEmbed, Embed } from "./plugin-api.ts";
 import { NoteSync, committed, worthRetrying, type SaveState } from "./sync.ts";
@@ -32,23 +32,6 @@ const retryAfter = (failures: number) => Math.min(30_000, 1000 * 2 ** (failures 
 
 const typingIn = (el: Element | null) =>
   el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable);
-
-/**
- * Someone who types or pastes a heading's mark after that one anyway, as they would in an empty
- * note, means that heading and not a second mark after the first.
- */
-const titleMarkOnce = EditorState.transactionFilter.of((tr) => {
-  if (!tr.docChanged || !tr.isUserEvent("input") || tr.startState.doc.toString() !== TITLE_MARK) return tr;
-  let typed: string | null = null;
-  let changes = 0;
-  tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
-    changes++;
-    if (from === TITLE_MARK.length && to === from) typed = inserted.toString();
-  });
-  if (changes !== 1 || typed === null || !/^#{1,6}(?:\s|$)/.test(typed)) return tr;
-  const insert: string = typed;
-  return { changes: { from: 0, to: TITLE_MARK.length, insert }, selection: { anchor: insert.length }, annotations: Transaction.userEvent.of(tr.annotation(Transaction.userEvent)!), scrollIntoView: true };
-});
 
 interface Props {
   workspaceId: string;
@@ -92,11 +75,23 @@ interface Props {
   meta: ReactNode;
   /** What plugins say of the note above its text, such as that it is in Trash. */
   above: ReactNode;
+  /** In focus, the live things of the bottom bar, such as a running timer, which are then drawn at the foot of the note with whether it is saved. */
+  live?: ReactNode;
 }
 
-export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta, above }: Props) {
+/** Where a note's text begins across its pane, from the pane's left edge: what is kept under it, such as vim's mode, begins there too. */
+function textLeftIn(view: EditorView, pane: HTMLElement): number {
+  const content = view.contentDOM;
+  const line = content.querySelector<HTMLElement>(".cm-line:not([class*=' '])") ?? content.querySelector<HTMLElement>(".cm-line");
+  const padding = (el: Element | null) => (el ? parseFloat(getComputedStyle(el).paddingLeft) || 0 : 0);
+  return Math.round(content.getBoundingClientRect().left + padding(content) + padding(line) - pane.getBoundingClientRect().left);
+}
+
+export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, onEdit, notice, focus, onFocused, access, state, gone, onRejected, embeds, completions, onContributionFailed, extensions: contributed, onExtensionRefused, meta, above, live }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const foot = useRef<HTMLDivElement>(null);
+  const footRow = useRef<HTMLDivElement>(null);
+  const [textLeft, setTextLeft] = useState<number | null>(null);
   const syncRef = useRef<NoteSync | null>(null);
   const edited = useRef(onEdit);
   edited.current = onEdit;
@@ -133,7 +128,7 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
     let cancelled = false;
     let again: ReturnType<typeof setTimeout> | undefined;
 
-    committed(noteId).then(() => perform(workspaceId, { type: "note.read", id: noteId })).then(
+    Promise.all([committed(noteId).then(() => perform(workspaceId, { type: "note.read", id: noteId })), fontLoaded()]).then(([note]) => note).then(
       (note) => {
         if (cancelled || !host.current) return;
         failures.current = 0;
@@ -142,10 +137,8 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         setRead({ access: note.access, state: note.state });
         const inTrash = (now.current.state ?? note.state) === "trashed";
         const writable = (now.current.access ?? note.access) === "edit" && !inTrash;
-        const fresh = writable && note.text === "";
-        const text = fresh ? TITLE_MARK : note.text;
-        // The sync is told the mark is what the server has, so an untouched note is never sent: there is nothing of the member's in it.
-        sync = syncRef.current = new NoteSync(workspaceId, { ...note, text }, onSaved, (state) => {
+        const { text } = note;
+        sync = syncRef.current = new NoteSync(workspaceId, note, onSaved, (state) => {
           setSaveState(state);
           if (state === "rejected" || state === "inTrash") now.current.onRejected(state);
         });
@@ -154,14 +147,12 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
           parent: host.current,
           state: EditorState.create({
             doc: text,
-            selection: { anchor: fresh ? text.length : 0 },
             extensions: [
               locked.of(writable ? [] : readOnly),
               // Before the editor's own keys, so a plugin's keys are tried first.
               added.of(now.current.extensions),
               // Undo and redo are commands, which choose between this stack and the note's history, so no keys are bound here.
               history(),
-              titleMarkOnce,
               keymap.of(defaultKeymap),
               // GitHub-flavored, so tables, task lists and strikethrough are in the parse for the plugins that draw them.
               markdown({ base: markdownLanguage }),
@@ -244,6 +235,19 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
     if (revision !== undefined) void syncRef.current?.pull(revision).catch(() => {});
   }, [revision]);
 
+  // The pane and the column of text each change size on their own: a split dragged, focus entered, the reading width or the text size set.
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    const row = footRow.current;
+    if (load.kind !== "loaded" || !view || !row || !host.current) return;
+    const measure = () => setTextLeft(textLeftIn(view, row));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    observer.observe(host.current);
+    return () => observer.disconnect();
+  }, [load.kind]);
+
   /** A click in the room under the text puts the cursor at the note's end, as a click under the last line of a page does. */
   const toEnd = (event: MouseEvent<HTMLDivElement>) => {
     const view = viewRef.current;
@@ -278,7 +282,15 @@ export function NoteEditor({ workspaceId, noteId, onLoaded, onSaved, revision, o
         )}
         <div className="editor" ref={host} />
       </div>
-      <div className="note-foot" ref={foot} />
+      <div className="note-foot" ref={footRow} style={{ "--text-left": textLeft === null ? undefined : `${textLeft}px` } as CSSProperties}>
+        <div className="note-panels" ref={foot} />
+        {live && (
+          <div className="note-live">
+            {live}
+            <span className="note-live-save">{load.kind === "loaded" ? (trashed && saveState !== "saved" ? UNSAVED_IN_TRASH : SAVE_LABEL[saveState]) : ""}</span>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

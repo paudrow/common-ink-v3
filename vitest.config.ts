@@ -11,5 +11,7 @@ export default defineConfig(async () => ({
   test: {
     include: ["test/core/**/*.test.ts"],
     setupFiles: ["test/core/setup.ts"],
+    // The stylesheet is read as text by a test, which an empty stand-in would pass.
+    css: { include: [/style\.css/] },
   },
 }));

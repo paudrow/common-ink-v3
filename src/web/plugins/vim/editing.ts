@@ -1,7 +1,7 @@
 import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { EditorView, RectangleMarker, ViewPlugin, drawSelection, layer } from "@codemirror/view";
 import { Vim, getCM, vim } from "@replit/codemirror-vim";
-import { TITLE_MARK, dismissing, noteJump } from "../../plugin-api.ts";
+import { dismissing, noteJump } from "../../plugin-api.ts";
 
 let run: (commandId: string) => boolean = () => false;
 
@@ -50,6 +50,30 @@ Vim.defineAction("previousTab", () => void run("vim.tab.previous"));
 Vim.mapCommand("gt", "action", "nextTab", {}, { context: "normal" });
 Vim.mapCommand("gT", "action", "previousTab", {}, { context: "normal" });
 
+// zz, zt and zb put the cursor's line in the middle, at the top or at the foot of what is seen, and z., z<CR> and z- do the
+// same with the cursor on the line's first letter. The library's own scroll the editor, which here never scrolls: its pane does.
+Vim.defineAction("scrollCursorTo", (cm, given) => {
+  const args = given as { position?: "center" | "start" | "end"; firstLetter?: boolean };
+  const view = cm.cm6 as EditorView;
+  if (args.firstLetter) {
+    const { line } = cm.getCursor();
+    cm.setCursor(line, /^\s*/.exec(cm.getLine(line))![0].length);
+  }
+  // After vim has put its cursor where it goes, which would otherwise take the place of this scroll with its own.
+  setTimeout(() => view.dom.isConnected && view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: args.position ?? "center", yMargin: 0 }) }));
+});
+for (const [keys, position, firstLetter] of [
+  ["zz", "center", false],
+  ["zt", "start", false],
+  ["zb", "end", false],
+  ["z.", "center", true],
+  ["z<CR>", "start", true],
+  ["z-", "end", true],
+] as const) {
+  Vim.mapCommand(keys, "action", "scrollCursorTo", { position, firstLetter }, { context: "normal" });
+  Vim.mapCommand(keys, "action", "scrollCursorTo", { position }, { context: "visual" });
+}
+
 // A note saves itself, so :w sends what's typed now, and :q closes the tab.
 Vim.defineEx("write", "w", () => void run("note.save"));
 Vim.defineEx("quit", "q", () => void run("tab.close"));
@@ -60,16 +84,12 @@ for (const [name, prefix] of [["wq", "wq"], ["xit", "x"]] as const) {
   });
 }
 
-/**
- * A note opened with nothing in it but the mark of its title starts in insert mode after the mark,
- * so the title is typed at once here too. In normal mode the cursor would stand on the mark's space,
- * and `i` would type the title into the mark.
- */
-const titleFirst = ViewPlugin.define((view) => {
-  if (view.state.doc.toString() === TITLE_MARK && !view.state.readOnly) {
+/** A note opened with nothing in it starts in insert mode, so its first words are typed at once here too. */
+const startTyping = ViewPlugin.define((view) => {
+  if (view.state.doc.length === 0 && !view.state.readOnly) {
     queueMicrotask(() => {
       const cm = getCM(view);
-      if (cm && !cm.state.vim?.insertMode && view.state.doc.toString() === TITLE_MARK) Vim.handleKey(cm, "A", "mapping");
+      if (cm && !cm.state.vim?.insertMode && view.state.doc.length === 0) Vim.handleKey(cm, "i", "mapping");
     });
   }
   return {};
@@ -135,7 +155,9 @@ export function vimEditing(runCommand: (commandId: string) => boolean): { extens
       // Visual block mode is a selection on each of its lines, which an editor keeps only when told it may. A click still makes one.
       EditorState.allowMultipleSelections.of(true),
       EditorView.clickAddsSelectionRange.of(() => false),
-      titleFirst,
+      startTyping,
+      // Room under the last line for zz to bring a line near the end to the middle.
+      EditorView.editorAttributes.of({ class: "cm-vim-room" }),
     ],
     /** Leaves insert or visual mode in the note whose text the element is, as Escape does. */
     toNormal(focused) {

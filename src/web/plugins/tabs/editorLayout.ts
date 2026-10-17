@@ -41,6 +41,9 @@ export interface EditorLayout {
 
 export const EMPTY_LAYOUT: EditorLayout = { groups: [{ id: "1", tabs: [], active: null }], focusedGroupId: "1" };
 
+/** The notes that have a tab in any group. */
+export const notesIn = (layout: EditorLayout): Set<string> => new Set(layout.groups.flatMap((g) => g.tabs.flatMap((t) => (t.kind === "note" ? [t.id] : []))));
+
 export const same = (a: Opened | null, b: Opened | null) => a?.kind === b?.kind && a?.id === b?.id;
 /** What a tab holds, without whether it is a preview. A page's is the plugin API's whole `Opened`, its address with it. */
 const refOf = (tab: Opened): Opened => (tab.kind === "page" ? { kind: tab.kind, id: tab.id, path: tab.path } : { kind: tab.kind, id: tab.id });

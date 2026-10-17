@@ -59,6 +59,7 @@ test("? outside a text field opens every command with keys over the page, under 
   await sheet(page).getByRole("link", { name: "Change the keys in Settings" }).click();
   await expect(sheet(page)).toHaveCount(0);
   await expect(page).toHaveURL(/\/settings\/keyboard$/);
+  await expect(page.getByRole("dialog", { name: "Settings", exact: true }).getByRole("table", { name: "Keyboard shortcuts" })).toBeVisible();
 });
 
 test("? is left to whatever is being typed in: a note, the search bar, the builder's fields, and Settings' search, where it is typed and opens nothing", async ({ page }) => {

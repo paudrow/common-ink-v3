@@ -335,6 +335,8 @@ const PLANS: { [K in OpType]: Plan<K> } = {
   "record.refer": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
   "record.read": { on: "workspace", who: EVERYONE, args: () => ({ ref: "aaaaaaaaaaaa" }) },
   "record.notes": { on: "workspace", who: EVERYONE, args: () => ({ sourceId: "google-calendar", id: "none" }) },
+  // Every note here was made with words, so whoever is let through is refused it for that: see test/core/discard.test.ts.
+  "note.discard": { on: "note", needs: "E", trashed: "refused", members: true, args: (id) => ({ id }) },
   // Asked last: it is the one operation that leaves a note not there for the ones after, the note in Trash for whoever may remove it.
   "note.purge": { on: "note", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },
   "upload.purge": { on: "upload", needs: "E", trashed: "opens", members: true, maker: true, args: (id) => ({ id }) },

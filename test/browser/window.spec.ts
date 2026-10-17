@@ -761,8 +761,10 @@ for (const width of [900, 700, 480]) {
     await expect(inspector(page)).toHaveCount(0);
     await expect(page.getByRole("navigation")).toHaveCount(0);
     await inside(focusButton);
-    bar = await barIsWhole();
-    expect(bar.cut).toEqual([]);
+    // In focus the note's bar is out of sight, and its save state is on the quiet line at its foot, whole and inside the window.
+    await expect(page.locator(".note-bar")).toBeHidden();
+    await inside(page.locator(".note-live-save"));
+    await expect(page.locator(".note-live-save")).toHaveText("Saved");
     await focusButton.click();
     await inside(sidebar(page), inspector(page), focusButton);
   });

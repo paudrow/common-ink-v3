@@ -97,7 +97,6 @@ export { onTheme, themeNow, type Theme } from "./theme.ts";
 /** Whether an editor state is that of a reading of a note, where nothing is shown as written whatever is selected. */
 export { isReading } from "./readOnly.ts";
 export { ResizeHandle } from "./resize.tsx";
-export { TITLE_MARK } from "./titleMark.ts";
 export { Icon, type IconName } from "./icons.tsx";
 /** Help shown over the page, such as the query syntax or the keyboard shortcuts: one look for every help there is. */
 export { HelpOverlay } from "./HelpOverlay.tsx";
@@ -174,7 +173,11 @@ export type Setting = {
    * their own (`EMBED_ORIGIN`), as the server says: the safe choice there.
    */
   | { type: "string"; default: string; enum?: readonly string[]; maxLength?: number; unreadable?: string; defaultWithoutEmbedSite?: string }
-  | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number }
+  /**
+   * `follows` names another setting, by its key and title, whose value this one is until the member sets it, as the editor's text size is the
+   * app's: so a value the same as `default` is the member's choice and is kept.
+   */
+  | { type: "number" | "integer"; default: number; minimum?: number; maximum?: number; follows?: { key: string; title: string } }
   /** Chords such as `mod+shift+p`, which is what a keybinding holds. */
   | { type: "chords"; default: readonly string[] }
   /** Words, each at most `maxLength` characters, at most `maxItems` of them. */
@@ -413,6 +416,8 @@ export interface Command {
    * `Editor`, or a plugin's own, as vim's are under `Vim`. One with none is under Other.
    */
   group?: string;
+  /** Other names the command palette finds it by, such as what it was called before. Its title is what is shown. */
+  aliases?: readonly string[];
 }
 
 export interface CommandInfo {
@@ -423,6 +428,7 @@ export interface CommandInfo {
   /** Every chord that runs it now, as a person reads them: its own, or the member's in their place. */
   keys: readonly string[];
   group: string | undefined;
+  aliases?: readonly string[];
 }
 
 /** What a view is drawn with. */
@@ -511,9 +517,11 @@ export interface Slots {
    * said. Items of one order stay in the order of the plugins that added them. A component with
    * nothing to say draws nothing, and takes no room. The bar is there while any plugin has an item
    * in it, with something to say or not, so nothing above it moves as items come and go. In focus
-   * it is out of sight.
+   * it is out of sight, and an item that is `live`, such as a running timer, is drawn at the foot of
+   * the note instead, beside vim's mode and whether the note is saved: only what changes as it is
+   * watched belongs there, not a count.
    */
-  bar: { id: string; component: View; side?: "left" | "right"; order?: number };
+  bar: { id: string; component: View; side?: "left" | "right"; order?: number; live?: true };
   /**
    * A word or two about a note in the bar above its text, after its folder, in every editor showing
    * it: that it is archived, say, with a button that undoes it. The bar keeps its height, so the
@@ -999,6 +1007,13 @@ export interface App {
   noteChanged(note: Note): void;
   /** Reads the folders and notes again, after a change the app wasn't told about. */
   refresh(): void;
+  /**
+   * For the editor area: says a note is open in none of its tabs now. A note the member made that
+   * never had anything in it but spaces or a lone `#` is then removed outright, not put in Trash, once
+   * what was typed in it has been sent: so a new note left untouched leaves nothing behind. Any other
+   * note is left as it is.
+   */
+  left(noteId: string): void;
   /**
    * Sends what is typed in a note's editor now, without waiting for a pause in the typing. For a
    * change that must reach the server as it is, before anything else is typed. It answers with the

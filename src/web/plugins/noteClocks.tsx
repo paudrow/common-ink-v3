@@ -35,6 +35,7 @@ export const noteClocks: Plugin = {
     const notes = openNotes(host);
     host.views.register("bar", {
       id: "note-clocks",
+      live: true,
       component: ({ app }) => {
         const text = notes.useText(app.noteId);
         const on = new Set(host.embeds.list().map((e) => e.name));

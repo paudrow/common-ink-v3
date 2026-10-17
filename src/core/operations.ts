@@ -63,7 +63,7 @@ import { FILTERS, MAX_BOUND, PRIORITIES, conditionOf, dayOf, folded, isRelative,
 import { matchesIn } from "./search.ts";
 import { linkTo, listGrants, revokeGrant, setGrant, setPrivate, setUploadPrivate } from "./sharing.ts";
 import { noteSlug } from "./slug.ts";
-import { NO_SOURCES, contactCards, createContact, createEvent, listContacts, listEvents, listSources, photoContact, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
+import { NO_SOURCES, calendarFor, calendarSettings, contactCards, createContact, createEvent, listContacts, listEvents, listSources, photoContact, readRecord, referencesTo, refer, updateContact, updateEvent, type Sources } from "./sources.ts";
 import { referencesIn } from "./references.ts";
 import { NO_SUCH_LINK, standingByLink, standingIn, type Standing as ActorStanding } from "./standing.ts";
 import { applyChanges, changesBetween } from "./text.ts";
@@ -292,6 +292,9 @@ const sameAuthor = (a: AuthorRef, b: AuthorRef) => a.kind === b.kind && a.id ===
 const isBy = (ctx: Context, author: AuthorRef) => sameAuthor(author, { kind: ctx.author.kind, id: authorId(ctx) });
 
 const NO_SUCH_NOTE = "No such note";
+const NOT_DISCARDED = "Only a note you made that has never had anything in it but spaces or a lone # is discarded. Move it to Trash instead.";
+/** Whether a note's text says nothing: spaces and line breaks, and at most the mark of a title. */
+export const blank = (text: string) => /^#?$/.test(text.trim());
 const NO_SUCH_FOLDER = "No such folder";
 
 /** The folder bound as ?4 and every folder under it, for a listing narrowed to a folder. */
@@ -896,10 +899,10 @@ function newDaily(ctx: Context, { settings, day }: Completing, text: string, fol
       ...(folder ? [] : [ctx.db.prepare("INSERT INTO folders (id, workspace_id, parent_id, name, name_key) VALUES (?, ?, NULL, ?, ?)").bind(folderId, ctx.workspaceId, settings.folder, folderKey(settings.folder))]),
       ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, private_owner, indexed)
-           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, created_by_kind, private_owner, indexed)
+           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, row.private_owner, row.indexed),
+        .bind(id, ctx.workspaceId, folderId, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, ctx.author.kind, row.private_owner, row.indexed),
       insertChange(ctx, id, 1, 0, "", changesBetween("", text)),
       ...(stale ? [ctx.db.prepare("DELETE FROM daily_notes WHERE workspace_id = ? AND person_id = ? AND day = ? AND note_id = ?").bind(ctx.workspaceId, ctx.personId, day, stale)] : []),
       ctx.db.prepare("INSERT INTO daily_notes (workspace_id, person_id, day, note_id) VALUES (?, ?, ?, ?)").bind(ctx.workspaceId, ctx.personId, day, id),
@@ -1662,10 +1665,10 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
       const row: NoteRow = { id, folder_id: folder.id, revision, created_at: ctx.now, created_by: ctx.personId, private_owner: null, indexed: MADE, ...NEW, ...written(ctx, text) };
       const insertNote = ctx.db
         .prepare(
-          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, indexed)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notes (id, workspace_id, folder_id, revision, text, title, snippet, open_todos, created_at, updated_at, updated_by, updated_by_kind, created_by, created_by_kind, indexed)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, row.indexed);
+        .bind(id, ctx.workspaceId, row.folder_id, revision, row.text, row.title, row.snippet, row.open_todos, row.created_at, row.updated_at, row.updated_by, row.updated_by_kind, row.created_by, ctx.author.kind, row.indexed);
       await intoFolder(ctx.db.batch(text ? [insertNote, insertChange(ctx, id, 1, 0, "", changesBetween("", text)), ...deriving(ctx, id, text, { was: "" })] : [insertNote, ...searching(ctx, id, text)]));
       return linked(toNote(ctx, row), unresolved);
     },
@@ -2420,6 +2423,34 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
     },
   },
 
+  // A note the member made and left with nothing in it is not kept, not even in Trash. Only the member's own app does it, as they leave the note: see NOT_FOR_AGENTS.
+  "note.discard": {
+    needs: "edit",
+    by: "member",
+    members: true,
+    async run(ctx, op) {
+      const row = await loadNote(ctx, op.id, "edit", "refused");
+      const made = await ctx.db.prepare("SELECT created_by_kind FROM notes WHERE id = ?").bind(row.id).first<{ created_by_kind: string | null }>();
+      if (made?.created_by_kind !== "member" || row.created_by !== ctx.personId) throw new OpError("invalid", NOT_DISCARDED);
+      const { results } = await ctx.db.prepare("SELECT diff, author_kind, author_id FROM changes WHERE note_id = ? ORDER BY revision").bind(row.id).all<{ diff: string; author_kind: string; author_id: string }>();
+      if (results.length !== row.revision) throw new OpError("invalid", NOT_DISCARDED);
+      let text = "";
+      for (const change of results) {
+        text = applyChanges(ChangeSet.fromJSON(JSON.parse(change.diff)), text);
+        if (change.author_kind !== "member" || change.author_id !== ctx.personId || !blank(text)) throw new OpError("invalid", NOT_DISCARDED);
+      }
+      // Put in Trash at no time at all, which nothing else is, so the removal below takes this note as it is now, or nothing if it was written to since it was read.
+      const done = await ctx.db.batch([
+        ctx.db.prepare("UPDATE notes SET state = 'trashed', state_at = 0 WHERE id = ? AND revision = ? AND state != 'trashed'").bind(row.id, row.revision),
+        ...removing(ctx.db, row.id, 0),
+      ]);
+      // The first statement is the one that says whether the note was still as it was read; the rest do nothing unless it did.
+      if (!done[0]!.meta.changes) throw new OpError("conflict", "The note was written to as it was being discarded, so it is kept");
+      await forgetRemoved(ctx.db);
+      return { id: row.id };
+    },
+  },
+
   // Removing a note for good is the one change nothing takes back. Only the member does it: see NOT_FOR_AGENTS.
   "note.purge": {
     needs: "edit",
@@ -2790,7 +2821,17 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
   },
   "event.list": { needs: "view", own: true, run: (ctx, op) => listEvents(asker(ctx), op) },
   "event.update": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateEvent(asker(ctx), sourceId, id, etag, change) },
-  "event.create": { needs: "view", own: true, changes: true, run: (ctx, { sourceId, calendarId, type: _, ...fields }) => createEvent(asker(ctx), sourceId, calendarId, fields) },
+  "event.create": {
+    needs: "view",
+    own: true,
+    changes: true,
+    // An agent has no browser to say which calendar is the member's default, so the server reads it from their settings, as it does their daily notes'.
+    run: async (ctx, { sourceId, calendarId, type: _, ...fields }) => {
+      const settings = async () => calendarSettings((await ctx.db.prepare("SELECT text FROM settings WHERE workspace_id = ? AND person_id = ?").bind(ctx.workspaceId, ctx.personId).first<{ text: string }>())?.text);
+      const target = await calendarFor(asker(ctx), { sourceId, calendarId }, settings);
+      return createEvent(asker(ctx), target.sourceId, target.calendarId, fields);
+    },
+  },
   "contact.list": { needs: "view", own: true, run: (ctx, op) => listContacts(asker(ctx), op.query) },
   // A contact is how the member reaches someone, outside Common Ink and its history: only the member changes one. See NOT_FOR_AGENTS.
   "contact.update": { needs: "view", by: "member", own: true, changes: true, run: (ctx, { sourceId, id, etag, type: _, ...change }) => updateContact(asker(ctx), sourceId, id, etag, change) },

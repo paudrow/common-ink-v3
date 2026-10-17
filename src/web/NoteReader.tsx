@@ -2,6 +2,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fontLoaded } from "./noteFont.ts";
 import type { Results } from "../core/protocol.ts";
 import { perform } from "./api.ts";
 import { forEditor } from "./editorExtensions.ts";
@@ -42,8 +43,8 @@ export function NoteReader({ workspaceId, noteId, revision, embeds, extensions: 
   useEffect(() => {
     let live = true;
     // Typing still on its way from an editor of the same note is read once it has arrived.
-    committed(noteId)
-      .then(() => perform(workspaceId, { type: "note.read", id: noteId }))
+    Promise.all([committed(noteId).then(() => perform(workspaceId, { type: "note.read", id: noteId })), fontLoaded()])
+      .then(([note]) => note)
       .then(
         (note) => {
           if (!live || !el.current) return;

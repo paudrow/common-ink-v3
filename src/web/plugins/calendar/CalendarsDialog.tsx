@@ -1,6 +1,7 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useId, useRef, type CSSProperties } from "react";
 import { useDismiss, type App, type Calendar, type PluginHost, type Source } from "../../plugin-api.ts";
 import { Sources } from "../lib/Sources.tsx";
+import { startWords, type Start } from "./choosing.ts";
 import { calendarKey } from "./listing.ts";
 
 interface Props {
@@ -8,6 +9,11 @@ interface Props {
   app: App;
   sources: readonly Source[] | null;
   calendars: readonly Calendar[];
+  /** The calendar a new event starts in, and why; null when there is none to add to. */
+  start: Start;
+  /** The member's default calendar, by `calendarKey`, or "" for none. */
+  chosen: string;
+  setDefault: (calendar: Calendar) => boolean;
   /** The calendars the member chose not to see here, by `calendarKey`. */
   hidden: ReadonlySet<string>;
   setShown: (calendar: Calendar, shown: boolean) => void;
@@ -18,9 +24,9 @@ interface Props {
 /**
  * Everything about where the Calendar's events come from, behind its one button: each calendar data
  * source with its way to connect and disconnect, and under a connected one, its calendars, each
- * shown here or not.
+ * shown here or not; and which of them new events go in.
  */
-export function CalendarsDialog({ host, app, sources, calendars, hidden, setShown, onSources, close }: Props) {
+export function CalendarsDialog({ host, app, sources, calendars, start, chosen, setDefault, hidden, setShown, onSources, close }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(close, ref);
   // Focus goes into the dialog, and back to what opened it when it closes.
@@ -66,8 +72,39 @@ export function CalendarsDialog({ host, app, sources, calendars, hidden, setShow
               );
             }}
           />
+          {start && <DefaultCalendar calendars={calendars.filter((c) => c.writable && !hidden.has(calendarKey(c)))} start={start} chosen={chosen} setDefault={setDefault} />}
         </div>
       </div>
     </div>
+  );
+}
+
+/** Which calendar new events go in, from those the member may add to and shows; with none chosen, where they go instead. */
+function DefaultCalendar({ calendars, start, chosen, setDefault }: { calendars: readonly Calendar[]; start: NonNullable<Start>; chosen: string; setDefault: (calendar: Calendar) => boolean }) {
+  const id = useId();
+  const usable = calendars.some((c) => calendarKey(c) === chosen);
+  return (
+    <section className="sources" aria-labelledby={id}>
+      <h2 id={id}>Default calendar</h2>
+      <select
+        aria-labelledby={id}
+        aria-describedby={`${id}-about`}
+        value={usable ? chosen : ""}
+        onChange={(e) => {
+          const calendar = calendars.find((c) => calendarKey(c) === e.target.value);
+          if (calendar) setDefault(calendar);
+        }}
+      >
+        {!usable && <option value="">None chosen</option>}
+        {calendars.map((calendar) => (
+          <option key={calendarKey(calendar)} value={calendarKey(calendar)}>
+            {calendar.name}
+          </option>
+        ))}
+      </select>
+      <p id={`${id}-about`} className="source-meta">
+        {start.by === "default" ? `New events go in ${start.calendar.name}: New event, a drag on the grid, and an agent's that names no calendar.` : startWords(start)}
+      </p>
+    </section>
   );
 }

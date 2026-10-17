@@ -174,7 +174,7 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
     while (scroller && !(/auto|scroll/.test(getComputedStyle(scroller).overflowY) && scroller.scrollHeight > scroller.clientHeight)) scroller = scroller.parentElement;
     return Math.max(1, Math.floor((scroller?.clientHeight ?? innerHeight) / 2 / (row?.getBoundingClientRect().height || 1)));
   };
-  const searchBox = () => [here(), document.querySelector("main")].flatMap((within) => [...(within?.querySelectorAll<HTMLElement>(SEARCH) ?? [])]).find(shown);
+  const searchBox = () => [scope(), here(), document.querySelector("main")].flatMap((within) => [...(within?.querySelectorAll<HTMLElement>(SEARCH) ?? [])]).find(shown);
   const tablist = () => [scope(), here()].flatMap((within) => [...(within?.querySelectorAll('[role="tablist"]') ?? [])]).find(shown);
   /** In a field of the page's. A note's editor has fields of its own, such as vim's prompt, where these keys are vim's. */
   const inField = () => typing(active()) && !active().isContentEditable && !active().closest(".cm-editor");
@@ -202,7 +202,9 @@ export function surfaces(given: { normal(el: HTMLElement): boolean; dismissing()
       },
       search: () => !drawn() && !typing(active()) && !!searchBox(),
       field: () => inField() && !!listNear(),
-      fieldOfList: () => inField() && (active().matches(SEARCH) || !!active().closest("[data-rests]")) && !given.dismissing() && !active().closest(OVER) && !!listNear(),
+      // Over the window only a search box or a field inside a list, as Settings has: a palette's own field keeps Escape for closing.
+      fieldOfList: () =>
+        inField() && (active().matches(SEARCH) || !!active().closest("[data-rests]")) && !given.dismissing() && (!active().closest(OVER) || active().matches(SEARCH) || !!active().closest("[data-list]")) && !!listNear(),
       window: () => !typing(active()) || given.normal(active()),
       tabs: () => !drawn() && !typing(active()) && !!tablist(),
     },

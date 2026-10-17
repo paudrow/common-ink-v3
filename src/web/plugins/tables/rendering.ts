@@ -506,7 +506,7 @@ const look = EditorView.baseTheme({
     borderRadius: "50%",
     background: "var(--bg-elev)",
     color: "var(--muted)",
-    font: "500 13px/1 var(--prose)",
+    font: "500 calc(13px * var(--text-scale))/1 var(--prose)",
     cursor: "pointer",
     opacity: "0",
     pointerEvents: "none",
@@ -517,7 +517,7 @@ const look = EditorView.baseTheme({
   ".md-table:hover .md-table-add, .md-table:focus-within .md-table-add": { opacity: "1", pointerEvents: "auto" },
   ".md-table-add:hover, .md-table-add:focus-visible": { color: "var(--accent)", borderColor: "var(--accent)", outline: "none" },
   // The table's own lines, shown above it with the cursor in them: as written, in the face markdown is written in.
-  ".cm-line.md-table-source": { font: "12.5px/1.6 var(--mono)", color: "var(--accent)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
+  ".cm-line.md-table-source": { font: "calc(12.5px * var(--text-scale))/1.6 var(--mono)", color: "var(--accent)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
   // A formula in them is drawn by its own rule, in its own faces.
   ".cm-line.md-table-source :not(.md-chip-math, .md-chip-math *)": { font: "inherit !important", color: "inherit !important", textDecoration: "none" },
 });

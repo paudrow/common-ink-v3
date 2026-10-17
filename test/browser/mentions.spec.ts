@@ -37,7 +37,8 @@ function asked(page: Page, type: string) {
 async function open(page: Page, noteId: string, shows: string) {
   await page.goto(`/note/${noteId}`);
   await expect(editor(page)).toContainText(shows);
-  await editor(page).click();
+  // Focused, not pressed: a press in the middle of the text can land on a mention, which opens its person's page.
+  await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+End");
 }
 

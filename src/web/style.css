@@ -1,3 +1,100 @@
+/* The fonts a note's text can be set in, from the app's own files. A browser fetches a face only when text on the page is in it, so only the one chosen is loaded. */
+@font-face {
+  font-family: "iA Writer Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ia-writer-mono/ia-writer-mono-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "iA Writer Mono";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ia-writer-mono/ia-writer-mono-latin-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "iA Writer Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/ia-writer-mono/ia-writer-mono-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "iA Writer Mono";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/ia-writer-mono/ia-writer-mono-latin-700-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono/ibm-plex-mono-latin-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono/ibm-plex-mono-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono/ibm-plex-mono-latin-700-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/source-serif-4/source-serif-4-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/source-serif-4/source-serif-4-latin-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/source-serif-4/source-serif-4-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/source-serif-4/source-serif-4-latin-700-italic.woff2") format("woff2");
+}
+
 :root {
   color-scheme: light dark;
   --bg: #fbfaf8;
@@ -30,6 +127,12 @@
   --accent-ink: #4545b8;
   --prose: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Every size of text is a share of the member's text size, which the app sets here. A test in test/core/text-size.test.ts holds the stylesheet to it. */
+  --text-scale: 1;
+  --editor-text-scale: 1;
+  --editor-font: "iA Writer Mono", var(--mono);
+  --editor-line-height: 1.4;
+  --editor-width: 46rem;
   font-family: var(--prose);
   background: var(--bg);
   color: var(--ink);
@@ -116,7 +219,7 @@ body,
   background: var(--bg-elev);
   color: var(--ink);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: calc(0.9rem * var(--text-scale));
   text-decoration: none;
   cursor: pointer;
 }
@@ -187,7 +290,7 @@ button.link:hover {
 
 .sign-in h1 {
   margin: 0.5rem 0 0;
-  font-size: 1.6rem;
+  font-size: calc(1.6rem * var(--text-scale));
 }
 
 .sign-in p {
@@ -204,7 +307,7 @@ button.link:hover {
   display: flex;
   height: 100%;
   overflow: hidden;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   line-height: 1.45;
 }
 
@@ -246,7 +349,7 @@ button.link:hover {
 
 .button.small {
   padding: 0.2rem 0.6rem;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .button:disabled,
@@ -258,7 +361,7 @@ button.link:hover {
 .error {
   margin: 6px 10px;
   color: var(--danger);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 /* Folders column */
@@ -337,7 +440,7 @@ button.link:hover {
 
 .workspace-role {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
 }
 
 .menu {
@@ -399,7 +502,7 @@ button.link:hover {
   margin: 4px 10px 6px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   text-overflow: ellipsis;
 }
 
@@ -461,7 +564,7 @@ button.link:hover {
   margin-top: 12px;
   padding: 0 4px 2px 10px;
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -549,7 +652,7 @@ button.link:hover {
   flex: none;
   padding: 0 4px;
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   font-variant-numeric: tabular-nums;
   font-weight: 400;
 }
@@ -620,7 +723,7 @@ button.link:hover {
 .folder-head h1 {
   margin: 0;
   overflow: hidden;
-  font-size: 24px;
+  font-size: calc(24px * var(--text-scale));
   letter-spacing: -0.02em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -630,7 +733,7 @@ button.link:hover {
   flex: 1;
   padding-top: 6px;
   color: var(--faint);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   white-space: nowrap;
 }
 
@@ -670,7 +773,7 @@ button.link:hover {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale));
 }
 
 .finder-scope {
@@ -684,7 +787,7 @@ button.link:hover {
   border-radius: 6px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -744,7 +847,7 @@ button.link:hover {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -767,7 +870,7 @@ button.link:hover {
   background: var(--bg-elev);
   box-shadow: var(--shadow);
   list-style: none;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .query-offers li {
@@ -782,13 +885,13 @@ button.link:hover {
 .query-offers li > span {
   flex: none;
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .query-offers small {
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -801,14 +904,14 @@ button.link:hover {
 .query-error {
   margin: 0;
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
 .query-error code {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   white-space: pre-wrap;
 }
 
@@ -827,7 +930,7 @@ button.link:hover {
   border-radius: 9px;
   background: var(--bg-elev);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .query-panel > header {
@@ -913,7 +1016,7 @@ button.link:hover {
   flex: 1 0 100%;
   margin: 0;
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
@@ -942,7 +1045,7 @@ button.link:hover {
   display: flex;
   flex-direction: column;
   max-height: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .help-overlay-body > header {
@@ -957,7 +1060,7 @@ button.link:hover {
 .help-overlay h2 {
   flex: 1;
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -969,7 +1072,7 @@ button.link:hover {
 .help-overlay h3 {
   margin: 16px 0 4px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1028,7 +1131,7 @@ button.link:hover {
 .query-example {
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .query-example {
@@ -1080,12 +1183,12 @@ button.link:hover {
   gap: 8px 10px;
   margin: 10px 0 16px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .finder-tools .chip {
   padding: 2px 11px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 /* One choice of a few, as a row of words with the chosen one raised. */
@@ -1204,7 +1307,7 @@ button.link:hover {
   margin-right: auto;
   overflow: hidden;
   color: var(--ink);
-  font-size: 15.5px;
+  font-size: calc(15.5px * var(--text-scale));
   font-weight: 650;
   letter-spacing: -0.01em;
   text-decoration: none;
@@ -1255,7 +1358,7 @@ button.link:hover {
   height: 18px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
 }
 
@@ -1278,7 +1381,7 @@ button.link:hover {
   margin: 7px 0 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -1350,7 +1453,7 @@ button.link:hover {
 
 .folder-notes h1 {
   margin: 0 0 12px;
-  font-size: 24px;
+  font-size: calc(24px * var(--text-scale));
 }
 
 .folder-notes ul {
@@ -1396,7 +1499,7 @@ button.link:hover {
   border-radius: 99px;
   background: var(--bg-elev);
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -1437,7 +1540,7 @@ button.link:hover {
   display: -webkit-box;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -1447,7 +1550,7 @@ button.link:hover {
   justify-content: space-between;
   gap: 8px;
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
 }
 
 .empty {
@@ -1641,11 +1744,6 @@ button.link:hover {
   display: none;
 }
 
-/* A note's bar ends short of the way out, so its save state is not under it. */
-.groups[data-focus-mode] .note-bar {
-  padding-right: 40px;
-}
-
 .groups[data-focus-mode] .focus-button:not(:hover, :focus-visible) {
   background: none;
   opacity: 0.45;
@@ -1668,7 +1766,7 @@ button.link:hover {
   padding: 0 6px 0 12px;
   border-right: 1px solid var(--line);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   cursor: pointer;
   user-select: none;
 }
@@ -1800,7 +1898,7 @@ button.link:hover {
   padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .note-meta {
@@ -1870,16 +1968,65 @@ button.link:hover {
 }
 
 .editor {
+  /* Inside a note every size of text is a share of the editor's text size. */
+  --text-scale: var(--editor-text-scale);
   box-sizing: border-box;
-  max-width: 46rem;
+  max-width: var(--editor-width);
   min-height: 100%;
   margin: 0 auto;
   padding: 2rem 2rem 30cqh;
 }
 
-/* What an editor extension keeps under a note, such as vim's mode: at the foot of the note's pane, as wide as the pane. */
+/* With vim, there is room under a note's last line for zz to put it in the middle of the pane. Nothing above it moves. */
+.editor:has(> .cm-editor.cm-vim-room) {
+  padding-bottom: 50cqh;
+}
+
+/* What an editor extension keeps under a note, such as vim's mode: at the foot of the note's pane, as wide as the pane, its words beginning where the note's text does. */
 .note-foot {
+  display: flex;
   flex: none;
+  align-items: stretch;
+}
+
+.note-panels {
+  flex: 1;
+  min-width: 0;
+}
+
+/* In focus, the live things of the bottom bar and whether the note is saved, quietly at the right of the foot, on vim's line when it has one. */
+.note-live {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  box-sizing: border-box;
+  height: calc(1.75rem * var(--text-scale));
+  padding: 0 16px 0 8px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.note-live .bar-item:empty {
+  display: none;
+}
+
+.note[data-save-state="failed"] .note-live-save,
+.note[data-save-state="rejected"] .note-live-save,
+.note[data-save-state="inTrash"] .note-live-save {
+  color: var(--danger);
+}
+
+/* With vim's mode beside them, they share its rule. */
+.note-panels:has(.cm-panels) + .note-live {
+  border-top: 1px solid var(--line);
+}
+
+/* Focus shows the note's text and what is live at its foot: its folder and last edit are out of sight. */
+.groups[data-focus-mode] .group[data-front] .note-bar {
+  display: none;
 }
 
 .note-foot .cm-panels {
@@ -1888,15 +2035,15 @@ button.link:hover {
   color: var(--muted);
 }
 
-/* One row of one height whatever it says, so the text above never moves as the mode or a half-typed command changes. */
+/* One row of one height whatever it says, so the text above never moves as the mode or a half-typed command changes. It begins where the note's text does. */
 .note-foot .cm-vim-panel {
   box-sizing: border-box;
-  height: 1.75rem;
-  padding: 0 16px;
+  height: calc(1.75rem * var(--text-scale));
+  padding: 0 16px 0 var(--text-left, 16px);
   overflow: hidden;
   font-family: var(--mono);
-  font-size: 0.8rem;
-  line-height: 1.75rem;
+  font-size: calc(0.8rem * var(--text-scale));
+  line-height: calc(1.75rem * var(--text-scale));
   white-space: nowrap;
 }
 
@@ -1909,7 +2056,7 @@ button.link:hover {
 }
 
 .editor .cm-editor {
-  font-size: calc(1.05rem * var(--editor-text-scale, 1));
+  font-size: calc(1.05rem * var(--text-scale));
   line-height: 1.6;
 }
 
@@ -1920,11 +2067,14 @@ button.link:hover {
 /* Room left of the text, inside the editor's own margin, for what hangs there: a heading's #s. */
 .editor .cm-scroller {
   margin-left: -3rem;
+  line-height: var(--editor-line-height);
 }
 
 .editor .cm-content {
   padding-left: 3rem;
-  font-family: var(--prose);
+  font-family: var(--editor-font);
+  /* A pair of letters a construct's edge falls between is kerned only while the two are one run of text, so a letter would move by a fraction as the construct is drawn or written. */
+  font-kerning: none;
   caret-color: var(--accent);
 }
 
@@ -1956,7 +2106,7 @@ button.link:hover {
 
 .mode-view h1 {
   margin: 0 0 6px;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .embed {
@@ -1974,7 +2124,7 @@ button.link:hover {
   background: var(--bg-elev);
   box-shadow: 0 1px 2px rgb(30 24 12 / 0.05);
   font-family: var(--prose);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   line-height: 1.4;
 }
 
@@ -1982,7 +2132,7 @@ button.link:hover {
 .embed-head::before {
   content: attr(data-title);
   color: var(--muted);
-  font: 650 10.5px/1 var(--prose);
+  font: 650 calc(10.5px * var(--text-scale))/1 var(--prose);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: text;
@@ -2073,7 +2223,7 @@ button.link:hover {
 .embed-source-rows,
 .embed-source,
 .cm-line.embed-source-line {
-  font: 12.5px/1.6 var(--mono);
+  font: calc(12.5px * var(--text-scale))/1.6 var(--mono);
   letter-spacing: 0;
   text-indent: 0;
   white-space: pre-wrap;
@@ -2123,11 +2273,11 @@ button.link:hover {
 .embed-written {
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .cm-line.embed-alone {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .embed-written * {
@@ -2151,7 +2301,7 @@ button.link:hover {
 
 .embed-option-label {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .embed-option input {
@@ -2170,13 +2320,13 @@ button.link:hover {
 
 .embed-option-hint {
   color: var(--faint);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .embed-option-error {
   margin: 0;
   color: var(--danger);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .embed-option-choices,
@@ -2267,7 +2417,7 @@ button.link:hover {
   border: 0;
   background: none;
   color: inherit;
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -2295,7 +2445,7 @@ button.link:hover {
   border: 1px solid var(--line-strong);
   background: var(--bg);
   color: var(--ink);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -2464,7 +2614,7 @@ button.link:hover {
   color: var(--ink);
   font: inherit;
   font-family: var(--prose);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -2483,7 +2633,7 @@ button.link:hover {
   padding: 8px 16px;
   color: var(--ink);
   font-family: var(--prose);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   text-align: center;
 }
 
@@ -2552,7 +2702,7 @@ button.link:hover {
   padding: 12px 16px 28px;
   background: linear-gradient(rgb(0 0 0 / 0.7), transparent);
   color: #fff;
-  font: 600 15px/1.3 var(--prose);
+  font: 600 calc(15px * var(--text-scale))/1.3 var(--prose);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2618,12 +2768,12 @@ button.link:hover {
 
 .media-load-from {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .kanban {
   font-family: var(--prose);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   line-height: 1.4;
 }
 
@@ -2660,7 +2810,7 @@ button.link:hover {
   justify-content: space-between;
   gap: 8px;
   margin: 0 2px 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -2735,7 +2885,7 @@ button.link:hover {
   display: block;
   margin-top: 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   white-space: pre-wrap;
 }
 
@@ -2745,7 +2895,7 @@ button.link:hover {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   cursor: pointer;
   width: 100%;
   margin-top: 6px;
@@ -2810,7 +2960,7 @@ button.link:hover {
   margin: 0;
   padding: 8px 14px 10px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .quick-timer input[aria-invalid="true"] {
@@ -2824,7 +2974,7 @@ button.link:hover {
   background: var(--bg-elev);
   box-shadow: var(--shadow);
   font-family: var(--prose);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   overflow: hidden;
 }
 
@@ -2850,7 +3000,7 @@ button.link:hover {
   margin-left: 1em;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-style: normal;
 }
 
@@ -2863,7 +3013,7 @@ button.link:hover {
 
 .plugins-page h2 {
   margin: 18px 0 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .plugins-page .error {
@@ -2912,7 +3062,7 @@ button.link:hover {
 }
 
 .plugin-card .plugin-name {
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale));
   font-weight: 650;
   letter-spacing: -0.01em;
   outline: none;
@@ -2980,7 +3130,7 @@ button.link:hover {
 
 .plugin-name {
   color: var(--ink);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   font-weight: 600;
   text-decoration: none;
 }
@@ -2994,7 +3144,7 @@ button.link:hover {
 .plugin-meta {
   margin: 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .plugin-head {
@@ -3012,13 +3162,13 @@ button.link:hover {
   gap: 8px;
   align-items: center;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .plugin-back {
   align-self: flex-start;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   text-decoration: none;
 }
 
@@ -3032,7 +3182,7 @@ button.link:hover {
 
 .plugin-lead {
   margin: 4px 0 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .plugin-section {
@@ -3074,7 +3224,7 @@ button.link:hover {
 .plugin-shots figcaption {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 /* A picture taken in each theme: the one for the theme the app is in is the one shown. */
@@ -3107,7 +3257,7 @@ button.link:hover {
 }
 
 .plugin-adds dt {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -3117,14 +3267,14 @@ button.link:hover {
   gap: 2px 8px;
   align-items: baseline;
   margin: 2px 0 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .plugin-adds code,
 .shortcuts code {
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
 }
 
 /* A plugin's options on its own page are the rows Settings draws, in a frame with no border of its own. */
@@ -3189,7 +3339,7 @@ kbd {
   border-radius: 5px;
   background: var(--bg-elev);
   font-family: var(--prose);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   white-space: nowrap;
 }
 
@@ -3208,7 +3358,7 @@ kbd {
   border-radius: 10px;
   background: var(--bg-elev);
   box-shadow: var(--shadow);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .settings-banner .button {
@@ -3220,8 +3370,28 @@ kbd {
   border-color: var(--danger);
 }
 
-.mode-view.settings {
-  max-width: 62rem;
+/* Settings over the window, large, whatever is under it. */
+.settings-overlay {
+  box-sizing: border-box;
+  width: min(66rem, calc(100% - 32px));
+  height: calc(100% - 64px);
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-overlay::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.settings-overlay .settings {
+  padding: 22px 28px 32px;
   container-type: inline-size;
 }
 
@@ -3234,6 +3404,7 @@ kbd {
 
 .settings-head h1 {
   margin: 0;
+  font-size: calc(22px * var(--text-scale));
 }
 
 /* Saved and Saving… take the same room, so the head wraps the same way through a save and nothing under it moves. */
@@ -3284,7 +3455,7 @@ kbd {
   padding: 4px 10px;
   border-radius: 6px;
   color: var(--ink);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   text-decoration: none;
 }
 
@@ -3302,7 +3473,7 @@ kbd {
   margin: 12px 0 2px;
   padding: 0 10px;
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3310,7 +3481,7 @@ kbd {
 
 .settings-count {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   font-weight: 400;
 }
 
@@ -3324,7 +3495,7 @@ kbd {
   background: var(--bg-elev);
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 /* Too narrow to keep the categories beside the settings: they are a menu above them. */
@@ -3420,18 +3591,18 @@ kbd {
   border: 1px solid var(--danger);
   border-radius: 8px;
   color: var(--danger);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .settings-problems code,
 .setting code {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
 }
 
 .settings-locked {
   margin: 12px 0 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .settings-pane {
@@ -3465,12 +3636,12 @@ kbd {
   gap: 10px;
   align-items: baseline;
   margin: 22px 0 4px;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .settings-about-plugin {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 400;
 }
 
@@ -3479,7 +3650,7 @@ kbd {
   width: 100%;
   margin-top: 8px;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   table-layout: fixed;
 }
 
@@ -3508,7 +3679,7 @@ kbd {
 
 .shortcuts thead th {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -3533,7 +3704,7 @@ kbd {
 .shortcuts .error {
   display: block;
   margin-top: 2px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 /* A command's keys are one line whatever their number and their length, so a key added grows no row: those past the column's width are scrolled to, and the cell's title names them all. */
@@ -3567,7 +3738,7 @@ kbd {
 .shortcut-none,
 .shortcut-from {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .shortcut-buttons {
@@ -3611,7 +3782,7 @@ kbd {
   border-radius: 10px;
   background: var(--bg-elev);
   box-shadow: var(--shadow);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .recorder:focus {
@@ -3639,13 +3810,13 @@ kbd {
 
 .recorder-keys kbd {
   padding: 2px 10px;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .recorder-says {
   min-height: 2.5em;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .recorder-warning {
@@ -3669,7 +3840,7 @@ kbd {
   display: flex;
   gap: 10px;
   align-items: baseline;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -3681,7 +3852,7 @@ kbd {
 .setting-about {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .setting-control {
@@ -3700,7 +3871,7 @@ kbd {
   background: var(--bg-elev);
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .setting-control [aria-invalid="true"] {
@@ -3709,7 +3880,7 @@ kbd {
 
 .setting-default {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .setting .error {
@@ -3726,7 +3897,7 @@ kbd {
 
 .settings-json .cm-editor {
   min-height: 16rem;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .settings-json .cm-editor.cm-focused {
@@ -3794,7 +3965,7 @@ kbd {
 
 .panel-head h2 {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -3833,7 +4004,7 @@ kbd {
 .info dt {
   margin-top: 14px;
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3860,7 +4031,7 @@ kbd {
   background: var(--bg-elev);
   color: var(--ink);
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .info .url {
@@ -3872,7 +4043,7 @@ kbd {
   flex: 1;
   min-width: 0;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
 }
 
 /* A closed sidebar, and the inspector's bar, which is always there: a bar of icons, one for each thing the sidebar lists or each panel. */
@@ -3945,7 +4116,7 @@ kbd {
   margin: 0;
   padding: 14px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 /* Command palette and quick open */
@@ -3974,7 +4145,7 @@ kbd {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   outline: none;
 }
 
@@ -4008,7 +4179,7 @@ kbd {
 .palette-hint {
   flex: none;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 /* History */
@@ -4054,7 +4225,7 @@ kbd {
 .history-panes {
   height: 100%;
   min-height: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 /* The page's two panes fill it side by side and each scrolls by itself. */
@@ -4091,13 +4262,13 @@ kbd {
 
 .hist-head h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .hist-sub {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .hist-filters {
@@ -4121,7 +4292,7 @@ kbd {
   border-radius: 6px;
   background: none;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -4165,7 +4336,7 @@ kbd {
   text-decoration: underline;
 }
 
-/* Who wrote this: the switch in a note's History panel, a dot that fills when it is on. */
+/* Blame mode: the switch in a note's History panel, a dot that fills when it is on. */
 .who-switch {
   display: inline-flex;
   align-items: center;
@@ -4191,7 +4362,7 @@ kbd {
 }
 
 /*
- * Who wrote this: a column left of the text, one label for each run of lines one change last wrote.
+ * Blame mode: a column left of the text, one label for each run of lines one change last wrote.
  * The editor makes room for it out of its margin, and moves over only by what the margin lacks, once,
  * as the mode comes on. Members are cool colours and agents warm ones, the member's own grey. The
  * strip at the column's right edge is stronger the newer the change. One value of each holds in both
@@ -4202,9 +4373,9 @@ kbd {
 }
 
 .editor:has(> .cm-editor.who-on) {
-  margin-left: max(calc(var(--who-col) + 1.75rem), calc((100% - 46rem) / 2));
+  margin-left: max(calc(var(--who-col) + 1.75rem), calc((100% - var(--editor-width)) / 2));
   margin-right: auto;
-  max-width: min(46rem, calc(100% - var(--who-col) - 1.75rem));
+  max-width: min(var(--editor-width), calc(100% - var(--who-col) - 1.75rem));
 }
 
 .editor .cm-editor.who-on .cm-scroller {
@@ -4299,7 +4470,7 @@ kbd {
   padding-right: 10px;
   overflow: hidden;
   font-family: var(--ui, system-ui);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 16px;
 }
 
@@ -4313,7 +4484,7 @@ kbd {
   border-radius: 50%;
   background: var(--who);
   color: #fff;
-  font-size: 9px;
+  font-size: calc(9px * var(--text-scale));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -4455,7 +4626,7 @@ kbd {
   gap: 8px;
   padding: 8px 18px 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .hist-all-tick {
@@ -4466,7 +4637,7 @@ kbd {
   border: 0;
   background: none;
   color: var(--ink);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -4508,7 +4679,7 @@ kbd {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-scale));
   font-weight: 650;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -4618,7 +4789,7 @@ kbd {
   border-radius: 50%;
   background: hsl(var(--hue) 75% 91%);
   color: hsl(var(--hue) 50% 36%);
-  font-size: 9px;
+  font-size: calc(9px * var(--text-scale));
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.02em;
@@ -4682,7 +4853,7 @@ kbd {
   gap: 2px 8px;
   margin-top: 2px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-variant-numeric: tabular-nums;
 }
 
@@ -4735,7 +4906,7 @@ kbd {
 
 .hist-sum-text b {
   color: var(--ink);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 650;
 }
 
@@ -4762,7 +4933,7 @@ kbd {
   margin: 0;
   padding: 64px 20px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   text-align: center;
 }
 
@@ -4790,7 +4961,7 @@ kbd {
   border: 0;
   background: none;
   color: var(--ink);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-weight: 600;
   text-align: left;
   text-overflow: ellipsis;
@@ -4819,7 +4990,7 @@ kbd {
   background: var(--bg-elev);
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .hist-file > .error {
@@ -4837,7 +5008,7 @@ kbd {
   gap: 4px 10px;
   padding: 8px 14px 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .hist-skip {
@@ -4924,7 +5095,7 @@ kbd {
   display: block;
   padding: 4px 10px 1px calc(var(--diff-gutter, 14px) - 3px);
   color: var(--danger);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 600;
   line-height: 1.5;
 }
@@ -5064,12 +5235,12 @@ kbd {
 
 .history-panes.panel .hist-hint {
   padding: 24px 14px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .history-panes.panel .diff {
   --diff-gutter: 22px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 /* What just happened, in the window's bottom right corner, as v1's toasts. */
@@ -5098,7 +5269,7 @@ kbd {
   background: var(--bg-elev);
   box-shadow: var(--shadow-lg);
   color: var(--ink);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   animation: toast-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
   transition:
     opacity 0.35s,
@@ -5151,7 +5322,7 @@ kbd {
   border-radius: 7px;
   background: none;
   color: var(--accent-ink);
-  font: 650 12.5px var(--prose);
+  font: 650 calc(12.5px * var(--text-scale)) var(--prose);
   cursor: pointer;
 }
 
@@ -5161,13 +5332,13 @@ kbd {
 
 .change-stat {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   white-space: nowrap;
 }
 
 .hist-sum-text .change-stat,
 .hist-file-head .change-stat {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .added {
@@ -5182,7 +5353,7 @@ kbd {
 .label-chip {
   padding: 0 6px;
   border-radius: 99px;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
 }
 
 .badge {
@@ -5200,7 +5371,7 @@ kbd {
 .diff {
   --diff-gutter: 34px;
   font-family: var(--prose);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   line-height: 1.65;
 }
 
@@ -5241,7 +5412,7 @@ kbd {
   left: calc(var(--diff-gutter) - 20px);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: calc(14px * 1.65);
   user-select: none;
 }
@@ -5284,7 +5455,7 @@ kbd {
   background: none;
   color: var(--muted);
   font-family: var(--prose);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   text-align: left;
 }
 
@@ -5301,7 +5472,7 @@ button.diff-fold:hover {
   margin: 0;
   padding: 10px 14px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .diff-none .link {
@@ -5328,7 +5499,7 @@ button.diff-fold:hover {
   flex-direction: column;
   gap: 10px;
   padding: 16px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .revert-dialog h2,
@@ -5337,7 +5508,7 @@ button.diff-fold:hover {
 }
 
 .revert-dialog h2 {
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .revert-dialog .diff {
@@ -5356,7 +5527,7 @@ button.diff-fold:hover {
 
 .revert-dialog h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .conflicts,
@@ -5397,7 +5568,7 @@ button.diff-fold:hover {
 .conflict dt,
 .conflict-after > span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .conflict dd {
@@ -5412,7 +5583,7 @@ button.diff-fold:hover {
   border-radius: 6px;
   background: var(--bg);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   line-height: 1.5;
 }
 
@@ -5464,7 +5635,7 @@ button.diff-fold:hover {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   line-height: 1.5;
   resize: vertical;
 }
@@ -5478,7 +5649,7 @@ button.diff-fold:hover {
 
 .revert-result output {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 400;
 }
 
@@ -5507,12 +5678,12 @@ button.diff-fold:hover {
   --diff-gutter: 26px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .revert-dialog h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .revert-lead,
@@ -5547,7 +5718,7 @@ button.diff-fold:hover {
 .revert-note-head h3 {
   min-width: 0;
   overflow: hidden;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5568,12 +5739,12 @@ button.diff-fold:hover {
 
 .agents h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .agents h2 {
   margin: 10px 0 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .agents .lead,
@@ -5586,7 +5757,7 @@ button.diff-fold:hover {
 .agents .lead,
 .agents .hint {
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .connect {
@@ -5611,7 +5782,7 @@ button.diff-fold:hover {
   flex-direction: column;
   gap: 3px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .connect input:not([type="checkbox"]),
@@ -5624,14 +5795,14 @@ button.diff-fold:hover {
   background: var(--bg);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .connect .check {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .connect .button {
@@ -5653,7 +5824,7 @@ button.diff-fold:hover {
   margin-bottom: 3px;
   padding: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .folder-limit .hint {
@@ -5713,7 +5884,7 @@ button.diff-fold:hover {
 
 .copyable.prose textarea {
   font-family: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.45;
   resize: vertical;
 }
@@ -5721,7 +5892,7 @@ button.diff-fold:hover {
 .by-hand summary {
   width: max-content;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -5757,7 +5928,7 @@ button.diff-fold:hover {
 .copyable textarea {
   flex: 1;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   resize: none;
 }
 
@@ -5799,11 +5970,11 @@ button.diff-fold:hover {
 .agent-meta {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .confirm {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .confirm {
@@ -5843,7 +6014,7 @@ button.diff-fold:hover {
   background: var(--bg);
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .members .said {
@@ -5899,7 +6070,7 @@ button.diff-fold:hover {
 .share-head h2 {
   margin: 0;
   overflow: hidden;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5919,7 +6090,7 @@ button.diff-fold:hover {
 
 .share-body h3 {
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -5928,7 +6099,7 @@ button.diff-fold:hover {
 .share-body .hint,
 .share-meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .share-body .error {
@@ -5968,12 +6139,12 @@ button.diff-fold:hover {
   background: var(--bg);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .share-dialog .copyable textarea {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .share-list,
@@ -6025,7 +6196,7 @@ button.diff-fold:hover {
   display: flex;
   flex-direction: column;
   height: 100%;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   line-height: 1.45;
 }
 
@@ -6095,7 +6266,7 @@ button.diff-fold:hover {
   display: block;
   padding: 10px 8px 2px;
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -6135,7 +6306,7 @@ button.diff-fold:hover {
 
 .todos-page h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 /* The query bar and, at the end of its line, the order, which is the query's sort: said as a menu. */
@@ -6158,7 +6329,7 @@ button.diff-fold:hover {
   min-height: 38px;
   margin-left: auto;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .todo-sort select {
@@ -6212,7 +6383,7 @@ button.diff-fold:hover {
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 13%, var(--bg-elev));
   color: var(--accent-ink);
-  font: 500 13px/20px var(--prose);
+  font: 500 calc(13px * var(--text-scale))/20px var(--prose);
   animation: todo-order-in 0.18s ease-out;
 }
 
@@ -6248,7 +6419,7 @@ button.diff-fold:hover {
   border-radius: 6px;
   background: var(--accent);
   color: var(--on-accent);
-  font: 600 12.5px/20px var(--prose);
+  font: 600 calc(12.5px * var(--text-scale))/20px var(--prose);
   cursor: pointer;
 }
 
@@ -6286,7 +6457,7 @@ button.diff-fold:hover {
   margin: 0 -6px;
   padding: 4px 6px;
   border-radius: 7px;
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--text-scale));
   line-height: 1.4;
 }
 
@@ -6362,7 +6533,7 @@ button.diff-fold:hover {
   grid-column: 2 / 4;
   margin: 1px 0 0;
   color: var(--muted);
-  font: 12px/1.35 var(--prose);
+  font: calc(12px * var(--text-scale))/1.35 var(--prose);
 }
 
 .todo-row[data-done] .todo-words {
@@ -6423,7 +6594,7 @@ button.diff-fold:hover {
   border-radius: 999px;
   background: var(--hover);
   color: var(--chip-ink);
-  font: 500 11.5px/1 var(--prose);
+  font: 500 calc(11.5px * var(--text-scale))/1 var(--prose);
   white-space: nowrap;
 }
 
@@ -6565,7 +6736,7 @@ button.todo-chip:disabled {
   min-width: 0;
   /* A long tag is cut short at about 14 letters' width; its chip's own size, so the line wraps round the chip and not round the tag. */
   max-width: min(14em, 100%);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
 }
 
 .todo-tag-name {
@@ -6635,7 +6806,7 @@ button.todo-tag[aria-pressed="true"] {
   border-radius: 5px;
   background: none;
   color: var(--muted);
-  font: 12px/15px var(--prose);
+  font: calc(12px * var(--text-scale))/15px var(--prose);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -6694,7 +6865,7 @@ button.todo-tag[aria-pressed="true"] {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   text-align: left;
   cursor: pointer;
 }
@@ -6787,7 +6958,7 @@ button.todo-tag[aria-pressed="true"] {
   max-width: 55%;
   margin-left: auto;
   color: var(--ink);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6799,7 +6970,7 @@ button.todo-tag[aria-pressed="true"] {
 .chip-now {
   margin-left: auto;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
 }
 
 .chip-day {
@@ -6820,12 +6991,12 @@ button.todo-tag[aria-pressed="true"] {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .todo-none {
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 
 .todo-next {
@@ -6836,7 +7007,7 @@ button.todo-tag[aria-pressed="true"] {
   background: var(--bg-elev);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -6858,7 +7029,7 @@ button.todo-tag[aria-pressed="true"] {
   background: var(--bg-elev);
   box-shadow: var(--shadow-lg);
   color: var(--ink);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 /* The Repeat popover, one column: the rule in words and its next dates, the rules to pick from, Custom's form, then Cancel and Done. */
@@ -6889,7 +7060,7 @@ button.todo-tag[aria-pressed="true"] {
 .repeat-next {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .repeat-list {
@@ -6925,7 +7096,7 @@ button.todo-tag[aria-pressed="true"] {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   text-decoration: underline;
   cursor: pointer;
 }
@@ -7091,7 +7262,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .rule-hint {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .rule-note {
@@ -7102,7 +7273,7 @@ button.todo-tag[aria-pressed="true"] {
   padding: 6px 8px;
   border-radius: 6px;
   background: var(--hover);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .completions {
@@ -7111,7 +7282,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .completions h2 {
   margin: 2px 6px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 600;
   color: var(--muted);
   outline: none;
@@ -7158,7 +7329,7 @@ button.todo-tag[aria-pressed="true"] {
   max-width: 18rem;
   margin: 6px 6px 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   outline: none;
 }
 
@@ -7170,7 +7341,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .daily-opening h1 {
   margin: 0 0 6px;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .daily-opening p {
@@ -7194,7 +7365,7 @@ button.todo-tag[aria-pressed="true"] {
 .search-page h1 {
   margin: 0;
   overflow-wrap: anywhere;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .search-tools {
@@ -7204,12 +7375,12 @@ button.todo-tag[aria-pressed="true"] {
   justify-content: space-between;
   gap: 6px 14px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .search-tools .filter {
   padding: 8px 11px;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 .include-archived {
@@ -7222,7 +7393,7 @@ button.todo-tag[aria-pressed="true"] {
 .search-status {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
@@ -7277,7 +7448,7 @@ button.todo-tag[aria-pressed="true"] {
   flex-wrap: wrap;
   gap: 2px 10px;
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
 }
 
 .found-archived {
@@ -7290,7 +7461,7 @@ button.todo-tag[aria-pressed="true"] {
 .found-line {
   overflow: hidden;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: pre;
 }
@@ -7307,7 +7478,7 @@ button.todo-tag[aria-pressed="true"] {
   align-items: center;
   gap: 10px;
   color: var(--danger);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .found-more {
@@ -7317,7 +7488,7 @@ button.todo-tag[aria-pressed="true"] {
   background: var(--bg-elev);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -7371,7 +7542,7 @@ button.todo-tag[aria-pressed="true"] {
   margin: 0;
   padding: 0 10px;
   color: var(--faint);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .tags-hint {
@@ -7418,7 +7589,7 @@ button.todo-tag[aria-pressed="true"] {
   border-bottom: 1px solid var(--line);
   background: var(--accent-soft);
   color: var(--ink);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .trash-banner > span:first-child {
@@ -7478,7 +7649,7 @@ button.todo-tag[aria-pressed="true"] {
   flex-wrap: wrap;
   gap: 2px 12px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .trash-actions {
@@ -7546,7 +7717,7 @@ button.todo-tag[aria-pressed="true"] {
   border-top: 1px solid var(--line);
   background: var(--bg-side);
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
   overflow: hidden;
 }
@@ -7616,7 +7787,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .contacts-page h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .cal-head {
@@ -7629,7 +7800,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .cal-head h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .cal-head .cal-zone {
@@ -7662,7 +7833,7 @@ button.todo-tag[aria-pressed="true"] {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -7677,7 +7848,7 @@ button.todo-tag[aria-pressed="true"] {
   border-radius: 10px;
   padding: 8px 12px;
   background: var(--accent-soft);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .cal-nav,
@@ -7697,7 +7868,7 @@ button.todo-tag[aria-pressed="true"] {
 .contacts-count {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .cal-grid {
@@ -7723,7 +7894,7 @@ button.todo-tag[aria-pressed="true"] {
   border-bottom: 1px solid var(--line);
   background: var(--bg-side);
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -7764,11 +7935,11 @@ button.todo-tag[aria-pressed="true"] {
   gap: 5px;
   padding: 0 2px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .cal-weekday {
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -7816,7 +7987,7 @@ button.todo-tag[aria-pressed="true"] {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 1.35;
   text-align: left;
   cursor: pointer;
@@ -7873,7 +8044,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .cal-agenda h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .cal-agenda .cal-day[data-today] h3 {
@@ -7881,7 +8052,7 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 .cal-agenda .cal-event {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .cal-agenda .cal-time {
@@ -7956,7 +8127,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .cal-tg-weekday {
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-scale));
   font-weight: 650;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -7969,7 +8140,7 @@ button.todo-tag[aria-pressed="true"] {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  font-size: 18px;
+  font-size: calc(18px * var(--text-scale));
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -7990,7 +8161,7 @@ button.todo-tag[aria-pressed="true"] {
 .cal-tg-allday .cal-tg-gutter {
   padding: 7px 8px 0 0;
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-scale));
   text-align: right;
   white-space: nowrap;
 }
@@ -8010,7 +8181,7 @@ button.todo-tag[aria-pressed="true"] {
   box-shadow: inset 3px 0 0 var(--c);
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 550;
   line-height: 20px;
   text-align: left;
@@ -8053,7 +8224,7 @@ button.todo-tag[aria-pressed="true"] {
   position: absolute;
   right: 8px;
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-scale));
   white-space: nowrap;
   transform: translateY(-50%);
 }
@@ -8122,7 +8293,7 @@ button.todo-tag[aria-pressed="true"] {
   box-shadow: inset 3px 0 0 var(--c);
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 16px;
   text-align: left;
   cursor: pointer;
@@ -8163,7 +8334,7 @@ button.todo-tag[aria-pressed="true"] {
   flex: none;
   overflow: hidden;
   color: color-mix(in srgb, currentcolor 76%, transparent);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -8180,7 +8351,7 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 .cal-ev-compact {
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
 }
 
 /* Under an hour: one line, the title then when it starts. */
@@ -8274,7 +8445,7 @@ button.todo-tag[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   pointer-events: none;
 }
 
@@ -8340,7 +8511,7 @@ button.todo-tag[aria-pressed="true"] {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -8357,7 +8528,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .cal-new-length {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .event-scrim {
@@ -8395,7 +8566,7 @@ button.todo-tag[aria-pressed="true"] {
 .event-head h2 {
   margin: 0;
   overflow: hidden;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8406,7 +8577,7 @@ button.todo-tag[aria-pressed="true"] {
   gap: 14px;
   padding: 14px 16px 16px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .event-body p {
@@ -8473,7 +8644,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .event-notes h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 /* The panel's main action, under the notes it adds to. */
@@ -8534,7 +8705,7 @@ button.todo-tag[aria-pressed="true"] {
   border-radius: 999px;
   background: var(--hover);
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
 }
 
 .event-audience[data-audience="private"] {
@@ -8561,13 +8732,13 @@ button.todo-tag[aria-pressed="true"] {
   padding: 4px 8px 8px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
 .event-link-head strong {
   color: var(--ink);
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -8592,7 +8763,7 @@ button.todo-tag[aria-pressed="true"] {
 .event-link-notes h3 {
   margin: 2px 8px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--text-scale));
   font-weight: 500;
 }
 
@@ -8618,7 +8789,7 @@ button.todo-tag[aria-pressed="true"] {
 .event-link .event-new-note p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .event-link-open {
@@ -8629,7 +8800,7 @@ button.todo-tag[aria-pressed="true"] {
 
 .event-link-open .event-link-title {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .event-link-said {
@@ -8641,7 +8812,7 @@ button.todo-tag[aria-pressed="true"] {
   flex-direction: column;
   gap: 3px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .event-form .check {
@@ -8660,7 +8831,7 @@ button.todo-tag[aria-pressed="true"] {
   background: var(--bg);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .event-form textarea {
@@ -8687,13 +8858,13 @@ button.todo-tag[aria-pressed="true"] {
   margin-top: 8px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .sources h2 {
   margin: 0;
   color: var(--faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -8706,7 +8877,7 @@ button.todo-tag[aria-pressed="true"] {
 .sources-none,
 .source-meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .source-list {
@@ -8735,7 +8906,7 @@ button.todo-tag[aria-pressed="true"] {
 }
 
 .source-list button.link {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -8762,7 +8933,7 @@ button.todo-tag[aria-pressed="true"] {
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -8782,7 +8953,7 @@ button.todo-tag[aria-pressed="true"] {
 .contact-name {
   overflow: hidden;
   color: var(--ink);
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -8791,7 +8962,7 @@ button.todo-tag[aria-pressed="true"] {
 .contact-organization,
 .contact-reach {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-scale));
 }
 
 .contact-reach {
@@ -8930,7 +9101,7 @@ button.todo-tag[aria-pressed="true"] {
   overflow: hidden;
   color: var(--muted);
   font-family: var(--prose);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   text-align: center;
 }
 
@@ -8938,7 +9109,7 @@ button.todo-tag[aria-pressed="true"] {
   max-width: 100%;
   overflow: hidden;
   color: var(--faint);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8957,7 +9128,7 @@ button.todo-tag[aria-pressed="true"] {
   overflow: hidden;
   color: var(--muted);
   font-family: var(--prose);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .upload-sending-words {
@@ -8989,7 +9160,7 @@ button.todo-tag[aria-pressed="true"] {
   height: 40px;
   padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--line);
-  font: 13px/1.3 var(--prose);
+  font: calc(13px * var(--text-scale))/1.3 var(--prose);
 }
 
 .upload-card-name {
@@ -9022,7 +9193,7 @@ button.todo-tag[aria-pressed="true"] {
 .upload-card-said {
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -9124,7 +9295,7 @@ button.todo-tag[aria-pressed="true"] {
   margin: 0;
   padding: 10px 14px;
   color: var(--ink);
-  font: 12.5px/20px var(--mono);
+  font: calc(12.5px * var(--text-scale))/20px var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -9133,7 +9304,7 @@ button.todo-tag[aria-pressed="true"] {
   margin: 8px 6px;
   border-collapse: collapse;
   color: var(--ink);
-  font: 12.5px/1 var(--prose);
+  font: calc(12.5px * var(--text-scale))/1 var(--prose);
 }
 
 .upload-preview-rows :is(th, td) {
@@ -9173,7 +9344,7 @@ button.todo-tag[aria-pressed="true"] {
 .upload-type-ending {
   margin-top: 26px;
   color: var(--muted);
-  font: 650 11px/1 var(--prose);
+  font: 650 calc(11px * var(--text-scale))/1 var(--prose);
   letter-spacing: 0.06em;
 }
 
@@ -9181,13 +9352,13 @@ button.todo-tag[aria-pressed="true"] {
   margin: 0;
   padding: 0 14px 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   text-align: center;
 }
 
 h2 > .upload-preview-said {
   padding: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 400;
 }
 
@@ -9338,7 +9509,7 @@ a.file-chip:hover .file-chip-name {
 
 .uploads-head h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
 }
 
 .uploads-tools {
@@ -9372,7 +9543,7 @@ a.file-chip:hover .file-chip-name {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   cursor: pointer;
 }
 
@@ -9391,7 +9562,7 @@ a.file-chip:hover .file-chip-name {
 .uploads-none {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .uploads-none {
@@ -9469,7 +9640,7 @@ a.file-chip:hover .file-chip-name {
   gap: 2px 10px;
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .upload-detail {
@@ -9498,7 +9669,7 @@ a.file-chip:hover .file-chip-name {
 
 .upload-detail-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
@@ -9534,7 +9705,7 @@ a.file-chip:hover .file-chip-name {
 .upload-used h3 {
   margin: 0 0 4px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 600;
 }
 
@@ -9545,7 +9716,7 @@ a.file-chip:hover .file-chip-name {
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .upload-used a {
@@ -9568,7 +9739,7 @@ a.file-chip:hover .file-chip-name {
   border-radius: 12px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   font-weight: 600;
   pointer-events: none;
 }
@@ -9618,7 +9789,7 @@ a.file-chip:hover .file-chip-name {
   box-shadow: var(--shadow-lg);
   color: var(--ink);
   font-family: var(--prose);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .upload-insert input {
@@ -9671,7 +9842,7 @@ a.file-chip:hover .file-chip-name {
 .upload-insert small {
   flex: none;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .upload-insert-none {
@@ -9709,7 +9880,7 @@ a.file-chip:hover .file-chip-name {
 
 .file-title h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
@@ -9723,14 +9894,14 @@ a.file-chip:hover .file-chip-name {
 .file-none {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .file-code .cm-editor {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--code-bg);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .file-code .cm-scroller {
@@ -9759,7 +9930,7 @@ a.file-chip:hover .file-chip-name {
   width: max-content;
   min-width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .file-table th,
@@ -9797,7 +9968,7 @@ a.file-chip:hover .file-chip-name {
 
 .trash-part {
   margin: 28px 0 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 
 @media (max-width: 60rem) {
@@ -9844,7 +10015,7 @@ a.file-chip:hover .file-chip-name {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   object-fit: cover;
 }
 
@@ -9855,19 +10026,19 @@ a.file-chip:hover .file-chip-name {
 
 .person-title h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   overflow-wrap: anywhere;
 }
 
 .person-what {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .person-page h2 {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-weight: 600;
   color: var(--muted);
 }
@@ -9881,7 +10052,7 @@ a.file-chip:hover .file-chip-name {
 .person-whose {
   margin: 0 0 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .person-fields {
@@ -9898,7 +10069,7 @@ a.file-chip:hover .file-chip-name {
 
 .person-field dt {
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.6;
 }
 
@@ -9951,7 +10122,7 @@ a.file-chip:hover .file-chip-name {
 
 .contact-form-label {
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .contact-form-lines {
@@ -9985,7 +10156,7 @@ a.file-chip:hover .file-chip-name {
   border-color: transparent;
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .contact-form .contact-form-type:hover,
@@ -10012,7 +10183,7 @@ a.file-chip:hover .file-chip-name {
   background: var(--bg);
   color: var(--ink);
   font: inherit;
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--text-scale));
 }
 
 .contact-form-birthday input {
@@ -10051,7 +10222,7 @@ a.file-chip:hover .file-chip-name {
 .person-source {
   display: inline-block;
   margin-top: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .person-mentions ul {
@@ -10088,7 +10259,7 @@ a.file-chip:hover .file-chip-name {
 .person-note,
 .person-none {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .person-none {
@@ -10270,7 +10441,7 @@ a.file-chip:hover .file-chip-name {
 .dash-head h3 {
   margin: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -10308,7 +10479,7 @@ a.file-chip:hover .file-chip-name {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   text-align: left;
   text-decoration: none;
 }
@@ -10336,7 +10507,7 @@ button.dash-row:hover {
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -10401,11 +10572,11 @@ button.dash-row:hover {
   margin: 0;
   padding: 7px 8px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .dash-since {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .dash-none.failed {
@@ -10458,3 +10629,21 @@ button.dash-row:hover {
 }
 
 /* Dashboard: end */
+
+/* The Calendar with nothing connected asks for a calendar first. */
+.cal-connect {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.event-form select,
+.cal-sources select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}

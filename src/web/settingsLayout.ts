@@ -46,8 +46,8 @@ const GENERAL = { id: "general", name: "General" };
 
 /** The app's own settings, by the category each is listed under. One that is in no row is under General. */
 const OWN: readonly { id: string; name: string; keys: readonly string[] }[] = [
-  { id: "editor", name: "Editor", keys: ["core.editorTextSize"] },
-  { id: "appearance", name: "Appearance", keys: ["core.theme"] },
+  { id: "editor", name: "Editor", keys: ["core.editorFont", "core.editorFontFamily", "core.editorTextSize", "core.editorLineHeight", "core.editorReadingWidth"] },
+  { id: "appearance", name: "Appearance", keys: ["core.theme", "core.textSize"] },
 ];
 
 /** The id of the app's own plugin, whose settings are split among {@link OWN}. */

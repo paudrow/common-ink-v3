@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { category, group, json, openOptions, setPlugin, typeJson } from "./settings-helpers.ts";
+import { category, group, json, openOptions, saveState, setPlugin, settingsDialog, typeJson } from "./settings-helpers.ts";
 import { perform, pinPanel, signInAsNewPerson } from "./helpers.ts";
 
 let errors: string[];
@@ -32,7 +32,7 @@ async function openSettings(page: Page) {
   await signInAsNewPerson(page, "Ada Lovelace");
   const note = await perform(page, { type: "note.create", text: "# Alpha\n\nThe first lines of Alpha." });
   await page.goto(APPEARANCE);
-  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(settingsDialog(page).getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   return note;
 }
 
@@ -105,12 +105,13 @@ test("when the settings can't be read the workspace opens with the defaults, say
   await page.keyboard.type("Disable plugin: Note list");
   await page.keyboard.press("Enter");
   await page.goto(APPEARANCE);
-  await expect(page.getByRole("status")).toHaveText("Your settings couldn't be loaded, so nothing can be changed here");
+  await expect(saveState(page)).toHaveText("Your settings couldn't be loaded, so nothing can be changed here");
   await expect(themeBox(page)).toBeDisabled();
   down = false;
   await expect.poll(() => stored(page)).toEqual({ "core.theme": "dark", "sidebar.enabled": false });
 
-  await page.getByRole("button", { name: "Try again" }).click();
+  // The window's banner is under the dialog, so Settings has its own Try again.
+  await settingsDialog(page).getByRole("button", { name: "Try again" }).click();
   await expect(banner).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toHaveCount(0);
   await expect(themeBox(page)).toHaveValue("dark");
@@ -124,7 +125,7 @@ test("slow settings don't hold the workspace back for long: it opens with the de
   await slow(page, "settings.read", 4000);
 
   await page.goto("/");
-  // `/` returns to the Settings page's tab, which says the same in its own words: this is the app's notice.
+  // Settings is not open at `/`, so this is the app's notice.
   const banner = page.getByRole("status").filter({ hasText: "Loading your settings. The defaults are in use until they arrive." });
   await expect(banner).toBeVisible({ timeout: 3500 });
   await expect(page.getByRole("complementary", { name: "Sidebar" })).toBeVisible();
@@ -189,7 +190,8 @@ test("a plugin that names a command or a page as the app's own are named is left
   await expect(row("Squatter of plugins.toggle.sidebar")).toContainText("starts with plugins., and this one is plugins.toggle.sidebar");
   await expect(row("Squatter of the page")).toContainText("There's already a page at /settings");
   await page.goto("/settings");
-  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(settingsDialog(page).getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(page.getByText("Not the settings")).toHaveCount(0);
 });
 
 test("a key that types is a keybinding only where nothing is being typed, so Enter in a note stays Enter", async ({ page }) => {
@@ -235,7 +237,7 @@ test("settings the server refuses are put back as they were, with its reason and
 
   await typeJson(page, `{"core.theme": "light", "x": "${"a".repeat(100_100)}"}`);
 
-  await expect(page.getByRole("status")).toHaveText("Not saved, and put back as it was: Settings can be at most 100000 characters");
+  await expect(saveState(page)).toHaveText("Not saved, and put back as it was: Settings can be at most 100000 characters");
   await expect(json(page)).toContainText('"core.theme": "dark"');
   await expect.poll(() => theme(page)).toBe("dark");
   await page.waitForTimeout(3500);
@@ -244,7 +246,7 @@ test("settings the server refuses are put back as they were, with its reason and
 
   await perform(page, { type: "settings.write", text: '{"core.theme":"light"}', baseRevision: 1 });
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(saveState(page)).toHaveText("Saved");
   await expect.poll(() => theme(page)).toBe("light");
 });
 

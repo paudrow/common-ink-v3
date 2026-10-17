@@ -29,7 +29,7 @@ const look = EditorView.baseTheme({
   ".code-tools": { float: "right", position: "sticky", right: "0.4em", marginRight: "-0.5em", height: "0", alignItems: "flex-start", display: "flex", gap: "2px", fontFamily: "var(--prose)", textIndent: "0", userSelect: "none", opacity: "0", transition: "opacity 0.12s" },
   ".code-tools.code-near, .code-tools:hover, .code-tools:focus-within, .code-tools:has(.code-done)": { opacity: "1" },
   "@media (hover: none)": { ".code-tools": { opacity: "1" } },
-  ".code-tools button": { display: "inline-flex", alignItems: "center", gap: "4px", height: "22px", padding: "0 5px", border: "0", borderRadius: "6px", background: "none", color: "var(--muted)", font: "600 11px/1 var(--prose)", cursor: "pointer" },
+  ".code-tools button": { display: "inline-flex", alignItems: "center", gap: "4px", height: "22px", padding: "0 5px", border: "0", borderRadius: "6px", background: "none", color: "var(--muted)", font: "600 calc(11px * var(--text-scale))/1 var(--prose)", cursor: "pointer" },
   ".code-tools button:hover": { background: "var(--hover)", color: "var(--ink)" },
   ".code-tools button:focus-visible": { outline: "2px solid var(--accent)", outlineOffset: "1px" },
   ".code-tools button[aria-pressed=true]": { background: "var(--accent-soft)", color: "var(--accent)" },

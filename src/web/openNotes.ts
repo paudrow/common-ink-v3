@@ -25,6 +25,32 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 
+/** Whether a note is open in an editor now. */
+export const isOpen = (noteId: string) => editors.has(noteId);
+
+/** Other tabs of this browser, asked which notes they have open. A tab never hears what it sent itself. */
+const tabs = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("ink.open-notes");
+tabs?.addEventListener("message", (e: MessageEvent<{ ask?: string; open?: string; id: string }>) => {
+  if (e.data.ask && editors.has(e.data.ask)) tabs.postMessage({ open: e.data.ask, id: e.data.id });
+});
+
+/** Whether another tab of this browser has a note open in an editor, which may hold typing not yet sent. It answers false when none says so in a moment. */
+export function openInAnotherTab(noteId: string): Promise<boolean> {
+  if (!tabs) return Promise.resolve(false);
+  const id = crypto.randomUUID();
+  return new Promise((answer) => {
+    const done = (open: boolean) => {
+      clearTimeout(waiting);
+      tabs.removeEventListener("message", reply);
+      answer(open);
+    };
+    const reply = (e: MessageEvent<{ open?: string; id: string }>) => e.data.open === noteId && e.data.id === id && done(true);
+    const waiting = setTimeout(() => done(false), 250);
+    tabs.addEventListener("message", reply);
+    tabs.postMessage({ ask: noteId, id });
+  });
+}
+
 /**
  * A move of the cursor within a note that is a jump, as vim's G or a search is: going back comes back
  * to `from`. An editor extension puts it on a transaction of its own after the move.

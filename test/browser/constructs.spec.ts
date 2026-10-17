@@ -87,7 +87,8 @@ const seen = (page: Page) =>
 
 for (const vim of [false, true]) {
   test(`walking the cursor along a line one letter at a time shows as written only what it is on, one construct at a time, and moves nothing else${vim ? ", in vim mode" : ""}`, async ({ page }) => {
-    await open(page, WALK, vim ? { "vim.enabled": true } : undefined);
+    // A column wide enough for the line to be one row as written too, in a monospaced font as in any other.
+    await open(page, WALK, { "core.editorReadingWidth": 1100, ...(vim ? { "vim.enabled": true } : {}) });
     if (vim) await expect(page.locator(".cm-vim-panel")).toHaveText("--NORMAL--");
     await expect(editor(page).locator(".katex").first()).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
@@ -397,7 +398,8 @@ for (const face of ["the app's face", "a face with a wide X"] as const) {
 }
 
 test("a formula in a line sits on the line's baseline where KaTeX itself puts it, and the line is no taller", async ({ page }) => {
-  await open(page, "# Inline $\\frac{a}{b}$ head\n\nA fraction $\\frac{a}{b}$ and a square $x^2$ and a sum $\\sum_{i=1}^{n} i$ and $a \\neq b$ and $x \\notin S$ in words.\n\nLast words.");
+  // A column wide enough for the line of formulas to be one row in a monospaced font too, so its baseline is the formulas'.
+  await open(page, "# Inline $\\frac{a}{b}$ head\n\nA fraction $\\frac{a}{b}$ and a square $x^2$ and a sum $\\sum_{i=1}^{n} i$ and $a \\neq b$ and $x \\notin S$ in words.\n\nLast words.", { "core.editorReadingWidth": 1100 });
   await expect(editor(page).locator(".katex").first()).toBeVisible();
   // KaTeX's own script, served as a file of the app's origin: the page's policy runs no inline script.
   await page.route("**/test-only/katex.min.js", (route) => route.fulfill({ path: "node_modules/katex/dist/katex.min.js", contentType: "text/javascript" }));
@@ -407,7 +409,9 @@ test("a formula in a line sits on the line's baseline where KaTeX itself puts it
     const style = getComputedStyle(line);
     // The same formulas as KaTeX sets them in a paragraph of the line's own face, size and height.
     const plain = document.createElement("p");
-    Object.assign(plain.style, { position: "fixed", left: "0", top: "0", margin: "0", font: style.font, lineHeight: style.lineHeight, whiteSpace: "pre" });
+    // Each part of the face, as `font` reads as nothing for a face with a part it can't say, such as no kerning.
+    const face = { fontFamily: style.fontFamily, fontSize: style.fontSize, fontWeight: style.fontWeight, fontStyle: style.fontStyle, fontKerning: style.fontKerning };
+    Object.assign(plain.style, { position: "fixed", left: "0", top: "0", margin: "0", ...face, lineHeight: style.lineHeight, whiteSpace: "pre" });
     for (const tex of ["\\frac{a}{b}", "x^2", "\\sum_{i=1}^{n} i", "a \\neq b", "x \\notin S"]) {
       const el = document.createElement("span");
       (window as unknown as { katex: { render(tex: string, el: HTMLElement, options: object): void } }).katex.render(tex, el, { output: "htmlAndMathml" });
@@ -434,7 +438,7 @@ test("a formula in a line sits on the line's baseline where KaTeX itself puts it
       );
     };
     const plainLine = document.createElement("p");
-    Object.assign(plainLine.style, { margin: "0", font: style.font, lineHeight: style.lineHeight });
+    Object.assign(plainLine.style, { margin: "0", ...face, lineHeight: style.lineHeight });
     plainLine.textContent = "words";
     document.body.append(plainLine);
     // In a heading, the formula's baseline is the heading's.
