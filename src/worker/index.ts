@@ -7,6 +7,7 @@ import { sweep } from "../core/oauth.ts";
 import { clearUploads, purgeTrash } from "../core/purge.ts";
 import { SIGN_IN_FIRST } from "../core/standing.ts";
 import { devSignIn, handleAuth, sessionPersonId } from "./auth.ts";
+import { handleClipper } from "./clipper.ts";
 import { handleAgentsApi } from "./mcp/agents-api.ts";
 import { handleMcp } from "./mcp/mcp.ts";
 import { handleOAuth } from "./oauth.ts";
@@ -134,6 +135,7 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   if (fileSite) return fileSite;
   if (url.pathname === SW_PATH && (req.method === "GET" || req.method === "HEAD")) return swResponse();
   if (url.pathname.startsWith("/auth/")) return handleAuth(req, env, url);
+  if (url.pathname === "/clipper/connect") return handleClipper(req, env, url);
   if (url.pathname === "/mcp") return answered("/mcp", () => handleMcp(req, env, sourcesFor(env, url)), () => json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: BROKE } }, 500));
   if (url.pathname.startsWith("/oauth/") || url.pathname.startsWith("/.well-known/oauth-")) {
     return answered(url.pathname, () => handleOAuth(req, env, url), () => json({ error: "server_error", error_description: BROKE }, 500));

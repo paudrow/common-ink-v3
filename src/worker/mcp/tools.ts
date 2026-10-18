@@ -282,8 +282,14 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "create_note",
-    description: `${ASK_NOTE_SYNTAX} Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} ${MENTIONS} ${TODOS} Needs the editor or admin role.`,
-    inputSchema: object({ text: { type: "string", description: "The note's markdown" }, folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"), linkTitles, mentionNames }),
+    description: `${ASK_NOTE_SYNTAX} Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. Send the same writeId again after a failed call and the note is created once. ${LINKS} ${MENTIONS} ${TODOS} Needs the editor or admin role.`,
+    inputSchema: object({
+      text: { type: "string", description: "The note's markdown" },
+      folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"),
+      linkTitles,
+      mentionNames,
+      writeId: { type: "string", maxLength: 64, description: "Any unique string, to make a retry return the note from the first call" },
+    }),
     op: "note.create",
     example: { text: "# Plan\n\nSee [[Budget]].", folderId: FOLDER },
   },
@@ -1158,7 +1164,7 @@ function fromBase64(given: unknown): Uint8Array | null {
 }
 
 /** Runs a tool as `agent`. Failures the agent can act on come back as an error result, not a protocol error. */
-export async function callTool(db: D1Database, agent: ConnectedAgent, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null }): Promise<ToolResult | null> {
+export async function callTool(db: D1Database, agent: ConnectedAgent & { asMember?: boolean }, name: string, args: Record<string, unknown>, sources?: Sources, reached: Reached = { origin: "", bucket: null }): Promise<ToolResult | null> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return null;
   try {
@@ -1177,7 +1183,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
       if (typeof workspace !== "string" || !me.workspaces.some((w) => w.id === workspace)) throw new OpError("not_found", NO_SUCH_WORKSPACE);
       workspaceId = workspace;
     }
-    const actor = agentActor(agent, workspaceId);
+    const actor: Actor = agent.asMember ? { kind: "member", personId: agent.personId, workspaceId } : agentActor(agent, workspaceId);
     const written = async (answer: unknown) => text(withTimes(answer, timeIn((await timeZoneOf(db, workspaceId, agent.personId)) ?? "UTC"), tool.times ? new Set([...TIME_KEYS, ...tool.times]) : TIME_KEYS));
     if (name === "upload_file") {
       const { name: fileName, base64, folderId } = fields;

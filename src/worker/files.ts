@@ -5,6 +5,7 @@
 // The bytes are whatever somebody uploaded, served from the app's own host, so every answer is made
 // unable to act as a page of the app: see `SEALED`.
 import { authenticateAgent } from "../core/agents.ts";
+import { authenticateClipper } from "../core/clipper.ts";
 import { disposition, fileClass } from "../core/filetypes.ts";
 import { agentActor, perform, type Actor, type Visitor } from "../core/operations.ts";
 import { OpError, PART_BYTES, type OpErrorCode, type OpenedUpload } from "../core/protocol.ts";
@@ -58,13 +59,15 @@ function served(req: Request, { upload, body, etag, range }: OpenedUpload, more:
   return new Response(body, { status: range ? 206 : 200, headers });
 }
 
-/** Who is asking for a workspace's files: an agent by its token, or else the person signed in. An agent's token is never a cookie, so no page can send it. */
+/** Who is asking for a workspace's files: an agent by its token, a clipper allowed by the member, or else the person signed in. A token is never a cookie, so no page can send it. */
 async function asker(req: Request, env: Env, url: URL, workspaceId: string): Promise<{ actor: Actor; byToken: boolean } | Response> {
   const token = bearerToken(req);
   if (token) {
     const agent = await authenticateAgent(env.DB, token);
-    if (!agent) return json({ error: "unauthorized", message: "Send a Common Ink agent token or an OAuth access token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
-    return { byToken: true, actor: agentActor(agent, workspaceId) };
+    if (agent) return { byToken: true, actor: agentActor(agent, workspaceId) };
+    const clipper = await authenticateClipper(env.DB, token);
+    if (clipper) return { byToken: true, actor: { kind: "member", personId: clipper.personId, workspaceId } satisfies Actor };
+    return json({ error: "unauthorized", message: "Send a Common Ink agent token or an OAuth access token: Authorization: Bearer cink_…" }, 401, { "WWW-Authenticate": 'Bearer realm="Common Ink"' });
   }
   const personId = await sessionPersonId(req, env, url);
   return personId ? { byToken: false, actor: { kind: "member", personId, workspaceId } } : json({ error: "signed_out" }, 401);

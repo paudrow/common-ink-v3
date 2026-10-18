@@ -159,6 +159,16 @@ test("a post is asked for in the app's theme, and again when the theme changes, 
   await expect.poll(() => size()).toEqual([550, 222]);
 });
 
+test("a post whose frame never loads shows a link to it instead of an empty box", async ({ page }) => {
+  await page.route("https://platform.twitter.com/**", () => new Promise(() => {}));
+  await open(page, `# Post\n\n${POST}\n`);
+  const room = below(page, "post");
+  await expect(room.locator(".embed-loading")).toHaveCount(1);
+  await expect(room.getByRole("link", { name: POST })).toHaveAttribute("href", POST, { timeout: 12_000 });
+  await expect(room.locator(".embed-loading")).toHaveCount(0);
+  await expect.poll(async () => (await room.boundingBox())!.height).toBeLessThan(80);
+});
+
 test("a post asked for again in the other theme keeps its placeholder until the post in that theme says it is drawn", async ({ page }) => {
   await standIns(page, { postHeight: 240 });
   await open(page, `# Post\n\nabove\n\n${POST}\n\nafter\n`);

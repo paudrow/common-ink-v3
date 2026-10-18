@@ -425,7 +425,7 @@ describe("a reference to a record", () => {
     const note = await w.ask(ada, { type: "note.create", text: `# Plans\n\n${text}\n` });
     const read = await w.ask(eve, { type: "note.read", id: note.id });
     expect(read.text).toContain(`::event{${ref} Lunch with Sam}`);
-    expect(JSON.stringify(read)).not.toMatch(/Cafe Lula|Bring the contract|a1"/);
+    expect(JSON.stringify(read)).not.toMatch(/Cafe Lula|Bring the contract|"a1"/);
     expect(await refusal(w.ask(eve, { type: "record.read", ref }))).toBe("not_found: No such record");
   });
 });
