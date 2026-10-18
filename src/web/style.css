@@ -2932,7 +2932,7 @@ button.link:hover {
 
 .form-embed {
   display: grid;
-  gap: 12px;
+  gap: 22px;
   color: var(--ink);
   font-family: var(--prose);
   font-size: calc(14px * var(--text-scale));
@@ -2941,11 +2941,10 @@ button.link:hover {
 
 .form-q {
   display: grid;
-  gap: 10px;
-  padding: 14px 16px 16px;
+  gap: 8px;
+  padding: 0;
   border: 0;
-  border-radius: 12px;
-  background: var(--bg);
+  background: none;
 }
 
 .form-prompt {
@@ -3192,7 +3191,7 @@ span.form-point {
 .form-grid tbody th {
   position: sticky;
   left: 0;
-  background: var(--bg);
+  background: var(--bg-elev);
   text-align: left;
   color: var(--ink);
 }
