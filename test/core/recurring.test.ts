@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { signIn } from "../../src/core/accounts.ts";
 import { connectAgent } from "../../src/core/agents.ts";
-import { dailySettings, dayFor, zoneToKeep } from "../../src/core/daily.ts";
+import { dailySettings } from "../../src/core/daily.ts";
 import { perform, type Actor } from "../../src/core/operations.ts";
 import { OpError, type OpInput } from "../../src/core/protocol.ts";
 import { changesBetween } from "../../src/core/text.ts";
@@ -194,17 +194,6 @@ describe("what a member's settings say of daily notes", () => {
 
   it("takes a folder name, whether new daily notes are private, and a time zone", () => {
     expect(dailySettings(JSON.stringify({ "daily.folder": " Journal ", "daily.private": false, "daily.timeZone": "America/Chicago" }))).toEqual({ folder: "Journal", private: false, timeZone: "America/Chicago" });
-  });
-
-  it("keeps the browser's zone when the member named none, so 7:30pm in Chicago is still that day", () => {
-    // 00:30 UTC on the 18th is 7:30pm on the 17th in Chicago. A day nobody named is the 18th until the zone is kept.
-    const evening = Date.parse("2026-10-18T00:30:00.000Z");
-    expect(dayFor(dailySettings("{}"), evening)).toBe("2026-10-18");
-    const kept = zoneToKeep("{}", "America/Chicago");
-    expect(dayFor(dailySettings(JSON.stringify({ "daily.timeZone": kept })), evening)).toBe("2026-10-17");
-    expect(zoneToKeep(JSON.stringify({ "daily.timeZone": "Pacific/Auckland" }), "America/Chicago")).toBeNull();
-    expect(zoneToKeep(JSON.stringify({ "daily.timeZone": "UTC" }), "America/Chicago")).toBeNull();
-    expect(zoneToKeep("{}", "Mars/Olympus")).toBeNull();
   });
 });
 

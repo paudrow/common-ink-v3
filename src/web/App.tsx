@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { DAILY_SETTINGS, zoneToKeep } from "../core/daily.ts";
 import type { Me, MeHere } from "../core/protocol.ts";
 import { ApiError, getMe, onRefused, perform, session, signOut, workspaceOfInvite, workspaceOfNote } from "./api.ts";
 import { showing, targetOf, type Target } from "./leads.ts";
@@ -241,13 +240,9 @@ function useSettings(workspaceId: string) {
   const status = useSyncExternalStore(store.subscribe, store.status);
   const [waitedFor, setWaitedFor] = useState<SettingsStore | null>(null);
   useEffect(() => {
-    const keepZone = () => {
-      const zone = zoneToKeep(store.text(), Intl.DateTimeFormat().resolvedOptions().timeZone);
-      if (zone) store.set(DAILY_SETTINGS.timeZone.key, zone);
-    };
-    void store.load().then(keepZone);
+    void store.load();
     const timer = setTimeout(() => setWaitedFor(store), SETTINGS_WAIT_MS);
-    const refresh = () => document.visibilityState === "visible" && void store.refresh().then(keepZone);
+    const refresh = () => document.visibilityState === "visible" && void store.refresh();
     addEventListener("focus", refresh);
     addEventListener("pageshow", refresh);
     addEventListener("pagehide", store.flush);
