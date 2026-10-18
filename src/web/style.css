@@ -3069,12 +3069,15 @@ button.link:hover {
 }
 
 .form-mark {
-  flex: none;
+  display: inline-block;
+  flex: 0 0 16px;
   width: 16px;
+  min-width: 16px;
   height: 16px;
   margin-top: 1px;
   border: 1.5px solid var(--faint);
   box-sizing: border-box;
+  vertical-align: middle;
 }
 
 .form-mark-one {
@@ -3163,8 +3166,14 @@ span.form-point {
   cursor: default;
 }
 
+.form-grid-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
 .form-grid {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
 }
 
@@ -3173,20 +3182,29 @@ span.form-point {
   padding: 2px 4px;
   font-weight: 500;
   text-align: center;
+  white-space: nowrap;
 }
 
 .form-grid tbody th {
+  position: sticky;
+  left: 0;
+  background: var(--bg-elev);
   text-align: left;
   color: var(--ink);
 }
 
-.form-cell {
+.form-cell,
+.form-cell-read {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
+  min-width: 1.75rem;
   min-height: 1.75rem;
   padding: 4px;
+}
+
+.form-cell {
   cursor: pointer;
 }
 

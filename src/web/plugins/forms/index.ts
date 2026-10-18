@@ -336,7 +336,7 @@ function drawQuestion(
         );
       }
       table.append(body);
-      block.append(table);
+      block.append(h("div", { className: "form-grid-scroll" }, table));
       return finish(block);
     }
     case "image": {
