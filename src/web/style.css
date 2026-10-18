@@ -2943,15 +2943,13 @@ button.link:hover {
   display: grid;
   gap: 10px;
   padding: 14px 16px 16px;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: 12px;
-  background: var(--bg-elev);
+  background: var(--bg);
 }
 
 .form-prompt {
   margin: 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
   font-weight: 600;
 }
 
@@ -3090,7 +3088,7 @@ button.link:hover {
 
 .form-mark-one[data-on="true"] {
   border-color: var(--accent);
-  box-shadow: inset 0 0 0 3px var(--bg-elev), inset 0 0 0 8px var(--accent);
+  background: radial-gradient(circle at center, var(--accent) 0 4px, transparent 5px);
 }
 
 .form-mark-any[data-on="true"] {
@@ -3113,13 +3111,19 @@ button.link:hover {
 .form-edit-toggle,
 .form-mini {
   justify-self: start;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: 6px;
   padding: 4px 10px;
-  background: var(--bg);
-  color: var(--ink);
+  background: transparent;
+  color: var(--muted);
   font: inherit;
   cursor: pointer;
+}
+
+.form-edit-toggle:hover,
+.form-mini:hover {
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .form-build-bar,
@@ -3188,7 +3192,7 @@ span.form-point {
 .form-grid tbody th {
   position: sticky;
   left: 0;
-  background: var(--bg-elev);
+  background: var(--bg);
   text-align: left;
   color: var(--ink);
 }
