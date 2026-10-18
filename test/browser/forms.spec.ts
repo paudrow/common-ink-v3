@@ -149,6 +149,38 @@ test("an anonymous dropdown shows the tally on the option that was picked", asyn
   await expect(pier).toContainText("0");
 });
 
+test("an anonymous grid and image leave a zero tally unmarked", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const body = {
+    anonymous: true,
+    questions: [
+      { id: "g", type: "grid", prompt: "How does each part feel", rows: [{ id: "r1", label: "First" }], cols: [{ id: "c1", label: "A" }, { id: "c2", label: "B" }] },
+      { id: "m", type: "image", prompt: "Which mark", options: [{ id: "a", label: "One" }, { id: "b", label: "Two" }] },
+    ],
+    tallies: {},
+    texts: {},
+    voted: [],
+  };
+  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const note = await perform(page, { type: "note.create", text });
+  await page.goto(`/note/${note.id}`);
+
+  await editor(page).getByRole("radio", { name: "First A" }).click();
+  await editor(page).getByRole("radio", { name: "One", exact: true }).click();
+  await editor(page).getByRole("button", { name: "Cast vote" }).click();
+
+  const row = editor(page).locator("tr", { hasText: "First" });
+  const marks = row.locator(".form-mark");
+  await expect(marks.nth(0)).toHaveAttribute("data-on", "true");
+  await expect(marks.nth(1)).not.toHaveAttribute("data-on", "true");
+  await expect(row).toContainText("0");
+
+  const one = editor(page).locator(".form-shot", { hasText: "One" });
+  const two = editor(page).locator(".form-shot", { hasText: "Two" });
+  await expect(one).toHaveClass(/form-shot-on/);
+  await expect(two).not.toHaveClass(/form-shot-on/);
+});
+
 test("Edit questions keeps Other on when the question forces it and the form turned it off", async ({ page }) => {
   await signInAsNewPerson(page, "Ada Lovelace");
   const body = { explain: false, questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"], explain: true }], answers: {} };
