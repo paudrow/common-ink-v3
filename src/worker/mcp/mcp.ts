@@ -5,6 +5,7 @@ import { authenticateAgent, type ConnectedAgent } from "../../core/agents.ts";
 import type { Sources } from "../../core/sources.ts";
 import { logFault } from "../../core/logs.ts";
 import { BROKE } from "../../core/protocol.ts";
+import { ASK_NOTE_SYNTAX } from "../../core/noteSyntax.ts";
 import { callTool, toolList, type Reached } from "./tools.ts";
 
 const VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -13,7 +14,7 @@ const MAX_BODY = 6_000_000;
 
 const SERVER = { name: "common-ink", version: "0.1.0" };
 const INSTRUCTIONS =
-  "Common Ink is a markdown notes workspace. You act as the member who connected you, with their role, and your edits are recorded under your own name. Read a note before writing it, and send its revision as baseRevision.";
+  `Common Ink is a markdown notes workspace. You act as the member who connected you, with their role, and your edits are recorded under your own name. Read a note before writing it, and send its revision as baseRevision. ${ASK_NOTE_SYNTAX}`;
 
 type Id = string | number | null;
 interface Request_ {

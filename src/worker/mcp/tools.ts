@@ -3,6 +3,7 @@ import { timeIn } from "../../core/history.ts";
 import { agentActor, perform, timeZoneOf, type Actor } from "../../core/operations.ts";
 import { MAX_INLINE_UPLOAD_BYTES, MAX_UPLOAD_BYTES, NO_SUCH_WORKSPACE, OpError, PART_BYTES, TODO_SORTS, type OpInput, type OpType, type SendingUpload, type Upload } from "../../core/protocol.ts";
 import { writtenUpload } from "../../core/uploadRefs.ts";
+import { ASK_NOTE_SYNTAX, syntaxDescription, syntaxText as noteSyntaxText } from "../../core/noteSyntax.ts";
 import { MAX_SEARCH_LENGTH, syntaxText, type Scope } from "../../core/query.ts";
 import { RULE_GRAMMAR } from "../../core/recurrence.ts";
 import type { ConnectedAgent } from "../../core/agents.ts";
@@ -253,8 +254,14 @@ export const TOOLS: Tool[] = [
     example: { noteId: NOTE },
   },
   {
+    name: "note_syntax",
+    description: syntaxDescription(),
+    inputSchema: object({}),
+    example: {},
+  },
+  {
     name: "create_note",
-    description: `Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} ${MENTIONS} ${TODOS} Needs the editor or admin role.`,
+    description: `${ASK_NOTE_SYNTAX} Make a note with markdown text whose first # heading is its title, in a folder or in Unsorted when none is named. ${LINKS} ${MENTIONS} ${TODOS} Needs the editor or admin role.`,
     inputSchema: object({ text: { type: "string", description: "The note's markdown" }, folderId: folderId("The folder to put it in, from list_folders; default is Unsorted"), linkTitles, mentionNames }),
     op: "note.create",
     example: { text: "# Plan\n\nSee [[Budget]].", folderId: FOLDER },
@@ -262,7 +269,7 @@ export const TOOLS: Tool[] = [
   {
     name: "write_note",
     description:
-      `Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
+      `${ASK_NOTE_SYNTAX} Replace a note's text. Give the revision you read as baseRevision: edits made since then are merged in, not overwritten. Send the same writeId again after a failed call and the write is recorded once. ${LINKS} ${MENTIONS} Checking the box of a repeating todo here completes it as set_todo does: the answer has the line open again with its next due date, and filed says where the checked line went. Needs the editor or admin role. The change is recorded under your agent's name.`,
     inputSchema: object(
       {
         noteId,
@@ -992,6 +999,7 @@ export async function callTool(db: D1Database, agent: ConnectedAgent, name: stri
   if (!tool) return null;
   try {
     const { workspaceId: workspace, fields } = opArguments(tool, args);
+    if (name === "note_syntax") return text(noteSyntaxText());
     const me = await whoAmI(db, agent.personId);
     // A token pinned to one workspace sees only that one, as if the member belonged to no other.
     if (agent.workspaceId) me.workspaces = me.workspaces.filter((w) => w.id === agent.workspaceId);
