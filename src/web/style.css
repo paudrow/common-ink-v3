@@ -2932,7 +2932,7 @@ button.link:hover {
 
 .form-embed {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   color: var(--ink);
   font-family: var(--prose);
   font-size: calc(14px * var(--text-scale));
@@ -2941,12 +2941,27 @@ button.link:hover {
 
 .form-q {
   display: grid;
-  gap: 2px;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
 }
 
 .form-prompt {
   margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
   font-weight: 600;
+}
+
+.form-other {
+  display: grid;
+  gap: 4px;
+}
+
+.form-other .form-note {
+  margin-left: 0;
 }
 
 .form-choice,

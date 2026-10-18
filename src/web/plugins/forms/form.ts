@@ -7,13 +7,15 @@ export interface NamedForm extends Base {
   /** `each` keeps every member's choices. `one` keeps only the member who edited last. Absent means `each`. */
   mode?: "each" | "one";
   answers: Record<string, MemberAnswers>;
+  /** What a member wrote in Other, by question id. The choice itself stays in `answers`. */
+  other?: Record<string, Record<string, string>>;
 }
 
 export interface AnonymousForm extends Base {
   anonymous: true;
   /** Counts by question id, then by tally key. */
   tallies: Record<string, Record<string, number>>;
-  /** Text answers by question id, with no author. */
+  /** Text answers and Other lines by question id, with no author. */
   texts: Record<string, string[]>;
   /** Members who have cast, in the order they did. */
   voted: string[];
@@ -23,6 +25,8 @@ interface Base {
   /** When present and non-empty, only these members may answer. */
   ask?: string[];
   closed?: boolean;
+  /** Absent means a choice question has an Other line. False hides Other on the whole form. */
+  explain?: boolean;
   questions: Question[];
 }
 
@@ -46,45 +50,72 @@ export interface OneQuestion extends QuestionBase {
   type: "one";
   options: string[];
   required?: boolean;
+  explain?: boolean;
 }
 
 export interface SeveralQuestion extends QuestionBase {
   type: "several";
   options: string[];
   required?: boolean;
+  explain?: boolean;
 }
 
 export interface ScaleQuestion extends QuestionBase {
   type: "scale";
   minLabel?: string;
   maxLabel?: string;
+  explain?: boolean;
 }
 
 export interface GridQuestion extends QuestionBase {
   type: "grid";
   rows: { id: string; label: string }[];
   cols: { id: string; label: string }[];
+  explain?: boolean;
 }
 
 export interface ImageQuestion extends QuestionBase {
   type: "image";
   options: { id: string; label: string; src?: string }[];
+  explain?: boolean;
+}
+
+/** A choice question shows Other unless this question or the whole form says not to. Short and paragraph questions are already the explanation. */
+export function showsOther(form: Form, question: Question): boolean {
+  switch (question.type) {
+    case "short":
+    case "paragraph":
+      return false;
+    default:
+      if (question.explain === false) return false;
+      if (question.explain === true) return true;
+      return form.explain !== false;
+  }
 }
 
 const id = z.string().min(1);
 const labelled = z.object({ id, label: z.string() }).passthrough();
 const text = (type: "short" | "paragraph") => z.object({ id, type: z.literal(type), prompt: z.string(), required: z.boolean().optional() }).passthrough();
-const one = z.object({ id, type: z.literal("one"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional() }).passthrough();
-const several = z.object({ id, type: z.literal("several"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional() }).passthrough();
-const scale = z.object({ id, type: z.literal("scale"), prompt: z.string(), minLabel: z.string().optional(), maxLabel: z.string().optional() }).passthrough();
-const grid = z.object({ id, type: z.literal("grid"), prompt: z.string(), rows: z.array(labelled), cols: z.array(labelled) }).passthrough();
-const image = z.object({ id, type: z.literal("image"), prompt: z.string(), options: z.array(z.object({ id, label: z.string(), src: z.string().optional() }).passthrough()) }).passthrough();
+const explain = z.boolean().optional();
+const one = z.object({ id, type: z.literal("one"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional(), explain }).passthrough();
+const several = z.object({ id, type: z.literal("several"), prompt: z.string(), options: z.array(z.string()), required: z.boolean().optional(), explain }).passthrough();
+const scale = z.object({ id, type: z.literal("scale"), prompt: z.string(), minLabel: z.string().optional(), maxLabel: z.string().optional(), explain }).passthrough();
+const grid = z.object({ id, type: z.literal("grid"), prompt: z.string(), rows: z.array(labelled), cols: z.array(labelled), explain }).passthrough();
+const image = z.object({ id, type: z.literal("image"), prompt: z.string(), options: z.array(z.object({ id, label: z.string(), src: z.string().optional() }).passthrough()), explain }).passthrough();
 const question = z.discriminatedUnion("type", [text("short"), text("paragraph"), one, several, scale, grid, image]);
 
 const answerValue = z.union([z.string(), z.number(), z.array(z.string()), z.record(z.string(), z.string())]);
-const shared = { ask: z.array(z.string()).optional(), closed: z.boolean().optional(), questions: z.array(question) };
+const shared = { ask: z.array(z.string()).optional(), closed: z.boolean().optional(), explain, questions: z.array(question) };
 
-const namedSchema = z.object({ ...shared, anonymous: z.literal(false).optional(), mode: z.enum(["each", "one"]).optional(), answers: z.record(z.string(), z.record(z.string(), answerValue)).default({}) }).passthrough();
+const namedSchema = z
+  .object({
+    ...shared,
+    anonymous: z.literal(false).optional(),
+    mode: z.enum(["each", "one"]).optional(),
+    answers: z.record(z.string(), z.record(z.string(), answerValue)).default({}),
+    other: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+  })
+  .passthrough();
 const anonymousSchema = z
   .object({
     ...shared,
@@ -127,23 +158,35 @@ export function setAnswer(form: NamedForm, memberId: string, questionId: string,
   const question = form.questions.find((item) => item.id === questionId);
   if (!question) return form;
   // `one` is a single shared answer. The next editor continues it, and the key becomes theirs.
-  const prior = form.mode === "one" ? (Object.values(form.answers)[0] ?? {}) : (form.answers[memberId] ?? {});
-  const mine: MemberAnswers = { ...prior };
-  const applied = apply(question, mine[questionId], value);
+  const prior = carried(form, memberId);
+  const applied = apply(question, prior.answers[questionId], value);
   if (applied === "same") return form;
-  if (applied === "clear") delete mine[questionId];
-  else mine[questionId] = applied;
-  const answers = form.mode === "one" ? {} : { ...form.answers };
-  if (Object.keys(mine).length) answers[memberId] = mine;
-  else delete answers[memberId];
-  return { ...form, answers };
+  if (applied === "clear") delete prior.answers[questionId];
+  else prior.answers[questionId] = applied;
+  return written(form, memberId, prior.answers, prior.other);
+}
+
+/**
+ * Stores `text` as `memberId`'s Other line, or returns `form` unchanged when they may not answer
+ * or this question has no Other line. "" clears it. On a single shared answer, the choice already
+ * stored comes with it.
+ */
+export function setOther(form: NamedForm, memberId: string, questionId: string, text: string): NamedForm {
+  if (!allowed(form, memberId)) return form;
+  const question = form.questions.find((item) => item.id === questionId);
+  if (!question || !showsOther(form, question)) return form;
+  const prior = carried(form, memberId);
+  if ((prior.other[questionId] ?? "") === text) return form;
+  if (text === "") delete prior.other[questionId];
+  else prior.other[questionId] = text;
+  return written(form, memberId, prior.answers, prior.other);
 }
 
 /**
  * Adds `draft` into the tallies and texts and records the member. A member already in `voted`
  * gets the same form back: their choice was not kept, so it cannot be changed.
  */
-export function castVote(form: AnonymousForm, memberId: string, draft: MemberAnswers): AnonymousForm {
+export function castVote(form: AnonymousForm, memberId: string, draft: MemberAnswers, other: Record<string, string> = {}): AnonymousForm {
   if (!allowed(form, memberId) || form.voted.includes(memberId)) return form;
   const tallies = Object.fromEntries(Object.entries(form.tallies).map(([key, counts]) => [key, { ...counts }]));
   const texts = Object.fromEntries(Object.entries(form.texts).map(([key, lines]) => [key, [...lines]]));
@@ -151,7 +194,30 @@ export function castVote(form: AnonymousForm, memberId: string, draft: MemberAns
     const question = form.questions.find((item) => item.id === questionId);
     if (question) count(question, value, tallies, texts);
   }
+  for (const [questionId, text] of Object.entries(other)) {
+    const question = form.questions.find((item) => item.id === questionId);
+    if (!question || !showsOther(form, question) || text === "") continue;
+    texts[questionId] = [...(texts[questionId] ?? []), text].sort();
+  }
   return { ...form, tallies, texts, voted: [...form.voted, memberId] };
+}
+
+function carried(form: NamedForm, memberId: string): { answers: MemberAnswers; other: Record<string, string> } {
+  const source = form.mode === "one" ? (Object.keys(form.answers)[0] ?? Object.keys(form.other ?? {})[0] ?? memberId) : memberId;
+  return { answers: { ...(form.answers[source] ?? {}) }, other: { ...(form.other?.[source] ?? {}) } };
+}
+
+function written(form: NamedForm, memberId: string, answers: MemberAnswers, other: Record<string, string>): NamedForm {
+  const nextAnswers = form.mode === "one" ? {} : { ...form.answers };
+  const nextOther = form.mode === "one" ? {} : { ...(form.other ?? {}) };
+  if (Object.keys(answers).length) nextAnswers[memberId] = answers;
+  else delete nextAnswers[memberId];
+  if (Object.keys(other).length) nextOther[memberId] = other;
+  else delete nextOther[memberId];
+  const next: NamedForm = { ...form, answers: nextAnswers };
+  if (Object.keys(nextOther).length) next.other = nextOther;
+  else delete next.other;
+  return next;
 }
 
 function allowed(form: Form, memberId: string): boolean {
@@ -161,13 +227,14 @@ function allowed(form: Form, memberId: string): boolean {
 
 function coherent(form: Form, raw: Record<string, unknown>): boolean {
   if (form.anonymous) {
-    if ("answers" in raw || "mode" in raw) return false;
+    if ("answers" in raw || "mode" in raw || "other" in raw) return false;
   } else if ("tallies" in raw || "texts" in raw || "voted" in raw) return false;
   if (!wellFormed(form.questions)) return false;
   const byId = new Map(form.questions.map((question) => [question.id, question]));
   if (form.anonymous) {
     return known(byId, form.tallies) && known(byId, form.texts);
   }
+  if (form.other && !Object.values(form.other).every((notes) => Object.entries(notes).every(([questionId, text]) => byId.has(questionId) && typeof text === "string"))) return false;
   return Object.values(form.answers).every((member) => Object.entries(member).every(([questionId, value]) => fits(byId.get(questionId), value)));
 }
 

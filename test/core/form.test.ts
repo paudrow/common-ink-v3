@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { castVote, parseForm, serializeForm, setAnswer, type AnonymousForm, type NamedForm } from "../../src/web/plugins/forms/form.ts";
+import { castVote, parseForm, serializeForm, setAnswer, setOther, showsOther, type AnonymousForm, type NamedForm } from "../../src/web/plugins/forms/form.ts";
 
 const one = (over: Partial<NamedForm> = {}): NamedForm => ({
   questions: [{ id: "q", type: "one", prompt: "Pick", options: ["A", "B"] }],
@@ -33,6 +33,24 @@ describe("a named form", () => {
 
     expect(ada.answers).toEqual({ ada: { q: "A", r: "B" } });
     expect(setAnswer(ada, "grace", "q", "B").answers).toEqual({ grace: { q: "B", r: "B" } });
+  });
+
+  it("keeps an Other line with the choice, and drops it when the form or the question says so", () => {
+    const ada = setOther(setAnswer(one(), "ada", "q", "A"), "ada", "q", "the date moved");
+    expect(ada.other).toEqual({ ada: { q: "the date moved" } });
+    expect(ada.answers).toEqual({ ada: { q: "A" } });
+
+    const shared = setAnswer(one({ mode: "one", other: { ada: { q: "because" } }, answers: { ada: { q: "A" } } }), "grace", "q", "B");
+    expect(shared.answers).toEqual({ grace: { q: "B" } });
+    expect(shared.other).toEqual({ grace: { q: "because" } });
+
+    expect(setOther(one({ explain: false }), "ada", "q", "no")).toEqual(one({ explain: false }));
+    const hidden: NamedForm = { questions: [{ id: "q", type: "one", prompt: "Pick", options: ["A", "B"], explain: false }], answers: {} };
+    expect(setOther(hidden, "ada", "q", "no")).toBe(hidden);
+    const forced = one({ explain: false, questions: [{ id: "q", type: "one", prompt: "Pick", options: ["A", "B"], explain: true }] });
+    expect(showsOther(forced, forced.questions[0]!)).toBe(true);
+    expect(setOther(forced, "ada", "q", "yes").other).toEqual({ ada: { q: "yes" } });
+    expect(setOther(ada, "ada", "q", "").other).toBeUndefined();
   });
 
   it("refuses a member who was not asked, and takes one who was", () => {
@@ -194,5 +212,15 @@ describe("an anonymous form", () => {
     expect(castVote(asked, "grace", { q: "A" })).toBe(asked);
     expect(castVote(closed, "ada", { q: "A" })).toBe(closed);
     expect(castVote(asked, "ada", { q: "A" }).voted).toEqual(["ada"]);
+  });
+
+  it("keeps an Other line with the tallies, and not in vote order", () => {
+    const once = castVote(form, "ada", { q: "A" }, { q: "zebra" });
+    const twice = castVote(once, "grace", { q: "B" }, { q: "apple" });
+
+    expect(twice.tallies.q).toEqual({ A: 1, B: 1 });
+    expect(twice.voted).toEqual(["ada", "grace"]);
+    expect(twice.texts.q).toEqual(["apple", "zebra"]);
+    expect(castVote(form, "ada", { q: "A" }, { q: "" }).texts.q).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { castVote, parseForm, serializeForm, setAnswer, type AnswerValue, type Form, type NamedForm, type Question } from "./form.ts";
+import { castVote, parseForm, serializeForm, setAnswer, setOther, showsOther, type AnswerValue, type Form, type NamedForm, type Question } from "./form.ts";
 import type { Drawn, EmbedOptions, Embedded, Plugin, PluginHost } from "../../plugin-api.ts";
 
 interface Props {
@@ -22,11 +22,22 @@ const options: EmbedOptions = {
   fields: ({ body }) => {
     const form = parseForm(body);
     if (!form) return [];
-    return [{ id: "closed", label: "Answers", kind: "choice", value: form.closed ? "closed" : "open", choices: [{ value: "open", label: "Open" }, { value: "closed", label: "Closed" }] }];
+    return [
+      { id: "closed", label: "Answers", kind: "choice", value: form.closed ? "closed" : "open", choices: [{ value: "open", label: "Open" }, { value: "closed", label: "Closed" }] },
+      { id: "explain", label: "Other", kind: "choice", value: form.explain === false ? "off" : "on", choices: [{ value: "on", label: "On" }, { value: "off", label: "Off" }] },
+    ];
   },
-  set: ({ body }, _id, value) => {
+  set: ({ body }, id, value) => {
     const form = parseForm(body);
     if (!form) return "This form can't be read.";
+    if (id === "explain") {
+      const on = value !== "off";
+      if ((form.explain !== false) === on) return { body };
+      const next = { ...form };
+      if (on) delete next.explain;
+      else next.explain = false;
+      return { body: serializeForm(next) };
+    }
     const closed = value === "closed";
     if (Boolean(form.closed) === closed) return { body };
     return { body: serializeForm({ ...form, closed }) };
@@ -69,6 +80,7 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
   let current = embed;
   const me = host.app().me;
   let draft: Record<string, AnswerValue> = {};
+  let more: Record<string, string> = {};
   const roster = new Map<string, string>();
   let asked = false;
 
@@ -110,15 +122,26 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
       const next = setAnswer(scratch, me.id, questionId, value);
       if (next !== scratch) draft = next.answers[me.id] ?? {};
     };
+    const typeOther = (questionId: string, value: string) => {
+      if (!form.anonymous) {
+        const next = setOther(form, me.id, questionId, value);
+        if (next !== form) write(next);
+        return;
+      }
+      if (value === "") delete more[questionId];
+      else more[questionId] = value;
+    };
+    const otherOf = (questionId: string) => (form.anonymous ? (more[questionId] ?? "") : (form.mode === "one" ? Object.values(form.other ?? {})[0] : form.other?.[me.id])?.[questionId] ?? "");
 
-    for (const question of form.questions) root.append(drawQuestion(form, question, answering, roster, me.id, valueOf, names, count, choose, typeText));
+    for (const question of form.questions) root.append(drawQuestion(form, question, answering, roster, me.id, valueOf, names, count, choose, typeText, otherOf, typeOther));
 
     if (answering && form.anonymous) {
       const cast = h("button", { type: "button", className: "form-cast", textContent: "Cast vote", data: { focus: "cast" } });
       cast.addEventListener("click", () => {
-        const next = castVote(form, me.id, draft);
+        const next = castVote(form, me.id, draft, more);
         if (next === form) return;
         draft = {};
+        more = {};
         write(next);
       });
       root.append(cast);
@@ -159,15 +182,27 @@ function drawQuestion(
   count: (questionId: string, key: string) => string,
   choose: (questionId: string, value: AnswerValue) => void,
   typeText: (questionId: string, value: string) => void,
+  otherOf: (questionId: string) => string,
+  typeOther: (questionId: string, value: string) => void,
 ): HTMLElement {
   const block = h("div", { className: "form-q" }, promptOf(question));
+  const finish = (node: HTMLElement) => {
+    if (!showsOther(form, question)) return node;
+    if (answering) {
+      const line = h("label", { className: "form-other" }, h("span", { className: "form-note", textContent: "Other" }));
+      line.append(field("short", otherOf(question.id), `other:${question.id}`, (text) => typeOther(question.id, text)));
+      node.append(line);
+    }
+    node.append(...otherLines(form, question.id, answering, roster, meId));
+    return node;
+  };
   const value = valueOf(question.id);
   const detail = (key: string, hit: (stored: AnswerValue | undefined) => boolean) => count(question.id, key) || names(question.id, hit);
 
   switch (question.type) {
     case "short":
     case "paragraph": {
-      if (answering) block.append(field(question.type, typeof value === "string" ? value : "", `text:${question.id}`, (text) => typeText(question.id, text)));
+      if (answering) block.append(field(question.type, typeof value === "string" ? value : "", `text:${question.id}`, (text) => typeText(question.id, text), question.prompt));
       block.append(...quotes(form, question.id, answering, roster, meId));
       return block;
     }
@@ -183,7 +218,7 @@ function drawQuestion(
       group.setAttribute("role", radio ? "radiogroup" : "group");
       group.setAttribute("aria-label", question.prompt);
       block.append(group);
-      return block;
+      return finish(block);
     }
     case "scale": {
       const line = h("div", { className: "form-scale" });
@@ -196,7 +231,7 @@ function drawQuestion(
       }
       if (question.maxLabel) line.append(h("span", { className: "form-note" }, question.maxLabel));
       block.append(line);
-      return block;
+      return finish(block);
     }
     case "grid": {
       const table = h("table", { className: "form-grid" });
@@ -220,7 +255,7 @@ function drawQuestion(
       }
       table.append(body);
       block.append(table);
-      return block;
+      return finish(block);
     }
     case "image": {
       const line = h("div", { className: "form-images" });
@@ -235,7 +270,7 @@ function drawQuestion(
         line.append(shot);
       }
       block.append(line);
-      return block;
+      return finish(block);
     }
     default: {
       const unreachable: never = question;
@@ -260,8 +295,25 @@ function quotes(form: Form, questionId: string, answering: boolean, roster: Map<
   return lines;
 }
 
-function field(type: "short" | "paragraph", value: string, focus: string, onInput: (value: string) => void): HTMLElement {
+function otherLines(form: Form, questionId: string, answering: boolean, roster: Map<string, string>, meId: string): HTMLElement[] {
+  if (form.anonymous) {
+    if (answering) return [];
+    return (form.texts[questionId] ?? []).map((line) => h("p", { className: "form-quote" }, `"${line}"`));
+  }
+  if (!form.other || (form.mode === "one" && answering)) return [];
+  const lines: HTMLElement[] = [];
+  for (const [memberId, notes] of Object.entries(form.other)) {
+    if (answering && memberId === meId) continue;
+    const text = notes[questionId];
+    if (!text) continue;
+    lines.push(h("p", { className: "form-quote" }, `"${text}" `, h("span", { className: "form-note" }, nameOf(roster, memberId, meId))));
+  }
+  return lines;
+}
+
+function field(type: "short" | "paragraph", value: string, focus: string, onInput: (value: string) => void, label?: string): HTMLElement {
   const input = type === "short" ? h("input", { type: "text", className: "form-field", value, data: { focus } }) : h("textarea", { className: "form-field", rows: 3, value, data: { focus } });
+  if (label) input.setAttribute("aria-label", label);
   input.addEventListener("input", () => onInput((input as HTMLInputElement | HTMLTextAreaElement).value));
   return input;
 }
