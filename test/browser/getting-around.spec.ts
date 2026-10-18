@@ -248,6 +248,8 @@ test("every kind of page is a stop in the history, at its own address, and back 
 
 test("the calendar comes back at the view and the day it was left at", async ({ page }) => {
   await withNotes(page, "# Alpha");
+  // With nothing connected the page offers connecting instead of the month, so the heading the address names is not there.
+  await perform(page, { type: "source.connect", id: "sample-calendar", back: "/calendar" });
   await page.goto("/calendar?view=month&day=2026-03-10");
   await expect(page.getByRole("heading", { name: "March 2026" })).toBeVisible();
   await go(page, "/calendar?view=day&day=2026-05-04");
