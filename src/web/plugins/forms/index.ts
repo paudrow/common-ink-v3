@@ -129,7 +129,7 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
 
     const root = h("div", { className: "form-embed" });
     if (!current.readOnly) {
-      const edit = h("button", { type: "button", className: "form-edit-toggle", textContent: editing ? "Done" : "Edit questions", data: { focus: "edit" } });
+      const edit = h("button", { type: "button", className: "form-edit-toggle", textContent: editing ? "Done editing" : "Edit questions", data: { focus: "edit" } });
       edit.addEventListener("click", () => {
         editing = !editing;
         paint();
@@ -202,6 +202,14 @@ function present(host: PluginHost, el: HTMLElement, embed: Embedded): Drawn {
       root.append(cast);
     } else if (form.anonymous && form.voted.length) {
       root.append(h("p", { className: "form-quote" }, "Voted ", h("span", { className: "form-note" }, form.voted.map((id) => nameOf(roster, id, me.id)).join(", "))));
+    }
+
+    if (!editing && !current.readOnly && !form.closed) {
+      const done = h("button", { type: "button", className: "form-done", textContent: "Done", data: { focus: "done" } });
+      done.addEventListener("click", () => write({ ...form, closed: true }));
+      root.append(done);
+    } else if (!editing && form.closed) {
+      root.append(h("p", { className: "form-kind" }, "Closed"));
     }
 
     el.replaceChildren(root);

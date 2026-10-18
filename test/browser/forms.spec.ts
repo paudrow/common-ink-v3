@@ -91,6 +91,21 @@ test("Other is stored with the choice, and a form can turn it off", async ({ pag
   await expect(editor(page).getByRole("textbox", { name: "Other" })).toHaveCount(0);
 });
 
+test("Done closes the form, and the choices stop taking clicks", async ({ page }) => {
+  await signInAsNewPerson(page, "Ada Lovelace");
+  const body = { questions: [{ id: "q", type: "one", prompt: "Ship it?", options: ["Yes", "No"] }], answers: {} };
+  const text = `# Form\n\n:::form{}\n${JSON.stringify(body, null, 2)}\n:::\n`;
+  const note = await perform(page, { type: "note.create", text });
+  await page.goto(`/note/${note.id}`);
+
+  await editor(page).getByRole("button", { name: "Done", exact: true }).click();
+
+  await expect.poll(async () => JSON.parse(readFence(await read(page, note.id))).closed).toBe(true);
+  await expect(editor(page).getByRole("radio", { name: "Yes", exact: true })).toHaveCount(0);
+  await expect(editor(page).getByText("Closed", { exact: true })).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "Done", exact: true })).toHaveCount(0);
+});
+
 function readFence(text: string): string {
   const start = text.indexOf(":::form{}\n");
   const end = text.indexOf("\n:::", start);
