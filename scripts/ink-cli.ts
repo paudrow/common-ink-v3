@@ -62,6 +62,10 @@ export const USAGE = `Usage: ink [--workspace ID] <command>
                                       a new note (text from stdin if --text is left out)
   write ID --base N [--text TEXT] [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--on DAY]
                                       replace a note's text (from stdin if --text is left out)
+  edit ID --base N (--edits JSON | --from N --to N --text TEXT) [--write-id ANY] [--link-titles resolve|resolve-strict|keep] [--mention-names keep] [--on DAY]
+                                      change lines of a note and leave the rest. Lines are counted from 0 in the
+                                      revision you read: --from is included, --to is not, so they are equal to
+                                      insert and an empty --text deletes. --edits is a JSON list of {from, to, text}
   backlinks ID                        the notes that link to a note
   links-rebuild                       make backlinks and the index of todos again from the notes' text
   todos [QUERY] [--today DAY] [--zone ZONE] [--folder ID] [--tag NAME] [--due-from DAY] [--due-to DAY]
@@ -607,6 +611,17 @@ export async function run(argv: string[], io: Io): Promise<number> {
         tool = "write_note";
         args = { noteId: needId(), baseRevision: integer("--base", flags.get("base")!), text: flags.get("text") ?? (await io.stdin()), ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], on: ["on"] }) };
         break;
+      case "edit": {
+        if (!flags.has("base")) throw new UsageError("edit needs --base, the revision you read");
+        const ranged = flags.has("from") || flags.has("to") || flags.has("text");
+        const listed = flags.has("edits");
+        if (ranged === listed) throw new UsageError("edit needs --edits, or --from, --to and --text, and not both");
+        if (ranged && !(flags.has("from") && flags.has("to") && flags.has("text"))) throw new UsageError("edit needs --from, --to and --text together");
+        const edits = listed ? json("--edits", flags.get("edits")!) : [{ from: integer("--from", flags.get("from")!), to: integer("--to", flags.get("to")!), text: flags.get("text")! }];
+        tool = "edit_note";
+        args = { noteId: needId(), baseRevision: integer("--base", flags.get("base")!), edits, ...given({ writeId: ["write-id"], linkTitles: ["link-titles"], mentionNames: ["mention-names"], on: ["on"] }) };
+        break;
+      }
       case "backlinks":
         tool = "backlinks";
         args = { noteId: needId() };

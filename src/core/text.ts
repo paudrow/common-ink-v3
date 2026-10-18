@@ -217,6 +217,58 @@ function myers(a: string[], b: string[], maxApart: number): Run[] {
   return rewrite;
 }
 
+/**
+ * The lines of a note, counted from 0. A newline after the last line ends that line, so it is not
+ * an empty line of its own. An empty note has no lines. `ended` is whether the note ends with a newline.
+ */
+function noteLines(text: string): { lines: string[]; ended: boolean } {
+  if (text === "") return { lines: [], ended: false };
+  const ended = text.endsWith("\n");
+  const lines = text.split("\n");
+  if (ended) lines.pop();
+  return { lines, ended };
+}
+
+/** A replacement of whole lines. `from` is included and `to` is not, both counted from 0. `from` equal to `to` inserts, and an empty `text` deletes. */
+export interface LineSplice {
+  from: number;
+  to: number;
+  text: string;
+}
+
+/**
+ * The note with `edits` applied. Every range is counted in `note` as given, so one edit does not
+ * shift another. Whether the note ends with a newline stays as it was. A newline after a
+ * replacement's own last line is not kept, because the replacement is lines and the note keeps its ending.
+ */
+export function spliceLines(note: string, edits: readonly LineSplice[]): string {
+  const { lines, ended } = noteLines(note);
+  const ordered = [...edits].sort((a, b) => a.from - b.from || a.to - b.to);
+  for (const [i, edit] of ordered.entries()) {
+    if (!Number.isInteger(edit.from) || !Number.isInteger(edit.to) || edit.from < 0 || edit.from > edit.to || edit.to > lines.length) throw new Error(outside(lines.length, edit));
+    const next = ordered[i + 1];
+    if (next && next.from < edit.to) throw new Error(`Line ranges ${edit.from} to ${edit.to} and ${next.from} to ${next.to} overlap. Every range is counted in the note as you read it, so one range is not shifted by another.`);
+  }
+  // Copy line by line. Passing the replacement to splice as arguments overflows the stack past about 100,000 lines.
+  const next: string[] = [];
+  let at = 0;
+  for (const edit of ordered) {
+    for (; at < edit.from; at++) next.push(lines[at]!);
+    for (const line of noteLines(edit.text).lines) next.push(line);
+    at = edit.to;
+  }
+  for (; at < lines.length; at++) next.push(lines[at]!);
+  if (next.length === 0) return "";
+  const body = next.join("\n");
+  return ended ? `${body}\n` : body;
+}
+
+function outside(lines: number, edit: LineSplice): string {
+  if (edit.from > edit.to) return `A line range stops at to, after from. ${edit.from} to ${edit.to} stops first.`;
+  const count = lines === 1 ? "1 line" : `${lines} lines`;
+  return `This note has ${count} at that revision, counted from 0. A range includes from and stops before to, and to may be ${lines} to add after the last line. ${edit.from} to ${edit.to} is outside that.`;
+}
+
 function walkBack(rounds: Int32Array[], n: number, m: number, reach: (before: Int32Array, d: number, k: number) => { x: number; from: number }): Run[] {
   const runs: Run[] = [];
   let [x, y] = [n, m];

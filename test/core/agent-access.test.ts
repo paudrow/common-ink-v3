@@ -46,6 +46,7 @@ const everyOp = (noteId: string, folderId: string): { [K in ToolOp]: Omit<Extrac
   "note.create": { text: "# New" },
   "note.read": { id: noteId },
   "note.write": { id: noteId, baseRevision: 2, text: "# Plan\n\nStep\n\nMore" },
+  "note.edit": { id: noteId, baseRevision: 2, edits: [{ from: 2, to: 3, text: "edited" }] },
   "note.backlinks": { id: noteId },
   "links.rebuild": {},
   "todo.list": {},
@@ -140,6 +141,7 @@ describe("an agent's access is its member's", () => {
     viewer: [
       "note.create",
       "note.write",
+      "note.edit",
       "links.rebuild",
       "todo.set",
       "todos.rebuild",

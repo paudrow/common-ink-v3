@@ -14,7 +14,7 @@ const MAX_BODY = 6_000_000;
 
 const SERVER = { name: "common-ink", version: "0.1.0" };
 const INSTRUCTIONS =
-  `Common Ink is a markdown notes workspace. You act as the member who connected you, with their role, and your edits are recorded under your own name. Read a note before writing it, and send its revision as baseRevision. ${ASK_NOTE_SYNTAX}`;
+  `Common Ink is a markdown notes workspace. You act as the member who connected you, with their role, and your edits are recorded under your own name. Read a note before writing it, and send its revision as baseRevision. To change some lines and leave the rest, call edit_note. ${ASK_NOTE_SYNTAX}`;
 
 type Id = string | number | null;
 interface Request_ {

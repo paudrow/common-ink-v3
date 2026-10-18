@@ -238,6 +238,26 @@ export const Op = z.discriminatedUnion("type", [
      */
     on: Day.optional(),
   }),
+  /**
+   * Replaces lines of the note at `baseRevision` and leaves the rest. Each edit includes `from`
+   * and stops before `to`, counted from 0 in that revision: `from` equal to `to` inserts, and an
+   * empty `text` deletes. Every range is counted in that revision, so one edit does not shift
+   * another. The result is merged with edits made since, as note.write merges a whole note.
+   */
+  z.object({
+    type: z.literal("note.edit"),
+    id: Id,
+    baseRevision: Revision,
+    edits: z
+      .array(z.object({ from: z.number().int().min(0), to: z.number().int().min(0), text: NoteText }))
+      .min(1)
+      .max(50),
+    /** Chosen by the writer; an edit sent again with the same id is recorded once. */
+    writeId: z.string().min(1).max(64).optional(),
+    linkTitles: LinkTitles,
+    mentionNames: MentionNames,
+    on: Day.optional(),
+  }),
   /** The notes whose text links to this one, latest change first. */
   z.object({ type: z.literal("note.backlinks"), id: Id }),
   z.object({ type: z.literal("note.history"), id: Id }),
@@ -1399,6 +1419,7 @@ export interface Results {
   "note.create": Linked<Note>;
   "note.read": ReadNote;
   "note.write": Linked<Written>;
+  "note.edit": Linked<Written>;
   "note.backlinks": NoteSummary[];
   "links.rebuild": Rebuilt;
   /** `next` is the `offset` of the page after, or null on the last. */

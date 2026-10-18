@@ -5,6 +5,7 @@ import type { ConnectedAgent } from "./agents.ts";
 import { SEEN, SEEN_FOLDER, allows, canShare, folderLevel, itemAsked, itemLevel, seesEveryFolder, type GrantLevel, type Sight } from "./access.ts";
 import { dailySettings, dailyText, dayFor, filedOn, type DailySettings } from "./daily.ts";
 import { lineDiff, textDiff } from "./diff.ts";
+import { spliceLines } from "./text.ts";
 import { atPath, nameKey as folderKey, pathsOf } from "./folder-names.ts";
 import { following as lineFollowing } from "./follow.ts";
 import { dayIn, dayStartIn, linesAsOf, rebased, redoTarget, revertOfAuthor, revertedBy, revertible, reverting, runsOf, settledRevert, undoTarget, type Choice, type Resolution, type Reverting, type Step } from "./history.ts";
@@ -1716,6 +1717,43 @@ async function readPerson(ctx: Context, op: Extract<Op, { type: "person.read" }>
 
 export const MAX_ANSWER_LINES = 2000;
 
+/** Records `op.text` as a write of the note at `op.baseRevision`, merging edits made since. */
+async function commitNote(ctx: Context, op: { id: string; baseRevision: number; text: string; writeId?: string; linkTitles: LinkTitles; mentionNames: "resolve" | "keep"; on?: string }) {
+  let unresolved: UnresolvedLink[] = [];
+  const written = await settle(async (): Promise<Written | null> => {
+    const row = await loadNote(ctx, op.id, "edit", "refused");
+    if (op.writeId) {
+      const recorded = await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(row.id, op.writeId).first();
+      if (recorded) return toNote(ctx, row);
+    }
+    if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
+    const base = op.baseRevision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, op.baseRevision, row.revision);
+    const resolved = await storedAs(ctx, op.text, base.text, op);
+    const stored = resolved.text;
+    unresolved = resolved.unresolved;
+    const changes = base.since ? rebased(base.text, stored, base.since) : changesBetween(base.text, stored);
+    if (changes.empty) return toNote(ctx, row);
+    // A write that checks a recurring todo's box completes it, as todo.set does, whoever wrote it and however.
+    const merged = applyChanges(changes, row.text);
+    const checked = checkedOff(row.text, changes);
+    if (checked.length) {
+      const mine = await completing(ctx, op.on);
+      // A todo completed since the writer read the note is not completed again by a check made on what they read, as this same write sent twice would.
+      const since = op.baseRevision === row.revision ? [] : (await completionsNow(ctx, row.id)).filter((f) => f.completion.revision > op.baseRevision).map((f) => changes.mapPos(f.at, 1));
+      const rolled = rolledForward(merged, checked, mine.day, (todo) => since.some((at) => todo.from <= at && at <= todo.from + todo.text.length));
+      // Read again as the smallest edit, which leaves the box as it was: the same write sent again then checks it again, and is seen to.
+      const completed = changesBetween(row.text, rolled.text);
+      if (completed.empty) return toNote(ctx, row);
+      if (rolled.filed.length) return recordCompleting(ctx, row, completed, op.baseRevision, rolled.filed, mine, { writeId: op.writeId });
+      const next = await record(ctx, row, completed, op.baseRevision, { writeId: op.writeId });
+      return next && toNote(ctx, next);
+    }
+    const next = await record(ctx, row, changes, op.baseRevision, { writeId: op.writeId });
+    return next && toNote(ctx, next);
+  });
+  return linked(written, unresolved);
+}
+
 const HANDLERS: { [K in OpType]: Handler<K> } = {
   "note.list": {
     needs: "view",
@@ -2001,40 +2039,23 @@ const HANDLERS: { [K in OpType]: Handler<K> } = {
 
   "note.write": {
     needs: "edit",
+    run: (ctx, op) => commitNote(ctx, op),
+  },
+
+  "note.edit": {
+    needs: "edit",
     run: async (ctx, op) => {
-      let unresolved: UnresolvedLink[] = [];
-      const written = await settle(async (): Promise<Written | null> => {
-        const row = await loadNote(ctx, op.id, "edit", "refused");
-        if (op.writeId) {
-          const recorded = await ctx.db.prepare("SELECT 1 FROM changes WHERE note_id = ? AND write_id = ?").bind(row.id, op.writeId).first();
-          if (recorded) return toNote(ctx, row);
-        }
-        if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
-        const base = op.baseRevision === row.revision ? { text: row.text, since: null } : await replay(ctx, row.id, op.baseRevision, row.revision);
-        const resolved = await storedAs(ctx, op.text, base.text, op);
-        const stored = resolved.text;
-        unresolved = resolved.unresolved;
-        const changes = base.since ? rebased(base.text, stored, base.since) : changesBetween(base.text, stored);
-        if (changes.empty) return toNote(ctx, row);
-        // A write that checks a recurring todo's box completes it, as todo.set does, whoever wrote it and however.
-        const merged = applyChanges(changes, row.text);
-        const checked = checkedOff(row.text, changes);
-        if (checked.length) {
-          const mine = await completing(ctx, op.on);
-          // A todo completed since the writer read the note is not completed again by a check made on what they read, as this same write sent twice would.
-          const since = op.baseRevision === row.revision ? [] : (await completionsNow(ctx, row.id)).filter((f) => f.completion.revision > op.baseRevision).map((f) => changes.mapPos(f.at, 1));
-          const rolled = rolledForward(merged, checked, mine.day, (todo) => since.some((at) => todo.from <= at && at <= todo.from + todo.text.length));
-          // Read again as the smallest edit, which leaves the box as it was: the same write sent again then checks it again, and is seen to.
-          const completed = changesBetween(row.text, rolled.text);
-          if (completed.empty) return toNote(ctx, row);
-          if (rolled.filed.length) return recordCompleting(ctx, row, completed, op.baseRevision, rolled.filed, mine, { writeId: op.writeId });
-          const next = await record(ctx, row, completed, op.baseRevision, { writeId: op.writeId });
-          return next && toNote(ctx, next);
-        }
-        const next = await record(ctx, row, changes, op.baseRevision, { writeId: op.writeId });
-        return next && toNote(ctx, next);
-      });
-      return linked(written, unresolved);
+      const row = await loadNote(ctx, op.id, "edit", "refused");
+      if (op.baseRevision > row.revision) throw new OpError("invalid", `The note has no revision ${op.baseRevision}`);
+      // The ranges were counted in the revision the caller read. Splice that text, then merge it as a write.
+      const base = op.baseRevision === row.revision ? row.text : (await replay(ctx, row.id, op.baseRevision, row.revision)).text;
+      let text: string;
+      try {
+        text = spliceLines(base, op.edits);
+      } catch (err) {
+        throw new OpError("invalid", err instanceof Error ? err.message : "These line ranges can't be applied");
+      }
+      return commitNote(ctx, { ...op, text });
     },
   },
 
